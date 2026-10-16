@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
+import { Suspense } from "react";
 import {
   AudioLines,
   Boxes,
@@ -88,8 +89,36 @@ function StatusDot({ ok }: { ok: boolean | undefined }) {
   return <span className={cn("size-1.5 shrink-0 rounded-full", ok ? "bg-success" : "bg-subtle-foreground")} />;
 }
 
+function NavGroups({ pathname }: { pathname: string }) {
+  return NAV.map((group) => (
+    <SidebarGroup key={group.label} className="py-1">
+      <SidebarGroupLabel className="text-[11px] font-medium uppercase tracking-wide">{group.label}</SidebarGroupLabel>
+      <SidebarMenu>
+        {group.items.map((item) => {
+          const [path, query] = item.href.split("?");
+          const active = !!pathname && !query && (path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`));
+          return (
+            <SidebarMenuItem key={item.href}>
+              <SidebarMenuButton asChild isActive={active} tooltip={item.label} className="h-8 text-[13px] data-[active=true]:font-semibold">
+                <Link href={item.href}>
+                  <item.icon />
+                  <span>{item.label}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          );
+        })}
+      </SidebarMenu>
+    </SidebarGroup>
+  ));
+}
+
+/** Reads the pathname (runtime data) inside Suspense so routes can still prerender. */
+function ActiveNav() {
+  return <NavGroups pathname={usePathname()} />;
+}
+
 export function AppSidebar() {
-  const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const status = useStatus().data;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
@@ -123,32 +152,9 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className="scrollbar-none">
-        {NAV.map((group) => (
-          <SidebarGroup key={group.label} className="py-1">
-            <SidebarGroupLabel className="text-[11px] font-medium uppercase tracking-wide">{group.label}</SidebarGroupLabel>
-            <SidebarMenu>
-              {group.items.map((item) => {
-                const [path, query] = item.href.split("?");
-                const active = query ? false : path === "/" ? pathname === "/" : pathname === path || pathname.startsWith(`${path}/`);
-                return (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={active}
-                      tooltip={item.label}
-                      className="h-8 text-[13px] data-[active=true]:font-semibold"
-                    >
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroup>
-        ))}
+        <Suspense fallback={<NavGroups pathname="" />}>
+          <ActiveNav />
+        </Suspense>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border">
         <Link

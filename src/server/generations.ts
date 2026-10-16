@@ -82,6 +82,7 @@ function update(id: string, fields: Partial<Row>): void {
 }
 
 export function getGeneration(id: string): Generation | null {
+  ensureRunner();
   const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
   return r ? toGeneration(r) : null;
 }
@@ -259,12 +260,16 @@ const POLL_MS = 1500;
 const TIMEOUT_MS = 45 * 60 * 1000;
 
 declare global {
-  var __fuobeRunner: { timer: NodeJS.Timeout; busy: boolean } | undefined;
+  var __fuobeRunner: { timer: NodeJS.Timeout; busy: boolean; tick: () => Promise<void> } | undefined;
 }
 
 export function ensureRunner(): void {
-  if (globalThis.__fuobeRunner) return;
-  const state = { busy: false, timer: setInterval(() => void tick(), POLL_MS) };
+  if (globalThis.__fuobeRunner) {
+    // After a dev hot-reload, point the existing timer at this module's (fresh) code.
+    globalThis.__fuobeRunner.tick = tick;
+    return;
+  }
+  const state = { busy: false, tick, timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS) };
   state.timer.unref?.();
   globalThis.__fuobeRunner = state;
   // Jobs that never got an external id (server died mid-submit) can't be recovered.

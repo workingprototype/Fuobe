@@ -8,6 +8,7 @@ import { PageShell } from "@/components/page-shell";
 export const metadata: Metadata = { title: "Project status" };
 
 async function readStatus(): Promise<string> {
+  "use cache";
   try {
     return await fs.readFile(path.join(process.cwd(), "docs", "STATUS.md"), "utf8");
   } catch {

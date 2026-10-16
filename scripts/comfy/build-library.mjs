@@ -1,0 +1,340 @@
+#!/usr/bin/env node
+// Build workflows/comfyui/<id>.json + manifest.json from library.spec.mjs.
+//
+//   node build-library.mjs            # all entries
+//   node build-library.mjs wan22-i2v-14b flux1-dev-t2i
+//
+// Inputs:  build/raw/<key>.api.json + .meta.json (from export-templates.mjs),
+//          hand-built/*.json, a running ComfyUI (for /object_info), Hugging Face (model sizes).
+// Outputs: ../../workflows/comfyui/<id>.json, manifest.json
+// The "validated" flag of each manifest entry is carried over from validation-state.json when the
+// workflow file content is unchanged; run validate-workflows.mjs afterwards to (re)validate.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { SPEC, KNOWN_MODELS, CUSTOM_NODE_REPOS } from './library.spec.mjs';
+import * as G from './lib/graph.mjs';
+import { resolveSource } from './export-templates.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, '..', '..');
+const OUT_DIR = path.join(REPO, 'workflows', 'comfyui');
+const RAW_DIR = path.join(HERE, 'build', 'raw');
+const SIZE_CACHE = path.join(HERE, 'build', 'model-sizes.json');
+export const STATE_FILE = path.join(HERE, 'validation-state.json');
+const COMFYUI_URL = process.env.COMFYUI_URL || 'http://127.0.0.1:8188';
+const COMFYUI_DIR = process.env.COMFYUI_DIR || '/home/user/ComfyUI';
+
+// Which input of which loader holds a model file, and the models/<folder> it is read from.
+export const LOADER_FOLDERS = {
+  UNETLoader: { unet_name: 'diffusion_models' },
+  CheckpointLoaderSimple: { ckpt_name: 'checkpoints' },
+  VAELoader: { vae_name: 'vae' },
+  CLIPLoader: { clip_name: 'text_encoders' },
+  DualCLIPLoader: { clip_name1: 'text_encoders', clip_name2: 'text_encoders' },
+  QuadrupleCLIPLoader: { clip_name1: 'text_encoders', clip_name2: 'text_encoders', clip_name3: 'text_encoders', clip_name4: 'text_encoders' },
+  LoraLoaderModelOnly: { lora_name: 'loras' },
+  LoraLoader: { lora_name: 'loras' },
+  CLIPVisionLoader: { clip_name: 'clip_vision' },
+  UpscaleModelLoader: { model_name: 'upscale_models' },
+  AudioEncoderLoader: { audio_encoder_name: 'audio_encoders' },
+  ModelPatchLoader: { name: 'model_patches' },
+  LatentUpscaleModelLoader: { model_name: 'latent_upscale_models' },
+  LoadBackgroundRemovalModel: { bg_removal_name: 'background_removal' },
+  FrameInterpolationModelLoader: { model_name: 'frame_interpolation' },
+  LTXAVTextEncoderLoader: { text_encoder: 'text_encoders', ckpt_name: 'checkpoints' },
+  LTXVAudioVAELoader: { ckpt_name: 'checkpoints' },
+  WanVideoModelLoader: { model: 'diffusion_models' },
+  MultiTalkModelLoader: { model: 'diffusion_models' },
+  WanVideoVAELoader: { model_name: 'vae' },
+  WanVideoTextEncodeCached: { model_name: 'text_encoders' },
+  WanVideoLoraSelect: { lora: 'loras' },
+  Wav2VecModelLoader: { model: 'wav2vec2' },
+  MMAudioModelLoader: { mmaudio_model: 'mmaudio' },
+  MMAudioFeatureUtilsLoader: { vae_model: 'mmaudio', synchformer_model: 'mmaudio', clip_model: 'mmaudio' },
+  ReActorFaceSwap: { swap_model: 'insightface', face_restore_model: 'facerestore_models' },
+};
+// Nodes that fetch their own weights at runtime (no manual download needed).
+const SELF_DOWNLOADING = new Set(['RIFE VFI', 'DownloadAndLoadWav2VecModel', 'RMBG']);
+// Binding keys whose input is a user-supplied model file (not part of "models").
+const USER_MODEL_KEYS = new Set(['lora', 'loraHigh', 'loraLow', 'upscaleModel']);
+const MODEL_EXT = /\.(safetensors|sft|gguf|ckpt|pt|pth|bin|onnx)$/i;
+const NUMERIC_DEFAULT_KEYS = [
+  'width', 'height', 'frames', 'fps', 'steps', 'cfg', 'guidance', 'denoise', 'shift', 'scale', 'duration',
+  'loraStrength', 'multiplier', 'bpm', 'padLeft', 'padTop', 'padRight', 'padBottom', 'cameraMotion',
+];
+export const BINDING_KEYS = new Set([
+  'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
+  'width', 'height', 'frames', 'fps', 'seed', 'steps', 'cfg', 'guidance', 'denoise', 'shift',
+  'loraHigh', 'loraLow', 'lora', 'loraStrength', 'upscaleModel', 'scale', 'duration', 'lyrics', 'tags',
+  // library extensions
+  'padLeft', 'padTop', 'padRight', 'padBottom', 'cameraMotion', 'multiplier', 'bpm', 'filenamePrefix',
+]);
+
+const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
+const writeJson = (p, v) => fs.writeFileSync(p, JSON.stringify(v, null, 2) + '\n');
+export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
+// Gated repos (license click-through) answer 401 to anonymous downloads; their file listing is
+// still public, so fall back to the tree API for the size and flag the model as gated.
+async function hfTreeSize(url) {
+  const m = url.match(/^https:\/\/huggingface\.co\/(datasets\/)?([^/]+\/[^/]+)\/resolve\/([^/]+)\/(.+)$/);
+  if (!m) return null;
+  const [, ds, repo, rev, file] = m;
+  const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '';
+  const api = `https://huggingface.co/api/${ds ? 'datasets' : 'models'}/${repo}/tree/${rev}/${dir}`;
+  const res = await fetch(api);
+  if (!res.ok) return null;
+  const hit = (await res.json()).find((f) => f.path === decodeURIComponent(file));
+  return hit ? hit.lfs?.size || hit.size : null;
+}
+
+async function hfSize(url, cache) {
+  if (cache[url] !== undefined && !cache[url]?.error) return cache[url];
+  try {
+    const res = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    const linked = res.headers.get('x-linked-size');
+    const len = linked || (res.status === 200 ? res.headers.get('content-length') : null);
+    if (res.status === 401 || res.status === 403) {
+      const size = await hfTreeSize(url);
+      cache[url] = size ? { size, gated: true } : { error: `HTTP ${res.status}` };
+    } else cache[url] = res.status >= 400 ? { error: `HTTP ${res.status}` } : len ? Number(len) : { error: `no size (HTTP ${res.status})` };
+  } catch (e) {
+    return { error: String(e.message || e) }; // do not cache transient failures
+  }
+  return cache[url];
+}
+
+function applyTransforms(g, transforms, objectInfo) {
+  for (const t of transforms || []) {
+    switch (t.op) {
+      case 'resolveSwitches': G.resolveSwitches(g, t.booleans || {}); break;
+      case 'set': G.setInputs(g, [t]); break;
+      case 'delete': G.deleteInputs(g, [t]); break;
+      case 'removeNodes': G.removeNodes(g, t.ids); break;
+      case 'removeOutputs': G.removeNodes(g, t.ids); break;
+      case 'addNodes': G.addNodes(g, t.nodes); break;
+      case 'insertAfter': G.insertAfter(g, t.source, t.id, t.node, t.input, t.only); break;
+      case 'rename': G.renameValues(g, t.map); break;
+      case 'prune': G.prune(g, objectInfo); break;
+      default: throw new Error(`unknown transform op ${t.op}`);
+    }
+  }
+  return g;
+}
+
+function comfyCommit() {
+  try {
+    return execSync(`git -C ${COMFYUI_DIR} rev-parse HEAD`).toString().trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+export async function fetchObjectInfo() {
+  const res = await fetch(`${COMFYUI_URL}/object_info`);
+  if (!res.ok) throw new Error(`GET /object_info failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function main() {
+  const only = new Set(process.argv.slice(2));
+  const objectInfo = await fetchObjectInfo();
+  const stats = await (await fetch(`${COMFYUI_URL}/system_stats`)).json();
+  const sizeCache = readJson(SIZE_CACHE, {});
+  const state = readJson(STATE_FILE, {});
+  const prevManifest = readJson(path.join(OUT_DIR, 'manifest.json'), { workflows: [] });
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+
+  const ids = new Set();
+  const entries = [];
+  const errors = [];
+  for (const spec of SPEC) {
+    if (ids.has(spec.id)) throw new Error(`duplicate id ${spec.id}`);
+    ids.add(spec.id);
+    if (only.size && !only.has(spec.id)) {
+      const prev = prevManifest.workflows.find((w) => w.id === spec.id);
+      if (prev) entries.push(prev);
+      continue;
+    }
+    const errs = [];
+    // ---- load source
+    let graph, meta, source;
+    if (spec.export) {
+      const src = resolveSource(spec.export);
+      const rawFile = path.join(RAW_DIR, `${src.key}.api.json`);
+      if (!fs.existsSync(rawFile)) {
+        errors.push(`${spec.id}: raw export ${rawFile} missing; run export-templates.mjs first`);
+        continue;
+      }
+      graph = readJson(rawFile);
+      meta = readJson(path.join(RAW_DIR, `${src.key}.meta.json`), { models: [] });
+      source = meta.source;
+      const STRUCTURAL = (spec.transforms || []).filter((t) => !['resolveSwitches', 'prune', 'removeOutputs'].includes(t.op));
+      if (STRUCTURAL.length) source += ' (modified, see notes)';
+    } else if (spec.handBuilt) {
+      graph = readJson(path.join(HERE, spec.handBuilt));
+      meta = { models: [] };
+      source = `hand-built (scripts/comfy/${spec.handBuilt})`;
+    } else throw new Error(`${spec.id}: needs export or handBuilt`);
+
+    // ---- transform
+    try {
+      applyTransforms(graph, spec.transforms, objectInfo);
+    } catch (e) {
+      errors.push(`${spec.id}: transform failed: ${e.message}`);
+      continue;
+    }
+    const outIds = spec.outputs.map((o) => o.node);
+    for (const o of outIds) if (!graph[o]) errs.push(`output node ${o} missing`);
+    // Predictable output location: output/fuobe/<id>_00001_.ext
+    for (const o of outIds) if (graph[o] && 'filename_prefix' in graph[o].inputs) graph[o].inputs.filename_prefix = `fuobe/${spec.id}`;
+    // Drop any other output nodes (previews etc.), then everything not feeding the kept outputs.
+    for (const id of G.outputNodeIds(graph, objectInfo)) if (!outIds.includes(id)) delete graph[id];
+    G.prune(graph, objectInfo, outIds);
+    graph = G.sortGraph(graph);
+    errs.push(...G.lint(graph, objectInfo));
+
+    // ---- bindings
+    const bindings = { ...spec.bindings };
+    const prefixTargets = outIds.filter((o) => graph[o] && 'filename_prefix' in graph[o].inputs).map((o) => ({ node: o, input: 'filename_prefix' }));
+    if (prefixTargets.length && !bindings.filenamePrefix) bindings.filenamePrefix = prefixTargets;
+    for (const [key, targets] of Object.entries(bindings)) {
+      if (!BINDING_KEYS.has(key)) errs.push(`binding key ${key} not in vocabulary`);
+      for (const { node, input } of targets) {
+        const n = graph[node];
+        if (!n) { errs.push(`binding ${key}: node ${node} not in workflow`); continue; }
+        if (!(input in n.inputs)) errs.push(`binding ${key}: ${node}.${input} not an input of ${n.class_type}`);
+        else if (G.isLink(n.inputs[input])) errs.push(`binding ${key}: ${node}.${input} is a link, not a widget value`);
+      }
+    }
+
+    // Every media input must be bound, otherwise the workflow references a template example asset.
+    const FILE_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio' };
+    const boundTargets = new Set(Object.values(bindings).flat().map((t) => `${t.node}.${t.input}`));
+    for (const [nid, n] of Object.entries(graph)) {
+      const inp = FILE_INPUTS[n.class_type];
+      if (inp && !boundTargets.has(`${nid}.${inp}`)) errs.push(`media input ${nid}.${inp} (${n.class_type}) is not bound`);
+    }
+
+    // ---- defaults (derived from the workflow's current values, spec overrides win)
+    const defaults = {};
+    for (const key of NUMERIC_DEFAULT_KEYS) {
+      const t = bindings[key]?.[0];
+      if (t && graph[t.node] && !G.isLink(graph[t.node].inputs[t.input])) {
+        const v = graph[t.node].inputs[t.input];
+        defaults[key] = typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1e4) / 1e4 : v;
+      }
+    }
+    // frames must be frameStep*n+1 (Wan/Hunyuan 4, LTX 8); exposed as defaults.frameStep for app code.
+    const { frameStep, ...limits } = spec.limits || {};
+    if (frameStep) defaults.frameStep = frameStep;
+    Object.assign(defaults, spec.defaults || {});
+
+    // ---- models
+    const userModelTargets = new Set(
+      Object.entries(bindings).filter(([k]) => USER_MODEL_KEYS.has(k)).flatMap(([, ts]) => ts.map((t) => `${t.node}.${t.input}`)),
+    );
+    const models = new Map();
+    const metaByName = Object.fromEntries((meta.models || []).map((m) => [m.name, m]));
+    for (const [nid, n] of Object.entries(graph)) {
+      const map = LOADER_FOLDERS[n.class_type] || {};
+      for (const [inp, val] of Object.entries(n.inputs)) {
+        if (typeof val !== 'string') continue;
+        const folder = map[inp];
+        if (!folder) {
+          if (MODEL_EXT.test(val) && !SELF_DOWNLOADING.has(n.class_type) && !['filename_prefix'].includes(inp) && !n.class_type.startsWith('Load'))
+            errs.push(`node ${nid} (${n.class_type}).${inp}="${val}" looks like a model file but the loader is unknown`);
+          continue;
+        }
+        if (val === 'none' || val === '') continue;
+        if (userModelTargets.has(`${nid}.${inp}`) && spec.id.endsWith('-lora')) continue; // placeholder LoRA names
+        if (models.has(val)) continue;
+        const m = metaByName[val];
+        const known = KNOWN_MODELS[val];
+        const url = m?.url || known?.url;
+        if (m?.directory && m.directory !== folder) errs.push(`model ${val}: template says ${m.directory}, loader reads ${folder}`);
+        if (!url) errs.push(`model ${val} (${folder}): no download URL known`);
+        const size = url ? await hfSize(url, sizeCache) : null;
+        if (size && typeof size === 'object' && size.error) errs.push(`model ${val}: ${url} -> ${size.error}`);
+        const bytes = typeof size === 'number' ? size : size?.size;
+        const model = { file: val, folder, url: url || null, sizeGb: bytes ? Math.round((bytes / 1e9) * 100) / 100 : null };
+        if (size?.gated) model.gated = true;
+        models.set(val, model);
+      }
+    }
+
+    // ---- custom nodes
+    const custom = new Set();
+    for (const n of Object.values(graph)) {
+      const mod = objectInfo[n.class_type]?.python_module || '';
+      const m = mod.match(/^custom_nodes\.([^.]+)/);
+      if (m) custom.add(m[1]);
+    }
+    const customNodes = [...custom].sort().map((name) => ({ name, repo: CUSTOM_NODE_REPOS[name] || null }));
+    for (const c of customNodes) if (!c.repo) errs.push(`custom node pack ${c.name} has no repo URL`);
+
+    // ---- write
+    const text = JSON.stringify(graph, null, 2) + '\n';
+    const file = `${spec.id}.json`;
+    fs.writeFileSync(path.join(OUT_DIR, file), text);
+    const hash = sha256(text);
+    const st = state[spec.id];
+    const validated = !!(st && st.sha256 === hash && st.validated);
+    const entry = {
+      id: spec.id,
+      title: spec.title,
+      capability: spec.capability,
+      file,
+      source,
+      bindings,
+      outputs: spec.outputs,
+      defaults,
+      limits,
+      models: [...models.values()],
+      customNodes,
+      vramGb: spec.vramGb,
+      validated,
+      notes: spec.notes || '',
+    };
+    if (spec.autoDownloads) entry.autoDownloads = spec.autoDownloads;
+    if (!validated && st && st.sha256 === hash && st.error) entry.validationError = st.error;
+    if (errs.length) {
+      errors.push(...errs.map((e) => `${spec.id}: ${e}`));
+      entry.buildWarnings = errs;
+    }
+    entries.push(entry);
+    console.log(`${errs.length ? '!' : '✓'} ${spec.id}: ${Object.keys(graph).length} nodes, ${models.size} models${customNodes.length ? `, custom: ${customNodes.map((c) => c.name).join('+')}` : ''}`);
+  }
+
+  // keep manifest order = spec order
+  const order = SPEC.map((s) => s.id);
+  entries.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  const versions = stats.system || {};
+  const manifest = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    comfyuiCommit: comfyCommit(),
+    comfyuiVersion: versions.comfyui_version,
+    workflowTemplatesVersion: versions.installed_templates_version,
+    frontendVersion: (versions.comfy_package_versions || []).find((p) => p.name === 'comfyui-frontend-package')?.installed,
+    workflows: entries,
+  };
+  writeJson(path.join(OUT_DIR, 'manifest.json'), manifest);
+  writeJson(SIZE_CACHE, sizeCache);
+  if (errors.length) {
+    console.error(`\n${errors.length} problem(s):\n  ${errors.join('\n  ')}`);
+    process.exitCode = 1;
+  }
+  console.log(`\nWrote ${entries.length} workflows + manifest.json to ${path.relative(REPO, OUT_DIR)}/`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

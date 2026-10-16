@@ -53,7 +53,7 @@ export const VIDEO_STUDIO: StudioConfig = {
     { key: "endImage", label: "End frame", accept: "image" },
   ],
   presetPicker: "motion",
-  defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b" },
+  defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" },
   suggestions: [
     "A paper boat drifts down a rain-soaked street gutter, macro, slow motion",
     "FPV drone dives off a sea cliff at sunrise and skims the waves",

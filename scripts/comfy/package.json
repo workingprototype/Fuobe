@@ -1,0 +1,18 @@
+{
+  "name": "fuobe-comfy-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Export ComfyUI templates to API format, build Fuobe's workflow library + manifest, and validate it against a running ComfyUI.",
+  "scripts": {
+    "comfy:install": "bash install-comfyui.sh",
+    "comfy:start": "bash start-comfyui.sh",
+    "comfy:stop": "bash stop-comfyui.sh",
+    "export": "node export-templates.mjs",
+    "build": "NODE_USE_ENV_PROXY=1 node --no-warnings build-library.mjs",
+    "validate": "node validate-workflows.mjs",
+    "all": "npm run export && npm run build && npm run validate"
+  },
+  "devDependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

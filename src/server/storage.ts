@@ -106,7 +106,7 @@ export function saveFile(opts: {
   const id = nanoid(12);
   const ext = EXT_BY_TYPE[opts.contentType] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
-  const relPath = path.join(opts.source === "upload" ? "uploads" : "outputs", day, `${id}.${ext}`);
+  const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "upload" ? "uploads" : "outputs", day, `${id}.${ext}`);
   const abs = path.join(FILES_DIR, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, opts.data);

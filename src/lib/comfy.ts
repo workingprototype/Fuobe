@@ -235,5 +235,5 @@ export function explainComfyError(nodeErrors: unknown, manifest?: ManifestWorkfl
       }
     }
   }
-  return parts.join("\n") || "ComfyUI rejected the workflow";
+  return [...new Set(parts)].join("\n") || "ComfyUI rejected the workflow";
 }

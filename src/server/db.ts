@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
-export const DATA_DIR = path.resolve(process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
+export const DATA_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
 
 const MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS generations (

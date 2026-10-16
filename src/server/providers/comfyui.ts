@@ -185,7 +185,7 @@ export const comfyProvider: ProviderAdapter = {
     return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   },
 
-  async submit({ route, input }) {
+  async submit({ route, input, generationId }) {
     const { manifest, workflow } = getWorkflow(route.endpoint);
     const d = manifest.defaults;
     const images = input.images ?? [];
@@ -203,12 +203,19 @@ export const comfyProvider: ProviderAdapter = {
       seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
     };
     if (manifest.bindings.width || manifest.bindings.height) {
-      const dims = computeDimensions(input.aspectRatio, input.resolution, {
-        width: Number(d.width ?? 1024),
-        height: Number(d.height ?? 1024),
-      });
-      values.width = dims.width;
-      values.height = dims.height;
+      const multiple = Number(manifest.limits?.dimensionMultiple ?? 16);
+      const dims = computeDimensions(
+        input.aspectRatio === "auto" ? undefined : input.aspectRatio,
+        input.resolution,
+        { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) },
+        multiple,
+      );
+      // Respect the workflow's size limits while keeping the aspect ratio.
+      const maxW = Number(manifest.limits?.maxWidth ?? Infinity);
+      const maxH = Number(manifest.limits?.maxHeight ?? Infinity);
+      const k = Math.min(1, maxW / dims.width, maxH / dims.height);
+      values.width = Math.max(multiple, Math.floor((dims.width * k) / multiple) * multiple);
+      values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
     }
     if (manifest.bindings.frames && input.duration) {
       const fps = Number(d.fps ?? 16);
@@ -216,6 +223,7 @@ export const comfyProvider: ProviderAdapter = {
     }
     if (manifest.bindings.duration && input.duration) values.duration = input.duration;
     if (manifest.bindings.tags && !manifest.bindings.prompt) values.tags = input.prompt;
+    if (manifest.bindings.filenamePrefix) values.filenamePrefix = `fuobe/${generationId}`;
     for (const [k, v] of Object.entries(input.extra ?? {})) values[k as BindingKey] = v;
 
     const bound = applyBindings(workflow, manifest.bindings, values);
@@ -232,7 +240,7 @@ export const comfyProvider: ProviderAdapter = {
     });
     const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { message?: string }; node_errors?: unknown };
     if (!res.ok || !body.prompt_id) {
-      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, manifest) : body.error?.message;
+      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : body.error?.message;
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
     return { externalId: body.prompt_id, meta: { workflowId: manifest.id, nodeCount: Object.keys(wf).length }, payload: wf };
@@ -314,7 +322,8 @@ export const comfyProvider: ProviderAdapter = {
 /** Which manifest models are present on the connected ComfyUI server. */
 export async function modelInventory(): Promise<Record<string, string[]> | null> {
   try {
-    const folders = ["diffusion_models", "checkpoints", "text_encoders", "vae", "loras", "clip_vision", "upscale_models", "audio_encoders", "model_patches"];
+    const listed = await comfyFetch("/models");
+    const folders = listed.ok ? ((await listed.json()) as string[]) : ["diffusion_models", "checkpoints", "text_encoders", "vae", "loras"];
     const out: Record<string, string[]> = {};
     await Promise.all(
       folders.map(async (f) => {

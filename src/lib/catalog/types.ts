@@ -194,6 +194,8 @@ export interface LoraRef {
   url?: string;
   strength?: number;
   trigger?: string;
+  /** Wan 2.2 MoE: which expert gets the LoRA. */
+  target?: "high" | "low" | "both";
 }
 
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
