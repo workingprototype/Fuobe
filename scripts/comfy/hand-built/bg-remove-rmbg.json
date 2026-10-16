@@ -1,0 +1,5 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "input.png"}, "_meta": {"title": "Load Image"}},
+  "2": {"class_type": "RMBG", "inputs": {"image": ["1", 0], "model": "BEN2", "sensitivity": 1.0, "process_res": 1024, "mask_blur": 0, "mask_offset": 0, "invert_output": false, "refine_foreground": false, "unload_model": false, "background": "Alpha", "background_color": "#222222"}, "_meta": {"title": "Remove Background (RMBG)"}},
+  "3": {"class_type": "SaveImage", "inputs": {"images": ["2", 0], "filename_prefix": "ComfyUI"}, "_meta": {"title": "Save Image (RGBA)"}}
+}

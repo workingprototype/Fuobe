@@ -1,0 +1,5494 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-16T20:57:14.649Z",
+  "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
+  "comfyuiVersion": "0.41.0",
+  "workflowTemplatesVersion": "0.11.86",
+  "frontendVersion": "1.55.17",
+  "workflows": [
+    {
+      "id": "flux1-dev-t2i",
+      "title": "FLUX.1 [dev] Text to Image",
+      "capability": "t2i",
+      "file": "flux1-dev-t2i.json",
+      "source": "official template flux_dev_full_text_to_image from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "194:49",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "194:48",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "194:48",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "194:50",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "194:50",
+            "input": "steps"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "1001",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 20,
+        "guidance": 3.5
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "flux1-dev.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev.safetensors",
+          "sizeGb": 23.8
+        },
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+          "sizeGb": 9.79
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) \u2014 ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
+    },
+    {
+      "id": "flux1-krea-dev-t2i",
+      "title": "FLUX.1 Krea [dev] Text to Image",
+      "capability": "t2i",
+      "file": "flux1-krea-dev-t2i.json",
+      "source": "official template flux1_krea_dev from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "200:195",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "200:196",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "200:196",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "200:197",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "200:197",
+            "input": "steps"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "1001",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 20,
+        "guidance": 3.5
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+          "sizeGb": 9.79
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "flux1-krea-dev_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/FLUX.1-Krea-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-krea-dev_fp8_scaled.safetensors",
+          "sizeGb": 11.9
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "validated": true,
+      "notes": "Photorealistic \"opinionated\" FLUX.1 dev fine-tune by Krea (fp8 scaled weights). Shares text encoders + ae.safetensors with flux1-dev-t2i."
+    },
+    {
+      "id": "flux1-schnell-t2i",
+      "title": "FLUX.1 [schnell] Text to Image",
+      "capability": "t2i",
+      "file": "flux1-schnell-t2i.json",
+      "source": "official template flux_schnell_full_text_to_image from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "41",
+            "input": "clip_l"
+          },
+          {
+            "node": "41",
+            "input": "t5xxl"
+          }
+        ],
+        "width": [
+          {
+            "node": "27",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "27",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "31",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "31",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "flux1-schnell.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell.safetensors",
+          "sizeGb": 23.78
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+          "sizeGb": 9.79
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "4-step distilled, Apache-2.0 licence (commercial OK). Prompt goes to both CLIP-L and T5 fields of CLIPTextEncodeFlux. Guidance is ignored by schnell."
+    },
+    {
+      "id": "flux2-dev-t2i",
+      "title": "FLUX.2 [dev] Text to Image",
+      "capability": "t2i",
+      "file": "flux2-dev-t2i.json",
+      "source": "official template image_flux2_text_to_image from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "98:6",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "98:47",
+            "input": "width"
+          },
+          {
+            "node": "98:48",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "98:47",
+            "input": "height"
+          },
+          {
+            "node": "98:48",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "98:25",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "98:100",
+            "input": "value"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "98:26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 20,
+        "guidance": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "full_encoder_small_decoder.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "flux2_dev_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+          "sizeGb": 35.46
+        },
+        {
+          "file": "mistral_3_small_flux2_bf16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
+          "sizeGb": 35.58
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Mistral-Small text encoder (18 GB bf16) + 32B fp8mixed transformer; needs ~64 GB system RAM for offloading on 24 GB cards. Width/height must be set on BOTH the latent and the Flux2Scheduler (both listed)."
+    },
+    {
+      "id": "flux2-dev-t2i-turbo",
+      "title": "FLUX.2 [dev] Text to Image (Turbo LoRA, 8-step)",
+      "capability": "t2i",
+      "file": "flux2-dev-t2i-turbo.json",
+      "source": "official template image_flux2_text_to_image from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "98:6",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "98:47",
+            "input": "width"
+          },
+          {
+            "node": "98:48",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "98:47",
+            "input": "height"
+          },
+          {
+            "node": "98:48",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "98:25",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "98:99",
+            "input": "value"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "98:26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8,
+        "guidance": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "full_encoder_small_decoder.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "flux2_dev_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+          "sizeGb": 35.46
+        },
+        {
+          "file": "mistral_3_small_flux2_bf16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
+          "sizeGb": 35.58
+        },
+        {
+          "file": "Flux_2-Turbo-LoRA_comfyui.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/ByteZSzn/Flux.2-Turbo-ComfyUI/resolve/main/Flux_2-Turbo-LoRA_comfyui.safetensors",
+          "sizeGb": 2.76
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Same as flux2-dev-t2i with the official template's \"Enable Turbo LoRA\" path (Flux_2-Turbo-LoRA, 8 steps)."
+    },
+    {
+      "id": "flux2-dev-edit",
+      "title": "FLUX.2 [dev] Image Edit (1 reference)",
+      "capability": "edit",
+      "file": "flux2-dev-edit.json",
+      "source": "official template image_flux2 from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "68:6",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "46",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "68:25",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "68:91",
+            "input": "value"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "68:26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 20,
+        "guidance": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "full_encoder_small_decoder.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "flux2_dev_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+          "sizeGb": 35.46
+        },
+        {
+          "file": "mistral_3_small_flux2_bf16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
+          "sizeGb": 35.58
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Output size follows the input image rescaled to ~1 megapixel (ImageScaleToTotalPixels node 45, megapixels=1)."
+    },
+    {
+      "id": "flux2-dev-multiref",
+      "title": "FLUX.2 [dev] Multi-Reference Edit (3 images)",
+      "capability": "edit",
+      "file": "flux2-dev-multiref.json",
+      "source": "official template image_flux2 from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "68:6",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "46",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "1101",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "1111",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "68:25",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "68:91",
+            "input": "value"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "68:26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 20,
+        "guidance": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "full_encoder_small_decoder.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "flux2_dev_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+          "sizeGb": 35.46
+        },
+        {
+          "file": "mistral_3_small_flux2_bf16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
+          "sizeGb": 35.58
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Official FLUX.2 edit template extended with two more chained ReferenceLatent inputs (FLUX.2 supports up to ~10). All three images are required; refer to them in the prompt as \"image 1/2/3\". Output size follows image 1 (~1 MP)."
+    },
+    {
+      "id": "qwen-image-2512-t2i",
+      "title": "Qwen-Image 2512 Text to Image",
+      "capability": "t2i",
+      "file": "qwen-image-2512-t2i.json",
+      "source": "official template image_qwen_Image_2512 from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "238:227",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "238:228",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "238:232",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "238:232",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "238:230",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "238:224",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "238:223",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "238:222",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "60",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "60",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1328,
+        "height": 1328,
+        "steps": 50,
+        "cfg": 4,
+        "shift": 3.1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "qwen_image_2512_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Best open model for in-image text rendering (EN/ZH). Native 1328x1328; recommended sizes 1664x928 (16:9), 928x1664 (9:16), 1472x1104 (4:3). 50 steps cfg 4 by default."
+    },
+    {
+      "id": "qwen-image-2512-t2i-lightning",
+      "title": "Qwen-Image 2512 Text to Image (Lightning 4-step)",
+      "capability": "t2i",
+      "file": "qwen-image-2512-t2i-lightning.json",
+      "source": "official template image_qwen_Image_2512 from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "238:227",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "238:228",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "238:232",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "238:232",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "238:230",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "238:225",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "238:218",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "238:222",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "60",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "60",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1328,
+        "height": 1328,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 3.1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/resolve/main/Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
+          "sizeGb": 1.7
+        },
+        {
+          "file": "qwen_image_2512_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Official template with \"Enable 4 Steps LoRA\" on (Qwen-Image-2512-Lightning-4steps, cfg 1). ~10x faster than qwen-image-2512-t2i."
+    },
+    {
+      "id": "z-image-turbo-t2i",
+      "title": "Z-Image Turbo Text to Image",
+      "capability": "t2i",
+      "file": "z-image-turbo-t2i.json",
+      "source": "official template image_z_image_turbo from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "57:27",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "57:13",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "57:13",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "57:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "57:3",
+            "input": "steps"
+          }
+        ],
+        "shift": [
+          {
+            "node": "57:11",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 8,
+        "shift": 3
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "z_image_turbo_bf16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+          "sizeGb": 12.31
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "qwen_3_4b.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+          "sizeGb": 8.04
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 12,
+      "validated": true,
+      "notes": "6B distilled model, 8 steps, cfg 1 (no negative prompt). Fastest high-quality option; fits 12-16 GB GPUs."
+    },
+    {
+      "id": "hidream-i1-dev-t2i",
+      "title": "HiDream-I1 Dev Text to Image",
+      "capability": "t2i",
+      "file": "hidream-i1-dev-t2i.json",
+      "source": "official template hidream_i1_dev from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "16",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "40",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "53",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "53",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "70",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 28,
+        "cfg": 1,
+        "shift": 6
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "clip_l_hidream.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/text_encoders/clip_l_hidream.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "clip_g_hidream.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/text_encoders/clip_g_hidream.safetensors",
+          "sizeGb": 1.39
+        },
+        {
+          "file": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 5.16
+        },
+        {
+          "file": "llama_3.1_8b_instruct_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/text_encoders/llama_3.1_8b_instruct_fp8_scaled.safetensors",
+          "sizeGb": 9.08
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/vae/ae.safetensors?download=true",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "hidream_i1_dev_fp8.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/HiDream-I1_ComfyUI/resolve/main/split_files/diffusion_models/hidream_i1_dev_fp8.safetensors",
+          "sizeGb": 17.11
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "17B MoE (fp8). Four text encoders incl. Llama-3.1-8B (fp8). Dev variant: 28 steps, cfg 1, lcm sampler; negative prompt has little effect at cfg 1."
+    },
+    {
+      "id": "sdxl-t2i",
+      "title": "SDXL 1.0 Text to Image",
+      "capability": "t2i",
+      "file": "sdxl-t2i.json",
+      "source": "official template image_sdxl_simple from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "10",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "11",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "13",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "13",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "12",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "12",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "12",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25,
+        "cfg": 7
+      },
+      "limits": {
+        "maxWidth": 1536,
+        "maxHeight": 1536,
+        "dimensionMultiple": 8
+      },
+      "models": [
+        {
+          "file": "sd_xl_base_1.0.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors?download=true",
+          "sizeGb": 6.94
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 8,
+      "validated": true,
+      "notes": "Lightweight baseline (single 6.9 GB checkpoint). Native 1024x1024 class resolutions. Default negative prompt replaced with a generic one."
+    },
+    {
+      "id": "qwen-image-edit-2509",
+      "title": "Qwen-Image-Edit 2509 (Lightning 4-step)",
+      "capability": "edit",
+      "file": "qwen-image-edit-2509.json",
+      "source": "official template image_qwen_image_edit_2509 from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "433:111",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4,
+        "cfg": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Official template default keeps \"Enable Lightning LoRA\" ON (4 steps, cfg 1). Input is rescaled to ~1 MP (FluxKontextImageScale); output size follows the input."
+    },
+    {
+      "id": "qwen-image-edit-2511",
+      "title": "Qwen-Image-Edit 2511",
+      "capability": "edit",
+      "file": "qwen-image-edit-2511.json",
+      "source": "official template image_qwen_image_edit_2511 from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "170:151",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "170:149",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "41",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "170:169",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "170:166",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "170:154",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 40,
+        "cfg": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "sizeGb": 20.53
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Derived from the official 2511 \"material replacement\" template with the 2nd reference removed. 40 steps, cfg 4 (Lightning LoRA path disabled). Better identity/consistency than 2509."
+    },
+    {
+      "id": "qwen-image-edit-2511-multi",
+      "title": "Qwen-Image-Edit 2511 Multi-Image (3 images)",
+      "capability": "edit",
+      "file": "qwen-image-edit-2511-multi.json",
+      "source": "official template image_qwen_image_edit_2511 from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "170:151",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "170:149",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "41",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "83",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "1201",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "170:169",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "170:166",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "170:154",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 40,
+        "cfg": 4
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "qwen_image_edit_2511_fp8mixed.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+          "sizeGb": 20.53
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "TextEncodeQwenImageEditPlus takes up to 3 images; refer to them as \"image 1/2/3\" in the prompt. All three are required. Output size follows image 1."
+    },
+    {
+      "id": "flux1-kontext-dev-edit",
+      "title": "FLUX.1 Kontext [dev] Image Edit",
+      "capability": "edit",
+      "file": "flux1-kontext-dev-edit.json",
+      "source": "official template flux_kontext_dev_basic from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "192:6",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "190",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "192:31",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "192:31",
+            "input": "steps"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "192:35",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "136",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "136",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 20,
+        "guidance": 2.5
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "flux1-dev-kontext_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors",
+          "sizeGb": 11.9
+        },
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 5.16
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "validated": true,
+      "notes": "Instruction edit (\"change the background to ...\"). Output follows the input aspect at ~1 MP (FluxKontextImageScale)."
+    },
+    {
+      "id": "flux1-fill-inpaint",
+      "title": "FLUX.1 Fill [dev] Inpaint",
+      "capability": "inpaint",
+      "file": "flux1-fill-inpaint.json",
+      "source": "official template flux_fill_inpaint_example from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "47:23",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "17",
+            "input": "image"
+          }
+        ],
+        "mask": [
+          {
+            "node": "1301",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "47:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "47:3",
+            "input": "steps"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "47:26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 20,
+        "guidance": 30
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "flux1-fill-dev.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/split_files/diffusion_models/flux1-fill-dev.safetensors",
+          "sizeGb": 23.8
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+          "sizeGb": 9.79
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "mask = separate uploaded PNG, same size as image, read from the RED channel: white (255) = area to regenerate, black = keep. Guidance 30 is correct for Fill."
+    },
+    {
+      "id": "flux1-fill-outpaint",
+      "title": "FLUX.1 Fill [dev] Outpaint",
+      "capability": "outpaint",
+      "file": "flux1-fill-outpaint.json",
+      "source": "official template flux_fill_outpaint_example from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "23",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "17",
+            "input": "image"
+          }
+        ],
+        "padLeft": [
+          {
+            "node": "44",
+            "input": "left"
+          }
+        ],
+        "padTop": [
+          {
+            "node": "44",
+            "input": "top"
+          }
+        ],
+        "padRight": [
+          {
+            "node": "44",
+            "input": "right"
+          }
+        ],
+        "padBottom": [
+          {
+            "node": "44",
+            "input": "bottom"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "guidance": [
+          {
+            "node": "26",
+            "input": "guidance"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 20,
+        "guidance": 30,
+        "padLeft": 400,
+        "padTop": 0,
+        "padRight": 400,
+        "padBottom": 400
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "padMultiple": 8
+      },
+      "models": [
+        {
+          "file": "flux1-fill-dev.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/split_files/diffusion_models/flux1-fill-dev.safetensors",
+          "sizeGb": 23.8
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        },
+        {
+          "file": "clip_l.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors?download=true",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "t5xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors?download=true",
+          "sizeGb": 9.79
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Extends the canvas by padLeft/padTop/padRight/padBottom pixels (multiples of 8) and fills it. Keep final size <= ~2 MP."
+    },
+    {
+      "id": "upscale-image-esrgan",
+      "title": "Image Upscale (Real-ESRGAN 4x)",
+      "capability": "upscale-image",
+      "file": "upscale-image-esrgan.json",
+      "source": "hand-built (scripts/comfy/hand-built/upscale-image-esrgan.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "upscaleModel": [
+          {
+            "node": "2",
+            "input": "model_name"
+          }
+        ],
+        "scale": [
+          {
+            "node": "4",
+            "input": "scale_by"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "5",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "5",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "scale": 1
+      },
+      "limits": {
+        "maxWidth": 8192,
+        "maxHeight": 8192
+      },
+      "models": [
+        {
+          "file": "RealESRGAN_x4plus.safetensors",
+          "folder": "upscale_models",
+          "url": "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors",
+          "sizeGb": 0.07
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "Hand-built: UpscaleModelLoader -> ImageUpscaleWithModel -> ImageScaleBy. The model fixes the factor (x4 for RealESRGAN_x4plus); `scale` resizes AFTER the model (0.5 => net 2x). Any spandrel-supported model in models/upscale_models works as upscaleModel."
+    },
+    {
+      "id": "upscale-image-seedvr2",
+      "title": "Image Upscale / Restore (SeedVR2 7B int8)",
+      "capability": "upscale-image",
+      "file": "upscale-image-seedvr2.json",
+      "source": "official template utility_seedvr2_7b_int8_upscale_image from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "scale": [
+          {
+            "node": "66:57",
+            "input": "resize_type.multiplier"
+          }
+        ],
+        "seed": [
+          {
+            "node": "66:54",
+            "input": "seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "scale": 4
+      },
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [
+        {
+          "file": "seedvr2_ema_vae_fp16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors",
+          "sizeGb": 0.5
+        },
+        {
+          "file": "seedvr2_7b_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_7b_int8_convrot.safetensors",
+          "sizeGb": 8.33
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "validated": true,
+      "notes": "Native SeedVR2 nodes (core ComfyUI >= 0.28), one-step diffusion restoration. scale = output multiplier (template 4). The numz/ComfyUI-SeedVR2_VideoUpscaler pack is NOT used (it cannot register on CPU-only hosts and is superseded by core nodes)."
+    },
+    {
+      "id": "bg-remove-birefnet",
+      "title": "Remove Background (BiRefNet, native)",
+      "capability": "bg-remove",
+      "file": "bg-remove-birefnet.json",
+      "source": "official template utility_birefnet_remove_background from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "image": [
+          {
+            "node": "17",
+            "input": "image"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "1401",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "1401",
+          "kind": "image"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [
+        {
+          "file": "birefnet.safetensors",
+          "folder": "background_removal",
+          "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+          "sizeGb": 0.44
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "Native core nodes (LoadBackgroundRemovalModel/RemoveBackground). Output is an RGBA PNG (transparent background). Template preview nodes replaced with SaveImage. MIT-licensed model."
+    },
+    {
+      "id": "bg-remove-rmbg",
+      "title": "Remove Background (ComfyUI-RMBG, BEN2)",
+      "capability": "bg-remove",
+      "file": "bg-remove-rmbg.json",
+      "source": "hand-built (scripts/comfy/hand-built/bg-remove-rmbg.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "3",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "3",
+          "kind": "image"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-RMBG",
+          "repo": "https://github.com/1038lab/ComfyUI-RMBG"
+        }
+      ],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "Custom pack alternative to bg-remove-birefnet. Model choices on node 2: RMBG-2.0 (best, but CC BY-NC 4.0 non-commercial), INSPYRENET, BEN, BEN2 (default). Output RGBA PNG.",
+      "autoDownloads": [
+        "ComfyUI-RMBG downloads the selected model (BEN2 -> models/RMBG/BEN2) from Hugging Face on first run"
+      ]
+    },
+    {
+      "id": "face-swap-reactor",
+      "title": "Face Swap (ReActor)",
+      "capability": "face-swap",
+      "file": "face-swap-reactor.json",
+      "source": "hand-built (scripts/comfy/hand-built/face-swap-reactor.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "2",
+            "input": "image"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "image"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [
+        {
+          "file": "inswapper_128.onnx",
+          "folder": "insightface",
+          "url": "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx",
+          "sizeGb": 0.55
+        },
+        {
+          "file": "GFPGANv1.4.pth",
+          "folder": "facerestore_models",
+          "url": "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth",
+          "sizeGb": 0.35
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-ReActor",
+          "repo": "https://github.com/Gourieff/ComfyUI-ReActor"
+        }
+      ],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "image = target photo (faces get replaced), image2 = source face. inswapper_128 is research/non-commercial licensed; ReActor applies an NSFW detector by default. Requires the insightface Python package (pip wheel insightface 2.1 installs fine on Python 3.13).",
+      "autoDownloads": [
+        "insightface buffalo_l face analysis models -> models/insightface/models/buffalo_l (downloaded by ReActor on first run)",
+        "retinaface_resnet50 detector -> models/facedetection (downloaded on first run)"
+      ]
+    },
+    {
+      "id": "wan22-t2v-14b",
+      "title": "Wan 2.2 14B Text to Video",
+      "capability": "t2v",
+      "file": "wan22-t2v-14b.json",
+      "source": "official template video_wan2_2_14B_t2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128:89",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "128:72",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "128:74",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "128:74",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "128:74",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "128:125",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "128:81",
+            "input": "noise_seed"
+          },
+          {
+            "node": "128:78",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "128:114",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "128:116",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "128:82",
+            "input": "shift"
+          },
+          {
+            "node": "128:86",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "80",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "80",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 3.5,
+        "shift": 5,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Two-expert MoE: high-noise model runs the first half of the steps, low-noise model the rest. The high/low split step is a separate primitive (10 of 20); if you change steps, keep it roughly at steps/2 (not exposed as a binding). Default 640x640, 81 frames @16 fps (5 s); 1280x720 works on 24 GB+ with offloading. Template default 20 steps, cfg 3.5."
+    },
+    {
+      "id": "wan22-t2v-14b-lightx2v",
+      "title": "Wan 2.2 14B Text to Video (lightx2v 4-step)",
+      "capability": "t2v",
+      "file": "wan22-t2v-14b-lightx2v.json",
+      "source": "official template video_wan2_2_14B_t2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128:89",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "128:72",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "128:74",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "128:74",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "128:74",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "128:125",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "128:81",
+            "input": "noise_seed"
+          },
+          {
+            "node": "128:78",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "128:117",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "128:119",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "128:82",
+            "input": "shift"
+          },
+          {
+            "node": "128:86",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "80",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "80",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 5,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "sizeGb": 1.23
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Two-expert MoE: high-noise model runs the first half of the steps, low-noise model the rest. The high/low split step is a separate primitive (2 of 4); if you change steps, keep it roughly at steps/2 (not exposed as a binding). Default 640x640, 81 frames @16 fps (5 s); 1280x720 works on 24 GB+ with offloading. Uses the official Wan2.2 lightx2v 4-step LoRAs (cfg 1): ~5x faster, less motion."
+    },
+    {
+      "id": "wan22-i2v-14b",
+      "title": "Wan 2.2 14B Image to Video",
+      "capability": "i2v",
+      "file": "wan22-i2v-14b.json",
+      "source": "official template video_wan2_2_14B_i2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "129:93",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "129:89",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "97",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "129:98",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "129:98",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "129:98",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "129:162",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "129:86",
+            "input": "noise_seed"
+          },
+          {
+            "node": "129:85",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "129:128",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "129:126",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "129:104",
+            "input": "shift"
+          },
+          {
+            "node": "129:103",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "108",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "108",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 3.5,
+        "shift": 5,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "High/low split step fixed at 10 of 20 (not a binding). Default 640x640, 81 frames @16 fps. Template default 20 steps, cfg 3.5."
+    },
+    {
+      "id": "wan22-i2v-14b-lightx2v",
+      "title": "Wan 2.2 14B Image to Video (lightx2v 4-step)",
+      "capability": "i2v",
+      "file": "wan22-i2v-14b-lightx2v.json",
+      "source": "official template video_wan2_2_14B_i2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "129:93",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "129:89",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "97",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "129:98",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "129:98",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "129:98",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "129:162",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "129:86",
+            "input": "noise_seed"
+          },
+          {
+            "node": "129:85",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "129:118",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "129:122",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "129:104",
+            "input": "shift"
+          },
+          {
+            "node": "129:103",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "108",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "108",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 5,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+          "sizeGb": 1.23
+        },
+        {
+          "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "High/low split step fixed at 2 of 4 (not a binding). Default 640x640, 81 frames @16 fps. Official lightx2v 4-step LoRAs, cfg 1."
+    },
+    {
+      "id": "wan22-i2v-14b-lora",
+      "title": "Wan 2.2 14B Image to Video + LoRA (camera/VFX)",
+      "capability": "vfx",
+      "file": "wan22-i2v-14b-lora.json",
+      "source": "official template video_wan2_2_14B_i2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "129:93",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "129:89",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "97",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "129:98",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "129:98",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "129:98",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "129:162",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "129:86",
+            "input": "noise_seed"
+          },
+          {
+            "node": "129:85",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "129:128",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "129:126",
+            "input": "value"
+          }
+        ],
+        "shift": [
+          {
+            "node": "129:104",
+            "input": "shift"
+          },
+          {
+            "node": "129:103",
+            "input": "shift"
+          }
+        ],
+        "loraHigh": [
+          {
+            "node": "1001",
+            "input": "lora_name"
+          }
+        ],
+        "loraLow": [
+          {
+            "node": "1002",
+            "input": "lora_name"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          },
+          {
+            "node": "1002",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "108",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "108",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 3.5,
+        "shift": 5,
+        "loraStrength": 1,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Derived from the official template: LoraLoaderModelOnly inserted after BOTH the high-noise (node 1001) and low-noise (node 1002) UNETLoader. Wan 2.2 effect/camera LoRAs ship as high/low pairs; loraHigh and loraLow must both name files present in models/loras (the default names are placeholders, not downloadable). For a LoRA that only has one file, pass the same file for both (or use wan22-i2v-14b if no LoRA is wanted); loraStrength applies to both. High/low split step fixed at 10 of 20 (not a binding). Default 640x640, 81 frames @16 fps. Template default 20 steps, cfg 3.5."
+    },
+    {
+      "id": "wan22-ti2v-5b",
+      "title": "Wan 2.2 5B Text to Video (720p)",
+      "capability": "t2v",
+      "file": "wan22-ti2v-5b.json",
+      "source": "official template video_wan2_2_5B_ti2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "7",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "55",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "55",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "55",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "57",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "48",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "58",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "58",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "steps": 20,
+        "cfg": 5,
+        "shift": 8,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "wan2.2_ti2v_5B_fp16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+          "sizeGb": 10
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan2.2_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors",
+          "sizeGb": 1.41
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 12,
+      "validated": true,
+      "notes": "Dense 5B model with the high-compression Wan2.2 VAE: 1280x704 @24 fps, 121 frames (5 s). Fits 12 GB with offloading. Best consumer-GPU video option."
+    },
+    {
+      "id": "wan22-ti2v-5b-i2v",
+      "title": "Wan 2.2 5B Image to Video (720p)",
+      "capability": "i2v",
+      "file": "wan22-ti2v-5b-i2v.json",
+      "source": "official template video_wan2_2_5B_ti2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "7",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "1501",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "55",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "55",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "55",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "57",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "48",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "58",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "58",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "steps": 20,
+        "cfg": 5,
+        "shift": 8,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "wan2.2_ti2v_5B_fp16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+          "sizeGb": 10
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan2.2_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors",
+          "sizeGb": 1.41
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 12,
+      "validated": true,
+      "notes": "Same as wan22-ti2v-5b with the optional start_image input of Wan22ImageToVideoLatent wired to a LoadImage (the official template documents this as the I2V mode). Image is used at the given width/height; pre-crop to the target aspect."
+    },
+    {
+      "id": "wan22-flf2v-14b",
+      "title": "Wan 2.2 14B First-Last Frame to Video",
+      "capability": "flf2v",
+      "file": "wan22-flf2v-14b.json",
+      "source": "official template video_wan2_2_14B_flf2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "90",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "78",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "80",
+            "input": "image"
+          }
+        ],
+        "endImage": [
+          {
+            "node": "89",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "81",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "81",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "81",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "86",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "84",
+            "input": "noise_seed"
+          },
+          {
+            "node": "87",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "84",
+            "input": "steps"
+          },
+          {
+            "node": "87",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "84",
+            "input": "cfg"
+          },
+          {
+            "node": "87",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "73",
+            "input": "shift"
+          },
+          {
+            "node": "74",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "83",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "83",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 4,
+        "shift": 8,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.29
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Uses the Wan 2.2 I2V high/low experts. High->low switch at step 10 (end_at_step of node 84 / start_at_step of node 87, not a binding). Start and end images should share the output aspect ratio."
+    },
+    {
+      "id": "wan22-fun-camera-14b",
+      "title": "Wan 2.2 14B Fun Camera Control (image to video)",
+      "capability": "camera-motion",
+      "file": "wan22-fun-camera-14b.json",
+      "source": "official template video_wan2_2_14B_fun_camera from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "107",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "99",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "97",
+            "input": "image"
+          }
+        ],
+        "cameraMotion": [
+          {
+            "node": "108",
+            "input": "camera_pose"
+          }
+        ],
+        "width": [
+          {
+            "node": "108",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "108",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "108",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "105",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "102",
+            "input": "noise_seed"
+          },
+          {
+            "node": "103",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "102",
+            "input": "steps"
+          },
+          {
+            "node": "103",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "102",
+            "input": "cfg"
+          },
+          {
+            "node": "103",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "100",
+            "input": "shift"
+          },
+          {
+            "node": "101",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "106",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "106",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 720,
+        "height": 720,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 3.5,
+        "shift": 8,
+        "cameraMotion": "Zoom In",
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_camera_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 15.3
+        },
+        {
+          "file": "wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_camera_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 15.3
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "cameraMotion is one of: Static, Pan Up, Pan Down, Pan Left, Pan Right, Zoom In, Zoom Out, Anti Clockwise (ACW), ClockWise (CW). width/height/frames live on WanCameraEmbedding (node 108) which feeds WanCameraImageToVideo. Default changed from \"Static\" to \"Zoom In\"."
+    },
+    {
+      "id": "wan22-fun-control-14b",
+      "title": "Wan 2.2 14B Fun Control (reference image + control video)",
+      "capability": "motion-transfer",
+      "file": "wan22-fun-control-14b.json",
+      "source": "official template video_wan2_2_14B_fun_control from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "99",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "91",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "145",
+            "input": "image"
+          }
+        ],
+        "video": [
+          {
+            "node": "158",
+            "input": "file"
+          }
+        ],
+        "width": [
+          {
+            "node": "160",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "160",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "160",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "100",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "96",
+            "input": "noise_seed"
+          },
+          {
+            "node": "95",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "96",
+            "input": "steps"
+          },
+          {
+            "node": "95",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "96",
+            "input": "cfg"
+          },
+          {
+            "node": "95",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "93",
+            "input": "shift"
+          },
+          {
+            "node": "94",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "98",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "98",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 20,
+        "cfg": 3.5,
+        "shift": 8,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_fun_control_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_control_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.3
+        },
+        {
+          "file": "wan2.2_fun_control_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_control_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 14.3
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "image = reference/first frame (style + identity), video = driving clip; structure/motion is transferred via Canny edges computed in-graph (node 1601). Only the first `frames` frames of the video are used; feed a ~16 fps clip so motion speed is preserved. Swap node 1601 for depth/pose preprocessors if you install comfyui_controlnet_aux."
+    },
+    {
+      "id": "wan21-vace-14b-ref2v",
+      "title": "Wan 2.1 VACE 14B Reference to Video",
+      "capability": "ref2v",
+      "file": "wan21-vace-14b-ref2v.json",
+      "source": "official template video_wan_vace_14B_ref2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "105",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "107",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "73",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "109",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "109",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "109",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "68",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "108",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "108",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "108",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "110",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "69",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "69",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 768,
+        "height": 768,
+        "frames": 81,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 8,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "wan2.1_vace_14B_fp16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+          "sizeGb": 34.68
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Wan21_CausVid_14B_T2V_lora_rank32.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_14B_T2V_lora_rank32.safetensors",
+          "sizeGb": 0.32
+        },
+        {
+          "file": "umt5_xxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors",
+          "sizeGb": 11.37
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Subject/character reference (not a first frame): the reference appears in a newly composed scene. fp16 14B weights (34.7 GB) + CausVid LoRA at 0.3 for 4-step sampling. 24 GB cards need weight_dtype fp8_e4m3fn on node 113."
+    },
+    {
+      "id": "wan22-s2v-14b",
+      "title": "Wan 2.2 S2V 14B Talking Video (image + audio)",
+      "capability": "lipsync",
+      "file": "wan22-s2v-14b.json",
+      "source": "official template video_wan2_2_14B_s2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "7",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "52",
+            "input": "image"
+          }
+        ],
+        "audio": [
+          {
+            "node": "58",
+            "input": "audio"
+          }
+        ],
+        "width": [
+          {
+            "node": "93",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "93",
+            "input": "height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          },
+          {
+            "node": "79:77",
+            "input": "seed"
+          },
+          {
+            "node": "85:183",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "103",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "105",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "113",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "113",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "steps": 4,
+        "cfg": 1
+      },
+      "limits": {
+        "maxWidth": 1024,
+        "maxHeight": 1024,
+        "dimensionMultiple": 16,
+        "maxDurationSec": 14
+      },
+      "models": [
+        {
+          "file": "wan2.2_s2v_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors",
+          "sizeGb": 16.39
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wav2vec2_large_english_fp16.safetensors",
+          "folder": "audio_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors",
+          "sizeGb": 0.63
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Audio-driven speaking/singing video with body motion. Fixed length: 1 base chunk + 2 extend subgraphs of 77 frames @16 fps (~14 s); shorter audio is padded, longer audio is cut. Output muxes the input audio. Uses the lightx2v 4-step LoRA by default (steps 4, cfg 1; without it use 20 / 6.0)."
+    },
+    {
+      "id": "wan-animate2",
+      "title": "Wan Animate 2 Motion Transfer (character + driving video)",
+      "capability": "motion-transfer",
+      "file": "wan-animate2.json",
+      "source": "official template video_wan_animate2 from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "672:582",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "672:581",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "189",
+            "input": "image"
+          }
+        ],
+        "video": [
+          {
+            "node": "240",
+            "input": "file"
+          }
+        ],
+        "width": [
+          {
+            "node": "672:600",
+            "input": "resize_type.width"
+          }
+        ],
+        "height": [
+          {
+            "node": "672:600",
+            "input": "resize_type.height"
+          }
+        ],
+        "seed": [
+          {
+            "node": "672:597",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "672:591",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "246",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "246",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 482,
+        "height": 854,
+        "steps": 6
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "wan_animate_2_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/diffusion_models/wan_animate_2_int8_convrot.safetensors",
+          "sizeGb": 16.65
+        },
+        {
+          "file": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "sizeGb": 0.74
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "clip_vision_h.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/clip_vision/clip_vision_h.safetensors",
+          "sizeGb": 1.26
+        },
+        {
+          "file": "Wan2_1_VAE_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/vae/Wan2_1_VAE_bf16.safetensors",
+          "sizeGb": 0.25
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "image = character reference, video = driving video (raw frames; no pose extraction needed). Processes the whole driving video in 81-frame fragments via native loop nodes; output keeps the driving video fps + audio. prompt = character/background description (node 672:582); the separate pose prompt (672:585) is set to a generic motion description. The side-by-side comparison output of the template was removed."
+    },
+    {
+      "id": "hunyuan15-t2v-720p",
+      "title": "HunyuanVideo 1.5 Text to Video (720p)",
+      "capability": "t2v",
+      "file": "hunyuan15-t2v-720p.json",
+      "source": "official template video_hunyuan_video_1.5_720p_t2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "44",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "93",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "124",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "124",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "124",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "101",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "129",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "128",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "131",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "132",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "102",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "102",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "frames": 121,
+        "fps": 24,
+        "steps": 20,
+        "cfg": 6,
+        "shift": 7,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "hunyuanvideo15_vae_fp16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors",
+          "sizeGb": 2.52
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "byt5_small_glyphxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+          "sizeGb": 0.44
+        },
+        {
+          "file": "hunyuanvideo1.5_720p_t2v_fp16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_720p_t2v_fp16.safetensors",
+          "sizeGb": 16.65
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "8.3B model, 1280x720, 121 frames @24 fps (5 s), 20 steps cfg 6. The template's optional 1080p super-resolution stage is bypassed (not exported)."
+    },
+    {
+      "id": "hunyuan15-i2v-720p",
+      "title": "HunyuanVideo 1.5 Image to Video (720p)",
+      "capability": "i2v",
+      "file": "hunyuan15-i2v-720p.json",
+      "source": "official template video_hunyuan_video_1.5_720p_i2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "44",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "93",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "80",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "78",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "78",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "78",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "101",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "127",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "126",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "129",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "130",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "102",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "102",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "frames": 121,
+        "fps": 24,
+        "steps": 20,
+        "cfg": 6,
+        "shift": 7,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "hunyuanvideo15_vae_fp16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors",
+          "sizeGb": 2.52
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "byt5_small_glyphxl_fp16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/byt5_small_glyphxl_fp16.safetensors",
+          "sizeGb": 0.44
+        },
+        {
+          "file": "hunyuanvideo1.5_720p_i2v_fp16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/diffusion_models/hunyuanvideo1.5_720p_i2v_fp16.safetensors",
+          "sizeGb": 16.65
+        },
+        {
+          "file": "sigclip_vision_patch14_384.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
+          "sizeGb": 0.86
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Uses SigCLIP vision conditioning + first frame. 1280x720, 121 frames @24 fps."
+    },
+    {
+      "id": "ltx2-t2v",
+      "title": "LTX-2 Text to Video + Audio",
+      "capability": "t2v",
+      "file": "ltx2-t2v.json",
+      "source": "official template video_ltx2_t2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "92:3",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "92:4",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "92:89",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "92:89",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "92:62",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "92:102",
+            "input": "value"
+          },
+          {
+            "node": "92:103",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "92:11",
+            "input": "noise_seed"
+          },
+          {
+            "node": "92:67",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "92:9",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "92:47",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "75",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "75",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "frames": 121,
+        "fps": 24,
+        "steps": 20,
+        "cfg": 4,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 64
+      },
+      "models": [
+        {
+          "file": "ltx-2-19b-dev-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors",
+          "sizeGb": 27.08
+        },
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2-19b-distilled-lora-384.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors",
+          "sizeGb": 7.67
+        },
+        {
+          "file": "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+          "folder": "latent_upscale_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
+          "sizeGb": 1
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Generates synchronized audio (speech/SFX/music) together with video. Two-stage: base pass at width/2 x height/2, then 2x latent upscale + 3-step distilled refine, so width/height are the FINAL size (multiples of 64). frames must be 8n+1 (121 = 5 s @24 fps). fps is set on both the float and int primitives."
+    },
+    {
+      "id": "ltx2-i2v",
+      "title": "LTX-2 Image to Video + Audio",
+      "capability": "i2v",
+      "file": "ltx2-i2v.json",
+      "source": "official template video_ltx2_i2v from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "92:3",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "92:4",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "98",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "102",
+            "input": "resize_type.width"
+          }
+        ],
+        "height": [
+          {
+            "node": "102",
+            "input": "resize_type.height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "92:62",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "92:22",
+            "input": "frame_rate"
+          },
+          {
+            "node": "92:51",
+            "input": "frame_rate"
+          },
+          {
+            "node": "92:97",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "92:11",
+            "input": "noise_seed"
+          },
+          {
+            "node": "92:67",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "92:9",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "92:47",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "75",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "75",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "frames": 121,
+        "fps": 25,
+        "steps": 20,
+        "cfg": 4,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 64
+      },
+      "models": [
+        {
+          "file": "ltx-2-19b-dev-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors",
+          "sizeGb": 27.08
+        },
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2-19b-distilled-lora-384.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors",
+          "sizeGb": 7.67
+        },
+        {
+          "file": "ltx-2-spatial-upscaler-x2-1.0.safetensors",
+          "folder": "latent_upscale_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors",
+          "sizeGb": 1
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "validated": true,
+      "notes": "Input image is center-cropped/resized to width x height (node 102). Same two-stage pipeline as ltx2-t2v; produces audio. fps (25 by default) must be set in three places (all listed)."
+    },
+    {
+      "id": "ltx25-t2v",
+      "title": "LTX-2.5 Text to Video + Audio (distilled)",
+      "capability": "t2v",
+      "file": "ltx25-t2v.json",
+      "source": "official template video_ltx2_5_t2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "405:376",
+            "input": "value"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "405:373",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "405:372",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "405:360",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "405:356",
+            "input": "length"
+          },
+          {
+            "node": "405:366",
+            "input": "frames_number"
+          }
+        ],
+        "fps": [
+          {
+            "node": "405:361",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "405:339",
+            "input": "noise_seed"
+          },
+          {
+            "node": "405:338",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "75",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "75",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 241,
+        "dimensionMultiple": 64
+      },
+      "models": [
+        {
+          "file": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "folder": "latent_upscale_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "sizeGb": 1,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "sizeGb": 21.5,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-video-vae-bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors",
+          "sizeGb": 1.47,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-audio-vae-bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors",
+          "sizeGb": 0.36,
+          "gated": true
+        },
+        {
+          "file": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "sizeGb": 15.37,
+          "gated": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Newest LTX (22B distilled, int8). Fixed manual sigma schedules (no steps/cfg). width/height are FINAL size (base pass at half size, then 2x latent upscale) -> multiples of 64. frames = seconds*fps+1 (template default 5 s @24 fps = 121). The template's optional Gemma prompt-enhancer branch is disabled."
+    },
+    {
+      "id": "ltx25-i2v",
+      "title": "LTX-2.5 Image to Video + Audio (distilled)",
+      "capability": "i2v",
+      "file": "ltx25-i2v.json",
+      "source": "official template video_ltx2_5_i2v from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "398:376",
+            "input": "value"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "398:373",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "395",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "398:372",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "398:360",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "398:356",
+            "input": "length"
+          },
+          {
+            "node": "398:366",
+            "input": "frames_number"
+          }
+        ],
+        "fps": [
+          {
+            "node": "398:361",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "398:339",
+            "input": "noise_seed"
+          },
+          {
+            "node": "398:338",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "75",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "75",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 241,
+        "dimensionMultiple": 64
+      },
+      "models": [
+        {
+          "file": "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "folder": "latent_upscale_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+          "sizeGb": 1,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+          "sizeGb": 21.5,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-video-vae-bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors",
+          "sizeGb": 1.47,
+          "gated": true
+        },
+        {
+          "file": "ltx-2.5-audio-vae-bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors",
+          "sizeGb": 0.36,
+          "gated": true
+        },
+        {
+          "file": "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+          "sizeGb": 15.37,
+          "gated": true
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "First-frame conditioning (strength 0.7 base pass, 1.0 refine). Same size/frames rules as ltx25-t2v. Image is resized to longer side 1536 before conditioning; give it the output aspect ratio."
+    },
+    {
+      "id": "infinitetalk-native",
+      "title": "InfiniteTalk Lip-sync (native, single speaker, ~6 s)",
+      "capability": "lipsync",
+      "file": "infinitetalk-native.json",
+      "source": "official template video_wan2_1_infinitetalk from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "188:14",
+            "input": "text"
+          },
+          {
+            "node": "324:312",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "32",
+            "input": "image"
+          }
+        ],
+        "audio": [
+          {
+            "node": "24",
+            "input": "audio"
+          }
+        ],
+        "width": [
+          {
+            "node": "149",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "150",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "188:193",
+            "input": "noise_seed"
+          },
+          {
+            "node": "324:321",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "188:192",
+            "input": "steps"
+          },
+          {
+            "node": "324:320",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "141",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "141",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 832,
+        "height": 480,
+        "steps": 6
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16,
+        "maxDurationSec": 6
+      },
+      "models": [
+        {
+          "file": "Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/I2V/Wan2_1-I2V-14B-480p_fp8_e4m3fn_scaled_KJ.safetensors",
+          "sizeGb": 16.64
+        },
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wav2vec2-chinese-base_fp16.safetensors",
+          "folder": "audio_encoders",
+          "url": "https://huggingface.co/Kijai/wav2vec2_safetensors/resolve/main/wav2vec2-chinese-base_fp16.safetensors",
+          "sizeGb": 0.19
+        },
+        {
+          "file": "Wan2_1_VAE_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.1_infiniteTalk_single_fp16.safetensors",
+          "folder": "model_patches",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/model_patches/wan2.1_infiniteTalk_single_fp16.safetensors",
+          "sizeGb": 5.13
+        },
+        {
+          "file": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "sizeGb": 0.74
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "validated": true,
+      "notes": "Official native InfiniteTalk template converted from two-speaker to single-speaker (single-speaker InfiniteTalk patch, masks/2nd audio/first-pass preview output removed). Two 81-frame windows @25 fps => ~6 s; audio beyond that is not animated (trim audio to <= 6 s). For long clips use infinitetalk-wanwrapper."
+    },
+    {
+      "id": "infinitetalk-wanwrapper",
+      "title": "InfiniteTalk Lip-sync (WanVideoWrapper, long audio)",
+      "capability": "lipsync",
+      "file": "infinitetalk-wanwrapper.json",
+      "source": "custom-node example ComfyUI-WanVideoWrapper/example_workflows/wanvideo_2_1_14B_I2V_InfiniteTalk_example_03.json @ 088128b (modified, see notes)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "241",
+            "input": "positive_prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "241",
+            "input": "negative_prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "284",
+            "input": "image"
+          }
+        ],
+        "audio": [
+          {
+            "node": "125",
+            "input": "audio"
+          }
+        ],
+        "width": [
+          {
+            "node": "245",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "246",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "270",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "128",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "128",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "131",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "131",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 500,
+        "steps": 6
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "dimensionMultiple": 16,
+        "maxFrames": 1000
+      },
+      "models": [
+        {
+          "file": "Wan2_1-InfiniteTalk_Single_Q8.gguf",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_GGUF/resolve/main/InfiniteTalk/Wan2_1-InfiniteTalk_Single_Q8.gguf",
+          "sizeGb": 2.65
+        },
+        {
+          "file": "wan2.1-i2v-14b-480p-Q8_0.gguf",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/city96/Wan2.1-I2V-14B-480P-gguf/resolve/main/wan2.1-i2v-14b-480p-Q8_0.gguf",
+          "sizeGb": 18.14
+        },
+        {
+          "file": "Wan2_1_VAE_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1_VAE_bf16.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "sizeGb": 0.74
+        },
+        {
+          "file": "clip_vision_h.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+          "sizeGb": 1.26
+        },
+        {
+          "file": "umt5-xxl-enc-bf16.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/umt5-xxl-enc-bf16.safetensors",
+          "sizeGb": 11.36
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-KJNodes",
+          "repo": "https://github.com/kijai/ComfyUI-KJNodes"
+        },
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        },
+        {
+          "name": "ComfyUI-WanVideoWrapper",
+          "repo": "https://github.com/kijai/ComfyUI-WanVideoWrapper"
+        }
+      ],
+      "vramGb": 16,
+      "validated": true,
+      "notes": "kijai WanVideoWrapper example 03 (GGUF Q8 Wan2.1-I2V-480p + InfiniteTalk single, lightx2v LoRA, 6 steps). Generates in 81-frame windows until the audio ends; `frames` is a MAX frame cap @25 fps (default 500 = 20 s). Changes vs example: MelBandRoFormer vocal separation removed (use clean speech audio), attention sdpa instead of sageattn, save_output=true, Windows sub-paths flattened. Output is a VHS_VideoCombine node: look in history outputs[node].gifs[], not .images[].",
+      "autoDownloads": [
+        "DownloadAndLoadWav2VecModel downloads TencentGameMate/chinese-wav2vec2-base into models/transformers on first run"
+      ]
+    },
+    {
+      "id": "upscale-video-seedvr2",
+      "title": "Video Upscale / Restore (SeedVR2 3B int8)",
+      "capability": "upscale-video",
+      "file": "upscale-video-seedvr2.json",
+      "source": "official template utility_seedvr2_3b_int8_upscale_video from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "video": [
+          {
+            "node": "73",
+            "input": "file"
+          }
+        ],
+        "scale": [
+          {
+            "node": "66:57",
+            "input": "resize_type.multiplier"
+          }
+        ],
+        "seed": [
+          {
+            "node": "66:54",
+            "input": "seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "76",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "76",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "scale": 2
+      },
+      "limits": {
+        "maxWidth": 3840,
+        "maxHeight": 3840,
+        "maxDurationSec": 20
+      },
+      "models": [
+        {
+          "file": "seedvr2_ema_vae_fp16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors",
+          "sizeGb": 0.5
+        },
+        {
+          "file": "seedvr2_3b_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors",
+          "sizeGb": 3.46
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "validated": true,
+      "notes": "Native SeedVR2 (one-step diffusion restoration, temporally consistent). scale = output multiplier (template 2). Keeps source fps + audio. Temporal latent chunking is off (template default); long or 1080p+ clips need more VRAM."
+    },
+    {
+      "id": "upscale-video-esrgan",
+      "title": "Video Upscale (Real-ESRGAN 4x)",
+      "capability": "upscale-video",
+      "file": "upscale-video-esrgan.json",
+      "source": "official template utility-gan_upscaler from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "video": [
+          {
+            "node": "9",
+            "input": "file"
+          }
+        ],
+        "upscaleModel": [
+          {
+            "node": "1",
+            "input": "model_name"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "12",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "12",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 3840,
+        "maxHeight": 3840
+      },
+      "models": [
+        {
+          "file": "RealESRGAN_x4plus.safetensors",
+          "folder": "upscale_models",
+          "url": "https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors",
+          "sizeGb": 0.07
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "Fast GAN upscale frame by frame (no new detail). Output factor = model factor (x4). Keeps fps + audio."
+    },
+    {
+      "id": "interpolate-film",
+      "title": "Frame Interpolation (FILM, native)",
+      "capability": "interpolate",
+      "file": "interpolate-film.json",
+      "source": "official template utility_video_frame_interpolation from comfyui-workflow-templates 0.11.86",
+      "bindings": {
+        "video": [
+          {
+            "node": "4",
+            "input": "file"
+          }
+        ],
+        "multiplier": [
+          {
+            "node": "16:9",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "multiplier": 2
+      },
+      "limits": {
+        "maxMultiplier": 16
+      },
+      "models": [
+        {
+          "file": "film_net_fp16.safetensors",
+          "folder": "frame_interpolation",
+          "url": "https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors",
+          "sizeGb": 0.07
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "validated": true,
+      "notes": "Native FrameInterpolate node. Output fps = source fps x multiplier (same duration, smoother motion). Audio passthrough."
+    },
+    {
+      "id": "interpolate-rife",
+      "title": "Frame Interpolation (RIFE 4.26, native)",
+      "capability": "interpolate",
+      "file": "interpolate-rife.json",
+      "source": "official template utility_video_frame_interpolation from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "video": [
+          {
+            "node": "4",
+            "input": "file"
+          }
+        ],
+        "multiplier": [
+          {
+            "node": "16:9",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "multiplier": 2
+      },
+      "limits": {
+        "maxMultiplier": 16
+      },
+      "models": [
+        {
+          "file": "rife_v4.26.safetensors",
+          "folder": "frame_interpolation",
+          "url": "https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/rife_v4.26.safetensors",
+          "sizeGb": 0.02
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 2,
+      "validated": true,
+      "notes": "Same official template with the RIFE v4.26 checkpoint (template lists rife_v4.25/4.26 variants in Comfy-Org/frame_interpolation). Faster than FILM."
+    },
+    {
+      "id": "interpolate-rife-vfi",
+      "title": "Frame Interpolation (RIFE VFI custom pack)",
+      "capability": "interpolate",
+      "file": "interpolate-rife-vfi.json",
+      "source": "hand-built (scripts/comfy/hand-built/interpolate-rife-vfi.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "multiplier": [
+          {
+            "node": "2",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "6",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "6",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "multiplier": 2
+      },
+      "limits": {
+        "maxMultiplier": 8
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Frame-Interpolation",
+          "repo": "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation"
+        },
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 2,
+      "validated": true,
+      "notes": "Fannovel16/ComfyUI-Frame-Interpolation + VideoHelperSuite alternative to interpolate-rife. Output fps = source fps x multiplier (VHS_VideoInfo + ComfyMathExpression). Output is VHS_VideoCombine (history .gifs[]).",
+      "autoDownloads": [
+        "RIFE VFI downloads rife49.pth into custom_nodes/ComfyUI-Frame-Interpolation/ckpts/rife on first run"
+      ]
+    },
+    {
+      "id": "music-ace-step-15",
+      "title": "ACE-Step 1.5 Music (tags + lyrics)",
+      "capability": "music",
+      "file": "music-ace-step-15.json",
+      "source": "official template audio_ace_step_1_5_checkpoint from comfyui-workflow-templates 0.11.86 (modified, see notes)",
+      "bindings": {
+        "tags": [
+          {
+            "node": "94",
+            "input": "tags"
+          }
+        ],
+        "lyrics": [
+          {
+            "node": "94",
+            "input": "lyrics"
+          }
+        ],
+        "duration": [
+          {
+            "node": "94",
+            "input": "duration"
+          },
+          {
+            "node": "98",
+            "input": "seconds"
+          }
+        ],
+        "bpm": [
+          {
+            "node": "94",
+            "input": "bpm"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          },
+          {
+            "node": "94",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "106",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "106",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "steps": 8,
+        "duration": 60,
+        "bpm": 120
+      },
+      "limits": {
+        "maxDurationSec": 240
+      },
+      "models": [
+        {
+          "file": "ace_step_1.5_turbo_aio.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/checkpoints/ace_step_1.5_turbo_aio.safetensors",
+          "sizeGb": 10.03
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 8,
+      "validated": true,
+      "notes": "Turbo AIO checkpoint (8 steps). tags = style description, lyrics with [Verse]/[Chorus] markers (\"[Instrumental]\" or empty for instrumental). Output MP3 V0 (changed from FLAC). Defaults changed to 60 s / 120 bpm. Language/keyscale/timesignature stay at template values (en, E minor, 4)."
+    },
+    {
+      "id": "v2a-mmaudio",
+      "title": "Video to Audio / Foley (MMAudio)",
+      "capability": "v2a",
+      "file": "v2a-mmaudio.json",
+      "source": "custom-node example ComfyUI-MMAudio/example_workflows/mmaudio_test.json @ 8eaeb72 (modified, see notes)",
+      "bindings": {
+        "video": [
+          {
+            "node": "91",
+            "input": "video"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "92",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "92",
+            "input": "negative_prompt"
+          }
+        ],
+        "seed": [
+          {
+            "node": "92",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "92",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "92",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "97",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "1701",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "97",
+          "kind": "video"
+        },
+        {
+          "node": "1701",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "steps": 25,
+        "cfg": 4.5
+      },
+      "limits": {
+        "maxDurationSec": 30
+      },
+      "models": [
+        {
+          "file": "mmaudio_large_44k_v2_fp16.safetensors",
+          "folder": "mmaudio",
+          "url": "https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/mmaudio_large_44k_v2_fp16.safetensors",
+          "sizeGb": 2.06
+        },
+        {
+          "file": "mmaudio_vae_44k_fp16.safetensors",
+          "folder": "mmaudio",
+          "url": "https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/mmaudio_vae_44k_fp16.safetensors",
+          "sizeGb": 0.61
+        },
+        {
+          "file": "mmaudio_synchformer_fp16.safetensors",
+          "folder": "mmaudio",
+          "url": "https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/mmaudio_synchformer_fp16.safetensors",
+          "sizeGb": 0.47
+        },
+        {
+          "file": "apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+          "folder": "mmaudio",
+          "url": "https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors",
+          "sizeGb": 1.97
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-MMAudio",
+          "repo": "https://github.com/kijai/ComfyUI-MMAudio"
+        },
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 8,
+      "validated": true,
+      "notes": "kijai ComfyUI-MMAudio example. Audio duration = loaded video duration (VHS_VideoInfo). Two outputs: the input video muxed with generated audio (VHS_VideoCombine -> history .gifs[]) and the FLAC track (SaveAudio -> history .audio[]). MMAudio is trained on 8 s clips; quality drops on long inputs."
+    },
+    {
+      "id": "selftest-image",
+      "title": "Self-test: invert image",
+      "capability": "edit",
+      "file": "selftest-image.json",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "3",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "3",
+          "kind": "image"
+        }
+      ],
+      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
+      "customNodes": [],
+      "models": [],
+      "vramGb": 0,
+      "validated": true,
+      "defaults": {},
+      "source": "hand-built (Fuobe self-test, no model weights)"
+    },
+    {
+      "id": "selftest-video",
+      "title": "Self-test: image to flicker video",
+      "capability": "i2v",
+      "file": "selftest-video.json",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "6",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "6",
+          "kind": "video"
+        }
+      ],
+      "notes": "Runs on any ComfyUI (CPU is fine). Exercises the SaveVideo output path. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
+      "customNodes": [],
+      "models": [],
+      "vramGb": 0,
+      "validated": true,
+      "defaults": {},
+      "source": "hand-built (Fuobe self-test, no model weights)"
+    }
+  ]
+}

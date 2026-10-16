@@ -1,0 +1,308 @@
+{
+  "bg-remove-birefnet": {
+    "sha256": "8d12248b956c8cd91d207b5ec9a8585c681259aff216ac38745fa4bffdaae988",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:20.633Z"
+  },
+  "bg-remove-rmbg": {
+    "sha256": "d99b9123ef37bc9eace53838577091c6c2fa2cf3e66c10d7a3c643fe31a9d00f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:20.767Z"
+  },
+  "face-swap-reactor": {
+    "sha256": "3bff3a7975736ff83aef7e2040c1af8b7dc18ac4e273bcd5dce73ab7eecf4a8a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.016Z"
+  },
+  "flux1-dev-t2i": {
+    "sha256": "62de41ccfa9c0fcce1599c8f5f712b983e767800af5b73a4e06cb71a1aa649ea",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.582Z"
+  },
+  "flux1-fill-inpaint": {
+    "sha256": "1805c40665be21f24ac3f48c9bb5f3a8a901ac4e8ac3f75578d1f66bd83a5bbb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:19.961Z"
+  },
+  "flux1-fill-outpaint": {
+    "sha256": "83531688ff4442569167378a926d5717aa127d8033d911d14b8019105e8187b3",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:20.148Z"
+  },
+  "flux1-kontext-dev-edit": {
+    "sha256": "0d773bcf08371c1e1a4ef7ef47e0fa1ab09a9db5e436fe34be940c8f84eaa406",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:19.626Z"
+  },
+  "flux1-krea-dev-t2i": {
+    "sha256": "cd842fe535de7f2acd628d2876cd63f6b3354a68ec19e6c5357a388c732d6734",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.618Z"
+  },
+  "flux1-schnell-t2i": {
+    "sha256": "9460e1647625617192391f220770130f00ac63fbe1179358911a7d07a0d855b3",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.655Z"
+  },
+  "flux2-dev-edit": {
+    "sha256": "a0321f7b9170cfdee7b9e5e0c10522b025bcbed8586aff502d7de746db703bc2",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.913Z"
+  },
+  "flux2-dev-multiref": {
+    "sha256": "2126a7b68f0bed51316b553cd3fb6a5dbb4177e576078aa9a22dc4472c4783df",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.045Z"
+  },
+  "flux2-dev-t2i": {
+    "sha256": "0c33ab5c0c8a6360180d15d62acdda80263363a715b19817e846cc492756e075",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.692Z"
+  },
+  "flux2-dev-t2i-turbo": {
+    "sha256": "0e5d31ee7a4cf40d74353c854292d8cc76b120d1ec927d03091e0074f620f257",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:15.735Z"
+  },
+  "hidream-i1-dev-t2i": {
+    "sha256": "19c70e814c0c92a3a503bad43fe5cd2db46bc25551651cb181952d033a801d11",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.851Z"
+  },
+  "hunyuan15-i2v-720p": {
+    "sha256": "a0dc8d56182ff28d23a74916717c151ebbb30e960f88ca45b220fe2501579c58",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.077Z"
+  },
+  "hunyuan15-t2v-720p": {
+    "sha256": "be26868d5b5576036d6c2628eac139ea5cd12268e4a09ee011b701de898e1fd5",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:25.685Z"
+  },
+  "infinitetalk-native": {
+    "sha256": "816327852679ebc006a3842668c35a0c9127f724690abc4d58d7e820d2cf0de5",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.803Z"
+  },
+  "infinitetalk-wanwrapper": {
+    "sha256": "9c6d9405cde952f4ae1cc0833969959685d7f8b19a39d24aed5da3428d2ee4ff",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.816Z"
+  },
+  "interpolate-film": {
+    "sha256": "457d686f8e58bc08982a0f881c90a5402c9ee888960de935b139be253e1d5fc2",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.845Z"
+  },
+  "interpolate-rife": {
+    "sha256": "83a7470b9574b0e297e0fc2c8e1eb3e280f0bf77784f397b4f01516f8f18604e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.854Z"
+  },
+  "interpolate-rife-vfi": {
+    "sha256": "bec30ae2655d256ad465f02fb5249b7a6ec08c57cd3d6ca2f5425428f1f6f95c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.862Z"
+  },
+  "ltx2-i2v": {
+    "sha256": "db32b2b64be6be2ec2a9e64cae5e74c042d2eada6131eee52f6a6c2866e2dab9",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.485Z"
+  },
+  "ltx2-t2v": {
+    "sha256": "954ab8cef567a7c7daf4fdb267fc3f896a93596e005b34ebd466d4d0018f1c9a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.268Z"
+  },
+  "ltx25-i2v": {
+    "sha256": "7a9a34d0b7571d6a44cfd7b7cdb98a2896023700b7a0beba452f15f45d91130a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.788Z"
+  },
+  "ltx25-t2v": {
+    "sha256": "1ccb9e71b8c7b0855b92ca27f48157e9c79cfdde5d1ef94fbb1827c20041cbeb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.738Z"
+  },
+  "music-ace-step-15": {
+    "sha256": "a64cd8f69aaad6969b547e9c9b8354444cf938325c153ac7a253daae2d1b0ac7",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.870Z"
+  },
+  "qwen-image-2512-t2i": {
+    "sha256": "c18da4a3488120bdcee722e4ae7d187385544ec4805753e7dae6946ddb6f6ba5",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.251Z"
+  },
+  "qwen-image-2512-t2i-lightning": {
+    "sha256": "1b20e8b0bb3a61a643a694bed1af0d9120a7c2d3300a07721ca378e5f1c2c26d",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.441Z"
+  },
+  "qwen-image-edit-2509": {
+    "sha256": "6dc2a41dd884d6b878826877017e845fdb1729620ee92118d66c9507fdd25fc0",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.936Z"
+  },
+  "qwen-image-edit-2511": {
+    "sha256": "5deec4e50d093dabcdd74b6a97e794bcb0069a987f573ce65e8d966909c6de26",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.994Z"
+  },
+  "qwen-image-edit-2511-multi": {
+    "sha256": "29278f8d1a2c84104c2bcc4cab0f8a3e33002681c32e97409afa38c5525dc641",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:17.108Z"
+  },
+  "sdxl-t2i": {
+    "sha256": "ae16cc9b74193179da08136571719871c3e31e2abacf5297985657c2fe5e9fbf",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.889Z"
+  },
+  "upscale-image-esrgan": {
+    "sha256": "e26aac88303d6b46d78b1adbf43d1b3d6b07c88650c94e6309ec4971e6e22ef9",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:20.245Z"
+  },
+  "upscale-image-seedvr2": {
+    "sha256": "a28b3dc95f8b3d9a0d67fb06cff7db09b058ffac1dd375b33e77596a481768ad",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:20.394Z"
+  },
+  "upscale-video-esrgan": {
+    "sha256": "b0459a0959fbd7b7658c59a53293e085ae705e92b27b200fe9735b87e0bfc200",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.837Z"
+  },
+  "upscale-video-seedvr2": {
+    "sha256": "42f7ef1d6ab68d53f96a704037fc443fd207b790562da473c747f9f6e14c34fc",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.825Z"
+  },
+  "v2a-mmaudio": {
+    "sha256": "3f8f0c2713a0e46202546db49a0228601d987a10577c96f248211259c7483608",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:26.882Z"
+  },
+  "wan-animate2": {
+    "sha256": "efee2e4874102ff8a7f075993e406e05b355a843762220ad38278209de05c63a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:25.481Z"
+  },
+  "wan21-vace-14b-ref2v": {
+    "sha256": "6a9e277f11862df6ed7bf8e28d5f28414f623f571bb265881370b190e402e37c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:24.965Z"
+  },
+  "wan22-flf2v-14b": {
+    "sha256": "8fe5dfa9f3705bdc640960bc8fdb7d4fe28a2cf21e9c942a28c90d1dcc8c4e11",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:22.038Z"
+  },
+  "wan22-fun-camera-14b": {
+    "sha256": "df3ef7ac0f10e06d1a317010b5667c85bbb6ba0ae68a0a3ace95aa3ee4432bfc",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:22.218Z"
+  },
+  "wan22-fun-control-14b": {
+    "sha256": "160d6c0b2755218a1b267f5520e6f435857aeca390b763e7b7197570e711f767",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:24.702Z"
+  },
+  "wan22-i2v-14b": {
+    "sha256": "aacf225b2fe0d83be4489888039e98a14ebba49e4b9adf4bf25192250b182352",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.272Z"
+  },
+  "wan22-i2v-14b-lightx2v": {
+    "sha256": "344df9a302da8ec9afe0bcd6606e241f7e4f301bb337d78987d7030edf6b68ba",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.427Z"
+  },
+  "wan22-i2v-14b-lora": {
+    "sha256": "95908d67a56cb8eb7db7e7fc36047b5480b416e9a1a6a5712da691daf9cfe000",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.514Z"
+  },
+  "wan22-s2v-14b": {
+    "sha256": "1b554529206f27dd9ebddf4a6ef60ad666e550fc64ed72c222f57bb1dacf7720",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:25.122Z"
+  },
+  "wan22-t2v-14b": {
+    "sha256": "5ed0d42ea93ca8242c22d66b76f1705ce95c339c8673f0db496048cf854262ec",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.056Z"
+  },
+  "wan22-t2v-14b-lightx2v": {
+    "sha256": "29d59bb02665b0aa85442a098965e178e235ea1d5b95d346fd478d9a6520262f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.114Z"
+  },
+  "wan22-ti2v-5b": {
+    "sha256": "8937d1317a4df79ab983b2630b17e65e2c30789d694db18e9dc08dc2a7a42268",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.668Z"
+  },
+  "wan22-ti2v-5b-i2v": {
+    "sha256": "6dc57b1184547542488964ec52f77a8cd5a1d1ad0f25326d972a22e65e65c46a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:21.746Z"
+  },
+  "z-image-turbo-t2i": {
+    "sha256": "dda8f9b795709c31220a732c2db134e130cda20d0672c0cca64905b1f8397a70",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T20:57:16.610Z"
+  }
+}
