@@ -28,6 +28,10 @@ const RequestSchema = z.object({
       seed: z.number().int().optional(),
       generateAudio: z.boolean().optional(),
       enhancePrompt: z.boolean().optional(),
+      shots: z.array(z.object({ prompt: z.string().max(2000), duration: z.number().positive().max(60) })).max(12).optional(),
+      multiShot: z.literal("auto").optional(),
+      draft: z.boolean().optional(),
+      draftId: z.string().max(8192).optional(),
       extra: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),

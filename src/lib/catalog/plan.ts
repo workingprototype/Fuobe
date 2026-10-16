@@ -21,6 +21,7 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (req.inputs?.audio && imgs && has("avatar")) return "avatar";
     if (req.inputs?.video && imgs && has("motion-transfer")) return "motion-transfer";
     if (req.inputs?.video && has("v2v")) return "v2v";
+    if (req.inputs?.video && has("extend")) return "extend";
     if (imgs && req.inputs?.endImage && has("flf2v")) return "flf2v";
     if (imgs > 1 && has("ref2v")) return "ref2v";
     if (imgs && has("i2v")) return "i2v";
@@ -57,6 +58,17 @@ export function composePrompt(
     .replace(/\s{2,}/g, " ")
     .replace(/^[\s,.;:]+|[\s,;:]+$/g, "")
     .trim();
+}
+
+/** "Shot 1 [0–3s]: … Shot 2 [3–8s]: …" — the format Seedance, Wan and LTX follow for multi-shot prompts. */
+export function composeShots(overall: string, shots: { prompt: string; duration: number }[]): string {
+  let t = 0;
+  const parts = shots.map((s, i) => {
+    const from = t;
+    t += s.duration;
+    return `Shot ${i + 1} [${from}-${t}s]: ${s.prompt.trim().replace(/[.\s]+$/, "")}.`;
+  });
+  return [overall.trim() && `${overall.trim().replace(/[.\s]+$/, "")}.`, ...parts].filter(Boolean).join(" ");
 }
 
 export function presetRoute(preset: Preset, engine: Engine): PresetRoute | null {
@@ -105,11 +117,29 @@ export function planGeneration(
   }
 
   if (req.loras?.length) loras = [...loras, ...req.loras];
+
+  // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
+  const shots = params.shots?.filter((s) => s.prompt.trim());
+  if (shots?.length) {
+    if (!model.options.multiShot) throw new Error(`${model.name} can't do multi-shot — try Kling 3.0, Seedance 2.5 or Wan 2.6`);
+    if (shots.length > model.options.multiShot.maxShots) throw new Error(`${model.name} takes up to ${model.options.multiShot.maxShots} shots`);
+    const total = shots.reduce((n, s) => n + s.duration, 0);
+    const max = Math.max(...(model.options.durations ?? [total]));
+    if (total > max) throw new Error(`The shots add up to ${total}s — ${model.name} makes up to ${max}s`);
+    // Per-shot prompts carry the overall description (and @element legend) with them.
+    const overall = prompt.trim().replace(/[.\s]+$/, "");
+    const native = model.options.multiShot.mode === "native";
+    params = { ...params, shots: native && overall ? shots.map((s) => ({ ...s, prompt: `${overall}. ${s.prompt.trim()}` })) : shots, duration: total };
+    prompt = composeShots(prompt, shots);
+  } else if (params.multiShot === "auto" && model.options.multiShot?.mode === "prompt") {
+    prompt = `${prompt.replace(/[.\s]+$/, "")}. Multi-shot sequence: tell it in several distinct shots with clean cuts between them.`;
+  }
   op = op ?? inferOperation(model, req);
   if (!routesFor(model, op).length) {
     throw new Error(`${model.name} can't do ${op} — try another model`);
   }
-  if (!prompt && op !== "upscale-image" && op !== "upscale-video" && op !== "bg-remove" && op !== "interpolate" && op !== "v2a" && op !== "face-swap" && op !== "motion-transfer" && op !== "lipsync" && op !== "avatar") {
+  if (op === "finalize" && !params.draftId) throw new Error("Pick a draft to finish");
+  if (!prompt && op !== "finalize" && op !== "reframe" && op !== "upscale-image" && op !== "upscale-video" && op !== "bg-remove" && op !== "interpolate" && op !== "v2a" && op !== "face-swap" && op !== "motion-transfer" && op !== "lipsync" && op !== "avatar") {
     throw new Error("Write a prompt first");
   }
 
@@ -143,6 +173,7 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio
   v2a: { video: true, msg: "Add a video" },
   interpolate: { video: true, msg: "Add a video" },
   extend: { video: true, msg: "Add the video to continue" },
+  reframe: { video: true, msg: "Add a video to reframe" },
 };
 
 /** Human message for the first missing input of an operation, or null. */

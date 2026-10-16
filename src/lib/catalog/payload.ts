@@ -44,6 +44,22 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     else out[g.key] = input.generateAudio ? g.on : g.off;
   }
 
+  // Native multi-shot replaces the single prompt with per-shot prompts.
+  if (map.multiShot && (input.shots?.length || input.multiShot === "auto")) {
+    const ms = map.multiShot;
+    if (input.shots?.length) {
+      const shots = input.shots.map((s) => ({ prompt: s.prompt, duration: ms.durationType === "string" ? String(s.duration) : s.duration }));
+      out[ms.key] = ms.json ? JSON.stringify(shots) : shots;
+      if (map.prompt !== false) delete out[map.prompt ?? "prompt"];
+      if (ms.shotType) out[ms.shotType] = "customize";
+    } else if (ms.shotType) {
+      out[ms.shotType] = "intelligent";
+    }
+    if (ms.flag) out[ms.flag] = true;
+  }
+  if (map.draft && input.draft) out[map.draft] = true;
+  if (map.draftId && input.draftId) out[map.draftId] = input.draftId;
+
   Object.assign(out, map.fixed ?? {});
   Object.assign(out, input.extra ?? {});
   return out;

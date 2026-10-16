@@ -18,6 +18,12 @@ RESEARCH = json.loads((ROOT / "docs/research/paid-model-apis.json").read_text())
 EPS = {}
 for e in RESEARCH["endpoints"]:
     EPS.setdefault((e["provider"], e["endpoint"]), e)
+# Part 2 (multi-shot, draft, extend, reframe, audio, training) re-verified some endpoints with more key fields.
+RESEARCH_2 = json.loads((ROOT / "docs/research/paid-model-apis-2.json").read_text())
+for e in RESEARCH_2["endpoints"]:
+    prev = EPS.get((e["provider"], e["endpoint"]))
+    # Keep part 1's key fields (aspect ratio mappings etc.) and add part 2's.
+    EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
@@ -119,13 +125,16 @@ model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal t
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
       "Higgsfield's default — multi-shot cinema with native audio, up to 30s",
       [("t2v", "bytedance/seedance-2.5/text-to-video"), ("i2v", "bytedance/seedance-2.5/image-to-video", "fal", "+flf2v"),
-       ("ref2v", "bytedance/seedance-2.5/reference-to-video")],
-      badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"})
+       ("ref2v", "bytedance/seedance-2.5/reference-to-video"),
+       ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
+       ("finalize", "bytedance/seedance-2.5/draft/complete")],
+      badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("seedance-2-0", "Seedance 2.0", "ByteDance", "seedance", "video",
       "Smooth multi-shot motion with audio",
       [("t2v", "bytedance/seedance-2.0/text-to-video"), ("i2v", "bytedance/seedance-2.0/image-to-video", "fal", "+flf2v"),
        ("ref2v", "bytedance/seedance-2.0/reference-to-video")],
-      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"})
+      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("seedance-2-0-fast", "Seedance 2.0 Fast", "ByteDance", "seedance", "video",
       "Seedance 2 at draft speed",
       [("t2v", "bytedance/seedance-2.0/fast/text-to-video"), ("i2v", "bytedance/seedance-2.0/fast/image-to-video", "fal", "+flf2v"),
@@ -170,10 +179,12 @@ model("kling-2-5-turbo", "Kling 2.5 Turbo Pro", "Kuaishou", "kling", "video",
 model("veo-3-1", "Veo 3.1", "Google", "veo", "video",
       "State-of-the-art realism with synchronized sound and dialogue",
       [("t2v", "fal-ai/veo3.1"), ("i2v", "fal-ai/veo3.1/image-to-video"), ("flf2v", "fal-ai/veo3.1/first-last-frame-to-video"),
-       ("ref2v", "fal-ai/veo3.1/reference-to-video"), ("t2v", "google/veo-3.1", "replicate"), ("i2v", "google/veo-3.1", "replicate")],
+       ("ref2v", "fal-ai/veo3.1/reference-to-video"), ("t2v", "google/veo-3.1", "replicate"), ("i2v", "google/veo-3.1", "replicate"),
+       ("extend", "fal-ai/veo3.1/extend-video", "fal", {"note": "fal retires Veo 3.1 extend on 2026-11-17"})],
       badges=["top", "audio", "hd"], pricing=("second", 0.4, "audio-off-half"), defaults={"aspectRatio": "16:9", "duration": 8, "resolution": "1080p"})
 model("veo-3-1-fast", "Veo 3.1 Fast", "Google", "veo", "video", "Veo quality at a fraction of the cost",
-      [("t2v", "fal-ai/veo3.1/fast"), ("i2v", "fal-ai/veo3.1/fast/image-to-video"), ("flf2v", "fal-ai/veo3.1/fast/first-last-frame-to-video")],
+      [("t2v", "fal-ai/veo3.1/fast"), ("i2v", "fal-ai/veo3.1/fast/image-to-video"), ("flf2v", "fal-ai/veo3.1/fast/first-last-frame-to-video"),
+       ("extend", "fal-ai/veo3.1/fast/extend-video", "fal", {"note": "fal retires Veo 3.1 extend on 2026-11-17"})],
       badges=["fast", "audio"], pricing=("second", 0.15), defaults={"aspectRatio": "16:9", "duration": 8, "resolution": "1080p"})
 model("veo-3-1-lite", "Veo 3.1 Lite", "Google", "veo", "video", "Cheapest Veo for drafts and volume",
       [("t2v", "fal-ai/veo3.1/lite"), ("i2v", "fal-ai/veo3.1/lite/image-to-video")],
@@ -195,7 +206,7 @@ model("wan-2-7", "Wan 2.7", "Alibaba Wan", "wan", "video", "Hosted Wan with refe
       badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
 model("wan-2-6", "Wan 2.6", "Alibaba Wan", "wan", "video", "Multi-shot Wan with audio",
       [("t2v", "wan/v2.6/text-to-video"), ("i2v", "wan/v2.6/image-to-video"), ("ref2v", "wan/v2.6/reference-to-video")],
-      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
+      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"}, options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("wan-2-5", "Wan 2.5", "Alibaba Wan", "wan", "video", "Audio-driven video up to 1080p",
       [("t2v", "fal-ai/wan-25-preview/text-to-video"), ("i2v", "fal-ai/wan-25-preview/image-to-video")],
       badges=["audio"], pricing=("second", 0.15, "1080p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
@@ -203,7 +214,8 @@ model("minimax-h3", "MiniMax H3", "MiniMax", "hailuo", "video", "Expressive char
       [("t2v", "minimax/h3/text-to-video"), ("i2v", "minimax/h3/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3/reference-to-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
 model("minimax-h3-max", "MiniMax H3 Max", "MiniMax", "hailuo", "video", "Top-tier MiniMax with extend",
-      [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video")],
+      [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video"),
+       ("extend", "minimax/h3-max/extend-video")],
       badges=["pro"], defaults={"aspectRatio": "16:9"})
 model("hailuo-2-3", "MiniMax Hailuo 2.3", "MiniMax", "hailuo", "video", "Expressive characters and dynamic action",
       [("t2v", "fal-ai/minimax/hailuo-2.3/pro/text-to-video"), ("i2v", "fal-ai/minimax/hailuo-2.3/pro/image-to-video")],
@@ -213,20 +225,27 @@ model("hailuo-02", "MiniMax Hailuo 02", "MiniMax", "hailuo", "video", "Physics-h
       pricing=("second", 0.045), defaults={"duration": 6, "resolution": "768P"}, fixed={"prompt_optimizer": True})
 model("flux-3-video", "FLUX.3 Video", "Black Forest Labs", "flux", "video", "BFL's video model with keyframes and edits",
       [("t2v", "blackforestlabs/flux-3/text-to-video"), ("i2v", "blackforestlabs/flux-3/image-to-video"),
-       ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video")],
+       ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video"),
+       ("extend", "blackforestlabs/flux-3/extend-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
 model("pixverse-v6", "PixVerse V6", "PixVerse", "pixverse", "video", "Stylized social video with transitions",
-      [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition")],
+      [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition"),
+       ("extend", "fal-ai/pixverse/v6/extend")],
       defaults={"aspectRatio": "16:9"})
 model("vidu-q3", "Vidu Q3", "Shengshu", "vidu", "video", "Anime-friendly video with references",
       [("t2v", "fal-ai/vidu/q3/text-to-video"), ("i2v", "fal-ai/vidu/q3/image-to-video"), ("ref2v", "fal-ai/vidu/q3/reference-to-video/mix")],
       defaults={"aspectRatio": "16:9"})
 model("luma-ray-3-2", "Luma Ray 3.2", "Luma", "luma", "video", "HDR, physically convincing motion",
-      [("t2v", "luma/agent/ray/v3.2/text-to-video"), ("i2v", "luma/agent/ray/v3.2/image-to-video"), ("v2v", "luma/agent/ray/v3.2/video-to-video")],
+      [("t2v", "luma/agent/ray/v3.2/text-to-video"), ("i2v", "luma/agent/ray/v3.2/image-to-video"), ("v2v", "luma/agent/ray/v3.2/video-to-video"),
+       ("reframe", "luma/agent/ray/v3.2/reframe")],
       defaults={"aspectRatio": "16:9"})
+model("ltx-reframe", "LTX Reframe", "Lightricks", "ltx", "video", "Change a clip's aspect ratio — fast, no prompt needed",
+      [("reframe", "fal-ai/ltx-2.3/reframe")], defaults={"aspectRatio": "9:16"})
+model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "video", "Open-weights reframe: outpaints the new edges with a prompt",
+      [("reframe", "fal-ai/wan-vace-14b/reframe")], defaults={"aspectRatio": "9:16"})
 
 # ----- Avatars & lipsync
 model("kling-avatar-2", "Kling Avatar 2.0", "Kuaishou", "kling", "video", "Photo + voice → expressive talking video",
@@ -289,7 +308,8 @@ def num(v):
         return None
 
 
-def build_route(op, ep, provider, m, opts):
+def build_route(op, ep, provider, m, opts, ropts=None):
+    ropts = ropts or {}
     e = EPS.get((provider, ep))
     if not e:
         warn(f"{m['id']}: endpoint {provider}:{ep} not in research")
@@ -305,11 +325,32 @@ def build_route(op, ep, provider, m, opts):
             fmap["prompt"] = kf["prompt"]
     else:
         fmap["prompt"] = False
+    # Some APIs call their boolean sound switch "audio" (Wan 3.0); that's generateAudio, not an audio file.
+    if "audio" in kf and (inputs.get(kf["audio"]) or {}).get("type") == "boolean":
+        kf.setdefault("generateAudio", kf.pop("audio"))
     for k in ["negativePrompt", "image", "images", "endImage", "mask", "video", "audio", "numOutputs", "seed", "generateAudio"]:
         if k in kf:
             if k in ("video", "audio", "image", "endImage", "mask") and (inputs.get(kf[k]) or {}).get("type") == "array":
-                continue  # array-of-media inputs (reference videos/audios) aren't wired yet
+                if k == "video" and ropts.get("videoArray"):
+                    fmap["videoArray"] = kf[k]
+                continue  # other array-of-media inputs (reference videos/audios) aren't wired yet
             fmap[k] = kf[k]
+    # Multi-shot, draft mode and draft completion (research part 2 key fields).
+    if "multiShot" in kf and op in ("t2v", "i2v", "ref2v") and (inputs.get(kf["multiShot"]) or {}).get("type") in ("array", "string"):
+        item = (inputs.get(kf["multiShot"]) or {}).get("itemSchema") or {}
+        dtype = "string" if (item.get("duration") or {}).get("valueType") == "string" else "number"
+        ms = {"key": kf["multiShot"], "durationType": dtype}
+        if (inputs.get(kf["multiShot"]) or {}).get("type") == "string":
+            ms["json"] = True
+        if "shotType" in kf:
+            ms["shotType"] = kf["shotType"]
+        fmap["multiShot"] = ms
+        opts["multiShot"] = {"mode": "native", "maxShots": 6}
+    if "draft" in kf and op in ("t2v", "i2v", "ref2v"):
+        fmap["draft"] = kf["draft"]
+        opts["draft"] = True
+    if "draftId" in kf:
+        fmap["draftId"] = kf["draftId"]
     # LTX/others sometimes have image key named differently but keyFields covers it.
     if "negativePrompt" in fmap:
         opts["negativePrompt"] = True
@@ -353,7 +394,8 @@ def build_route(op, ep, provider, m, opts):
             fmap["duration"] = {"key": key, "type": dtype, **({"suffix": suffix} if suffix else {})}
             if len(vals) > 6:
                 pick = [v for v in vals if v in (3, 4, 5, 6, 8, 10, 12, 15, 20, 30)] or vals[:6]
-                vals = pick[:7]
+                # Keep the longest option: multi-shot budgets and the duration picker both need the real maximum.
+                vals = pick[:6] + [pick[-1]] if len(pick) > 7 else pick
             opts["durations"] = union(opts.get("durations", []), vals)
         else:
             dtype = "number" if spec.get("type") in ("integer", "number") else "string"
@@ -363,6 +405,8 @@ def build_route(op, ep, provider, m, opts):
         if key.endswith("_ms"):
             fmap["duration"]["multiplier"] = 1000
     # Text-to-speech etc. carry the prompt in "text".
+    if ropts.get("fixed"):
+        m = {**m, "fixed": {**m["fixed"], **ropts["fixed"]}}
     if m["fixed"]:
         fmap["fixed"] = {k: v for k, v in m["fixed"].items() if k in inputs}
         missing = [k for k in m["fixed"] if k not in inputs]
@@ -378,7 +422,10 @@ def build_route(op, ep, provider, m, opts):
         opts["maxImages"] = max(opts.get("maxImages", 1), mx or (10 if op == "edit" else 4))
     elif "image" in fmap:
         opts["maxImages"] = max(opts.get("maxImages", 0), 1)
-    return {"op": op, "provider": provider, "endpoint": ep, "map": fmap}, e
+    route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
+    if ropts.get("note"):
+        route["note"] = ropts["note"]
+    return route, e
 
 
 def parse_price(e):
@@ -398,21 +445,23 @@ for m in M:
     for r in m["routes"]:
         op, ep = r[0], r[1]
         provider = r[2] if len(r) > 2 else "fal"
-        res = build_route(op, ep, provider, m, opts)
+        ropts = r[3] if len(r) > 3 and isinstance(r[3], dict) else {}
+        res = build_route(op, ep, provider, m, opts, ropts)
         if not res:
             continue
         route, e = res
         first_e = first_e or e
         routes.append(route)
         # Edit endpoints that take a mask also get a native inpaint route.
-        if op == "edit" and "mask" not in route["map"]:
+        if op == "edit":
             inputs = e.get("inputs") or {}
-            mk = next((k for k in ("mask_url", "mask_image_url", "mask") if k in inputs and inputs[k].get("type") != "array"), None)
+            # The mask belongs on the inpaint route only; plain edits never send one.
+            mk = route["map"].pop("mask", None) or next((k for k in ("mask_url", "mask_image_url", "mask") if k in inputs and inputs[k].get("type") != "array"), None)
             if mk:
                 # Ideogram paints black = change; OpenAI's GPT Image uses transparent = change.
                 fmt = "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
                 routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
-        if len(r) > 3 and r[3] == "+flf2v":
+        if len(r) > 3 and r[3] == "+flf2v" and not ropts:
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})
             else:

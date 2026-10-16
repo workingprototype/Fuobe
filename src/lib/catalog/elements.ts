@@ -90,7 +90,9 @@ const ops = (m: ModelDef) => new Set(m.routes.map((r) => r.op));
  * is mentioned.
  */
 export function applyMentions(req: GenerationRequest, model: ModelDef, elements: StudioElement[]): MentionResolution {
-  const mentioned = findMentions(req.prompt, elements);
+  // Shots (multi-shot) can mention elements too.
+  const shots = req.params?.shots;
+  const mentioned = findMentions([req.prompt ?? "", ...(shots ?? []).map((s) => s.prompt)].join("\n"), elements);
   if (!mentioned.length) return { request: req, mentioned, notes: [] };
 
   const notes: string[] = [];
@@ -155,9 +157,8 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
   if (model.kind === "video" && images.length > existing.length) op = "ref2v";
 
   // Rewrite the prompt: "@Maya" → "Maya", plus who/what each image is.
-  let prompt = req.prompt ?? "";
   const seen = new Set<string>();
-  prompt = prompt.replace(MENTION, (whole, h: string) => {
+  const rewrite = (text: string) => text.replace(MENTION, (whole, h: string) => {
     const el = mentioned.find((e) => e.handle.toLowerCase() === h.toLowerCase());
     if (!el) return whole;
     const first = !seen.has(el.id);
@@ -168,6 +169,8 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
     if (first && !positions.get(el.id)?.length && !viaLora.has(el.id) && el.description) return `${el.name} (${el.description.replace(/[.\s]+$/, "")})`;
     return el.name;
   });
+  let prompt = rewrite(req.prompt ?? "");
+  const newShots = shots?.map((s) => ({ ...s, prompt: rewrite(s.prompt) }));
   const legend = mentioned
     .map((e) => {
       const pos = positions.get(e.id) ?? [];
@@ -181,7 +184,7 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
           : `${e.name} is ${noun} in ${which}`;
     })
     .filter(Boolean);
-  if (legend.length) prompt = `${prompt.trim().replace(/[.\s]+$/, "")}. ${legend.join(". ")}.`;
+  if (legend.length) prompt = `${prompt.trim().replace(/[.\s]+$/, "")}${prompt.trim() ? ". " : ""}${legend.join(". ")}.`;
 
   for (const e of mentioned) {
     if (viaLora.has(e.id)) continue;
@@ -201,7 +204,7 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
       prompt,
       inputs: { ...req.inputs, images: images.length ? images : undefined },
       loras: loras.length ? loras : undefined,
-      params: extra !== req.params?.extra ? { ...req.params, extra } : req.params,
+      params: extra !== req.params?.extra || newShots ? { ...req.params, extra, ...(newShots ? { shots: newShots } : {}) } : req.params,
     },
     mentioned,
     notes,

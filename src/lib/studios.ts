@@ -203,3 +203,31 @@ export const VIDEO_EDIT_STUDIO: StudioConfig = {
   multiRef: { label: "Add ref", max: 4 },
   defaultModels: { cloud: "kling-o3", open: "oss-wan22-fun-control" },
 };
+
+export const EXTEND_STUDIO: StudioConfig = {
+  feature: "extend",
+  title: "Extend video",
+  hero: "What happens next?",
+  subtitle: "Continues the clip from its last frames — same look, same characters.",
+  placeholder: "Describe what happens next… e.g. “the camera keeps tracking as she runs into the crowd”",
+  kind: "video",
+  ops: ["extend"],
+  feed: { features: ["extend"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "seedance-2-5", open: "" },
+  suggestions: ["The camera pulls back to reveal the whole city", "She turns and smiles at the camera", "A storm rolls in and lightning hits"],
+};
+
+export const REFRAME_STUDIO: StudioConfig = {
+  feature: "reframe",
+  title: "Reframe",
+  hero: "Same shot, new shape",
+  subtitle: "Turn a 16:9 clip into 9:16 (or any ratio) — the model invents what was outside the frame.",
+  placeholder: "Optional: what should fill the new space? e.g. “more of the crowd and the night sky”",
+  kind: "video",
+  ops: ["reframe"],
+  feed: { features: ["reframe"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "luma-ray-3-2", open: "" },
+  promptOptional: true,
+};

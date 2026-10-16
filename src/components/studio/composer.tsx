@@ -3,6 +3,7 @@
 import {
   ArrowUp,
   AtSign,
+  FileVideo2,
   Clock,
   Copy as CopyIcon,
   Film,
@@ -37,6 +38,7 @@ import { ControlsChip, ProviderPresetChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { SketchTools } from "./sketch-tools";
+import { MultiShotChip, ShotsEditor } from "./shots-editor";
 import { useStudio } from "./studio-context";
 import { nanoid } from "nanoid";
 
@@ -277,7 +279,9 @@ export function Composer({ docked }: { docked: boolean }) {
     if (next && getModel(next)) setDraft((d) => ({ modelId: next, params: { ...getModel(next)!.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
   }, [engine, model, lockedModel, preset, config.defaultModels, setDraft]);
 
-  const rawRequest = buildRequest(config.feature, draft, undefined, config.promptSuffix);
+  // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
+  const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
+  const rawRequest = buildRequest(config.feature, draft, studioOp, config.promptSuffix);
   const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
   const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
   const request = sketched.request;
@@ -297,7 +301,7 @@ export function Composer({ docked }: { docked: boolean }) {
       if (s.required && !draft.slots[s.key]?.ref) throw new Error(`Add ${s.label.toLowerCase()}`);
     }
     if (Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading)) throw new Error("Uploading…");
-    if (!config.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim()) {
+    if (!config.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim())) {
       throw new Error("Write a prompt first");
     }
   } catch (e) {
@@ -310,7 +314,7 @@ export function Composer({ docked }: { docked: boolean }) {
       return;
     }
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
-    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? undefined : op, config.promptSuffix), {
+    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix), {
       onSuccess: (items) => {
         toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
       },
@@ -436,6 +440,9 @@ export function Composer({ docked }: { docked: boolean }) {
         />
       )}
 
+      {/* Multi-shot */}
+      {model?.options.multiShot && p.shots && <ShotsEditor model={model} shots={p.shots} onChange={(shots) => setP({ shots })} />}
+
       {/* @mentioned elements */}
       {mentions.mentioned.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
@@ -540,7 +547,7 @@ export function Composer({ docked }: { docked: boolean }) {
           {opts.resolutions && opts.resolutions.length > 1 && (
             <SegmentChip icon={Maximize} label="Quality" options={opts.resolutions} value={p.resolution} onChange={(v) => setP({ resolution: v })} />
           )}
-          {opts.durations && opts.durations.length > 1 && (
+          {opts.durations && opts.durations.length > 1 && !p.shots && (
             <SegmentChip
               icon={Clock}
               label="Duration"
@@ -555,6 +562,17 @@ export function Composer({ docked }: { docked: boolean }) {
           )}
           {config.kind === "video" && op !== "lipsync" && op !== "avatar" && op !== "upscale-video" && (
             <SegmentChip icon={CopyIcon} label="Videos" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
+          )}
+          {opts.multiShot && model && <MultiShotChip model={model} params={p} onChange={setP} />}
+          {opts.draft && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Chip icon={FileVideo2} active={!!p.draft} onClick={() => setP({ draft: !p.draft })}>
+                  Draft
+                </Chip>
+              </TooltipTrigger>
+              <TooltipContent>{p.draft ? "Cheap 480p take — finish the one you like in 1080p" : "Draft mode: preview at 480p first, then render the keeper in 1080p"}</TooltipContent>
+            </Tooltip>
           )}
           {opts.presets && (
             <ProviderPresetChip

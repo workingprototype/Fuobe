@@ -17,6 +17,7 @@ export interface SubmitResult {
 
 export interface RemoteOutput {
   url: string;
+  draftId?: string;
   kind?: MediaKind;
   contentType?: string;
   /** Extra headers needed to download (e.g. auth for a private ComfyUI). */

@@ -93,6 +93,11 @@ def field_map(op, ep, inputs, opts):
     elif "sound" in inputs and inputs["sound"].get("enum") == ["on", "off"]:
         fm["generateAudio"] = {"key": "sound", "on": "on", "off": "off"}
         opts["audio"] = True
+    if "multi_prompt" in inputs and op in ("t2v", "i2v", "flf2v", "ref2v"):
+        item = (inputs["multi_prompt"].get("items") or {}).get("fields") or {}
+        dtype = "number" if (item.get("duration") or {}).get("type") in ("integer", "number") else "string"
+        fm["multiShot"] = {"key": "multi_prompt", "durationType": dtype, **({"flag": "multi_shots"} if "multi_shots" in inputs else {})}
+        opts["multiShot"] = {"mode": "native", "maxShots": int(inputs["multi_prompt"].get("maxItems", 6))}
     if "batch_size" in inputs:
         b = inputs["batch_size"]
         if b.get("enum"):

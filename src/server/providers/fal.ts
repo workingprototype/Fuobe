@@ -91,7 +91,9 @@ export const falProvider: ProviderAdapter = {
         const result = await falFetch(meta.responseUrl as string);
         const outputs = extractMedia(result);
         if (!outputs.length) return { state: "failed", error: `No media in response: ${JSON.stringify(result).slice(0, 300)}` };
-        return { state: "succeeded", outputs };
+        // Seedance draft mode: keep the id that finishes this take at 1080p.
+        const draftId = /"draft_id"\s*:\s*"([^"]+)"/.exec(JSON.stringify(result))?.[1];
+        return { state: "succeeded", outputs: draftId ? outputs.map((o) => ({ ...o, draftId })) : outputs };
       } catch (e) {
         return { state: "failed", error: (e as Error).message };
       }

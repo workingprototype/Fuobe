@@ -16,6 +16,9 @@ import {
   ZoomIn,
   Cpu,
   Cloud,
+  Crop,
+  FastForward,
+  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -151,6 +154,16 @@ function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRet
   );
 }
 
+/** Seedance draft mode: render the chosen 480p take again at 1080p with the same seed and settings. */
+export function useFinalizeDraft() {
+  const create = useCreateGeneration();
+  return (g: Generation, draftId: string) =>
+    create.mutate(
+      { feature: g.feature, modelId: g.modelId, op: "finalize", prompt: g.request.prompt, params: { draftId, resolution: "1080p", duration: g.request.params?.duration } },
+      { onSuccess: () => toast.success("Rendering the final 1080p version"), onError: (e) => toast.error((e as Error).message) },
+    );
+}
+
 export function GenerationGroup({
   g,
   onOpen,
@@ -171,6 +184,7 @@ export function GenerationGroup({
     create.mutate(g.request, {
       onError: (e) => toast.error((e as Error).message),
     });
+  const finalize = useFinalizeDraft();
   const p = g.request.params ?? {};
   const meta = [
     preset?.name,
@@ -272,6 +286,17 @@ export function GenerationGroup({
               style={{ aspectRatio: o.kind === "audio" ? 1.6 : ratio }}
             >
               <MediaThumb output={o} />
+              {o.draftId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    finalize(g, o.draftId!);
+                  }}
+                  className="absolute top-2 left-2 inline-flex h-7 items-center gap-1 rounded-full bg-black/55 pr-2.5 pl-2 text-[12px] font-medium text-white backdrop-blur transition-colors hover:bg-black/75"
+                >
+                  <Sparkles className="size-3.5" /> Draft · render 1080p
+                </button>
+              )}
               {g.favorite && <Heart className="absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow" />}
               {o.kind !== "audio" && (
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-0.5 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
@@ -298,6 +323,12 @@ export function GenerationGroup({
                     </>
                   ) : (
                     <>
+                      <IconAction label="Extend" href={`/extend?video=${encodeURIComponent(o.url)}`}>
+                        <FastForward className="size-4" />
+                      </IconAction>
+                      <IconAction label="Reframe" href={`/reframe?video=${encodeURIComponent(o.url)}`}>
+                        <Crop className="size-4" />
+                      </IconAction>
                       <IconAction label="Lipsync" href={`/lipsync?video=${encodeURIComponent(o.url)}`}>
                         <Mic2 className="size-4" />
                       </IconAction>

@@ -6,6 +6,8 @@ import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
   AtSign,
+  Crop,
+  FastForward,
   Brush,
   AudioLines,
   Boxes,
@@ -70,6 +72,8 @@ const NAV = [
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },
+      { href: "/extend", label: "Extend video", icon: FastForward },
+      { href: "/reframe", label: "Reframe", icon: Crop },
       { href: "/elements", label: "Elements", icon: AtSign },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },

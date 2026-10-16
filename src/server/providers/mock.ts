@@ -110,6 +110,8 @@ export const mockProvider: ProviderAdapter = {
         prompt: input.prompt ?? route.op,
         aspectRatio: input.aspectRatio ?? "1:1",
         count: Math.max(1, Math.min(4, input.numOutputs ?? 1)),
+        // Let draft mode be tried end to end in demo mode.
+        draft: !!(input.draft && route.map?.draft),
       },
       payload: { demo: true, ...input },
     };
@@ -136,7 +138,10 @@ export const mockProvider: ProviderAdapter = {
     }
     const ar = String(meta.aspectRatio);
     const sample = ar === "9:16" || ar === "3:4" || ar === "2:3" ? "demo-portrait.mp4" : ar === "1:1" ? "demo-square.mp4" : "demo-landscape.mp4";
-    return { state: "succeeded", outputs: [{ url: `sample:${sample}`, kind: "video", contentType: "video/mp4" }] };
+    return {
+      state: "succeeded",
+      outputs: [{ url: `sample:${sample}`, kind: "video", contentType: "video/mp4", ...(meta.draft ? { draftId: `demo_draft_${nanoid(8)}` } : {}) }],
+    };
   },
 
   async test() {

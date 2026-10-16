@@ -352,7 +352,7 @@ async function pollOne(r: Row): Promise<void> {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {
-      outputs.push({ url: o.url, kind: o.kind ?? r.kind });
+      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...(o.draftId ? { draftId: o.draftId } : {}) });
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
@@ -384,7 +384,7 @@ async function persistOutput(o: RemoteOutput, generationId: string): Promise<Out
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
-  return { url: asset.url, kind: asset.kind, contentType: asset.contentType, assetId: asset.id };
+  return { url: asset.url, kind: asset.kind, contentType: asset.contentType, assetId: asset.id, ...(o.draftId ? { draftId: o.draftId } : {}) };
 }
 
 export async function cancelGeneration(id: string): Promise<void> {

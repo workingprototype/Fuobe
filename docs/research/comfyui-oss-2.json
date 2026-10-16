@@ -13904,7 +13904,7 @@
     ],
     "vramGB": 4,
     "license": "MIT",
-    "notes": "Outputs: node 7 = transparent .webm (SaveWEBM: 'RGBA images are saved with their alpha channel as transparency (vp9 codec only)', reported under ui.images with animated preview), node 10 = black/white matte .mp4 for compositing. RemoveBackground returns foreground=1; InvertMask is required because JoinImageWithAlpha stores 1-mask as alpha (same as the library's bg-remove-birefnet). fps on SaveWEBM is a literal (bind source fps). Edge flicker is possible on hair; Comfy-Org/BiRefNet also ships lucida.safetensors (0.88 GB) usable in the same loader.",
+    "notes": "Outputs: node 7 = transparent .webm (SaveWEBM: 'RGBA images are saved with their alpha channel as transparency (vp9 codec only)', reported under ui.images with animated preview), node 10 = black/white matte .mp4 for compositing. RemoveBackground returns foreground=1; InvertMask is required because JoinImageWithAlpha stores 1-mask as alpha (same as the library's bg-remove-birefnet). fps on SaveWEBM is a literal (bind source fps). Edge flicker is possible on hair; Comfy-Org/BiRefNet also ships lucida.safetensors (0.88 GB); the core loader only accepts BiRefNet-architecture keys (comfy/bg_removal_model.py), so whether lucida loads is unverified.",
     "inferred": [
      "temporal stability (BiRefNet is per-frame)"
     ],

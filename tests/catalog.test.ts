@@ -19,7 +19,8 @@ describe("catalog integrity", () => {
       const d = m.defaults ?? {};
       if (d.aspectRatio && m.options.aspectRatios) expect(m.options.aspectRatios, `${m.id} aspect`).toContain(d.aspectRatio);
       if (d.resolution && m.options.resolutions) expect(m.options.resolutions, `${m.id} resolution`).toContain(d.resolution);
-      for (const r of m.routes) expect(r.provider === "comfyui" ? m.engine : "cloud", `${m.id} engine/provider`).toBe(m.engine);
+      // ComfyUI and browser-only tools are the open engine; every API provider is cloud.
+      for (const r of m.routes) expect(r.provider === "comfyui" || r.provider === "local" ? "open" : "cloud", `${m.id} engine/provider`).toBe(m.engine);
     }
   });
 

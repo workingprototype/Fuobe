@@ -35,7 +35,9 @@ export type Operation =
   | "v2a" // video → audio/foley
   | "interpolate"
   | "extend" // video → the same clip, continued
-  | "grade"; // colour grade, rendered in the browser
+  | "grade" // colour grade, rendered in the browser
+  | "reframe" // video → same video at a new aspect ratio (AI-filled edges)
+  | "finalize"; // draft video → full-quality render of the same take
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -61,6 +63,8 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   interpolate: "Frame interpolation",
   extend: "Extend video",
   grade: "Color grade",
+  reframe: "Reframe",
+  finalize: "Final render",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -87,6 +91,8 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   interpolate: "video",
   extend: "video",
   grade: "image",
+  reframe: "video",
+  finalize: "video",
 };
 
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
@@ -134,6 +140,12 @@ export interface FieldMap {
   seedRange?: [number, number];
   /** Boolean field, or an on/off enum such as Kling's `sound: "on" | "off"`. */
   generateAudio?: string | { key: string; on: unknown; off: unknown };
+  /** Native multi-shot: an array of {prompt, duration} (Kling's `multi_prompt`). */
+  multiShot?: { key: string; durationType: "string" | "number"; json?: boolean; shotType?: string; flag?: string };
+  /** Boolean draft switch (Seedance 2.5 renders a cheap 480p take and returns a draft id). */
+  draft?: string;
+  /** Field that takes the draft id to finish. */
+  draftId?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
 }
@@ -163,6 +175,10 @@ export interface ModelOptions {
   /** true = optional toggle, "always" = native audio always on. */
   audio?: boolean | "always";
   endFrame?: boolean;
+  /** Multi-shot support: "native" sends per-shot prompts, "prompt" writes the shots into one prompt. */
+  multiShot?: { mode: "native" | "prompt"; maxShots: number };
+  /** Draft mode (cheap preview, then a full render of the take you like). */
+  draft?: boolean;
   /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
   presets?: { source: string; param: string; label: string; required?: boolean };
   /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
@@ -203,6 +219,13 @@ export interface GenParams {
   seed?: number;
   generateAudio?: boolean;
   enhancePrompt?: boolean;
+  /** Multi-shot: shots in order (empty/undefined = one shot). "auto" lets the model cut by itself. */
+  shots?: { prompt: string; duration: number }[];
+  multiShot?: "auto";
+  /** Render a cheap draft first (Seedance 2.5 draft mode). */
+  draft?: boolean;
+  /** Finish this draft at full quality (op "finalize"). */
+  draftId?: string;
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
@@ -257,6 +280,8 @@ export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "
 
 export interface OutputFile {
   url: string;
+  /** Draft renders: the id to finish this take at full quality. */
+  draftId?: string;
   kind: MediaKind;
   contentType?: string;
   width?: number;

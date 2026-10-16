@@ -1126,6 +1126,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },
@@ -1144,6 +1149,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },
@@ -1162,6 +1172,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     }
@@ -1181,6 +1196,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },
@@ -1199,6 +1219,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },
@@ -1217,6 +1242,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     }
@@ -1266,6 +1296,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },
@@ -1285,6 +1320,11 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "key": "sound",
           "on": "on",
           "off": "off"
+        },
+        "multiShot": {
+          "key": "multi_prompt",
+          "durationType": "number",
+          "flag": "multi_shots"
         }
       }
     },

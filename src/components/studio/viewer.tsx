@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Clapperboard, Columns2, SlidersHorizontal, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clapperboard, Columns2, Crop, FastForward, SlidersHorizontal, Sparkles, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ import { useGenerationActions } from "@/lib/api";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CompareSlider } from "./compare-slider";
-import { downloadName } from "./feed";
+import { downloadName, useFinalizeDraft } from "./feed";
 
 function Row({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
   if (value === undefined || value === null || value === "") return null;
@@ -49,6 +49,7 @@ export function Viewer({
   // Edits, inpaints, upscales and app results can be compared with the image they started from.
   const source = o.kind === "image" && g.op !== "t2i" ? g.request.inputs?.images?.[0] : undefined;
   const [comparing, setComparing] = useState(false);
+  const finalize = useFinalizeDraft();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -167,6 +168,25 @@ export function Viewer({
                 <Button asChild variant="secondary" size="sm">
                   <Link href={`/edit?image=${encodeURIComponent(o.url)}`}>
                     <Wand2 /> Edit
+                  </Link>
+                </Button>
+              </>
+            )}
+            {o.draftId && (
+              <Button variant="default" size="sm" className="col-span-2" onClick={() => finalize(g, o.draftId!)}>
+                <Sparkles /> Render this draft in 1080p
+              </Button>
+            )}
+            {o.kind === "video" && (
+              <>
+                <Button asChild variant="secondary" size="sm">
+                  <Link href={`/extend?video=${encodeURIComponent(o.url)}`}>
+                    <FastForward /> Extend
+                  </Link>
+                </Button>
+                <Button asChild variant="secondary" size="sm">
+                  <Link href={`/reframe?video=${encodeURIComponent(o.url)}`}>
+                    <Crop /> Reframe
                   </Link>
                 </Button>
               </>

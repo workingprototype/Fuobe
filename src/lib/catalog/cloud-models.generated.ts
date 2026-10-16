@@ -1698,6 +1698,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seedance-2.5/text-to-video",
         "map": {
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1714,6 +1715,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1730,6 +1732,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1746,6 +1749,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "images": "image_urls",
           "seed": "seed",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1753,9 +1757,40 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "string"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "bytedance/seedance-2.5/reference-to-video",
+        "map": {
+          "images": "image_urls",
+          "videoArray": "video_urls",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          },
+          "fixed": {
+            "task": "extension"
+          }
+        }
+      },
+      {
+        "op": "finalize",
+        "provider": "fal",
+        "endpoint": "bytedance/seedance-2.5/draft/complete",
+        "map": {
+          "prompt": false,
+          "draftId": "draft_id",
+          "resolution": "resolution"
+        }
       }
     ],
     "options": {
+      "draft": true,
       "audio": true,
       "aspectRatios": [
         "auto",
@@ -1778,11 +1813,15 @@ export const CLOUD_MODELS: ModelDef[] = [
         8,
         10,
         12,
-        15
+        30
       ],
       "endFrame": true,
       "maxImages": 4,
-      "seed": true
+      "seed": true,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "top",
@@ -1899,7 +1938,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         15
       ],
       "endFrame": true,
-      "maxImages": 9
+      "maxImages": 9,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "audio"
@@ -2139,6 +2182,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "negativePrompt": "negative_prompt",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2155,6 +2203,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "start_image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2170,6 +2223,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "start_image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2178,6 +2236,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "negativePrompt": true,
       "audio": true,
       "aspectRatios": [
@@ -2192,7 +2254,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 1
@@ -2227,6 +2289,10 @@ export const CLOUD_MODELS: ModelDef[] = [
         "provider": "fal",
         "endpoint": "fal-ai/kling-video/v3/turbo/pro/text-to-video",
         "map": {
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2248,6 +2314,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "aspectRatios": [
         "16:9",
         "9:16",
@@ -2260,7 +2330,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "maxImages": 1
     },
@@ -2342,7 +2412,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 1
@@ -2372,6 +2442,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "fal-ai/kling-video/o3/pro/text-to-video",
         "map": {
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2387,6 +2462,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2401,6 +2481,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2416,6 +2501,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "images": "image_urls",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2434,6 +2524,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "audio": true,
       "aspectRatios": [
         "16:9",
@@ -2447,7 +2541,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 4
@@ -2878,6 +2972,25 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "number"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/veo3.1/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        },
+        "note": "fal retires Veo 3.1 extend on 2026-11-17"
       }
     ],
     "options": {
@@ -2981,6 +3094,25 @@ export const CLOUD_MODELS: ModelDef[] = [
             "suffix": "s"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/veo3.1/fast/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        },
+        "note": "fal retires Veo 3.1 extend on 2026-11-17"
       }
     ],
     "options": {
@@ -3509,7 +3641,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 4
@@ -3603,7 +3735,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         10,
         15
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "audio"
@@ -3861,6 +3997,21 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "number"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/extend-video",
+        "map": {
+          "video": "video_url",
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
       }
     ],
     "options": {
@@ -3871,12 +4022,14 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:3",
         "1:1",
         "3:4",
-        "9:16"
+        "9:16",
+        "auto"
       ],
       "resolutions": [
         "480P",
         "768P",
-        "1080P"
+        "1080P",
+        "2K"
       ],
       "endFrame": true,
       "maxImages": 9
@@ -4074,6 +4227,21 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "video": "video_url"
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "blackforestlabs/flux-3/extend-video",
+        "map": {
+          "video": "video_url",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          }
+        }
       }
     ],
     "options": {
@@ -4237,6 +4405,22 @@ export const CLOUD_MODELS: ModelDef[] = [
           "seed": "seed",
           "generateAudio": "generate_audio_switch",
           "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/pixverse/v6/extend",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio_switch",
           "resolution": "resolution",
           "duration": {
             "key": "duration",
@@ -4411,6 +4595,21 @@ export const CLOUD_MODELS: ModelDef[] = [
             "suffix": "s"
           }
         }
+      },
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "luma/agent/ray/v3.2/reframe",
+        "map": {
+          "video": "video_url",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        }
       }
     ],
     "options": {
@@ -4436,6 +4635,100 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "defaults": {
       "aspectRatio": "16:9"
+    }
+  },
+  {
+    "id": "ltx-reframe",
+    "name": "LTX Reframe",
+    "vendor": "Lightricks",
+    "family": "ltx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Change a clip's aspect ratio \u2014 fast, no prompt needed",
+    "routes": [
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3/reframe",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ]
+    },
+    "defaults": {
+      "aspectRatio": "9:16"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1
+    }
+  },
+  {
+    "id": "wan-vace-reframe",
+    "name": "Wan VACE Reframe (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Open-weights reframe: outpaints the new edges with a prompt",
+    "routes": [
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/reframe",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "endImage": "last_frame_url",
+          "video": "video_url",
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "endFrame": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "9:16"
+    },
+    "pricing": {
+      "unit": "video",
+      "usd": 0.08
     }
   },
   {
