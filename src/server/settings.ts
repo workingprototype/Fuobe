@@ -1,0 +1,79 @@
+import "server-only";
+import { db } from "./db";
+
+/**
+ * Settings live in SQLite so they can be edited from the UI; environment variables
+ * provide defaults (handy for Docker / self-hosting). Secrets never leave the server
+ * unmasked.
+ */
+export interface SettingDef {
+  key: string;
+  env?: string;
+  secret?: boolean;
+  default?: string;
+}
+
+export const SETTINGS = {
+  falKey: { key: "fal.key", env: "FAL_KEY", secret: true },
+  replicateToken: { key: "replicate.token", env: "REPLICATE_API_TOKEN", secret: true },
+  openaiKey: { key: "openai.key", env: "OPENAI_API_KEY", secret: true },
+  googleKey: { key: "google.key", env: "GEMINI_API_KEY", secret: true },
+  anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
+  comfyUrl: { key: "comfyui.url", env: "COMFYUI_URL", default: "http://127.0.0.1:8188" },
+  comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
+  /** "auto" = demo outputs only when the chosen provider is not configured. */
+  demoMode: { key: "demo.mode", env: "FUOBE_DEMO_MODE", default: "auto" },
+  enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto" },
+  ollamaUrl: { key: "ollama.url", env: "OLLAMA_URL", default: "http://127.0.0.1:11434" },
+  ollamaModel: { key: "ollama.model", env: "OLLAMA_MODEL", default: "qwen3:8b" },
+} satisfies Record<string, SettingDef>;
+
+export type SettingName = keyof typeof SETTINGS;
+
+export function getSetting(name: SettingName): string {
+  const def: SettingDef = SETTINGS[name];
+  const row = db().prepare("SELECT value FROM settings WHERE key = ?").get(def.key) as { value: string } | undefined;
+  if (row && row.value !== "") return row.value;
+  if (def.env && process.env[def.env]) return process.env[def.env]!;
+  return def.default ?? "";
+}
+
+export function setSetting(name: SettingName, value: string): void {
+  const def = SETTINGS[name];
+  if (value === "") {
+    db().prepare("DELETE FROM settings WHERE key = ?").run(def.key);
+    return;
+  }
+  db()
+    .prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run(def.key, value);
+}
+
+export function mask(value: string): string {
+  if (!value) return "";
+  if (value.length <= 8) return "••••";
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`;
+}
+
+export interface PublicSetting {
+  name: SettingName;
+  value: string;
+  secret: boolean;
+  fromEnv: boolean;
+  isSet: boolean;
+}
+
+export function publicSettings(): PublicSetting[] {
+  return (Object.keys(SETTINGS) as SettingName[]).map((name) => {
+    const def: SettingDef = SETTINGS[name];
+    const row = db().prepare("SELECT value FROM settings WHERE key = ?").get(def.key) as { value: string } | undefined;
+    const value = getSetting(name);
+    return {
+      name,
+      value: def.secret ? mask(value) : value,
+      secret: !!def.secret,
+      fromEnv: !row && !!def.env && !!process.env[def.env],
+      isSet: !!value && value !== def.default,
+    };
+  });
+}
