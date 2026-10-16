@@ -1,8 +1,10 @@
 "use client";
 
-import { Cloud, Cpu } from "lucide-react";
+import { Cloud, Cpu, Lock } from "lucide-react";
+import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Engine } from "@/lib/catalog/types";
+import { useEngineMode } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const OPTIONS: { value: Engine; label: string; icon: typeof Cloud; tip: string }[] = [
@@ -20,7 +22,29 @@ export function EngineSwitch({
   onChange: (e: Engine) => void;
   size?: "sm" | "md";
 }) {
+  const mode = useEngineMode();
   const idx = OPTIONS.findIndex((o) => o.value === value);
+  if (mode !== "both") {
+    const o = OPTIONS.find((x) => x.value === mode)!;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            href="/settings"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
+              size === "sm" ? "h-8" : "h-9",
+            )}
+          >
+            <o.icon className="size-3.5" />
+            {mode === "open" ? "Open source only" : "Cloud only"}
+            <Lock className="size-3 opacity-60" />
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>Locked in Settings → Engine mode</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <div
       role="radiogroup"

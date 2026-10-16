@@ -44,7 +44,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Kbd } from "@/components/ui/kbd";
-import { useStatus } from "@/lib/api";
+import { useEngineMode, useStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -127,6 +127,8 @@ export function AppSidebar() {
   const status = useStatus().data;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
   const comfy = status?.providers.comfyui?.configured;
+  const mode = useEngineMode();
+  const ready = mode === "open" ? comfy : mode === "cloud" ? cloud : cloud || comfy;
 
   return (
     <Sidebar variant="inset" collapsible="icon">
@@ -165,15 +167,22 @@ export function AppSidebar() {
           href="/settings"
           className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden"
         >
-          <span className="flex items-center gap-2">
-            <StatusDot ok={cloud} /> Cloud models
-            <span className="ml-auto">{cloud ? "connected" : "add key"}</span>
-          </span>
-          <span className="flex items-center gap-2">
-            <StatusDot ok={comfy} /> ComfyUI
-            <span className="ml-auto">{comfy ? "online" : "offline"}</span>
-          </span>
-          {status && !cloud && !comfy && status.demoMode !== "off" && (
+          {mode !== "open" && (
+            <span className="flex items-center gap-2">
+              <StatusDot ok={cloud} /> Cloud models
+              <span className="ml-auto">{cloud ? "connected" : "add key"}</span>
+            </span>
+          )}
+          {mode !== "cloud" && (
+            <span className="flex items-center gap-2">
+              <StatusDot ok={comfy} /> ComfyUI
+              <span className="ml-auto">{comfy ? "online" : "offline"}</span>
+            </span>
+          )}
+          {mode !== "both" && (
+            <span className="text-[11px] text-subtle-foreground">{mode === "open" ? "Open source only" : "Paid APIs only"}</span>
+          )}
+          {status && !ready && status.demoMode !== "off" && (
             <span className="mt-0.5 rounded-sm bg-highlight/25 px-1.5 py-0.5 text-[11px] text-highlight-foreground dark:text-highlight">
               Demo mode · placeholder outputs
             </span>

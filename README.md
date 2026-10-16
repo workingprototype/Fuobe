@@ -17,12 +17,20 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Open **Settings** and connect what you have:
+Open **Settings** and pick an **Engine mode**:
+
+| Engine mode | What the install offers | Needs |
+|---|---|---|
+| **Open source + paid APIs** (default) | A Cloud / Open source switch in every studio | A paid-API key and/or a ComfyUI server |
+| **Open source only** | Only open-weight models on your ComfyUI; paid models are hidden and rejected by the server, and prompt enhancement never calls a paid API on its own | A ComfyUI server |
+| **Paid APIs only** | Only hosted frontier models; open-source models are hidden and rejected | A fal.ai or Replicate key |
+
+The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect what you have:
 
 | You have | What to set | You get |
 |---|---|---|
 | A [fal.ai](https://fal.ai/dashboard/keys) key | `fal.ai API key` (or `FAL_KEY`) | Every cloud model and cloud app |
-| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts |
+| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal` or `replicate`) picks which one goes first |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`) | Every open-source model, app, motion and effect |
 | An Anthropic key or Ollama | `Prompt enhancement` | The **Enhance** toggle rewrites prompts with Claude or a local LLM (offline rewriter otherwise) |
 

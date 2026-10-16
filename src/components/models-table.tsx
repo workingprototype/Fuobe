@@ -7,10 +7,13 @@ import { ModelBadges } from "@/components/studio/model-picker";
 import { MODELS } from "@/lib/catalog";
 import { OPERATION_LABELS, type Engine, type MediaKind } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { useEngine } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function ModelsTable() {
-  const [engine, setEngine] = useState<Engine | "all">("all");
+  const [engineChoice, setEngine] = useState<Engine | "all">("all");
+  const [, , mode] = useEngine();
+  const engine: Engine | "all" = mode === "both" ? engineChoice : mode;
   const [kind, setKind] = useState<MediaKind | "all">("all");
   const list = MODELS.filter((m) => (engine === "all" || m.engine === engine) && (kind === "all" || m.kind === kind));
   const chip = (active: boolean) =>
@@ -18,7 +21,7 @@ export function ModelsTable() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-1">
-        {(["all", "cloud", "open"] as const).map((e) => (
+        {(mode === "both" ? (["all", "cloud", "open"] as const) : [mode]).map((e) => (
           <button key={e} className={chip(engine === e)} onClick={() => setEngine(e)}>
             {e === "all" ? "All engines" : e === "cloud" ? "Cloud" : "Open source"}
           </button>

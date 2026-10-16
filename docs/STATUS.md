@@ -16,7 +16,7 @@ _Last updated: 2026-10-16. The research behind this is in [`docs/research/`](res
 | check | result |
 |---|---|
 | `pnpm typecheck`, `pnpm lint` | clean |
-| `pnpm test` (Vitest, 28 tests) | pass — payload mapping, durations/enums, response parsing, operation inference, prompt composition, batching, input validation, cost estimates, ComfyUI bindings, LoRA injection on Wan 2.2 experts, size/frame math, error hints, catalog integrity (every preset → existing model with that operation, every ComfyUI route → a workflow in the manifest, icons exist, defaults valid) |
+| `pnpm test` (Vitest, 32 tests) | pass — payload mapping, durations/enums, response parsing, operation inference, prompt composition, batching, input validation, cost estimates, ComfyUI bindings, LoRA injection on Wan 2.2 experts, size/frame math, error hints, catalog integrity (every preset → existing model with that operation, every ComfyUI route → a workflow in the manifest, icons exist, defaults valid) |
 | `pnpm build` | passes (150 prerendered pages) |
 | Demo mode, browser | ✅ image and video generations queue, show live progress, land in the feed, open in the viewer; no console errors (headless Chromium, desktop + 390px mobile, light + dark) |
 | ComfyUI engine, live server | ✅ `pnpm test:e2e:comfyui` against ComfyUI 0.41 (CPU): upload → bindings → `/prompt` → websocket/`/history` → download → library, for an image and a video workflow |
@@ -24,6 +24,8 @@ _Last updated: 2026-10-16. The research behind this is in [`docs/research/`](res
 | ComfyUI error UX | ✅ a LoRA motion preset with missing files fails fast with "Missing model X — put it in ComfyUI/models/<folder> (download: URL)" for every missing file |
 | Cloud providers (fal / Replicate) | 🟢 adapters and 67 model routes built from fal's per-endpoint OpenAPI schemas (499/517 researched endpoints verified); **no live paid run yet** — needs a key |
 | Prompt enhancement | 🟢 Claude (Anthropic SDK) and Ollama paths built; offline rewriter ✅ |
+| Engine mode (Settings) | ✅ Open source only / Paid APIs only / Both: enforced by the server (unit-tested + verified via the API), UI locks the engine switch, filters pickers, galleries and the model list, and dims unused settings sections (browser-checked in all three modes) |
+| Preferred cloud provider | ✅ auto / fal.ai first / Replicate first — unit-tested route ordering |
 
 ## 2. Feature matrix vs Higgsfield
 
@@ -75,6 +77,7 @@ _Last updated: 2026-10-16. The research behind this is in [`docs/research/`](res
 |---|---|---|
 | Assets library, favorites, search, reuse/remix, "animate this image" hand-offs, download | ✅ | Library page, tile actions (Animate, Edit, Upscale, Use as reference, Lipsync, Add sound), viewer with keyboard shortcuts |
 | Live progress, cancel, retry, failure messages | ✅ | Shimmer status, percent, elapsed time, cancel; retries re-submit the same request |
+| Engine choice (open source only, paid only, or both) | ✅ | Settings → Engine mode, or `FUOBE_ENGINE_MODE` |
 | Credits / pricing | 🟡 | Bring-your-own-key: live cost estimate per run from provider prices; "Free" for open source; no billing |
 | Accounts, teams, sharing, community feed, contests | ⬜ | Single-user, self-hosted today |
 | Supercomputer / Assist agent, MCP, plugins | ⬜ | |

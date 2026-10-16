@@ -17,7 +17,7 @@ import { db } from "./db";
 import { enhancePrompt } from "./enhance";
 import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
-import { getSetting } from "./settings";
+import { engineMode, getSetting } from "./settings";
 import { contentTypeFor, readRef, saveFile } from "./storage";
 
 interface Row {
@@ -142,7 +142,10 @@ export function deleteGeneration(id: string): void {
 // Routing
 
 /** Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off). */
-export function chooseRoute(routes: ModelRoute[]): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo: boolean } {
+  // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
+  const preferred = getSetting("cloudProvider");
+  const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
   const real = routes.find((r) => provider(r.provider).isConfigured());
@@ -159,6 +162,14 @@ export function chooseRoute(routes: ModelRoute[]): { route: ModelRoute; demo: bo
 
 export function createGenerations(req: GenerationRequest): Generation[] {
   const plan = planGeneration(req, getModel, getPreset);
+  const mode = engineMode();
+  if (mode !== "both" && plan.model.engine !== mode) {
+    throw new Error(
+      mode === "open"
+        ? `${plan.model.name} is a paid cloud model, but this install is set to open source only (Settings → Engine mode)`
+        : `${plan.model.name} is an open-source model, but this install is set to paid cloud APIs only (Settings → Engine mode)`,
+    );
+  }
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op));
   const providerId: ProviderId = demo ? "mock" : route.provider;
   const batchId = plan.jobs > 1 ? nanoid(10) : null;

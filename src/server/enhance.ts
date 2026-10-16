@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { MediaKind, Operation } from "@/lib/catalog/types";
-import { getSetting } from "./settings";
+import { engineMode, getSetting } from "./settings";
 
 /**
  * "Enhance prompt": rewrite a short idea into a rich, model-friendly prompt.
@@ -82,7 +82,8 @@ export function heuristicEnhance(prompt: string, kind: MediaKind, op: Operation)
 
 export async function enhancePrompt(prompt: string, kind: MediaKind, op: Operation): Promise<string> {
   const choice = getSetting("enhanceProvider");
-  const useClaude = choice === "anthropic" || (choice === "auto" && !!getSetting("anthropicKey"));
+  // "Open source only" installs never call a paid API unless Claude was picked explicitly.
+  const useClaude = choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"));
   if (useClaude) return viaClaude(prompt, kind, op);
   if (choice === "ollama") return viaOllama(prompt, kind, op);
   if (choice === "auto") {

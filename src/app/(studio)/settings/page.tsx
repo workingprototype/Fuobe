@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default function Page() {
   return (
     <PageShell>
-      <PageHeader title="Settings" description="Connect cloud providers, point Fuobe at your ComfyUI server, and choose how prompts get enhanced. Keys stay on this server." />
+      <PageHeader title="Settings" description="Choose open source, paid APIs or both, connect providers, point Fuobe at your ComfyUI server, and choose how prompts get enhanced. Keys stay on this server." />
       <SettingsForm />
     </PageShell>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, ExternalLink, Loader2 } from "lucide-react";
+import { CheckCircle2, CircleAlert, Cloud, Cpu, ExternalLink, Layers, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -25,15 +25,85 @@ function useSettings() {
   });
 }
 
-function Section({ title, description, children }: { title: string; description: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  description,
+  inactive,
+  children,
+}: {
+  id?: string;
+  title: string;
+  description: React.ReactNode;
+  /** Shown when the current engine mode doesn't use this section. */
+  inactive?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="grid gap-6 border-b py-8 first:pt-0 md:grid-cols-[260px_1fr]">
+    <section id={id} className="grid scroll-mt-6 gap-6 border-b py-8 first:pt-0 md:grid-cols-[260px_1fr]">
       <div>
         <h2 className="text-[15px] font-semibold">{title}</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+        {inactive && <p className="mt-2 inline-flex rounded-md bg-muted px-2 py-1 text-[12px] text-muted-foreground">{inactive}</p>}
       </div>
-      <div className="space-y-5">{children}</div>
+      <div className={cn("space-y-5", inactive && "opacity-55")}>{children}</div>
     </section>
+  );
+}
+
+const ENGINE_MODES = [
+  {
+    value: "both",
+    title: "Open source + paid APIs",
+    icon: Layers,
+    body: "Every studio gets a Cloud / Open source switch. Use frontier paid models when you want them, your own GPU when you don't.",
+    needs: "A fal.ai or Replicate key and/or a ComfyUI server",
+  },
+  {
+    value: "open",
+    title: "Open source only",
+    icon: Cpu,
+    body: "Only open-weight models on your ComfyUI server. Paid models are hidden and blocked on the server, and nothing is sent to paid APIs.",
+    needs: "A ComfyUI server",
+  },
+  {
+    value: "cloud",
+    title: "Paid APIs only",
+    icon: Cloud,
+    body: "Only hosted frontier models (Nano Banana, Seedance, Kling, Veo…). No GPU needed; open-source models are hidden.",
+    needs: "A fal.ai or Replicate key",
+  },
+] as const;
+
+function EngineModePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Engine mode" className="grid gap-2 lg:grid-cols-3">
+      {ENGINE_MODES.map((m) => {
+        const active = value === m.value;
+        return (
+          <button
+            key={m.value}
+            role="radio"
+            aria-checked={active}
+            onClick={() => !active && onChange(m.value)}
+            className={cn(
+              "flex flex-col gap-2 rounded-xl border p-4 text-left transition-colors hover:bg-accent",
+              active && "border-primary bg-brand-faint hover:bg-brand-faint",
+            )}
+          >
+            <span className="flex items-center gap-2">
+              <span className={cn("grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground", active && "bg-primary text-primary-foreground")}>
+                <m.icon className="size-4" />
+              </span>
+              <span className="text-[14px] font-medium">{m.title}</span>
+              {active && <CheckCircle2 className="ml-auto size-4 text-brand-text" />}
+            </span>
+            <span className="text-[13px] leading-relaxed text-muted-foreground">{m.body}</span>
+            <span className="text-[12px] text-subtle-foreground">Needs: {m.needs}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -127,7 +197,8 @@ export function SettingsForm() {
   const save = useMutation({
     mutationFn: async (patch: Record<string, string>) =>
       (await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })).json(),
-    onSuccess: () => {
+    onSuccess: (body: { error?: string }) => {
+      if (body?.error) return toast.error(body.error);
       toast.success("Saved");
       void qc.invalidateQueries({ queryKey: ["settings"] });
       void qc.invalidateQueries({ queryKey: ["status"] });
@@ -137,16 +208,28 @@ export function SettingsForm() {
   const set = (n: string) => (v: string) => save.mutate({ [n]: v });
 
   if (settings.isLoading) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
+  const mode = get("engineMode")?.value || "both";
 
   return (
     <div>
       <Section
-        title="Cloud models"
+        id="engine"
+        title="Engine mode"
+        description="Choose what this install runs: fully open source, only paid APIs, or both side by side. The mode is enforced on the server, so a locked engine can't be used from the API either."
+      >
+        <EngineModePicker value={mode} onChange={set("engineMode")} />
+        <p className="text-[12px] text-muted-foreground">Also settable with the <code className="font-mono">FUOBE_ENGINE_MODE</code> environment variable (both · open · cloud).</p>
+      </Section>
+
+      <Section
+        id="cloud"
+        title="Paid API configuration"
         description={
           <>
-            One fal.ai key unlocks Nano Banana Pro, Seedream, Kling, Veo 3.1, Sora 2, Seedance, Hailuo, Wan and more. Replicate is used as a fallback where it hosts the same model.
+            One fal.ai key unlocks Nano Banana, Seedream, GPT Image, FLUX, Kling, Seedance, Veo 3.1, Wan, MiniMax, avatars and more. Replicate hosts a subset and is used as a fallback (or first, if you prefer it).
           </>
         }
+        inactive={mode === "open" ? "Not used in Open source only mode" : undefined}
       >
         <Field
           setting={get("falKey")}
@@ -160,13 +243,39 @@ export function SettingsForm() {
           }
         />
         <TestButton provider="fal" />
-        <Field setting={get("replicateToken")} label="Replicate API token" placeholder="r8_…" onSave={set("replicateToken")} />
+        <Field
+          setting={get("replicateToken")}
+          label="Replicate API token"
+          placeholder="r8_…"
+          onSave={set("replicateToken")}
+          hint={
+            <a href="https://replicate.com/account/api-tokens" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
+              Get a token <ExternalLink className="size-3" />
+            </a>
+          }
+        />
         <TestButton provider="replicate" />
+        <div className="space-y-1.5">
+          <Label className="text-[13px]">Preferred provider</Label>
+          <Select value={get("cloudProvider")?.value || "auto"} onValueChange={set("cloudProvider")}>
+            <SelectTrigger className="w-72">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Automatic (fal.ai first, Replicate fallback)</SelectItem>
+              <SelectItem value="fal">Prefer fal.ai</SelectItem>
+              <SelectItem value="replicate">Prefer Replicate</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-[12px] text-muted-foreground">Used when a model is available on both. Models only one provider hosts always use that one.</p>
+        </div>
       </Section>
 
       <Section
-        title="Open source · ComfyUI"
-        description="Run every open-source workflow on your own GPU (or a rented one). Fuobe talks to ComfyUI's HTTP API and uploads inputs for you. See Workflows for the models each one needs."
+        id="comfyui"
+        title="Open-source engine · ComfyUI"
+        description="Run every open-source workflow on your own GPU (or a rented one). Fuobe talks to ComfyUI's HTTP API and uploads inputs for you. See ComfyUI workflows for the models each one needs."
+        inactive={mode === "cloud" ? "Not used in Paid APIs only mode" : undefined}
       >
         <Field setting={get("comfyUrl")} label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" onSave={set("comfyUrl")} />
         <Field setting={get("comfyToken")} label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." onSave={set("comfyToken")} />
@@ -175,7 +284,7 @@ export function SettingsForm() {
 
       <Section
         title="Prompt enhancement"
-        description="The Enhance toggle rewrites short ideas into rich prompts. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter."
+        description="The Enhance toggle rewrites short ideas into rich prompts. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter. In Open source only mode, Automatic skips Claude."
       >
         <div className="space-y-1.5">
           <Label className="text-[13px]">Enhancer</Label>

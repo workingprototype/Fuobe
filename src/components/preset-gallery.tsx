@@ -51,8 +51,10 @@ export function PresetCard({ preset, href, compact }: { preset: Preset; href: st
 export function PresetGallery({ presets, href }: { presets: Preset[]; /** "{id}" is replaced with the preset id. */ href: string }) {
   const [cat, setCat] = useState("All");
   const [q, setQ] = useState("");
-  const [engine] = useEngine();
-  const [onlyEngine, setOnlyEngine] = useState(false);
+  const [engine, , mode] = useEngine();
+  const [onlyEngineChoice, setOnlyEngine] = useState(false);
+  // When the install is locked to one engine, only show presets that engine can run.
+  const onlyEngine = mode !== "both" || onlyEngineChoice;
   const cats = useMemo(() => ["All", ...new Set(presets.map((p) => p.category))], [presets]);
   const list = presets.filter(
     (p) =>
@@ -77,15 +79,17 @@ export function PresetGallery({ presets, href }: { presets: Preset[]; /** "{id}"
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setOnlyEngine((v) => !v)}
-          className={cn(
-            "h-8 rounded-full border px-3 text-[13px] text-muted-foreground hover:bg-accent",
-            onlyEngine && "border-primary bg-brand-faint text-brand-text",
-          )}
-        >
-          Only {engine === "open" ? "open source" : "cloud"}
-        </button>
+        {mode === "both" && (
+          <button
+            onClick={() => setOnlyEngine((v) => !v)}
+            className={cn(
+              "h-8 rounded-full border px-3 text-[13px] text-muted-foreground hover:bg-accent",
+              onlyEngine && "border-primary bg-brand-faint text-brand-text",
+            )}
+          >
+            Only {engine === "open" ? "open source" : "cloud"}
+          </button>
+        )}
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input

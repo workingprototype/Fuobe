@@ -9,8 +9,11 @@ Composer (React) ──POST /api/generations──▶ planGeneration()      src/
                                               │  → prompt (preset template, LoRA trigger)
                                               │  → params, LoRAs, number of jobs
                                               ▼
+                                         engine mode check        Settings → Engine mode (both / open / cloud)
+                                              │  rejects models of a disabled engine
                                          chooseRoute()            src/server/generations.ts
-                                              │  first configured provider for that operation,
+                                              │  first configured provider for that operation
+                                              │  (Settings → Preferred provider sets fal/Replicate order),
                                               │  else the demo provider (Settings → Demo mode)
                                               ▼
                                          SQLite row (queued) ─ submit() in the background:
@@ -56,7 +59,7 @@ All adapters implement `prepareFile`, `submit`, `poll`, `cancel`, `test`.
 
 ## Storage (`src/server/db.ts`, `storage.ts`, `settings.ts`)
 
-SQLite (WAL) with tables `generations`, `assets`, `settings`, `characters`. Files live in `data/files/{uploads,outputs}/<date>/<id>.<ext>` and are served by `/api/files/...` with HTTP range support for video. `FUOBE_DATA_DIR` moves everything.
+SQLite (WAL) with tables `generations`, `assets`, `settings`, `characters`. Settings (`src/server/settings.ts`) are typed, validated against allowed values, overridable by environment variables, and secrets are masked before reaching the browser. `engineMode` is enforced server-side; the client reads it from `/api/status` (`useEngineMode`) to lock the engine switch and filter what it shows. Files live in `data/files/{uploads,outputs}/<date>/<id>.<ext>` and are served by `/api/files/...` with HTTP range support for video. `FUOBE_DATA_DIR` moves everything.
 
 ## UI (`src/components/`, `src/app/(studio)/`)
 

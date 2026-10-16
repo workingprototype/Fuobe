@@ -46,10 +46,12 @@ export function HomeView() {
   const router = useRouter();
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState("");
-  const [engine, setEngine] = useEngine();
+  const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
   const status = useStatus().data;
-  const nothingConnected = status && !status.providers.fal?.configured && !status.providers.replicate?.configured && !status.providers.comfyui?.configured;
+  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured);
+  const comfyReady = !!status?.providers.comfyui?.configured;
+  const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
 
   const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : ""}`);
 
@@ -57,7 +59,13 @@ export function HomeView() {
     <PageShell>
       <div className="flex flex-col items-center pt-[8vh] text-center">
         <h1 className="font-heading text-display text-balance sm:text-[44px]">What will you create today?</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">Frontier cloud models or fully open-source workflows — same studio, your choice.</p>
+        <p className="mt-2 text-[15px] text-muted-foreground">
+          {engineMode === "open"
+            ? "Fully open-source models running on your own ComfyUI."
+            : engineMode === "cloud"
+              ? "Frontier paid models through your own API keys."
+              : "Frontier cloud models or fully open-source workflows — same studio, your choice."}
+        </p>
         <div className="mt-8 w-full max-w-[720px] rounded-[20px] border bg-background p-2.5 text-left shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
           <textarea
             value={prompt}
@@ -100,7 +108,7 @@ export function HomeView() {
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
             <Link href="/settings" className="text-brand-text underline-offset-2 hover:underline">
-              Add a fal.ai key or connect ComfyUI
+              {engineMode === "open" ? "Connect ComfyUI" : engineMode === "cloud" ? "Add a fal.ai or Replicate key" : "Add a fal.ai key or connect ComfyUI"}
             </Link>{" "}
             to generate for real.
           </p>

@@ -13,5 +13,10 @@ export async function GET() {
       { label: p.label, configured: p.id === "comfyui" ? comfy : p.id === "mock" ? true : p.isConfigured() },
     ]),
   );
-  return Response.json({ providers, demoMode: getSetting("demoMode") });
+  return Response.json({
+    providers,
+    demoMode: getSetting("demoMode"),
+    engineMode: getSetting("engineMode"),
+    cloudProvider: getSetting("cloudProvider"),
+  });
 }

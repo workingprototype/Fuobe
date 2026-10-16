@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
 
 export interface Asset {
@@ -124,9 +124,13 @@ export function useAssets(source?: "upload" | "generation", kind?: MediaKind) {
 // ---------------------------------------------------------------------------
 // Provider status
 
+export type EngineMode = "both" | "open" | "cloud";
+
 export interface StatusInfo {
   providers: Record<string, { label: string; configured: boolean }>;
   demoMode: string;
+  engineMode: EngineMode;
+  cloudProvider: string;
 }
 
 export function useStatus() {
@@ -152,8 +156,10 @@ export async function enhance(prompt: string, kind: MediaKind, op: string): Prom
 
 // ---------------------------------------------------------------------------
 // Engine preference (Cloud vs Open source), shared across tabs via localStorage.
+// Settings → Engine mode can lock the install to one engine; then the toggle is disabled.
 
 const ENGINE_KEY = "fuobe.engine";
+const MODE_KEY = "fuobe.engineMode";
 const listeners = new Set<() => void>();
 
 function readEngine(): Engine {
@@ -164,7 +170,49 @@ function readEngine(): Engine {
   }
 }
 
-export function useEngine(): [Engine, (e: Engine) => void] {
+function readCachedMode(): EngineMode {
+  try {
+    const m = localStorage.getItem(MODE_KEY);
+    return m === "open" || m === "cloud" ? m : "both";
+  } catch {
+    return "both";
+  }
+}
+
+const noopSubscribe = () => () => {};
+
+/** false while hydrating (matches the server HTML), true afterwards. */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
+}
+
+/** The install's engine mode (from the server, cached locally so pages don't flash). */
+export function useEngineMode(): EngineMode {
+  const hydrated = useHydrated();
+  const status = useStatus().data;
+  const cached = useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    readCachedMode,
+    () => "both" as EngineMode,
+  );
+  const serverMode = status?.engineMode;
+  useEffect(() => {
+    if (!serverMode || serverMode === readCachedMode()) return;
+    try {
+      localStorage.setItem(MODE_KEY, serverMode);
+    } catch {}
+    listeners.forEach((l) => l());
+  }, [serverMode]);
+  // Suspense subtrees can hydrate after the status query resolved; render the server's view until hydrated.
+  if (!hydrated) return "both";
+  return serverMode ?? cached;
+}
+
+export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {
+  const mode = useEngineMode();
   const engine = useSyncExternalStore(
     (cb) => {
       listeners.add(cb);
@@ -177,11 +225,15 @@ export function useEngine(): [Engine, (e: Engine) => void] {
     readEngine,
     () => "cloud" as Engine,
   );
-  const set = useCallback((e: Engine) => {
-    try {
-      localStorage.setItem(ENGINE_KEY, e);
-    } catch {}
-    listeners.forEach((l) => l());
-  }, []);
-  return [engine, set];
+  const set = useCallback(
+    (e: Engine) => {
+      if (mode !== "both") return;
+      try {
+        localStorage.setItem(ENGINE_KEY, e);
+      } catch {}
+      listeners.forEach((l) => l());
+    },
+    [mode],
+  );
+  return [mode === "both" ? engine : mode, set, mode];
 }
