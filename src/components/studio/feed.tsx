@@ -191,7 +191,7 @@ export function GenerationGroup({
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               {g.engine === "open" ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
-              {g.provider === "mock" ? "Demo" : g.engine === "open" ? "Open source" : "Cloud"}
+              {g.provider === "mock" ? "Demo" : g.provider === "local" ? "Browser" : g.engine === "open" ? "Open source" : "Cloud"}
             </span>
             {meta.map((m, i) => (
               <span key={i} className="before:mr-1.5 before:content-['·']">

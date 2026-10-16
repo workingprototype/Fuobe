@@ -140,7 +140,7 @@
     "fal-ai/wan-move (deprecated; trajectories)",
     "minimax/h3-max/camera-controls (camera path)"
    ],
-   "fields": "track:[[{x,y}...]] pixel coords <=121 pts/track"
+   "fields": "image_url = annotated frame, prompt ('follow the drawn arrows, then remove all annotations'); trajectory alt: track / trajectories = [[{x,y},...]] pixel coords (<=121 pts per track)"
   },
   {
    "feature": "Storyboard",
@@ -161,7 +161,7 @@
   "ElevenLabs Instant Voice Cloning is not on fal or Replicate; fal ElevenLabs endpoints accept premade voice names/ids only (a voice_id from your own ElevenLabs account cannot be used because fal uses its own key - unverified, no test call made).",
   "No Sync Labs or Kling video-translate endpoint on fal. Lip-synced translation = HeyGen translate; or ElevenLabs dubbing + a lipsync model.",
   "fal-ai/dia-tts/voice-clone schema exposes only 'text' (no reference audio) - not usable for cloning; use Replicate zsxkib/dia.",
-  "Trajectory draw-to-video endpoints on fal (fal-ai/wan-ati, fal-ai/wan-move) are marked deprecated in the catalog; no Kling motion-brush endpoint exists on fal or Replicate (bytedance/ati, zsxkib/ati 404 on Replicate).",
+  "Trajectory draw-to-video endpoints on fal (fal-ai/wan-ati, fal-ai/wan-move) are marked deprecated in the catalog; no Kling motion-brush endpoint was found on fal or Replicate (probed fal-ai/kling-video/v1*/motion-brush and Replicate bytedance/ati, zsxkib/ati: all 404).",
   "No video color-grade endpoint; only image color correction (fal-ai/post-processing/color-correction) and LTX IC-LoRA effects (colorization, day-to-night, hdr)."
  ],
  "elevenlabsVoices": {

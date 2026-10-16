@@ -34,7 +34,8 @@ export type Operation =
   | "music"
   | "v2a" // video → audio/foley
   | "interpolate"
-  | "extend"; // video → the same clip, continued
+  | "extend" // video → the same clip, continued
+  | "grade"; // colour grade, rendered in the browser
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -59,6 +60,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   v2a: "Video to audio",
   interpolate: "Frame interpolation",
   extend: "Extend video",
+  grade: "Color grade",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -84,9 +86,10 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   v2a: "video",
   interpolate: "video",
   extend: "video",
+  grade: "image",
 };
 
-export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock";
+export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Clapperboard, Columns2, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clapperboard, Columns2, SlidersHorizontal, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -137,7 +137,7 @@ export function Viewer({
             </div>
             <div className="divide-y rounded-lg border px-3">
               <Row label="Model" value={model?.name ?? g.modelId} />
-              <Row label="Engine" value={g.provider === "mock" ? "Demo" : g.engine === "open" ? "Open source · ComfyUI" : `Cloud · ${g.provider}`} />
+              <Row label="Engine" value={g.provider === "mock" ? "Demo" : g.provider === "local" ? "In your browser" : g.engine === "open" ? "Open source · ComfyUI" : `Cloud · ${g.provider}`} />
               <Row label="Mode" value={OPERATION_LABELS[g.op]} />
               <Row label="Preset" value={preset?.name} />
               <Row label="Aspect ratio" value={p.aspectRatio} />
@@ -170,6 +170,13 @@ export function Viewer({
                   </Link>
                 </Button>
               </>
+            )}
+            {(o.kind === "image" || o.kind === "video") && (
+              <Button asChild variant="secondary" size="sm">
+                <Link href={`/color-grade?${o.kind}=${encodeURIComponent(o.url)}`}>
+                  <SlidersHorizontal /> Grade
+                </Link>
+              </Button>
             )}
             <Button asChild variant="secondary" size="sm">
               <Link href={`/upscale?${o.kind === "video" ? "video" : "image"}=${encodeURIComponent(o.url)}`}>

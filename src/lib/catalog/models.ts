@@ -442,4 +442,20 @@ const cloud: ModelDef[] = [
   ...HIGGSFIELD_MODELS,
 ];
 
-export const MODELS: ModelDef[] = [...cloud, ...open];
+/** Tools that run entirely in the browser; recorded in the library like any other result. */
+const local: ModelDef[] = [
+  {
+    id: "local-color-grade",
+    name: "Color Grading",
+    vendor: "Fuobe",
+    family: "local",
+    engine: "open",
+    kind: "image",
+    tagline: "Real-time WebGL grading in your browser — free, nothing leaves your machine",
+    routes: [{ op: "grade", provider: "local", endpoint: "webgl" }],
+    options: {},
+    hidden: true,
+  },
+];
+
+export const MODELS: ModelDef[] = [...cloud, ...open, ...local];

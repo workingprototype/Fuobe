@@ -404,3 +404,51 @@ export async function cancelGeneration(id: string): Promise<void> {
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
 }
+
+// ---------------------------------------------------------------------------
+// Results made in the browser (colour grading): stored as finished generations.
+
+export function recordLocalGeneration(input: {
+  feature: string;
+  modelId: string;
+  op: Generation["op"];
+  prompt: string;
+  inputs: GenerationRequest["inputs"];
+  params?: GenerationRequest["params"];
+  output: { url: string; kind: OutputFile["kind"]; contentType?: string };
+}): Generation {
+  const model = getModel(input.modelId);
+  if (!model || !model.routes.some((r) => r.provider === "local")) throw new Error("Not a browser tool");
+  const now = Date.now();
+  const req: GenerationRequest = { feature: input.feature, modelId: input.modelId, op: input.op, prompt: input.prompt, inputs: input.inputs, params: input.params };
+  const row: Row = {
+    id: nanoid(12),
+    batch_id: null,
+    feature: input.feature,
+    preset_id: null,
+    model_id: model.id,
+    engine: model.engine,
+    provider: "local",
+    op: input.op,
+    kind: input.output.kind,
+    status: "succeeded",
+    progress: 1,
+    message: null,
+    prompt: input.prompt,
+    request_json: JSON.stringify(req),
+    provider_input_json: null,
+    external_id: "local",
+    external_meta_json: null,
+    outputs_json: JSON.stringify([input.output]),
+    error: null,
+    cost_usd: 0,
+    favorite: 0,
+    created_at: now,
+    updated_at: now,
+    completed_at: now,
+  };
+  db()
+    .prepare(`INSERT INTO generations (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
+    .run(row);
+  return toGeneration(row);
+}
