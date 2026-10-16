@@ -1,4 +1,5 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
+import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import type { ModelDef, ModelRoute, Operation } from "./types";
 
 /*
@@ -435,4 +436,10 @@ const open: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...CLOUD_MODELS, ...open];
+/** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
+const cloud: ModelDef[] = [
+  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)),
+  ...HIGGSFIELD_MODELS,
+];
+
+export const MODELS: ModelDef[] = [...cloud, ...open];

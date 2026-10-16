@@ -57,7 +57,7 @@ const ENGINE_MODES = [
     title: "Open source + paid APIs",
     icon: Layers,
     body: "Every studio gets a Cloud / Open source switch. Use frontier paid models when you want them, your own GPU when you don't.",
-    needs: "A fal.ai or Replicate key and/or a ComfyUI server",
+    needs: "A fal.ai, Replicate or Higgsfield key and/or a ComfyUI server",
   },
   {
     value: "open",
@@ -71,7 +71,7 @@ const ENGINE_MODES = [
     title: "Paid APIs only",
     icon: Cloud,
     body: "Only hosted frontier models (Nano Banana, Seedance, Kling, Veo…). No GPU needed; open-source models are hidden.",
-    needs: "A fal.ai or Replicate key",
+    needs: "A fal.ai, Replicate or Higgsfield key",
   },
 ] as const;
 
@@ -255,6 +255,21 @@ export function SettingsForm() {
           }
         />
         <TestButton provider="replicate" />
+        <Field
+          setting={get("higgsfieldKey")}
+          label="Higgsfield API key"
+          placeholder="KEY_ID:KEY_SECRET"
+          onSave={set("higgsfieldKey")}
+          hint={
+            <span>
+              Unlocks Higgsfield&apos;s own models — Soul 2.0, Soul Cinema, Soul ID, Genjutsu, Cinema Studio, Marketing &amp; Ads Studio — and is another route for Seedance, Kling, Wan and MiniMax.{" "}
+              <a href="https://console.higgsfield.ai" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-text hover:underline">
+                Get a key <ExternalLink className="size-3" />
+              </a>
+            </span>
+          }
+        />
+        <TestButton provider="higgsfield" />
         <div className="space-y-1.5">
           <Label className="text-[13px]">Preferred provider</Label>
           <Select value={get("cloudProvider")?.value || "auto"} onValueChange={set("cloudProvider")}>
@@ -262,9 +277,10 @@ export function SettingsForm() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Automatic (fal.ai first, Replicate fallback)</SelectItem>
+              <SelectItem value="auto">Automatic (fal.ai, then Replicate, then Higgsfield)</SelectItem>
               <SelectItem value="fal">Prefer fal.ai</SelectItem>
               <SelectItem value="replicate">Prefer Replicate</SelectItem>
+              <SelectItem value="higgsfield">Prefer Higgsfield</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[12px] text-muted-foreground">Used when a model is available on both. Models only one provider hosts always use that one.</p>

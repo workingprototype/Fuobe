@@ -33,6 +33,7 @@ import { formatCost, ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { fileToSlot, MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
+import { ControlsChip, ProviderPresetChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { SketchTools } from "./sketch-tools";
@@ -346,6 +347,13 @@ export function Composer({ docked }: { docked: boolean }) {
   const opts = model?.options ?? {};
   const p = draft.params;
   const setP = (patch: Partial<typeof p>) => setDraft((d) => ({ params: { ...d.params, ...patch } }));
+  const setExtra = (key: string, v: unknown) =>
+    setDraft((d) => {
+      const extra = { ...d.params.extra };
+      if (v === undefined) delete extra[key];
+      else extra[key] = v;
+      return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
+    });
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
   const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none";
 
@@ -488,8 +496,8 @@ export function Composer({ docked }: { docked: boolean }) {
       ) : null}
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2">
-        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+      <div className="flex items-end gap-2">
+        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
           {!lockedModel ? (
             <ModelPicker
               models={models}
@@ -548,6 +556,14 @@ export function Composer({ docked }: { docked: boolean }) {
           {config.kind === "video" && op !== "lipsync" && op !== "avatar" && op !== "upscale-video" && (
             <SegmentChip icon={CopyIcon} label="Videos" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
           )}
+          {opts.presets && (
+            <ProviderPresetChip
+              spec={opts.presets}
+              value={p.extra?.[opts.presets.param] as string | undefined}
+              onChange={(id) => setExtra(opts.presets!.param, id)}
+            />
+          )}
+          {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
           {opts.audio === true && (
             <Tooltip>
               <TooltipTrigger asChild>

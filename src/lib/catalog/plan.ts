@@ -115,6 +115,8 @@ export function planGeneration(
 
   const missing = missingInputs(op, req);
   if (missing) throw new Error(missing);
+  const presets = model.options.presets;
+  if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
 
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
   const maxPerJob = Math.max(1, model.options.maxOutputs ?? 1);
@@ -140,6 +142,7 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio
   "face-swap": { images: 2, msg: "Add a target photo and a face" },
   v2a: { video: true, msg: "Add a video" },
   interpolate: { video: true, msg: "Add a video" },
+  extend: { video: true, msg: "Add the video to continue" },
 };
 
 /** Human message for the first missing input of an operation, or null. */

@@ -127,7 +127,7 @@ function ActiveNav() {
 export function AppSidebar() {
   const { resolvedTheme, setTheme } = useTheme();
   const status = useStatus().data;
-  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
+  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured || status.providers.higgsfield?.configured);
   const comfy = status?.providers.comfyui?.configured;
   const mode = useEngineMode();
   const ready = mode === "open" ? comfy : mode === "cloud" ? cloud : cloud || comfy;

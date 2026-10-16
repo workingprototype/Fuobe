@@ -33,7 +33,8 @@ export type Operation =
   | "sfx"
   | "music"
   | "v2a" // video → audio/foley
-  | "interpolate";
+  | "interpolate"
+  | "extend"; // video → the same clip, continued
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -57,6 +58,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   music: "Music",
   v2a: "Video to audio",
   interpolate: "Frame interpolation",
+  extend: "Extend video",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -81,9 +83,10 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   music: "audio",
   v2a: "video",
   interpolate: "video",
+  extend: "video",
 };
 
-export type ProviderId = "fal" | "replicate" | "openai" | "google" | "comfyui" | "mock";
+export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {
@@ -116,13 +119,18 @@ export interface FieldMap {
   /** What the mask's paint means to this API: white (default), black or transparent = change. */
   maskFormat?: "white" | "black" | "alpha";
   video?: string;
+  /** Video field that takes an array (receives the one input video). */
+  videoArray?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
   resolution?: string | EnumField;
   duration?: DurationField;
   numOutputs?: string;
   seed?: string;
-  generateAudio?: string;
+  /** Inclusive seed limits when the API accepts a narrow range (Fuobe's seeds are folded into it). */
+  seedRange?: [number, number];
+  /** Boolean field, or an on/off enum such as Kling's `sound: "on" | "off"`. */
+  generateAudio?: string | { key: string; on: unknown; off: unknown };
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
 }
@@ -152,6 +160,10 @@ export interface ModelOptions {
   /** true = optional toggle, "always" = native audio always on. */
   audio?: boolean | "always";
   endFrame?: boolean;
+  /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
+  presets?: { source: string; param: string; label: string; required?: boolean };
+  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
+  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
 }
 
 export interface Pricing {
@@ -173,6 +185,8 @@ export interface ModelDef {
   options: ModelOptions;
   defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio">>;
   pricing?: Pricing;
+  /** Trained identities this model accepts by id (Higgsfield Soul ID). */
+  identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
 }

@@ -49,7 +49,7 @@ export function HomeView() {
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
   const status = useStatus().data;
-  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured);
+  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
   const comfyReady = !!status?.providers.comfyui?.configured;
   const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
 

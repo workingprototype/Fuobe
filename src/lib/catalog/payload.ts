@@ -17,6 +17,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.endImage && input.endImage) out[map.endImage] = input.endImage;
   if (map.mask && input.mask) out[map.mask] = input.mask;
   if (map.video && input.video) out[map.video] = input.video;
+  if (map.videoArray && input.video) out[map.videoArray] = [input.video];
   if (map.audio && input.audio) out[map.audio] = input.audio;
 
   if (map.aspectRatio && input.aspectRatio) {
@@ -33,8 +34,15 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[d.key] = d.type === "number" ? v : `${v}${d.suffix ?? ""}`;
   }
   if (map.numOutputs && input.numOutputs !== undefined) out[map.numOutputs] = input.numOutputs;
-  if (map.seed && input.seed !== undefined && input.seed >= 0) out[map.seed] = input.seed;
-  if (map.generateAudio && input.generateAudio !== undefined) out[map.generateAudio] = input.generateAudio;
+  if (map.seed && input.seed !== undefined && input.seed >= 0) {
+    const r = map.seedRange;
+    out[map.seed] = r ? r[0] + (input.seed % (r[1] - r[0] + 1)) : input.seed;
+  }
+  if (map.generateAudio && input.generateAudio !== undefined) {
+    const g = map.generateAudio;
+    if (typeof g === "string") out[g] = input.generateAudio;
+    else out[g.key] = input.generateAudio ? g.on : g.off;
+  }
 
   Object.assign(out, map.fixed ?? {});
   Object.assign(out, input.extra ?? {});

@@ -26,6 +26,8 @@ export interface ElementLora {
   url?: string;
   trigger: string;
   strength?: number;
+  /** Higgsfield Soul ID: a trained character reference passed as `custom_reference_id` instead of a LoRA. */
+  referenceId?: string;
 }
 
 export interface StudioElement {
@@ -108,12 +110,18 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
   // LoRAs win over references for the model they were trained on.
   const loras: LoraRef[] = [...(req.loras ?? [])];
   const viaLora = new Set<string>();
+  let extra = req.params?.extra;
   for (const el of mentioned) {
     const l = el.loras.find((x) => x.modelId === model.id && x.engine === model.engine);
-    if (l) {
+    if (!l) continue;
+    if (l.referenceId) {
+      // Soul ID takes one character per generation.
+      if (extra?.custom_reference_id) continue;
+      extra = { ...extra, custom_reference_id: l.referenceId, custom_reference_strength: l.strength ?? 1 };
+    } else {
       loras.push({ file: l.file, url: l.url, strength: l.strength ?? 1, trigger: l.trigger });
-      viaLora.add(el.id);
     }
+    viaLora.add(el.id);
   }
 
   // Share the reference budget: one image each first, then fill up to each kind's ideal count.
@@ -156,6 +164,7 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
     seen.add(el.id);
     const lora = loras.find((l) => viaLora.has(el.id) && el.loras.some((x) => x.file === l.file));
     if (lora?.trigger && first) return `${lora.trigger} ${el.name}`;
+    if (viaLora.has(el.id)) return el.name;
     if (first && !positions.get(el.id)?.length && !viaLora.has(el.id) && el.description) return `${el.name} (${el.description.replace(/[.\s]+$/, "")})`;
     return el.name;
   });
@@ -186,7 +195,14 @@ export function applyMentions(req: GenerationRequest, model: ModelDef, elements:
   }
 
   return {
-    request: { ...req, op, prompt, inputs: { ...req.inputs, images: images.length ? images : undefined }, loras: loras.length ? loras : undefined },
+    request: {
+      ...req,
+      op,
+      prompt,
+      inputs: { ...req.inputs, images: images.length ? images : undefined },
+      loras: loras.length ? loras : undefined,
+      params: extra !== req.params?.extra ? { ...req.params, extra } : req.params,
+    },
     mentioned,
     notes,
   };

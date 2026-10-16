@@ -2,6 +2,7 @@ import "server-only";
 import type { ProviderId } from "@/lib/catalog/types";
 import { comfyProvider } from "./comfyui";
 import { falProvider } from "./fal";
+import { higgsfieldProvider } from "./higgsfield";
 import { mockProvider } from "./mock";
 import { replicateProvider } from "./replicate";
 import type { ProviderAdapter } from "./types";
@@ -22,6 +23,7 @@ const notImplemented = (id: ProviderId, label: string): ProviderAdapter => ({
 export const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   fal: falProvider,
   replicate: replicateProvider,
+  higgsfield: higgsfieldProvider,
   comfyui: comfyProvider,
   mock: mockProvider,
   openai: notImplemented("openai", "OpenAI"),
