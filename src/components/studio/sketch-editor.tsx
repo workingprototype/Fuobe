@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { uploadFile } from "@/lib/api";
+import type { MotionPaths } from "@/lib/motion-paths";
 import { cn } from "@/lib/utils";
 
 /**
@@ -26,6 +27,8 @@ export interface SketchResult {
   overlay: string;
   /** Small preview for the composer chip. */
   preview: string;
+  /** draw mode: every brush stroke as a motion path, normalised to the image (Wan-Move draw-to-video). */
+  motion?: MotionPaths;
 }
 
 type Stroke =
@@ -288,7 +291,14 @@ function SketchCanvas({
         drawStrokes(octx, strokes, mode, 1);
       }
       const overlay = await uploadFile(await canvasToFile(ov, mode === "mask" ? "mask-overlay.png" : "sketch.png"));
-      onDone({ mask: maskUrl, overlay: overlay.url, preview: overlay.url });
+      const motion: MotionPaths | undefined =
+        mode === "draw"
+          ? {
+              aspect: [W, H],
+              paths: strokes.flatMap((st) => (st.type === "path" && !st.erase && st.points.length > 1 ? [st.points.map(([x, y]) => [x / W, y / H] as [number, number])] : [])),
+            }
+          : undefined;
+      onDone({ mask: maskUrl, overlay: overlay.url, preview: overlay.url, motion });
       onOpenChange(false);
     } catch (e) {
       toast.error((e as Error).message);

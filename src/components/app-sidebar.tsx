@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
   AtSign,
+  Layers,
   Crop,
   FastForward,
   Brush,
@@ -74,6 +75,7 @@ const NAV = [
       { href: "/video-edit", label: "Edit video", icon: Scissors },
       { href: "/extend", label: "Extend video", icon: FastForward },
       { href: "/reframe", label: "Reframe", icon: Crop },
+      { href: "/video-tools", label: "Video tools", icon: Layers },
       { href: "/elements", label: "Elements", icon: AtSign },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },

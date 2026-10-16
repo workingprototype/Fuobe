@@ -10,6 +10,9 @@ import {
   SFX_STUDIO,
   TRANSLATE_STUDIO,
   UPSCALE_STUDIO,
+  VIDEO_DEPTH_STUDIO,
+  VIDEO_MATTE_STUDIO,
+  VIDEO_RELIGHT_STUDIO,
   VIDEO_UPSCALE_STUDIO,
   VOICE_CHANGE_STUDIO,
 } from "@/lib/studios";
@@ -29,6 +32,11 @@ const MODES = {
     { id: "sfx", label: "Sound effects", config: SFX_STUDIO },
     { id: "music", label: "Music", config: MUSIC_STUDIO },
     { id: "video", label: "Sound for video", config: FOLEY_STUDIO },
+  ],
+  "video-tools": [
+    { id: "matte", label: "Remove background", config: VIDEO_MATTE_STUDIO },
+    { id: "relight", label: "Relight", config: VIDEO_RELIGHT_STUDIO },
+    { id: "depth", label: "Depth map", config: VIDEO_DEPTH_STUDIO },
   ],
 } as const;
 

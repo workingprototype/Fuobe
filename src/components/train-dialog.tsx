@@ -46,7 +46,11 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
   };
   const start = useMutation({
     mutationFn: async (target: string) => {
-      const res = await fetch(`/api/elements/${element.id}/trainings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target }) });
+      const res = await fetch(`/api/elements/${element.id}/trainings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target }),
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
       return body;
@@ -75,7 +79,11 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
     onError: (e) => toast.error((e as Error).message),
   });
   const remove = async (modelId: string) => {
-    await fetch(`/api/elements/${element.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ removeIdentities: [modelId] }) });
+    await fetch(`/api/elements/${element.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ removeIdentities: [modelId] }),
+    });
     refresh();
   };
 
@@ -89,8 +97,8 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
             <GraduationCap className="size-5" /> Train {element.name}
           </DialogTitle>
           <DialogDescription>
-            Train once and {element.name} looks right every time — @{element.handle} then uses the trained identity on that model instead of reference photos. Uses all{" "}
-            {photos} photos; 15–30 varied ones work best.
+            Train once and {element.name} looks right every time — @{element.handle} then uses the trained identity on that model instead of reference photos.
+            Uses all {photos} photos; 15–30 varied ones work best.
           </DialogDescription>
         </DialogHeader>
 
@@ -128,7 +136,12 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                       {t.price} · {t.eta}
                     </p>
                   </div>
-                  <Button size="sm" variant={busy ? "secondary" : "default"} disabled={!!t.blocker || tooFew || !!busy || start.isPending} onClick={() => start.mutate(t.id)}>
+                  <Button
+                    size="sm"
+                    variant={busy ? "secondary" : "default"}
+                    disabled={!!t.blocker || tooFew || !!busy || start.isPending}
+                    onClick={() => start.mutate(t.id)}
+                  >
                     {busy ? <Loader2 className="animate-spin" /> : null}
                     {busy ? "Training" : job?.status === "succeeded" ? "Retrain" : "Train"}
                   </Button>

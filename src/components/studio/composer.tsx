@@ -29,7 +29,7 @@ import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, type GenerationRequest, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
 import { enhance, useCreateGeneration, useElements, useEngine, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
-import { applySketch } from "@/lib/catalog/sketch";
+import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { formatCost, ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PRESET_ICONS } from "@/components/preset-icons";
@@ -262,6 +262,7 @@ function buildRequest(
       mask: s.mask?.ref || undefined,
       sketch: s.sketch?.ref || undefined,
       voiceAudio: s.voiceAudio?.ref || undefined,
+      voiceAudio2: s.voiceAudio2?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
     },
@@ -298,7 +299,7 @@ export function Composer({ docked }: { docked: boolean }) {
   const rawRequest = buildRequest(config.feature, draft, studioOp, config.promptSuffix);
   const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
   const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
-  const request = sketched.request;
+  const request = model ? stripMotionPaths(sketched.request, model) : sketched.request;
   const resolvesOnServer = mentions.mentioned.length > 0 || !!draft.slots.mask?.ref || !!draft.slots.sketch?.ref;
   let op: Operation | undefined;
   let blocker: string | null = null;
@@ -594,7 +595,25 @@ export function Composer({ docked }: { docked: boolean }) {
               }}
             />
           )}
-          {model && opts.languages && <LanguageChip languages={opts.languages} value={p.targetLanguage} onChange={(targetLanguage) => setP({ targetLanguage })} />}
+          {/* Open-source dialogue clones each speaker from a sample. */}
+          {model && opts.voiceClone && (studioOp ?? op) === "dialogue" &&
+            (["voiceAudio", "voiceAudio2"] as const).map((key, i) => (
+              <VoicePicker
+                key={key}
+                model={{ ...model, options: { ...model.options, voices: [] } }}
+                sample={draft.slots[key]}
+                label={`Speaker ${i ? "B" : "A"}`}
+                onChange={(c) => c?.kind === "sample" && setSlot(key, c.value)}
+              />
+            ))}
+          {model && opts.languages && (
+            <LanguageChip
+              languages={opts.languages}
+              value={p.targetLanguage}
+              label={(studioOp ?? op) === "dub" ? "Translate to…" : "Language"}
+              onChange={(targetLanguage) => setP({ targetLanguage })}
+            />
+          )}
           {model && opts.sliders && <SlidersChip model={model} values={p.extra ?? {}} onChange={setExtra} />}
           {opts.multiShot && model && <MultiShotChip model={model} params={p} onChange={setP} />}
           {opts.draft && (

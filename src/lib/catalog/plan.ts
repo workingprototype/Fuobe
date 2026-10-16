@@ -88,7 +88,7 @@ export interface Plan {
 
 /** Operations that work from their inputs alone. */
 const PROMPTLESS = new Set<Operation>([
-  "finalize", "reframe", "dialogue", "voice-change", "dub", "upscale-image", "upscale-video", "bg-remove",
+  "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
 ]);
 
@@ -147,6 +147,10 @@ export function planGeneration(
   if (op === "finalize" && !params.draftId) throw new Error("Pick a draft to finish");
   if (op === "dialogue" && !params.dialogue?.some((l) => l.text.trim())) throw new Error("Write at least one line");
   if (op === "dub" && !params.targetLanguage) throw new Error("Pick a language to translate into");
+  if (model.options.motionPaths && !(params.extra?.motionPaths as { paths?: unknown[] } | undefined)?.paths?.length) {
+    throw new Error(`Draw on the start frame — ${model.name} moves things along the paths you draw`);
+  }
+  if (op === "dialogue" && model.options.voiceClone && (!req.inputs?.voiceAudio || !req.inputs?.voiceAudio2)) throw new Error("Add a voice sample for each speaker");
   if ((op === "tts" || op === "voice-change") && model.options.voiceClone && !model.options.voices?.length && !req.inputs?.voiceAudio) {
     throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
   }
@@ -187,6 +191,9 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio
   extend: { video: true, msg: "Add the video to continue" },
   reframe: { video: true, msg: "Add a video to reframe" },
   "voice-change": { audio: true, msg: "Add the recording to re-voice" },
+  "bg-remove-video": { video: true, msg: "Add a video" },
+  "depth-video": { video: true, msg: "Add a video" },
+  "relight-video": { video: true, msg: "Add a video to relight" },
 };
 
 /** Human message for the first missing input of an operation, or null. */

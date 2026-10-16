@@ -18,6 +18,7 @@ const RequestSchema = z.object({
       video: z.string().optional(),
       audio: z.string().optional(),
       voiceAudio: z.string().optional(),
+      voiceAudio2: z.string().optional(),
     })
     .optional(),
   params: z

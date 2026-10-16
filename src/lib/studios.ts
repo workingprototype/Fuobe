@@ -130,7 +130,7 @@ export const AUDIO_STUDIO: StudioConfig = {
   ops: ["tts"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-v4", open: "" },
+  defaultModels: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
   suggestions: ["Welcome to Fuobe — make anything, with any model.", "[whispers] Don't look now… but I think it's following us.", "Breaking news: the robots have learned to paint."],
 };
 
@@ -144,7 +144,7 @@ export const DIALOGUE_STUDIO: StudioConfig = {
   ops: ["dialogue"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-dialogue", open: "" },
+  defaultModels: { cloud: "elevenlabs-dialogue", open: "oss-chatterbox-dialogue" },
   promptOptional: true,
   hidePrompt: true,
 };
@@ -159,7 +159,7 @@ export const VOICE_CHANGE_STUDIO: StudioConfig = {
   ops: ["voice-change"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [{ key: "audio", label: "Recording", accept: "audio", required: true }],
-  defaultModels: { cloud: "elevenlabs-voice-changer", open: "" },
+  defaultModels: { cloud: "elevenlabs-voice-changer", open: "oss-chatterbox-vc" },
   promptOptional: true,
   hidePrompt: true,
 };
@@ -286,7 +286,7 @@ export const EXTEND_STUDIO: StudioConfig = {
   ops: ["extend"],
   feed: { features: ["extend"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
-  defaultModels: { cloud: "seedance-2-5", open: "" },
+  defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-vace-extend" },
   suggestions: ["The camera pulls back to reveal the whole city", "She turns and smiles at the camera", "A storm rolls in and lightning hits"],
 };
 
@@ -300,6 +300,41 @@ export const REFRAME_STUDIO: StudioConfig = {
   ops: ["reframe"],
   feed: { features: ["reframe"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
-  defaultModels: { cloud: "luma-ray-3-2", open: "" },
+  defaultModels: { cloud: "luma-ray-3-2", open: "oss-wan22-vace-reframe" },
   promptOptional: true,
+};
+
+export const VIDEO_MATTE_STUDIO: StudioConfig = {
+  feature: "video-tools",
+  title: "Video tools",
+  hero: "Cut out the subject",
+  subtitle: "Every frame matted — a transparent WebM you can drop over anything.",
+  placeholder: "Optional (SAM 3): what to keep, e.g. “the dog”",
+  kind: "video",
+  ops: ["bg-remove-video"],
+  feed: { features: ["video-tools"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "bria-video-bg", open: "oss-video-matte-birefnet" },
+  promptOptional: true,
+};
+
+export const VIDEO_DEPTH_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "A depth map for every frame",
+  subtitle: "For compositing, fog, parallax and 3D effects.",
+  placeholder: "",
+  ops: ["depth-video"],
+  defaultModels: { cloud: "depth-anything-video-cloud", open: "oss-video-depth-vda" },
+  hidePrompt: true,
+};
+
+export const VIDEO_RELIGHT_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "Relight the shot",
+  subtitle: "Describe the new light — golden hour, neon, a single window, a campfire.",
+  placeholder: "e.g. “warm sunset light from the left, long soft shadows”",
+  ops: ["relight-video"],
+  defaultModels: { cloud: "lightx-relight", open: "oss-bernini-relight" },
+  promptOptional: false,
+  suggestions: ["Warm golden-hour sun from the left", "Pink and blue neon from the street", "A single cold window light, dark room", "Flickering campfire light from below"],
 };

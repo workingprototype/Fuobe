@@ -48,6 +48,10 @@ export function applySketch(req: GenerationRequest, model: ModelDef): { request:
       },
     };
   }
+  // Wan-Move follows the strokes themselves (sent as motion paths) on the clean start frame.
+  if (model.kind === "video" && model.options.motionPaths) {
+    return { request: { ...req, op: "i2v", inputs: rest } };
+  }
   if (model.kind === "video" && has("i2v")) {
     return {
       request: {
@@ -59,4 +63,12 @@ export function applySketch(req: GenerationRequest, model: ModelDef): { request:
     };
   }
   return { request: { ...req, inputs: rest }, note: `${model.name} can't follow a drawing — pick an edit or image-to-video model` };
+}
+
+/** Drop drawn motion paths from models that can't use them (they'd be sent as an unknown field). */
+export function stripMotionPaths(req: GenerationRequest, model: ModelDef): GenerationRequest {
+  if (model.options.motionPaths || !req.params?.extra || !("motionPaths" in req.params.extra)) return req;
+  const extra = { ...req.params.extra };
+  delete extra.motionPaths;
+  return { ...req, params: { ...req.params, extra } };
 }

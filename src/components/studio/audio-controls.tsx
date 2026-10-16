@@ -199,7 +199,7 @@ const display = (() => {
 const langLabel = (l: string) => (/^[a-z]{2,3}$/.test(l) ? (display?.of(l) ?? l) : l);
 
 /** Target language for dubbing / translation. */
-export function LanguageChip({ languages, value, onChange }: { languages: string[]; value?: string; onChange: (v: string) => void }) {
+export function LanguageChip({ languages, value, onChange, label = "Translate to…" }: { languages: string[]; value?: string; onChange: (v: string) => void; label?: string }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const list = useMemo(() => languages.filter((l) => !q || langLabel(l).toLowerCase().includes(q.toLowerCase())), [languages, q]);
@@ -207,7 +207,7 @@ export function LanguageChip({ languages, value, onChange }: { languages: string
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" className={cn(chip, value ? on : idle)}>
-          <Globe className="size-3.5" /> {value ? langLabel(value) : "Translate to…"}
+          <Globe className="size-3.5" /> {value ? langLabel(value) : label}
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-1.5" align="start" side="top" collisionPadding={12}>

@@ -6836,6 +6836,147 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "birefnet-video",
+    "name": "BiRefNet video (hosted)",
+    "vendor": "ZhengPeng7",
+    "family": "birefnet",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Transparent WebM cut-outs of the subject",
+    "routes": [
+      {
+        "op": "bg-remove-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/birefnet/v2/video",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "fixed": {
+            "video_output_type": "VP9 (.webm)",
+            "model": "General Use (Heavy)"
+          }
+        }
+      }
+    ],
+    "options": {},
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0
+    }
+  },
+  {
+    "id": "bria-video-bg",
+    "name": "Bria video background removal",
+    "vendor": "Bria",
+    "family": "bria",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Production-grade video matting with audio kept",
+    "routes": [
+      {
+        "op": "bg-remove-video",
+        "provider": "fal",
+        "endpoint": "bria/video/background-removal/v3",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "fixed": {
+            "background_color": "Transparent",
+            "output_container_and_codec": "webm_vp9"
+          }
+        }
+      }
+    ],
+    "options": {},
+    "pricing": {
+      "unit": "second",
+      "usd": 0.05
+    }
+  },
+  {
+    "id": "depth-anything-video-cloud",
+    "name": "Video Depth Anything (hosted)",
+    "vendor": "ByteDance",
+    "family": "depth-anything",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Stable depth maps for every frame",
+    "routes": [
+      {
+        "op": "depth-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/depth-anything-video",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "resolution": "resolution",
+          "fixed": {
+            "model": "VDA-Base",
+            "colormap": "grayscale"
+          }
+        }
+      }
+    ],
+    "options": {
+      "resolutions": [
+        "auto",
+        "360p",
+        "480p",
+        "720p",
+        "1080p"
+      ]
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04
+    }
+  },
+  {
+    "id": "lightx-relight",
+    "name": "LightX Relight",
+    "vendor": "LightX",
+    "family": "lightx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Relight a video from a description and a light direction",
+    "routes": [
+      {
+        "op": "relight-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/lightx/relight",
+        "map": {
+          "prompt": "relight_parameters.relight_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "fixed": {
+            "relit_cond_type": "ic",
+            "relight_parameters.bg_source": "Left"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "controls": [
+        {
+          "param": "relight_parameters.bg_source",
+          "label": "Light from",
+          "values": [
+            "Left",
+            "Right",
+            "Top",
+            "Bottom"
+          ],
+          "default": "Left"
+        }
+      ]
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1
+    }
+  },
+  {
     "id": "mmaudio-cloud",
     "name": "MMAudio",
     "vendor": "hkchengrex",

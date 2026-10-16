@@ -308,6 +308,17 @@ model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", 
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
       [("music", "fal-ai/elevenlabs/music")], pricing=("minute", 0.6), defaults={"duration": 30}, options={"durations": [15, 30, 60, 120]})
+model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject",
+      [("bg-remove-video", "fal-ai/birefnet/v2/video")], pricing=("second", 0.0), fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
+model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video", "Production-grade video matting with audio kept",
+      [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
+      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
+model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
+      [("depth-video", "fal-ai/depth-anything-video")], pricing=("second", 0.04), fixed={"model": "VDA-Base", "colormap": "grayscale"})
+model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
+      [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
+      fixed={"relit_cond_type": "ic", "relight_parameters.bg_source": "Left"},
+      options={"controls": [{"param": "relight_parameters.bg_source", "label": "Light from", "values": ["Left", "Right", "Top", "Bottom"], "default": "Left"}]})
 model("mmaudio-cloud", "MMAudio", "hkchengrex", "mmaudio", "video", "Add matching sound to a silent video",
       [("v2a", "fal-ai/mmaudio-v2")], pricing=("second", 0.001))
 
@@ -369,6 +380,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             fmap["prompt"] = kf["prompt"]
     else:
         fmap["prompt"] = False
+    # Relight endpoints take the lighting description as the prompt.
+    if "lightingPrompt" in kf:
+        fmap["prompt"] = kf["lightingPrompt"]
     # Zero-shot TTS takes its reference voice in the "audio" field; voice conversion names it separately.
     if op == "tts" and "audio" in kf:
         kf["referenceVoice"] = kf.pop("audio")
@@ -475,8 +489,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     if ropts.get("fixed"):
         m = {**m, "fixed": {**m["fixed"], **ropts["fixed"]}}
     if m["fixed"]:
-        fmap["fixed"] = {k: v for k, v in m["fixed"].items() if k in inputs}
-        missing = [k for k in m["fixed"] if k not in inputs]
+        fmap["fixed"] = {k: v for k, v in m["fixed"].items() if k.split(".")[0] in inputs}
+        missing = [k for k in m["fixed"] if k.split(".")[0] not in inputs]
         if missing:
             warn(f"{m['id']}: fixed fields {missing} not in {ep} inputs")
         if not fmap["fixed"]:

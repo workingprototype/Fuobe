@@ -16,7 +16,7 @@ function setPath(out: Record<string, unknown>, key: string, value: unknown) {
 /** Build a provider payload from canonical input using a route's {@link FieldMap}. Pure + unit-tested. */
 export function buildPayload(map: FieldMap, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (map.prompt !== false && input.prompt !== undefined) out[map.prompt ?? "prompt"] = input.prompt;
+  if (map.prompt !== false && input.prompt !== undefined) setPath(out, map.prompt ?? "prompt", input.prompt);
   if (map.negativePrompt && input.negativePrompt) out[map.negativePrompt] = input.negativePrompt;
 
   const images = input.images ?? [];
@@ -76,8 +76,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.targetLanguage && input.targetLanguage) out[map.targetLanguage] = input.targetLanguage;
   if (map.draftId && input.draftId) out[map.draftId] = input.draftId;
 
-  Object.assign(out, map.fixed ?? {});
-  Object.assign(out, input.extra ?? {});
+  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) setPath(out, k, v);
   return out;
 }
 

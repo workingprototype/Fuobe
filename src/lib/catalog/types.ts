@@ -40,7 +40,10 @@ export type Operation =
   | "finalize" // draft video → full-quality render of the same take
   | "dialogue" // several speakers → one audio track
   | "voice-change" // speech audio → the same speech in another voice
-  | "dub"; // video (or audio) → translated, re-voiced and lip-synced
+  | "dub" // video (or audio) → translated, re-voiced and lip-synced
+  | "bg-remove-video" // video → the subject on a transparent background
+  | "depth-video" // video → depth map video
+  | "relight-video"; // video → the same shot under new lighting
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -71,6 +74,9 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   dialogue: "Dialogue",
   "voice-change": "Voice change",
   dub: "Translate & dub",
+  "bg-remove-video": "Video background removal",
+  "depth-video": "Video depth map",
+  "relight-video": "Video relight",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -102,6 +108,9 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   dialogue: "audio",
   "voice-change": "audio",
   dub: "video",
+  "bg-remove-video": "video",
+  "depth-video": "video",
+  "relight-video": "video",
 };
 
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
@@ -204,6 +213,8 @@ export interface ModelOptions {
   voices?: { id: string; name: string; hint?: string }[];
   /** Takes a reference recording to clone a voice from. */
   voiceClone?: boolean;
+  /** Follows motion paths drawn on the start frame (Wan-Move). */
+  motionPaths?: boolean;
   /** Languages it can translate into. */
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
@@ -291,6 +302,8 @@ export interface GenerationRequest {
     audio?: string;
     /** Reference recording of the voice to speak with / convert into. */
     voiceAudio?: string;
+    /** Second speaker's reference voice (open-source dialogue). */
+    voiceAudio2?: string;
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
@@ -309,6 +322,7 @@ export interface GenInput extends GenParams {
   video?: string;
   audio?: string;
   voiceAudio?: string;
+  voiceAudio2?: string;
   loras?: LoraRef[];
 }
 
@@ -351,7 +365,7 @@ export interface Generation {
 
 /** Input slot a preset asks the user for. */
 export interface InputSlot {
-  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch" | "voiceAudio";
+  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch" | "voiceAudio" | "voiceAudio2";
   label: string;
   hint?: string;
   accept: MediaKind;

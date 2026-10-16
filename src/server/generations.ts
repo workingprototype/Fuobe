@@ -4,7 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
-import { applySketch } from "@/lib/catalog/sketch";
+import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   OPERATION_OUTPUT,
@@ -168,7 +168,7 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 export function createGenerations(original: GenerationRequest): Generation[] {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   const model = getModel(original.modelId);
-  const req = model ? applySketch(applyMentions(original, model, listElements()).request, model).request : original;
+  const req = model ? stripMotionPaths(applySketch(applyMentions(original, model, listElements()).request, model).request, model) : original;
   const plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {
@@ -264,6 +264,7 @@ async function submit(
       video: await prep(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
       voiceAudio: await prep(req.inputs?.voiceAudio),
+      voiceAudio2: await prep(req.inputs?.voiceAudio2),
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,

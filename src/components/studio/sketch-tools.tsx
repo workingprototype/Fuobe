@@ -21,7 +21,12 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
     }
   }, [autoOpen, image, current]);
 
-  const clear = () => setDraft((d) => ({ slots: { ...d.slots, mask: null, sketch: null } }));
+  const clear = () =>
+    setDraft((d) => {
+      const extra = { ...d.params.extra };
+      delete extra.motionPaths;
+      return { slots: { ...d.slots, mask: null, sketch: null }, params: { ...d.params, extra } };
+    });
 
   return (
     <>
@@ -69,13 +74,19 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
           image={image}
           mode={editing}
           onDone={(r) =>
-            setDraft((d) => ({
-              slots: {
-                ...d.slots,
-                mask: r.mask ? { ref: r.mask, preview: r.preview, kind: "image" } : null,
-                sketch: { ref: r.overlay, preview: r.preview, kind: "image" },
-              },
-            }))
+            setDraft((d) => {
+              const extra = { ...d.params.extra };
+              if (r.motion?.paths.length) extra.motionPaths = r.motion;
+              else delete extra.motionPaths;
+              return {
+                slots: {
+                  ...d.slots,
+                  mask: r.mask ? { ref: r.mask, preview: r.preview, kind: "image" } : null,
+                  sketch: { ref: r.overlay, preview: r.preview, kind: "image" },
+                },
+                params: { ...d.params, extra },
+              };
+            })
           }
         />
       )}
