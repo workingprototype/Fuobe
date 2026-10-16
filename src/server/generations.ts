@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
+import { applyMentions } from "@/lib/catalog/elements";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   OPERATION_OUTPUT,
@@ -14,6 +15,7 @@ import {
   type ProviderId,
 } from "@/lib/catalog/types";
 import { db } from "./db";
+import { listElements } from "./elements";
 import { enhancePrompt } from "./enhance";
 import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
@@ -160,7 +162,10 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 // ---------------------------------------------------------------------------
 // Create
 
-export function createGenerations(req: GenerationRequest): Generation[] {
+export function createGenerations(original: GenerationRequest): Generation[] {
+  // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
+  const model = getModel(original.modelId);
+  const req = model ? applyMentions(original, model, listElements()).request : original;
   const plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {
@@ -192,7 +197,7 @@ export function createGenerations(req: GenerationRequest): Generation[] {
       progress: null,
       message: demo ? "Demo mode — no provider connected" : "Submitting",
       prompt: plan.prompt,
-      request_json: JSON.stringify(req),
+      request_json: JSON.stringify(original),
       provider_input_json: null,
       external_id: null,
       external_meta_json: null,

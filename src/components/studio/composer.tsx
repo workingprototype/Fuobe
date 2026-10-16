@@ -2,6 +2,7 @@
 
 import {
   ArrowUp,
+  AtSign,
   Clock,
   Copy as CopyIcon,
   Film,
@@ -25,14 +26,18 @@ import { Kbd } from "@/components/ui/kbd";
 import { EFFECTS, getModel, getPreset, modelsFor, MOTIONS } from "@/lib/catalog";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, type GenerationRequest, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
-import { enhance, useCreateGeneration, useEngine, useStatus } from "@/lib/api";
+import { enhance, useCreateGeneration, useElements, useEngine, useStatus } from "@/lib/api";
+import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { formatCost, ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { fileToSlot, MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
 import { ModelPicker } from "./model-picker";
+import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { useStudio } from "./studio-context";
 import { nanoid } from "nanoid";
+
+const EMPTY: StudioElement[] = [];
 
 // ---------------------------------------------------------------------------
 // Chips
@@ -250,8 +255,9 @@ export function Composer({ docked }: { docked: boolean }) {
   const [engine, setEngine] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<PromptInputHandle>(null);
   const status = useStatus().data;
+  const elements = useElements().data ?? EMPTY;
 
   const preset: Preset | undefined = draft.presetId ? getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
@@ -267,7 +273,9 @@ export function Composer({ docked }: { docked: boolean }) {
     if (next && getModel(next)) setDraft((d) => ({ modelId: next, params: { ...getModel(next)!.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
   }, [engine, model, lockedModel, preset, config.defaultModels, setDraft]);
 
-  const request = buildRequest(config.feature, draft, undefined, config.promptSuffix);
+  const rawRequest = buildRequest(config.feature, draft, undefined, config.promptSuffix);
+  const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
+  const request = mentions.request;
   let op: Operation | undefined;
   let blocker: string | null = null;
   let cost: number | null = null;
@@ -295,7 +303,8 @@ export function Composer({ docked }: { docked: boolean }) {
       if (blocker) toast(blocker);
       return;
     }
-    create.mutate(buildRequest(config.feature, draft, op, config.promptSuffix), {
+    // The server resolves @mentions itself; only pin the operation when nothing was mentioned.
+    create.mutate(buildRequest(config.feature, draft, mentions.mentioned.length ? undefined : op, config.promptSuffix), {
       onSuccess: (items) => {
         toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
       },
@@ -397,20 +406,47 @@ export function Composer({ docked }: { docked: boolean }) {
 
       {/* Prompt */}
       {showPrompt && (
-        <textarea
-          ref={textarea}
+        <PromptInput
+          ref={promptRef}
           value={draft.prompt}
-          onChange={(e) => setDraft({ prompt: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          rows={1}
+          onChange={(v) => setDraft({ prompt: v })}
+          onSubmit={submit}
           placeholder={preset?.promptPlaceholder ?? config.placeholder}
-          className="field-sizing-content max-h-52 min-h-12 w-full resize-none bg-transparent px-2.5 py-1.5 text-base leading-relaxed outline-none placeholder:text-subtle-foreground"
+          elements={elements}
         />
+      )}
+
+      {/* @mentioned elements */}
+      {mentions.mentioned.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+          {mentions.mentioned.map((el) => {
+            const Icon = ELEMENT_ICONS[el.kind];
+            const words = mentions.notes.find((n) => n.startsWith(`${el.name} `));
+            return (
+              <Tooltip key={el.id}>
+                <TooltipTrigger asChild>
+                  <span className={cn("inline-flex h-7 items-center gap-1.5 rounded-full border bg-background pr-2.5 pl-0.5 text-[12px] font-medium", words && "border-dashed text-muted-foreground")}>
+                    <span className="grid size-6 place-items-center overflow-hidden rounded-full bg-muted">
+                      {el.references[0] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={el.references[0]} alt="" className="size-full object-cover" />
+                      ) : (
+                        <Icon className="size-3.5" />
+                      )}
+                    </span>
+                    {el.name}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {words ??
+                    (el.loras.some((l) => l.modelId === model?.id)
+                      ? `Uses ${el.name}'s trained LoRA on ${model?.name}`
+                      : `${el.name}'s photos are sent as reference images`)}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
       )}
 
       {/* Preset options (apps) */}
@@ -455,6 +491,21 @@ export function Composer({ docked }: { docked: boolean }) {
             />
           ) : (
             <Chip icon={Sparkles}>{model?.name}</Chip>
+          )}
+          {showPrompt && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => promptRef.current?.startMention()}
+                  className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-accent"
+                  aria-label="Add an element"
+                >
+                  <AtSign className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Add a character, location or prop · type @</TooltipContent>
+            </Tooltip>
           )}
           {config.presetPicker && (
             <PresetChip

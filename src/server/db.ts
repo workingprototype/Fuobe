@@ -61,6 +61,10 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
+  // Characters become Elements (characters, locations, props, styles) with @handles and trained LoRAs.
+  `ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'character';
+  ALTER TABLE characters ADD COLUMN handle TEXT;
+  ALTER TABLE characters ADD COLUMN loras_json TEXT;`,
 ];
 
 declare global {

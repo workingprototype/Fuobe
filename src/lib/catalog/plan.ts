@@ -104,6 +104,7 @@ export function planGeneration(
     if (sameModel) op = op ?? route.op;
   }
 
+  if (req.loras?.length) loras = [...loras, ...req.loras];
   op = op ?? inferOperation(model, req);
   if (!routesFor(model, op).length) {
     throw new Error(`${model.name} can't do ${op} — try another model`);

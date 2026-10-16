@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
 
 export interface Asset {
@@ -118,6 +119,51 @@ export function useAssets(source?: "upload" | "generation", kind?: MediaKind) {
       if (kind) qs.set("kind", kind);
       return (await json<{ items: Asset[] }>(await fetch(`/api/assets?${qs}`))).items;
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Elements (@characters, locations, props, styles)
+
+export function useElements() {
+  return useQuery({
+    queryKey: ["elements"],
+    queryFn: async () => (await json<{ items: StudioElement[] }>(await fetch("/api/elements"))).items,
+    staleTime: 10_000,
+  });
+}
+
+export function useElement(id: string) {
+  return useQuery({
+    queryKey: ["elements", id],
+    queryFn: async () => json<StudioElement>(await fetch(`/api/elements/${id}`)),
+  });
+}
+
+export function useSaveElement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { id?: string; name: string; kind?: ElementKind; description?: string | null; references: string[] }) => {
+      const { id, ...rest } = body;
+      return json<StudioElement>(
+        await fetch(id ? `/api/elements/${id}` : "/api/elements", {
+          method: id ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(rest),
+        }),
+      );
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["elements"] }),
+  });
+}
+
+export function useDeleteElement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/elements/${id}`, { method: "DELETE" });
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["elements"] }),
   });
 }
 

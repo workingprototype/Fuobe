@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
+  AtSign,
   AudioLines,
   Boxes,
   Clapperboard,
@@ -17,7 +18,6 @@ import {
   Mic2,
   Moon,
   Plus,
-  ScanFace,
   Settings,
   Sparkles,
   Star,
@@ -66,7 +66,7 @@ const NAV = [
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },
-      { href: "/characters", label: "Characters", icon: ScanFace },
+      { href: "/elements", label: "Elements", icon: AtSign },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },
     ],

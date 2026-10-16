@@ -216,6 +216,8 @@ export interface GenerationRequest {
   params?: GenParams;
   /** Values for preset option pickers (apps). */
   presetOptions?: Record<string, string>;
+  /** Server-side only: LoRAs added by @element mentions (trained identities). */
+  loras?: LoraRef[];
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
