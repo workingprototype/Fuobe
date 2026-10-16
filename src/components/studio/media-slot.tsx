@@ -173,7 +173,7 @@ export function MediaSlot({
               )}
             >
               {over ? <Upload className="size-4" /> : <KindIcon kind={kind} className="size-4" />}
-              <span className="max-w-full truncate px-1 text-[10px] leading-tight font-medium">{label}</span>
+              <span className="line-clamp-2 max-w-full px-1 text-center text-[10px] leading-[1.1] font-medium">{label}</span>
             </button>
           )}
           {!value && <LibraryPicker kind={kind} onPick={onChange} />}

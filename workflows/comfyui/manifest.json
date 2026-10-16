@@ -5449,11 +5449,11 @@
           "kind": "image"
         }
       ],
-      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test.",
+      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
       "customNodes": [],
       "models": [],
       "vramGb": 0,
-      "validated": false,
+      "validated": true,
       "defaults": {},
       "source": "hand-built (Fuobe self-test, no model weights)"
     },
@@ -5482,11 +5482,11 @@
           "kind": "video"
         }
       ],
-      "notes": "Runs on any ComfyUI (CPU is fine). Exercises the SaveVideo output path.",
+      "notes": "Runs on any ComfyUI (CPU is fine). Exercises the SaveVideo output path. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
       "customNodes": [],
       "models": [],
       "vramGb": 0,
-      "validated": false,
+      "validated": true,
       "defaults": {},
       "source": "hand-built (Fuobe self-test, no model weights)"
     }

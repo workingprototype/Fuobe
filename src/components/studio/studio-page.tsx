@@ -150,6 +150,7 @@ function StudioBody({ header }: { header?: React.ReactNode }) {
         ) : (
           <div className="flex flex-col items-center pt-[16vh] text-center">
             <h2 className="font-heading text-display text-balance">{config.hero}</h2>
+            {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
             <div className="mt-10 w-full">{composer(false)}</div>
             {config.suggestions && (
               <div className="mt-4 flex max-w-[760px] flex-wrap justify-center gap-2">

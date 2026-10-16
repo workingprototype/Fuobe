@@ -27,6 +27,8 @@ import {
   Workflow,
   ZoomIn,
   Library,
+  PersonStanding,
+  Scissors,
 } from "lucide-react";
 import {
   Sidebar,
@@ -62,6 +64,8 @@ const NAV = [
     label: "Studios",
     items: [
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
+      { href: "/motion-control", label: "Motion control", icon: PersonStanding },
+      { href: "/video-edit", label: "Edit video", icon: Scissors },
       { href: "/characters", label: "Characters", icon: ScanFace },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },

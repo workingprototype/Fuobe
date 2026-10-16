@@ -91,7 +91,7 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 opacity-60" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[min(92vw,420px)] p-0 shadow-strong">
+      <PopoverContent align="start" side="top" collisionPadding={12} className="w-[min(92vw,420px)] p-0 shadow-strong">
         <div className="flex items-center gap-2 border-b p-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -105,7 +105,7 @@ export function ModelPicker({
           </div>
           <EngineSwitch value={engine} onChange={onEngineChange} size="sm" />
         </div>
-        <ScrollArea className="max-h-[min(60vh,440px)]">
+        <ScrollArea className="h-[min(56vh,440px)]">
           <div className="p-1">
             {visible.length === 0 && (
               <p className="px-3 py-8 text-center text-sm text-muted-foreground">

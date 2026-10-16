@@ -25,7 +25,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { EFFECTS, getModel, getPreset, modelsFor, MOTIONS } from "@/lib/catalog";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, type GenerationRequest, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
-import { enhance, useCreateGeneration, useEngine } from "@/lib/api";
+import { enhance, useCreateGeneration, useEngine, useStatus } from "@/lib/api";
 import { formatCost, ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PRESET_ICONS } from "@/components/preset-icons";
@@ -73,7 +73,7 @@ function AspectChip({ options, value, onChange }: { options: string[]; value?: s
       <PopoverTrigger asChild>
         <Chip icon={Ratio}>{value ?? options[0]}</Chip>
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" align="start">
+      <PopoverContent className="w-72 p-2" align="start" side="top">
         <p className="px-1 pb-2 text-[13px] font-medium">Aspect ratio</p>
         <div className="grid grid-cols-4 gap-1">
           {options.map((o) => (
@@ -121,7 +121,7 @@ function SegmentChip<T extends string | number>({
       <PopoverTrigger asChild>
         <Chip icon={icon}>{value !== undefined ? format(value) : format(options[0])}</Chip>
       </PopoverTrigger>
-      <PopoverContent className="w-auto min-w-44 p-2" align="start">
+      <PopoverContent className="w-auto min-w-44 p-2" align="start" side="top">
         <p className="px-1 pb-2 text-[13px] font-medium">{label}</p>
         <div className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
           {options.map((o) => (
@@ -168,7 +168,7 @@ function PresetChip({ type, value, onChange }: { type: "motion" | "effect"; valu
           )}
         </Chip>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,460px)] p-2" align="start">
+      <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12}>
         <div className="scrollbar-none mb-2 flex gap-1 overflow-x-auto">
           {cats.map((c) => (
             <button
@@ -251,6 +251,7 @@ export function Composer({ docked }: { docked: boolean }) {
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const status = useStatus().data;
 
   const preset: Preset | undefined = draft.presetId ? getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
@@ -510,7 +511,7 @@ export function Composer({ docked }: { docked: boolean }) {
                 <Settings2 className="size-4" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-80 space-y-3" align="start">
+            <PopoverContent className="w-80 space-y-3" align="start" side="top">
               <p className="text-[13px] font-medium">Advanced</p>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[12px] text-muted-foreground">
@@ -557,7 +558,13 @@ export function Composer({ docked }: { docked: boolean }) {
           </Popover>
         </div>
         <span className="hidden shrink-0 font-mono text-[12px] text-muted-foreground sm:inline">
-          {cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : ""}
+          {model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured)
+            ? "Demo · free"
+            : cost === 0
+              ? "Free"
+              : cost != null
+                ? `≈ ${formatCost(cost)}`
+                : ""}
         </span>
         <Tooltip>
           <TooltipTrigger asChild>

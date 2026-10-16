@@ -12,6 +12,8 @@ export interface StudioConfig {
   feature: string;
   title: string;
   hero: string;
+  /** Small line under the hero (e.g. which models an app runs on). */
+  subtitle?: string;
   placeholder: string;
   kind: MediaKind;
   /** Operations whose models appear in the picker. */

@@ -46,12 +46,13 @@ export const VIDEO_STUDIO: StudioConfig = {
   hero: "What’s the shot?",
   placeholder: "Describe a shot… e.g. “slow dolly-in on a rainy street, neon reflections”",
   kind: "video",
-  ops: ["t2v", "i2v", "flf2v"],
+  ops: ["t2v", "i2v", "flf2v", "ref2v"],
   feed: { kind: "video", features: ["video", "motion:*", "effect:*"] },
   slots: [
     { key: "image", label: "Start frame", accept: "image" },
     { key: "endImage", label: "End frame", accept: "image" },
   ],
+  multiRef: { label: "Add ref", max: 3 },
   presetPicker: "motion",
   defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" },
   suggestions: [
@@ -136,6 +137,13 @@ export function appStudio(preset: Preset): StudioConfig {
     feature: `app:${preset.id}`,
     title: preset.name,
     hero: preset.description,
+    subtitle: [
+      preset.cloud ? `Cloud: ${getModel(preset.cloud.modelId)?.name}` : "No cloud version yet",
+      preset.open ? `Open source: ${getModel(preset.open.modelId)?.name}` : "No open-source version yet",
+      preset.parity,
+    ]
+      .filter(Boolean)
+      .join(" · "),
     placeholder: preset.promptPlaceholder ?? "Add details (optional)",
     kind,
     ops,
@@ -147,3 +155,32 @@ export function appStudio(preset: Preset): StudioConfig {
     hidePrompt: preset.userPrompt === "none",
   };
 }
+
+export const MOTION_CONTROL_STUDIO: StudioConfig = {
+  feature: "motion-control",
+  title: "Motion control",
+  hero: "Make your character copy any move",
+  placeholder: "Optional: describe the character or scene",
+  kind: "video",
+  ops: ["motion-transfer"],
+  feed: { features: ["motion-control"] },
+  slots: [
+    { key: "image", label: "Character", accept: "image", required: true },
+    { key: "video", label: "Driving video", accept: "video", required: true },
+  ],
+  defaultModels: { cloud: "kling-motion-control", open: "oss-wan22-animate" },
+  promptOptional: true,
+};
+
+export const VIDEO_EDIT_STUDIO: StudioConfig = {
+  feature: "video-edit",
+  title: "Edit video",
+  hero: "Change anything in a clip",
+  placeholder: "Describe the edit… e.g. “make it snow”, “replace the car with a horse”",
+  kind: "video",
+  ops: ["v2v"],
+  feed: { features: ["video-edit"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  multiRef: { label: "Add ref", max: 4 },
+  defaultModels: { cloud: "kling-o3", open: "oss-wan22-fun-control" },
+};

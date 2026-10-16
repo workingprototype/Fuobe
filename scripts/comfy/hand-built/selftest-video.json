@@ -1,0 +1,8 @@
+{
+  "1": { "class_type": "LoadImage", "inputs": { "image": "example.png" }, "_meta": { "title": "Input" } },
+  "2": { "class_type": "ImageInvert", "inputs": { "image": ["1", 0] } },
+  "3": { "class_type": "ImageBatch", "inputs": { "image1": ["1", 0], "image2": ["2", 0] } },
+  "4": { "class_type": "RepeatImageBatch", "inputs": { "image": ["3", 0], "amount": 12 } },
+  "5": { "class_type": "CreateVideo", "inputs": { "images": ["4", 0], "fps": 8, "bit_depth": 8, "color_space": "sRGB", "codec": "none" } },
+  "6": { "class_type": "SaveVideo", "inputs": { "video": ["5", 0], "filename_prefix": "fuobe/selftest", "format": "auto", "format.codec": "auto", "codec": "auto" } }
+}

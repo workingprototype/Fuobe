@@ -103,7 +103,8 @@ export function Viewer({
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
             <div>
-              <p className="font-heading text-[20px] leading-snug">{g.prompt || preset?.name}</p>
+              <p className="font-heading text-[20px] leading-snug">{(preset ? g.request.prompt?.trim() : g.prompt) || preset?.name}</p>
+              {preset && g.prompt && <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">Sent to the model: {g.prompt}</p>}
               {g.prompt && (
                 <button
                   onClick={() => {
