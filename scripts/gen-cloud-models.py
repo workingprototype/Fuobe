@@ -106,6 +106,10 @@ model("flux-kontext-max", "FLUX.1 Kontext [max]", "Black Forest Labs", "flux", "
 model("ideogram-4-5", "Ideogram 4.5", "Ideogram", "ideogram", "image",
       "Best-in-class typography, posters and graphic design",
       [("t2i", "ideogram/v4.5"), ("edit", "ideogram/v4.5/edit")], defaults={"aspectRatio": "1:1"})
+model("flux-fill-pro", "FLUX.1 Fill [pro]", "Black Forest Labs", "flux", "image", "Precise inpainting and object replacement with a mask",
+      [("inpaint", "fal-ai/flux-pro/v1/fill")], pricing=("megapixel", 0.05), hidden=False)
+model("z-image-inpaint", "Z-Image Turbo Inpaint (hosted)", "Alibaba Tongyi", "z-image", "image", "Cheapest, fastest masked inpainting",
+      [("inpaint", "fal-ai/z-image/turbo/inpaint")], badges=["fast"], pricing=("megapixel", 0.01))
 model("recraft-4-1", "Recraft V4.1", "Recraft", "recraft", "image",
       "Brand-ready illustration, icons and design assets",
       [("t2i", "fal-ai/recraft/v4.1/text-to-image")], defaults={"aspectRatio": "1:1"})
@@ -276,8 +280,30 @@ model("seedvr-video", "SeedVR2 Video Upscale", "ByteDance Seed", "seedvr", "vide
       [("upscale-video", "fal-ai/seedvr/upscale/video")])
 model("birefnet-cloud", "BiRefNet background removal", "ZhengPeng7", "birefnet", "image", "Clean cut-outs with hair detail",
       [("bg-remove", "fal-ai/birefnet/v2")], pricing=("image", 0.0), fixed={"operating_resolution": "2048x2048", "output_format": "png"})
-model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Expressive multilingual speech",
-      [("tts", "fal-ai/elevenlabs/tts/eleven-v3")], pricing=("request", 0.1, "per 1k chars"), fixed={"voice": "Rachel"})
+model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Most expressive speech — audio tags like [whispers] and [laughs]",
+      [("tts", "fal-ai/elevenlabs/tts/eleven-v3")], badges=["top"], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-v4", "ElevenLabs v4", "ElevenLabs", "elevenlabs", "audio", "Newest ElevenLabs voice model — natural, stable long-form",
+      [("tts", "elevenlabs/tts/eleven-v4")], badges=["new"], pricing=("request", 0.08, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-v4-turbo", "ElevenLabs v4 Turbo", "ElevenLabs", "elevenlabs", "audio", "Low-latency v4 at half the price",
+      [("tts", "elevenlabs/tts/eleven-v4-turbo")], badges=["fast"], pricing=("request", 0.04, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-multilingual-v2", "ElevenLabs Multilingual v2", "ElevenLabs", "elevenlabs", "audio", "29 languages with speed and style control",
+      [("tts", "fal-ai/elevenlabs/tts/multilingual-v2")], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-dialogue", "ElevenLabs Dialogue", "ElevenLabs", "elevenlabs", "audio", "Several speakers, one natural conversation",
+      [("dialogue", "fal-ai/elevenlabs/text-to-dialogue/eleven-v3")], badges=["new"], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("chatterbox-cloud", "Chatterbox (hosted)", "Resemble AI", "chatterbox", "audio", "Clone any voice from a 10-second sample",
+      [("tts", "fal-ai/chatterbox/text-to-speech")], pricing=("request", 0.025, "per 1k chars"))
+model("index-tts-2-cloud", "IndexTTS-2 (hosted)", "Bilibili", "index-tts", "audio", "Zero-shot cloning with emotion control",
+      [("tts", "fal-ai/index-tts-2/text-to-speech")], pricing=("second", 0.002))
+model("elevenlabs-voice-changer", "ElevenLabs Voice Changer", "ElevenLabs", "elevenlabs", "audio", "Re-voice a recording with any premade voice",
+      [("voice-change", "fal-ai/elevenlabs/voice-changer")], pricing=("minute", 0.3), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("chatterbox-vc-cloud", "Chatterbox Voice Conversion (hosted)", "Resemble AI", "chatterbox", "audio", "Turn a recording into any voice from a sample",
+      [("voice-change", "fal-ai/chatterbox/speech-to-speech")], pricing=("minute", 0.015))
+model("heygen-translate", "HeyGen Translate", "HeyGen", "heygen", "video", "Lip-synced video translation into 170+ languages and accents",
+      [("dub", "fal-ai/heygen/v2/translate/precision")], badges=["top"], pricing=("second", 0.1))
+model("heygen-translate-fast", "HeyGen Translate Speed", "HeyGen", "heygen", "video", "Faster, cheaper lip-synced translation",
+      [("dub", "fal-ai/heygen/v2/translate/speed")], badges=["fast"], pricing=("second", 0.05))
+model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "video", "Dub video or audio while keeping each speaker's voice",
+      [("dub", "fal-ai/elevenlabs/dubbing")], pricing=("minute", 0.6))
 model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", "audio", "Describe a sound, get a sound",
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
@@ -287,6 +313,24 @@ model("mmaudio-cloud", "MMAudio", "hkchengrex", "mmaudio", "video", "Add matchin
 
 
 # ---------------------------------------------------------------------------
+
+# Numeric voice settings exposed as sliders.
+SLIDER_LABELS = {
+    "stability": "Stability", "similarity_boost": "Similarity", "style": "Style exaggeration", "speed": "Speed",
+    "exaggeration": "Emotion", "cfg": "Pace / guidance", "temperature": "Variety", "strength": "Voice strength",
+}
+
+# ElevenLabs premade voices (docs/research/paid-model-apis-2.json → elevenlabsVoices). Sent by voice_id.
+_EL = RESEARCH_2.get("elevenlabsVoices") or {}
+ELEVEN_VOICES = [
+    {"id": v["voice_id"], "name": v["name"], "hint": " · ".join(x for x in [(v.get("label") or "").partition(" - ")[2], v.get("accent")] if x)}
+    for v in (_EL.get("voices") or [])
+]
+
+# ElevenLabs dubbing takes ISO 639-1 codes.
+ISO_LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "hi", "ja", "ko", "zh", "ar", "ru", "tr", "nl", "sv", "id", "fil", "uk", "el", "cs",
+                 "ro", "da", "fi", "bg", "hr", "sk", "ms", "ta", "vi", "hu", "no"]
+
 
 def warn(msg):
     print(f"warning: {msg}", file=sys.stderr)
@@ -325,6 +369,29 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             fmap["prompt"] = kf["prompt"]
     else:
         fmap["prompt"] = False
+    # Zero-shot TTS takes its reference voice in the "audio" field; voice conversion names it separately.
+    if op == "tts" and "audio" in kf:
+        kf["referenceVoice"] = kf.pop("audio")
+    if "referenceVoice" in kf and (inputs.get(kf["referenceVoice"]) or {}).get("type") != "array":
+        fmap["voiceAudio"] = kf["referenceVoice"]
+        opts["voiceClone"] = True
+    if "voice" in kf and "[]" not in kf["voice"]:
+        fmap["voice"] = kf["voice"]
+    if "voice" in kf and "elevenlabs" in ep:
+        opts["voices"] = ELEVEN_VOICES
+    if "dialogue" in kf:
+        fmap["dialogue"] = {"key": kf["dialogue"], "text": "text", "voice": "voice"}
+    if "targetLanguage" in kf:
+        fmap["targetLanguage"] = kf["targetLanguage"]
+        enum = (inputs.get(kf["targetLanguage"]) or {}).get("values")
+        opts["languages"] = enum or ISO_LANGUAGES
+    sliders = [
+        {"param": k, "label": SLIDER_LABELS[k], "min": v["minimum"], "max": v["maximum"], "step": 0.05 if v["maximum"] - v["minimum"] <= 4 else 1,
+         "default": v.get("default", v["minimum"])}
+        for k, v in inputs.items() if k in SLIDER_LABELS and isinstance(v, dict) and "minimum" in v and "maximum" in v
+    ]
+    if sliders:
+        opts["sliders"] = sliders
     # Some APIs call their boolean sound switch "audio" (Wan 3.0); that's generateAudio, not an audio file.
     if "audio" in kf and (inputs.get(kf["audio"]) or {}).get("type") == "boolean":
         kf.setdefault("generateAudio", kf.pop("audio"))

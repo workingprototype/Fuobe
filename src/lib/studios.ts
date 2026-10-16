@@ -124,13 +124,85 @@ export const AUDIO_STUDIO: StudioConfig = {
   feature: "audio",
   title: "Audio",
   hero: "Give it a voice",
-  placeholder: "What should it say, or what should it sound like?",
+  subtitle: "Premade ElevenLabs voices, or clone any voice from a 10-second sample.",
+  placeholder: "What should it say? Try ElevenLabs v3 audio tags like [whispers] or [laughs]",
   kind: "audio",
-  ops: ["tts", "sfx", "music"],
+  ops: ["tts"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-tts", open: "oss-ace-step" },
-  suggestions: ["Welcome to Fuobe — make anything, with any model.", "Thunder rolling over a quiet forest", "Lo-fi hip hop beat with soft piano, 80 bpm"],
+  defaultModels: { cloud: "elevenlabs-v4", open: "" },
+  suggestions: ["Welcome to Fuobe — make anything, with any model.", "[whispers] Don't look now… but I think it's following us.", "Breaking news: the robots have learned to paint."],
+};
+
+export const DIALOGUE_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Write a conversation",
+  subtitle: "Every line gets its own voice; the model handles timing, interruptions and tone.",
+  placeholder: "",
+  kind: "audio",
+  ops: ["dialogue"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-dialogue", open: "" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const VOICE_CHANGE_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Say it in another voice",
+  subtitle: "Keeps your timing and emotion, swaps the voice.",
+  placeholder: "",
+  kind: "audio",
+  ops: ["voice-change"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [{ key: "audio", label: "Recording", accept: "audio", required: true }],
+  defaultModels: { cloud: "elevenlabs-voice-changer", open: "" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const TRANSLATE_STUDIO: StudioConfig = {
+  feature: "translate",
+  title: "Audio",
+  hero: "Speak every language",
+  subtitle: "Translates the speech, keeps each speaker's voice and re-syncs the lips.",
+  placeholder: "",
+  kind: "video",
+  ops: ["dub"],
+  feed: { features: ["translate"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "heygen-translate", open: "" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const SFX_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Describe a sound",
+  placeholder: "e.g. “thunder rolling over a quiet forest, rain on leaves”",
+  kind: "audio",
+  ops: ["sfx"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-sfx", open: "" },
+  suggestions: ["Thunder rolling over a quiet forest", "Footsteps on gravel, distant birds", "Sci-fi door whooshing open"],
+};
+
+export const MUSIC_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "What should it sound like?",
+  placeholder: "Genre, mood, instruments, tempo — add lyrics on new lines",
+  kind: "audio",
+  ops: ["music"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-music", open: "oss-ace-step" },
+  suggestions: ["Lo-fi hip hop beat with soft piano, 80 bpm", "Epic orchestral trailer music building to a drop", "Upbeat indie pop with handclaps and a whistled hook"],
 };
 
 export const FOLEY_STUDIO: StudioConfig = {

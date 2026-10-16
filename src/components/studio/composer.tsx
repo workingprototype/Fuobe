@@ -39,10 +39,23 @@ import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
 import { SketchTools } from "./sketch-tools";
 import { MultiShotChip, ShotsEditor } from "./shots-editor";
+import { DialogueEditor, LanguageChip, SlidersChip, VoicePicker } from "./audio-controls";
 import { useStudio } from "./studio-context";
 import { nanoid } from "nanoid";
 
 const EMPTY: StudioElement[] = [];
+
+/** Operations that transform one input into one result — no batch count. */
+const SINGLE_TAKE = new Set<Operation | undefined>(["lipsync", "avatar", "upscale-video", "dub", "extend", "reframe", "finalize", "v2a", "interpolate"]);
+
+/** Two speakers to start a dialogue with. */
+const defaultLines = (m: ModelDef) => {
+  const v = m.options.voices ?? [];
+  return [
+    { text: "", voice: v[0]?.id },
+    { text: "", voice: v[1]?.id ?? v[0]?.id },
+  ];
+};
 
 // ---------------------------------------------------------------------------
 // Chips
@@ -248,6 +261,7 @@ function buildRequest(
       endImage: s.endImage?.ref || undefined,
       mask: s.mask?.ref || undefined,
       sketch: s.sketch?.ref || undefined,
+      voiceAudio: s.voiceAudio?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
     },
@@ -440,6 +454,11 @@ export function Composer({ docked }: { docked: boolean }) {
         />
       )}
 
+      {/* Dialogue script */}
+      {model && (studioOp ?? op) === "dialogue" && (
+        <DialogueEditor model={model} lines={p.dialogue ?? defaultLines(model)} onChange={(dialogue) => setP({ dialogue })} />
+      )}
+
       {/* Multi-shot */}
       {model?.options.multiShot && p.shots && <ShotsEditor model={model} shots={p.shots} onChange={(shots) => setP({ shots })} />}
 
@@ -560,9 +579,23 @@ export function Composer({ docked }: { docked: boolean }) {
           {config.kind === "image" && (
             <SegmentChip icon={CopyIcon} label="Images" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
           )}
-          {config.kind === "video" && op !== "lipsync" && op !== "avatar" && op !== "upscale-video" && (
+          {config.kind === "video" && !SINGLE_TAKE.has((studioOp ?? op)!) && (
             <SegmentChip icon={CopyIcon} label="Videos" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
           )}
+          {model && (opts.voices?.length || opts.voiceClone) && (studioOp ?? op) !== "dialogue" && (
+            <VoicePicker
+              model={model}
+              voice={p.voice}
+              sample={draft.slots.voiceAudio}
+              label={(studioOp ?? op) === "voice-change" ? "New voice" : "Voice"}
+              onChange={(c) => {
+                if (c?.kind === "preset") setDraft((d) => ({ params: { ...d.params, voice: c.id }, slots: { ...d.slots, voiceAudio: null } }));
+                if (c?.kind === "sample") setSlot("voiceAudio", c.value);
+              }}
+            />
+          )}
+          {model && opts.languages && <LanguageChip languages={opts.languages} value={p.targetLanguage} onChange={(targetLanguage) => setP({ targetLanguage })} />}
+          {model && opts.sliders && <SlidersChip model={model} values={p.extra ?? {}} onChange={setExtra} />}
           {opts.multiShot && model && <MultiShotChip model={model} params={p} onChange={setP} />}
           {opts.draft && (
             <Tooltip>

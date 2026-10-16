@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, Check, Copy, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { AtSign, AudioLines, Check, Copy, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StudioPage } from "@/components/studio/studio-page";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ELEMENT_ICONS } from "@/components/studio/prompt-input";
+import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import type { StudioConfig } from "@/components/studio/studio-context";
 import { useDeleteElement, useElement, useElements, useSaveElement } from "@/lib/api";
 import { ELEMENT_KINDS, elementKindInfo, handleFor, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
@@ -26,6 +27,7 @@ const TIPS: Record<ElementKind, string> = {
   location: "1–6 photos of the place from a few viewpoints.",
   prop: "1–4 clean photos of the object, ideally on a plain background.",
   style: "2–10 images that share the look you want: palette, lighting, grain, mood.",
+  voice: "One clean 10–60 second recording of the voice — just speech, no music. Record it here or upload a WAV or MP3.",
 };
 
 const MAX_PHOTOS = 20;
@@ -131,7 +133,7 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
         <DialogDescription>Save it once, then type @ in any image or video prompt to put it in the shot.</DialogDescription>
       </DialogHeader>
       {!element && (
-        <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted p-1">
+        <div className="grid grid-cols-5 gap-1 rounded-xl bg-muted p-1">
           {ELEMENT_KINDS.map((k) => {
             const Icon = ELEMENT_ICONS[k.kind];
             return (
@@ -179,7 +181,11 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
       />
       <div className="space-y-2">
         <p className="text-[12px] text-muted-foreground">{TIPS[kind]}</p>
-        <PhotoGrid photos={photos} setPhotos={setPhotos} />
+        {kind === "voice" ? (
+          <VoiceSample value={photos[0]} onChange={(v) => setPhotos(v ? [{ ...v, id: nanoid(6) }] : [])} />
+        ) : (
+          <PhotoGrid photos={photos} setPhotos={setPhotos} />
+        )}
       </div>
       <DialogFooter>
         <Button disabled={!canSave} onClick={submit}>
@@ -187,6 +193,23 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
         </Button>
       </DialogFooter>
     </>
+  );
+}
+
+/** One voice recording: record it here or upload a file, then listen back. */
+function VoiceSample({ value, onChange }: { value?: SlotValue; onChange: (v: SlotValue | null) => void }) {
+  return value?.ref ? (
+    <div className="flex items-center gap-2 rounded-xl border bg-muted/40 p-2">
+      <audio src={value.preview} controls className="h-9 flex-1" />
+      <Button variant="ghost" size="icon" onClick={() => onChange(null)} aria-label="Remove recording">
+        <X />
+      </Button>
+    </div>
+  ) : (
+    <div className="flex items-center gap-2">
+      <VoiceRecorder onRecorded={onChange} />
+      <MediaSlot label="Upload" kind="audio" value={null} onChange={(v) => v && !v.uploading && onChange(v)} />
+    </div>
   );
 }
 
@@ -213,30 +236,37 @@ function ElementCard({ el }: { el: StudioElement }) {
   const Icon = ELEMENT_ICONS[el.kind];
   return (
     <div className="group relative overflow-hidden rounded-xl border bg-background transition-shadow hover:shadow-normal">
-      <Link href={`/elements/${el.id}`} className="block">
-        <div className="grid aspect-square grid-cols-2 grid-rows-2 gap-0.5 bg-muted">
-          {el.references.length ? (
-            el.references.slice(0, 4).map((r, i, arr) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={r}
-                src={r}
-                alt=""
-                className={cn(
-                  "size-full object-cover",
-                  arr.length === 1 && "col-span-2 row-span-2",
-                  arr.length === 2 && "row-span-2",
-                  arr.length === 3 && i === 0 && "row-span-2",
-                )}
-              />
-            ))
-          ) : (
-            <div className="col-span-2 row-span-2 grid place-items-center text-muted-foreground">
-              <Icon className="size-8" />
-            </div>
-          )}
+      {el.kind === "voice" ? (
+        <div className="grid aspect-square place-items-center bg-gradient-to-br from-brand-faint to-muted p-4">
+          <AudioLines className="size-10 text-brand-text" />
+          {el.references[0] && <audio src={el.references[0]} controls className="w-full" />}
         </div>
-      </Link>
+      ) : (
+        <Link href={`/elements/${el.id}`} className="block">
+          <div className="grid aspect-square grid-cols-2 grid-rows-2 gap-0.5 bg-muted">
+            {el.references.length ? (
+              el.references.slice(0, 4).map((r, i, arr) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={r}
+                  src={r}
+                  alt=""
+                  className={cn(
+                    "size-full object-cover",
+                    arr.length === 1 && "col-span-2 row-span-2",
+                    arr.length === 2 && "row-span-2",
+                    arr.length === 3 && i === 0 && "row-span-2",
+                  )}
+                />
+              ))
+            ) : (
+              <div className="col-span-2 row-span-2 grid place-items-center text-muted-foreground">
+                <Icon className="size-8" />
+              </div>
+            )}
+          </div>
+        </Link>
+      )}
       <div className="flex items-start justify-between gap-2 p-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{el.name}</p>

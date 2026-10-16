@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, MapPin, Package, Palette, Plus, ScanFace } from "lucide-react";
+import { AtSign, AudioLines, MapPin, Package, Palette, Plus, ScanFace } from "lucide-react";
 import Link from "next/link";
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { elementKindInfo, mentionAtCaret, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
@@ -11,6 +11,7 @@ export const ELEMENT_ICONS: Record<ElementKind, typeof ScanFace> = {
   location: MapPin,
   prop: Package,
   style: Palette,
+  voice: AudioLines,
 };
 
 export interface PromptInputHandle {
@@ -62,17 +63,18 @@ export const PromptInput = forwardRef<
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<number | null>(null);
 
-  const handles = useMemo(() => new Set(elements.map((e) => e.handle.toLowerCase())), [elements]);
+  const visual = useMemo(() => elements.filter((e) => e.kind !== "voice"), [elements]);
+  const handles = useMemo(() => new Set(visual.map((e) => e.handle.toLowerCase())), [visual]);
   const mention = caret != null ? mentionAtCaret(value, caret) : null;
   const open = !!mention && dismissed !== mention.start;
   const matches = useMemo(() => {
     if (!mention) return [];
     const q = mention.query.toLowerCase();
-    return elements
+    return visual
       .filter((e) => !q || e.handle.toLowerCase().includes(q) || e.name.toLowerCase().includes(q))
       .sort((a, b) => Number(b.handle.toLowerCase().startsWith(q)) - Number(a.handle.toLowerCase().startsWith(q)))
       .slice(0, 8);
-  }, [mention, elements]);
+  }, [mention, visual]);
 
   const syncCaret = () => setCaret(ta.current?.selectionStart ?? null);
 
@@ -200,7 +202,7 @@ export const PromptInput = forwardRef<
           })}
           {!matches.length && (
             <p className="px-2 py-3 text-[13px] text-muted-foreground">
-              {elements.length ? "No element with that name." : "No elements yet. Save a character, location or prop once, then @mention it anywhere."}
+              {visual.length ? "No element with that name." : "No elements yet. Save a character, location or prop once, then @mention it anywhere."}
             </p>
           )}
           <Link href="/elements?new=1" className="mt-1 flex items-center gap-2 rounded-lg border-t px-2 py-2 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground">

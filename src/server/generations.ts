@@ -262,6 +262,7 @@ async function submit(
       mask: await prepMask(req.inputs?.mask),
       video: await prep(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
+      voiceAudio: await prep(req.inputs?.voiceAudio),
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,

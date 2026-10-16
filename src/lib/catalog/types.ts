@@ -37,7 +37,10 @@ export type Operation =
   | "extend" // video → the same clip, continued
   | "grade" // colour grade, rendered in the browser
   | "reframe" // video → same video at a new aspect ratio (AI-filled edges)
-  | "finalize"; // draft video → full-quality render of the same take
+  | "finalize" // draft video → full-quality render of the same take
+  | "dialogue" // several speakers → one audio track
+  | "voice-change" // speech audio → the same speech in another voice
+  | "dub"; // video (or audio) → translated, re-voiced and lip-synced
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -65,6 +68,9 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   grade: "Color grade",
   reframe: "Reframe",
   finalize: "Final render",
+  dialogue: "Dialogue",
+  "voice-change": "Voice change",
+  dub: "Translate & dub",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -93,6 +99,9 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   grade: "image",
   reframe: "video",
   finalize: "video",
+  dialogue: "audio",
+  "voice-change": "audio",
+  dub: "video",
 };
 
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
@@ -140,6 +149,14 @@ export interface FieldMap {
   seedRange?: [number, number];
   /** Boolean field, or an on/off enum such as Kling's `sound: "on" | "off"`. */
   generateAudio?: string | { key: string; on: unknown; off: unknown };
+  /** Premade voice name / id (ElevenLabs `voice`). Dotted keys write nested fields. */
+  voice?: string;
+  /** Reference clip to clone a voice from (zero-shot TTS) or to convert into (voice change). */
+  voiceAudio?: string;
+  /** Multi-speaker lines: an array of {text, voice}. */
+  dialogue?: { key: string; text: string; voice: string };
+  /** Language to translate into (dubbing). */
+  targetLanguage?: string;
   /** Native multi-shot: an array of {prompt, duration} (Kling's `multi_prompt`). */
   multiShot?: { key: string; durationType: "string" | "number"; json?: boolean; shotType?: string; flag?: string };
   /** Boolean draft switch (Seedance 2.5 renders a cheap 480p take and returns a draft id). */
@@ -181,6 +198,14 @@ export interface ModelOptions {
   draft?: boolean;
   /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
   presets?: { source: string; param: string; label: string; required?: boolean };
+  /** Premade voices the model offers (shown in the voice picker). */
+  voices?: { id: string; name: string; hint?: string }[];
+  /** Takes a reference recording to clone a voice from. */
+  voiceClone?: boolean;
+  /** Languages it can translate into. */
+  languages?: string[];
+  /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
+  sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
   /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
   controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
 }
@@ -202,7 +227,7 @@ export interface ModelDef {
   badges?: Badge[];
   routes: ModelRoute[];
   options: ModelOptions;
-  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio">>;
+  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice">>;
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
@@ -219,6 +244,12 @@ export interface GenParams {
   seed?: number;
   generateAudio?: boolean;
   enhancePrompt?: boolean;
+  /** Premade voice (TTS, voice change). */
+  voice?: string;
+  /** Dialogue lines, each with its own voice. */
+  dialogue?: { text: string; voice?: string }[];
+  /** Dubbing target language. */
+  targetLanguage?: string;
   /** Multi-shot: shots in order (empty/undefined = one shot). "auto" lets the model cut by itself. */
   shots?: { prompt: string; duration: number }[];
   multiShot?: "auto";
@@ -256,6 +287,8 @@ export interface GenerationRequest {
     sketch?: string;
     video?: string;
     audio?: string;
+    /** Reference recording of the voice to speak with / convert into. */
+    voiceAudio?: string;
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
@@ -273,6 +306,7 @@ export interface GenInput extends GenParams {
   mask?: string;
   video?: string;
   audio?: string;
+  voiceAudio?: string;
   loras?: LoraRef[];
 }
 
@@ -315,7 +349,7 @@ export interface Generation {
 
 /** Input slot a preset asks the user for. */
 export interface InputSlot {
-  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch";
+  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch" | "voiceAudio";
   label: string;
   hint?: string;
   accept: MediaKind;

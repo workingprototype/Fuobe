@@ -5,6 +5,14 @@ function enumValue(field: string | EnumField, value: string): [string, unknown] 
   return [field.key, field.values && value in field.values ? field.values[value] : value];
 }
 
+/** Write `a.b.c` as nested objects (MiniMax's voice_setting.voice_id etc.). */
+function setPath(out: Record<string, unknown>, key: string, value: unknown) {
+  const parts = key.split(".");
+  let o = out;
+  for (const k of parts.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
+  o[parts[parts.length - 1]] = value;
+}
+
 /** Build a provider payload from canonical input using a route's {@link FieldMap}. Pure + unit-tested. */
 export function buildPayload(map: FieldMap, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -58,6 +66,14 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     if (ms.flag) out[ms.flag] = true;
   }
   if (map.draft && input.draft) out[map.draft] = true;
+  // Voices, dialogue and dubbing.
+  if (map.voice && input.voice) setPath(out, map.voice, input.voice);
+  if (map.voiceAudio && input.voiceAudio) out[map.voiceAudio] = input.voiceAudio;
+  if (map.dialogue && input.dialogue?.length) {
+    const d = map.dialogue;
+    out[d.key] = input.dialogue.map((l) => ({ [d.text]: l.text, [d.voice]: l.voice ?? input.voice }));
+  }
+  if (map.targetLanguage && input.targetLanguage) out[map.targetLanguage] = input.targetLanguage;
   if (map.draftId && input.draftId) out[map.draftId] = input.draftId;
 
   Object.assign(out, map.fixed ?? {});

@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { createElement, listElements } from "@/server/elements";
 
-const Kind = z.enum(["character", "location", "prop", "style"]);
+const Kind = z.enum(["character", "location", "prop", "style", "voice"]);
 
 const Body = z.object({
   name: z.string().trim().min(1).max(60),

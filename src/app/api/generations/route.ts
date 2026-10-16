@@ -17,6 +17,7 @@ const RequestSchema = z.object({
       sketch: z.string().optional(),
       video: z.string().optional(),
       audio: z.string().optional(),
+      voiceAudio: z.string().optional(),
     })
     .optional(),
   params: z
@@ -32,6 +33,9 @@ const RequestSchema = z.object({
       multiShot: z.literal("auto").optional(),
       draft: z.boolean().optional(),
       draftId: z.string().max(8192).optional(),
+      voice: z.string().max(200).optional(),
+      dialogue: z.array(z.object({ text: z.string().max(5000), voice: z.string().max(200).optional() })).max(200).optional(),
+      targetLanguage: z.string().max(80).optional(),
       extra: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),

@@ -86,6 +86,12 @@ export interface Plan {
   perJobOutputs: number;
 }
 
+/** Operations that work from their inputs alone. */
+const PROMPTLESS = new Set<Operation>([
+  "finalize", "reframe", "dialogue", "voice-change", "dub", "upscale-image", "upscale-video", "bg-remove",
+  "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
+]);
+
 export function planGeneration(
   req: GenerationRequest,
   getModel: (id: string) => ModelDef | undefined,
@@ -139,7 +145,13 @@ export function planGeneration(
     throw new Error(`${model.name} can't do ${op} — try another model`);
   }
   if (op === "finalize" && !params.draftId) throw new Error("Pick a draft to finish");
-  if (!prompt && op !== "finalize" && op !== "reframe" && op !== "upscale-image" && op !== "upscale-video" && op !== "bg-remove" && op !== "interpolate" && op !== "v2a" && op !== "face-swap" && op !== "motion-transfer" && op !== "lipsync" && op !== "avatar") {
+  if (op === "dialogue" && !params.dialogue?.some((l) => l.text.trim())) throw new Error("Write at least one line");
+  if (op === "dub" && !params.targetLanguage) throw new Error("Pick a language to translate into");
+  if ((op === "tts" || op === "voice-change") && model.options.voiceClone && !model.options.voices?.length && !req.inputs?.voiceAudio) {
+    throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
+  }
+  if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
+  if (!prompt && !PROMPTLESS.has(op)) {
     throw new Error("Write a prompt first");
   }
 
@@ -174,6 +186,7 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio
   interpolate: { video: true, msg: "Add a video" },
   extend: { video: true, msg: "Add the video to continue" },
   reframe: { video: true, msg: "Add a video to reframe" },
+  "voice-change": { audio: true, msg: "Add the recording to re-voice" },
 };
 
 /** Human message for the first missing input of an operation, or null. */

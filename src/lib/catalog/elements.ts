@@ -5,13 +5,14 @@
  */
 import type { Engine, GenerationRequest, LoraRef, ModelDef, Operation } from "./types";
 
-export type ElementKind = "character" | "location" | "prop" | "style";
+export type ElementKind = "character" | "location" | "prop" | "style" | "voice";
 
 export const ELEMENT_KINDS: { kind: ElementKind; label: string; plural: string; noun: string; refs: number }[] = [
   { kind: "character", label: "Character", plural: "Characters", noun: "the person", refs: 3 },
   { kind: "location", label: "Location", plural: "Locations", noun: "the location", refs: 2 },
   { kind: "prop", label: "Prop", plural: "Props", noun: "the object", refs: 1 },
   { kind: "style", label: "Style", plural: "Styles", noun: "the visual style", refs: 2 },
+  { kind: "voice", label: "Voice", plural: "Voices", noun: "the voice", refs: 0 },
 ];
 
 export const elementKindInfo = (k: ElementKind) => ELEMENT_KINDS.find((x) => x.kind === k) ?? ELEMENT_KINDS[0];
@@ -92,7 +93,9 @@ const ops = (m: ModelDef) => new Set(m.routes.map((r) => r.op));
 export function applyMentions(req: GenerationRequest, model: ModelDef, elements: StudioElement[]): MentionResolution {
   // Shots (multi-shot) can mention elements too.
   const shots = req.params?.shots;
-  const mentioned = findMentions([req.prompt ?? "", ...(shots ?? []).map((s) => s.prompt)].join("\n"), elements);
+  // Voices are picked in the voice menu, not mentioned in visual prompts.
+  const visual = elements.filter((e) => e.kind !== "voice");
+  const mentioned = findMentions([req.prompt ?? "", ...(shots ?? []).map((s) => s.prompt)].join("\n"), visual);
   if (!mentioned.length) return { request: req, mentioned, notes: [] };
 
   const notes: string[] = [];
