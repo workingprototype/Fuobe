@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, AudioLines, Check, Copy, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { AtSign, AudioLines, Check, Copy, GraduationCap, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
@@ -17,6 +17,7 @@ import { StudioPage } from "@/components/studio/studio-page";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ELEMENT_ICONS } from "@/components/studio/prompt-input";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
+import { TrainDialog } from "@/components/train-dialog";
 import type { StudioConfig } from "@/components/studio/studio-context";
 import { useDeleteElement, useElement, useElements, useSaveElement } from "@/lib/api";
 import { ELEMENT_KINDS, elementKindInfo, handleFor, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
@@ -267,6 +268,12 @@ function ElementCard({ el }: { el: StudioElement }) {
           </div>
         </Link>
       )}
+      {(el.loras.length > 0 || el.status === "training") && (
+        <span className="pointer-events-none absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-background/90 px-2 py-0.5 text-[11px] font-medium text-success shadow-soft backdrop-blur">
+          {el.status === "training" ? <Loader2 className="size-3 animate-spin" /> : <GraduationCap className="size-3" />}
+          {el.status === "training" ? "Training" : "Trained"}
+        </span>
+      )}
       <div className="flex items-start justify-between gap-2 p-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{el.name}</p>
@@ -370,6 +377,7 @@ export function ElementsView() {
 export function ElementStudio({ id }: { id: string }) {
   const q = useElement(id);
   const [editing, setEditing] = useState(false);
+  const [training, setTraining] = useState(false);
   const el = q.data;
   const config = useMemo<StudioConfig | null>(() => {
     if (!el) return null;
@@ -412,12 +420,21 @@ export function ElementStudio({ id }: { id: string }) {
         config={config}
         initialPrompt={`@${el.handle} `}
         header={
-          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-            <Pencil /> Edit
-          </Button>
+          <>
+            {el.kind !== "voice" && (
+              <Button variant={el.loras.length ? "ghost" : "secondary"} size="sm" onClick={() => setTraining(true)}>
+                {el.status === "training" ? <Loader2 className="animate-spin" /> : <GraduationCap />}
+                {el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+              <Pencil /> Edit
+            </Button>
+          </>
         }
       />
       <ElementDialog open={editing} onOpenChange={setEditing} element={el} />
+      <TrainDialog open={training} onOpenChange={setTraining} element={el} />
     </>
   );
 }

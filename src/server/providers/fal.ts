@@ -19,7 +19,7 @@ function key(): string {
   return getSetting("falKey");
 }
 
-async function falFetch(url: string, init: RequestInit = {}): Promise<unknown> {
+export async function falFetch(url: string, init: RequestInit = {}): Promise<unknown> {
   const res = await fetch(url, {
     ...init,
     headers: { Authorization: `Key ${key()}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
@@ -59,7 +59,11 @@ export const falProvider: ProviderAdapter = {
 
   async submit({ route, input }) {
     const payload = buildPayload(route.map ?? {}, input);
-    const res = (await falFetch(`${QUEUE}/${route.endpoint}`, {
+    // Trained identities (fal LoRA URLs) switch to the model's LoRA endpoint.
+    const loras = (input.loras ?? []).filter((l) => l.url);
+    const endpoint = loras.length && route.loraEndpoint ? route.loraEndpoint : route.endpoint;
+    if (endpoint !== route.endpoint) payload.loras = loras.map((l) => ({ path: l.url, scale: l.strength ?? 1 }));
+    const res = (await falFetch(`${QUEUE}/${endpoint}`, {
       method: "POST",
       body: JSON.stringify(payload),
     })) as { request_id: string; status_url: string; response_url: string; cancel_url: string };

@@ -17,6 +17,7 @@ import {
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
+import { pollTrainings } from "./training";
 import { enhancePrompt } from "./enhance";
 import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
@@ -314,7 +315,10 @@ async function tick(): Promise<void> {
     const active = db()
       .prepare("SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY created_at ASC LIMIT 50")
       .all() as Row[];
-    await Promise.all(active.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Poll error: ${(e as Error).message}` }))));
+    await Promise.all([
+      ...active.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Poll error: ${(e as Error).message}` }))),
+      pollTrainings().catch(() => {}),
+    ]);
   } finally {
     state.busy = false;
   }

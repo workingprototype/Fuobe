@@ -65,6 +65,25 @@ const MIGRATIONS: string[] = [
   `ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'character';
   ALTER TABLE characters ADD COLUMN handle TEXT;
   ALTER TABLE characters ADD COLUMN loras_json TEXT;`,
+  // Identity training jobs (Soul ID, fal LoRA trainers, AI-Toolkit).
+  `CREATE TABLE IF NOT EXISTS trainings (
+    id TEXT PRIMARY KEY,
+    element_id TEXT NOT NULL,
+    target TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress REAL,
+    message TEXT,
+    external_id TEXT,
+    meta_json TEXT,
+    trigger_word TEXT,
+    error TEXT,
+    cost_usd REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS trainings_element ON trainings(element_id);`,
 ];
 
 declare global {

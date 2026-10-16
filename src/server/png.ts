@@ -90,7 +90,7 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
-function crc32(b: Buffer): number {
+export function crc32(b: Buffer): number {
   let c = 0xffffffff;
   for (const x of b) c = CRC_TABLE[(c ^ x) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;

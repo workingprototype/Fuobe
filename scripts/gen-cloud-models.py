@@ -121,7 +121,7 @@ model("wan-2-7-image", "Wan 2.7 Image", "Alibaba Wan", "wan", "image",
       [("t2i", "fal-ai/wan/v2.7/pro/text-to-image"), ("edit", "fal-ai/wan/v2.7/pro/edit")], defaults={"aspectRatio": "16:9"})
 model("z-image-turbo-cloud", "Z-Image Turbo (hosted)", "Alibaba Tongyi", "z-image", "image",
       "Sub-second photoreal images",
-      [("t2i", "fal-ai/z-image/turbo")], badges=["fast"], defaults={"aspectRatio": "1:1"})
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"})], badges=["fast"], defaults={"aspectRatio": "1:1"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -492,6 +492,10 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
     if ropts.get("note"):
         route["note"] = ropts["note"]
+    if ropts.get("loraEndpoint"):
+        if (provider, ropts["loraEndpoint"]) not in EPS:
+            warn(f"{m['id']}: LoRA endpoint {ropts['loraEndpoint']} not in research")
+        route["loraEndpoint"] = ropts["loraEndpoint"]
     return route, e
 
 

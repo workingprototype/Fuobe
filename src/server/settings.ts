@@ -29,6 +29,13 @@ export const SETTINGS = {
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
   comfyUrl: { key: "comfyui.url", env: "COMFYUI_URL", default: "http://127.0.0.1:8188" },
   comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
+  /** ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there. */
+  comfyLorasDir: { key: "comfyui.lorasDir", env: "COMFYUI_LORAS_DIR" },
+  /** AI-Toolkit UI (ostris/ai-toolkit, port 8675) for open-source character LoRA training. */
+  aiToolkitUrl: { key: "aitk.url", env: "AI_TOOLKIT_URL" },
+  aiToolkitToken: { key: "aitk.token", env: "AI_TOOLKIT_AUTH", secret: true },
+  /** Where AI-Toolkit can read datasets Fuobe writes (defaults to Fuobe's data folder — same machine). */
+  aiToolkitDatasetDir: { key: "aitk.datasetDir", env: "AI_TOOLKIT_DATASET_DIR" },
   /** "auto" = demo outputs only when the chosen provider is not configured. */
   demoMode: { key: "demo.mode", env: "FUOBE_DEMO_MODE", default: "auto", options: ["auto", "on", "off"] },
   enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto", options: ["auto", "anthropic", "ollama", "none"] },

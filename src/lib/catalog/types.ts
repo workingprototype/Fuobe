@@ -175,6 +175,8 @@ export interface ModelRoute {
   map?: FieldMap;
   /** Optional note shown in the UI (e.g. "uses Lightx2v 4-step LoRA"). */
   note?: string;
+  /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
+  loraEndpoint?: string;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";

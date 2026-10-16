@@ -1683,7 +1683,8 @@ export const CLOUD_MODELS: ModelDef[] = [
               "4:5": "portrait_4_3"
             }
           }
-        }
+        },
+        "loraEndpoint": "fal-ai/z-image/turbo/lora"
       }
     ],
     "options": {

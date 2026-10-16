@@ -137,6 +137,8 @@ export function useElement(id: string) {
   return useQuery({
     queryKey: ["elements", id],
     queryFn: async () => json<StudioElement>(await fetch(`/api/elements/${id}`)),
+    // Pick up the trained identity as soon as a training job finishes.
+    refetchInterval: (q) => (q.state.data?.status === "training" ? 3000 : false),
   });
 }
 
