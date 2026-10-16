@@ -113,6 +113,8 @@ export interface FieldMap {
   images?: string;
   endImage?: string;
   mask?: string;
+  /** What the mask's paint means to this API: white (default), black or transparent = change. */
+  maskFormat?: "white" | "black" | "alpha";
   video?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
@@ -210,6 +212,8 @@ export interface GenerationRequest {
     images?: string[];
     endImage?: string;
     mask?: string;
+    /** The first image with painted instructions: a red-tinted mask (inpaint) or drawn arrows/notes (draw to edit/video). */
+    sketch?: string;
     video?: string;
     audio?: string;
   };
@@ -269,7 +273,7 @@ export interface Generation {
 
 /** Input slot a preset asks the user for. */
 export interface InputSlot {
-  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask";
+  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch";
   label: string;
   hint?: string;
   accept: MediaKind;

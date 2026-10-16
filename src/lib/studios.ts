@@ -31,6 +31,7 @@ export const EDIT_STUDIO: StudioConfig = {
   feed: { kind: "image", features: ["edit"] },
   slots: [{ key: "image", label: "Image", accept: "image", required: true }],
   multiRef: { label: "Add ref", max: 6 },
+  sketch: ["mask", "draw"],
   defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
   suggestions: [
     "Make it golden hour",
@@ -38,6 +39,23 @@ export const EDIT_STUDIO: StudioConfig = {
     "Turn this into a watercolor painting",
     "Put the person from image 2 next to them, same lighting",
   ],
+};
+
+export const INPAINT_STUDIO: StudioConfig = {
+  feature: "edit",
+  title: "Inpaint",
+  hero: "Paint it, then say what goes there",
+  subtitle: "GPT Image, Ideogram and FLUX Fill take the mask directly; other edit models are shown the painted area.",
+  placeholder: "What should fill the painted area? e.g. “a vase of white tulips”",
+  kind: "image",
+  ops: ["inpaint", "edit"],
+  feed: { kind: "image", features: ["edit"] },
+  slots: [{ key: "image", label: "Image", accept: "image", required: true }],
+  multiRef: { label: "Add ref", max: 3 },
+  sketch: ["mask"],
+  sketchAutoOpen: "mask",
+  defaultModels: { cloud: "nano-banana-pro", open: "oss-flux-fill" },
+  suggestions: ["Remove it and fill in the background", "A golden retriever sitting there", "Make the shirt navy linen", "Add sunglasses"],
 };
 
 export const VIDEO_STUDIO: StudioConfig = {
@@ -53,6 +71,7 @@ export const VIDEO_STUDIO: StudioConfig = {
     { key: "endImage", label: "End frame", accept: "image" },
   ],
   multiRef: { label: "Add ref", max: 3 },
+  sketch: ["draw"],
   presetPicker: "motion",
   defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" },
   suggestions: [

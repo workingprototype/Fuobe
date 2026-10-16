@@ -123,9 +123,9 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
-const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio?: boolean; endImage?: boolean; msg: string }>> = {
+const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio?: boolean; endImage?: boolean; mask?: boolean; msg: string }>> = {
   edit: { images: 1, msg: "Add an image to edit" },
-  inpaint: { images: 1, msg: "Add an image to inpaint" },
+  inpaint: { images: 1, mask: true, msg: "Add an image and paint the area to change" },
   outpaint: { images: 1, msg: "Add an image to extend" },
   i2v: { images: 1, msg: "Add a start frame" },
   flf2v: { images: 1, endImage: true, msg: "Add a start and an end frame" },
@@ -151,6 +151,7 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   if (n.video && !i.video) return n.msg;
   if (n.audio && !i.audio) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
+  if (n.mask && !i.mask) return n.msg;
   return null;
 }
 

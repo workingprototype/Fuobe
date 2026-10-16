@@ -30,6 +30,10 @@ export interface StudioConfig {
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
   hidePrompt?: boolean;
+  /** Paint tools offered on the first image: an inpaint mask and/or freehand drawing. */
+  sketch?: ("mask" | "draw")[];
+  /** Open the editor as soon as an image is attached (Inpaint). */
+  sketchAutoOpen?: "mask" | "draw";
   /** Appended to the user prompt on submit (e.g. identity lock for characters). */
   promptSuffix?: string;
 }

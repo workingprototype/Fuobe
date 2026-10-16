@@ -14,6 +14,7 @@ const RequestSchema = z.object({
       images: z.array(z.string()).max(14).optional(),
       endImage: z.string().optional(),
       mask: z.string().optional(),
+      sketch: z.string().optional(),
       video: z.string().optional(),
       audio: z.string().optional(),
     })

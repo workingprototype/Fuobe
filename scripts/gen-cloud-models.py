@@ -404,6 +404,14 @@ for m in M:
         route, e = res
         first_e = first_e or e
         routes.append(route)
+        # Edit endpoints that take a mask also get a native inpaint route.
+        if op == "edit" and "mask" not in route["map"]:
+            inputs = e.get("inputs") or {}
+            mk = next((k for k in ("mask_url", "mask_image_url", "mask") if k in inputs and inputs[k].get("type") != "array"), None)
+            if mk:
+                # Ideogram paints black = change; OpenAI's GPT Image uses transparent = change.
+                fmt = "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
+                routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
         if len(r) > 3 and r[3] == "+flf2v":
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})

@@ -3,7 +3,7 @@
 import { AtSign, Check, Copy, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { PageShell } from "@/components/page-shell";
@@ -83,33 +83,29 @@ function PhotoGrid({ photos, setPhotos }: { photos: SlotValue[]; setPhotos: Reac
   );
 }
 
-/** Create or edit an element. */
-export function ElementDialog({
-  open,
-  onOpenChange,
-  element,
-  defaultKind = "character",
-  onSaved,
-}: {
+interface ElementDialogProps {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   element?: StudioElement;
   defaultKind?: ElementKind;
   onSaved?: (el: StudioElement) => void;
-}) {
+}
+
+/** Create or edit an element. */
+export function ElementDialog(props: ElementDialogProps) {
+  return (
+    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+      <DialogContent className="sm:max-w-[560px]">{props.open && <ElementForm {...props} />}</DialogContent>
+    </Dialog>
+  );
+}
+
+function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved }: ElementDialogProps) {
   const save = useSaveElement();
   const [kind, setKind] = useState<ElementKind>(element?.kind ?? defaultKind);
   const [name, setName] = useState(element?.name ?? "");
   const [description, setDescription] = useState(element?.description ?? "");
   const [photos, setPhotos] = useState<SlotValue[]>(() => (element?.references ?? []).map((r) => ({ id: nanoid(6), ref: r, preview: r, kind: "image" })));
-
-  useEffect(() => {
-    if (!open) return;
-    setKind(element?.kind ?? defaultKind);
-    setName(element?.name ?? "");
-    setDescription(element?.description ?? "");
-    setPhotos((element?.references ?? []).map((r) => ({ id: nanoid(6), ref: r, preview: r, kind: "image" })));
-  }, [open, element, defaultKind]);
 
   const uploading = photos.some((p) => p.uploading);
   const refs = photos.filter((p) => p.ref).map((p) => p.ref);
@@ -129,62 +125,68 @@ export function ElementDialog({
     );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px]">
-        <DialogHeader>
-          <DialogTitle>{element ? `Edit ${element.name}` : "New element"}</DialogTitle>
-          <DialogDescription>Save it once, then type @ in any image or video prompt to put it in the shot.</DialogDescription>
-        </DialogHeader>
-        {!element && (
-          <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted p-1">
-            {ELEMENT_KINDS.map((k) => {
-              const Icon = ELEMENT_ICONS[k.kind];
-              return (
-                <button
-                  key={k.kind}
-                  onClick={() => setKind(k.kind)}
-                  className={cn(
-                    "flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-[12px] font-medium text-muted-foreground transition",
-                    kind === k.kind && "bg-background text-foreground shadow-soft",
-                  )}
-                >
-                  <Icon className="size-4" />
-                  {k.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={kind === "character" ? "Name, e.g. Maya" : kind === "location" ? "Name, e.g. Rooftop bar" : kind === "prop" ? "Name, e.g. Red sneaker" : "Name, e.g. Film noir"}
-            autoFocus
-          />
-          <p className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
-            <AtSign className="size-3" />
-            {name.trim() ? handleFor(name) : "handle"} <span className="text-subtle-foreground">— how you mention it in prompts</span>
-          </p>
+    <>
+      <DialogHeader>
+        <DialogTitle>{element ? `Edit ${element.name}` : "New element"}</DialogTitle>
+        <DialogDescription>Save it once, then type @ in any image or video prompt to put it in the shot.</DialogDescription>
+      </DialogHeader>
+      {!element && (
+        <div className="grid grid-cols-4 gap-1 rounded-xl bg-muted p-1">
+          {ELEMENT_KINDS.map((k) => {
+            const Icon = ELEMENT_ICONS[k.kind];
+            return (
+              <button
+                key={k.kind}
+                onClick={() => setKind(k.kind)}
+                className={cn(
+                  "flex h-14 flex-col items-center justify-center gap-1 rounded-lg text-[12px] font-medium text-muted-foreground transition",
+                  kind === k.kind && "bg-background text-foreground shadow-soft",
+                )}
+              >
+                <Icon className="size-4" />
+                {k.label}
+              </button>
+            );
+          })}
         </div>
-        <Textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          placeholder="Short description (optional) — used when a model can't take photos, e.g. “woman in her 30s, short copper hair, freckles”"
-          className="resize-none text-sm"
+      )}
+      <div className="space-y-1.5">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={
+            kind === "character"
+              ? "Name, e.g. Maya"
+              : kind === "location"
+                ? "Name, e.g. Rooftop bar"
+                : kind === "prop"
+                  ? "Name, e.g. Red sneaker"
+                  : "Name, e.g. Film noir"
+          }
+          autoFocus
         />
-        <div className="space-y-2">
-          <p className="text-[12px] text-muted-foreground">{TIPS[kind]}</p>
-          <PhotoGrid photos={photos} setPhotos={setPhotos} />
-        </div>
-        <DialogFooter>
-          <Button disabled={!canSave} onClick={submit}>
-            {save.isPending && <Loader2 className="animate-spin" />} {element ? "Save" : `Create ${elementKindInfo(kind).label.toLowerCase()}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <p className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
+          <AtSign className="size-3" />
+          {name.trim() ? handleFor(name) : "handle"} <span className="text-subtle-foreground">— how you mention it in prompts</span>
+        </p>
+      </div>
+      <Textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+        placeholder="Short description (optional) — used when a model can't take photos, e.g. “woman in her 30s, short copper hair, freckles”"
+        className="resize-none text-sm"
+      />
+      <div className="space-y-2">
+        <p className="text-[12px] text-muted-foreground">{TIPS[kind]}</p>
+        <PhotoGrid photos={photos} setPhotos={setPhotos} />
+      </div>
+      <DialogFooter>
+        <Button disabled={!canSave} onClick={submit}>
+          {save.isPending && <Loader2 className="animate-spin" />} {element ? "Save" : `Create ${elementKindInfo(kind).label.toLowerCase()}`}
+        </Button>
+      </DialogFooter>
+    </>
   );
 }
 
@@ -344,7 +346,14 @@ export function ElementStudio({ id }: { id: string }) {
     return {
       feature: `element:${el.id}`,
       title: el.name,
-      hero: el.kind === "character" ? `Where should ${el.name} go next?` : el.kind === "location" ? `What happens at ${el.name}?` : el.kind === "prop" ? `Where should ${el.name} show up?` : `What should look like ${el.name}?`,
+      hero:
+        el.kind === "character"
+          ? `Where should ${el.name} go next?`
+          : el.kind === "location"
+            ? `What happens at ${el.name}?`
+            : el.kind === "prop"
+              ? `Where should ${el.name} show up?`
+              : `What should look like ${el.name}?`,
       subtitle: `Mention @${el.handle} in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`,
       placeholder: `Describe a scene with @${el.handle}…`,
       kind: "image",
@@ -355,8 +364,18 @@ export function ElementStudio({ id }: { id: string }) {
       defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
     };
   }, [el]);
-  if (q.isError) return <PageShell><p className="text-muted-foreground">Element not found.</p></PageShell>;
-  if (!config || !el) return <PageShell><Loader2 className="size-5 animate-spin text-muted-foreground" /></PageShell>;
+  if (q.isError)
+    return (
+      <PageShell>
+        <p className="text-muted-foreground">Element not found.</p>
+      </PageShell>
+    );
+  if (!config || !el)
+    return (
+      <PageShell>
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </PageShell>
+    );
   return (
     <>
       <StudioPage

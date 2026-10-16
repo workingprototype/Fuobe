@@ -28,12 +28,14 @@ import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, type GenerationRequest, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
 import { enhance, useCreateGeneration, useElements, useEngine, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
+import { applySketch } from "@/lib/catalog/sketch";
 import { formatCost, ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { fileToSlot, MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
+import { SketchTools } from "./sketch-tools";
 import { useStudio } from "./studio-context";
 import { nanoid } from "nanoid";
 
@@ -242,6 +244,7 @@ function buildRequest(
       images: images.length ? images : undefined,
       endImage: s.endImage?.ref || undefined,
       mask: s.mask?.ref || undefined,
+      sketch: s.sketch?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
     },
@@ -275,7 +278,9 @@ export function Composer({ docked }: { docked: boolean }) {
 
   const rawRequest = buildRequest(config.feature, draft, undefined, config.promptSuffix);
   const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
-  const request = mentions.request;
+  const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
+  const request = sketched.request;
+  const resolvesOnServer = mentions.mentioned.length > 0 || !!draft.slots.mask?.ref || !!draft.slots.sketch?.ref;
   let op: Operation | undefined;
   let blocker: string | null = null;
   let cost: number | null = null;
@@ -303,8 +308,8 @@ export function Composer({ docked }: { docked: boolean }) {
       if (blocker) toast(blocker);
       return;
     }
-    // The server resolves @mentions itself; only pin the operation when nothing was mentioned.
-    create.mutate(buildRequest(config.feature, draft, mentions.mentioned.length ? undefined : op, config.promptSuffix), {
+    // The server resolves @mentions and drawings itself; only pin the operation when there are none.
+    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? undefined : op, config.promptSuffix), {
       onSuccess: (items) => {
         toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
       },
@@ -362,9 +367,16 @@ export function Composer({ docked }: { docked: boolean }) {
               kind={s.accept}
               required={s.required}
               value={draft.slots[s.key] ?? null}
-              onChange={(v) => setSlot(s.key, v)}
+              onChange={(v) => {
+                setSlot(s.key, v);
+                // A drawing belongs to the image it was made on.
+                if (s.key === "image") setDraft((d) => ({ slots: { ...d.slots, mask: null, sketch: null } }));
+              }}
             />
           ))}
+          {config.sketch && draft.slots.image?.ref && !draft.slots.image.uploading && (
+            <SketchTools modes={config.sketch} image={draft.slots.image.ref} autoOpen={config.sketchAutoOpen} />
+          )}
           {config.multiRef &&
             draft.refs.map((r) => (
               <div key={r.id ?? r.ref} className="relative size-14 shrink-0 overflow-hidden rounded-xl border bg-muted">
@@ -638,6 +650,7 @@ export function Composer({ docked }: { docked: boolean }) {
           </TooltipContent>
         </Tooltip>
       </div>
+      {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
       {model && op && model.options.endFrame === undefined && draft.slots.endImage?.ref && (
         <p className="px-2 pt-1 text-[12px] text-warning">{model.name} ignores the end frame — pick Kling 2.5, Veo 3.1, Seedance or Wan 2.2 to use it.</p>
       )}

@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
   AtSign,
+  Brush,
   AudioLines,
   Boxes,
   Clapperboard,
@@ -55,6 +56,7 @@ const NAV = [
       { href: "/image", label: "Image", icon: ImageIcon },
       { href: "/video", label: "Video", icon: Video },
       { href: "/edit", label: "Edit", icon: Wand2 },
+      { href: "/inpaint", label: "Inpaint", icon: Brush },
       { href: "/motions", label: "Camera motions", icon: Film },
       { href: "/effects", label: "Effects", icon: Sparkles },
       { href: "/apps", label: "Apps", icon: LayoutGrid },

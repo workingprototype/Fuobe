@@ -631,6 +631,33 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "resolution": "quality"
         }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2.5/flare/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
+        }
       }
     ],
     "options": {
@@ -721,6 +748,33 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "resolution": "quality"
         }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2.5/sunburst/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
+        }
       }
     ],
     "options": {
@@ -807,6 +861,33 @@ export const CLOUD_MODELS: ModelDef[] = [
             }
           },
           "resolution": "quality"
+        }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
         }
       }
     ],
@@ -898,6 +979,36 @@ export const CLOUD_MODELS: ModelDef[] = [
           "fixed": {
             "quality": "high"
           }
+        }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "fal-ai/gpt-image-1.5/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "fixed": {
+            "quality": "high"
+          },
+          "mask": "mask_image_url",
+          "maskFormat": "alpha"
         }
       }
     ],
@@ -1189,6 +1300,35 @@ export const CLOUD_MODELS: ModelDef[] = [
             }
           },
           "resolution": "quality"
+        }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "ideogram/v4.5/edit",
+        "map": {
+          "image": "image_url",
+          "images": "reference_image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "black"
         }
       }
     ],

@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { applySketch } from "@/lib/catalog/sketch";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   OPERATION_OUTPUT,
@@ -19,6 +20,7 @@ import { listElements } from "./elements";
 import { enhancePrompt } from "./enhance";
 import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
+import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { contentTypeFor, readRef, saveFile } from "./storage";
 
@@ -165,7 +167,7 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 export function createGenerations(original: GenerationRequest): Generation[] {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   const model = getModel(original.modelId);
-  const req = model ? applyMentions(original, model, listElements()).request : original;
+  const req = model ? applySketch(applyMentions(original, model, listElements()).request, model).request : original;
   const plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {
@@ -238,6 +240,13 @@ async function submit(
       const f = await readRef(ref);
       return adapter.prepareFile(f.data, f.contentType, f.name);
     };
+    const prepMask = async (ref?: string) => {
+      if (!ref) return undefined;
+      const f = await readRef(ref);
+      const fmt = route.map?.maskFormat;
+      const data = fmt && fmt !== "white" && f.contentType === "image/png" ? convertMask(f.data, fmt) : f.data;
+      return adapter.prepareFile(data, f.contentType, f.name);
+    };
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {
       update(id, { message: "Enhancing prompt" });
@@ -250,7 +259,7 @@ async function submit(
       negativePrompt: req.negativePrompt,
       images: (await Promise.all((req.inputs?.images ?? []).map(prep))).filter(Boolean) as string[],
       endImage: await prep(req.inputs?.endImage),
-      mask: await prep(req.inputs?.mask),
+      mask: await prepMask(req.inputs?.mask),
       video: await prep(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
       loras: plan.loras,

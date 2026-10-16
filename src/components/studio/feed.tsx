@@ -37,7 +37,7 @@ import { Viewer } from "./viewer";
 
 export function downloadName(g: Generation, o: OutputFile, i: number): string {
   const ext = o.url.split(".").pop()?.split("?")[0] ?? "bin";
-  const base = (g.prompt ?? g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
+  const base = (g.request.prompt || g.prompt || g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
   return `${base}-${g.id.slice(0, 6)}${i ? `-${i + 1}` : ""}.${ext}`;
 }
 
@@ -186,7 +186,7 @@ export function GenerationGroup({
       <header className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 font-heading text-[19px] leading-snug" title={g.prompt ?? undefined}>
-            {(preset ? g.request.prompt?.trim() : g.prompt) || preset?.name || "Untitled"}
+            {g.request.prompt?.trim() || preset?.name || g.prompt || "Untitled"}
           </h3>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
