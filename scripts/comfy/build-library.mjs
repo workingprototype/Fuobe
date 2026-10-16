@@ -44,6 +44,7 @@ export const LOADER_FOLDERS = {
   ModelPatchLoader: { name: 'model_patches' },
   LatentUpscaleModelLoader: { model_name: 'latent_upscale_models' },
   LoadBackgroundRemovalModel: { bg_removal_name: 'background_removal' },
+  LoadDA3Model: { model_name: 'geometry_estimation' },
   FrameInterpolationModelLoader: { model_name: 'frame_interpolation' },
   LTXAVTextEncoderLoader: { text_encoder: 'text_encoders', ckpt_name: 'checkpoints' },
   LTXVAudioVAELoader: { ckpt_name: 'checkpoints' },
@@ -65,6 +66,7 @@ const MODEL_EXT = /\.(safetensors|sft|gguf|ckpt|pt|pth|bin|onnx)$/i;
 const NUMERIC_DEFAULT_KEYS = [
   'width', 'height', 'frames', 'fps', 'steps', 'cfg', 'guidance', 'denoise', 'shift', 'scale', 'duration',
   'loraStrength', 'multiplier', 'bpm', 'padLeft', 'padTop', 'padRight', 'padBottom', 'cameraMotion',
+  'contextFrames', 'exaggeration', 'temperature', 'motionStrength', 'strength',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -72,6 +74,9 @@ export const BINDING_KEYS = new Set([
   'loraHigh', 'loraLow', 'lora', 'loraStrength', 'upscaleModel', 'scale', 'duration', 'lyrics', 'tags',
   // library extensions
   'padLeft', 'padTop', 'padRight', 'padBottom', 'cameraMotion', 'multiplier', 'bpm', 'filenamePrefix',
+  // comfyui-oss-2 additions (see library.spec.mjs header)
+  'audio2', 'video2', 'video3', 'video4', 'language', 'exaggeration', 'temperature', 'contextFrames', 'tracks',
+  'motionStrength', 'strength',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
@@ -297,6 +302,7 @@ async function main() {
       models: [...models.values()],
       customNodes,
       vramGb: spec.vramGb,
+      ...(spec.license ? { license: spec.license } : {}),
       validated,
       notes: spec.notes || '',
     };
@@ -324,6 +330,7 @@ async function main() {
     workflows: entries,
   };
   writeJson(path.join(OUT_DIR, 'manifest.json'), manifest);
+  fs.mkdirSync(path.dirname(SIZE_CACHE), { recursive: true });
   writeJson(SIZE_CACHE, sizeCache);
   if (errors.length) {
     console.error(`\n${errors.length} problem(s):\n  ${errors.join('\n  ')}`);

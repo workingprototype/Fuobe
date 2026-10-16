@@ -1,0 +1,485 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input_video.mp4"
+    },
+    "_meta": {
+      "title": "Source clip"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "3": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 640,
+      "height": 640,
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "Resize source"
+    }
+  },
+  "4": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "3",
+        0
+      ],
+      "batch_index": [
+        "33",
+        1
+      ],
+      "length": [
+        "31",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Last contextFrames frames"
+    }
+  },
+  "5": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": 640,
+      "height": 640,
+      "batch_size": [
+        "30",
+        0
+      ],
+      "color": 8355711
+    },
+    "_meta": {
+      "title": "Gray fill (frames to generate)"
+    }
+  },
+  "6": {
+    "class_type": "BatchImagesNode",
+    "inputs": {
+      "images.image0": [
+        "4",
+        0
+      ],
+      "images.image1": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Control video"
+    }
+  },
+  "7": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": 640,
+      "height": 640,
+      "batch_size": [
+        "31",
+        0
+      ],
+      "color": 0
+    },
+    "_meta": {
+      "title": "Mask 0 = keep"
+    }
+  },
+  "8": {
+    "class_type": "EmptyImage",
+    "inputs": {
+      "width": 640,
+      "height": 640,
+      "batch_size": [
+        "30",
+        0
+      ],
+      "color": 16777215
+    },
+    "_meta": {
+      "title": "Mask 1 = generate"
+    }
+  },
+  "9": {
+    "class_type": "BatchImagesNode",
+    "inputs": {
+      "images.image0": [
+        "7",
+        0
+      ],
+      "images.image1": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Mask frames"
+    }
+  },
+  "10": {
+    "class_type": "ImageToMask",
+    "inputs": {
+      "image": [
+        "9",
+        0
+      ],
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Control masks"
+    }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {}
+  },
+  "12": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "The camera keeps tracking the runner as she crosses the bridge at sunset.",
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "13": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "14": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {}
+  },
+  "15": {
+    "class_type": "WanVaceToVideo",
+    "inputs": {
+      "positive": [
+        "12",
+        0
+      ],
+      "negative": [
+        "13",
+        0
+      ],
+      "vae": [
+        "14",
+        0
+      ],
+      "width": 640,
+      "height": 640,
+      "length": [
+        "32",
+        1
+      ],
+      "batch_size": 1,
+      "strength": 1,
+      "control_video": [
+        "6",
+        0
+      ],
+      "control_masks": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "WanVaceToVideo"
+    }
+  },
+  "16": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Fun VACE high noise"
+    }
+  },
+  "17": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Fun VACE low noise"
+    }
+  },
+  "18": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "16",
+        0
+      ],
+      "lora_name": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {}
+  },
+  "19": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "17",
+        0
+      ],
+      "lora_name": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {}
+  },
+  "20": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "18",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {}
+  },
+  "21": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "19",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {}
+  },
+  "22": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "add_noise": "enable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "15",
+        1
+      ],
+      "latent_image": [
+        "15",
+        2
+      ],
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable"
+    },
+    "_meta": {
+      "title": "Sampler high (0-2)"
+    }
+  },
+  "23": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "21",
+        0
+      ],
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "15",
+        1
+      ],
+      "latent_image": [
+        "22",
+        0
+      ],
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    },
+    "_meta": {
+      "title": "Sampler low (2-4)"
+    }
+  },
+  "24": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "23",
+        0
+      ],
+      "trim_amount": [
+        "15",
+        3
+      ]
+    },
+    "_meta": {}
+  },
+  "25": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "24",
+        0
+      ],
+      "vae": [
+        "14",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "26": {
+    "class_type": "ImageBatchExtendWithOverlap",
+    "inputs": {
+      "source_images": [
+        "3",
+        0
+      ],
+      "overlap": [
+        "31",
+        0
+      ],
+      "overlap_side": "source",
+      "overlap_mode": "linear_blend",
+      "new_images": [
+        "25",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Append to source (overlap blend)"
+    }
+  },
+  "27": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "26",
+        2
+      ],
+      "fps": 16,
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {}
+  },
+  "28": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "27",
+        0
+      ],
+      "filename_prefix": "fuobe/video-extend-wan22-fun-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  },
+  "30": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 65
+    },
+    "_meta": {
+      "title": "New frames (4n+1)"
+    }
+  },
+  "31": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 16
+    },
+    "_meta": {
+      "title": "Context frames (multiple of 4)"
+    }
+  },
+  "32": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a + b",
+      "values.a": [
+        "30",
+        0
+      ],
+      "values.b": [
+        "31",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Window length = new + context"
+    }
+  },
+  "33": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "0 - a",
+      "values.a": [
+        "31",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "-contextFrames (tail index)"
+    }
+  }
+}

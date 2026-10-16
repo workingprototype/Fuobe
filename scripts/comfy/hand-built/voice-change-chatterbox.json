@@ -1,0 +1,78 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "source_performance.wav"
+    },
+    "_meta": {
+      "title": "Source performance"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "target_voice.wav"
+    },
+    "_meta": {
+      "title": "Target voice"
+    }
+  },
+  "3": {
+    "class_type": "FL_ChatterboxVC",
+    "inputs": {
+      "input_audio": [
+        "1",
+        0
+      ],
+      "target_voice": [
+        "2",
+        0
+      ],
+      "seed": [
+        "11",
+        1
+      ],
+      "use_cpu": false,
+      "keep_model_loaded": false
+    },
+    "_meta": {
+      "title": "Chatterbox VC"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/voice-change-chatterbox",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "Save MP3"
+    }
+  },
+  "10": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Seed (any size)"
+    }
+  },
+  "11": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a % 4294967296",
+      "values.a": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seed mod 2^32"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-16T20:57:14.649Z",
+  "generatedAt": "2026-10-16T23:35:57.312Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -102,7 +102,7 @@
       "customNodes": [],
       "vramGb": 24,
       "validated": true,
-      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) \u2014 ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
+      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) — ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
     },
     {
       "id": "flux1-krea-dev-t2i",
@@ -5425,6 +5425,1862 @@
       "notes": "kijai ComfyUI-MMAudio example. Audio duration = loaded video duration (VHS_VideoInfo). Two outputs: the input video muxed with generated audio (VHS_VideoCombine -> history .gifs[]) and the FLAC track (SaveAudio -> history .audio[]). MMAudio is trained on 8 s clips; quality drops on long inputs."
     },
     {
+      "id": "tts-chatterbox-multilingual",
+      "title": "Chatterbox Multilingual TTS (voice clone, 23 languages)",
+      "capability": "tts",
+      "file": "tts-chatterbox-multilingual.json",
+      "source": "hand-built (scripts/comfy/hand-built/tts-chatterbox-multilingual.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "2",
+            "input": "text"
+          }
+        ],
+        "audio": [
+          {
+            "node": "1",
+            "input": "audio"
+          }
+        ],
+        "language": [
+          {
+            "node": "2",
+            "input": "language"
+          }
+        ],
+        "seed": [
+          {
+            "node": "10",
+            "input": "value"
+          }
+        ],
+        "exaggeration": [
+          {
+            "node": "2",
+            "input": "exaggeration"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "2",
+            "input": "cfg_weight"
+          }
+        ],
+        "temperature": [
+          {
+            "node": "2",
+            "input": "temperature"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "3",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "3",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "cfg": 0.5,
+        "exaggeration": 0.5,
+        "temperature": 0.8,
+        "language": "English (en)"
+      },
+      "limits": {
+        "maxDurationSec": 300
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI_Fill-ChatterBox",
+          "repo": "https://github.com/filliptm/ComfyUI_Fill-ChatterBox"
+        }
+      ],
+      "vramGb": 6,
+      "license": "Chatterbox weights MIT (ResembleAI); pack repo has no LICENSE file",
+      "validated": true,
+      "notes": "Template audio-chatterbox_tts_multilingual. prompt = text to speak; audio = 5-15 s clean reference of the voice to clone (required in this graph). language is a combo of \"Name (code)\" strings: Arabic (ar), Danish (da), German (de), Greek (el), English (en), Spanish (es), Finnish (fi), French (fr), Hebrew (he), Hindi (hi), Italian (it), Japanese (ja), Korean (ko), Malay (ms), Dutch (nl), Norwegian (no), Polish (pl), Portuguese (pt), Russian (ru), Swedish (sv), Swahili (sw), Turkish (tr), Chinese (zh). cfg = cfg_weight (0-1, default 0.5; lower = slower, more deliberate pacing), exaggeration 0-2 (0.5 neutral), temperature 0.05-2 (0.8). Long text is chunked by the node. seed is folded to 32 bits in the graph (node 11, the FL nodes cap seed at 2^32-1). Output MP3 V0. Install resemble-perth so outputs carry the Perth watermark (the pack treats it as optional). Get consent for cloned voices.",
+      "autoDownloads": [
+        "FL_ChatterboxMultilingualTTS downloads ResembleAI/chatterbox (t3_mtl23ls_v2.safetensors 2.14 GB, s3gen.pt 1.06 GB, ve.pt, conds.pt, grapheme_mtl_merged_expanded_v1.json, Cangjie5_TC.json) into models/chatterbox/chatterbox_multilingual on first run"
+      ]
+    },
+    {
+      "id": "tts-indextts2",
+      "title": "IndexTTS-2 TTS (voice clone, expressive)",
+      "capability": "tts",
+      "file": "tts-indextts2.json",
+      "source": "hand-built (scripts/comfy/hand-built/tts-indextts2.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "2",
+            "input": "text"
+          }
+        ],
+        "audio": [
+          {
+            "node": "1",
+            "input": "audio"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "3",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "3",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxDurationSec": 300
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-IndexTTS2",
+          "repo": "https://github.com/snicolast/ComfyUI-IndexTTS2"
+        }
+      ],
+      "vramGb": 8,
+      "license": "bilibili IndexTTS-2 Model Use License: commercial use allowed below 100M MAU / RMB 1B annual revenue; may not be used to improve other AI models. Pack code: no LICENSE file",
+      "validated": true,
+      "notes": "IndexTTS2Simple(audio = speaker reference, text, emotion_control_weight 1.0, use_fp16 true). No seed input. Best for emotion/timing control (dubbing). Validated with the pack registered (it imports only numpy at load time); its runtime stack (pynini, WeTextProcessing, modelscope, descript-audiotools, ...) is NOT installed by default - run install-comfyui.sh with INDEXTTS_RUNTIME=1, ideally in a separate worker. Emotion from a second clip or a vector (IndexTTS2EmotionVector / IndexTTS2EmotionFromText) is not wired.",
+      "autoDownloads": [
+        "IndexTeam/IndexTTS-2 must be in custom_nodes/ComfyUI-IndexTTS2/checkpoints (gpt.pth 3.48 GB, s2mel.pth 1.2 GB, qwen0.6bemo4-merge 1.19 GB, config.yaml, bpe.model, ...); w2v-bert-2.0, MaskGCT semantic codec, CAMPPlus and BigVGAN are fetched from Hugging Face on first run"
+      ]
+    },
+    {
+      "id": "tts-dialogue-chatterbox",
+      "title": "Chatterbox Dialogue (2 speakers, voice clone)",
+      "capability": "dialogue",
+      "file": "tts-dialogue-chatterbox.json",
+      "source": "hand-built (scripts/comfy/hand-built/tts-dialogue-chatterbox.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "3",
+            "input": "dialog_text"
+          }
+        ],
+        "audio": [
+          {
+            "node": "1",
+            "input": "audio"
+          }
+        ],
+        "audio2": [
+          {
+            "node": "2",
+            "input": "audio"
+          }
+        ],
+        "seed": [
+          {
+            "node": "10",
+            "input": "value"
+          }
+        ],
+        "exaggeration": [
+          {
+            "node": "3",
+            "input": "exaggeration"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg_weight"
+          }
+        ],
+        "temperature": [
+          {
+            "node": "3",
+            "input": "temperature"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "cfg": 0.5,
+        "exaggeration": 0.5,
+        "temperature": 0.8
+      },
+      "limits": {
+        "maxDurationSec": 300
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI_Fill-ChatterBox",
+          "repo": "https://github.com/filliptm/ComfyUI_Fill-ChatterBox"
+        }
+      ],
+      "vramGb": 6,
+      "license": "Chatterbox weights MIT (ResembleAI); pack repo has no LICENSE file",
+      "validated": true,
+      "notes": "Template audio-chatterbox_tts_dialog. prompt = script, one line per turn starting with \"SPEAKER A:\" or \"SPEAKER B:\" (parsed with startswith). audio = speaker A reference, audio2 = speaker B reference. English model only. The node also outputs per-speaker stems (outputs 1-4, not saved here) that suit multi-person lipsync; speakers C/D need optional inputs speaker_C_Audio/speaker_D_Audio (not wired). cfg = cfg_weight (0.2-1), exaggeration 0.25-2, temperature 0.05-5. seed is folded to 32 bits in the graph (node 11). Output MP3 V0 of the mixed dialogue.",
+      "autoDownloads": [
+        "FL_ChatterboxDialogTTS downloads ResembleAI/chatterbox English model (t3_cfg.safetensors 2.13 GB, s3gen.safetensors 1.06 GB, ve.safetensors, tokenizer.json, conds.pt) into models/chatterbox/chatterbox on first run"
+      ]
+    },
+    {
+      "id": "voice-change-chatterbox",
+      "title": "Chatterbox Voice Changer (speech to speech)",
+      "capability": "voice-change",
+      "file": "voice-change-chatterbox.json",
+      "source": "hand-built (scripts/comfy/hand-built/voice-change-chatterbox.json)",
+      "bindings": {
+        "audio": [
+          {
+            "node": "1",
+            "input": "audio"
+          }
+        ],
+        "audio2": [
+          {
+            "node": "2",
+            "input": "audio"
+          }
+        ],
+        "seed": [
+          {
+            "node": "10",
+            "input": "value"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxDurationSec": 300
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI_Fill-ChatterBox",
+          "repo": "https://github.com/filliptm/ComfyUI_Fill-ChatterBox"
+        }
+      ],
+      "vramGb": 3,
+      "license": "Chatterbox weights MIT (ResembleAI); pack repo has no LICENSE file",
+      "validated": true,
+      "notes": "Template audio-chatterbox_vc. audio = performance to convert (timing and prosody are kept), audio2 = 5-15 s of the target voice. Zero-shot, no training. seed is folded to 32 bits in the graph (node 11). To re-voice a video: extract its audio client-side (or GetVideoComponents.audio -> FL_ChatterboxVC -> CreateVideo(audio=...)) and remux.",
+      "autoDownloads": [
+        "FL_ChatterboxVC downloads ResembleAI/chatterbox s3gen.pt (1.06 GB) + conds.pt into models/chatterbox/chatterbox_vc on first run"
+      ]
+    },
+    {
+      "id": "video-extend-wan22-fun-vace",
+      "title": "Wan 2.2 Fun VACE Video Extend (lightx2v 4-step)",
+      "capability": "extend",
+      "file": "video-extend-wan22-fun-vace.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-extend-wan22-fun-vace.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "12",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "13",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "7",
+            "input": "width"
+          },
+          {
+            "node": "8",
+            "input": "width"
+          },
+          {
+            "node": "15",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "7",
+            "input": "height"
+          },
+          {
+            "node": "8",
+            "input": "height"
+          },
+          {
+            "node": "15",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "30",
+            "input": "value"
+          }
+        ],
+        "contextFrames": [
+          {
+            "node": "31",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "27",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "22",
+            "input": "noise_seed"
+          },
+          {
+            "node": "23",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "22",
+            "input": "steps"
+          },
+          {
+            "node": "23",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "22",
+            "input": "cfg"
+          },
+          {
+            "node": "23",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "20",
+            "input": "shift"
+          },
+          {
+            "node": "21",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "28",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "28",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "frames": 65,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 5,
+        "contextFrames": 16,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 105,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "sizeGb": 1.23
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-KJNodes",
+          "repo": "https://github.com/kijai/ComfyUI-KJNodes"
+        }
+      ],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Wan 2.2 Fun VACE, Wan 2.2 lightx2v LoRAs)",
+      "validated": true,
+      "notes": "Continues a clip. frames = NEW frames to generate (4n+1, from duration*fps); contextFrames = how many of the source's last frames are fed back as known context (multiple of 4, default 16). The graph computes window = frames + contextFrames (ComfyMathExpression, must stay <= 121) and the negative tail index itself. WanVaceToVideo control: last contextFrames frames (mask 0 = keep) + gray frames (mask 1 = generate). Output = whole source clip resized/center-cropped to width x height + the new frames, overlap linear-blended (KJNodes ImageBatchExtendWithOverlap), at fps (16 = Wan native; resample the source to 16 fps first). Run repeatedly on the result to extend further. Source audio is dropped. 4 steps split 2/2 high/low (split not bound), cfg 1, shift 5. Fun VACE + T2V lightx2v LoRA pairing is inferred from the shared A14B T2V base (not GPU-tested)."
+    },
+    {
+      "id": "video-reframe-wan22-fun-vace",
+      "title": "Wan 2.2 Fun VACE Video Reframe / Outpaint",
+      "capability": "reframe",
+      "file": "video-reframe-wan22-fun-vace.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-reframe-wan22-fun-vace.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "9",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "10",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "12",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "12",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "12",
+            "input": "length"
+          }
+        ],
+        "fps": [
+          {
+            "node": "23",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "19",
+            "input": "noise_seed"
+          },
+          {
+            "node": "20",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "19",
+            "input": "steps"
+          },
+          {
+            "node": "20",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "19",
+            "input": "cfg"
+          },
+          {
+            "node": "20",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "17",
+            "input": "shift"
+          },
+          {
+            "node": "18",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "24",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "24",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1136,
+        "height": 640,
+        "frames": 81,
+        "fps": 16,
+        "steps": 4,
+        "cfg": 1,
+        "shift": 5,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+          "sizeGb": 17.35
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+          "sizeGb": 1.23
+        },
+        {
+          "file": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+          "sizeGb": 1.23
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-KJNodes",
+          "repo": "https://github.com/kijai/ComfyUI-KJNodes"
+        }
+      ],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Wan 2.2 Fun VACE, Wan 2.2 lightx2v LoRAs)",
+      "validated": true,
+      "notes": "Changes the aspect ratio of a clip and fills the new area. width/height = TARGET size (from aspectRatio); KJNodes ImageResizeKJv2 (keep_proportion=pad, center, divisible_by 16) fits the source inside it, pads with 0.5 gray and outputs mask 1 on the padding, 0 on the source (per frame) -> WanVaceToVideo control_video/control_masks (pattern of template video_wan_vace_outpainting, re-targeted to Wan 2.2 Fun VACE). frames must be <= the source frame count (4n+1): WanVaceToVideo trims the control video to frames, and pads a shorter one with gray + mask 1 (= invents frames). Only call it when the aspect ratio actually changes (no padding -> ImageResizeKJv2 returns a 64x64 placeholder mask and the whole clip would be regenerated). Clips longer than ~5-7 s: run windows and reuse the previous window's last frames (see video-extend). Source audio is dropped. 4 steps split 2/2, cfg 1, shift 5."
+    },
+    {
+      "id": "relight-qwen-edit-2509",
+      "title": "Qwen-Image-Edit 2509 Relight (prompted lighting)",
+      "capability": "edit",
+      "file": "relight-qwen-edit-2509.json",
+      "source": "hand-built (scripts/comfy/hand-built/relight-qwen-edit-2509.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "1002",
+            "input": "string_b"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4,
+        "cfg": 1,
+        "loraStrength": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "Qwen-Image-Edit-2509-Relight.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Relight.safetensors",
+          "sizeGb": 0.24
+        },
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit-2509, Relight LoRA, Lightning LoRA)",
+      "validated": true,
+      "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"重新照明,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
+    },
+    {
+      "id": "relight-qwen-edit-2509-reference",
+      "title": "Qwen-Image-Edit 2509 Relight from Reference (light migration)",
+      "capability": "edit",
+      "file": "relight-qwen-edit-2509-reference.json",
+      "source": "hand-built (scripts/comfy/hand-built/relight-qwen-edit-2509-reference.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "1002",
+            "input": "string_b"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "1003",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4,
+        "cfg": 1,
+        "loraStrength": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "Qwen-Image-Edit-2509-Light-Migration.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Light-Migration.safetensors",
+          "sizeGb": 0.24
+        },
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit-2509, Light-Migration LoRA, Lightning LoRA)",
+      "validated": true,
+      "notes": "Template templates-portrait_light_migration: image = subject, image2 = lighting reference (wired as image2 of both TextEncodeQwenImageEditPlus). Node 1002 prefixes the template instruction (\"参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明\" = remove image 1's lighting and relight it with image 2's light and tone); prompt may stay empty or add constraints. 4 steps, cfg 1."
+    },
+    {
+      "id": "video-relight-bernini-r",
+      "title": "Bernini-R Video Relight / Restyle (lightx2v 6-step)",
+      "capability": "v2v",
+      "file": "video-relight-bernini-r.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-relight-bernini-r.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "5",
+            "input": "string_b"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "7",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "8",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "8",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "8",
+            "input": "length"
+          }
+        ],
+        "seed": [
+          {
+            "node": "16",
+            "input": "noise_seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "13",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "16",
+            "input": "cfg"
+          },
+          {
+            "node": "17",
+            "input": "cfg"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "20",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "20",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 480,
+        "height": 832,
+        "frames": 81,
+        "steps": 6,
+        "cfg": 1,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 1280,
+        "maxHeight": 1280,
+        "maxFrames": 121,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "wan2.2_bernini_r_high_noise_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_high_noise_fp8_scaled.safetensors",
+          "sizeGb": 15.57
+        },
+        {
+          "file": "wan2.2_bernini_r_low_noise_fp8_scaled.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_low_noise_fp8_scaled.safetensors",
+          "sizeGb": 15.57
+        },
+        {
+          "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+          "sizeGb": 0.63
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (ByteDance Bernini-R, lightx2v)",
+      "validated": true,
+      "notes": "Official template video_bernini_r_video_editing, subgraph flattened with its turbo switch ON: lightx2v T2V v2 rank64 LoRA at 3.0 (high) / 1.5 (low), 6 steps split at 3 (SplitSigmas, not bound), cfg 1, res_multistep. Node 5 prepends the template system prompt for style/lighting/colour edits; prompt = the edit, e.g. \"Relight the scene as golden hour, warm low sun from the left; keep subject, motion and framing unchanged\". BerniniConditioning resizes/center-crops the source to width x height and trims it to frames (use the source aspect ratio and frame count, 4n+1). Output fps = source fps (linked), no audio. Also works as general prompt-driven video restyle. Turbo off (template): 40 steps split 20, cfg 5, no LoRA. Very new weights (2026-06): GPU smoke-test before exposing."
+    },
+    {
+      "id": "draw-to-video-wan-move",
+      "title": "Wan-Move Draw-to-Video (motion paths, lightx2v)",
+      "capability": "draw-to-video",
+      "file": "draw-to-video-wan-move.json",
+      "source": "hand-built (scripts/comfy/hand-built/draw-to-video-wan-move.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "tracks": [
+          {
+            "node": "3",
+            "input": "value"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "6",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "7",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "11",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "11",
+            "input": "height"
+          }
+        ],
+        "frames": [
+          {
+            "node": "11",
+            "input": "length"
+          }
+        ],
+        "motionStrength": [
+          {
+            "node": "11",
+            "input": "strength"
+          }
+        ],
+        "fps": [
+          {
+            "node": "17",
+            "input": "fps"
+          }
+        ],
+        "seed": [
+          {
+            "node": "15",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "15",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "15",
+            "input": "cfg"
+          }
+        ],
+        "shift": [
+          {
+            "node": "14",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "18",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "18",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 832,
+        "height": 480,
+        "frames": 81,
+        "fps": 16,
+        "steps": 6,
+        "cfg": 1,
+        "shift": 8,
+        "motionStrength": 1,
+        "frameStep": 4
+      },
+      "limits": {
+        "maxWidth": 832,
+        "maxHeight": 832,
+        "maxFrames": 81,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "sizeGb": 6.74
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "clip_vision_h.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+          "sizeGb": 1.26
+        },
+        {
+          "file": "Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/WanMove/Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors",
+          "sizeGb": 16.4
+        },
+        {
+          "file": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+          "sizeGb": 0.74
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Ruihang/Wan-Move-14B-480P, lightx2v)",
+      "validated": true,
+      "notes": "Official template video_wanmove_480p (turbo path). image = start frame (resized/center-cropped to width x height). tracks = JSON string: a list of tracks, each a list of {\"x\": px, \"y\": px} with exactly ONE point per output frame (frames points), in width x height pixel space; all tracks the same length (nodes_wanmove.py uses len(tracks[0])). Client: resample each drawn stroke to frames points by arc length, add a few parallel tracks per object, and constant-position tracks to pin the background. motionStrength = track conditioning strength (1.0). 480p model: keep the long side <= 832. 6 steps, cfg 1, er_sde, shift 8 (without the LoRA: 20 steps, cfg 6)."
+    },
+    {
+      "id": "video-concat-2",
+      "title": "Join 2 Shots (multi-shot concat)",
+      "capability": "concat",
+      "file": "video-concat-2.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-2.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "file"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "6",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "6",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 16
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes)",
+      "validated": true,
+      "notes": "Hard-cut concatenation of 2 clips (video, video2) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo(fps). Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative."
+    },
+    {
+      "id": "video-concat-3",
+      "title": "Join 3 Shots (multi-shot concat)",
+      "capability": "concat",
+      "file": "video-concat-3.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-3.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "file"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "file"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "6",
+            "input": "width"
+          },
+          {
+            "node": "9",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "6",
+            "input": "height"
+          },
+          {
+            "node": "9",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 16
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes)",
+      "validated": true,
+      "notes": "Hard-cut concatenation of 3 clips (video, video2, video3) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo(fps). Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative."
+    },
+    {
+      "id": "video-concat-4",
+      "title": "Join 4 Shots (multi-shot concat)",
+      "capability": "concat",
+      "file": "video-concat-4.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-4.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "file"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "file"
+          }
+        ],
+        "video4": [
+          {
+            "node": "10",
+            "input": "file"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          },
+          {
+            "node": "6",
+            "input": "width"
+          },
+          {
+            "node": "9",
+            "input": "width"
+          },
+          {
+            "node": "12",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          },
+          {
+            "node": "6",
+            "input": "height"
+          },
+          {
+            "node": "9",
+            "input": "height"
+          },
+          {
+            "node": "12",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 16
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes)",
+      "validated": true,
+      "notes": "Hard-cut concatenation of 4 clips (video, video2, video3, video4) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo(fps). Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative."
+    },
+    {
+      "id": "storyboard-qwen-edit-2509-next-scene",
+      "title": "Storyboard Next Scene (Qwen-Image-Edit 2509 + next-scene LoRA)",
+      "capability": "edit",
+      "file": "storyboard-qwen-edit-2509-next-scene.json",
+      "source": "hand-built (scripts/comfy/hand-built/storyboard-qwen-edit-2509-next-scene.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "1002",
+            "input": "string_b"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "1003",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4,
+        "cfg": 1,
+        "loraStrength": 0.75
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "next-scene_lora-v2-3000.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/main/next-scene_lora-v2-3000.safetensors",
+          "sizeGb": 0.3
+        },
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit-2509, Lightning LoRA); next-scene LoRA MIT (lovis93)",
+      "validated": true,
+      "notes": "Run once per panel: image = previous panel (panel 1 from z-image-turbo-t2i, optionally with the user's character LoRA), image2 = character/product reference re-injected every panel to limit identity drift, prompt = camera move + story beat (\"The camera pulls back to a wide shot ...\"). Node 1002 prefixes \"Next Scene:\". loraStrength default 0.75 (model card: 0.7-0.8). 4 steps, cfg 1. Drift still accumulates over many chained panels (inferred); qwen-image-edit-2511-multi (independent panels from the same references) is the no-drift alternative."
+    },
+    {
+      "id": "video-bg-remove-birefnet",
+      "title": "Video Background Removal (BiRefNet, transparent WebM)",
+      "capability": "bg-remove-video",
+      "file": "video-bg-remove-birefnet.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-bg-remove-birefnet.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "10",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        },
+        {
+          "node": "10",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "birefnet.safetensors",
+          "folder": "background_removal",
+          "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+          "sizeGb": 0.44
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "license": "MIT (BiRefNet)",
+      "validated": true,
+      "notes": "Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs \"images\" (animated: true), not \"videos\": classify by the .webm extension / the declared kind. Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For \"keep only X\" use video-bg-remove-sam3."
+    },
+    {
+      "id": "video-bg-remove-sam3",
+      "title": "Video Cutout by Text (SAM 3.1 tracking, transparent WebM)",
+      "capability": "bg-remove-video",
+      "file": "video-bg-remove-sam3.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-bg-remove-sam3.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "4",
+            "input": "text"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "9",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "9",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "sam3.1_multiplex_fp16.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors",
+          "sizeGb": 1.75
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 6,
+      "license": "Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)",
+      "validated": true,
+      "notes": "prompt = what to KEEP (\"person\", \"red car\"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices \"\" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history \"images\" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead."
+    },
+    {
+      "id": "video-depth-da3",
+      "title": "Video Depth Map (Depth Anything 3 Mono)",
+      "capability": "depth-video",
+      "file": "video-depth-da3.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-depth-da3.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "depth_anything_3_mono_large.safetensors",
+          "folder": "geometry_estimation",
+          "url": "https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors",
+          "sizeGb": 1.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 4,
+      "license": "Apache-2.0 (DA3MONO-LARGE; DA3-LARGE / GIANT are CC-BY-NC, do not swap them in)",
+      "validated": true,
+      "notes": "Template utility_depth_anything3_video_depth_estimation: LoadDA3Model -> DA3Inference (resolution 504, step 14; mode \"mono\") -> DA3Render (output \"depth\", output.normalization v2_style) -> CreateVideo (source fps + audio). Grayscale depth video (near = bright). Per-frame model (some flicker possible); video-depth-vda-small is the temporally stable alternative. DynamicCombo inputs are dotted keys in API format."
+    },
+    {
+      "id": "video-depth-vda-small",
+      "title": "Video Depth Map (Video Depth Anything Small, temporally stable)",
+      "capability": "depth-video",
+      "file": "video-depth-vda-small.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-depth-vda-small.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-Video-Depth-Anything",
+          "repo": "https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything"
+        }
+      ],
+      "vramGb": 4,
+      "license": "Apache-2.0 (Video-Depth-Anything-Small); Base/Large and metric variants are CC-BY-NC-4.0 (non-commercial) - keep the vits model",
+      "validated": true,
+      "notes": "yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default \".safetensors\" is not in its own option list) -> VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.",
+      "autoDownloads": [
+        "LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run"
+      ]
+    },
+    {
+      "id": "palette-transfer-image",
+      "title": "Palette Lock (ColorTransfer to a swatch)",
+      "capability": "grade",
+      "file": "palette-transfer-image.json",
+      "source": "hand-built (scripts/comfy/hand-built/palette-transfer-image.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "2",
+            "input": "image"
+          }
+        ],
+        "strength": [
+          {
+            "node": "3",
+            "input": "strength"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "strength": 0.8
+      },
+      "limits": {
+        "maxWidth": 8192,
+        "maxHeight": 8192
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core ColorTransfer)",
+      "validated": true,
+      "notes": "Soul HEX parity: image = picture to recolor, image2 = palette swatch PNG the app renders from the HEX list (e.g. 512x512 bands sized by intended coverage). ColorTransfer method mkl_lab (alternatives reinhard_lab, histogram; not bound), strength 0-10 (0.8 default; > 1 exaggerates). Pair with hex codes in the generation prompt (FLUX.2 understands \"#E4572E\") for semantic placement. Histogram matching shifts skin tones: keep strength <= 0.8. Runs on CPU."
+    },
+    {
+      "id": "palette-transfer-video",
+      "title": "Palette Lock for Video (ColorTransfer, flicker-free)",
+      "capability": "v2v",
+      "file": "palette-transfer-video.json",
+      "source": "hand-built (scripts/comfy/hand-built/palette-transfer-video.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "image": [
+          {
+            "node": "3",
+            "input": "image"
+          }
+        ],
+        "strength": [
+          {
+            "node": "4",
+            "input": "strength"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "6",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "6",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "strength": 0.8
+      },
+      "limits": {
+        "maxWidth": 4096,
+        "maxHeight": 4096
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core ColorTransfer)",
+      "validated": true,
+      "notes": "video = clip to recolor, image = palette swatch PNG. ColorTransfer(source_stats \"uniform\") pools colour statistics over all frames, so the grade does not flicker; mkl_lab, strength 0.8. Output keeps the source fps and audio. Runs on CPU."
+    },
+    {
       "id": "selftest-image",
       "title": "Self-test: invert image",
       "capability": "edit",
@@ -5449,7 +7305,7 @@
           "kind": "image"
         }
       ],
-      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
+      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings → Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
       "customNodes": [],
       "models": [],
       "vramGb": 0,

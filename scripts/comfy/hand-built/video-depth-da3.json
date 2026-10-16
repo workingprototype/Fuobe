@@ -1,0 +1,96 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input_video.mp4"
+    },
+    "_meta": {
+      "title": "Source clip"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "3": {
+    "class_type": "LoadDA3Model",
+    "inputs": {
+      "model_name": "depth_anything_3_mono_large.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {}
+  },
+  "4": {
+    "class_type": "DA3Inference",
+    "inputs": {
+      "da3_model": [
+        "3",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "resolution": 504,
+      "resize_method": "lower_bound_resize",
+      "mode": "mono"
+    },
+    "_meta": {}
+  },
+  "5": {
+    "class_type": "DA3Render",
+    "inputs": {
+      "da3_geometry": [
+        "4",
+        0
+      ],
+      "output": "depth",
+      "output.normalization": "v2_style",
+      "output.apply_sky_clip": false
+    },
+    "_meta": {}
+  },
+  "6": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "5",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "2",
+        1
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {}
+  },
+  "7": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "6",
+        0
+      ],
+      "filename_prefix": "fuobe/video-depth-da3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save depth video"
+    }
+  }
+}

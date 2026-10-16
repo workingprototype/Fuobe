@@ -21,6 +21,10 @@ declare -A NODES=(
   [ComfyUI-RMBG]="https://github.com/1038lab/ComfyUI-RMBG 229529e0ea63fb7085848225d74f91f6dc164956"
   [ComfyUI-ReActor]="https://github.com/Gourieff/ComfyUI-ReActor 3be5f356fe5b120a7a274d2509c0ecef5d0a7498"
   [ComfyUI-MMAudio]="https://github.com/kijai/ComfyUI-MMAudio 8eaeb72edc3aaf2059b57f2d96a1f6f689f19ae2"
+  # audio / video-depth packs added with the comfyui-oss-2 workflows (2026-10-16)
+  [ComfyUI_Fill-ChatterBox]="https://github.com/filliptm/ComfyUI_Fill-ChatterBox f7d7a16187430abcaf91a3039b9c83aa9960816a"
+  [ComfyUI-IndexTTS2]="https://github.com/snicolast/ComfyUI-IndexTTS2 5b33e02bc0112b8aaf1fc823d5e5a609ca07fc27"
+  [ComfyUI-Video-Depth-Anything]="https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything a0db08e63d1ea571601c45cde4aaee0acdd0544d"
 )
 
 if [ ! -d "$COMFYUI_DIR/.git" ]; then
@@ -52,7 +56,19 @@ uv pip install --python "$PY" \
   "accelerate>=1.2.1" "diffusers>=0.33.1" "peft>=0.17.0" "sentencepiece>=0.2.0" protobuf pyloudnorm "gguf>=0.17.1" scipy \
   "librosa>=0.10.1" "torchdiffeq>=0.2.3" "timm>=1.0.8" "omegaconf>=2.3.0" "open_clip_torch>=2.29.0" \
   "rotary_embedding_torch>=0.5.3" huggingface-hub transparent-background segment-anything onnxruntime hydra-core iopath \
-  albumentations onnx ultralytics colour-science kornia insightface triton decord pycocotools
+  albumentations onnx ultralytics colour-science kornia insightface triton decord pycocotools \
+  resampy s3tokenizer conformer soundfile einops easydict Imath OpenEXR
+# ^ last line: ComfyUI_Fill-ChatterBox (Chatterbox TTS/VC) + ComfyUI-Video-Depth-Anything.
+# ComfyUI-IndexTTS2 registers its nodes with numpy only (everything else is imported lazily), which is
+# all validation needs. Its *runtime* stack (pynini, WeTextProcessing, modelscope, descript-audiotools, ...)
+# is heavy and pins old versions; on a GPU server install it in an isolated worker:
+#   INDEXTTS_RUNTIME=1 scripts/comfy/install-comfyui.sh   (pynini 2.1.7 has a cp313 wheel; 2.1.6 must be built)
+if [ "${INDEXTTS_RUNTIME:-0}" = "1" ]; then
+  uv pip install --python "$PY" "pynini>=2.1.6" WeTextProcessing cn2an ffmpeg-python g2p-en jieba json5 munch textstat modelscope \
+    "git+https://github.com/descriptinc/audiotools" || echo "warn: IndexTTS2 runtime deps failed to install"
+fi
+# Chatterbox's Perth watermarker (recommended in production for cloned voices; optional for validation):
+#   uv pip install --python "$PY" resemble-perth
 
 # ComfyUI-ReActor downloads ~1 GB of face-restore models into models/facerestore_models whenever that
 # folder is empty -- even on a plain GET /object_info. On this validation-only (no weights) install keep a
