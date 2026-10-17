@@ -64,7 +64,7 @@ const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { sta
 const route: ModelRoute = { op: "edit", provider: "comfyui", endpoint: "selftest-image" };
 const model = { id: "m", routes: [route] } as unknown as ModelDef;
 const pollCtx = (externalId: string, meta: Record<string, unknown> = { workflowId: "selftest-image", nodeCount: 3 }) => ({ externalId, meta, route, model, createdAt: Date.now() });
-const done = (outputs: Record<string, unknown>) => ({ status: { status_str: "success", completed: true }, outputs });
+const done = (outputs: Record<string, Record<string, unknown>>) => ({ status: { status_str: "success", completed: true }, outputs });
 
 describe("ComfyUI poll (S5)", () => {
   it("retries instead of failing when /queue answers with a proxy error page", async () => {
@@ -278,7 +278,7 @@ describe("ComfyUI output mapping", () => {
 
   it("follows VHS meta-batch passes to the one that saved the video", async () => {
     const prefix = "fuobe/gen-mm";
-    const pass = (n: number, outputs: Record<string, unknown>) => ({ prompt: [n, `pass-${n}`, { "22": { class_type: "VHS_VideoCombine", inputs: { filename_prefix: prefix } } }], ...done(outputs) });
+    const pass = (n: number, outputs: Record<string, Record<string, unknown>>) => ({ prompt: [n, `pass-${n}`, { "22": { class_type: "VHS_VideoCombine", inputs: { filename_prefix: prefix } } }], ...done(outputs) });
     let queued = true;
     handler = (url) => {
       if (url.includes("/history/p-mm")) return json({ "p-mm": pass(1, {}) });
