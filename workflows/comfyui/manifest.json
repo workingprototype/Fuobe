@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-17T21:02:48.119Z",
+  "generatedAt": "2026-10-17T21:13:08.018Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -10141,7 +10141,8 @@
       ],
       "defaults": {
         "steps": 4,
-        "loraStrength": 1
+        "loraStrength": 1,
+        "promptPrefix": "TRYON"
       },
       "limits": {},
       "models": [
@@ -10179,7 +10180,7 @@
       "vramGb": 10,
       "license": "Apache-2.0 (FLUX.2 [klein] 4B, try-on LoRA by xocialize); segformer_b2_clothes MIT; ComfyUI-RMBG code GPL-3.0",
       "validated": true,
-      "notes": "Reference order is load-bearing (LoRA card): image = person, image2 = top, image3 = bottom; for a dress the provider passes image2 again as image3. The LoRA was trained on clothing-agnostic inputs, so ClothesSegment greys the old outfit out first. Trigger word TRYON (keep it at the start of the prompt). Output size = the person image (~1 MP).",
+      "notes": "Reference order is load-bearing (LoRA card): image = person, image2 = top, image3 = bottom; for a dress the provider passes image2 again as image3. The LoRA was trained on clothing-agnostic inputs, so ClothesSegment greys the old outfit out first. Trigger word TRYON (defaults.promptPrefix: the provider puts it at the start of the prompt). Output size = the person image (~1 MP).",
       "autoDownloads": [
         "ClothesSegment (ComfyUI-RMBG) downloads segformer_b2_clothes (0.11 GB) into models/RMBG/segformer_clothes on first run"
       ]
@@ -10267,7 +10268,8 @@
         "height": 1152,
         "steps": 8,
         "columns": 3,
-        "rows": 3
+        "rows": 3,
+        "gridPrompt": "A {columns}x{rows} grid contact sheet of {count} film stills from the same scene, edge to edge with thin black gutters, consistent characters, wardrobe, lighting and colour grade in every panel, varied shot sizes and angles:"
       },
       "limits": {
         "maxWidth": 2048,
@@ -10303,7 +10305,7 @@
       "vramGb": 14,
       "license": "Apache-2.0 (Z-Image Turbo)",
       "validated": true,
-      "notes": "Higgsfield \"full grid from a single prompt\": one generation, then KJNodes ImageGridtoBatch cuts the sheet into columns x rows tiles (row-major). gridPrompt is chosen by the app per size/type (freeform, zooms, shots); next/prev shots continue from a tile with storyboard-qwen-edit-2509-next-scene. Outputs: the sheet first, then the tiles."
+      "notes": "gridPrompt defaults to a contact-sheet sentence for the chosen columns x rows ({columns}, {rows}, {count} are filled by the provider). Higgsfield \"full grid from a single prompt\": one generation, then KJNodes ImageGridtoBatch cuts the sheet into columns x rows tiles (row-major). gridPrompt is chosen by the app per size/type (freeform, zooms, shots); next/prev shots continue from a tile with storyboard-qwen-edit-2509-next-scene. Outputs: the sheet first, then the tiles."
     },
     {
       "id": "soul-cast-sheet-zimage",

@@ -2213,12 +2213,13 @@ export const SPEC = [
       steps: [b('75:62', 'steps')], loraStrength: [b('75:400', 'strength_model')],
     },
     outputs: [{ node: '9', kind: 'image' }],
+    defaults: { promptPrefix: 'TRYON' },
     vramGb: 10,
     license: 'Apache-2.0 (FLUX.2 [klein] 4B, try-on LoRA by xocialize); segformer_b2_clothes MIT; ComfyUI-RMBG code GPL-3.0',
     autoDownloads: ['ClothesSegment (ComfyUI-RMBG) downloads segformer_b2_clothes (0.11 GB) into models/RMBG/segformer_clothes on first run'],
     notes:
       'Reference order is load-bearing (LoRA card): image = person, image2 = top, image3 = bottom; for a dress the provider passes image2 again as image3. The LoRA was trained on clothing-agnostic inputs, ' +
-      'so ClothesSegment greys the old outfit out first. Trigger word TRYON (keep it at the start of the prompt). Output size = the person image (~1 MP).',
+      'so ClothesSegment greys the old outfit out first. Trigger word TRYON (defaults.promptPrefix: the provider puts it at the start of the prompt). Output size = the person image (~1 MP).',
   },
 
   // ---- Cinema Studio grid and Soul Cast -------------------------------------------
@@ -2232,10 +2233,15 @@ export const SPEC = [
       seed: [b('24', 'seed')], steps: [b('24', 'steps')],
     },
     outputs: [{ node: '26', kind: 'image', role: 'sheet' }, { node: '28', kind: 'image', role: 'tiles' }],
+    defaults: {
+      gridPrompt:
+        'A {columns}x{rows} grid contact sheet of {count} film stills from the same scene, edge to edge with thin black gutters, consistent characters, wardrobe, lighting and colour grade in every panel, varied shot sizes and angles:',
+    },
     limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
     vramGb: 14,
     license: 'Apache-2.0 (Z-Image Turbo)',
     notes:
+      'gridPrompt defaults to a contact-sheet sentence for the chosen columns x rows ({columns}, {rows}, {count} are filled by the provider). ' +
       'Higgsfield "full grid from a single prompt": one generation, then KJNodes ImageGridtoBatch cuts the sheet into columns x rows tiles (row-major). gridPrompt is chosen by the app per size/type ' +
       '(freeform, zooms, shots); next/prev shots continue from a tile with storyboard-qwen-edit-2509-next-scene. Outputs: the sheet first, then the tiles.',
   },
