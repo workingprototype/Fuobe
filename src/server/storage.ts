@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { DATA_DIR, db } from "./db";
 import type { MediaKind } from "@/lib/catalog/types";
+import { fetchRemote } from "./remote-fetch";
 
 export const FILES_DIR = path.join(DATA_DIR, "files");
 
@@ -22,6 +23,13 @@ const EXT_BY_TYPE: Record<string, string> = {
   "audio/ogg": "ogg",
   "audio/flac": "flac",
   "audio/mp4": "m4a",
+  // Text outputs (transcripts, translations, scripts) and 3D models.
+  "text/plain": "txt",
+  "application/x-subrip": "srt",
+  "text/vtt": "vtt",
+  "application/json": "json",
+  "model/gltf-binary": "glb",
+  "model/gltf+json": "gltf",
 };
 
 const TYPE_BY_EXT: Record<string, string> = {
@@ -39,6 +47,12 @@ const TYPE_BY_EXT: Record<string, string> = {
   ogg: "audio/ogg",
   flac: "audio/flac",
   m4a: "audio/mp4",
+  txt: "text/plain",
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  json: "application/json",
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
 };
 
 export function contentTypeFor(fileName: string, fallback = "application/octet-stream"): string {
@@ -47,8 +61,12 @@ export function contentTypeFor(fileName: string, fallback = "application/octet-s
 }
 
 export function kindFor(contentType: string): MediaKind {
-  if (contentType.startsWith("video/")) return "video";
-  if (contentType.startsWith("audio/")) return "audio";
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  // Transcripts, translations and scripts: plain text, subtitles or JSON cue lists.
+  if (type.startsWith("text/") || type === "application/json" || type === "application/x-subrip") return "text";
+  if (type.startsWith("model/")) return "model3d";
   return "image";
 }
 
@@ -104,7 +122,7 @@ export function saveFile(opts: {
   generationId?: string;
 }): Asset {
   const id = nanoid(12);
-  const ext = EXT_BY_TYPE[opts.contentType] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
+  const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
   const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "upload" ? "uploads" : "outputs", day, `${id}.${ext}`);
   const abs = path.join(FILES_DIR, relPath);
@@ -182,10 +200,11 @@ export async function readRef(ref: string): Promise<{ data: Buffer; contentType:
     return { data: fs.readFileSync(abs), contentType: contentTypeFor(abs), name: path.basename(abs) };
   }
   if (/^https?:\/\//.test(ref)) {
-    const res = await fetch(ref);
-    if (!res.ok) throw new Error(`Could not fetch ${ref}: ${res.status}`);
-    const contentType = res.headers.get("content-type")?.split(";")[0] ?? contentTypeFor(ref);
-    return { data: Buffer.from(await res.arrayBuffer()), contentType, name: ref.split("/").pop() ?? "input" };
+    // Public links only: never this machine or its private network (see remote-fetch.ts).
+    const res = await fetchRemote(ref);
+    const path0 = new URL(res.url).pathname;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return { data: res.data, contentType: header ?? contentTypeFor(path0), name: path0.split("/").pop() || "input" };
   }
   const asset = getAsset(ref);
   if (!asset) throw new Error(`Unknown asset ${ref}`);

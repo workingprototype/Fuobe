@@ -122,6 +122,104 @@ export function validSession(value: string | undefined): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-site requests
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Extra addresses this studio is reached at (FUOBE_ALLOWED_ORIGINS="https://fuobe.example.com,studio.lan:3000"). */
+function allowedHosts(): string[] {
+  return (process.env.FUOBE_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return s.includes("://") ? new URL(s).host : s;
+      } catch {
+        return s;
+      }
+    });
+}
+
+/**
+ * Changes must come from Fuobe's own pages, or from a client that isn't a browser (those send no
+ * Origin). Without this check any web page could post to a password-less local install — set its
+ * password, start paid generations — with a "simple" text/plain request that needs no preflight.
+ */
+export function crossSite(request: Request, ownHost: string): boolean {
+  if (SAFE_METHODS.has(request.method)) return false;
+  if (request.headers.get("sec-fetch-site") === "cross-site") return true;
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  let host: string;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return true; // "null" (sandboxed frames, file://) or garbage
+  }
+  if (!host) return true;
+  const own = [request.headers.get("host"), request.headers.get("x-forwarded-host")?.split(",")[0].trim(), ownHost, ...allowedHosts()];
+  return !own.includes(host);
+}
+
+// ---------------------------------------------------------------------------
+// Sign-in attempts
+
+/**
+ * Wrong-password lockout. Route handlers can't see the socket address, and Next keeps any
+ * X-Forwarded-For a client sends, so that header only identifies a client behind a reverse proxy
+ * you trust (FUOBE_TRUST_PROXY=1; the proxy's own entry is the last one). Otherwise every client
+ * shares one budget. A global budget caps guesses even when the per-client key is spoofed.
+ */
+export class LoginGuard {
+  private failures = new Map<string, { n: number; first: number; until: number }>();
+  private recent: number[] = [];
+
+  constructor(
+    private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, maxClients: 5000 },
+  ) {}
+
+  /** Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. */
+  static clientKey(headers: Headers, trustProxy = process.env.FUOBE_TRUST_PROXY === "1"): string {
+    if (!trustProxy) return "direct";
+    const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    return hops.at(-1) ?? "direct";
+  }
+
+  /** Milliseconds until this client may try again (0 = now). */
+  blockedFor(key: string, now = Date.now()): number {
+    this.recent = this.recent.filter((t) => now - t < this.o.windowMs);
+    const f = this.failures.get(key);
+    const own = f && f.until > now ? f.until - now : 0;
+    const global = this.recent.length >= this.o.global ? this.o.windowMs - (now - this.recent[0]) : 0;
+    return Math.max(own, global);
+  }
+
+  fail(key: string, now = Date.now()): void {
+    this.recent.push(now);
+    const f = this.failures.get(key);
+    const fresh = !f || now - f.first > this.o.windowMs;
+    const n = fresh ? 1 : f.n + 1;
+    this.failures.delete(key);
+    this.failures.set(key, { n, first: fresh ? now : f.first, until: n >= this.o.perClient ? now + this.o.lockMs : 0 });
+    // Forget old entries; never let the map grow without bound.
+    for (const [k, v] of this.failures) {
+      if (this.failures.size <= this.o.maxClients && now - v.first < this.o.windowMs * 10) break;
+      if (v.until < now) this.failures.delete(k);
+      else if (this.failures.size > this.o.maxClients) this.failures.delete(k);
+    }
+  }
+
+  succeed(key: string): void {
+    this.failures.delete(key);
+  }
+
+  get size() {
+    return this.failures.size;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // API tokens
 
 const tokenHash = (t: string) => crypto.createHash("sha256").update(t).digest("hex");

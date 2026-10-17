@@ -13,9 +13,11 @@ export async function GET(request: Request, ctx: RouteContext<"/api/files/[...pa
   const size = fs.statSync(abs).size;
   const type = contentTypeFor(abs);
   const headers: Record<string, string> = {
-    "Content-Type": type,
+    // Transcripts, subtitles and scripts are UTF-8 text.
+    "Content-Type": /^text\/|^application\/(json|x-subrip)$/.test(type) ? `${type}; charset=utf-8` : type,
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
   };
   if (type === "image/svg+xml") headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'";
   const download = new URL(request.url).searchParams.get("download");

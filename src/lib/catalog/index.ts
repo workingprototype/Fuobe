@@ -1,9 +1,11 @@
 import { APPS as RAW_APPS } from "./apps";
 import { EFFECTS as RAW_EFFECTS, MOTIONS as RAW_MOTIONS } from "./motions";
 import { MODELS } from "./models";
+import { LLM_MODELS } from "./llm-models";
 import { OSS_LORAS } from "./oss-loras.generated";
 import type { Engine, MediaKind, ModelDef, Operation, Preset } from "./types";
 
+MODELS.push(...LLM_MODELS.filter((m) => !MODELS.some((x) => x.id === m.id))); // text steps (translate, write) on the configured LLM; once per hot reload
 export { MODELS };
 
 const modelIndex = new Map(MODELS.map((m) => [m.id, m]));

@@ -23,8 +23,11 @@ import { listElements } from "./elements";
 import { pollTrainings } from "./training";
 import { createExtendChain, createShotFilm } from "./chains";
 import { enhancePrompt } from "./enhance";
+import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
-import type { RemoteOutput } from "./providers/types";
+import { probeComfy } from "./providers/comfyui";
+import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
+import type { PollContext, RemoteOutput } from "./providers/types";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { contentTypeFor, readRef, saveFile } from "./storage";
@@ -163,14 +166,34 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
-  const real = routes.find((r) => provider(r.provider).isConfigured());
+  const real = routes.find(routeReady);
   if (real) return { route: real, demo: false };
   if (demo === "off") {
+    if (routes.every((r) => r.provider === "llm")) throw new Error(llmMissing(routes[0]));
     const names = [...new Set(routes.map((r) => provider(r.provider).label))].join(" or ");
     throw new Error(`Connect ${names} in Settings to run this model`);
   }
   return { route: routes[0], demo: true };
 }
+
+/** Text steps depend on which LLM the route may use (the open model never calls Claude). */
+const routeReady = (r: ModelRoute) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured());
+
+/** What a run produces: colour matching works on images and videos, so it follows the model. */
+export function outputKind(op: Generation["op"], model: { kind: MediaKind }): MediaKind {
+  return op === "color-match" ? model.kind : OPERATION_OUTPUT[op];
+}
+
+// Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row
+// (soft delete, when the table has one) leaves the feeds like a deleted one.
+setResolver((ids) =>
+  ids.map((id): LiveEvent => {
+    const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as (Row & { deleted_at?: number | null; trashed_at?: number | null }) | undefined;
+    const g = r && (toGeneration(r) as Generation & { deletedAt?: number | null; trashedAt?: number | null });
+    if (!r || !g || r.deleted_at || r.trashed_at || g.deletedAt || g.trashedAt) return { type: "deleted", id, json: JSON.stringify({ id }) };
+    return { type: "generation", id, json: JSON.stringify(g) };
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Create
@@ -189,15 +212,30 @@ function prepare(original: GenerationRequest) {
         : `${plan.model.name} is an open-source model, but this install is set to paid cloud APIs only (Settings → Engine mode)`,
     );
   }
+  // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
+  if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
+  if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op));
   const providerId: ProviderId = demo ? "mock" : route.provider;
-  return { req, plan, route, demo, providerId, cost: demo ? 0 : estimateCost(plan.model, plan.params, 1) };
+  // A text step that runs on Ollama is free; only Claude costs money.
+  const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
+  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1) };
 }
+
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
   const { plan, demo, providerId, cost } = prepare(req);
   return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+}
+
+/** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */
+export function previewChained(req: GenerationRequest, deps: number) {
+  if (!deps) return previewGeneration(req);
+  // A waiting step always runs as one job (createGenerations doesn't batch dependents).
+  const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
+  const jobs = Math.max(1, p.jobs);
+  return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
 
 export interface CreateOptions {
@@ -241,11 +279,12 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       engine: plan.model.engine,
       provider: providerId,
       op: plan.op,
-      kind: OPERATION_OUTPUT[plan.op],
+      kind: outputKind(plan.op, plan.model),
       status: "queued",
       progress: null,
       message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
-      prompt: plan.prompt,
+      // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
+      prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
       request_json: JSON.stringify(original),
       provider_input_json: null,
       external_id: null,
@@ -275,8 +314,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
 
 /** Where each dependency's output goes: `chain`, or the single-image `chainFrom`. */
 function slotsFor(req: GenerationRequest, n: number): ChainSlot[] {
-  if (req.chain?.length) return req.chain.slice(0, n);
-  return Array.from({ length: n }, () => ({ slot: "images" as const, position: req.chainFrom ?? "last" }));
+  // Dependencies beyond the listed slots are images (a chain shorter than dependsOn used to crash the launch).
+  return Array.from({ length: n }, (_, i) => req.chain?.[i] ?? { slot: "images" as const, position: req.chainFrom ?? "last" });
 }
 
 const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
@@ -295,9 +334,20 @@ function placeholderFor(s: ChainSlot): string {
   return kind === "image" ? "/api/files/placeholder.png" : kind === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
 }
 
-/** What a chained step takes from a dependency's output: the file URL, or the text for "prompt". */
-function chainValue(o: OutputFile | undefined, s: ChainSlot): string | undefined {
-  return s.slot === "prompt" ? o?.text : o?.url;
+/**
+ * What a chained step takes from a dependency's output: the file URL, or the text for "prompt".
+ * A translation of timed text gets the cue list (so the timing survives); text saved only as a
+ * file is read back from it.
+ */
+async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: Generation["op"]): Promise<string | undefined> {
+  if (!o) return undefined;
+  if (s.slot !== "prompt") return o.url;
+  if (op === "translate" && Array.isArray(o.meta?.cues) && o.meta.cues.length) return JSON.stringify(o.meta.cues);
+  if (typeof o.text === "string") return o.text;
+  if (!o.url) return undefined;
+  return readRef(o.url)
+    .then((f) => f.data.toString("utf8"))
+    .catch(() => undefined);
 }
 
 /**
@@ -321,48 +371,94 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   return { ...req, prompt, inputs };
 }
 
-/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. */
-const launching = new Set<string>();
+/** Generations this process is handing to a provider right now (shared across hot reloads and bundles). */
+declare global {
+  var __fuobeSubmitting: Set<string> | undefined;
+}
+const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<string>());
+
+/**
+ * A chain runs all for real or all as a demo (a demo join of paid clips, or a paid step fed a demo
+ * placeholder, helps nobody). Returns the error for a step that can't match its dependencies, and
+ * whether it should run as a demo because they did.
+ */
+function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[]): { error?: string; forceDemo?: boolean } {
+  const demoDeps = deps.filter((d) => d.provider === "mock").length;
+  if (p.demo && demoDeps < deps.length) {
+    const needs = p.route.provider === "llm" ? "Claude or Ollama" : provider(p.route.provider).label;
+    return { error: `${p.plan.model.name} needs ${needs} to continue what the earlier steps made for real — connect it in Settings, then retry` };
+  }
+  if (!p.demo && demoDeps > 0) {
+    if (getSetting("demoMode") === "off") return { error: "An earlier step ran as a demo — retry it with its provider connected" };
+    return { forceDemo: true };
+  }
+  return {};
+}
+
+/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db()
     .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
     .all() as Row[];
   for (const r of rows) {
-    if (launching.has(r.id)) continue;
+    if (submitting().has(r.id)) continue;
     const request = JSON.parse(r.request_json) as GenerationRequest;
     const ids = depIds(r.depends_on);
     const slots = slotsFor(request, ids.length);
-    const deps = ids.map((id) => db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "outputs_json"> | undefined);
+    const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
     const earlier = request.frame ? "The previous frame" : "An earlier step";
     if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
       update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
       continue;
     }
     if (deps.some((d) => d!.status !== "succeeded")) continue;
-    const urls = deps.map((d, i) => chainValue((JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot]), slots[i]));
-    if (urls.some((u) => !u)) {
-      update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[urls.findIndex((u) => !u)].slot]} to use`, message: null, completed_at: Date.now() });
-      continue;
-    }
-    launching.add(r.id);
+    submitting().add(r.id);
+    let handedOff = false;
     try {
-      const original = withChainInputs(request, urls as string[]);
-      const { req, plan, route, providerId, cost, demo } = prepare(original);
+      const values = await Promise.all(
+        deps.map((d, i) => chainValue((JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot]), slots[i], request.op)),
+      );
+      const missing = values.findIndex((u) => !u);
+      if (missing >= 0) {
+        update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[missing].slot]} to use`, message: null, completed_at: Date.now() });
+        continue;
+      }
+      // Routing reads cached reachability: make sure it's fresh for local engines.
+      const model = getModel(request.modelId);
+      if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
+      if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
+      const original = withChainInputs(request, values as string[]);
+      const prepared = prepare(original);
+      const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
+      if (mode.error) throw new Error(mode.error);
+      const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {
-        provider: providerId,
-        op: plan.op,
-        prompt: plan.prompt,
-        cost_usd: cost,
+        provider: p.providerId,
+        op: p.plan.op,
+        kind: outputKind(p.plan.op, p.plan.model),
+        prompt: p.plan.prompt,
+        cost_usd: p.cost,
         request_json: JSON.stringify(original),
-        message: demo ? "Demo mode — no provider connected" : "Submitting",
+        message: mode.forceDemo ? "Demo — an earlier step ran as a demo" : p.demo ? "Demo mode — no provider connected" : "Submitting",
       });
-      await submit(r.id, route, providerId, plan, req, 0);
+      // In the background: an upload must not hold up the runner's other polls.
+      handedOff = true;
+      void submit(r.id, p.route, p.providerId, p.plan, p.req, 0);
     } catch (e) {
       update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
     } finally {
-      launching.delete(r.id);
+      if (!handedOff) submitting().delete(r.id);
     }
   }
+}
+
+const statusOf = (id: string) => (db().prepare("SELECT status FROM generations WHERE id = ?").get(id) as Pick<Row, "status"> | undefined)?.status;
+
+/** Start the timeout clock: the job has reached its provider. */
+function recordSubmission(id: string, at: number): void {
+  db()
+    .prepare("INSERT INTO generation_runs (id, submitted_at, started_at) VALUES (?, ?, NULL) ON CONFLICT(id) DO UPDATE SET submitted_at = excluded.submitted_at, started_at = NULL")
+    .run(id, at);
 }
 
 async function submit(
@@ -374,6 +470,7 @@ async function submit(
   index: number,
 ): Promise<void> {
   const adapter = provider(providerId);
+  submitting().add(id);
   try {
     const prep = async (ref?: string) => {
       if (!ref) return undefined;
@@ -410,14 +507,28 @@ async function submit(
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,
     };
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
-    update(id, {
-      external_id: res.externalId,
-      external_meta_json: JSON.stringify(res.meta ?? {}),
-      provider_input_json: res.payload ? JSON.stringify(res.payload).slice(0, 200_000) : null,
-      message: "Queued",
-    });
+    const now = Date.now();
+    const status = statusOf(id);
+    if (!status || status === "canceled") {
+      // Canceled (or deleted) while it was being handed over: stop the provider's job too.
+      await adapter.cancel?.({ externalId: res.externalId, meta: res.meta ?? {}, route, model: plan.model, createdAt: now }).catch(() => {});
+      if (status) update(id, { external_id: res.externalId, external_meta_json: JSON.stringify(res.meta ?? {}), message: null });
+      return;
+    }
+    db().transaction(() => {
+      update(id, {
+        external_id: res.externalId,
+        external_meta_json: JSON.stringify(res.meta ?? {}),
+        provider_input_json: res.payload ? JSON.stringify(res.payload).slice(0, 200_000) : null,
+        message: "Queued",
+      });
+      recordSubmission(id, now);
+    })();
   } catch (e) {
-    update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+    // A cancel during the hand-over stays a cancel.
+    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+  } finally {
+    submitting().delete(id);
   }
 }
 
@@ -425,27 +536,87 @@ async function submit(
 // Polling loop
 
 const POLL_MS = 1500;
+/** Jobs about to finish (progress ≥ 0.9) are polled this often, so results land sooner. */
+const FAST_POLL_MS = 500;
+/** How long a job may run once its provider has started it… */
 const TIMEOUT_MS = 45 * 60 * 1000;
+/** …and how long it may wait in the provider's queue first (a busy local GPU works through jobs one by one). */
+const QUEUE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+/** A row this old with no external id, that no submit in this process is working on, was cut off by a restart. */
+const STALE_SUBMIT_MS = 2 * 60 * 1000;
 
-declare global {
-  var __fuobeRunner: { timer: NodeJS.Timeout; busy: boolean; tick: () => Promise<void> } | undefined;
+interface RunnerState {
+  timer: NodeJS.Timeout;
+  busy: boolean;
+  tick: () => Promise<void>;
+  fastTimer?: NodeJS.Timeout;
+  fastBusy?: boolean;
+  fast?: () => Promise<void>;
+  /** Rows being polled right now (the fast lane and the tick never poll one row twice at once). */
+  polling?: Set<string>;
 }
 
+declare global {
+  var __fuobeRunner: RunnerState | undefined;
+}
+
+/**
+ * Start the background runner (once per process; started at boot by src/instrumentation.ts).
+ * Also installs the live-update hooks and primes the reachability probes routing reads.
+ */
 export function ensureRunner(): void {
-  if (globalThis.__fuobeRunner) {
-    // After a dev hot-reload, point the existing timer at this module's (fresh) code.
-    globalThis.__fuobeRunner.tick = tick;
+  watchGenerations(db());
+  const cur = globalThis.__fuobeRunner;
+  if (cur) {
+    // After a dev hot-reload, point the existing timers at this module's (fresh) code.
+    cur.tick = tick;
+    cur.fast = fastTick;
+    cur.polling ??= new Set();
+    if (!cur.fastTimer) {
+      cur.fastTimer = setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS);
+      cur.fastTimer.unref?.();
+    }
     return;
   }
-  const state = { busy: false, tick, timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS) };
+  const state: RunnerState = {
+    busy: false,
+    tick,
+    fast: fastTick,
+    polling: new Set(),
+    timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS),
+    fastTimer: setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS),
+  };
   state.timer.unref?.();
+  state.fastTimer?.unref?.();
   globalThis.__fuobeRunner = state;
-  // Jobs that never got an external id (server died mid-submit) can't be recovered.
-  db()
-    .prepare(
-      "UPDATE generations SET status = 'failed', error = 'Interrupted before it reached the provider', completed_at = ? WHERE status IN ('queued','running') AND external_id IS NULL AND depends_on IS NULL AND created_at < ?",
-    )
-    .run(Date.now(), Date.now() - 2 * 60 * 1000);
+  void probeComfy().catch(() => false);
+  void probeOllama().catch(() => false);
+  sweepInterrupted();
+}
+
+/** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
+function sweepInterrupted(): void {
+  const rows = db()
+    .prepare("SELECT id FROM generations WHERE status IN ('queued','running') AND external_id IS NULL AND depends_on IS NULL AND created_at < ?")
+    .all(Date.now() - STALE_SUBMIT_MS) as Pick<Row, "id">[];
+  const busy = submitting();
+  for (const r of rows) {
+    if (busy.has(r.id)) continue;
+    update(r.id, { status: "failed", error: "Interrupted before it reached the provider", completed_at: Date.now(), message: null });
+  }
+}
+
+async function pollGuarded(r: Row): Promise<void> {
+  const polling = (globalThis.__fuobeRunner!.polling ??= new Set());
+  if (polling.has(r.id)) return;
+  polling.add(r.id);
+  try {
+    await pollOne(r);
+  } catch (e) {
+    update(r.id, { message: `Poll error: ${(e as Error).message}` });
+  } finally {
+    polling.delete(r.id);
+  }
 }
 
 async function tick(): Promise<void> {
@@ -453,17 +624,46 @@ async function tick(): Promise<void> {
   if (!state || state.busy) return;
   state.busy = true;
   try {
+    sweepInterrupted();
     const active = db()
       .prepare("SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY created_at ASC LIMIT 50")
       .all() as Row[];
-    await Promise.all([
-      ...active.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Poll error: ${(e as Error).message}` }))),
-      pollTrainings().catch(() => {}),
-      advanceDependents().catch(() => {}),
-    ]);
+    await Promise.all([...active.map(pollGuarded), pollTrainings().catch(() => {}), advanceDependents().catch(() => {})]);
   } finally {
     state.busy = false;
   }
+}
+
+async function fastTick(): Promise<void> {
+  const state = globalThis.__fuobeRunner;
+  if (!state || state.fastBusy) return;
+  state.fastBusy = true;
+  try {
+    const rows = db()
+      .prepare(
+        "SELECT g.*, r.started_at AS run_started_at FROM generations g LEFT JOIN generation_runs r ON r.id = g.id WHERE g.status = 'running' AND g.external_id IS NOT NULL AND g.progress IS NOT NULL ORDER BY g.created_at ASC LIMIT 50",
+      )
+      .all() as (Row & { run_started_at: number | null })[];
+    const now = Date.now();
+    // At 90% (or on course to be there by now, at the pace it has reported since it started).
+    const nearlyDone = rows.filter((r) => {
+      const p = r.progress ?? 0;
+      if (p >= 0.9) return true;
+      const ran = r.run_started_at ? r.updated_at - r.run_started_at : 0;
+      return ran > 0 && p > 0 && (p * (now - r.run_started_at!)) / ran >= 0.9;
+    });
+    await Promise.all(nearlyDone.slice(0, 20).map(pollGuarded));
+  } finally {
+    state.fastBusy = false;
+  }
+}
+
+function runRoute(model: NonNullable<ReturnType<typeof getModel>>, r: Pick<Row, "op" | "provider">): ModelRoute {
+  return model.routes.find((x) => x.op === r.op && (x.provider === r.provider || r.provider === "mock")) ?? model.routes[0];
+}
+
+function pollContext(r: Row, model: NonNullable<ReturnType<typeof getModel>>): PollContext {
+  return { externalId: r.external_id!, meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>, route: runRoute(model, r), model, createdAt: r.created_at };
 }
 
 async function pollOne(r: Row): Promise<void> {
@@ -472,19 +672,33 @@ async function pollOne(r: Row): Promise<void> {
     update(r.id, { status: "failed", error: `Model ${r.model_id} no longer exists`, completed_at: Date.now() });
     return;
   }
-  if (Date.now() - r.created_at > TIMEOUT_MS) {
-    update(r.id, { status: "failed", error: "Timed out", completed_at: Date.now() });
+  // The clock runs from when the provider got the job (and from when it started it), not from creation:
+  // a chained step created at the start of a long pipeline gets its full time once it's submitted.
+  const now = Date.now();
+  let run = db().prepare("SELECT submitted_at, started_at FROM generation_runs WHERE id = ?").get(r.id) as { submitted_at: number; started_at: number | null } | undefined;
+  if (!run) {
+    // Submitted before this was recorded (an upgrade mid-job): start counting now.
+    recordSubmission(r.id, now);
+    run = { submitted_at: now, started_at: null };
+  }
+  const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : now - run.submitted_at > QUEUE_TIMEOUT_MS;
+  const ctx = pollContext(r, model);
+  if (overdue) {
+    // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
+    await provider(r.provider)
+      .cancel?.(ctx)
+      .catch(() => {});
+    update(r.id, {
+      status: "failed",
+      error: run.started_at ? `Timed out after ${TIMEOUT_MS / 60_000} minutes` : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
+      completed_at: now,
+      message: null,
+    });
     return;
   }
-  const route = model.routes.find((x) => x.op === r.op && (x.provider === r.provider || r.provider === "mock")) ?? model.routes[0];
-  const res = await provider(r.provider).poll({
-    externalId: r.external_id!,
-    meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>,
-    route,
-    model,
-    createdAt: r.created_at,
-  });
+  const res = await provider(r.provider).poll(ctx);
   if (res.state === "queued" || res.state === "running") {
+    if (res.state === "running" && !run.started_at) db().prepare("UPDATE generation_runs SET started_at = ? WHERE id = ?").run(Date.now(), r.id);
     update(r.id, { status: res.state, progress: res.progress ?? r.progress, message: res.message ?? null });
     return;
   }
@@ -495,11 +709,11 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
-  for (const o of res.outputs) {
+  for (const o of res.outputs as RichOutput[]) {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {
-      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...(o.draftId ? { draftId: o.draftId } : {}) });
+      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...(o.text !== undefined && { text: o.text }), ...(o.meta && { meta: o.meta }), ...(o.draftId ? { draftId: o.draftId } : {}) });
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
@@ -512,10 +726,19 @@ async function pollOne(r: Row): Promise<void> {
   });
 }
 
-async function persistOutput(o: RemoteOutput, generationId: string): Promise<OutputFile> {
+/** Outputs may carry text (transcripts, translations, scripts) and structured extras (layer boxes, cues, stems). */
+type RichOutput = RemoteOutput & { text?: string; meta?: Record<string, unknown> };
+
+/** Text kept inline on the generation; longer text stays in its file. */
+const MAX_INLINE_TEXT = 1_000_000;
+
+async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
   let data: Buffer;
   let contentType = o.contentType;
-  if (o.url.startsWith("sample:")) {
+  if (!o.url && o.text !== undefined) {
+    data = Buffer.from(o.text);
+    contentType ??= "text/plain";
+  } else if (o.url.startsWith("sample:")) {
     const file = path.join(process.cwd(), "public", "samples", path.basename(o.url.slice(7)));
     data = fs.readFileSync(file);
     contentType ??= contentTypeFor(file);
@@ -531,22 +754,27 @@ async function persistOutput(o: RemoteOutput, generationId: string): Promise<Out
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
-  return { url: asset.url, kind: asset.kind, contentType: asset.contentType, assetId: asset.id, ...(o.draftId ? { draftId: o.draftId } : {}) };
+  // A text file's words travel with the generation, so feeds and the next chained step can use them.
+  const text = o.text ?? (asset.kind === "text" && data.length <= MAX_INLINE_TEXT ? data.toString("utf8") : undefined);
+  return {
+    url: asset.url,
+    kind: asset.kind,
+    contentType: asset.contentType,
+    assetId: asset.id,
+    ...(text !== undefined && { text }),
+    ...(o.meta && { meta: o.meta }),
+    ...(o.draftId ? { draftId: o.draftId } : {}),
+  };
 }
 
 export async function cancelGeneration(id: string): Promise<void> {
   const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
   if (!r || (r.status !== "queued" && r.status !== "running")) return;
   const model = getModel(r.model_id);
+  // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
     await provider(r.provider)
-      .cancel?.({
-        externalId: r.external_id,
-        meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>,
-        route: model.routes[0],
-        model,
-        createdAt: r.created_at,
-      })
+      .cancel?.(pollContext(r, model))
       .catch(() => {});
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
