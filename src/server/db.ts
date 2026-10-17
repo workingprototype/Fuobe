@@ -101,6 +101,43 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS assist_threads_updated ON assist_threads(updated_at DESC);`,
+  // Cinema Studio: projects (Director settings, brief, AI Director chat), folders = scenes, and the generations in them.
+  `CREATE TABLE IF NOT EXISTS cinema_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    cover_url TEXT,
+    cost_cap_usd REAL,
+    director_json TEXT NOT NULL DEFAULT '{}',
+    palettes_json TEXT NOT NULL DEFAULT '[]',
+    brief_title TEXT NOT NULL DEFAULT '',
+    brief_body TEXT NOT NULL DEFAULT '',
+    chat_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS cinema_folders (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    parent_id TEXT,
+    name TEXT NOT NULL,
+    color TEXT,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS cinema_folders_project ON cinema_folders(project_id);
+  CREATE TABLE IF NOT EXISTS cinema_items (
+    project_id TEXT NOT NULL,
+    generation_id TEXT NOT NULL,
+    folder_id TEXT,
+    meta_json TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (project_id, generation_id)
+  );
+  CREATE INDEX IF NOT EXISTS cinema_items_generation ON cinema_items(generation_id);`,
 ];
 
 declare global {
