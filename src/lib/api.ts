@@ -78,6 +78,7 @@ const patched = (g: Generation, patch: Partial<Generation>): Generation => ({ ..
 
 const live = {
   connected: false,
+  everConnected: false,
   subscribers: 0,
   listeners: new Set<() => void>(),
   abort: null as AbortController | null,
@@ -112,8 +113,12 @@ async function connect() {
     }
     live.attempt = 0;
     setLive(true);
-    // Catch up on whatever changed while we were away.
-    void live.client.invalidateQueries({ queryKey: ["generations"] });
+    // Back after a drop: catch up on whatever changed while we were away.
+    if (live.everConnected) {
+      void live.client.invalidateQueries({ queryKey: ["generations"] });
+      void live.client.invalidateQueries({ queryKey: ["library"] });
+    }
+    live.everConnected = true;
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
     let buf = "";
     for (;;) {

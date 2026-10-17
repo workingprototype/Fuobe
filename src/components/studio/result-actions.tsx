@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -161,6 +161,12 @@ export function SaveElementForm({ g, o, onDone }: { g: Generation; o: OutputFile
   const router = useRouter();
   const [name, setName] = useState(() => characterName(g.request.prompt));
   const [kind, setKind] = useState<ElementKind>("character");
+  const nameRef = useRef<HTMLInputElement>(null);
+  // Focus once the menu that opened this has finished moving focus around.
+  useEffect(() => {
+    const t = setTimeout(() => nameRef.current?.select(), 60);
+    return () => clearTimeout(t);
+  }, []);
   const submit = () =>
     save.mutate(
       { name: name.trim() || "New character", kind, references: [o.url] },
@@ -187,7 +193,7 @@ export function SaveElementForm({ g, o, onDone }: { g: Generation; o: OutputFile
         </label>
         <input
           id={`el-name-${g.id}`}
-          autoFocus
+          ref={nameRef}
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={60}
@@ -268,7 +274,8 @@ export function TileActions({
   const popover = saving && (
     <Popover open onOpenChange={(v) => !v && setSaving(false)}>
       <PopoverAnchor className="absolute right-2 bottom-2" />
-      <PopoverContent align="end" collisionPadding={12} className="w-72" onClick={stop}>
+      {/* Opened from a closing menu, which moves focus around: only a click outside or Esc closes it. */}
+      <PopoverContent align="end" collisionPadding={12} className="w-72" onClick={stop} onFocusOutside={(e) => e.preventDefault()}>
         <SaveElementForm g={g} o={g.outputs[index]} onDone={() => setSaving(false)} />
       </PopoverContent>
     </Popover>
