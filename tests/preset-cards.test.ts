@@ -264,10 +264,16 @@ describe("preset how-to line", () => {
   it("names the required inputs", () => {
     expect(presetHowTo(byName(APPS, "Face Swap"))).toMatch(/^Add .+ and .+, then Generate\.$/);
     expect(presetHowTo({ type: "motion", userPrompt: "optional", inputs: [{ key: "image", label: "Start frame", accept: "image", required: true }] })).toBe(
-      "Add a start frame, add a few words if you like, then Generate.",
+      "Add a start frame, then Generate.",
     );
     expect(presetHowTo({ type: "app", userPrompt: "none", inputs: [{ key: "image", label: "Your photo", accept: "image", required: true }] })).toBe(
       "Add your photo, then Generate.",
+    );
+  });
+
+  it("asks for the prompt only when it's required", () => {
+    expect(presetHowTo({ type: "app", userPrompt: "required", inputs: [{ key: "image", label: "Product photo", accept: "image", required: true }] })).toBe(
+      "Add a product photo and describe what you want, then Generate.",
     );
   });
 

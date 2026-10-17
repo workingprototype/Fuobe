@@ -425,10 +425,10 @@ export function presetRouteLines(
 export function presetHowTo(p: Pick<Preset, "inputs" | "userPrompt" | "type">): string {
   const needs = p.inputs.filter((i) => i.required).map((i) => article(lowerFirst(i.label)));
   const optional = p.inputs.filter((i) => !i.required).map((i) => article(lowerFirst(i.label)));
-  const say = p.userPrompt === "required" ? "describe what you want" : p.userPrompt === "optional" ? "add a few words if you like" : "";
   if (!needs.length) {
     const first = p.userPrompt === "required" ? "Describe what you want" : optional.length ? `Add ${joinList(optional)} (optional)` : "Press Generate";
     return first === "Press Generate" ? "Press Generate — no inputs needed." : `${first}, then Generate.`;
   }
-  return `Add ${joinList(needs)}${say ? `, ${say}` : ""}, then Generate.`;
+  // An optional prompt goes unsaid: the composer shows its placeholder anyway.
+  return `Add ${joinList(needs)}${p.userPrompt === "required" ? " and describe what you want" : ""}, then Generate.`;
 }

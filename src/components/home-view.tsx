@@ -7,7 +7,7 @@ import { lazy, Suspense, useState } from "react";
 import { PageShell } from "@/components/page-shell";
 import { PresetCard } from "@/components/preset-gallery";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -68,7 +68,11 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
   const [prompt, setPrompt] = useState("");
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
-  const status = useStatus().data;
+  // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
+  // the status: render the server's (status-less) view until hydrated, as useEngineMode does.
+  const hydrated = useHydrated();
+  const statusData = useStatus().data;
+  const status = hydrated ? statusData : undefined;
   const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
   const comfyReady = !!status?.providers.comfyui?.configured;
   const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);

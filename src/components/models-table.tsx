@@ -24,7 +24,7 @@ function RouteDetails({ row }: { row: ModelRow }) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label={`Where ${row.name} runs`}
         >
           <Info className="size-3.5" />
@@ -71,7 +71,10 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         <div className="text-[12px] text-muted-foreground">
           {m.vendor} — {m.tagline}
         </div>
-        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">{m.ops.join(" · ")}</div>
+        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">
+          <span className="font-mono text-muted-foreground sm:hidden">{m.price} · </span>
+          {m.ops.join(" · ")}
+        </div>
       </td>
       <td className="hidden px-4 py-3 whitespace-nowrap md:table-cell">
         <span className="inline-flex items-center gap-1">
@@ -80,7 +83,7 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         </span>
       </td>
       <td className="hidden px-4 py-3 text-[12px] text-muted-foreground md:table-cell">{m.ops.join(" · ")}</td>
-      <td className="px-3 py-3 font-mono text-[12px] whitespace-nowrap sm:px-4">{m.price}</td>
+      <td className="hidden px-4 py-3 font-mono text-[12px] whitespace-nowrap sm:table-cell">{m.price}</td>
       <td className="px-2 py-2.5 text-right">
         <RouteDetails row={m} />
       </td>
@@ -141,7 +144,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
               <th className="px-3 py-2.5 font-medium sm:px-4">Model</th>
               <th className="hidden px-4 py-2.5 font-medium md:table-cell">Engine</th>
               <th className="hidden px-4 py-2.5 font-medium md:table-cell">Can do</th>
-              <th className="px-3 py-2.5 font-medium sm:px-4">Price</th>
+              <th className="hidden px-4 py-2.5 font-medium sm:table-cell">Price</th>
               <th className="px-2 py-2.5">
                 <span className="sr-only">Details</span>
               </th>
