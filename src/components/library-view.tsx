@@ -233,7 +233,12 @@ function Inner() {
   );
   const lib = useLibrary(filter);
   const uploads = useUploads();
-  const items = useMemo(() => (uploadsTab ? (uploads.data ?? []).map(uploadAsGeneration) : (lib.data?.pages.flat() ?? [])), [uploadsTab, uploads.data, lib.data]);
+  const items = useMemo(() => {
+    if (!uploadsTab) return lib.data?.pages.flat() ?? [];
+    // Uploads search by file name.
+    const all = (uploads.data ?? []).map(uploadAsGeneration);
+    return dq ? all.filter((g) => g.request.prompt?.toLowerCase().includes(dq.toLowerCase())) : all;
+  }, [uploadsTab, uploads.data, lib.data, dq]);
   const built = useMemo(() => buildEntries(items, { stacks: prefs.stacks && !trash && !uploadsTab }), [items, prefs.stacks, trash, uploadsTab]);
   const entries = useStableEntries(built);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -428,7 +433,7 @@ function Inner() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQ("")}
-              placeholder="Search prompts"
+              placeholder={uploadsTab ? "Search file names" : "Search prompts"}
               aria-label="Search prompts"
               className="h-8 w-full rounded-full border bg-background pr-8 pl-8 text-[13px] outline-none focus:border-primary focus:ring-4 focus:ring-brand-faint"
             />
