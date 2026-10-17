@@ -6,6 +6,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { PageHeader } from "@/components/page-shell";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
+import { GALLERY_GRID } from "@/components/skeletons";
 import { useEngineMode } from "@/lib/api";
 import { searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -146,7 +147,7 @@ function useFadeEdges<T extends HTMLElement>() {
 const FIRST_PAGE = 30;
 const PAGE = 40;
 
-const GRID = "grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
+const GRID = GALLERY_GRID;
 
 export function PresetGallery({
   presets,
@@ -296,32 +297,6 @@ export function PresetGallery({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-/** Skeleton for the gallery pages (loading.tsx). */
-export function PresetGallerySkeleton() {
-  return (
-    <div className="space-y-4" aria-hidden>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="h-9 w-full animate-pulse rounded-full bg-muted sm:w-80" />
-        <div className="h-9 w-56 animate-pulse rounded-full bg-muted sm:ml-auto" />
-      </div>
-      <div className="flex gap-1 overflow-hidden">
-        {Array.from({ length: 9 }, (_, i) => (
-          <div key={i} className="h-8 w-20 shrink-0 animate-pulse rounded-full bg-muted" />
-        ))}
-      </div>
-      <div className={GRID}>
-        {Array.from({ length: 10 }, (_, i) => (
-          <div key={i} className="space-y-2 p-1.5">
-            <div className="aspect-[4/3] animate-pulse rounded-lg bg-muted" />
-            <div className="h-3.5 w-2/3 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-full animate-pulse rounded bg-muted" />
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
