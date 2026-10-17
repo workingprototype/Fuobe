@@ -449,6 +449,8 @@ function Inner() {
             <button
               onClick={() => (selecting ? clear() : setSelecting(true))}
               aria-pressed={selecting}
+              aria-label="Select"
+              title={selecting ? "Done selecting" : "Select several"}
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
                 selecting ? "bg-brand-faint text-brand-text hover:bg-brand-faint-hover" : "bg-secondary text-secondary-foreground hover:bg-accent",
