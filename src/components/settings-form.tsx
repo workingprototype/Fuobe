@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { SecuritySettings } from "@/components/security-settings";
 
 interface PublicSetting {
   name: string;
@@ -300,7 +301,7 @@ export function SettingsForm() {
 
       <Section
         title="Prompt enhancement"
-        description="The Enhance toggle rewrites short ideas into rich prompts. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter. In Open source only mode, Automatic skips Claude."
+        description="The Enhance toggle rewrites short ideas into rich prompts, and storyboards split stories into frames. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter. Claude also powers the Assist agent. In Open source only mode, Automatic skips Claude."
       >
         <div className="space-y-1.5">
           <Label className="text-[13px]">Enhancer</Label>
@@ -321,6 +322,14 @@ export function SettingsForm() {
           <Field setting={get("ollamaUrl")} label="Ollama URL" onSave={set("ollamaUrl")} />
           <Field setting={get("ollamaModel")} label="Ollama model" onSave={set("ollamaModel")} />
         </div>
+      </Section>
+
+      <Section
+        id="security"
+        title="Security"
+        description="Protect this studio with a password, and create API tokens for scripts and agents. Off by default for local use."
+      >
+        <SecuritySettings />
       </Section>
 
       <Section title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
