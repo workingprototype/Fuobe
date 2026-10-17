@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Trash2,
   UserRoundPlus,
+  Video,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
@@ -274,8 +275,10 @@ function TileView({
     ) : g.status !== "succeeded" ? (
       <FailedTile g={g} ratio={aspect} onRetry={() => void actions.retry(g.id).catch((e) => toast.error((e as Error).message))} />
     ) : (
-      <div className={cn("size-full", fit && "bg-muted")}>
-        <MediaThumb output={u.output!} className={fit ? "object-contain" : undefined} />
+      <div className={cn("relative size-full", fit && "bg-muted")}>
+        {/* Behind the video: visible until (or if) the browser can draw its first frame. */}
+        {u.output?.kind === "video" && <Video className="absolute top-1/2 left-1/2 size-6 -translate-1/2 text-subtle-foreground" aria-hidden />}
+        <MediaThumb output={u.output!} className={cn("relative", fit && "object-contain")} />
       </div>
     );
   const clickable = g.status === "succeeded";

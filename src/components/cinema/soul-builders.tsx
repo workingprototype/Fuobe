@@ -54,7 +54,14 @@ function Field({ f, values, set }: { f: CastField; values: CastValues; set: (pat
         <div className="space-y-1.5 px-1">
           <div className="flex justify-between">
             <span className="text-[11.5px] text-muted-foreground">{f.key === "budget" ? "Budget in millions" : f.label}</span>
-            <span className="font-mono text-[13px]">{v !== undefined ? fmt(f, v as string | number) : "—"}</span>
+            <span className="flex items-center gap-2">
+              {v !== undefined && f.default === undefined && (
+                <button type="button" onClick={() => set({ [f.key]: undefined })} className="text-[11px] text-muted-foreground hover:text-foreground">
+                  Clear
+                </button>
+              )}
+              <span className="font-mono text-[13px]">{v !== undefined ? fmt(f, v as string | number) : "Any"}</span>
+            </span>
           </div>
           <Slider
             value={[Math.max(0, f.options.indexOf(v as string | number))]}
@@ -150,6 +157,12 @@ function Results({ items, picked, onPick }: { items: Generation[]; picked: strin
   );
 }
 
+/** "a marble perfume atelier at golden hour, …" → "Marble Perfume Atelier". */
+function locationName(prompt: string): string {
+  const words = prompt.split(/[,.;]/)[0].replace(/^(an?|the)\s+/i, "").split(/\s+/).filter((w) => w && !/^(at|in|on|of|with|by|under|near|and)$/i.test(w));
+  return words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") || "Location";
+}
+
 function useBuilderRun(projectId: string) {
   const generate = useCinemaGenerate(projectId);
   const items = useCinemaItems(projectId).data;
@@ -161,7 +174,7 @@ function useBuilderRun(projectId: string) {
 function CostLabel({ plan, demoModel }: { plan: { costUsd: number | null }; demoModel: { routes: { provider: string }[] } }) {
   const status = useStatus().data;
   const demo = !!status && status.demoMode !== "off" && !demoModel.routes.some((r) => status.providers[r.provider]?.configured);
-  return <span className="font-mono text-[12px] text-muted-foreground">{demo ? "Demo · free" : plan.costUsd === 0 ? "Free" : plan.costUsd != null ? `≈ ${formatCost(plan.costUsd)}` : ""}</span>;
+  return <span className="font-mono text-[12px] whitespace-nowrap text-muted-foreground">{demo ? "Demo · free" : plan.costUsd === 0 ? "Free" : plan.costUsd != null ? `≈ ${formatCost(plan.costUsd)}` : ""}</span>;
 }
 
 function SaveElement({ kind, defaultName, picked, description, onSaved }: { kind: "character" | "location"; defaultName: string; picked: string[]; description: string; onSaved: () => void }) {
@@ -266,7 +279,7 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
         <Button variant="ghost" size="sm" onClick={() => setValues(castDefaults())}>
           <RotateCcw /> Reset
         </Button>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:ml-auto sm:w-auto">
           <div className="inline-flex h-8 rounded-full bg-muted p-0.5" role="radiogroup" aria-label="Variants">
             {[1, 2, 3, 4].map((n) => (
               <button key={n} type="button" role="radio" aria-checked={batch === n} onClick={() => setBatch(n)} className={cn("w-8 rounded-full font-mono text-[12px]", batch === n ? "bg-background shadow-soft" : "text-muted-foreground")}>
@@ -376,7 +389,7 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
               ))}
             </div>
           )}
-          <SaveElement kind="location" defaultName={prompt.split(/[,.]/)[0].replace(/^(an?|the)\s+/i, "").slice(0, 40) || "Location"} picked={picked} description={prompt} onSaved={() => onOpenChange(false)} />
+          <SaveElement kind="location" defaultName={locationName(prompt)} picked={picked} description={prompt} onSaved={() => onOpenChange(false)} />
         </div>
       )}
     </>

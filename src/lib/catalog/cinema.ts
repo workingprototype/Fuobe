@@ -690,8 +690,8 @@ export function castPrompt(values: CastValues, description?: string): string {
 
 /** A starting name for the saved element ("Rebel, 30s"); renamed on the element page. */
 export function castName(values: CastValues): string {
-  const archetype = values.archetype ? String(values.archetype) : "Cast member";
-  return values.age ? `${archetype} ${values.age}` : archetype;
+  if (values.archetype) return values.age ? `${values.archetype} ${values.age}` : String(values.archetype);
+  return values.genre ? `${values.genre} lead` : "Cast member";
 }
 
 // ---------------------------------------------------------------------------

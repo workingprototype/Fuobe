@@ -9,6 +9,19 @@ import { CAMERA_MOVES, moveBySlug, openCameraRoute, type CameraMove } from "@/li
 import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 
+/** Name matches first (prefix, then word start, then anywhere), the slug and the hint after. */
+function moveScore(value: string, search: string, keywords?: string[]): number {
+  const q = search.trim().toLowerCase();
+  if (!q) return 1;
+  const name = value.toLowerCase();
+  if (name.startsWith(q)) return 1;
+  if (name.split(/\s+/).some((w) => w.startsWith(q))) return 0.9;
+  if (name.includes(q)) return 0.8;
+  const [slug = "", hint = ""] = (keywords ?? []).map((k) => k.toLowerCase());
+  if (slug.includes(q.replace(/\s+/g, "-"))) return 0.6;
+  return hint.includes(q) ? 0.2 : 0;
+}
+
 /** How the open engine drives a move (shown as a small badge in the picker). */
 function routeBadge(m: CameraMove, engine: Engine): string | null {
   if (engine !== "open") return null;
@@ -34,7 +47,7 @@ export function MoveList({
   const [query, setQuery] = useState(defaultQuery ?? "");
   const moves = useMemo(() => (sort === "name" ? [...CAMERA_MOVES].sort((a, b) => a.name.localeCompare(b.name)) : CAMERA_MOVES), [sort]);
   return (
-    <Command loop className="bg-transparent" filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
+    <Command loop className="bg-transparent" filter={moveScore}>
       <div className="flex items-center gap-1 pr-1">
         <div className="min-w-0 flex-1">
           <CommandInput placeholder="Search camera moves…" value={query} onValueChange={setQuery} autoFocus={autoFocus} />
@@ -60,7 +73,7 @@ export function MoveList({
             const badge = routeBadge(m, engine);
             const n = selected.indexOf(m.slug);
             return (
-              <CommandItem key={m.slug} value={`${m.name} ${m.slug} ${m.hint}`} onSelect={() => onPick(m.slug)} className="group/move items-start gap-2.5 py-2">
+              <CommandItem key={m.slug} value={m.name} keywords={[m.slug, m.hint]} onSelect={() => onPick(m.slug)} className="group/move items-start gap-2.5 py-2">
                 <span className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-md text-[11px] font-semibold", n >= 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
                   {n >= 0 ? n + 1 : <Hash className="size-3" />}
                 </span>

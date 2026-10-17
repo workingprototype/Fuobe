@@ -157,19 +157,42 @@ const FRAMES: { title: string; frame: string; moves: (t: string) => string[]; fo
   { title: "Closing", frame: "Wide closing shot", moves: () => ["dolly-out"], focal: "35mm" },
 ];
 
-/** Split a script into beats: lines, else sentences; a one-line idea gets a 4-beat structure. */
-function beats(text: string, want?: number): string[] {
-  const body = text
-    .replace(/^(please\s+)?(write|make|create|generate|break( down)?|turn)\b[^:]*:\s*/i, "")
-    .trim();
+/** "Generate an 8-shot storyboard for a sci-fi chase in Tokyo" → "a sci-fi chase in Tokyo". */
+export function ideaOf(text: string): string {
+  return text
+    .trim()
+    .replace(/^(please\s+)?(can you\s+)?(write|make|create|generate|give me|break( down)?|turn|draft|plan|storyboard|shoot|direct)\b\s*(me\s+)?/i, "")
+    .replace(/^(an?|the)\s+/i, "")
+    .replace(/\b\d+\s*[- ]?\s*(shots?|seconds?|secs?|s)\b[- ]?/gi, "")
+    .replace(/^(cinematic\s+)?(storyboard|shot list|breakdown|sequence|scene list)\s+(for|of|about)\s+/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "");
+}
+
+const STORY_BEATS = ["the world is introduced", "the action begins", "a closer look at the character", "a telling detail", "a reaction", "the turning point", "the reveal", "the resolution"];
+const AD_BEATS = [
+  "the world of the product, setting the mood",
+  "the hero finds it",
+  "the product up close, light catching every surface",
+  "a sensory detail that sells the feeling",
+  "a reaction: the pleasure of using it",
+  "a bold, dynamic angle on the product",
+  "the brand world revealed",
+  "the final hero shot, product centred, room for the logo",
+];
+
+/** A script's lines (or sentences) are its beats; a one-line idea gets a shot structure around it. */
+function beats(text: string, want?: number): { beat: string; frame?: number }[] {
+  const body = text.replace(/^(please\s+)?(write|make|create|generate|break( down)?|turn)\b[^:\n]*:\s*/i, "").trim();
   const lines = body.split(/\n+/).map((l) => l.replace(/^\s*(\d+[.)]|[-*•])\s*/, "").trim()).filter((l) => l.length > 3);
-  let parts = lines.length > 1 ? lines : body.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 3);
-  const n = want ?? (parts.length > 1 ? Math.min(parts.length, 12) : 4);
-  if (parts.length < n) {
-    const idea = parts.join(" ") || body;
-    parts = Array.from({ length: n }, (_, i) => parts[i] ?? idea);
-  }
-  return parts.slice(0, n);
+  const parts = lines.length > 1 ? lines : body.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter((x) => x.length > 3);
+  if (parts.length > 1) return parts.slice(0, want ?? 12).map((beat) => ({ beat }));
+  const idea = ideaOf(text);
+  const ad = has(text, "commercial", "advert", "product", "perfume", "brand", "spot", "promo");
+  const n = want ?? 4;
+  const order = n <= 4 ? [0, 1, 2, 7].slice(0, n) : Array.from({ length: n }, (_, i) => i % FRAMES.length);
+  return order.map((frame) => ({ beat: `${idea}, ${(ad ? AD_BEATS : STORY_BEATS)[frame]}`, frame }));
 }
 
 export function offlineDirector(text: string, project: Pick<CinemaProject, "brief" | "director">): { reply: string; shots: DirectorShot[]; brief?: string } {
@@ -185,13 +208,20 @@ export function offlineDirector(text: string, project: Pick<CinemaProject, "brie
     ].join("\n");
     return { reply: "Here's a starting brief. Apply it to the project, then edit it as you like.", shots: [], brief };
   }
+  const idea = ideaOf(text);
+  if (!text.includes("\n") && (!idea || /^(script|story|film|movie|scene|something)$/i.test(idea))) {
+    return {
+      reply: "What's the film about? Give me a line or two — a character, a place, what goes wrong — or paste your script, and I'll break it into shots with the camera, light and palette filled in.",
+      shots: [],
+    };
+  }
   const count = /(\d+)\s*[- ]?\s*shots?/i.exec(text)?.[1];
   const seconds = /(\d+)\s*[- ]?\s*(s|sec|second)s?\b/i.exec(text)?.[1];
   const parts = beats(text, count ? Math.max(1, Math.min(12, Number(count))) : undefined);
   const each = seconds ? Math.max(DURATION.min, Math.min(DURATION.max, Math.round(Number(seconds) / parts.length))) : DURATION.default;
   const look = guessLook(t, project.director);
-  const shots = parts.map((beat, i): DirectorShot => {
-    const f = FRAMES[parts.length <= 4 ? [0, 1, 2, 7][i] : i % FRAMES.length] ?? FRAMES[i % FRAMES.length];
+  const shots = parts.map(({ beat, frame }, i): DirectorShot => {
+    const f = FRAMES[frame ?? (parts.length <= 4 ? [0, 1, 2, 7][i] : i % FRAMES.length)] ?? FRAMES[i % FRAMES.length];
     return {
       title: `${i + 1}. ${f.title}`,
       prompt: `${f.frame}: ${beat.replace(/[.\s]+$/, "")}`,

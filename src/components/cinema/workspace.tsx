@@ -320,7 +320,14 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
         <EngineSwitch value={engine} onChange={setEngine} size="sm" />
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={panel === "director" ? "secondary" : "ghost"} size="sm" onClick={() => setPanel((p) => (p === "director" ? null : "director"))} aria-pressed={panel === "director"} className="shrink-0">
+            <Button
+              variant={panel === "director" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setPanel((p) => (p === "director" ? null : "director"))}
+              aria-pressed={panel === "director"}
+              aria-label="AI Director"
+              className="shrink-0 max-sm:size-8 max-sm:px-0"
+            >
               <Bot /> <span className="hidden sm:inline">AI Director</span>
             </Button>
           </TooltipTrigger>
@@ -328,7 +335,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={panel === "brief" ? "secondary" : "ghost"} size="icon-sm" onClick={() => setPanel((p) => (p === "brief" ? null : "brief"))} aria-pressed={panel === "brief"} aria-label="Project brief" className="shrink-0">
+            <Button variant={panel === "brief" ? "secondary" : "ghost"} size="icon-sm" onClick={() => setPanel((p) => (p === "brief" ? null : "brief"))} aria-pressed={panel === "brief"} aria-label="Project brief" className="shrink-0 max-sm:hidden">
               <FileText />
             </Button>
           </TooltipTrigger>
@@ -343,6 +350,9 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
               <Settings2 /> Project settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setPanel("brief")}>
+              <FileText /> Project brief
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => update.mutate({ pinned: !project.pinned })}>
               {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "Unpin project" : "Pin project"}

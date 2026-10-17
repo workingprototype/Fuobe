@@ -58,8 +58,13 @@ function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettin
           <p className="mt-1 text-[12px] text-muted-foreground">
             Updated {timeAgo(project.updatedAt)}
             {project.stats ? ` · ${project.stats.items} take${project.stats.items === 1 ? "" : "s"}` : ""}
-            {project.stats?.spentUsd ? <span className="font-mono"> · ≈ {formatCost(project.stats.spentUsd)}</span> : null}
-            {project.costCapUsd != null ? <span className="font-mono"> / {formatCost(project.costCapUsd) || "$0"}</span> : null}
+            {project.stats?.spentUsd || project.costCapUsd != null ? (
+              <span className="font-mono">
+                {" "}
+                · ≈ {formatCost(project.stats?.spentUsd ?? 0) === "Free" ? "$0" : formatCost(project.stats?.spentUsd ?? 0)}
+                {project.costCapUsd != null ? ` of ${formatCost(project.costCapUsd) === "Free" ? "$0" : formatCost(project.costCapUsd)}` : ""}
+              </span>
+            ) : null}
           </p>
         </div>
       </Link>

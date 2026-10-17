@@ -94,7 +94,23 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
   );
 }
 
-function PickChip<T extends string | number>({ icon: Icon, label, value, options, onChange, format }: { icon: typeof Video; label: string; value: T; options: T[]; onChange: (v: T) => void; format?: (v: T) => string }) {
+function PickChip<T extends string | number>({
+  icon: Icon,
+  label,
+  value,
+  options,
+  onChange,
+  format,
+  describe,
+}: {
+  icon: typeof Video;
+  label: string;
+  value: T;
+  options: T[];
+  onChange: (v: T) => void;
+  format?: (v: T) => string;
+  describe?: (v: T) => string;
+}) {
   const f = format ?? ((v: T) => String(v));
   return (
     <DropdownMenu>
@@ -108,8 +124,15 @@ function PickChip<T extends string | number>({ icon: Icon, label, value, options
         <DropdownMenuLabel>{label}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={String(value)} onValueChange={(v) => onChange(options.find((o) => String(o) === v)!)}>
           {options.map((o) => (
-            <DropdownMenuRadioItem key={String(o)} value={String(o)}>
-              {f(o)}
+            <DropdownMenuRadioItem key={String(o)} value={String(o)} className={describe ? "items-start" : undefined}>
+              {describe ? (
+                <span>
+                  <span className="block">{f(o)}</span>
+                  <span className="block text-[11.5px] text-muted-foreground">{describe(o)}</span>
+                </span>
+              ) : (
+                f(o)
+              )}
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -207,7 +230,7 @@ export function useAddRefs(setDraft: (fn: (d: CinemaDraft) => Partial<CinemaDraf
   };
 }
 
-function AddRef({ onFiles, onPick }: { onFiles: (f: FileList) => void; onPick: (r: RefItem) => void }) {
+function AddRef({ onFiles, onPick, compact }: { onFiles: (f: FileList) => void; onPick: (r: RefItem) => void; compact?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const assets = useAssets(undefined, undefined);
@@ -216,14 +239,20 @@ function AddRef({ onFiles, onPick }: { onFiles: (f: FileList) => void; onPick: (
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="flex size-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-border-strong text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text"
-              aria-label="Add references"
-            >
-              <Plus className="size-4" />
-              <span className="text-[10px] font-medium">Add</span>
-            </button>
+            {compact ? (
+              <button type="button" className={cn("grid size-8 shrink-0 place-items-center rounded-full", chipIdle)} aria-label="Add references">
+                <ImagePlus className="size-3.5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="flex size-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-border-strong text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text"
+                aria-label="Add references"
+              >
+                <Plus className="size-4" />
+                <span className="text-[10px] font-medium">Add</span>
+              </button>
+            )}
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent>Images, videos or audio as references · drop or paste anywhere</TooltipContent>
@@ -400,7 +429,7 @@ export function PromptBar(props: PromptBarProps) {
 
   return (
     <div
-      className="group/composer w-full rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+      className="group/composer @container w-full rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
       onPaste={(e) => {
         const files = [...e.clipboardData.files];
         if (files.length) {
@@ -447,7 +476,7 @@ export function PromptBar(props: PromptBarProps) {
       )}
 
       {/* References */}
-      <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-0.5 pb-2">
+      <div className={cn("scrollbar-none items-center gap-2 overflow-x-auto px-1 pt-0.5 pb-2", draft.refs.length ? "flex" : "hidden sm:flex")}>
         {(() => {
           const n: Record<string, number> = {};
           return draft.refs.map((r) => {
@@ -456,7 +485,7 @@ export function PromptBar(props: PromptBarProps) {
           });
         })()}
         <AddRef onFiles={addRefs} onPick={(r) => setDraft((d) => ({ refs: [...d.refs, r] }))} />
-        {!draft.refs.length && <span className="text-[12px] text-subtle-foreground">Start frame, references, clips or audio — or @ a character</span>}
+        {!draft.refs.length && <span className="hidden text-[12px] text-subtle-foreground sm:inline">Start frame, references, clips or audio — or @ a character</span>}
       </div>
 
       {video && <MoveChips moves={draft.moves} onChange={(moves) => setDraft({ moves })} />}
@@ -495,17 +524,42 @@ export function PromptBar(props: PromptBarProps) {
       )}
 
       {/* Director's Panel */}
-      <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-0.5 pb-1.5 sm:flex-wrap sm:overflow-visible">
+      <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-0.5 pb-1.5 @min-[760px]:flex-wrap @min-[760px]:overflow-visible">
         <FilmSetupChip settings={settings} onChange={onSettings} mode={draft.mode} />
-        <CameraChip settings={settings} onChange={onSettings} mode={draft.mode} engine={engine} moves={draft.moves} onMovesChange={(moves) => setDraft({ moves })} />
+        <CameraChip
+          settings={settings}
+          onChange={onSettings}
+          mode={draft.mode}
+          engine={engine}
+          moves={draft.moves}
+          onMovesChange={(moves) => setDraft({ moves })}
+          required={draft.mode === "image" && draft.imageTool === "still"}
+        />
         <PaletteChip settings={settings} onChange={onSettings} engine={engine} saved={props.palettes} onSave={props.onPalettes} />
         <LightingChip settings={settings} onChange={onSettings} />
         <EmotionChip settings={settings} onChange={onSettings} characters={characters} />
+        <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={props.onCast} className={cn(chip, chipIdle)} aria-label="Soul Cast: build a character">
+                <UserRoundPlus className="size-3.5" /> Cast
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Soul Cast: build an AI actor and save it as a character</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={props.onLocation} className={cn(chip, chipIdle)} aria-label="Soul Location: build a location">
+                <MapPin className="size-3.5" /> Location
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Soul Location: keep every scene in the same world</TooltipContent>
+          </Tooltip>
       </div>
 
       {/* Generation settings */}
       <div className="flex items-end gap-2">
-        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
+        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto @min-[760px]:flex-wrap @min-[760px]:overflow-visible">
           <Segmented
             label="Mode"
             value={draft.mode}
@@ -529,7 +583,7 @@ export function PromptBar(props: PromptBarProps) {
           {!video && draft.imageTool === "grid" && (
             <>
               <PickChip icon={Grid2x2} label="Grid size" value={draft.grid.size} options={GRID_SIZES.map((g) => g.id)} onChange={(size) => setDraft((d) => ({ grid: { ...d.grid, size } }))} format={(v) => GRID_SIZES.find((g) => g.id === v)!.name} />
-              <PickChip icon={Clapperboard} label="Grid type" value={draft.grid.type} options={GRID_TYPES.map((g) => g.id)} onChange={(type) => setDraft((d) => ({ grid: { ...d.grid, type } }))} format={(v) => GRID_TYPES.find((g) => g.id === v)!.name} />
+              <PickChip icon={Clapperboard} label="Grid type" value={draft.grid.type} options={GRID_TYPES.map((g) => g.id)} onChange={(type) => setDraft((d) => ({ grid: { ...d.grid, type } }))} format={(v) => GRID_TYPES.find((g) => g.id === v)!.name} describe={(v) => GRID_TYPES.find((g) => g.id === v)!.description} />
             </>
           )}
 
@@ -568,6 +622,11 @@ export function PromptBar(props: PromptBarProps) {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {!draft.refs.length && (
+            <span className="sm:hidden">
+              <AddRef compact onFiles={addRefs} onPick={(r) => setDraft((d) => ({ refs: [...d.refs, r] }))} />
+            </span>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={() => promptRef.current?.startMention()} className={cn("grid size-8 shrink-0 place-items-center rounded-full", chipIdle)} aria-label="Add an element">
@@ -621,22 +680,6 @@ export function PromptBar(props: PromptBarProps) {
               format={(v) => (v === "off" ? "Single shot" : v === "auto" ? "Multi-shot · Auto" : "Multi-shot · Manual")}
             />
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={props.onCast} className={cn(chip, chipIdle)} aria-label="Soul Cast: build a character">
-                <UserRoundPlus className="size-3.5" /> Cast
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Soul Cast: build an AI actor and save it as a character</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={props.onLocation} className={cn(chip, chipIdle)} aria-label="Soul Location: build a location">
-                <MapPin className="size-3.5" /> Location
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Soul Location: keep every scene in the same world</TooltipContent>
-          </Tooltip>
         </div>
         <span className={cn("hidden shrink-0 font-mono text-[12px] sm:inline", overCap ? "text-destructive" : "text-muted-foreground")}>
           {demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : ""}

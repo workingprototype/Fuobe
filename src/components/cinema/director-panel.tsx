@@ -178,6 +178,7 @@ export function CameraChip({
   engine,
   moves,
   onMovesChange,
+  required,
 }: {
   settings: DirectorSettings;
   onChange: Patch;
@@ -185,9 +186,11 @@ export function CameraChip({
   engine: Engine;
   moves: string[];
   onMovesChange: (m: string[]) => void;
+  /** Cinematic stills: camera, lens and focal length must be set. */
+  required?: boolean;
 }) {
   const [tab, setTab] = useState<(typeof CAMERA_TABS)[number]["id"]>("camera");
-  const still = mode === "image";
+  const still = !!required;
   const missing = still && (!settings.camera || !settings.lens || !settings.focal);
   const parts = [
     settings.camera && optionName(CAMERA_BODIES, settings.camera),
@@ -195,7 +198,7 @@ export function CameraChip({
     settings.focal && optionName(FOCAL_LENGTHS, settings.focal),
     settings.aperture && optionName(APERTURES, settings.aperture).replace(/ .*/, ""),
   ].filter(Boolean);
-  const required = (id: string) => still && ((id === "camera" && !settings.camera) || (id === "lens" && !settings.lens) || (id === "focal" && !settings.focal));
+  const needs = (id: string) => still && ((id === "camera" && !settings.camera) || (id === "lens" && !settings.lens) || (id === "focal" && !settings.focal));
   return (
     <Popover>
       <Tooltip>
@@ -220,7 +223,7 @@ export function CameraChip({
               )}
             >
               {t.label}
-              {required(t.id) && <span className="size-1.5 rounded-full bg-warning" aria-label="required" />}
+              {needs(t.id) && <span className="size-1.5 rounded-full bg-warning" aria-label="required" />}
               {t.id === "movement" && moves.length > 0 && <span className="font-mono text-[10px] text-brand-text">{moves.length}</span>}
             </button>
           ))}

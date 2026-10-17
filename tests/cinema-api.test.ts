@@ -13,7 +13,7 @@ const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const cinema = await import("@/server/cinema");
 const { generateInProject, swatchUrl } = await import("@/server/cinema-generate");
-const { askDirector, offlineDirector, parseDirectorAnswer } = await import("@/server/cinema-director");
+const { askDirector, ideaOf, offlineDirector, parseDirectorAnswer } = await import("@/server/cinema-director");
 const projectsRoute = await import("@/app/api/cinema/projects/route");
 const projectRoute = await import("@/app/api/cinema/projects/[id]/route");
 const foldersRoute = await import("@/app/api/cinema/projects/[id]/folders/route");
@@ -187,6 +187,20 @@ describe("AI Director", () => {
     expect(script.shots.map((s) => s.prompt)).toEqual(["Wide establishing shot: She opens the letter", "Medium shot: Her hands shake", "Close-up: She looks out the window at the rain"]);
     expect(script.shots[0].settings.camera).toBe("35mm-film");
     expect(offlineDirector("Write a project brief for a perfume commercial", { brief: { title: "", body: "" }, director: {} }).brief).toMatch(/^Context: /);
+
+    // A one-line idea gets a shot structure around it; a bare "write a script" asks what the film is about.
+    expect(ideaOf("Generate an 8-shot storyboard for a sci-fi chase scene through a neon city at night")).toBe("a sci-fi chase scene through a neon city at night");
+    const ad = offlineDirector("Create a 15-second cinematic perfume commercial", { brief: { title: "", body: "" }, director: {} });
+    expect(ad.shots.map((s) => s.prompt)).toEqual([
+      "Wide establishing shot: cinematic perfume commercial, the world of the product, setting the mood",
+      "Medium shot: cinematic perfume commercial, the hero finds it",
+      "Close-up: cinematic perfume commercial, the product up close, light catching every surface",
+      "Wide closing shot: cinematic perfume commercial, the final hero shot, product centred, room for the logo",
+    ]);
+    expect(ad.shots.every((s) => s.duration === 4 && s.settings.tempo === "dynamic")).toBe(true);
+    const ask = offlineDirector("Write a script", { brief: { title: "", body: "" }, director: {} });
+    expect(ask.shots).toEqual([]);
+    expect(ask.reply).toMatch(/What's the film about/);
   });
 
   it("parses an LLM answer and drops values the panel doesn't know", () => {

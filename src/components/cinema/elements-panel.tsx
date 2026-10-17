@@ -15,7 +15,7 @@ export function ElementsPanel({ onMention, onCast, onLocation }: { onMention: (e
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="flex-1 font-heading text-[24px] leading-none">My Elements</h2>
+        <h2 className="flex-1 font-heading text-[24px] leading-none whitespace-nowrap">My Elements</h2>
         <Button variant="secondary" size="sm" onClick={onCast}>
           <UserRoundPlus /> New character
         </Button>
