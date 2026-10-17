@@ -3,10 +3,11 @@
 **An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
 Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
-- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step
-- **Studios:** Image · Video (text, image, start/end frame, references, multi-shot, draft mode) · Edit · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard · Apps · Lipsync & avatars · Motion control · Edit / Extend / Reframe video · Video tools (matte, relight, depth) · Audio (speech with voice picker and cloning, dialogue, voice change, translate, SFX, music, sound for video) · Library
+- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Runs on Claude or a local Ollama model
+- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`
+- **Studios:** Image · Video (text, image, start/end frame, references, multi-shot, draft mode) · Edit · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · Apps · Lipsync & avatars · Motion control · Edit / Extend / Reframe video · Video tools (matte, relight, depth, join clips, match colors) · Audio (speech with voice picker and cloning, dialogue, voice change, translate, SFX, music, sound for video) · Library
 - **Elements:** save characters, locations, props, styles and voices once, then `@mention` them in any prompt; train a character (Soul ID, a fal LoRA, or AI-Toolkit on your GPU) for a consistent face
-- **Catalog:** 98 cloud models + 46 open-source models, 118 apps, 108 camera motions, 255 effects
+- **Catalog:** 100 cloud models + 49 open-source models, 121 apps, 108 camera motions (mix any two), 255 effects
 - **Open-source engine:** 73 API-format ComfyUI workflows exported from the official templates or community packs and validated against real ComfyUI node definitions, plus 170 researched LoRAs (camera moves, VFX) wired into the presets
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
@@ -36,10 +37,14 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 | A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`) | Every open-source model, app, motion and effect |
 | An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent, prompt **Enhance** and storyboard splitting with Claude |
-| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`) | Local prompt enhancement and storyboard splitting (Assist uses its offline planner without Claude) |
+| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`) | Local prompt enhancement, storyboard splitting and the Assist agent (tool calling) |
 | AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character LoRAs from an element's photos; the result is copied into ComfyUI and used whenever you @mention the character |
 
-Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user and its API is unauthenticated: run it on your own machine or behind an auth proxy, not on the open internet.
+Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user. Before you open it to a network, set a password (**Settings → Security**, or `FUOBE_PASSWORD`): every page and API call then needs a sign-in or an API token (`Authorization: Bearer fuobe_…`), which you create on the same page for scripts and MCP clients:
+
+```bash
+claude mcp add --transport http fuobe http://localhost:3000/api/mcp --header "Authorization: Bearer fuobe_…"
+```
 
 ### Setting up the open-source engine
 

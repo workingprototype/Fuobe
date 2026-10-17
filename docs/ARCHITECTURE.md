@@ -3,6 +3,8 @@
 Fuobe is a single Next.js 16 app. The browser talks only to Fuobe's own API; the server talks to providers (fal.ai, Replicate, Higgsfield, ComfyUI) and stores every input and output locally so the library never depends on a provider's expiring URLs.
 
 ```
+            proxy.ts (sign-in: session cookie or API token, once a password is set)
+                                              │
 Composer (React) ──POST /api/generations──▶ applyMentions()       src/lib/catalog/elements.ts
                                               │  @handles → reference images + legend, or a trained LoRA / Soul ID
                                          applySketch()            src/lib/catalog/sketch.ts
@@ -12,7 +14,7 @@ Composer (React) ──POST /api/generations──▶ applyMentions()       src/
                                          planGeneration()         src/lib/catalog/plan.ts
                                               │  model + preset + attachments
                                               │  → operation (t2v / i2v / flf2v / edit / avatar …)
-                                              │  → prompt (preset template, LoRA trigger)
+                                              │  → prompt (preset template, LoRA trigger, Mix of a second preset)
                                               │  → params, LoRAs, number of jobs
                                               ▼
                                          engine mode check        Settings → Engine mode (both / open / cloud)
@@ -23,8 +25,8 @@ Composer (React) ──POST /api/generations──▶ applyMentions()       src/
                                               │  else the demo provider (Settings → Demo mode)
                                               ▼
                                          SQLite row (queued) ─ submit() in the background
-                                              │  (a row with depends_on waits until that generation succeeds,
-                                              │   then gets its output as an input: storyboards)
+                                              │  (a row with depends_on waits until every generation it names
+                                              │   succeeds, then gets their outputs as inputs: see Chained jobs)
                                               │  upload inputs to the provider (prepareFile)
                                               │  optional prompt enhancement (src/server/enhance.ts)
                                               │  adapter.submit()  → external job id
@@ -75,17 +77,34 @@ All adapters implement `prepareFile`, `submit`, `poll`, `cancel`, `test`.
 
 `manifest.json` lists each workflow with its **bindings** (canonical key → node id + input), outputs, defaults (`width`, `height`, `fps`, `frameStep`…), limits (`dimensionMultiple`, `maxFrames`…), required model files with download URLs and sizes, custom node packs, VRAM and a `validated` flag. The pipeline in `scripts/comfy/` exports the official templates through the real ComfyUI frontend (`app.graphToPrompt()`), applies documented transforms, and validates every graph with `POST /prompt` against a live ComfyUI using zero-byte placeholder models.
 
+## Chained jobs (`src/server/chains.ts`)
+
+A generation can depend on others (`CreateOptions.dependsOn`, one id or a list). `GenerationRequest.chain` says where each dependency's first output goes (`images` first/last, `endImage`, `video`, `videos`, `audio`); the old single-image `chainFrom` still works. The request is validated with placeholder inputs when it's created, and the runner launches it once every dependency has succeeded (or fails it when one didn't). Built on that:
+
+- **Join clips** (`joinClips`): fal's FFmpeg `merge-videos` on the cloud, ComfyUI's `video-concat-{2,3,4}` on the open engine (the provider picks the graph by clip count; the graph plays at the first clip's frame rate). More than four clips on ComfyUI are folded four at a time.
+- **Open multi-shot** (`createShotFilm`): models with `multiShot.mode: "concat"` render one clip per shot (the first gets the start image, the last the end frame), then join them.
+- **Storyboard film** (`createStoryboardFilm` in `storyboard.ts`): each frame is animated toward the next (start + end frame when the model can), then joined.
+- **Last-frame extend** (`createExtendChain`): for models whose extend route is `LAST_FRAME_CHAIN` (Kling): fal FFmpeg `extract-frame` → the model's image-to-video → join with the original.
+
 ## Training (`src/server/training.ts`)
 
 A `trainings` row per job, polled by the same runner. Higgsfield Soul ID returns a reference id stored on the element; fal's Z-Image trainer gets a zipped dataset with captions and returns a LoRA URL (hosted Z-Image switches to its `/lora` endpoint); AI-Toolkit gets a dataset folder and a job through its UI's job API, and the finished LoRA is copied into `COMFYUI_LORAS_DIR`. Elements keep a list of trained identities (`loras_json`), and `applyMentions` uses the one that matches the chosen model.
 
 ## Assist agent (`src/server/assist/`)
 
-A manual tool-use loop over Claude (`claude-opus-5-5`, adaptive thinking, server-side fallback). Tools: `search_models`, `list_elements`, `list_recent`, `check_generations` (can wait, and can attach finished images so the model sees them), `generate` and `create_storyboard`. The last two are **gated**: when the model calls them the loop stops, the thread is saved as `waiting` with an approval card priced by `previewGeneration`, and the user's answer resumes the loop with the results of every call in that turn in one message. A new message instead of an answer declines the plan with the message as feedback. History is stored append-only exactly as the API returned it (thinking blocks included); local images are kept as URLs and converted to base64 per request. Without an Anthropic key, a rule-based planner returns the same message shapes, so the whole flow works offline. The run starts synchronously after the POST (so polls never see a stale "running" thread) and is kept alive with `after()`; the UI polls `GET /api/assist/<id>`.
+A manual tool-use loop over Claude (`claude-opus-5-5`, adaptive thinking, server-side fallback). Tools: `search_models`, `list_elements`, `list_recent`, `check_generations` (can wait, and can attach finished images so the model sees them), `generate` and `create_storyboard`. The last two are **gated**: when the model calls them the loop stops, the thread is saved as `waiting` with an approval card priced by `previewGeneration`, and the user's answer resumes the loop with the results of every call in that turn in one message. A new message instead of an answer declines the plan with the message as feedback. History is stored append-only exactly as the API returned it (thinking blocks included); local images are kept as URLs and converted to base64 per request. The same loop runs on a local model through Ollama's tool calling (the history is converted to Ollama chat messages and back), or, with no LLM at all, on a rule-based planner that returns the same message shapes. `resolveAgent()` picks one for each new chat.
+
+## MCP server (`src/server/mcp.ts`, `/api/mcp`)
+
+Model Context Protocol over streamable HTTP, stateless with JSON responses: `initialize` (version negotiation), `ping`, `tools/list`, `tools/call`. The tools are Assist's (shared `executeTool`), plus `estimate_cost`, which prices a generate call with `previewGeneration`. Requests from a foreign `Origin` are refused (DNS rebinding); the proxy applies the same sign-in rules as the REST API.
+
+## Access protection (`src/server/auth.ts`, `src/proxy.ts`)
+
+Off until a password is set in Settings → Security or `FUOBE_PASSWORD`. State lives in `data/auth.json` (not SQLite) so the proxy can check requests with `fs` and `crypto` alone: a scrypt password hash, an HMAC secret for 30-day session cookies (replaced when the password changes, which signs everyone out), and API tokens stored as SHA-256 hashes. The proxy lets `/login` and `/api/auth/login` through, answers other API calls with 401 and redirects pages to `/login?next=…`. Tokens and the password can only be managed from a signed-in browser. The run starts synchronously after the POST (so polls never see a stale "running" thread) and is kept alive with `after()`; the UI polls `GET /api/assist/<id>`.
 
 ## Storage (`src/server/db.ts`, `storage.ts`, `settings.ts`)
 
-SQLite (WAL) with tables `generations` (with `depends_on` for chained jobs), `assets`, `settings`, `characters` (elements), `trainings` and `assist_threads`. Migrations are an append-only list in `db.ts`. Settings (`src/server/settings.ts`) are typed, validated against allowed values, overridable by environment variables, and secrets are masked before reaching the browser. `engineMode` is enforced server-side; the client reads it from `/api/status` (`useEngineMode`) to lock the engine switch and filter what it shows. Files live in `data/files/{uploads,outputs}/<date>/<id>.<ext>` and are served by `/api/files/...` with HTTP range support for video. `FUOBE_DATA_DIR` moves everything.
+SQLite (WAL) with tables `generations` (with `depends_on`: one id or a JSON list, for chained jobs), `assets`, `settings`, `characters` (elements), `trainings` and `assist_threads`. Migrations are an append-only list in `db.ts`. Settings (`src/server/settings.ts`) are typed, validated against allowed values, overridable by environment variables, and secrets are masked before reaching the browser. `engineMode` is enforced server-side; the client reads it from `/api/status` (`useEngineMode`) to lock the engine switch and filter what it shows. Files live in `data/files/{uploads,outputs}/<date>/<id>.<ext>` and are served by `/api/files/...` with HTTP range support for video. `FUOBE_DATA_DIR` moves everything.
 
 ## UI (`src/components/`, `src/app/(studio)/`)
 
