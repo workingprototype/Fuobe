@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
   AtSign,
+  GalleryHorizontal,
   Layers,
   Crop,
   FastForward,
@@ -64,6 +65,7 @@ const NAV = [
       { href: "/color-grade", label: "Color grading", icon: SlidersHorizontal },
       { href: "/motions", label: "Camera motions", icon: Film },
       { href: "/effects", label: "Effects", icon: Sparkles },
+      { href: "/storyboard", label: "Storyboard", icon: GalleryHorizontal },
       { href: "/apps", label: "Apps", icon: LayoutGrid },
     ],
   },

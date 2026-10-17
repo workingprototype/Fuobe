@@ -50,6 +50,7 @@ interface Row {
   created_at: number;
   updated_at: number;
   completed_at: number | null;
+  depends_on: string | null;
 }
 
 function toGeneration(r: Row): Generation {
@@ -165,7 +166,8 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 // ---------------------------------------------------------------------------
 // Create
 
-export function createGenerations(original: GenerationRequest): Generation[] {
+/** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
+function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   const model = getModel(original.modelId);
   const req = model ? stripMotionPaths(applySketch(applyMentions(original, model, listElements()).request, model).request, model) : original;
@@ -180,11 +182,25 @@ export function createGenerations(original: GenerationRequest): Generation[] {
   }
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op));
   const providerId: ProviderId = demo ? "mock" : route.provider;
-  const batchId = plan.jobs > 1 ? nanoid(10) : null;
+  return { req, plan, route, demo, providerId, cost: demo ? 0 : estimateCost(plan.model, plan.params, 1) };
+}
+
+export interface CreateOptions {
+  /** Group several requests (storyboard frames) into one batch. */
+  batchId?: string;
+  /** Wait for this generation and feed its first output in as an image (see GenerationRequest.chainFrom). */
+  dependsOn?: string;
+}
+
+export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
+  // A dependent job can't be planned until its input exists; it's validated without it, then launched by the runner.
+  const p = opts.dependsOn ? prepare(withChainPlaceholder(original)) : prepare(original);
+  const { req, plan, route, demo, providerId, cost } = p;
+  const jobs = opts.dependsOn ? 1 : plan.jobs;
+  const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
-  const cost = estimateCost(plan.model, plan.params, 1);
   const created: Generation[] = [];
-  for (let i = 0; i < plan.jobs; i++) {
+  for (let i = 0; i < jobs; i++) {
     const id = nanoid(12);
     const row: Row = {
       id,
@@ -198,7 +214,7 @@ export function createGenerations(original: GenerationRequest): Generation[] {
       kind: OPERATION_OUTPUT[plan.op],
       status: "queued",
       progress: null,
-      message: demo ? "Demo mode — no provider connected" : "Submitting",
+      message: opts.dependsOn ? "Waits for the previous frame" : demo ? "Demo mode — no provider connected" : "Submitting",
       prompt: plan.prompt,
       request_json: JSON.stringify(original),
       provider_input_json: null,
@@ -206,11 +222,12 @@ export function createGenerations(original: GenerationRequest): Generation[] {
       external_meta_json: null,
       outputs_json: "[]",
       error: null,
-      cost_usd: demo ? 0 : cost,
+      cost_usd: cost,
       favorite: 0,
       created_at: now + i,
       updated_at: now + i,
       completed_at: null,
+      depends_on: opts.dependsOn ?? null,
     };
     db()
       .prepare(
@@ -220,10 +237,60 @@ export function createGenerations(original: GenerationRequest): Generation[] {
       )
       .run(row);
     created.push(toGeneration(row));
-    void submit(id, route, providerId, plan, req, i);
+    if (!opts.dependsOn) void submit(id, route, providerId, plan, req, i);
   }
   ensureRunner();
   return created;
+}
+
+/** Validate a chained request as if the previous frame were already there. */
+function withChainPlaceholder(req: GenerationRequest): GenerationRequest {
+  return withChainInput(req, "/api/files/placeholder.png");
+}
+
+function withChainInput(req: GenerationRequest, url: string): GenerationRequest {
+  const images = req.inputs?.images ?? [];
+  return { ...req, inputs: { ...req.inputs, images: req.chainFrom === "first" ? [url, ...images] : [...images, url] } };
+}
+
+/** Launch dependent jobs whose input finished; fail the ones whose input failed. */
+const launching = new Set<string>();
+async function advanceDependents(): Promise<void> {
+  const rows = db()
+    .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
+    .all() as Row[];
+  for (const r of rows) {
+    if (launching.has(r.id)) continue;
+    const dep = db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(r.depends_on) as Pick<Row, "status" | "outputs_json"> | undefined;
+    if (!dep || dep.status === "failed" || dep.status === "canceled") {
+      update(r.id, { status: "failed", error: "The previous frame didn't finish", message: null, completed_at: Date.now() });
+      continue;
+    }
+    if (dep.status !== "succeeded") continue;
+    const url = (JSON.parse(dep.outputs_json) as OutputFile[]).find((o) => o.kind === "image")?.url;
+    if (!url) {
+      update(r.id, { status: "failed", error: "The previous frame has no image", message: null, completed_at: Date.now() });
+      continue;
+    }
+    launching.add(r.id);
+    try {
+      const original = withChainInput(JSON.parse(r.request_json) as GenerationRequest, url);
+      const { req, plan, route, providerId, cost, demo } = prepare(original);
+      update(r.id, {
+        provider: providerId,
+        op: plan.op,
+        prompt: plan.prompt,
+        cost_usd: cost,
+        request_json: JSON.stringify(original),
+        message: demo ? "Demo mode — no provider connected" : "Submitting",
+      });
+      await submit(r.id, route, providerId, plan, req, 0);
+    } catch (e) {
+      update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
+    } finally {
+      launching.delete(r.id);
+    }
+  }
 }
 
 async function submit(
@@ -303,7 +370,7 @@ export function ensureRunner(): void {
   // Jobs that never got an external id (server died mid-submit) can't be recovered.
   db()
     .prepare(
-      "UPDATE generations SET status = 'failed', error = 'Interrupted before it reached the provider', completed_at = ? WHERE status IN ('queued','running') AND external_id IS NULL AND created_at < ?",
+      "UPDATE generations SET status = 'failed', error = 'Interrupted before it reached the provider', completed_at = ? WHERE status IN ('queued','running') AND external_id IS NULL AND depends_on IS NULL AND created_at < ?",
     )
     .run(Date.now(), Date.now() - 2 * 60 * 1000);
 }
@@ -319,6 +386,7 @@ async function tick(): Promise<void> {
     await Promise.all([
       ...active.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Poll error: ${(e as Error).message}` }))),
       pollTrainings().catch(() => {}),
+      advanceDependents().catch(() => {}),
     ]);
   } finally {
     state.busy = false;
@@ -452,6 +520,7 @@ export function recordLocalGeneration(input: {
     created_at: now,
     updated_at: now,
     completed_at: now,
+    depends_on: null,
   };
   db()
     .prepare(`INSERT INTO generations (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)

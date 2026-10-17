@@ -310,6 +310,10 @@ export interface GenerationRequest {
   presetOptions?: Record<string, string>;
   /** Server-side only: LoRAs added by @element mentions (trained identities). */
   loras?: LoraRef[];
+  /** Chained jobs: where the previous job's image goes among `inputs.images`. */
+  chainFrom?: "first" | "last";
+  /** Storyboard frame this request makes (shown under the frame). */
+  frame?: { scene: string; index: number; of: number };
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */

@@ -101,13 +101,13 @@ export function MediaThumb({ output, className, autoPlay }: { output: OutputFile
   return <img src={output.url} alt="" loading="lazy" className={cn("size-full object-cover", className)} />;
 }
 
-function tileRatio(g: Generation): number {
+export function tileRatio(g: Generation): number {
   const ar = g.request.params?.aspectRatio ?? getModel(g.modelId)?.defaults?.aspectRatio;
   if (g.kind === "audio") return 1.6;
   return ratioValue(ar && ar !== "auto" ? ar : undefined, g.kind === "video" ? 16 / 9 : 1);
 }
 
-function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
+export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const { cancel } = useGenerationActions();
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
@@ -140,7 +140,7 @@ function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   );
 }
 
-function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
+export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
   return (
     <div className="flex h-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
       <div className="min-h-0 space-y-1 overflow-hidden">

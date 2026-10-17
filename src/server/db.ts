@@ -84,6 +84,8 @@ const MIGRATIONS: string[] = [
     completed_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS trainings_element ON trainings(element_id);`,
+  // Chained jobs (storyboard frames wait for the previous frame).
+  `ALTER TABLE generations ADD COLUMN depends_on TEXT;`,
 ];
 
 declare global {
