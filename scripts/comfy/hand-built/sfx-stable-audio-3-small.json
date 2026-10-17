@@ -1,0 +1,143 @@
+{
+  "57": {
+    "inputs": {
+      "filename_prefix": "fuobe/sfx-stable-audio-3-small",
+      "format": "mp3",
+      "format.quality": "V0",
+      "audio": [
+        "52:12",
+        0
+      ]
+    },
+    "class_type": "SaveAudioAdvanced",
+    "_meta": {
+      "title": "Save Audio (Advanced)"
+    }
+  },
+  "52:7": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "52:26",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "52:12": {
+    "inputs": {
+      "samples": [
+        "52:3",
+        0
+      ],
+      "vae": [
+        "52:25",
+        2
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "52:11": {
+    "inputs": {
+      "seconds": [
+        "52:36",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentAudio",
+    "_meta": {
+      "title": "Empty Latent Audio"
+    }
+  },
+  "52:3": {
+    "inputs": {
+      "seed": 1038503484137406,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "lcm",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "52:25",
+        0
+      ],
+      "positive": [
+        "52:6",
+        0
+      ],
+      "negative": [
+        "52:7",
+        0
+      ],
+      "latent_image": [
+        "52:11",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "52:6": {
+    "inputs": {
+      "text": [
+        "52:31",
+        0
+      ],
+      "clip": [
+        "52:26",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "52:31": {
+    "inputs": {
+      "value": "Heavy wooden door creaks open slowly, then slams shut in a stone hallway, reverb"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "User: short description (USER_INPUT in template)"
+    }
+  },
+  "52:36": {
+    "inputs": {
+      "value": 10.0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "52:25": {
+    "inputs": {
+      "ckpt_name": "stable_audio_3_small_sfx.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "52:26": {
+    "inputs": {
+      "clip_name": "t5gemma_b_b_ul2.safetensors",
+      "type": "stable_audio",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "1": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3.5_4b_bf16.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "2": {
+    "class_type": "StringConcatenate",
+    "inputs": {
+      "string_a": "Translate the subtitle lines below into Spanish. Keep every line, keep the \"start-end:\" timestamps exactly as they are, translate only the text after the colon, keep it about as long as the original so it can be spoken in the same time. Output only the lines.\n\n",
+      "string_b": "0.00-2.10: Hello and welcome back.\n2.30-4.80: Today we test the new camera.",
+      "delimiter": ""
+    },
+    "_meta": {
+      "title": "StringConcatenate"
+    }
+  },
+  "3": {
+    "class_type": "TextGenerate",
+    "inputs": {
+      "clip": [
+        "1",
+        0
+      ],
+      "prompt": [
+        "2",
+        0
+      ],
+      "max_length": 2048,
+      "sampling_mode": "on",
+      "sampling_mode.temperature": 0.3,
+      "sampling_mode.top_k": 64,
+      "sampling_mode.top_p": 0.95,
+      "sampling_mode.min_p": 0.05,
+      "sampling_mode.repetition_penalty": 1.05,
+      "sampling_mode.seed": 0,
+      "sampling_mode.presence_penalty": 0,
+      "thinking": false,
+      "use_default_template": true,
+      "mtp": "auto"
+    },
+    "_meta": {
+      "title": "TextGenerate"
+    }
+  },
+  "4": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/translate-qwen35-textgen",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "SaveText"
+    }
+  }
+}

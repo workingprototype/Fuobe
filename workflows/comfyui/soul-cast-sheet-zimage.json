@@ -1,0 +1,182 @@
+{
+  "10": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "UNETLoader"
+    }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "12": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "_meta": {
+      "title": "VAELoader"
+    }
+  },
+  "13": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "shift": 3,
+      "sampling": "flow"
+    },
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "20": {
+    "class_type": "StringConcatenate",
+    "inputs": {
+      "string_a": "Character turnaround reference sheet on a seamless light grey background, the same person shown four times side by side, full body: front view, three-quarter view, side profile, back view. Consistent face, hair, body and outfit, even studio light:",
+      "string_b": "a 30-year-old Nigerian woman, athletic build, short natural hair, gold hoop earrings, olive bomber jacket, black cargo trousers, white sneakers",
+      "delimiter": " "
+    },
+    "_meta": {
+      "title": "StringConcatenate"
+    }
+  },
+  "21": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "11",
+        0
+      ],
+      "text": [
+        "20",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "22": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "21",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "23": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 2048,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "24": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "13",
+        0
+      ],
+      "positive": [
+        "21",
+        0
+      ],
+      "negative": [
+        "22",
+        0
+      ],
+      "latent_image": [
+        "23",
+        0
+      ],
+      "seed": 0,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "25": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "24",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "26": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "25",
+        0
+      ],
+      "filename_prefix": "fuobe/soul-cast-sheet-zimage"
+    },
+    "_meta": {
+      "title": "SaveImage"
+    }
+  },
+  "27": {
+    "class_type": "ImageGridtoBatch",
+    "inputs": {
+      "image": [
+        "25",
+        0
+      ],
+      "columns": 4,
+      "rows": 1
+    },
+    "_meta": {
+      "title": "ImageGridtoBatch"
+    }
+  },
+  "28": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "27",
+        0
+      ],
+      "filename_prefix": "fuobe/soul-cast-sheet-zimage"
+    },
+    "_meta": {
+      "title": "SaveImage"
+    }
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "style_1.png"
+    },
+    "_meta": {
+      "title": "LoadImage"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "style_2.png"
+    },
+    "_meta": {
+      "title": "LoadImage"
+    }
+  },
+  "10": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "flux1-dev-fp8.safetensors"
+    },
+    "_meta": {
+      "title": "CheckpointLoaderSimple"
+    }
+  },
+  "11": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "lora_name": "uso-flux1-dit-lora-v1.safetensors",
+      "strength_model": 1.0
+    },
+    "_meta": {
+      "title": "LoraLoaderModelOnly"
+    }
+  },
+  "12": {
+    "class_type": "ModelPatchLoader",
+    "inputs": {
+      "name": "uso-flux1-projector-v1.safetensors"
+    },
+    "_meta": {
+      "title": "ModelPatchLoader"
+    }
+  },
+  "13": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "sigclip_vision_patch14_384.safetensors"
+    },
+    "_meta": {
+      "title": "CLIPVisionLoader"
+    }
+  },
+  "14": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "13",
+        0
+      ],
+      "image": [
+        "1",
+        0
+      ],
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "CLIPVisionEncode"
+    }
+  },
+  "15": {
+    "class_type": "USOStyleReference",
+    "inputs": {
+      "model": [
+        "11",
+        0
+      ],
+      "model_patch": [
+        "12",
+        0
+      ],
+      "clip_vision_output": [
+        "14",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "USOStyleReference"
+    }
+  },
+  "16": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {
+      "clip_vision": [
+        "13",
+        0
+      ],
+      "image": [
+        "2",
+        0
+      ],
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "CLIPVisionEncode"
+    }
+  },
+  "17": {
+    "class_type": "USOStyleReference",
+    "inputs": {
+      "model": [
+        "15",
+        0
+      ],
+      "model_patch": [
+        "12",
+        0
+      ],
+      "clip_vision_output": [
+        "16",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "USOStyleReference"
+    }
+  },
+  "20": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "10",
+        1
+      ],
+      "text": "A portrait of a woman in a sunlit kitchen"
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "21": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "conditioning": [
+        "20",
+        0
+      ],
+      "guidance": 3.5
+    },
+    "_meta": {
+      "title": "FluxGuidance"
+    }
+  },
+  "22": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "20",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "23": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "24": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "17",
+        0
+      ],
+      "positive": [
+        "21",
+        0
+      ],
+      "negative": [
+        "22",
+        0
+      ],
+      "latent_image": [
+        "23",
+        0
+      ],
+      "seed": 0,
+      "steps": 20,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "25": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "24",
+        0
+      ],
+      "vae": [
+        "10",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "26": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "25",
+        0
+      ],
+      "filename_prefix": "fuobe/style-ref-uso-flux1"
+    },
+    "_meta": {
+      "title": "SaveImage"
+    }
+  }
+}

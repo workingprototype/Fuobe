@@ -1,0 +1,64 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "input.wav"
+    },
+    "_meta": {
+      "title": "Speech to transcribe (audio, or a video with sound)"
+    }
+  },
+  "3": {
+    "class_type": "AILab_Qwen3ASRSubtitle",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "model": "Qwen/Qwen3-ASR-0.6B-hf",
+      "precision": "bf16",
+      "attention": "auto",
+      "forced_aligner": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+      "language": "auto",
+      "hints": "",
+      "output_format": "srt",
+      "output_path": "fuobe/captions",
+      "split_mode": "split_by_punctuation_or_pause_or_length",
+      "max_gap_sec": 0.6,
+      "max_chars": 32,
+      "max_inference_batch_size": 32,
+      "max_new_tokens": 256,
+      "normalize_text": true,
+      "unload_models": true
+    },
+    "_meta": {
+      "title": "AILab_Qwen3ASRSubtitle"
+    }
+  },
+  "4": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "3",
+        1
+      ],
+      "filename_prefix": "fuobe/captions-qwen3-asr",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "SaveText"
+    }
+  },
+  "5": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "3",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "PreviewAny"
+    }
+  }
+}
