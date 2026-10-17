@@ -7,9 +7,12 @@ import { applyMentions } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
+  LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
+  type ChainSlot,
   type Generation,
   type GenerationRequest,
+  type MediaKind,
   type GenInput,
   type ModelRoute,
   type OutputFile,
@@ -18,6 +21,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
+import { createExtendChain, createShotFilm } from "./chains";
 import { enhancePrompt } from "./enhance";
 import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
@@ -94,6 +98,7 @@ export function getGeneration(id: string): Generation | null {
 }
 
 export interface ListOptions {
+  batchId?: string;
   feature?: string;
   features?: string[];
   kind?: string;
@@ -107,6 +112,10 @@ export interface ListOptions {
 export function listGenerations(o: ListOptions = {}): Generation[] {
   const where: string[] = [];
   const args: unknown[] = [];
+  if (o.batchId) {
+    where.push("batch_id = ?");
+    args.push(o.batchId);
+  }
   if (o.feature) {
     where.push("feature = ?");
     args.push(o.feature);
@@ -192,17 +201,32 @@ export function previewGeneration(req: GenerationRequest) {
 }
 
 export interface CreateOptions {
-  /** Group several requests (storyboard frames) into one batch. */
+  /** Group several requests (storyboard frames, the shots of a film) into one batch. */
   batchId?: string;
-  /** Wait for this generation and feed its first output in as an image (see GenerationRequest.chainFrom). */
-  dependsOn?: string;
+  /**
+   * Wait for these generations, then feed their first outputs in as inputs: where each goes is
+   * `request.chain` (one slot per id), or `request.chainFrom` for a single image dependency.
+   */
+  dependsOn?: string | string[];
 }
 
+const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
+
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
-  // A dependent job can't be planned until its input exists; it's validated without it, then launched by the runner.
-  const p = opts.dependsOn ? prepare(withChainPlaceholder(original)) : prepare(original);
+  // Open models make multi-shot films shot by shot, then join the clips.
+  const shotModel = getModel(original.modelId);
+  if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
+    return createShotFilm(original, shotModel);
+  }
+  if (!opts.dependsOn && original.op === "extend" && shotModel && routesFor(shotModel, "extend").some((r) => r.endpoint === LAST_FRAME_CHAIN)) {
+    return createExtendChain(original, shotModel);
+  }
+  const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
+  const waits = deps.length > 0;
+  // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
+  const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost } = p;
-  const jobs = opts.dependsOn ? 1 : plan.jobs;
+  const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
   const created: Generation[] = [];
@@ -220,7 +244,7 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       kind: OPERATION_OUTPUT[plan.op],
       status: "queued",
       progress: null,
-      message: opts.dependsOn ? "Waits for the previous frame" : demo ? "Demo mode — no provider connected" : "Submitting",
+      message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
       prompt: plan.prompt,
       request_json: JSON.stringify(original),
       provider_input_json: null,
@@ -233,7 +257,7 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       created_at: now + i,
       updated_at: now + i,
       completed_at: null,
-      depends_on: opts.dependsOn ?? null,
+      depends_on: !waits ? null : deps.length === 1 ? deps[0] : JSON.stringify(deps),
     };
     db()
       .prepare(
@@ -243,23 +267,41 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       )
       .run(row);
     created.push(toGeneration(row));
-    if (!opts.dependsOn) void submit(id, route, providerId, plan, req, i);
+    if (!waits) void submit(id, route, providerId, plan, req, i);
   }
   ensureRunner();
   return created;
 }
 
-/** Validate a chained request as if the previous frame were already there. */
-function withChainPlaceholder(req: GenerationRequest): GenerationRequest {
-  return withChainInput(req, "/api/files/placeholder.png");
+/** Where each dependency's output goes: `chain`, or the single-image `chainFrom`. */
+function slotsFor(req: GenerationRequest, n: number): ChainSlot[] {
+  if (req.chain?.length) return req.chain.slice(0, n);
+  return Array.from({ length: n }, () => ({ slot: "images" as const, position: req.chainFrom ?? "last" }));
 }
 
-function withChainInput(req: GenerationRequest, url: string): GenerationRequest {
-  const images = req.inputs?.images ?? [];
-  return { ...req, inputs: { ...req.inputs, images: req.chainFrom === "first" ? [url, ...images] : [...images, url] } };
+const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = { images: "image", endImage: "image", video: "video", videos: "video", audio: "audio" };
+
+function placeholderFor(s: ChainSlot): string {
+  return SLOT_KIND[s.slot] === "image" ? "/api/files/placeholder.png" : SLOT_KIND[s.slot] === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
 }
 
-/** Launch dependent jobs whose input finished; fail the ones whose input failed. */
+/** Put the dependencies' outputs into the request's inputs, slot by slot (lists keep dependency order). */
+export function withChainInputs(req: GenerationRequest, urls: string[]): GenerationRequest {
+  const inputs = { ...req.inputs };
+  const slots = slotsFor(req, urls.length);
+  for (const k of ["images", "videos"] as const) {
+    const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && (s.position ?? "last") === pos ? [urls[i]] : []));
+    const first = at("first");
+    const last = at("last");
+    if (first.length || last.length) inputs[k] = [...first, ...(inputs[k] ?? []), ...last];
+  }
+  slots.forEach((s, i) => {
+    if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = urls[i];
+  });
+  return { ...req, inputs };
+}
+
+/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. */
 const launching = new Set<string>();
 async function advanceDependents(): Promise<void> {
   const rows = db()
@@ -267,20 +309,24 @@ async function advanceDependents(): Promise<void> {
     .all() as Row[];
   for (const r of rows) {
     if (launching.has(r.id)) continue;
-    const dep = db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(r.depends_on) as Pick<Row, "status" | "outputs_json"> | undefined;
-    if (!dep || dep.status === "failed" || dep.status === "canceled") {
-      update(r.id, { status: "failed", error: "The previous frame didn't finish", message: null, completed_at: Date.now() });
+    const request = JSON.parse(r.request_json) as GenerationRequest;
+    const ids = depIds(r.depends_on);
+    const slots = slotsFor(request, ids.length);
+    const deps = ids.map((id) => db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "outputs_json"> | undefined);
+    const earlier = request.frame ? "The previous frame" : "An earlier step";
+    if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
+      update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
       continue;
     }
-    if (dep.status !== "succeeded") continue;
-    const url = (JSON.parse(dep.outputs_json) as OutputFile[]).find((o) => o.kind === "image")?.url;
-    if (!url) {
-      update(r.id, { status: "failed", error: "The previous frame has no image", message: null, completed_at: Date.now() });
+    if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const urls = deps.map((d, i) => (JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot])?.url);
+    if (urls.some((u) => !u)) {
+      update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[urls.findIndex((u) => !u)].slot]} to use`, message: null, completed_at: Date.now() });
       continue;
     }
     launching.add(r.id);
     try {
-      const original = withChainInput(JSON.parse(r.request_json) as GenerationRequest, url);
+      const original = withChainInputs(request, urls as string[]);
       const { req, plan, route, providerId, cost, demo } = prepare(original);
       update(r.id, {
         provider: providerId,
@@ -338,6 +384,7 @@ async function submit(
       audio: await prep(req.inputs?.audio),
       voiceAudio: await prep(req.inputs?.voiceAudio),
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
+      videos: (await Promise.all((req.inputs?.videos ?? []).map(prep))).filter(Boolean) as string[],
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,

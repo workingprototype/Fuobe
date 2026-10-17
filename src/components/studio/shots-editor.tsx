@@ -16,10 +16,12 @@ export function MultiShotChip({ model, params, onChange }: { model: ModelDef; pa
   const [open, setOpen] = useState(false);
   const ms = model.options.multiShot!;
   const mode = params.shots ? "custom" : params.multiShot === "auto" ? "auto" : "off";
-  const each = Math.max(1, Math.floor((params.duration ?? model.defaults?.duration ?? 6) / 2));
+  const concat = ms.mode === "concat";
+  const each = concat ? (model.defaults?.duration ?? 5) : Math.max(1, Math.floor((params.duration ?? model.defaults?.duration ?? 6) / 2));
   const options = [
     { id: "off", label: "Off", hint: "One continuous shot" },
-    { id: "auto", label: "Auto", hint: "The model plans the cuts" },
+    // Open models can't plan their own cuts.
+    ...(concat ? [] : [{ id: "auto", label: "Auto", hint: "The model plans the cuts" } as const]),
     { id: "custom", label: "Custom", hint: `Write up to ${ms.maxShots} shots` },
   ] as const;
   return (
@@ -57,7 +59,11 @@ export function MultiShotChip({ model, params, onChange }: { model: ModelDef; pa
           ))}
         </div>
         <p className="px-1 pt-2 text-[11px] text-muted-foreground">
-          {ms.mode === "native" ? `${model.name} takes each shot as its own prompt.` : `${model.name} follows shots written into the prompt.`}
+          {ms.mode === "native"
+            ? `${model.name} takes each shot as its own prompt.`
+            : concat
+              ? `Each shot renders as its own ${model.name} clip, then they're joined into one video.`
+              : `${model.name} follows shots written into the prompt.`}
         </p>
       </PopoverContent>
     </Popover>
@@ -69,6 +75,14 @@ export function ShotsEditor({ model, shots, onChange }: { model: ModelDef; shots
   const max = Math.max(...(model.options.durations ?? [15]));
   const total = shots.reduce((n, s) => n + s.duration, 0);
   const maxShots = model.options.multiShot?.maxShots ?? 6;
+  // Joined films: every shot is a separate clip, so it takes one of the model's own durations.
+  const concat = model.options.multiShot?.mode === "concat";
+  const steps = concat ? [...(model.options.durations ?? [5])].sort((a, b) => a - b) : null;
+  const stepTo = (d: number, dir: 1 | -1) => {
+    if (!steps) return dir > 0 ? Math.min(15, d + 1) : Math.max(1, d - 1);
+    return (dir > 0 ? steps.find((x) => x > d) : steps.findLast((x) => x < d)) ?? d;
+  };
+  const full = !concat && total >= max;
   const set = (i: number, patch: Partial<Shot>) => onChange(shots.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   const starts = shots.map((_, i) => shots.slice(0, i).reduce((n, s) => n + s.duration, 0));
   return (
@@ -89,7 +103,7 @@ export function ShotsEditor({ model, shots, onChange }: { model: ModelDef; shots
               className="field-sizing-content max-h-28 min-h-8 flex-1 resize-none bg-transparent py-1 text-[14px] leading-snug outline-none placeholder:text-subtle-foreground"
             />
             <div className="flex shrink-0 items-center gap-0.5 rounded-full bg-background p-0.5 shadow-soft">
-              <button onClick={() => set(i, { duration: Math.max(1, s.duration - 1) })} className="grid size-6 place-items-center rounded-full hover:bg-accent" aria-label="Shorter">
+              <button onClick={() => set(i, { duration: stepTo(s.duration, -1) })} className="grid size-6 place-items-center rounded-full hover:bg-accent" aria-label="Shorter">
                 <Minus className="size-3" />
               </button>
               <Tooltip>
@@ -101,8 +115,8 @@ export function ShotsEditor({ model, shots, onChange }: { model: ModelDef; shots
                 </TooltipContent>
               </Tooltip>
               <button
-                onClick={() => set(i, { duration: Math.min(15, s.duration + 1) })}
-                disabled={total >= max}
+                onClick={() => set(i, { duration: stepTo(s.duration, 1) })}
+                disabled={full || (!!steps && s.duration >= steps[steps.length - 1])}
                 className="grid size-6 place-items-center rounded-full hover:bg-accent disabled:opacity-40"
                 aria-label="Longer"
               >
@@ -122,15 +136,15 @@ export function ShotsEditor({ model, shots, onChange }: { model: ModelDef; shots
       <div className="flex items-center gap-3 px-1">
         {shots.length < maxShots && (
           <button
-            onClick={() => onChange([...shots, { prompt: "", duration: Math.max(1, Math.min(3, max - total)) }])}
-            disabled={total >= max}
+            onClick={() => onChange([...shots, { prompt: "", duration: steps ? (model.defaults?.duration ?? steps[0]) : Math.max(1, Math.min(3, max - total)) }])}
+            disabled={full}
             className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-text hover:underline disabled:opacity-40"
           >
             <Plus className="size-3" /> Add shot
           </button>
         )}
-        <span className={cn("ml-auto font-mono text-[11px] text-muted-foreground", total > max && "text-destructive")}>
-          {total}s of {max}s
+        <span className={cn("ml-auto font-mono text-[11px] text-muted-foreground", !concat && total > max && "text-destructive")}>
+          {concat ? `${total}s film · up to ${max}s a shot` : `${total}s of ${max}s`}
         </span>
       </div>
     </div>

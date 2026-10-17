@@ -1491,7 +1491,7 @@ export const SPEC = [
     vramGb: 0,
     license: 'no model (ComfyUI core nodes)',
     notes:
-      `Hard-cut concatenation of ${n} clips (video${n > 1 ? ', video2' : ''}${n > 2 ? ', video3' : ''}${n > 3 ? ', video4' : ''}) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo(fps). ` +
+      `Hard-cut concatenation of ${n} clips (video${n > 1 ? ', video2' : ''}${n > 2 ? ', video3' : ''}${n > 3 ? ', video4' : ''}) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo (fps linked from the first clip's GetVideoComponents; bind fps to override). ` +
       'Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). ' +
       'All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative.',
   })),

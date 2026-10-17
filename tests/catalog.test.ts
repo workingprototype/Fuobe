@@ -42,7 +42,11 @@ describe("catalog integrity", () => {
     if (!fs.existsSync(file)) return;
     const manifest = JSON.parse(fs.readFileSync(file, "utf8")) as Manifest;
     const ids = new Set(manifest.workflows.map((w) => w.id));
-    const missing = MODELS.flatMap((m) => m.routes.filter((r) => r.provider === "comfyui" && !ids.has(r.endpoint)).map((r) => `${m.id}:${r.endpoint}`));
+    // "{n}" routes pick a workflow per clip count (join clips: 2, 3 or 4).
+    const expand = (e: string) => (e.includes("{n}") ? ["2", "3", "4"].map((n) => e.replace("{n}", n)) : [e]);
+    const missing = MODELS.flatMap((m) =>
+      m.routes.filter((r) => r.provider === "comfyui").flatMap((r) => expand(r.endpoint).filter((e) => !ids.has(e)).map((e) => `${m.id}:${e}`)),
+    );
     expect(missing).toEqual([]);
   });
 });

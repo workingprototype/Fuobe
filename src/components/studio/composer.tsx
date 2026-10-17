@@ -26,7 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Kbd } from "@/components/ui/kbd";
 import { EFFECTS, getModel, getPreset, modelsFor, MOTIONS } from "@/lib/catalog";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
-import { OPERATION_LABELS, type GenerationRequest, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
+import { OPERATION_LABELS, type GenerationRequest, type MediaKind, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
 import { enhance, useCreateGeneration, useElements, useEngine, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
@@ -246,9 +246,12 @@ function buildRequest(
   draft: ReturnType<typeof useStudio>["draft"],
   op: Operation | undefined,
   promptSuffix?: string,
+  refKind: MediaKind = "image",
 ): GenerationRequest {
   const s = draft.slots;
-  const images = [s.image, s.image2, s.image3, ...draft.refs].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref);
+  const refs = draft.refs.filter((x) => !!x?.ref).map((x) => x.ref);
+  const images = [s.image, s.image2, s.image3].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref).concat(refKind === "image" ? refs : []);
+  const videos = refKind === "video" ? refs : [];
   return {
     feature,
     presetId: draft.presetId,
@@ -265,6 +268,7 @@ function buildRequest(
       voiceAudio2: s.voiceAudio2?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
+      videos: videos.length ? videos : undefined,
     },
     params: draft.params,
     presetOptions: draft.presetOptions,
@@ -296,7 +300,7 @@ export function Composer({ docked }: { docked: boolean }) {
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
-  const rawRequest = buildRequest(config.feature, draft, studioOp, config.promptSuffix);
+  const rawRequest = buildRequest(config.feature, draft, studioOp, config.promptSuffix, config.multiRef?.kind);
   const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
   const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
   const request = model ? stripMotionPaths(sketched.request, model) : sketched.request;
@@ -329,7 +333,7 @@ export function Composer({ docked }: { docked: boolean }) {
       return;
     }
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
-    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix), {
+    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind), {
       onSuccess: (items) => {
         toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
       },
@@ -364,6 +368,12 @@ export function Composer({ docked }: { docked: boolean }) {
 
   const slots = preset?.inputs ?? config.slots;
   const opts = model?.options ?? {};
+  // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
+  const refMax = !config.multiRef
+    ? 0
+    : config.multiRef.kind === "video"
+      ? Math.min(config.multiRef.max, model?.engine === "open" ? 4 : config.multiRef.max)
+      : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
   const p = draft.params;
   const setP = (patch: Partial<typeof p>) => setDraft((d) => ({ params: { ...d.params, ...patch } }));
   const setExtra = (key: string, v: unknown) =>
@@ -422,10 +432,10 @@ export function Composer({ docked }: { docked: boolean }) {
                 </button>
               </div>
             ))}
-          {config.multiRef && draft.refs.length < Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length)) && (
+          {config.multiRef && draft.refs.length < refMax && (
             <MediaSlot
               label={config.multiRef.label}
-              kind="image"
+              kind={config.multiRef.kind ?? "image"}
               value={null}
               onFile={(f) => {
                 const id = nanoid(6);

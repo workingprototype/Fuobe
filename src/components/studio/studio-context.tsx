@@ -20,8 +20,8 @@ export interface StudioConfig {
   ops: Operation[];
   feed: FeedFilter;
   slots: InputSlot[];
-  /** Extra reference images (multi-reference edit / image prompt). */
-  multiRef?: { label: string; max: number };
+  /** Extra reference images (multi-reference edit / image prompt), or a list of clips (kind "video": join clips). */
+  multiRef?: { label: string; max: number; kind?: MediaKind };
   /** Preset picker shown in the composer. */
   presetPicker?: "motion" | "effect";
   preset?: Preset;

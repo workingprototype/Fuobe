@@ -88,7 +88,7 @@ export interface Plan {
 
 /** Operations that work from their inputs alone. */
 const PROMPTLESS = new Set<Operation>([
-  "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
+  "concat", "frame", "color-match", "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
 ]);
 
@@ -131,7 +131,10 @@ export function planGeneration(
     if (shots.length > model.options.multiShot.maxShots) throw new Error(`${model.name} takes up to ${model.options.multiShot.maxShots} shots`);
     const total = shots.reduce((n, s) => n + s.duration, 0);
     const max = Math.max(...(model.options.durations ?? [total]));
-    if (total > max) throw new Error(`The shots add up to ${total}s — ${model.name} makes up to ${max}s`);
+    // Joined films (open models) render each shot as its own clip: only each shot has to fit.
+    const concat = model.options.multiShot.mode === "concat";
+    if (concat && shots.some((s) => s.duration > max)) throw new Error(`${model.name} makes clips up to ${max}s per shot`);
+    if (!concat && total > max) throw new Error(`The shots add up to ${total}s — ${model.name} makes up to ${max}s`);
     // Per-shot prompts carry the overall description (and @element legend) with them.
     const overall = prompt.trim().replace(/[.\s]+$/, "");
     const native = model.options.multiShot.mode === "native";
@@ -171,7 +174,7 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
-const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio?: boolean; endImage?: boolean; mask?: boolean; msg: string }>> = {
+const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; msg: string }>> = {
   edit: { images: 1, msg: "Add an image to edit" },
   inpaint: { images: 1, mask: true, msg: "Add an image and paint the area to change" },
   outpaint: { images: 1, msg: "Add an image to extend" },
@@ -194,6 +197,9 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; audio
   "bg-remove-video": { video: true, msg: "Add a video" },
   "depth-video": { video: true, msg: "Add a video" },
   "relight-video": { video: true, msg: "Add a video to relight" },
+  concat: { videos: 2, msg: "Add at least two clips to join" },
+  frame: { video: true, msg: "Add a video" },
+  "color-match": { images: 1, msg: "Add the image or video and a reference image" },
 };
 
 /** Human message for the first missing input of an operation, or null. */
@@ -203,6 +209,7 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   const i = req.inputs ?? {};
   if (n.images && (i.images?.length ?? 0) < n.images) return n.msg;
   if (n.video && !i.video) return n.msg;
+  if (n.videos && (i.videos?.length ?? 0) < n.videos) return n.msg;
   if (n.audio && !i.audio) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
   if (n.mask && !i.mask) return n.msg;

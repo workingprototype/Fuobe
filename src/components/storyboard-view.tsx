@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Clapperboard, ImagePlus, Loader2, Minus, Plus, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { ArrowUp, Clapperboard, Film, ImagePlus, Loader2, Minus, Plus, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { nanoid } from "nanoid";
@@ -38,12 +38,57 @@ function RatioPill({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
-function Board({ frames, onOpen }: { frames: Generation[]; onOpen: (g: Generation) => void }) {
+/** The film made from a board: the joined video big, its shots small underneath. */
+function FilmStrip({ items, ratio, onOpen }: { items: Generation[]; ratio: number; onOpen: (g: Generation) => void }) {
+  const create = useCreateGeneration();
+  const sorted = [...items].sort((a, b) => (a.request.step?.index ?? 0) - (b.request.step?.index ?? 0));
+  const film = sorted.findLast((g) => g.op === "concat");
+  const shots = sorted.filter((g) => g.op !== "concat");
+  const tile = (g: Generation, className?: string) =>
+    g.status === "succeeded" && g.outputs[0] ? (
+      <button onClick={() => onOpen(g)} className={cn("block w-full overflow-hidden rounded-xl bg-muted", className)} style={{ aspectRatio: ratio }}>
+        <MediaThumb output={g.outputs[0]} autoPlay={g === film} />
+      </button>
+    ) : g.status === "failed" || g.status === "canceled" ? (
+      <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />
+    ) : (
+      <PendingTile g={g} ratio={ratio} />
+    );
+  return (
+    <div className="grid gap-3 rounded-2xl border bg-muted/30 p-3 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      {film && <div className="min-w-0">{tile(film)}</div>}
+      <div className="grid min-w-0 grid-cols-2 content-start gap-2">
+        {shots.map((g) => (
+          <figure key={g.id} className="min-w-0 space-y-1">
+            {tile(g)}
+            <figcaption className="text-[11px] text-muted-foreground">{g.request.step?.label}</figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Board({ frames, film, onOpen }: { frames: Generation[]; film: Generation[]; onOpen: (g: Generation) => void }) {
   const { remove } = useGenerationActions();
   const create = useCreateGeneration();
+  const qc = useQueryClient();
   const first = frames[0];
   const done = frames.filter((f) => f.status === "succeeded").length;
   const ratio = tileRatio(first);
+  const makeFilm = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/storyboards/${first.batchId}/film`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error);
+      return body as { items: Generation[] };
+    },
+    onSuccess: (b) => {
+      toast.success(`Animating ${b.items.length - 1} shots, then joining them into one film`);
+      void qc.invalidateQueries({ queryKey: ["generations"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
   return (
     <section className="animate-fade-up space-y-3">
       <header className="flex items-start gap-3">
@@ -53,12 +98,17 @@ function Board({ frames, onOpen }: { frames: Generation[]; onOpen: (g: Generatio
             {frames.length} frames · {done === frames.length ? "done" : `${done}/${frames.length} ready`} · {getModel(first.modelId)?.name} · {timeAgo(first.createdAt)}
           </p>
         </div>
+        {!film.length && frames.length > 1 && first.batchId && (
+          <Button variant="secondary" size="sm" disabled={makeFilm.isPending} onClick={() => makeFilm.mutate()}>
+            {makeFilm.isPending ? <Loader2 className="animate-spin" /> : <Film />} Make the film
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
           className="text-muted-foreground hover:text-destructive"
           onClick={() => {
-            frames.forEach((f) => void remove(f));
+            [...frames, ...film].forEach((f) => void remove(f));
             toast("Storyboard deleted");
           }}
         >
@@ -105,6 +155,7 @@ function Board({ frames, onOpen }: { frames: Generation[]; onOpen: (g: Generatio
           );
         })}
       </div>
+      {film.length > 0 && <FilmStrip items={film} ratio={ratio} onOpen={onOpen} />}
     </section>
   );
 }
@@ -120,17 +171,26 @@ export function StoryboardView() {
   const [aspect, setAspect] = useState("16:9");
   const [refs, setRefs] = useState<SlotValue[]>([]);
   const [open, setOpen] = useState<Generation | null>(null);
-  const feed = useGenerations({ features: ["storyboard"], limit: 160 });
+  const feed = useGenerations({ features: ["storyboard", "storyboard-film"], limit: 240 });
 
-  const boards = useMemo(() => {
+  const films = useMemo(() => {
     const by = new Map<string, Generation[]>();
     for (const g of feed.data ?? []) {
+      if (g.feature !== "storyboard-film" || !g.batchId) continue;
+      const k = g.batchId.replace(/-film$/, "");
+      by.set(k, [...(by.get(k) ?? []), g]);
+    }
+    return by;
+  }, [feed.data]);
+  const boards = useMemo(() => {
+    const by = new Map<string, Generation[]>();
+    for (const g of (feed.data ?? []).filter((x) => x.feature === "storyboard")) {
       const k = g.batchId ?? g.id;
       by.set(k, [...(by.get(k) ?? []), g]);
     }
     return [...by.values()].map((fs) => fs.sort((a, b) => (a.request.frame?.index ?? 0) - (b.request.frame?.index ?? 0)));
   }, [feed.data]);
-  const flat = boards.flatMap((b) => b.filter((g) => g.status === "succeeded" && g.outputs[0]));
+  const flat = boards.flatMap((b) => [...b, ...(films.get(b[0].batchId ?? "") ?? [])].filter((g) => g.status === "succeeded" && g.outputs[0]));
   const pos = open ? flat.findIndex((g) => g.id === open.id) : -1;
 
   const m = STORYBOARD_MODELS[engine];
@@ -279,7 +339,7 @@ export function StoryboardView() {
         ) : boards.length ? (
           <div className="space-y-10">
             {boards.map((b) => (
-              <Board key={b[0].batchId ?? b[0].id} frames={b} onOpen={setOpen} />
+              <Board key={b[0].batchId ?? b[0].id} frames={b} film={films.get(b[0].batchId ?? "") ?? []} onOpen={setOpen} />
             ))}
           </div>
         ) : (

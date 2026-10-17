@@ -28,7 +28,7 @@ export function WorkflowsView() {
   });
   if (q.isLoading) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
   const data = q.data!;
-  const usedBy = (id: string) => MODELS.filter((m) => m.routes.some((r) => r.provider === "comfyui" && r.endpoint === id)).map((m) => m.name);
+  const usedBy = (id: string) => MODELS.filter((m) => m.routes.some((r) => r.provider === "comfyui" && (r.endpoint === id || (r.endpoint.includes("{n}") && new RegExp(`^${r.endpoint.replace("{n}", "\\d")}$`).test(id))))).map((m) => m.name);
 
   return (
     <div className="space-y-6">

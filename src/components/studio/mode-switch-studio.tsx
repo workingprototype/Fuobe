@@ -6,10 +6,12 @@ import {
   AUDIO_STUDIO,
   DIALOGUE_STUDIO,
   FOLEY_STUDIO,
+  JOIN_CLIPS_STUDIO,
   MUSIC_STUDIO,
   SFX_STUDIO,
   TRANSLATE_STUDIO,
   UPSCALE_STUDIO,
+  VIDEO_COLOR_MATCH_STUDIO,
   VIDEO_DEPTH_STUDIO,
   VIDEO_MATTE_STUDIO,
   VIDEO_RELIGHT_STUDIO,
@@ -37,6 +39,8 @@ const MODES = {
     { id: "matte", label: "Remove background", config: VIDEO_MATTE_STUDIO },
     { id: "relight", label: "Relight", config: VIDEO_RELIGHT_STUDIO },
     { id: "depth", label: "Depth map", config: VIDEO_DEPTH_STUDIO },
+    { id: "join", label: "Join clips", config: JOIN_CLIPS_STUDIO },
+    { id: "colors", label: "Match colors", config: VIDEO_COLOR_MATCH_STUDIO },
   ],
 } as const;
 

@@ -368,6 +368,29 @@ export const APPS: Preset[] = [
       "Relight the image with {option:light} {option:dir}. Keep the subject, composition and all details identical; only the light, shadows, reflections and color temperature change.",
   }),
   app({
+    name: "Match Lighting",
+    category: "Camera",
+    description: "Relight a photo to match the light in a reference shot",
+    icon: "Sunset",
+    hue: 35,
+    inputs: [photo, second("Lighting reference", "A photo whose light you want")],
+    prompt:
+      "Relight image 1 so its lighting matches image 2: the same light direction, softness, color temperature, contrast and mood. Keep the subject, composition and every detail of image 1 identical; only the light, shadows and reflections change.",
+    open: { modelId: "oss-qwen-relight-ref", op: "edit" },
+  }),
+  app({
+    name: "Match Colors",
+    category: "Camera",
+    description: "Give a photo the color palette of a reference image",
+    icon: "Palette",
+    hue: 300,
+    inputs: [photo, second("Color reference", "A still, poster or frame with the colors you want")],
+    prompt:
+      "Recolor image 1 to match the color palette and grade of image 2: the same hues, saturation, contrast and tone in the shadows and highlights. Keep the content, composition and details of image 1 unchanged.",
+    open: { modelId: "oss-palette-image", op: "color-match" },
+    parity: "The open version transfers the palette directly (no AI model, runs on CPU); the cloud version re-grades with Nano Banana Pro",
+  }),
+  app({
     name: "Expand Image",
     category: "Camera",
     description: "Extend any image beyond its edges",

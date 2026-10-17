@@ -43,7 +43,10 @@ export type Operation =
   | "dub" // video (or audio) → translated, re-voiced and lip-synced
   | "bg-remove-video" // video → the subject on a transparent background
   | "depth-video" // video → depth map video
-  | "relight-video"; // video → the same shot under new lighting
+  | "relight-video" // video → the same shot under new lighting
+  | "concat" // several clips → one video, in order
+  | "frame" // video → one of its frames (the last, for extending)
+  | "color-match"; // image or video + reference image → recoloured to the reference's palette
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -77,6 +80,9 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "bg-remove-video": "Video background removal",
   "depth-video": "Video depth map",
   "relight-video": "Video relight",
+  concat: "Join clips",
+  frame: "Extract frame",
+  "color-match": "Match colors",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -111,6 +117,9 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "bg-remove-video": "video",
   "depth-video": "video",
   "relight-video": "video",
+  concat: "video",
+  frame: "image",
+  "color-match": "image",
 };
 
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
@@ -148,6 +157,8 @@ export interface FieldMap {
   video?: string;
   /** Video field that takes an array (receives the one input video). */
   videoArray?: string;
+  /** Array field that receives every clip of `inputs.videos`, in order (join clips). */
+  videos?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
   resolution?: string | EnumField;
@@ -204,7 +215,7 @@ export interface ModelOptions {
   audio?: boolean | "always";
   endFrame?: boolean;
   /** Multi-shot support: "native" sends per-shot prompts, "prompt" writes the shots into one prompt. */
-  multiShot?: { mode: "native" | "prompt"; maxShots: number };
+  multiShot?: { mode: "native" | "prompt" | "concat"; maxShots: number };
   /** Draft mode (cheap preview, then a full render of the take you like). */
   draft?: boolean;
   /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
@@ -304,16 +315,28 @@ export interface GenerationRequest {
     voiceAudio?: string;
     /** Second speaker's reference voice (open-source dialogue). */
     voiceAudio2?: string;
+    /** Several clips in order (join clips). */
+    videos?: string[];
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
   presetOptions?: Record<string, string>;
   /** Server-side only: LoRAs added by @element mentions (trained identities). */
   loras?: LoraRef[];
-  /** Chained jobs: where the previous job's image goes among `inputs.images`. */
+  /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
   chainFrom?: "first" | "last";
+  /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
+  chain?: ChainSlot[];
   /** Storyboard frame this request makes (shown under the frame). */
   frame?: { scene: string; index: number; of: number };
+  /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
+  step?: { label: string; index: number; of: number };
+}
+
+export interface ChainSlot {
+  slot: "images" | "endImage" | "video" | "videos" | "audio";
+  /** For list slots: put it before or after the request's own items (default last). */
+  position?: "first" | "last";
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
@@ -327,6 +350,7 @@ export interface GenInput extends GenParams {
   audio?: string;
   voiceAudio?: string;
   voiceAudio2?: string;
+  videos?: string[];
   loras?: LoraRef[];
 }
 
@@ -421,3 +445,6 @@ export interface Preset {
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
 }
+
+/** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */
+export const LAST_FRAME_CHAIN = "chain:last-frame";

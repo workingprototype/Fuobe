@@ -338,3 +338,33 @@ export const VIDEO_RELIGHT_STUDIO: StudioConfig = {
   promptOptional: false,
   suggestions: ["Warm golden-hour sun from the left", "Pink and blue neon from the street", "A single cold window light, dark room", "Flickering campfire light from below"],
 };
+
+export const JOIN_CLIPS_STUDIO: StudioConfig = {
+  feature: "video-tools",
+  title: "Video tools",
+  hero: "Join clips into one video",
+  subtitle: "Add clips in order — they're scaled to one size and cut together.",
+  placeholder: "",
+  kind: "video",
+  ops: ["concat"],
+  feed: { features: ["video-tools"] },
+  slots: [],
+  multiRef: { label: "Add clip", max: 12, kind: "video" },
+  defaultModels: { cloud: "join-clips", open: "oss-join-clips" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const VIDEO_COLOR_MATCH_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "Match the colors of a reference",
+  subtitle: "Every frame takes on the palette of the image you add — no AI model, runs on CPU.",
+  placeholder: "",
+  ops: ["color-match"],
+  slots: [
+    { key: "video", label: "Video", accept: "video", required: true },
+    { key: "image", label: "Color reference", accept: "image", required: true },
+  ],
+  defaultModels: { cloud: "", open: "oss-palette-video" },
+  hidePrompt: true,
+};

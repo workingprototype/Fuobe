@@ -1,6 +1,6 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
-import type { ModelDef, ModelRoute, Operation } from "./types";
+import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
  * Model catalog.
@@ -22,6 +22,9 @@ const CHATTERBOX_SLIDERS = [
   { param: "cfg", label: "Pace / guidance", min: 0.2, max: 1, step: 0.05, default: 0.5 },
   { param: "temperature", label: "Variety", min: 0.05, max: 2, step: 0.05, default: 0.8 },
 ];
+
+/** Open models have no multi-shot of their own: each shot renders separately, then the clips are joined. */
+const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
 const IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"];
 const VID_AR = ["16:9", "9:16", "1:1"];
@@ -231,7 +234,7 @@ const open: ModelDef[] = [
     tagline: "Best open video model with Lightx2v 4-step LoRAs — minutes, not hours",
     badges: ["fast", "top"],
     routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b")],
-    options: { aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
   o({
@@ -242,7 +245,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Full-quality Wan 2.2 (20 steps) — text, image and start/end frame",
     routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b")],
-    options: { aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
   o({
@@ -254,7 +257,7 @@ const open: ModelDef[] = [
     tagline: "720p video on a single consumer GPU",
     badges: ["fast"],
     routes: [comfy("t2v", "wan22-ti2v-5b"), comfy("i2v", "wan22-ti2v-5b-i2v")],
-    options: { aspectRatios: VID_AR, durations: [3, 5], resolutions: ["720p"], seed: true, negativePrompt: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["720p"], seed: true, negativePrompt: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -266,7 +269,7 @@ const open: ModelDef[] = [
     tagline: "Open video with native synchronized audio, up to 10s",
     badges: ["audio", "new"],
     routes: [comfy("t2v", "ltx25-t2v"), comfy("i2v", "ltx25-i2v")],
-    options: { aspectRatios: VID_AR, durations: [5, 8, 10], resolutions: ["720p", "1080p"], seed: true, negativePrompt: true, audio: "always" },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5, 8, 10], resolutions: ["720p", "1080p"], seed: true, negativePrompt: true, audio: "always" },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -278,7 +281,7 @@ const open: ModelDef[] = [
     tagline: "Fast open video with audio",
     badges: ["audio"],
     routes: [comfy("t2v", "ltx2-t2v"), comfy("i2v", "ltx2-i2v")],
-    options: { aspectRatios: VID_AR, durations: [5, 8], resolutions: ["720p"], seed: true, negativePrompt: true, audio: "always" },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5, 8], resolutions: ["720p"], seed: true, negativePrompt: true, audio: "always" },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -289,7 +292,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Lightweight 8.3B model with strong motion",
     routes: [comfy("t2v", "hunyuan15-t2v-720p"), comfy("i2v", "hunyuan15-i2v-720p")],
-    options: { aspectRatios: VID_AR, durations: [5], resolutions: ["720p"], seed: true, negativePrompt: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5], resolutions: ["720p"], seed: true, negativePrompt: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -532,6 +535,17 @@ const open: ModelDef[] = [
     hidden: true,
   }),
   o({
+    id: "oss-qwen-relight-ref",
+    name: "Qwen-Image-Edit Relight (reference)",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "Relight a photo to match a reference image's light (Relight LoRA, 4 steps)",
+    routes: [comfy("edit", "relight-qwen-edit-2509-reference", "Relight LoRA + Lightning, image 2 = lighting reference")],
+    options: { seed: true, negativePrompt: true, maxImages: 2 },
+    hidden: true,
+  }),
+  o({
     id: "oss-qwen-next-scene",
     name: "Qwen-Image-Edit Next Scene",
     vendor: "Alibaba Qwen",
@@ -604,12 +618,84 @@ const open: ModelDef[] = [
     options: { durations: [30, 60, 120, 180], seed: true },
     defaults: { duration: 60 },
   }),
+  // Utilities used by chained jobs (multi-shot, storyboard films, extend) and the Video tools page.
+  o({
+    id: "oss-join-clips",
+    name: "Join clips",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Join 2–4 clips into one video, scaled to one size",
+    routes: [comfy("concat", "video-concat-{n}")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"] },
+    defaults: { aspectRatio: "16:9", resolution: "720p" },
+  }),
+  o({
+    id: "oss-palette-image",
+    name: "Palette match",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "image",
+    tagline: "Recolour an image to the palette of a reference image",
+    routes: [comfy("color-match", "palette-transfer-image")],
+    options: { sliders: [{ param: "strength", label: "Strength", min: 0, max: 1, step: 0.05, default: 0.8 }] },
+  }),
+  o({
+    id: "oss-palette-video",
+    name: "Palette match (video)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Give every frame of a video the colours of a reference image",
+    routes: [comfy("color-match", "palette-transfer-video")],
+    options: { sliders: [{ param: "strength", label: "Strength", min: 0, max: 1, step: 0.05, default: 0.8 }] },
+  }),
 ];
+
+/** fal's FFmpeg utilities (docs/research/paid-model-apis-2.md): the cloud side of join clips and Kling extend. */
+const cloudTools: ModelDef[] = [
+  {
+    id: "join-clips",
+    name: "Join clips",
+    vendor: "fal",
+    family: "utility",
+    engine: "cloud",
+    kind: "video",
+    tagline: "Join clips into one video, in order",
+    routes: [{ op: "concat", provider: "fal", endpoint: "fal-ai/ffmpeg-api/merge-videos", map: { prompt: false, videos: "video_urls" } }],
+    options: {},
+    pricing: { unit: "request", usd: 0, note: "billed per compute second, ≈ free" },
+  },
+  {
+    id: "extract-frame",
+    name: "Extract frame",
+    vendor: "fal",
+    family: "utility",
+    engine: "cloud",
+    kind: "image",
+    tagline: "The first, middle or last frame of a video",
+    routes: [{ op: "frame", provider: "fal", endpoint: "fal-ai/ffmpeg-api/extract-frame", map: { prompt: false, video: "video_url", fixed: { frame_type: "last" } } }],
+    options: {},
+    pricing: { unit: "request", usd: 0.001 },
+    hidden: true,
+  },
+];
+
+/**
+ * Kling has no extend endpoint: Fuobe continues a clip from its last frame with Kling's own
+ * image-to-video and joins the two (fal's FFmpeg tools; src/server/chains.ts).
+ */
+function withLastFrameExtend(m: ModelDef): ModelDef {
+  const i2v = m.routes.find((r) => r.op === "i2v" && r.provider === "fal");
+  if (m.family !== "kling" || m.kind !== "video" || !i2v || m.routes.some((r) => r.op === "extend")) return m;
+  return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
+}
 
 /** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
 const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)),
+  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)).map(withLastFrameExtend),
   ...HIGGSFIELD_MODELS,
+  ...cloudTools,
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */

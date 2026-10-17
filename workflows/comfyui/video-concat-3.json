@@ -131,7 +131,10 @@
         "20",
         0
       ],
-      "fps": 16,
+      "fps": [
+        "2",
+        2
+      ],
       "bit_depth": "auto",
       "color_space": "sRGB",
       "codec": "none"

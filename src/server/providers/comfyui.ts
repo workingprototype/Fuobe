@@ -187,7 +187,11 @@ export const comfyProvider: ProviderAdapter = {
   },
 
   async submit({ route, input, generationId }) {
-    const { manifest, workflow } = getWorkflow(route.endpoint);
+    // "video-concat-{n}": one workflow per clip count.
+    const clips = input.videos ?? [];
+    const endpoint = route.endpoint.replace("{n}", String(Math.max(2, Math.min(4, clips.length))));
+    if (route.endpoint.includes("{n}") && clips.length > 4) throw new ProviderError("ComfyUI joins up to 4 clips at a time");
+    const { manifest, workflow } = getWorkflow(endpoint);
     const d = manifest.defaults;
     const images = input.images ?? [];
     const values: Partial<Record<BindingKey, unknown>> = {
@@ -199,7 +203,10 @@ export const comfyProvider: ProviderAdapter = {
       image4: images[3],
       endImage: input.endImage,
       mask: input.mask,
-      video: input.video,
+      video: input.video ?? clips[0],
+      video2: clips[1],
+      video3: clips[2],
+      video4: clips[3],
       audio: input.audio,
       seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
     };

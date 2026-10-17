@@ -187,6 +187,7 @@ export function GenerationGroup({
   const finalize = useFinalizeDraft();
   const p = g.request.params ?? {};
   const meta = [
+    g.request.step?.label,
     preset?.name,
     model?.name ?? g.modelId,
     OPERATION_LABELS[g.op],

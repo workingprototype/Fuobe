@@ -26,6 +26,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.mask && input.mask) out[map.mask] = input.mask;
   if (map.video && input.video) out[map.video] = input.video;
   if (map.videoArray && input.video) out[map.videoArray] = [input.video];
+  if (map.videos && input.videos?.length) out[map.videos] = input.videos;
   if (map.audio && input.audio) out[map.audio] = input.audio;
 
   if (map.aspectRatio && input.aspectRatio) {
