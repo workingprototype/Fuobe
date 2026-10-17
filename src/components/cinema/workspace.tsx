@@ -68,6 +68,28 @@ function nameFrom(prompt: string | undefined, fallback: string): string {
   return words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || fallback;
 }
 
+const DRAFT_KEY = (id: string) => `fuobe.cinema.draft.${id}`;
+const KEPT = ["mode", "imageTool", "prompt", "moves", "models", "duration", "resolution", "aspect", "batch", "audio", "multiShot", "grid"] as const;
+
+function restoreDraft(id: string): CinemaDraft {
+  const base = initialDraft();
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(id));
+    if (!raw) return base;
+    const saved = JSON.parse(raw) as Partial<CinemaDraft>;
+    const kept = Object.fromEntries(KEPT.filter((k) => saved[k] !== undefined).map((k) => [k, saved[k]]));
+    return { ...base, ...kept };
+  } catch {
+    return base;
+  }
+}
+
+function saveDraft(id: string, d: CinemaDraft) {
+  try {
+    localStorage.setItem(DRAFT_KEY(id), JSON.stringify(Object.fromEntries(KEPT.map((k) => [k, d[k]]))));
+  } catch {}
+}
+
 function folderPath(folders: CinemaFolder[], id: string): CinemaFolder[] {
   const out: CinemaFolder[] = [];
   let cur = folders.find((f) => f.id === id);
@@ -138,7 +160,12 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
   const [engine, setEngine] = useEngine();
   const [view, setView] = useState<CinemaView>({ kind: "home" });
   const [nested, setNested] = useState(true);
-  const [draft, setDraftState] = useState<CinemaDraft>(initialDraft);
+  const [draft, setDraftState] = useState<CinemaDraft>(() => restoreDraft(id));
+  // The unsent prompt and its settings survive a reload (this browser only).
+  useEffect(() => {
+    const t = setTimeout(() => saveDraft(id, draft), 400);
+    return () => clearTimeout(t);
+  }, [id, draft]);
   const setDraft = (patch: Partial<CinemaDraft> | ((d: CinemaDraft) => Partial<CinemaDraft>)) => setDraftState((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }));
   const [settings, setSettings] = useState<DirectorSettings>(project.director);
   const update = useUpdateProject(id);

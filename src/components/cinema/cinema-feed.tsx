@@ -23,6 +23,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import {
@@ -335,6 +336,7 @@ function TileView({
     <div
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `${step ? `${step}: ` : ""}${promptOf(g)}` : undefined}
       draggable={!u.tile}
       onDragStart={(e) => e.dataTransfer.setData("application/x-cinema-takes", JSON.stringify(dragIds()))}
       onClick={(e) => {
@@ -462,6 +464,7 @@ export function CinemaFeed({
 }) {
   const [prefs, setPrefs] = usePrefs();
   const actions = useItemActions(projectId);
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -658,7 +661,11 @@ export function CinemaFeed({
         <Viewer
           generation={{ ...viewable[pos].g, outputs: [viewable[pos].output!] }}
           index={0}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            // The viewer likes and deletes through /api/generations: pick those changes up.
+            void qc.invalidateQueries({ queryKey: ["cinema", projectId, "items"] });
+          }}
           onPrev={pos > 0 ? () => setOpen(viewable[pos - 1].key) : undefined}
           onNext={pos < viewable.length - 1 ? () => setOpen(viewable[pos + 1].key) : undefined}
           onReuse={(g) => handlers.onLoad(g as CinemaGeneration)}

@@ -160,6 +160,19 @@ describe("Cinema API", () => {
     expect(film.request.inputs?.images?.[0]).toBe(gens.getGeneration(items[1].id)!.outputs[0].url);
   }, 90_000);
 
+  it("retries a canceled take in the same folder, with the same request", async () => {
+    const p = cinema.createProject({ name: "Retry" });
+    const folder = cinema.createFolder(p.id, { name: "Scene 9" });
+    const { items } = generateInProject(p.id, { ...VIDEO, engine: "open", moves: ["pan-left"], images: [] }, folder.id);
+    await gens.cancelGeneration(items[0].id);
+    const again = cinema.retryItem(p.id, items[0].id);
+    expect(again).toHaveLength(1);
+    expect(again[0].request.prompt).toBe(items[0].request.prompt);
+    expect(cinema.listItems(p.id, { folderId: folder.id }).map((g) => g.id)).toContain(again[0].id);
+    expect(cinema.listItems(p.id, { folderId: folder.id }).find((g) => g.id === again[0].id)?.take?.moves).toEqual(["pan-left"]);
+    expect(() => cinema.retryItem(p.id, "missing")).toThrow(/isn't in this project/);
+  });
+
   it("stores the tiles cut from a grid sheet", async () => {
     const p = cinema.createProject({ name: "Grid" });
     const { items } = generateInProject(p.id, { ...VIDEO, mode: "image", action: "grid", grid: { size: "2x2", type: "shots" } });
