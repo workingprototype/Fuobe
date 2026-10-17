@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { Cloud, Cpu, Lock, Search, Sparkles, X } from "lucide-react";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/page-shell";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import { GALLERY_GRID } from "@/components/skeletons";
+import { useProgressive } from "@/components/use-progressive";
 import { useEngineMode } from "@/lib/api";
 import { searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -163,7 +164,6 @@ export function PresetGallery({
   const [cat, setCat] = useState("All");
   const [q, setQ] = useState("");
   const [runsOnChoice, setRunsOn] = useState<RunsOn>("all");
-  const [shown, setShown] = useState(FIRST_PAGE);
   // "both" until hydrated, so the server HTML and the first client render agree.
   const mode = useEngineMode();
   const locked = mode === "both" ? undefined : mode;
@@ -179,24 +179,8 @@ export function PresetGallery({
         .map(([p]) => p),
     [index, cat, query, runsOn],
   );
-  // A new filter starts from the first page again.
-  const filterKey = `${cat}|${query}|${runsOn}`;
-  const [lastKey, setLastKey] = useState(filterKey);
-  if (lastKey !== filterKey) {
-    setLastKey(filterKey);
-    setShown(FIRST_PAGE);
-  }
-
-  const more = useCallback(() => setShown((n) => n + PAGE), []);
-  const sentinel = useRef<HTMLButtonElement>(null);
-  const hasMore = shown < list.length;
-  useEffect(() => {
-    const el = sentinel.current;
-    if (!el || !hasMore || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more(), { rootMargin: "600px 0px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [hasMore, more, shown]);
+  // Cards render a page at a time; a new filter starts from the first page again.
+  const { shown, hasMore, more, sentinel, left } = useProgressive(list.length, `${cat}|${query}|${runsOn}`, FIRST_PAGE, PAGE);
 
   const strip = useFadeEdges<HTMLDivElement>();
   const stale = q.trim().toLowerCase() !== query;
@@ -273,7 +257,7 @@ export function PresetGallery({
                 onClick={more}
                 className="h-9 rounded-full border bg-background px-4 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
               >
-                Show more · {list.length - shown} left
+                Show more · {left} left
               </button>
             </div>
           )}

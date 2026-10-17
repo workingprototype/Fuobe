@@ -1,6 +1,6 @@
 "use client";
 
-import { Columns2, Download, ImagePlus, Loader2, RotateCcw, Save } from "lucide-react";
+import { Columns2, Download, ImagePlus, Loader2, RotateCcw, Save, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -110,6 +110,22 @@ function loadSource(url: string, kind: "image" | "video"): Promise<Source> {
 
 const dims = (s: Source) => (s instanceof HTMLVideoElement ? [s.videoWidth, s.videoHeight] : [s.naturalWidth, s.naturalHeight]);
 
+/** Stop a detached video for good (it would keep decoding after the page or the clip changes). */
+function release(s: Source | null | undefined) {
+  if (!(s instanceof HTMLVideoElement)) return;
+  s.pause();
+  s.removeAttribute("src");
+  s.load();
+}
+
+/** Free a WebGL context now instead of waiting for garbage collection (browsers cap live contexts). */
+function loseContext(r: GradeRenderer | null | undefined) {
+  r?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+}
+
+/** Bundled still the looks are previewed on before anything is loaded. */
+const SAMPLE = "/samples/grade-sample.jpg";
+
 function Grader() {
   const sp = useSearchParams();
   const initial = sp.get("video") ? { url: sp.get("video")!, kind: "video" as const } : sp.get("image") ? { url: sp.get("image")!, kind: "image" as const } : null;
@@ -124,22 +140,50 @@ function Grader() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<GradeRenderer | null>(null);
   const [view, setView] = useState({ w: 0, h: 0 });
+  const [sample, setSample] = useState<HTMLImageElement | null>(null);
+  /** False once the page is gone, so a running export stops instead of playing on in the background. */
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      loseContext(renderer.current);
+      renderer.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!input) return;
     let cancelled = false;
+    let loaded: Source | null = null;
     loadSource(input.url, input.kind).then(
       (s) => {
-        if (cancelled) return;
+        if (cancelled) return release(s);
+        loaded = s;
         setSource(s);
         if (s instanceof HTMLVideoElement) void s.play().catch(() => {});
       },
-      (e) => toast.error((e as Error).message),
+      (e) => !cancelled && toast.error((e as Error).message),
+    );
+    return () => {
+      cancelled = true;
+      release(loaded);
+    };
+  }, [input]);
+
+  // The looks are previewed on a bundled sample until the user brings their own picture.
+  useEffect(() => {
+    if (source || sample) return;
+    let cancelled = false;
+    loadSource(SAMPLE, "image").then(
+      (s) => !cancelled && setSample(s as HTMLImageElement),
+      () => {},
     );
     return () => {
       cancelled = true;
     };
-  }, [input]);
+  }, [source, sample]);
 
   // Fit the preview to the stage.
   useEffect(() => {
@@ -180,10 +224,11 @@ function Grader() {
     return () => cancelAnimationFrame(raf);
   }, [source, grade, view, holding]);
 
-  // Preset thumbnails, rendered once per source with a throwaway WebGL context.
+  // Preset thumbnails, rendered once per source (or on the sample) with a throwaway WebGL context.
+  const thumbSource = source ?? sample;
   const thumbs = useMemo(() => {
     const out: Record<string, string> = {};
-    if (!source) return out;
+    if (!thumbSource) return out;
     const c = document.createElement("canvas");
     let r: GradeRenderer;
     try {
@@ -191,15 +236,15 @@ function Grader() {
     } catch {
       return out;
     }
-    const [w, h] = dims(source);
+    const [w, h] = dims(thumbSource);
     const s = 120 / Math.max(w, h);
     for (const p of PRESETS) {
-      r.render(source, applyPreset(p), Math.round(w * s), Math.round(h * s));
+      r.render(thumbSource, applyPreset(p), Math.round(w * s), Math.round(h * s));
       out[p.id] = c.toDataURL("image/jpeg", 0.8);
     }
-    r.gl.getExtension("WEBGL_lose_context")?.loseContext();
+    loseContext(r);
     return out;
-  }, [source]);
+  }, [thumbSource]);
 
   const set = (k: keyof Grade, v: number) => {
     setPreset(undefined);
@@ -236,7 +281,7 @@ function Grader() {
       const s = Math.min(1, r.maxSize / Math.max(w, h));
       r.render(source, grade, Math.round(w * s), Math.round(h * s));
       const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/png"));
-      r.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      loseContext(r);
       if (!blob) throw new Error("Couldn't export the image");
       await record(new File([blob], "graded.png", { type: "image/png" }), "image");
     } catch (e) {
@@ -250,6 +295,7 @@ function Grader() {
   const exportVideo = async () => {
     if (!(source instanceof HTMLVideoElement)) return;
     setSaving(0);
+    let clip: HTMLVideoElement | null = null;
     try {
       const c = document.createElement("canvas");
       const r = new GradeRenderer(c);
@@ -258,6 +304,7 @@ function Grader() {
       const W = Math.round((w * s) / 2) * 2;
       const H = Math.round((h * s) / 2) * 2;
       const v = (await loadSource(input!.url, "video")) as HTMLVideoElement;
+      clip = v;
       v.loop = false;
       v.muted = false;
       v.volume = 0.0001;
@@ -276,6 +323,7 @@ function Grader() {
       await v.play();
       await new Promise<void>((res) => {
         const tick = () => {
+          if (!alive.current) return res();
           r.render(v, grade, W, H);
           setSaving(Math.min(0.99, v.currentTime / (v.duration || 1)));
           if (v.ended) res();
@@ -285,24 +333,30 @@ function Grader() {
       });
       rec.stop();
       await done;
-      r.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      loseContext(r);
+      if (!alive.current) return;
       await record(new File(chunks, "graded.webm", { type: "video/webm" }), "video");
     } catch (e) {
-      toast.error((e as Error).message);
+      if (alive.current) toast.error((e as Error).message);
     } finally {
-      setSaving(null);
+      release(clip);
+      if (alive.current) setSaving(null);
     }
   };
 
   const groups = useMemo(() => [...new Set(CONTROLS.map((c) => c.group))], []);
   const neutral = isNeutral(grade);
 
-  const pick = (v: SlotValue | null) => {
-    if (!v?.ref || v.uploading) return;
+  const open = (next: { url: string; kind: "image" | "video" }) => {
+    loseContext(renderer.current);
     renderer.current = null;
     setSource(null);
     setSaved(null);
-    setInput({ url: v.ref, kind: v.kind === "video" ? "video" : "image" });
+    setInput(next);
+  };
+  const pick = (v: SlotValue | null) => {
+    if (!v?.ref || v.uploading) return;
+    open({ url: v.ref, kind: v.kind === "video" ? "video" : "image" });
   };
 
   return (
@@ -328,6 +382,13 @@ function Grader() {
                 <MediaSlot label="Image" kind="image" value={null} onChange={pick} size="lg" />
                 <MediaSlot label="Video" kind="video" value={null} onChange={pick} size="lg" />
               </div>
+              <button
+                type="button"
+                onClick={() => open({ url: SAMPLE, kind: "image" })}
+                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-white/10 px-3 text-[13px] font-medium text-white transition-colors hover:bg-white/20"
+              >
+                <Sparkles className="size-3.5" /> Try it on the sample photo
+              </button>
             </div>
           ) : !source ? (
             <Loader2 className="size-5 animate-spin text-white/70" />
@@ -357,17 +418,23 @@ function Grader() {
                 {PRESETS.map((p) => (
                   <button
                     key={p.id}
+                    type="button"
+                    aria-pressed={preset === p.id}
+                    title={source ? p.name : `${p.name} — opens the sample photo`}
                     onClick={() => {
+                      // Before anything is loaded, a look opens the sample with that look applied.
+                      if (!input) open({ url: SAMPLE, kind: "image" });
                       setPreset(p.id);
                       setGrade(applyPreset(p));
                     }}
-                    disabled={!source}
-                    className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent disabled:opacity-50", preset === p.id && "ring-2")}
+                    className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", preset === p.id && "ring-2")}
                   >
                     <span className="aspect-square w-full overflow-hidden rounded-md bg-muted">
-                      {thumbs[p.id] && (
+                      {thumbs[p.id] ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={thumbs[p.id]} alt="" className="size-full object-cover" />
+                      ) : (
+                        <span className="block size-full animate-pulse bg-muted" />
                       )}
                     </span>
                     <span className="truncate px-0.5 text-[11px] font-medium">{p.name}</span>
@@ -381,10 +448,13 @@ function Grader() {
                 {CONTROLS.filter((c) => c.group === g).map((c) => (
                   <div key={c.key} className="space-y-1.5">
                     <div className="flex items-center justify-between text-[13px]">
-                      <span>{c.label}</span>
+                      <span id={`grade-${c.key}`}>{c.label}</span>
                       <button
+                        type="button"
                         onDoubleClick={() => set(c.key, NEUTRAL[c.key])}
+                        onKeyDown={(e) => (e.key === "Enter" || e.key === "Backspace") && set(c.key, NEUTRAL[c.key])}
                         title="Double-click to reset"
+                        aria-label={`Reset ${c.label}`}
                         className={cn("font-mono text-[12px] text-muted-foreground tabular-nums", grade[c.key] !== NEUTRAL[c.key] && "text-brand-text")}
                       >
                         {c.min < 0 && grade[c.key] > 0 ? "+" : ""}
@@ -398,6 +468,8 @@ function Grader() {
                       max={c.max}
                       step={1}
                       disabled={!source}
+                      aria-label={c.group === "Split tone" ? `Split tone ${c.label.toLowerCase()}` : c.label}
+                      aria-valuetext={`${c.min < 0 && grade[c.key] > 0 ? "+" : ""}${grade[c.key]}${c.max === 360 ? "°" : ""}`}
                       onValueChange={([v]) => set(c.key, v)}
                     />
                   </div>

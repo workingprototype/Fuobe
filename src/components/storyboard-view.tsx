@@ -3,33 +3,69 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, Clapperboard, Film, ImagePlus, Loader2, Minus, Plus, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
 import { useCreateGeneration, useEngine, useGenerationActions, useGenerations } from "@/lib/api";
-import { getModel } from "@/lib/catalog";
 import { MAX_FRAMES, STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
-import type { Generation } from "@/lib/catalog/types";
+import type { Engine, Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
+import { BOARD_TITLES_KEY, boardTitle, filmReady, rememberTitle } from "@/lib/storyboard-board";
 import { cn } from "@/lib/utils";
 
 const ASPECTS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
 
+/* The idea each board was made from, remembered in this browser (the server keeps only the scenes). */
+const titleListeners = new Set<() => void>();
+let titleCache: { raw: string | null; map: Record<string, string> } | null = null;
+function readTitles(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(BOARD_TITLES_KEY);
+    if (titleCache?.raw !== raw) titleCache = { raw, map: raw ? (JSON.parse(raw) as Record<string, string>) : {} };
+    return titleCache.map;
+  } catch {
+    return {};
+  }
+}
+const NO_TITLES: Record<string, string> = {};
+function saveTitle(batchId: string, idea: string) {
+  try {
+    localStorage.setItem(BOARD_TITLES_KEY, JSON.stringify(rememberTitle(readTitles(), batchId, idea)));
+  } catch {}
+  titleListeners.forEach((l) => l());
+}
+function useBoardTitles() {
+  return useSyncExternalStore(
+    (cb) => {
+      titleListeners.add(cb);
+      return () => titleListeners.delete(cb);
+    },
+    readTitles,
+    () => NO_TITLES,
+  );
+}
+
+const modelName = (g: Generation, names: Record<string, string>) => (g as Generation & { modelName?: string }).modelName ?? names[g.modelId] ?? g.modelId;
+
 function RatioPill({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
+    <div role="radiogroup" aria-label="Aspect ratio" className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
       {ASPECTS.map((a) => (
         <button
           key={a}
+          type="button"
+          role="radio"
+          aria-checked={value === a}
           onClick={() => onChange(a)}
-          className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground transition", value === a && "bg-background text-foreground shadow-soft")}
+          className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground transition", value === a && "bg-background text-foreground shadow-soft")}
         >
           {a}
         </button>
@@ -61,7 +97,7 @@ function FilmStrip({ items, ratio, onOpen }: { items: Generation[]; ratio: numbe
         {shots.map((g) => (
           <figure key={g.id} className="min-w-0 space-y-1">
             {tile(g)}
-            <figcaption className="text-[11px] text-muted-foreground">{g.request.step?.label}</figcaption>
+            <figcaption className="truncate text-[11px] text-muted-foreground">{g.request.step?.label}</figcaption>
           </figure>
         ))}
       </div>
@@ -69,12 +105,64 @@ function FilmStrip({ items, ratio, onOpen }: { items: Generation[]; ratio: numbe
   );
 }
 
-function Board({ frames, film, onOpen }: { frames: Generation[]; film: Generation[]; onOpen: (g: Generation) => void }) {
-  const { remove } = useGenerationActions();
+function FrameTile({ g, index, ratio, onOpen }: { g: Generation; index: number; ratio: number; onOpen: (g: Generation) => void }) {
   const create = useCreateGeneration();
+  const o = g.outputs[0];
+  return (
+    <figure className="min-w-0 space-y-1.5">
+      <div className="group/tile relative overflow-hidden rounded-xl" style={{ aspectRatio: ratio }}>
+        {g.status === "succeeded" && o ? (
+          <>
+            <button onClick={() => onOpen(g)} className="block size-full cursor-zoom-in bg-muted" aria-label={`Open frame ${index + 1}`}>
+              <MediaThumb output={o} />
+            </button>
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 transition-opacity group-focus-within/tile:opacity-100 sm:opacity-0 sm:group-hover/tile:opacity-100">
+              <Link
+                href={`/video?image=${encodeURIComponent(o.url)}&prompt=${encodeURIComponent(g.request.frame?.scene ?? "")}`}
+                className="pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full bg-white/20 px-2.5 text-[12px] font-medium whitespace-nowrap text-white backdrop-blur hover:bg-white/30"
+              >
+                <Clapperboard className="size-3.5" /> Animate
+              </Link>
+              <Link
+                href={`/edit?image=${encodeURIComponent(o.url)}`}
+                className="pointer-events-auto inline-flex h-7 items-center gap-1 rounded-full bg-white/20 px-2.5 text-[12px] font-medium whitespace-nowrap text-white backdrop-blur hover:bg-white/30"
+              >
+                <Wand2 className="size-3.5" /> Edit
+              </Link>
+            </span>
+          </>
+        ) : g.status === "failed" || g.status === "canceled" ? (
+          <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />
+        ) : (
+          <PendingTile g={g} ratio={ratio} />
+        )}
+        <span className="pointer-events-none absolute top-2 left-2 grid size-6 place-items-center rounded-full bg-background/90 font-mono text-[11px] font-semibold shadow-soft">
+          {index + 1}
+        </span>
+      </div>
+      <figcaption className="line-clamp-2 px-0.5 text-[12px] leading-snug text-muted-foreground">{g.request.frame?.scene}</figcaption>
+    </figure>
+  );
+}
+
+function Board({
+  frames,
+  film,
+  onOpen,
+  idea,
+  names,
+}: {
+  frames: Generation[];
+  film: Generation[];
+  onOpen: (g: Generation) => void;
+  idea?: string;
+  names: Record<string, string>;
+}) {
+  const { remove } = useGenerationActions();
   const qc = useQueryClient();
   const first = frames[0];
   const done = frames.filter((f) => f.status === "succeeded").length;
+  const ready = filmReady(frames);
   const ratio = tileRatio(first);
   const makeFilm = useMutation({
     mutationFn: async () => {
@@ -89,78 +177,56 @@ function Board({ frames, film, onOpen }: { frames: Generation[]; film: Generatio
     },
     onError: (e) => toast.error((e as Error).message),
   });
+  const filmButton = (
+    <Button variant="secondary" size="sm" disabled={!ready || makeFilm.isPending} onClick={() => makeFilm.mutate()} className="whitespace-nowrap">
+      {makeFilm.isPending ? <Loader2 className="animate-spin" /> : <Film />} Make the film
+    </Button>
+  );
   return (
     <section className="animate-fade-up space-y-3">
-      <header className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-1 font-heading text-[19px] leading-snug">{first.request.frame?.scene ?? first.request.prompt}</h3>
+      <header className="flex flex-wrap items-start gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1 basis-60">
+          <h3 className="line-clamp-2 font-heading text-[19px] leading-snug">{boardTitle(frames, idea)}</h3>
           <p className="text-[12px] text-muted-foreground">
-            {frames.length} frames · {done === frames.length ? "done" : `${done}/${frames.length} ready`} · {getModel(first.modelId)?.name} · {timeAgo(first.createdAt)}
+            {frames.length} frames · {done === frames.length ? "done" : `${done}/${frames.length} ready`} · {modelName(first, names)} · {timeAgo(first.createdAt)}
           </p>
         </div>
-        {!film.length && frames.length > 1 && first.batchId && (
-          <Button variant="secondary" size="sm" disabled={makeFilm.isPending} onClick={() => makeFilm.mutate()}>
-            {makeFilm.isPending ? <Loader2 className="animate-spin" /> : <Film />} Make the film
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground hover:text-destructive"
-          onClick={() => {
-            [...frames, ...film].forEach((f) => void remove(f));
-            toast("Storyboard deleted");
-          }}
-        >
-          <Trash2 /> Delete
-        </Button>
-      </header>
-      <div className="scrollbar-none -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
-        {frames.map((g, i) => {
-          const o = g.outputs[0];
-          return (
-            <figure key={g.id} className="w-[min(70vw,280px)] shrink-0 space-y-1.5">
-              <div className="relative overflow-hidden rounded-xl" style={{ aspectRatio: ratio }}>
-                {g.status === "succeeded" && o ? (
-                  <button onClick={() => onOpen(g)} className="group/tile block size-full cursor-zoom-in bg-muted">
-                    <MediaThumb output={o} />
-                    <span className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity group-hover/tile:opacity-100">
-                      <Link
-                        href={`/video?image=${encodeURIComponent(o.url)}&prompt=${encodeURIComponent(g.request.frame?.scene ?? "")}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex h-7 items-center gap-1 rounded-full bg-white/20 px-2.5 text-[12px] font-medium text-white backdrop-blur hover:bg-white/30"
-                      >
-                        <Clapperboard className="size-3.5" /> Animate
-                      </Link>
-                      <Link
-                        href={`/edit?image=${encodeURIComponent(o.url)}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex h-7 items-center gap-1 rounded-full bg-white/20 px-2.5 text-[12px] font-medium text-white backdrop-blur hover:bg-white/30"
-                      >
-                        <Wand2 className="size-3.5" /> Edit
-                      </Link>
-                    </span>
-                  </button>
-                ) : g.status === "failed" || g.status === "canceled" ? (
-                  <FailedTile g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />
-                ) : (
-                  <PendingTile g={g} ratio={ratio} />
-                )}
-                <span className="pointer-events-none absolute top-2 left-2 grid size-6 place-items-center rounded-full bg-background/90 font-mono text-[11px] font-semibold shadow-soft">
-                  {i + 1}
+        <div className="flex shrink-0 items-center gap-1">
+          {!film.length && frames.length > 1 && first.batchId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled button gets no pointer events, so the tooltip hangs on a wrapper. */}
+                <span tabIndex={ready ? -1 : 0} className="inline-flex rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  {filmButton}
                 </span>
-              </div>
-              <figcaption className="line-clamp-2 px-0.5 text-[12px] leading-snug text-muted-foreground">{g.request.frame?.scene}</figcaption>
-            </figure>
-          );
-        })}
+              </TooltipTrigger>
+              <TooltipContent>{ready ? "Animate each frame into the next, then join them" : `Ready when all ${frames.length} frames are done`}</TooltipContent>
+            </Tooltip>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => {
+              [...frames, ...film].forEach((f) => void remove(f));
+              toast("Storyboard deleted");
+            }}
+          >
+            <Trash2 /> <span className="hidden sm:inline">Delete</span>
+          </Button>
+        </div>
+      </header>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+        {frames.map((g, i) => (
+          <FrameTile key={g.id} g={g} index={i} ratio={ratio} onOpen={onOpen} />
+        ))}
       </div>
       {film.length > 0 && <FilmStrip items={film} ratio={ratio} onOpen={onOpen} />}
     </section>
   );
 }
 
-export function StoryboardView() {
+export function StoryboardView({ modelNames = {} }: { /** Display names of the storyboard models, from the server. */ modelNames?: Record<string, string> }) {
   const qc = useQueryClient();
   const [engine, setEngine] = useEngine();
   const [mode, setMode] = useState<"auto" | "manual">("auto");
@@ -172,6 +238,7 @@ export function StoryboardView() {
   const [refs, setRefs] = useState<SlotValue[]>([]);
   const [open, setOpen] = useState<Generation | null>(null);
   const feed = useGenerations({ features: ["storyboard", "storyboard-film"], limit: 240 });
+  const titles = useBoardTitles();
 
   const films = useMemo(() => {
     const by = new Map<string, Generation[]>();
@@ -193,7 +260,7 @@ export function StoryboardView() {
   const flat = boards.flatMap((b) => [...b, ...(films.get(b[0].batchId ?? "") ?? [])].filter((g) => g.status === "succeeded" && g.outputs[0]));
   const pos = open ? flat.findIndex((g) => g.id === open.id) : -1;
 
-  const m = STORYBOARD_MODELS[engine];
+  const m = STORYBOARD_MODELS[engine as Engine];
   const submit = useMutation({
     mutationFn: async () => {
       const res = await fetch("/api/storyboards", {
@@ -209,9 +276,11 @@ export function StoryboardView() {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error);
-      return body as { scenes: string[] };
+      return body as { scenes: string[]; batchId?: string };
     },
     onSuccess: (b) => {
+      const idea = mode === "auto" ? story : scenes.find((s) => s.trim());
+      if (b.batchId && idea?.trim()) saveTitle(b.batchId, idea);
       toast.success(`${b.scenes.length} frames on the way — each one builds on the last`);
       void qc.invalidateQueries({ queryKey: ["generations"] });
     },
@@ -224,7 +293,9 @@ export function StoryboardView() {
     void fileToSlot(f, (v) =>
       setRefs((rs) => {
         if (!v) return rs.filter((r) => r.id !== id);
-        return rs.some((r) => r.id === id) ? rs.map((r) => (r.id === id ? { ...v, id } : r)) : [...rs, { ...v, id }];
+        if (rs.some((r) => r.id === id)) return rs.map((r) => (r.id === id ? { ...v, id } : r));
+        // A reference removed while it uploaded stays removed.
+        return v.uploading ? [...rs, { ...v, id }] : rs;
       }),
     );
   };
@@ -233,7 +304,7 @@ export function StoryboardView() {
     <div className="flex min-h-svh min-w-0 flex-col">
       <header className="sticky top-0 z-20 flex h-14 items-center gap-2 bg-background/85 px-3 backdrop-blur sm:px-6">
         <SidebarTrigger className="md:hidden" />
-        <h1 className="font-heading text-[22px] leading-none">Storyboard</h1>
+        <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">Storyboard</h1>
         <div className="ml-auto">
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
@@ -242,13 +313,20 @@ export function StoryboardView() {
         <div className="mx-auto max-w-[820px] pt-6 text-center">
           <h2 className="font-heading text-display text-balance">Tell it frame by frame</h2>
           <p className="mt-2 text-[13px] text-muted-foreground">
-            Up to {MAX_FRAMES} consistent frames — each one is made from the previous frame, so faces, wardrobe and light carry through. Runs on{" "}
-            {getModel(m.next)?.name}.
+            Up to {MAX_FRAMES} consistent frames — each one is made from the previous frame, so faces, wardrobe and light carry through.
+            {modelNames[m.next] ? ` Runs on ${modelNames[m.next]}.` : ""}
           </p>
-          <div className="mt-6 rounded-composer border bg-background p-3 text-left shadow-soft focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint">
-            <div className="mb-2 flex items-center gap-1 rounded-full bg-muted p-0.5 text-[13px] font-medium sm:w-fit">
+          <div className="mt-6 rounded-[20px] border bg-background p-3 text-left shadow-soft focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
+            <div role="radiogroup" aria-label="How to write it" className="mb-2 flex items-center gap-1 rounded-full bg-muted p-0.5 text-[13px] font-medium sm:w-fit">
               {(["auto", "manual"] as const).map((k) => (
-                <button key={k} onClick={() => setMode(k)} className={cn("h-8 flex-1 rounded-full px-4 text-muted-foreground transition", mode === k && "bg-background text-foreground shadow-soft")}>
+                <button
+                  key={k}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === k}
+                  onClick={() => setMode(k)}
+                  className={cn("h-8 flex-1 rounded-full px-4 whitespace-nowrap text-muted-foreground transition", mode === k && "bg-background text-foreground shadow-soft")}
+                >
                   {k === "auto" ? "From one idea" : "Scene by scene"}
                 </button>
               ))}
@@ -258,6 +336,7 @@ export function StoryboardView() {
                 value={story}
                 onChange={(e) => setStory(e.target.value)}
                 rows={2}
+                aria-label="Your story"
                 placeholder="The whole story in a sentence or two — e.g. “a lighthouse keeper finds a glowing bottle and follows its map into the sea”"
                 className="field-sizing-content max-h-52 min-h-16 w-full resize-none bg-transparent px-2 py-1.5 text-base leading-relaxed outline-none placeholder:text-subtle-foreground"
               />
@@ -270,10 +349,12 @@ export function StoryboardView() {
                       value={s}
                       onChange={(e) => setScenes((xs) => xs.map((x, j) => (j === i ? e.target.value : x)))}
                       rows={1}
+                      aria-label={`Frame ${i + 1}`}
                       placeholder={i ? "What happens next?" : "Opening frame — who, where, what"}
-                      className="field-sizing-content max-h-28 min-h-8 flex-1 resize-none bg-transparent py-1 text-[14px] outline-none placeholder:text-subtle-foreground"
+                      className="field-sizing-content max-h-28 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1 text-[14px] outline-none placeholder:text-subtle-foreground"
                     />
                     <button
+                      type="button"
                       onClick={() => setScenes((xs) => (xs.length > 1 ? xs.filter((_, j) => j !== i) : xs))}
                       className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent"
                       aria-label={`Remove frame ${i + 1}`}
@@ -283,7 +364,7 @@ export function StoryboardView() {
                   </div>
                 ))}
                 {scenes.length < MAX_FRAMES && (
-                  <button onClick={() => setScenes((xs) => [...xs, ""])} className="inline-flex items-center gap-1 px-1 text-[12px] font-medium text-brand-text hover:underline">
+                  <button type="button" onClick={() => setScenes((xs) => [...xs, ""])} className="inline-flex items-center gap-1 px-1 text-[12px] font-medium text-brand-text hover:underline">
                     <Plus className="size-3" /> Add frame
                   </button>
                 )}
@@ -292,6 +373,7 @@ export function StoryboardView() {
             <input
               value={style}
               onChange={(e) => setStyle(e.target.value)}
+              aria-label="Look (optional)"
               placeholder="Look (optional) — e.g. “35mm film, moody teal night, anamorphic”"
               className="mt-2 h-9 w-full rounded-lg border bg-background px-2.5 text-[13px] outline-none focus:border-primary"
             />
@@ -301,45 +383,59 @@ export function StoryboardView() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={r.preview} alt="" className="size-full object-cover" />
                   {r.uploading && <Loader2 className="absolute inset-0 m-auto size-4 animate-spin" />}
-                  <button onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))} className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-foreground/80 text-background" aria-label="Remove reference">
+                  <button
+                    type="button"
+                    onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
+                    className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-foreground/80 text-background"
+                    aria-label="Remove reference"
+                  >
                     <X className="size-2.5" />
                   </button>
                 </div>
               ))}
-              {refs.length < 4 && <MediaSlot label="Character / look" kind="image" value={null} onChange={(v) => v && setRefs((rs) => [...rs, { ...v, id: nanoid(6) }])} onFile={addRef} />}
+              {refs.length < 4 && <MediaSlot label="Look ref" kind="image" value={null} onChange={(v) => v && setRefs((rs) => [...rs, { ...v, id: nanoid(6) }])} onFile={addRef} />}
               {mode === "auto" && (
                 <div className="flex items-center gap-1 rounded-full bg-secondary px-1 py-0.5 text-[13px] font-medium">
-                  <button onClick={() => setCount((c) => Math.max(2, c - 1))} className="grid size-7 place-items-center rounded-full hover:bg-accent" aria-label="Fewer frames">
+                  <button type="button" onClick={() => setCount((c) => Math.max(2, c - 1))} className="grid size-7 place-items-center rounded-full hover:bg-accent" aria-label="Fewer frames">
                     <Minus className="size-3.5" />
                   </button>
-                  <span className="w-16 text-center tabular-nums">{count} frames</span>
-                  <button onClick={() => setCount((c) => Math.min(MAX_FRAMES, c + 1))} className="grid size-7 place-items-center rounded-full hover:bg-accent" aria-label="More frames">
+                  <span className="w-16 text-center whitespace-nowrap tabular-nums" aria-live="polite">
+                    {count} frames
+                  </span>
+                  <button type="button" onClick={() => setCount((c) => Math.min(MAX_FRAMES, c + 1))} className="grid size-7 place-items-center rounded-full hover:bg-accent" aria-label="More frames">
                     <Plus className="size-3.5" />
                   </button>
                 </div>
               )}
               <RatioPill value={aspect} onChange={setAspect} />
-              <Button size="icon" className="ml-auto size-10 rounded-full" disabled={!ready || submit.isPending} onClick={() => submit.mutate()} aria-label="Generate storyboard">
+              <Button size="icon" className="ml-auto size-10 shrink-0 rounded-full" disabled={!ready || submit.isPending} onClick={() => submit.mutate()} aria-label="Generate storyboard">
                 {submit.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
               </Button>
             </div>
-            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <Sparkles className="size-3" />
+            <p className="mt-2 flex items-start gap-1.5 text-[11px] text-muted-foreground">
+              <Sparkles className="mt-px size-3 shrink-0" />
               {mode === "auto" ? "Your story is split into frames by the prompt LLM (Settings → Prompt enhancement), or a shot list when none is set." : "One prompt per frame. References keep the cast consistent."}
             </p>
           </div>
         </div>
 
         {feed.isLoading ? (
-          <div className="flex gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
             {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-40 w-64 rounded-xl" />
+              <Skeleton key={i} className="aspect-video rounded-xl" />
             ))}
           </div>
         ) : boards.length ? (
           <div className="space-y-10">
             {boards.map((b) => (
-              <Board key={b[0].batchId ?? b[0].id} frames={b} film={films.get(b[0].batchId ?? "") ?? []} onOpen={setOpen} />
+              <Board
+                key={b[0].batchId ?? b[0].id}
+                frames={b}
+                film={films.get(b[0].batchId ?? "") ?? []}
+                onOpen={setOpen}
+                idea={b[0].batchId ? titles[b[0].batchId] : undefined}
+                names={modelNames}
+              />
             ))}
           </div>
         ) : (

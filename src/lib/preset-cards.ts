@@ -407,6 +407,20 @@ function joinList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/**
+ * Which model each engine runs a preset on, for the preset header's details popover (the studio
+ * hero no longer needs to spell out "Cloud: … · Open source: …").
+ */
+export function presetRouteLines(
+  p: Pick<Preset, "cloud" | "open" | "parity">,
+  nameOf: (modelId: string) => string | undefined = () => undefined,
+): { engine: "cloud" | "open"; label: string; model: string | null }[] {
+  return (["cloud", "open"] as const).map((engine) => {
+    const route = p[engine];
+    return { engine, label: engine === "cloud" ? "Cloud" : "Open source", model: route ? (nameOf(route.modelId) ?? route.modelId) : null };
+  });
+}
+
 /** One line telling the user what to do with a preset, e.g. "Add a target photo and a face, then Generate." */
 export function presetHowTo(p: Pick<Preset, "inputs" | "userPrompt" | "type">): string {
   const needs = p.inputs.filter((i) => i.required).map((i) => article(lowerFirst(i.label)));

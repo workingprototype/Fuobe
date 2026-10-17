@@ -1,90 +1,171 @@
 "use client";
 
-import { Cloud, Cpu } from "lucide-react";
-import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { ModelBadges } from "@/components/studio/model-picker";
-import { MODELS } from "@/lib/catalog";
-import { OPERATION_LABELS, type Engine, type MediaKind } from "@/lib/catalog/types";
-import { formatCost } from "@/lib/format";
+import { Cloud, Cpu, Info, Search } from "lucide-react";
+import { memo, useDeferredValue, useMemo, useState } from "react";
+import { useProgressive } from "@/components/use-progressive";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngine } from "@/lib/api";
+import type { Engine, MediaKind } from "@/lib/catalog/types";
+import { modelSearchText, type ModelRow } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 
-export function ModelsTable() {
+const KIND_LABEL: Partial<Record<MediaKind, string>> = { image: "Image", video: "Video", audio: "Audio", text: "Text", model3d: "3D" };
+
+const chip = (active: boolean) =>
+  cn(
+    "h-8 shrink-0 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent",
+    active && "bg-secondary text-foreground",
+  );
+
+/** Where a model runs, behind a small button (the endpoint list is long and only some people need it). */
+function RouteDetails({ row }: { row: ModelRow }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={`Where ${row.name} runs`}
+        >
+          <Info className="size-3.5" />
+          <span className="hidden sm:inline">
+            {row.routes.length} route{row.routes.length === 1 ? "" : "s"}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,420px)] p-3">
+        <p className="text-[12px] font-medium">{row.name} runs on</p>
+        <ul className="mt-2 space-y-1">
+          {row.routes.map((r) => (
+            <li key={r} className="font-mono text-[11px] break-all text-muted-foreground">
+              {r}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 font-mono text-[11px] text-subtle-foreground">id {row.id}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const Row = memo(function Row({ m }: { m: ModelRow }) {
+  return (
+    <tr className="align-top hover:bg-accent/50">
+      <td className="px-3 py-3 sm:px-4">
+        <div className="flex flex-wrap items-center gap-1.5 font-medium">
+          {m.engine === "open" ? <Cpu className="size-3.5 shrink-0 md:hidden" aria-label="Open source" /> : <Cloud className="size-3.5 shrink-0 md:hidden" aria-label="Cloud" />}
+          {m.name}
+          {m.badges.map((b) => (
+            <span
+              key={b}
+              className={cn(
+                "rounded-[4px] bg-secondary px-1 text-[10px] leading-4 font-medium text-secondary-foreground",
+                b === "New" && "bg-highlight text-highlight-foreground",
+                b === "Top" && "bg-brand-faint text-brand-text",
+              )}
+            >
+              {b}
+            </span>
+          ))}
+        </div>
+        <div className="text-[12px] text-muted-foreground">
+          {m.vendor} — {m.tagline}
+        </div>
+        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">{m.ops.join(" · ")}</div>
+      </td>
+      <td className="hidden px-4 py-3 whitespace-nowrap md:table-cell">
+        <span className="inline-flex items-center gap-1">
+          {m.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
+          {m.engine === "open" ? "Open source" : "Cloud"}
+        </span>
+      </td>
+      <td className="hidden px-4 py-3 text-[12px] text-muted-foreground md:table-cell">{m.ops.join(" · ")}</td>
+      <td className="px-3 py-3 font-mono text-[12px] whitespace-nowrap sm:px-4">{m.price}</td>
+      <td className="px-2 py-2.5 text-right">
+        <RouteDetails row={m} />
+      </td>
+    </tr>
+  );
+});
+
+export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [engineChoice, setEngine] = useState<Engine | "all">("all");
   const [, , mode] = useEngine();
   const engine: Engine | "all" = mode === "both" ? engineChoice : mode;
   const [kind, setKind] = useState<MediaKind | "all">("all");
-  const list = MODELS.filter((m) => (engine === "all" || m.engine === engine) && (kind === "all" || m.kind === kind));
-  const chip = (active: boolean) =>
-    cn("h-8 rounded-full px-3 text-[13px] font-medium text-muted-foreground hover:bg-accent", active && "bg-secondary text-foreground");
+  const [q, setQ] = useState("");
+  const term = useDeferredValue(q.trim().toLowerCase());
+  const index = useMemo(() => models.map((m) => [m, modelSearchText(m)] as const), [models]);
+  const kinds = useMemo(() => [...new Set(models.map((m) => m.kind))], [models]);
+  const list = useMemo(
+    () => index.filter(([m, text]) => (engine === "all" || m.engine === engine) && (kind === "all" || m.kind === kind) && (!term || text.includes(term))).map(([m]) => m),
+    [index, engine, kind, term],
+  );
+  // 40 rows in the page's HTML, the rest as you scroll.
+  const { shown, hasMore, more, sentinel, left } = useProgressive(list.length, `${engine}|${kind}|${term}`, 40, 60);
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1">
-        {(mode === "both" ? (["all", "cloud", "open"] as const) : [mode]).map((e) => (
-          <button key={e} className={chip(engine === e)} onClick={() => setEngine(e)}>
-            {e === "all" ? "All engines" : e === "cloud" ? "Cloud" : "Open source"}
-          </button>
-        ))}
-        <span className="mx-2 w-px bg-border" />
-        {(["all", "image", "video", "audio"] as const).map((k) => (
-          <button key={k} className={chip(kind === k)} onClick={() => setKind(k)}>
-            {k === "all" ? "All media" : k[0].toUpperCase() + k.slice(1)}
-          </button>
-        ))}
-        <span className="ml-auto self-center text-[13px] text-muted-foreground">{list.length} models</span>
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="relative w-full lg:w-72">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={`Search ${models.length} models`}
+            aria-label="Search models"
+            className="h-9 w-full rounded-full border bg-background pr-3 pl-9 text-[14px] outline-none placeholder:text-subtle-foreground focus:border-primary focus:ring-4 focus:ring-brand-faint"
+          />
+        </div>
+        <div className="scrollbar-none -mx-1 flex min-w-0 items-center gap-1 overflow-x-auto px-1">
+          {(mode === "both" ? (["all", "cloud", "open"] as const) : [mode]).map((e) => (
+            <button key={e} type="button" aria-pressed={engine === e} className={chip(engine === e)} onClick={() => setEngine(e)}>
+              {e === "all" ? "All engines" : e === "cloud" ? "Cloud" : "Open source"}
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px shrink-0 bg-border" />
+          {(["all", ...kinds] as const).map((k) => (
+            <button key={k} type="button" aria-pressed={kind === k} className={chip(kind === k)} onClick={() => setKind(k)}>
+              {k === "all" ? "All media" : (KIND_LABEL[k] ?? k)}
+            </button>
+          ))}
+        </div>
+        <span className="text-[13px] whitespace-nowrap text-muted-foreground tabular-nums lg:ml-auto" aria-live="polite">
+          {list.length} models
+        </span>
       </div>
       <div className="overflow-x-auto rounded-xl border">
         <table className="w-full text-left text-[13px]">
           <thead className="bg-muted/50 text-[12px] text-muted-foreground">
             <tr>
-              <th className="px-4 py-2.5 font-medium">Model</th>
-              <th className="px-4 py-2.5 font-medium">Engine</th>
-              <th className="px-4 py-2.5 font-medium">Can do</th>
-              <th className="px-4 py-2.5 font-medium">Runs on</th>
-              <th className="px-4 py-2.5 font-medium">Price</th>
+              <th className="px-3 py-2.5 font-medium sm:px-4">Model</th>
+              <th className="hidden px-4 py-2.5 font-medium md:table-cell">Engine</th>
+              <th className="hidden px-4 py-2.5 font-medium md:table-cell">Can do</th>
+              <th className="px-3 py-2.5 font-medium sm:px-4">Price</th>
+              <th className="px-2 py-2.5">
+                <span className="sr-only">Details</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {list.map((m) => (
-              <tr key={m.id} className="align-top hover:bg-accent/50">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5 font-medium">
-                    {m.name} <ModelBadges model={m} />
-                  </div>
-                  <div className="text-[12px] text-muted-foreground">
-                    {m.vendor} — {m.tagline}
-                  </div>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="inline-flex items-center gap-1">
-                    {m.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
-                    {m.engine === "open" ? "Open source" : "Cloud"}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {[...new Set(m.routes.map((r) => r.op))].map((op) => (
-                      <Badge key={op} variant="secondary" className="rounded-[4px] text-[11px] font-normal">
-                        {OPERATION_LABELS[op]}
-                      </Badge>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 font-mono text-[11px] text-muted-foreground">
-                  {m.routes.map((r) => (
-                    <div key={`${r.provider}-${r.op}-${r.endpoint}`}>
-                      {r.provider}: {r.endpoint}
-                    </div>
-                  ))}
-                </td>
-                <td className="px-4 py-3 font-mono text-[12px] whitespace-nowrap">
-                  {m.engine === "open" ? "Free" : m.pricing ? `${formatCost(m.pricing.usd)} / ${m.pricing.unit}` : "—"}
-                </td>
-              </tr>
+            {list.slice(0, shown).map((m) => (
+              <Row key={m.id} m={m} />
             ))}
           </tbody>
         </table>
+        {hasMore && (
+          <div className="flex justify-center border-t p-3">
+            <button
+              ref={sentinel}
+              type="button"
+              onClick={more}
+              className="h-9 rounded-full border bg-background px-4 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              Show more · {left} left
+            </button>
+          </div>
+        )}
+        {!list.length && <p className="py-12 text-center text-[13px] text-muted-foreground">No models match{term ? ` “${q.trim()}”` : " these filters"}.</p>}
       </div>
     </div>
   );

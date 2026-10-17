@@ -12,6 +12,7 @@ import {
   moveVars,
   PREVIEW_LAYERS,
   presetHowTo,
+  presetRouteLines,
   previewFor,
   searchText,
   toPresetCard,
@@ -243,6 +244,19 @@ describe("slim card DTOs", () => {
 
   it("searches name, description and category", () => {
     expect(searchText({ name: "Crash Zoom In", description: "A sudden zoom", category: "Push & Pull" })).toBe("crash zoom in a sudden zoom push & pull");
+  });
+});
+
+describe("preset route lines (details popover)", () => {
+  it("names each engine's model, or says there is none", () => {
+    const names: Record<string, string> = { "nano-banana-pro": "Nano Banana Pro" };
+    const lines = presetRouteLines({ cloud: { modelId: "nano-banana-pro", op: "edit" }, open: null }, (id) => names[id]);
+    expect(lines).toEqual([
+      { engine: "cloud", label: "Cloud", model: "Nano Banana Pro" },
+      { engine: "open", label: "Open source", model: null },
+    ]);
+    // Unknown names fall back to the model id.
+    expect(presetRouteLines({ cloud: null, open: { modelId: "oss-x", op: "edit" } })[1].model).toBe("oss-x");
   });
 });
 

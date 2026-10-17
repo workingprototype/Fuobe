@@ -58,10 +58,10 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
       {status.enabled && (
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-current`} className="text-[13px]">Current password</Label>
-          <Input id={`${id}-current`} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className="w-72" />
+          <Input id={`${id}-current`} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className="w-full max-w-72" />
         </div>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 sm:w-[36rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:w-[36rem] sm:max-w-full sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-new`} className="text-[13px]">{status.enabled ? "New password" : "Password"}</Label>
           <Input id={`${id}-new`} type="password" autoComplete="new-password" placeholder="At least 8 characters" value={next} onChange={(e) => setNext(e.target.value)} />
@@ -93,7 +93,7 @@ function McpSnippet({ token, needsToken }: { token: string | null; needsToken: b
   const auth = needsToken ? ` --header "Authorization: Bearer ${token ?? "fuobe_…"}"` : "";
   const cmd = `claude mcp add --transport http fuobe ${origin}/api/mcp${auth}`;
   return (
-    <div className="space-y-1.5 sm:w-[36rem]">
+    <div className="space-y-1.5 sm:w-[36rem] sm:max-w-full">
       <p className="text-[12px] font-medium">Connect an agent over MCP</p>
       <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-2">
         <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap">{cmd}</code>
@@ -131,7 +131,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label className="text-[13px]">API tokens</Label>
+        <h3 className="text-[13px] font-medium">API tokens</h3>
         <p className="text-[12px] text-muted-foreground">
           For scripts and agents (the REST API and the MCP endpoint at <code className="font-mono">/api/mcp</code>). Send as <code className="font-mono">Authorization: Bearer fuobe_…</code>. Only needed once a password is set.
         </p>
@@ -155,7 +155,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
         </div>
       )}
       {status.tokens.length > 0 && (
-        <ul className="divide-y rounded-xl border sm:w-[36rem]">
+        <ul className="divide-y rounded-xl border sm:w-[36rem] sm:max-w-full">
           {status.tokens.map((t) => (
             <li key={t.id} className="flex items-center gap-3 px-3 py-2">
               <KeyRound className="size-4 text-muted-foreground" />
@@ -183,9 +183,15 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
         </ul>
       )}
       <McpSnippet token={fresh} needsToken={status.enabled} />
-      <div className="flex gap-2 sm:w-[36rem]">
-        <Input placeholder="Token name, e.g. “Claude Desktop”" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button size="sm" variant="secondary" className="h-9" disabled={!name.trim()} onClick={() => void create()}>
+      <div className="flex gap-2 sm:w-[36rem] sm:max-w-full">
+        <Input
+          aria-label="Token name"
+          placeholder="Token name, e.g. “Claude Desktop”"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && void create()}
+        />
+        <Button size="sm" variant="secondary" className="h-9 shrink-0" disabled={!name.trim()} onClick={() => void create()}>
           Create token
         </Button>
       </div>

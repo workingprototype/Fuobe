@@ -2,12 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert, Cloud, Cpu, ExternalLink, Layers, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { SecuritySettings } from "@/components/security-settings";
 
@@ -41,13 +42,15 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className="grid scroll-mt-6 gap-6 border-b py-8 first:pt-0 md:grid-cols-[260px_1fr]">
-      <div>
-        <h2 className="text-[15px] font-semibold">{title}</h2>
+    <section id={id} aria-labelledby={id ? `${id}-title` : undefined} className="grid scroll-mt-6 grid-cols-[minmax(0,1fr)] gap-6 border-b py-8 first:pt-0 md:grid-cols-[260px_minmax(0,1fr)]">
+      <div className="min-w-0">
+        <h2 id={id ? `${id}-title` : undefined} className="text-[15px] font-semibold">
+          {title}
+        </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         {inactive && <p className="mt-2 inline-flex rounded-md bg-muted px-2 py-1 text-[12px] text-muted-foreground">{inactive}</p>}
       </div>
-      <div className={cn("space-y-5", inactive && "opacity-55")}>{children}</div>
+      <div className={cn("min-w-0 space-y-5", inactive && "opacity-55")}>{children}</div>
     </section>
   );
 }
@@ -151,12 +154,19 @@ function Field({
 }) {
   const [v, setV] = useState("");
   const [editing, setEditing] = useState(false);
+  const id = useId();
   const shown = editing ? v : setting?.secret ? "" : (setting?.value ?? "");
   return (
     <div className="space-y-1.5">
-      <Label className="text-[13px]">{label}</Label>
+      <Label htmlFor={id} className="text-[13px]">
+        {label}
+      </Label>
       <div className="flex gap-2">
         <Input
+          id={id}
+          aria-describedby={`${id}-hint`}
+          autoComplete="off"
+          spellCheck={false}
           type={setting?.secret ? "password" : "text"}
           value={shown}
           placeholder={setting?.secret && setting.isSet ? setting.value : placeholder}
@@ -168,8 +178,9 @@ function Field({
         />
         <Button
           size="sm"
-          className="h-9"
+          className="h-9 shrink-0"
           disabled={!editing}
+          aria-label={`Save ${label}`}
           onClick={() => {
             onSave(v);
             setEditing(false);
@@ -179,12 +190,12 @@ function Field({
           Save
         </Button>
         {setting?.isSet && !setting.fromEnv && (
-          <Button size="sm" variant="ghost" className="h-9" onClick={() => onSave("")}>
+          <Button size="sm" variant="ghost" className="h-9 shrink-0" aria-label={`Clear ${label}`} onClick={() => onSave("")}>
             Clear
           </Button>
         )}
       </div>
-      <p className="text-[12px] text-muted-foreground">
+      <p id={`${id}-hint`} className="text-[12px] text-muted-foreground">
         {setting?.fromEnv ? "Set from environment variable. " : ""}
         {hint}
       </p>
@@ -208,7 +219,14 @@ export function SettingsForm() {
   const get = (n: string) => settings.data?.find((s) => s.name === n);
   const set = (n: string) => (v: string) => save.mutate({ [n]: v });
 
-  if (settings.isLoading) return <Loader2 className="size-5 animate-spin text-muted-foreground" />;
+  if (settings.isLoading)
+    return (
+      <div className="space-y-3" aria-busy="true" aria-label="Loading settings">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-24 w-full rounded-xl" />
+        ))}
+      </div>
+    );
   const mode = get("engineMode")?.value || "both";
 
   return (
@@ -272,9 +290,11 @@ export function SettingsForm() {
         />
         <TestButton provider="higgsfield" />
         <div className="space-y-1.5">
-          <Label className="text-[13px]">Preferred provider</Label>
+          <Label htmlFor="setting-cloud-provider" className="text-[13px]">
+            Preferred provider
+          </Label>
           <Select value={get("cloudProvider")?.value || "auto"} onValueChange={set("cloudProvider")}>
-            <SelectTrigger className="w-72">
+            <SelectTrigger id="setting-cloud-provider" className="w-full max-w-80">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -304,9 +324,11 @@ export function SettingsForm() {
         description="The Enhance toggle rewrites short ideas into rich prompts, and storyboards split stories into frames. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter. Claude also powers the Assist agent. In Open source only mode, Automatic skips Claude."
       >
         <div className="space-y-1.5">
-          <Label className="text-[13px]">Enhancer</Label>
+          <Label htmlFor="setting-enhancer" className="text-[13px]">
+            Enhancer
+          </Label>
           <Select value={get("enhanceProvider")?.value || "auto"} onValueChange={set("enhanceProvider")}>
-            <SelectTrigger className="w-64">
+            <SelectTrigger id="setting-enhancer" className="w-full max-w-72">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -334,7 +356,7 @@ export function SettingsForm() {
 
       <Section title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
         <Select value={get("demoMode")?.value || "auto"} onValueChange={set("demoMode")}>
-          <SelectTrigger className="w-72">
+          <SelectTrigger aria-label="Demo mode" className="w-full max-w-80">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
