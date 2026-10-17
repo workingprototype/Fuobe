@@ -299,6 +299,12 @@
     "error": null,
     "at": "2026-10-16T20:57:16.889Z"
   },
+  "selftest-meta-batch": {
+    "sha256": "15894296f99cdd4919b88b3a67159bbe2cac97f4c19b3f7bf669e023156fb76c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:22:10.139Z"
+  },
   "sfx-hunyuan-foley": {
     "sha256": "54a10b4f9586f3e65c0f9cd1bcedf02d1842e3bf73df9dd98304eef0f07b212a",
     "validated": true,

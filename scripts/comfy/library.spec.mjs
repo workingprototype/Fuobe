@@ -1720,6 +1720,19 @@ export const SPEC = [
     vramGb: 0,
     notes: 'Runs on any ComfyUI (CPU is fine), needs no model files. Exercises the SaveVideo output path.',
   },
+  {
+    id: 'selftest-meta-batch',
+    title: 'Self-test: invert a clip 8 frames at a time (VHS meta-batch)',
+    capability: 'v2v',
+    handBuilt: 'hand-built/selftest-meta-batch.json',
+    bindings: { video: [b('1', 'video')], filenamePrefix: [b('4', 'filename_prefix')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'Runs on any ComfyUI (CPU is fine), needs no model files. VHS_BatchManager re-queues the prompt every 8 frames (new prompt ids, ui "unfinished_batch" until the last pass); ' +
+      'exercises the provider\'s meta-batch follow-up that mixed-media-zimage-frames relies on. Keeps the source fps and audio.',
+  },
 
   // =========================================================================
   // comfyui-oss-3 (round 3): docs/research/comfyui-oss-3.json. Graphs are the researcher's validated API graphs;

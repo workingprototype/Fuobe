@@ -436,6 +436,17 @@ const open: ModelDef[] = [
     options: {},
     hidden: true,
   }),
+  o({
+    id: "oss-selftest-meta-batch",
+    name: "ComfyUI self-test (meta-batch)",
+    vendor: "Fuobe",
+    family: "selftest",
+    kind: "video",
+    tagline: "Inverts a clip 8 frames per pass, like Mixed Media — needs no model files",
+    routes: [comfy("v2v", "selftest-meta-batch")],
+    options: {},
+    hidden: true,
+  }),
 
   // ---------------- Video tools (extend, reframe, relight, draw-to-video, mattes, depth)
   o({

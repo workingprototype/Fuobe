@@ -8760,6 +8760,14 @@
             "multiselect": false,
             "options": [
               "clip4s.mp4",
+              "fuobe_1p8twlz8.mp4",
+              "fuobe_52CkO1zA.wav",
+              "fuobe_EAO6RFsA.mp4",
+              "fuobe_VC-FibEl.mp4",
+              "fuobe_aQ4wM6Uo.wav",
+              "fuobe_mRUurdwM.mp4",
+              "fuobe_owTi-cFJ.mp4",
+              "fuobe_oxa2g7HS.wav",
               "fuobe_real.mp4",
               "fuobe_real.wav",
               "fuobe_validate.mp4",
@@ -8921,8 +8929,11 @@
         "image": [
           [
             "example.png",
+            "fuobe_SfM8ZKie.png",
+            "fuobe_qmXgUGxd.png",
             "fuobe_validate.png",
-            "fuobe_validate_mask.png"
+            "fuobe_validate_mask.png",
+            "fuobe_yy5Vt6TE.png"
           ],
           {
             "image_upload": true
@@ -8972,8 +8983,11 @@
         "image": [
           [
             "example.png",
+            "fuobe_SfM8ZKie.png",
+            "fuobe_qmXgUGxd.png",
             "fuobe_validate.png",
-            "fuobe_validate_mask.png"
+            "fuobe_validate_mask.png",
+            "fuobe_yy5Vt6TE.png"
           ],
           {
             "image_upload": true
@@ -9028,6 +9042,11 @@
             "multiselect": false,
             "options": [
               "clip4s.mp4",
+              "fuobe_1p8twlz8.mp4",
+              "fuobe_EAO6RFsA.mp4",
+              "fuobe_VC-FibEl.mp4",
+              "fuobe_mRUurdwM.mp4",
+              "fuobe_owTi-cFJ.mp4",
               "fuobe_real.mp4",
               "fuobe_validate.mp4"
             ],
@@ -16242,6 +16261,11 @@
         "video": [
           [
             "clip4s.mp4",
+            "fuobe_1p8twlz8.mp4",
+            "fuobe_EAO6RFsA.mp4",
+            "fuobe_VC-FibEl.mp4",
+            "fuobe_mRUurdwM.mp4",
+            "fuobe_owTi-cFJ.mp4",
             "fuobe_real.mp4",
             "fuobe_validate.mp4"
           ]

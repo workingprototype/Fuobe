@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-17T21:13:08.018Z",
+  "generatedAt": "2026-10-17T21:22:08.981Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -7345,6 +7345,46 @@
       "validated": true,
       "defaults": {},
       "source": "hand-built (Fuobe self-test, no model weights)"
+    },
+    {
+      "id": "selftest-meta-batch",
+      "title": "Self-test: invert a clip 8 frames at a time (VHS meta-batch)",
+      "capability": "v2v",
+      "file": "selftest-meta-batch.json",
+      "source": "hand-built (scripts/comfy/hand-built/selftest-meta-batch.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {},
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "n/a (no model)",
+      "validated": true,
+      "notes": "Runs on any ComfyUI (CPU is fine), needs no model files. VHS_BatchManager re-queues the prompt every 8 frames (new prompt ids, ui \"unfinished_batch\" until the last pass); exercises the provider's meta-batch follow-up that mixed-media-zimage-frames relies on. Keeps the source fps and audio."
     },
     {
       "id": "layers-qwen-image-layered",
