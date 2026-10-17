@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { ArrowRight, AudioLines, Film, ImageIcon, Mic2, ScanFace, Sparkles, Video, Wand2, ZoomIn } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { PageShell } from "@/components/page-shell";
 import { PresetCard } from "@/components/preset-gallery";
-import { Feed } from "@/components/studio/feed";
-import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
-import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
+import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
+
+// The feed (and the viewer behind it) is only needed once there is something recent to show.
+const Feed = lazy(() => import("@/components/studio/feed").then((m) => ({ default: m.Feed })));
 
 const MODES = [
   { id: "image", label: "Image", icon: ImageIcon, href: "/image", placeholder: "Describe an image…" },
@@ -18,10 +21,17 @@ const MODES = [
   { id: "edit", label: "Edit", icon: Wand2, href: "/edit", placeholder: "Describe a change (you'll add the image next)…" },
 ];
 
-const TOOLS = [
-  { href: "/motions", label: "Camera motions", desc: `${MOTIONS.length} director moves`, icon: Film, hue: 280 },
-  { href: "/effects", label: "Effects", desc: `${EFFECTS.length} viral VFX`, icon: Sparkles, hue: 20 },
-  { href: "/apps", label: "Apps", desc: `${APPS.length} one-click tools`, icon: Wand2, hue: 200 },
+interface Counts {
+  motions: number;
+  effects: number;
+  apps: number;
+}
+
+/** Tool tiles. Append one entry per new destination; the grid fits any count. */
+const tools = (c: Counts) => [
+  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film, hue: 280 },
+  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles, hue: 20 },
+  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2, hue: 200 },
   { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2, hue: 150 },
   { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace, hue: 320 },
   { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn, hue: 240 },
@@ -42,13 +52,27 @@ function Row({ title, href, children }: { title: string; href: string; children:
   );
 }
 
-export function HomeView() {
+function CardRow({ cards, href }: { cards: PresetCardData[]; href: (c: PresetCardData) => string }) {
+  return (
+    <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
+      {cards.map((p) => (
+        <PresetCard key={p.id} preset={p} href={href(p)} compact />
+      ))}
+    </div>
+  );
+}
+
+export function HomeView({ counts, motions, apps, effects }: { counts: Counts; motions: PresetCardData[]; apps: PresetCardData[]; effects: PresetCardData[] }) {
   const router = useRouter();
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState("");
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
-  const status = useStatus().data;
+  // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
+  // the status: render the server's (status-less) view until hydrated, as useEngineMode does.
+  const hydrated = useHydrated();
+  const statusData = useStatus().data;
+  const status = hydrated ? statusData : undefined;
   const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
   const comfyReady = !!status?.providers.comfyui?.configured;
   const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
@@ -71,34 +95,40 @@ export function HomeView() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 go();
               }
             }}
             rows={2}
             autoFocus
+            aria-label="Describe what to create"
             placeholder={mode.placeholder}
             className="field-sizing-content max-h-48 min-h-14 w-full resize-none bg-transparent px-2.5 py-1.5 text-base outline-none placeholder:text-subtle-foreground"
           />
           <div className="flex items-center gap-1.5">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMode(m)}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
-                  mode.id === m.id ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
-                )}
-              >
-                <m.icon className="size-3.5" /> {m.label}
-              </button>
-            ))}
+            <div role="radiogroup" aria-label="What to make" className="flex min-w-0 items-center gap-1">
+              {MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode.id === m.id}
+                  onClick={() => setMode(m)}
+                  className={cn(
+                    "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap transition-colors",
+                    mode.id === m.id ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  <m.icon className="size-3.5" /> {m.label}
+                </button>
+              ))}
+            </div>
             <div className="ml-auto flex items-center gap-2">
               <span className="hidden sm:block">
                 <EngineSwitch value={engine} onChange={setEngine} size="sm" />
               </span>
-              <button onClick={go} className="grid size-10 place-items-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90" aria-label="Start">
+              <button onClick={go} className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90" aria-label="Start">
                 <ArrowRight className="size-4" />
               </button>
             </div>
@@ -115,14 +145,14 @@ export function HomeView() {
         )}
       </div>
 
-      <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-        {TOOLS.map((t) => (
-          <Link key={t.href} href={t.href} className="group flex flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
+      <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-[repeat(auto-fit,minmax(128px,1fr))]">
+        {tools(counts).map((t) => (
+          <Link key={t.href} href={t.href} className="group flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
             <span className="grid size-9 place-items-center rounded-lg text-white" style={{ background: `linear-gradient(135deg, oklch(0.75 0.15 ${t.hue}), oklch(0.55 0.2 ${t.hue + 40}))` }}>
               <t.icon className="size-4 transition-transform group-hover:scale-110" />
             </span>
-            <span>
-              <span className="block text-[13px] font-medium">{t.label}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-medium">{t.label}</span>
               <span className="block text-[12px] text-muted-foreground">{t.desc}</span>
             </span>
           </Link>
@@ -132,29 +162,26 @@ export function HomeView() {
       <div className="mt-14 space-y-12">
         {!!recent.data?.length && (
           <Row title="Recent" href="/library">
-            <Feed items={recent.data.slice(0, 3)} />
+            <Suspense
+              fallback={
+                <div className="flex gap-2">
+                  <Skeleton className="h-56 w-56 rounded-xl" />
+                  <Skeleton className="h-56 w-56 rounded-xl" />
+                </div>
+              }
+            >
+              <Feed items={recent.data.slice(0, 3)} />
+            </Suspense>
           </Row>
         )}
         <Row title="Camera motions" href="/motions">
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
-            {MOTIONS.filter((m) => ["motion-crash-zoom-in", "motion-360-orbit", "motion-bullet-time", "motion-fpv-drone", "motion-dolly-zoom-in", "motion-snorricam"].includes(m.id)).map((p) => (
-              <PresetCard key={p.id} preset={p} href={`/video?preset=${p.id}`} compact />
-            ))}
-          </div>
+          <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} />
         </Row>
         <Row title="Popular apps" href="/apps">
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
-            {APPS.slice(0, 12).filter((a) => a.badges?.includes("top") || a.category === "Camera").slice(0, 6).map((p) => (
-              <PresetCard key={p.id} preset={p} href={`/apps/${p.id}`} compact />
-            ))}
-          </div>
+          <CardRow cards={apps} href={(p) => `/apps/${p.id}`} />
         </Row>
         <Row title="Effects" href="/effects">
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
-            {EFFECTS.slice(0, 6).map((p) => (
-              <PresetCard key={p.id} preset={p} href={`/video?preset=${p.id}`} compact />
-            ))}
-          </div>
+          <CardRow cards={effects} href={(p) => `/video?preset=${p.id}`} />
         </Row>
       </div>
     </PageShell>

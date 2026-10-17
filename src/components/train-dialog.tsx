@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { getModel } from "@/lib/catalog";
 import type { StudioElement } from "@/lib/catalog/elements";
 import { triggerFor, type TrainingTarget } from "@/lib/catalog/training";
 import { cn } from "@/lib/utils";
@@ -108,7 +107,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
             {element.loras.map((l) => (
               <div key={l.modelId} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px]">
                 <Check className="size-4 text-success" />
-                <span className="font-medium">{getModel(l.modelId)?.name ?? l.modelId}</span>
+                <span className="font-medium">{q.data?.targets.find((t) => t.modelIds.includes(l.modelId))?.name ?? l.modelId}</span>
                 <span className="truncate text-muted-foreground">{l.referenceId ? "Soul ID" : l.trigger ? `trigger “${l.trigger}”` : l.file}</span>
                 <button onClick={() => void remove(l.modelId)} className="ml-auto text-muted-foreground hover:text-destructive" aria-label="Remove">
                   <Trash2 className="size-3.5" />
