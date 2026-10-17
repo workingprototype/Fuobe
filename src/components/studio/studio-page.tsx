@@ -77,6 +77,8 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
     refs,
     presetId: r.presetId,
     presetOptions: r.presetOptions ?? {},
+    presetStrength: r.presetStrength,
+    mix: r.mix,
   };
 }
 

@@ -42,6 +42,8 @@ const RequestSchema = z.object({
     })
     .optional(),
   presetOptions: z.record(z.string(), z.string()).optional(),
+  presetStrength: z.number().min(0).max(1).optional(),
+  mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
 });
 
 export async function GET(request: Request) {

@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
@@ -168,11 +169,48 @@ function SegmentChip<T extends string | number>({
   );
 }
 
+function PresetGrid({ list, value, onPick }: { list: Preset[]; value?: string; onPick: (id: string) => void }) {
+  const [cat, setCat] = useState<string>("All");
+  const cats = ["All", ...new Set(list.map((p) => p.category))];
+  return (
+    <>
+      <div className="scrollbar-none mb-2 flex gap-1 overflow-x-auto">
+        {cats.map((c) => (
+          <button
+            key={c}
+            onClick={() => setCat(c)}
+            className={cn("h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent", cat === c && "bg-secondary text-foreground")}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
+        {list
+          .filter((p) => cat === "All" || p.category === cat)
+          .map((p) => {
+            const PI = PRESET_ICONS[p.look.icon] ?? Film;
+            return (
+              <button
+                key={p.id}
+                onClick={() => onPick(p.id)}
+                className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
+              >
+                <span className="grid aspect-video w-full place-items-center rounded-md text-white" style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}>
+                  <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
+                </span>
+                <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
+              </button>
+            );
+          })}
+      </div>
+    </>
+  );
+}
+
 function PresetChip({ type, value, onChange }: { type: "motion" | "effect"; value?: string; onChange: (id?: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [cat, setCat] = useState<string>("All");
   const list = type === "motion" ? MOTIONS : EFFECTS;
-  const cats = ["All", ...new Set(list.map((p) => p.category))];
   const selected = value ? getPreset(value) : undefined;
   const Icon = selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : Film;
   return (
@@ -192,48 +230,77 @@ function PresetChip({ type, value, onChange }: { type: "motion" | "effect"; valu
         </Chip>
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12}>
-        <div className="scrollbar-none mb-2 flex gap-1 overflow-x-auto">
-          {cats.map((c) => (
-            <button
-              key={c}
-              onClick={() => setCat(c)}
-              className={cn(
-                "h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent",
-                cat === c && "bg-secondary text-foreground",
-              )}
-            >
-              {c}
-            </button>
-          ))}
+        <PresetGrid
+          list={list}
+          value={value}
+          onPick={(id) => {
+            onChange(id);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const MIXABLE = [...MOTIONS, ...EFFECTS];
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+/** Higgsfield's Mix: a second motion or effect on top of the first, each with a strength. */
+function MixChip({
+  primary,
+  strength,
+  mix,
+  onChange,
+}: {
+  primary: Preset;
+  strength: number;
+  mix?: { presetId: string; strength: number };
+  onChange: (patch: { presetStrength?: number; mix?: { presetId: string; strength: number } | undefined }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const second = mix ? getPreset(mix.presetId) : undefined;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Chip icon={Shuffle} active={!!second}>
+          {second ? `+ ${second.name}` : "Mix"}
+          {second && (
+            <X
+              className="-mr-1 size-3.5 opacity-70 hover:opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange({ mix: undefined });
+              }}
+            />
+          )}
+        </Chip>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(92vw,460px)] space-y-3 p-3" align="start" side="top" collisionPadding={12}>
+        <div className="space-y-2.5">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="font-medium">{primary.name}</span>
+              <span className="font-mono text-muted-foreground">{pct(strength)}</span>
+            </div>
+            <Slider min={0.1} max={1} step={0.05} value={[strength]} onValueChange={([v]) => onChange({ presetStrength: v })} aria-label={`${primary.name} strength`} />
+          </div>
+          {second && mix && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="font-medium">{second.name}</span>
+                <span className="font-mono text-muted-foreground">{pct(mix.strength)}</span>
+              </div>
+              <Slider min={0.1} max={1} step={0.05} value={[mix.strength]} onValueChange={([v]) => onChange({ mix: { ...mix, strength: v } })} aria-label={`${second.name} strength`} />
+            </div>
+          )}
         </div>
-        <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto">
-          {list
-            .filter((p) => cat === "All" || p.category === cat)
-            .map((p) => {
-              const PI = PRESET_ICONS[p.look.icon] ?? Film;
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    onChange(p.id);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent",
-                    value === p.id && "ring-2",
-                  )}
-                >
-                  <span
-                    className="grid aspect-video w-full place-items-center rounded-md text-white"
-                    style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}
-                  >
-                    <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
-                  </span>
-                  <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
-                </button>
-              );
-            })}
-        </div>
+        <p className="text-[12px] text-muted-foreground">{second ? "Swap the second preset:" : "Pick a second motion or effect to combine with it:"}</p>
+        <PresetGrid
+          list={MIXABLE.filter((p) => p.id !== primary.id && !p.inputs.some((i) => i.key === "endImage"))}
+          value={mix?.presetId}
+          onPick={(id) => onChange({ mix: { presetId: id, strength: mix?.strength ?? 0.6 } })}
+        />
       </PopoverContent>
     </Popover>
   );
@@ -272,6 +339,8 @@ function buildRequest(
     },
     params: draft.params,
     presetOptions: draft.presetOptions,
+    ...(draft.presetId && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
+    ...(draft.presetId && draft.mix && { mix: draft.mix }),
   };
 }
 
@@ -568,8 +637,11 @@ export function Composer({ docked }: { docked: boolean }) {
             <PresetChip
               type={config.presetPicker}
               value={draft.presetId}
-              onChange={(id) => setDraft({ presetId: id })}
+              onChange={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
             />
+          )}
+          {preset && (preset.type === "motion" || preset.type === "effect") && (
+            <MixChip primary={preset} strength={draft.presetStrength ?? 1} mix={draft.mix} onChange={(patch) => setDraft(patch)} />
           )}
           {opts.aspectRatios && opts.aspectRatios.length > 1 && op !== "i2v" && op !== "flf2v" && (
             <AspectChip options={opts.aspectRatios} value={p.aspectRatio} onChange={(v) => setP({ aspectRatio: v })} />

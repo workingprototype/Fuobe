@@ -39,6 +39,9 @@ export function routesFor(model: ModelDef, op: Operation): ModelRoute[] {
   return model.routes.filter((r) => r.op === op);
 }
 
+const clamp01 = (n: number) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 1));
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /** Fill a preset prompt template: {prompt} and {option:key}. Collapses leftover whitespace. */
 export function composePrompt(
   template: string,
@@ -120,6 +123,25 @@ export function planGeneration(
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
     loras = sameModel ? (route.loras ?? []) : [];
     if (sameModel) op = op ?? route.op;
+  }
+
+  if (preset && /motion|effect/.test(preset.type)) {
+    const k = clamp01(req.presetStrength ?? 1);
+    if (k < 1) loras = loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) }));
+    if (req.mix) {
+      const second = getPreset(req.mix.presetId);
+      if (!second || !/motion|effect/.test(second.type)) throw new Error("Pick a camera motion or effect to mix in");
+      if (second.id !== preset.id) {
+        const m = clamp01(req.mix.strength);
+        // The second preset's own words, without the user's prompt; worded by strength.
+        const words = composePrompt(second.promptTemplate.replace(/\{prompt\}\.?/g, ""), "", second, undefined).replace(/[.\s]+$/, "");
+        const lead = m >= 0.75 ? "At the same time" : m >= 0.4 ? "Also, more subtly" : "With a slight hint of this";
+        prompt = `${prompt.replace(/[.\s]+$/, "")}. ${lead}: ${words.charAt(0).toLowerCase()}${words.slice(1)}.`;
+        // Its LoRAs stack on the same open model, scaled by the mix strength.
+        const route = presetRoute(second, model.engine);
+        if (route?.modelId === model.id && route.loras?.length) loras = [...loras, ...route.loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * m) }))];
+      }
+    }
   }
 
   if (req.loras?.length) loras = [...loras, ...req.loras];

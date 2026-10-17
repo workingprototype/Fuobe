@@ -321,6 +321,10 @@ export interface GenerationRequest {
   params?: GenParams;
   /** Values for preset option pickers (apps). */
   presetOptions?: Record<string, string>;
+  /** Motions/effects: how strongly the preset applies (0–1, default 1). */
+  presetStrength?: number;
+  /** Higgsfield's Mix: a second motion or effect on top of the first, with its own strength. */
+  mix?: { presetId: string; strength: number };
   /** Server-side only: LoRAs added by @element mentions (trained identities). */
   loras?: LoraRef[];
   /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */

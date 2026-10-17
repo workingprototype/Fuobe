@@ -47,6 +47,9 @@ export interface Draft {
   refs: SlotValue[];
   presetId?: string;
   presetOptions: Record<string, string>;
+  /** Motions/effects: strength of the preset, and an optional second one mixed in (Mix). */
+  presetStrength?: number;
+  mix?: { presetId: string; strength: number };
 }
 
 interface Ctx {

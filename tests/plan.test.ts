@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getModel, getPreset } from "@/lib/catalog";
+import { getModel, getPreset, PRESETS } from "@/lib/catalog";
 import { composePrompt, estimateCost, inferOperation, missingInputs, planGeneration } from "@/lib/catalog/plan";
 
 describe("inferOperation", () => {
@@ -61,5 +61,29 @@ describe("estimateCost", () => {
     expect(estimateCost(getModel("nano-banana-pro")!, { numOutputs: 2 })).toBeCloseTo(0.3);
     expect(estimateCost(getModel("kling-2-5-turbo")!, { duration: 10 })).toBeCloseTo(0.7);
     expect(estimateCost(getModel("oss-wan22-14b")!, {})).toBe(0);
+  });
+});
+
+describe("motion mix", () => {
+  const base = { feature: "motion", presetId: "motion-crash-zoom-in", prompt: "a boxer in the ring" };
+  it("adds the second preset's words, worded by strength", () => {
+    const strong = planGeneration({ ...base, modelId: "kling-2-5-turbo", inputs: { images: ["a.png"] }, mix: { presetId: "motion-handheld", strength: 0.9 } }, getModel, getPreset);
+    expect(strong.prompt).toMatch(/^a boxer in the ring\. .+ At the same time: /);
+    const faint = planGeneration({ ...base, modelId: "kling-2-5-turbo", inputs: { images: ["a.png"] }, mix: { presetId: "motion-handheld", strength: 0.2 } }, getModel, getPreset);
+    expect(faint.prompt).toMatch(/With a slight hint of this: /);
+    expect(() => planGeneration({ ...base, modelId: "kling-2-5-turbo", inputs: { images: ["a.png"] }, mix: { presetId: "app-relight", strength: 0.5 } }, getModel, getPreset)).toThrow(/camera motion or effect/);
+  });
+
+  it("stacks LoRAs on the open model, scaled by each strength", () => {
+    const withLora = PRESETS.filter((p) => /motion|effect/.test(p.type) && p.open?.modelId === "oss-wan22-14b" && p.open.loras?.length);
+    const [a, b] = withLora;
+    const plan = planGeneration(
+      { feature: "motion", presetId: a.id, modelId: "oss-wan22-14b", prompt: "x", inputs: { images: ["a.png"] }, presetStrength: 0.5, mix: { presetId: b.id, strength: 0.5 } },
+      getModel,
+      getPreset,
+    );
+    expect(plan.loras).toHaveLength(a.open!.loras!.length + b.open!.loras!.length);
+    expect(plan.loras[0].strength).toBeCloseTo((a.open!.loras![0].strength ?? 1) * 0.5);
+    expect(plan.loras.at(-1)!.strength).toBeCloseTo((b.open!.loras!.at(-1)!.strength ?? 1) * 0.5);
   });
 });
