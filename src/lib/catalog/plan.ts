@@ -93,6 +93,8 @@ export interface Plan {
 const PROMPTLESS = new Set<Operation>([
   "concat", "frame", "color-match", "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
+  // round 3 (open engine): tools that work from their inputs; captions need the cue text as the prompt
+  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d",
 ]);
 
 export function planGeneration(
@@ -222,6 +224,12 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; video
   concat: { videos: 2, msg: "Add at least two clips to join" },
   frame: { video: true, msg: "Add a video" },
   "color-match": { images: 1, msg: "Add the image or video and a reference image" },
+  // round 3 (open engine)
+  trim: { video: true, msg: "Add the video to trim" },
+  mux: { video: true, audio: true, msg: "Add a video and the soundtrack to put on it" },
+  captions: { video: true, msg: "Add the video to caption" },
+  layers: { images: 1, msg: "Add the image to split into layers" },
+  "image-to-3d": { images: 1, msg: "Add a product or object photo" },
 };
 
 /** Human message for the first missing input of an operation, or null. */
