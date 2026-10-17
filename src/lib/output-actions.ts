@@ -107,6 +107,8 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       out.push({ ...file, label: `Download .${ext}` }, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       break;
   }
+  // Uploads (the Library's Uploads tab) are files, not generations: hand-offs and download only.
+  if (g.feature === "upload") return out.filter((a) => a.id !== "favorite");
   if (g.outputs.length > 1) out.push({ id: "download-all", label: `Download all ${g.outputs.length} (.zip)`, placement: "menu", href: `/api/generations/zip?ids=${g.id}`, download: "" });
   if (o.draftId) out.push({ id: "finalize", label: "Render this draft in 1080p", placement: "menu" });
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });

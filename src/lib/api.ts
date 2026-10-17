@@ -318,6 +318,19 @@ export function useGenerationActions() {
   }, [qc]);
 }
 
+/** Files you uploaded (the Library's Uploads tab), newest first. */
+export function useUploads(kind?: MediaKind) {
+  return useQuery({
+    queryKey: ["assets", "upload", kind, 200],
+    queryFn: async () => {
+      const qs = new URLSearchParams({ source: "upload", limit: "200" });
+      if (kind) qs.set("kind", kind);
+      return (await json<{ items: Asset[] }>(await fetch(`/api/assets?${qs}`))).items;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Library folders
 

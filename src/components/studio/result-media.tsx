@@ -3,7 +3,7 @@
 import { AudioLines, Box, FileText, Layers } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { cuesOf, cueTime, layerInfo, modelPreview, textOf } from "@/lib/output-actions";
+import { cuesOf, cueTime, isLayered, layerInfo, modelPreview, textOf } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 /** Any result as a tile picture: image, video (plays on hover), audio, text card, 3D preview. */
@@ -70,6 +70,20 @@ export function MediaThumb({
   return <img src={output.url} alt="" loading="lazy" decoding="async" className={cn("size-full", object, className)} />;
 }
 
+/** A 56 px thumbnail for list rows: media where it reads at that size, an icon where it doesn't. */
+export function SmallThumb({ g, output }: { g: Generation; output: OutputFile }) {
+  if (output.kind === "audio" || output.kind === "text") {
+    const Icon = output.kind === "audio" ? AudioLines : FileText;
+    return (
+      <div className="grid size-full place-items-center bg-brand-faint text-brand-text">
+        <Icon className="size-5" />
+      </div>
+    );
+  }
+  if (isLayered(g)) return <LayersStack g={g} bare />;
+  return <MediaThumb output={output} g={g} />;
+}
+
 /** A transcript, translation or script as a readable card: the first lines and a cue count. */
 export function TextPreview({ output, className }: { output: OutputFile; className?: string }) {
   const cues = cuesOf(output);
@@ -105,16 +119,20 @@ export function TextReader({ output }: { output: OutputFile }) {
 }
 
 /** Layers of one picture as a stack: the composite on a checkerboard and the layer names. */
-export function LayersStack({ g, className }: { g: Generation; className?: string }) {
+export function LayersStack({ g, className, bare }: { g: Generation; className?: string; bare?: boolean }) {
   const layers = g.outputs.map((o, i) => ({ o, ...layerInfo(o, i) })).sort((a, b) => a.z - b.z);
+  const composite = (
+    <div className="checkerboard absolute inset-0">
+      {layers.map((l) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={l.o.url} src={l.o.url} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" />
+      ))}
+    </div>
+  );
+  if (bare) return <div className={cn("relative size-full overflow-hidden", className)}>{composite}</div>;
   return (
     <div className={cn("relative size-full overflow-hidden", className)}>
-      <div className="checkerboard absolute inset-0">
-        {layers.map((l) => (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img key={l.o.url} src={l.o.url} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" />
-        ))}
-      </div>
+      {composite}
       <div className="absolute top-2 left-2 flex max-w-[calc(100%-1rem)] flex-wrap gap-1">
         <span className="inline-flex h-6 items-center gap-1 rounded-full bg-black/55 px-2 text-[11px] font-medium text-white backdrop-blur">
           <Layers className="size-3" /> {layers.length} layers

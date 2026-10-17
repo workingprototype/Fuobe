@@ -251,6 +251,7 @@ export function TileActions({
   opts,
   menuOnly,
   className,
+  triggerClassName,
 }: {
   g: Generation;
   index: number;
@@ -258,6 +259,8 @@ export function TileActions({
   opts?: RunnerOptions;
   menuOnly?: boolean;
   className?: string;
+  /** menuOnly: the ⋯ button's look (default: white on a dark chip, for media). */
+  triggerClassName?: string;
 }) {
   const run = useActionRunner(opts);
   const list = useMemo(() => outputActions(g, index, ctx), [g, index, ctx]);
@@ -273,7 +276,7 @@ export function TileActions({
   if (menuOnly) {
     return (
       <div className={className} onClick={stop} onKeyDown={stop}>
-        <ActionMenu g={g} index={index} list={list} run={run} onSave={() => setSaving(true)} defaultOpen triggerClassName={cn(TILE_ICON, "bg-black/45 backdrop-blur")} />
+        <ActionMenu g={g} index={index} list={list} run={run} onSave={() => setSaving(true)} defaultOpen triggerClassName={triggerClassName ?? cn(TILE_ICON, "bg-black/45 backdrop-blur")} />
         {popover}
       </div>
     );

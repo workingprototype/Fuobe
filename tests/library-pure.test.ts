@@ -75,6 +75,8 @@ describe("outputActions", () => {
     expect(outputActions(layers, 1).find((a) => a.id === "download-all")?.href).toBe(`/api/generations/zip?ids=${layers.id}`);
     expect(outputActions(gen({ favorite: true }), 0)[2].label).toBe("Unfavorite");
     expect(ids(gen({ deletedAt: 5 }))).toEqual(["primary:restore", "bar:download", "menu:delete-forever"]);
+    expect(ids(gen({ feature: "upload" }))).not.toContain("menu:delete");
+    expect(ids(gen({ feature: "upload" }))).not.toContain("bar:favorite");
     expect(outputActions(gen(), 3)).toEqual([]);
   });
 });

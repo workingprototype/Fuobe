@@ -42,6 +42,18 @@ function ignoreKey(e: KeyboardEvent): boolean {
 function Details({ g, index }: { g: Generation; index: number }) {
   const p = g.request.params ?? {};
   const title = userTitle(g);
+  if (g.feature === "upload") {
+    return (
+      <div className="space-y-4">
+        <p className="font-heading text-[20px] leading-snug break-words">{title}</p>
+        <div className="divide-y rounded-lg border px-3">
+          <Row label="Source" value="Your upload" />
+          <Row label="Type" value={g.outputs[index]?.contentType} />
+          <Row label="Added" value={timeAgo(g.createdAt)} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
       <div>
@@ -178,7 +190,8 @@ export function Viewer({
 
   const primary = list.find((a) => a.placement === "primary");
   const bar = list.filter((a) => a.placement === "bar");
-  const menu = list.filter((a) => a.placement === "menu");
+  // "Copy prompt" sits under the title in the details, so it isn't repeated as a button.
+  const menu = list.filter((a) => a.placement === "menu" && a.id !== "copy-prompt");
 
   const actionButton = (a: OutputAction, opts: { variant?: "default" | "secondary" | "ghost"; className?: string; onDone?: () => void } = {}) => {
     const Icon = ACTION_ICONS[a.id];
