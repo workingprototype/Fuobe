@@ -5,17 +5,13 @@ import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { safeNext } from "@/lib/safe-redirect";
 
 export function LoginForm() {
   const params = useSearchParams();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Only same-site paths: never bounce to another origin after signing in.
-  const next = (() => {
-    const n = params.get("next") ?? "/";
-    return n.startsWith("/") && !n.startsWith("//") ? n : "/";
-  })();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +19,8 @@ export function LoginForm() {
     setError(null);
     const res = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     if (res.ok) {
-      window.location.assign(next);
+      // Only a page on this site: never bounce to another origin after signing in.
+      window.location.assign(safeNext(params.get("next"), window.location.origin));
       return;
     }
     setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't sign in");

@@ -1,10 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { authEnabled, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
+import { authEnabled, crossSite, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
 
 /** Paths that work signed out: the login page and its API. */
 const OPEN = new Set(["/login", "/api/auth/login"]);
 
 export function proxy(request: NextRequest) {
+  // Before the sign-in check: a password-less install needs this most.
+  if (crossSite(request, request.nextUrl.host)) {
+    return NextResponse.json({ error: "Blocked a request from another website. Use Fuobe from its own address (or add it to FUOBE_ALLOWED_ORIGINS)." }, { status: 403 });
+  }
   if (!authEnabled()) return NextResponse.next();
   const { pathname, search } = request.nextUrl;
   if (OPEN.has(pathname)) return NextResponse.next();
@@ -18,6 +22,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except build assets and the public folder's files.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|samples/|.*\\.svg$).*)"],
+  // Everything except build assets and the public folder's own files: the favicon, the demo
+  // samples and the SVGs at the root. Generated SVGs under /api/files stay behind sign-in.
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico$|samples/|[^/]+\\.svg$).*)"],
 };
