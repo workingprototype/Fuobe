@@ -31,6 +31,11 @@ export function ResponsivePanel({
   align?: "start" | "center" | "end";
 }) {
   const mobile = useIsMobile();
+  // On phones the sheet itself takes focus, so the keyboard doesn't jump up over the list.
+  const focusSheet = (e: Event) => {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement | null)?.focus();
+  };
   const withTip = (t: React.ReactNode) =>
     tooltip ? (
       <Tooltip>
@@ -45,7 +50,7 @@ export function ResponsivePanel({
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
         {withTip(<SheetTrigger asChild>{inner}</SheetTrigger>)}
-        <SheetContent side="bottom" className={cn("max-h-[88svh] gap-0 rounded-t-2xl pb-[env(safe-area-inset-bottom)]", sheetClassName)}>
+        <SheetContent side="bottom" onOpenAutoFocus={focusSheet} className={cn("max-h-[88svh] gap-0 rounded-t-2xl pb-[env(safe-area-inset-bottom)] outline-none", sheetClassName)}>
           <SheetHeader className="pr-12 pb-2">
             <SheetTitle className="font-sans text-[15px] font-semibold">{title}</SheetTitle>
             <SheetDescription className={cn(!description && "sr-only")}>{description ?? title}</SheetDescription>

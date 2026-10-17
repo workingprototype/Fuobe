@@ -208,7 +208,9 @@ export function Composer({ docked }: { docked: boolean }) {
     if (blocker || create.isPending) {
       if (blocker) {
         toast(blocker.message);
-        if (blocker.slot) pulseSlot(root.current, blocker.slot);
+        // Point at the tile to fill: the missing slot, or the clip list of a tool that only takes clips.
+        const target = blocker.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+        if (target) pulseSlot(root.current, target);
       }
       return;
     }
@@ -262,7 +264,9 @@ export function Composer({ docked }: { docked: boolean }) {
   // Attachments: only when something is attached or a required slot is still empty (U8).
   const kinds = [...attach.kinds];
   const hasAttachment = slots.some((s) => draft.slots[s.key]) || draft.refs.length > 0;
-  const showAttachments = (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!slots.find((s) => s.required && !draft.slots[s.key]));
+  // Tools whose only input is a list of clips (Join clips) keep their "Add clip" tile in view.
+  const showAttachments =
+    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
   const collapsed = docked && !focused;
 
   return (
@@ -325,6 +329,7 @@ export function Composer({ docked }: { docked: boolean }) {
             ))}
           {config.multiRef && draft.refs.length < refMax && (
             <MediaSlot
+              slotKey="refs"
               label={config.multiRef.label}
               kind={config.multiRef.kind ?? "image"}
               value={null}

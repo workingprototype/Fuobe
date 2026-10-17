@@ -1,6 +1,7 @@
 "use client";
 
 import { AudioLines, FileVideo, ImagePlus, Library, Loader2, Upload, X } from "lucide-react";
+import { nanoid } from "nanoid";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -70,6 +71,29 @@ export async function fileToSlot(file: File, onChange: (v: SlotValue | null) => 
   } finally {
     revoke();
   }
+}
+
+/**
+ * Upload into a list kept in React state (reference photos, a storyboard's looks): appended once
+ * with its preview, then replaced by id when the upload finishes, or dropped if it fails. A file
+ * removed from the list while it uploads stays removed.
+ */
+export function fileToList(file: File, setList: (update: (xs: SlotValue[]) => SlotValue[]) => void, kind?: MediaKind): void {
+  const id = nanoid(8);
+  let placed = false;
+  void fileToSlot(
+    file,
+    (v) => {
+      const first = !placed;
+      placed = true;
+      setList((xs) => {
+        if (first) return v ? [...xs, { ...v, id }] : xs;
+        if (!xs.some((x) => x.id === id)) return xs;
+        return v ? xs.map((x) => (x.id === id ? { ...v, id } : x)) : xs.filter((x) => x.id !== id);
+      });
+    },
+    kind,
+  );
 }
 
 function KindIcon({ kind, className }: { kind: MediaKind; className?: string }) {

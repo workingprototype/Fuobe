@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
@@ -134,6 +135,7 @@ export function ModelPicker({
   const [q, setQ] = useState("");
   const status = useStatus().data;
   const mode = useEngineMode();
+  const mobile = useIsMobile();
   const [recent] = useStoredList(RECENT_MODELS);
   const [starred, setStarred] = useStoredList(STARRED_MODELS);
   const engines = useMemo<Engine[]>(() => (mode === "both" ? ["cloud", "open"] : [mode]), [mode]);
@@ -172,7 +174,7 @@ export function ModelPicker({
       <Command shouldFilter={false} loop label="Models" className="rounded-none! bg-transparent p-0">
         <div className="flex items-center gap-2 p-1 sm:p-2 sm:pb-1">
           <div className="min-w-0 flex-1 [&_[data-slot=command-input-wrapper]]:p-0">
-            <CommandInput value={q} onValueChange={setQ} placeholder={mode === "both" ? "Search all models" : "Search models"} aria-label="Search models" autoFocus />
+            <CommandInput value={q} onValueChange={setQ} placeholder={mode === "both" ? "Search all models" : "Search models"} aria-label="Search models" autoFocus={!mobile} />
           </div>
           <EngineSwitch value={engine} onChange={onEngineChange} size="sm" />
         </div>
