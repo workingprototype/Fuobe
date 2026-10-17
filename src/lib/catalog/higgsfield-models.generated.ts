@@ -1931,6 +1931,27 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "provider": "higgsfield",
       "endpoint": "recraft/v4.1/text-to-image",
       "map": {
+        "palette": {
+          "key": "colors",
+          "format": "rgb-array",
+          "background": "background_color"
+        },
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution"
+      }
+    }
+  ],
+  "recraft-4-1-pro": [
+    {
+      "op": "t2i",
+      "provider": "higgsfield",
+      "endpoint": "recraft/v4.1/pro/text-to-image",
+      "map": {
+        "palette": {
+          "key": "colors",
+          "format": "rgb-array",
+          "background": "background_color"
+        },
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution"
       }

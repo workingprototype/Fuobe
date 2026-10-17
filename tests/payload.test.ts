@@ -30,6 +30,19 @@ describe("buildPayload", () => {
   it("renames the prompt field and ignores negative seeds", () => {
     expect(buildPayload({ prompt: "text", seed: "seed" }, { prompt: "hi", seed: -1 })).toEqual({ text: "hi" });
   });
+
+  it("never writes params.extra keys onto Object.prototype (S2)", () => {
+    const extra = JSON.parse(
+      '{"__proto__.polluted": "yes", "constructor.prototype.polluted2": "yes", "a.__proto__.polluted3": "yes", "__proto__": {"polluted4": "yes"}, "prototype": 1, "voice_setting.speed": 1.2}',
+    ) as Record<string, unknown>;
+    const p = buildPayload({ voice: "voice_setting.voice_id", fixed: { "voice_setting.pitch": 0 } }, { voice: "Wise_Woman", extra });
+    const probe = {} as Record<string, unknown>;
+    expect([probe.polluted, probe.polluted2, probe.polluted3, probe.polluted4]).toEqual([undefined, undefined, undefined, undefined]);
+    expect(Object.getPrototypeOf(p)).toBe(Object.prototype);
+    // Dotted keys still nest, and a scalar in the way is replaced by an object instead of throwing.
+    expect(p).toEqual({ voice_setting: { voice_id: "Wise_Woman", pitch: 0, speed: 1.2 } });
+    expect(buildPayload({}, { extra: { a: "x", "a.b": 1 } })).toEqual({ a: { b: 1 } });
+  });
 });
 
 describe("extractMedia", () => {
