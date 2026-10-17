@@ -1,11 +1,13 @@
 # Fuobe
 
-**An open-source AI image & video studio — a 1:1 alternative to Higgsfield.**
-Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, MiniMax, Wan…) with your own fal.ai / Replicate key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
+**An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
+Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
-- **Studios:** Image · Video (text, image, start/end frame, references) · Edit · Camera motions · Effects · Apps · Lipsync & avatars · Motion control · Edit video · Characters · Upscale · Audio (voice, SFX, music, sound-for-video) · Library
-- **Catalog:** 67 cloud models + 34 open-source models, 118 apps, 108 camera motions, 255 effects
-- **Open-source engine:** 53 API-format ComfyUI workflows exported from the official templates and validated against real ComfyUI node definitions, plus 170 researched LoRAs (camera moves, VFX) wired into the presets
+- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step
+- **Studios:** Image · Video (text, image, start/end frame, references, multi-shot, draft mode) · Edit · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard · Apps · Lipsync & avatars · Motion control · Edit / Extend / Reframe video · Video tools (matte, relight, depth) · Audio (speech with voice picker and cloning, dialogue, voice change, translate, SFX, music, sound for video) · Library
+- **Elements:** save characters, locations, props, styles and voices once, then `@mention` them in any prompt; train a character (Soul ID, a fal LoRA, or AI-Toolkit on your GPU) for a consistent face
+- **Catalog:** 98 cloud models + 46 open-source models, 118 apps, 108 camera motions, 255 effects
+- **Open-source engine:** 73 API-format ComfyUI workflows exported from the official templates or community packs and validated against real ComfyUI node definitions, plus 170 researched LoRAs (camera moves, VFX) wired into the presets
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
 > Project status, what works, what's verified and what's left: **[docs/STATUS.md](docs/STATUS.md)** (also in-app at `/status`).
@@ -30,11 +32,14 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 | You have | What to set | You get |
 |---|---|---|
 | A [fal.ai](https://fal.ai/dashboard/keys) key | `fal.ai API key` (or `FAL_KEY`) | Every cloud model and cloud app |
-| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal` or `replicate`) picks which one goes first |
+| A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal`, `replicate` or `higgsfield`) picks which one goes first |
+| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`) | Every open-source model, app, motion and effect |
-| An Anthropic key or Ollama | `Prompt enhancement` | The **Enhance** toggle rewrites prompts with Claude or a local LLM (offline rewriter otherwise) |
+| An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent, prompt **Enhance** and storyboard splitting with Claude |
+| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`) | Local prompt enhancement and storyboard splitting (Assist uses its offline planner without Claude) |
+| AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character LoRAs from an element's photos; the result is copied into ComfyUI and used whenever you @mention the character |
 
-Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`.
+Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user and its API is unauthenticated: run it on your own machine or behind an auth proxy, not on the open internet.
 
 ### Setting up the open-source engine
 
@@ -54,16 +59,17 @@ pnpm test:e2e:comfyui http://localhost:3000   # runs two weight-free workflows t
 ```bash
 pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest
 pnpm build                                  # production build
-pnpm gen:catalog                            # regenerate cloud models, LoRA map and icon map from docs/research/*.json
+pnpm gen:catalog                            # regenerate cloud models, Higgsfield models, LoRA map and icon map from docs/research/*.json
+pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading
 ```
 
 - `docs/ARCHITECTURE.md` — how requests flow from the composer to providers and back
-- `docs/research/` — the research this is built on (Higgsfield inventory, paid model APIs, ComfyUI equivalents, workflow library, Liner UI language)
+- `docs/research/` — the research this is built on (Higgsfield inventory and API, paid model APIs, ComfyUI equivalents, workflow library, Liner UI language)
 - `scripts/comfy/` — the pipeline that exports and validates the ComfyUI workflow library
 
 ## Tech
 
-Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · fal.ai queue API · Replicate predictions API · ComfyUI HTTP + WebSocket API · Vitest · Playwright.
+Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · WebGL · Vitest · Playwright.
 
 ## License notes
 
