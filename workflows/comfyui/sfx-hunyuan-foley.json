@@ -1,0 +1,63 @@
+{
+  "1": {
+    "class_type": "HunyuanModelLoader",
+    "inputs": {
+      "model_name": "hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors",
+      "precision": "bf16",
+      "quantization": "auto"
+    },
+    "_meta": {
+      "title": "HunyuanModelLoader"
+    }
+  },
+  "2": {
+    "class_type": "HunyuanDependenciesLoader",
+    "inputs": {
+      "vae_name": "vae_128d_48k_fp16.safetensors",
+      "synchformer_name": "synchformer_state_dict_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "HunyuanDependenciesLoader"
+    }
+  },
+  "3": {
+    "class_type": "HunyuanFoleySampler",
+    "inputs": {
+      "hunyuan_model": [
+        "1",
+        0
+      ],
+      "hunyuan_deps": [
+        "2",
+        0
+      ],
+      "frame_rate": 24,
+      "duration": 8,
+      "prompt": "footsteps on gravel, a car door closes",
+      "negative_prompt": "noisy, harsh",
+      "cfg_scale": 4.5,
+      "steps": 50,
+      "sampler": "euler",
+      "batch_size": 1,
+      "seed": 0,
+      "force_offload": true
+    },
+    "_meta": {
+      "title": "HunyuanFoleySampler"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/sfx-hunyuan-foley",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "SaveAudioMP3"
+    }
+  }
+}

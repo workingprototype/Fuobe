@@ -8,7 +8,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMFYUI_DIR="${COMFYUI_DIR:-/home/user/ComfyUI}"
-# Versions the committed library was generated/validated with (2026-10-16).
+# Versions the committed library was generated/validated with (2026-10-16; round-3 packs 2026-10-17).
 COMFYUI_REF="${COMFYUI_REF:-fc04da91b2ab12f99e4716371a7e4f98ac982597}"   # v0.41.0-7
 PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
 
@@ -25,6 +25,11 @@ declare -A NODES=(
   [ComfyUI_Fill-ChatterBox]="https://github.com/filliptm/ComfyUI_Fill-ChatterBox f7d7a16187430abcaf91a3039b9c83aa9960816a"
   [ComfyUI-IndexTTS2]="https://github.com/snicolast/ComfyUI-IndexTTS2 5b33e02bc0112b8aaf1fc823d5e5a609ca07fc27"
   [ComfyUI-Video-Depth-Anything]="https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything a0db08e63d1ea571601c45cde4aaee0acdd0544d"
+  # round-3 packs (2026-10-17, docs/research/comfyui-oss-3.md): voice separation, ASR/subtitles, foley, whisper captions
+  [ComfyUI-MelBandRoFormer]="https://github.com/kijai/ComfyUI-MelBandRoFormer 92c86854e6654f4aacc97484471af95c98ea16d4"
+  [ComfyUI-QwenASR]="https://github.com/1038lab/ComfyUI-QwenASR 3f9a652a617e578e4e3bd090e3dbc75274bf4775"
+  [ComfyUI-HunyuanVideo-Foley]="https://github.com/phazei/ComfyUI-HunyuanVideo-Foley afd2960b8ad9036a9f55a15daf514112ff68e010"
+  [ComfyUI-Whisper]="https://github.com/yuvraj108c/ComfyUI-Whisper 006a709848259ed3d69e2f9fcfd7a75f6c860ddd"
 )
 
 if [ ! -d "$COMFYUI_DIR/.git" ]; then
@@ -69,6 +74,20 @@ if [ "${INDEXTTS_RUNTIME:-0}" = "1" ]; then
 fi
 # Chatterbox's Perth watermarker (recommended in production for cloned voices; optional for validation):
 #   uv pip install --python "$PY" resemble-perth
+
+# ComfyUI-HunyuanVideo-Foley needs loguru; ComfyUI-Whisper needs openai-whisper (built from sdist).
+# ComfyUI-MelBandRoFormer needs rotary_embedding_torch + einops (installed above).
+# ComfyUI-QwenASR: do NOT install its requirements.txt (nagisa/DyNet38 have no cp313 wheels and are unused on the
+# Hugging Face path); transformers>=5.13 from ComfyUI's requirements is all it needs.
+uv pip install --python "$PY" loguru "openai-whisper==20250625"
+
+# Optional isolated worker (do not add to the shared install): LatentSync 1.6 lipsync and ThinkSound SFX change
+# process-wide state or pin old packages, so they run on a second ComfyUI with its own base directory and HOME.
+# The workflows lipsync-latentsync16 and sfx-thinksound carry "worker": "isolated" in manifest.json.
+# See scripts/comfy/README.md ("Isolated worker"). Packs, at the commits the library was validated with:
+#   git clone https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper && git -C ComfyUI-LatentSyncWrapper checkout 360d5283d7276aee68b4237b1387e594e4ce640e
+#   git clone https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper && git -C ComfyUI-ThinkSound_Wrapper checkout 9a2fb40ae30cabbdb55fb6f6fe02b01c23ab1a3b
+#   uv pip install --python "$PY" "mediapipe>=0.10.8" face-alignment DeepCache ffmpeg-python pytorch_lightning   # LatentSync runtime only
 
 # ComfyUI-ReActor downloads ~1 GB of face-restore models into models/facerestore_models whenever that
 # folder is empty -- even on a plain GET /object_info. On this validation-only (no weights) install keep a

@@ -1,0 +1,271 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "input.mp4",
+      "force_rate": 8,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 80,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None",
+      "meta_batch": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VHS_LoadVideo"
+    }
+  },
+  "2": {
+    "class_type": "VHS_BatchManager",
+    "inputs": {
+      "frames_per_batch": 8
+    },
+    "_meta": {
+      "title": "VHS_BatchManager"
+    }
+  },
+  "3": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": 768,
+      "height": 1344,
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "ImageScale"
+    }
+  },
+  "4": {
+    "class_type": "Canny",
+    "inputs": {
+      "image": [
+        "3",
+        0
+      ],
+      "low_threshold": 0.1,
+      "high_threshold": 0.32
+    },
+    "_meta": {
+      "title": "Canny"
+    }
+  },
+  "10": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "UNETLoader"
+    }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "12": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "_meta": {
+      "title": "VAELoader"
+    }
+  },
+  "13": {
+    "class_type": "ModelPatchLoader",
+    "inputs": {
+      "name": "Z-Image-Turbo-Fun-Controlnet-Union.safetensors"
+    },
+    "_meta": {
+      "title": "ModelPatchLoader"
+    }
+  },
+  "14": {
+    "class_type": "QwenImageDiffsynthControlnet",
+    "inputs": {
+      "model": [
+        "10",
+        0
+      ],
+      "model_patch": [
+        "13",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ],
+      "image": [
+        "4",
+        0
+      ],
+      "strength": 0.8,
+      "start_percent": 0.0,
+      "end_percent": 1.0
+    },
+    "_meta": {
+      "title": "QwenImageDiffsynthControlnet"
+    }
+  },
+  "15": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "14",
+        0
+      ],
+      "shift": 3.0,
+      "sampling": "flow"
+    },
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "11",
+        0
+      ],
+      "text": "hand-drawn textured pencil sketch, cross-hatching, paper grain, mixed media collage"
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "17": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "16",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "18": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": [
+        "3",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAEEncode"
+    }
+  },
+  "19": {
+    "class_type": "LatentBatchSeedBehavior",
+    "inputs": {
+      "samples": [
+        "18",
+        0
+      ],
+      "seed_behavior": "fixed"
+    },
+    "_meta": {
+      "title": "LatentBatchSeedBehavior"
+    }
+  },
+  "20": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "15",
+        0
+      ],
+      "positive": [
+        "16",
+        0
+      ],
+      "negative": [
+        "17",
+        0
+      ],
+      "latent_image": [
+        "19",
+        0
+      ],
+      "seed": 0,
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 0.7
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "21": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "20",
+        0
+      ],
+      "vae": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "22": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "21",
+        0
+      ],
+      "frame_rate": 8,
+      "loop_count": 0,
+      "filename_prefix": "fuobe/mixed-media-zimage",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "meta_batch": [
+        "2",
+        0
+      ],
+      "audio": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VHS_VideoCombine"
+    }
+  }
+}

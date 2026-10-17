@@ -1,0 +1,91 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "input.mp4",
+      "force_rate": 25,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "_meta": {
+      "title": "VHS_LoadVideo"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "dub_voice.mp3"
+    },
+    "_meta": {
+      "title": "LoadAudio"
+    }
+  },
+  "3": {
+    "class_type": "VideoLengthAdjuster",
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ],
+      "audio": [
+        "2",
+        0
+      ],
+      "mode": "loop_to_audio",
+      "fps": 25.0,
+      "silent_padding_sec": 0.5
+    },
+    "_meta": {
+      "title": "VideoLengthAdjuster"
+    }
+  },
+  "4": {
+    "class_type": "LatentSyncNode",
+    "inputs": {
+      "images": [
+        "3",
+        0
+      ],
+      "audio": [
+        "3",
+        1
+      ],
+      "seed": 1247,
+      "lips_expression": 1.5,
+      "inference_steps": 20
+    },
+    "_meta": {
+      "title": "LatentSyncNode"
+    }
+  },
+  "5": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ],
+      "audio": [
+        "4",
+        1
+      ],
+      "frame_rate": 25,
+      "loop_count": 0,
+      "filename_prefix": "fuobe/lipsync-latentsync16",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true
+    },
+    "_meta": {
+      "title": "VHS_VideoCombine"
+    }
+  }
+}

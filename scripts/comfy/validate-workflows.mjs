@@ -68,7 +68,13 @@ function sampleValue(key, entry, uploads) {
   switch (key) {
     case 'prompt': return 'Fuobe validation prompt: a red fox running through snow, cinematic lighting';
     case 'negativePrompt': return 'blurry, low quality';
-    case 'image': case 'image2': case 'image3': case 'image4': case 'endImage': return uploads.png;
+    case 'image': case 'image2': case 'image3': case 'image4': case 'endImage': case 'paletteImage': return uploads.png;
+    case 'paletteText': return 'Color palette: #E4572E, #29335C, #F3A712, #A8C686, #669BBC.';
+    case 'description': return 'A heavy wooden door creaks open slowly, then slams shut with a short stone-hall reverb.';
+    case 'gridPrompt': return 'A 2x2 grid contact sheet of four film stills from the same scene:';
+    case 'sheetPrompt': return 'Character turnaround sheet, front, three-quarter, profile and back views:';
+    case 'hints': return 'Fuobe';
+    case 'instruction': return String(entry.defaults?.instruction ?? 'Translate into {language}.').replaceAll('{language}', 'Spanish');
     case 'mask': return uploads.mask;
     case 'video': case 'video2': case 'video3': case 'video4': return uploads.mp4;
     case 'audio': case 'audio2': return uploads.wav;
@@ -236,8 +242,10 @@ async function main() {
     const g = JSON.parse(fs.readFileSync(path.join(OUT_DIR, entry.file), 'utf8'));
     for (const n of Object.values(g)) classes.add(n.class_type);
   }
+  // Keep the definitions of classes this server lacks (isolated-worker packs validated on another ComfyUI).
+  const prevSubset = readJson(path.join(OUT_DIR, 'object_info.subset.json'), {});
   const subset = {};
-  for (const c of [...classes].sort()) subset[c] = objectInfo[c] || null;
+  for (const c of [...classes].sort()) subset[c] = objectInfo[c] || prevSubset[c] || null;
   writeJson(path.join(OUT_DIR, 'object_info.subset.json'), subset);
 
   writeJson(manifestPath, manifest);

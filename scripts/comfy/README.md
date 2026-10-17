@@ -12,7 +12,7 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + the 11 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`) |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + the 15 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR, HunyuanVideo-Foley and Whisper for comfyui-oss-3) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
 | `library.spec.mjs` | the curated list: id, title, capability, source, transforms, bindings, outputs, limits, VRAM, notes |
@@ -57,6 +57,61 @@ so the validator is safe to point at a real GPU server via `COMFYUI_URL` + `COMF
 
 Environment variables: `COMFYUI_URL` (default `http://127.0.0.1:8188`), `COMFYUI_DIR` (default `/home/user/ComfyUI`),
 `COMFYUI_MODELS_DIR`, `CHROMIUM_PATH` (default: newest `/opt/pw-browsers/chromium-*/chrome-linux/chrome`).
+
+**Always pass ids to `npm run build` in a checkout without `build/raw/`** (a fresh clone has none): entries
+whose raw template export is missing are skipped, and the manifest is then rewritten without them. Hand-built
+entries need no export. After a build, diff `manifest.json`: untouched ids must be byte-identical.
+
+## Round-3 workflows (comfyui-oss-3, 2026-10-17)
+
+31 entries from `docs/research/comfyui-oss-3.json` (29 researched graphs + `video-mux-audio-replace` +
+`captions-burnin`), all hand-built, all `validated: true`:
+
+```bash
+npm run build -- <ids>                 # the 29 main-server ids of the "comfyui-oss-3" section of library.spec.mjs
+node validate-workflows.mjs <ids>
+```
+
+- **Changes from the research graphs**: `captions-qwen3-asr` and `dub-prepare-separate-transcribe` read the speech
+  with `LoadAudio` (it decodes the soundtrack of a video upload too, without decoding frames), so they take audio or
+  video. Binding names follow Fuobe's canonical inputs (`startTime`, `numLayers`, `sourceLanguage`, `paletteImage`…,
+  documented in the header of `library.spec.mjs`). The TRELLIS.2 graph's pass-through `PreviewImage` nodes are linked
+  around by the build (they would otherwise write 4096² textures to `temp/` on every run).
+- **`captions-burnin`** is Fuobe's own caption burn-in, core nodes only (`Trim Video` per cue, `Draw Text Overlay`,
+  `Batch Images`, `Create Video`). The library file holds a two-cue example; the provider rewrites it per request
+  (`expand: "captions"`, see `expandCaptionWorkflow()` in `src/lib/comfy.ts`).
+- **New entry fields**: `worker: "isolated"` (below), `expand`, and on outputs `stem` (`voice` | `background`) and
+  `role` (`cues`, `transcript`, `language`, `sheet`, `tiles`, `layers`, `first-frame`, `turntable`).
+
+### Isolated worker (LatentSync 1.6, ThinkSound)
+
+`lipsync-latentsync16` and `sfx-thinksound` are optional and never defaults. Their packs change process-wide state
+(LatentSync overrides `TMPDIR` and `folder_paths` temp handling at import, `rmtree()`s a `temp` folder next to the
+ComfyUI directory and pip-installs packages when its node is created) or pin old packages (ThinkSound's
+`requirements.txt` downgrades einops, PyWavelets, k-diffusion). Run them on a second ComfyUI with its own base
+directory and `HOME`, same commit and venv:
+
+```bash
+cp -r /home/user/ComfyUI /srv/comfyui-isolated          # code only; or a fresh clone at the same commit
+cd /srv/comfyui-isolated/custom_nodes
+git clone https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper && git -C ComfyUI-LatentSyncWrapper checkout 360d5283d7276aee68b4237b1387e594e4ce640e
+git clone https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper && git -C ComfyUI-ThinkSound_Wrapper checkout 9a2fb40ae30cabbdb55fb6f6fe02b01c23ab1a3b
+# plus ComfyUI-VideoHelperSuite + ComfyUI-KJNodes (same commits as install-comfyui.sh)
+uv pip install --python /home/user/ComfyUI/.venv/bin/python "mediapipe>=0.10.8" face-alignment DeepCache ffmpeg-python pytorch_lightning  # LatentSync runtime
+cd /srv/comfyui-isolated && HOME=/srv/comfyui-isolated/home /home/user/ComfyUI/.venv/bin/python main.py --listen 127.0.0.1 --port 8189
+```
+
+Point a second Fuobe install (or Settings → ComfyUI URL while you use those models) at port 8189. Build and
+validate them against that server (`COMFYUI_DIR` = its directory, for the placeholder models):
+
+```bash
+COMFYUI_URL=http://127.0.0.1:8189 npm run build -- lipsync-latentsync16 sfx-thinksound
+COMFYUI_URL=http://127.0.0.1:8189 COMFYUI_DIR=/srv/comfyui-isolated node validate-workflows.mjs lipsync-latentsync16 sfx-thinksound
+node validate-workflows.mjs video-trim     # then once on the main server, so object_info.subset.json comes from it
+```
+
+`validate-workflows.mjs` keeps the subset definitions of classes the current server lacks, so validating on either
+server never drops the other's classes.
 
 ## Adding a workflow
 
