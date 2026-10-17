@@ -10,7 +10,8 @@
 
 export type Engine = "cloud" | "open";
 
-export type MediaKind = "image" | "video" | "audio";
+/** "text" = transcripts, translations, scripts (OutputFile.text); "model3d" = a .glb mesh. */
+export type MediaKind = "image" | "video" | "audio" | "text" | "model3d";
 
 export type Operation =
   | "t2i" // text → image
@@ -46,7 +47,17 @@ export type Operation =
   | "relight-video" // video → the same shot under new lighting
   | "concat" // several clips → one video, in order
   | "frame" // video → one of its frames (the last, for extending)
-  | "color-match"; // image or video + reference image → recoloured to the reference's palette
+  | "color-match" // image or video + reference image → recoloured to the reference's palette
+  | "layers" // image → its layers as RGBA images (OutputFile.meta: name, z, bbox)
+  | "text-layers" // image → the background with the text removed + the text blocks (OutputFile.meta.textBlocks)
+  | "trim" // video → the part between params.startTime and params.endTime
+  | "transcribe" // audio or video → timed text (OutputFile.text, OutputFile.meta.cues)
+  | "captions" // video → the same video with burned-in captions
+  | "mux" // video + audio → the video with that soundtrack
+  | "image-to-3d" // image → a 3D model (.glb), optionally a turntable video
+  | "separate-audio" // audio or video → voice and background stems
+  | "translate" // text → the same text in params.targetLanguage (LLM)
+  | "write"; // brief → text (LLM: scripts, ad copy, shot lists)
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -83,6 +94,16 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   concat: "Join clips",
   frame: "Extract frame",
   "color-match": "Match colors",
+  layers: "Layers",
+  "text-layers": "Text layers",
+  trim: "Trim video",
+  transcribe: "Transcribe",
+  captions: "Captions",
+  mux: "Add soundtrack",
+  "image-to-3d": "Image to 3D",
+  "separate-audio": "Separate voice",
+  translate: "Translate",
+  write: "Write",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -120,9 +141,20 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   concat: "video",
   frame: "image",
   "color-match": "image",
+  layers: "image",
+  "text-layers": "image",
+  trim: "video",
+  transcribe: "text",
+  captions: "video",
+  mux: "video",
+  "image-to-3d": "model3d",
+  "separate-audio": "audio",
+  translate: "text",
+  write: "text",
 };
 
-export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
+/** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
+export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {
@@ -183,6 +215,18 @@ export interface FieldMap {
   draft?: string;
   /** Field that takes the draft id to finish. */
   draftId?: string;
+  /** Trim: where the kept part starts and ends (seconds × multiplier). */
+  startTime?: DurationField;
+  endTime?: DurationField;
+  /** Frames per second (frame sampling, images to video). */
+  fps?: string;
+  /** Colour palette: hex strings converted to the API's shape. */
+  palette?: { key: string; format: "hex" | "rgb-object" | "rgb-array" | "ideogram" };
+  /** A saved style id (Recraft styles, Soul 2.0 moodboards). */
+  styleId?: string;
+  /** How many layers to split an image into. */
+  numLayers?: string;
+  sourceLanguage?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
 }
@@ -281,6 +325,19 @@ export interface GenParams {
   draft?: boolean;
   /** Finish this draft at full quality (op "finalize"). */
   draftId?: string;
+  /** Trim: the part of the input video to keep, in seconds. */
+  startTime?: number;
+  endTime?: number;
+  /** Output / sampling frame rate. */
+  fps?: number;
+  /** Colour palette as hex strings ("#1a2b3c"), Soul HEX / Cinema Studio palettes. */
+  palette?: string[];
+  /** A saved style id (Recraft style, Soul 2.0 moodboard). */
+  styleId?: string;
+  /** Language of the source speech (transcribe, dub); omit to detect. */
+  sourceLanguage?: string;
+  /** Layer decomposition: how many layers to ask for. */
+  numLayers?: number;
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
@@ -338,7 +395,12 @@ export interface GenerationRequest {
 }
 
 export interface ChainSlot {
-  slot: "images" | "endImage" | "video" | "videos" | "audio";
+  /**
+   * "prompt" takes the dependency's text output (OutputFile.text): it replaces "{text}" in the
+   * request's prompt, or becomes the prompt when there is no placeholder.
+   * "voiceAudio" clones the voice of the dependency's audio output.
+   */
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
 }
@@ -362,6 +424,13 @@ export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "
 
 export interface OutputFile {
   url: string;
+  /** Text outputs (transcribe, translate, write): the content, also saved as a file at `url`. */
+  text?: string;
+  /**
+   * Structured extras a provider returned with this file: a layer's {name, z, bbox: [x, y, w, h]},
+   * transcript cues [{start, end, text}], text blocks, a 3D model's preview…
+   */
+  meta?: Record<string, unknown>;
   /** Draft renders: the id to finish this take at full quality. */
   draftId?: string;
   kind: MediaKind;

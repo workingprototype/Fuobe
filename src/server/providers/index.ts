@@ -43,6 +43,7 @@ export const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   local: localProvider,
   openai: notImplemented("openai", "OpenAI"),
   google: notImplemented("google", "Google"),
+  llm: notImplemented("llm", "LLM"),
 };
 
 export function provider(id: ProviderId): ProviderAdapter {
