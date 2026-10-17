@@ -340,8 +340,8 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           <p className="hidden truncate text-[11.5px] text-muted-foreground sm:block">
             Cinema Studio
             {project.description ? ` · ${project.description}` : ""}
-            {spentUsd > 0 ? ` · ≈ ${formatCost(spentUsd)} spent` : ""}
-            {project.costCapUsd != null ? ` of ${formatCost(project.costCapUsd) || "$0"}` : ""}
+            {spentUsd > 0 || project.costCapUsd != null ? ` · ≈ ${spentUsd > 0 ? formatCost(spentUsd) : "$0"} spent` : ""}
+            {project.costCapUsd != null ? ` of ${project.costCapUsd > 0 ? formatCost(project.costCapUsd) : "$0"}` : ""}
           </p>
         </div>
         <EngineSwitch value={engine} onChange={setEngine} size="sm" />
