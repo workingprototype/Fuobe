@@ -61,7 +61,7 @@ describe("assist tools", () => {
 
 describe("assist loop", () => {
   it("pauses on a paid plan, then answers every call of that turn in one message", async () => {
-    const t = agent.createThread({ engine: "cloud" });
+    const t = agent.createThread({ agent: "offline", engine: "cloud" });
     agent.addMessage(t.id, "Make a fox photo");
     const m = scripted(
       reply([text("Let me check models."), use("toolu_a", "search_models", { kind: "image" }), use("toolu_b", "generate", { summary: "A fox photo", jobs: [job] })], "tool_use"),
@@ -90,7 +90,7 @@ describe("assist loop", () => {
   });
 
   it("treats a new message as declining the plan, with the results before the text", async () => {
-    const t = agent.createThread({ engine: "cloud" });
+    const t = agent.createThread({ agent: "offline", engine: "cloud" });
     agent.addMessage(t.id, "Fox video");
     await agent.run(t.id, scripted(reply([use("toolu_c", "generate", { summary: "Fox", jobs: [job] })], "tool_use")).call);
     agent.addMessage(t.id, "Actually make it a wolf");
@@ -103,7 +103,7 @@ describe("assist loop", () => {
   });
 
   it("runs gated tools straight away when auto-run is on", async () => {
-    const t = agent.createThread({ engine: "cloud", autoApprove: true });
+    const t = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
     agent.addMessage(t.id, "Two foxes");
     await agent.run(t.id, scripted(reply([use("toolu_d", "generate", { summary: "Foxes", jobs: [{ ...job, outputs: 2 }] })], "tool_use"), reply([text("Done.")], "end_turn")).call);
     const v = agent.getThread(t.id)!;
@@ -113,7 +113,7 @@ describe("assist loop", () => {
   });
 
   it("doesn't run a tool call cut off by max_tokens", async () => {
-    const t = agent.createThread({ engine: "cloud", autoApprove: true });
+    const t = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
     agent.addMessage(t.id, "Fox");
     const m = scripted(reply([use("toolu_e", "generate", { summary: "Fo" })], "max_tokens"), reply([text("Retried.")], "end_turn"));
     await agent.run(t.id, m.call);
@@ -123,7 +123,7 @@ describe("assist loop", () => {
   });
 
   it("returns invalid tool input to the model as an error", async () => {
-    const t = agent.createThread({ engine: "cloud", autoApprove: true });
+    const t = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
     agent.addMessage(t.id, "Fox");
     const m = scripted(reply([use("toolu_f", "search_models", { kind: "smell" })], "tool_use"), reply([text("Oops.")], "end_turn"));
     await agent.run(t.id, m.call);
@@ -131,7 +131,7 @@ describe("assist loop", () => {
   });
 
   it("keeps the history valid after a refusal", async () => {
-    const t = agent.createThread({ engine: "cloud" });
+    const t = agent.createThread({ agent: "offline", engine: "cloud" });
     agent.addMessage(t.id, "something");
     await agent.run(t.id, scripted(reply([], "refusal", { stop_details: { type: "refusal", category: null, explanation: "Not this one." } as Msg["stop_details"] })).call);
     const v = agent.getThread(t.id)!;
@@ -144,7 +144,7 @@ describe("assist loop", () => {
   });
 
   it("refuses a message while a reply is still running", async () => {
-    const t = agent.createThread({ engine: "cloud" });
+    const t = agent.createThread({ agent: "offline", engine: "cloud" });
     agent.addMessage(t.id, "one");
     let release!: () => void;
     const slow: import("@/server/assist/agent").ModelCall = () => new Promise((r) => (release = () => r(reply([text("ok")], "end_turn"))));
@@ -171,7 +171,7 @@ describe("offline planner", () => {
   });
 
   it("plans, waits for approval and starts demo generations end to end", async () => {
-    const t = agent.createThread({ engine: "cloud" });
+    const t = agent.createThread({ agent: "offline", engine: "cloud" });
     agent.addMessage(t.id, "A cozy cabin in the snow, square");
     await agent.run(t.id, agent.offline);
     expect(agent.getThread(t.id)!.thread.status).toBe("waiting");
@@ -191,7 +191,7 @@ describe("claude request", () => {
     const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
     const asset = saveFile({ data: png, contentType: "image/png", source: "upload" });
     setSetting("anthropicKey", "sk-ant-test");
-    const t = agent.createThread({ engine: "open" });
+    const t = agent.createThread({ engine: "open", agent: await agent.resolveAgent() });
     expect(t.agent).toBe("claude");
     agent.addMessage(t.id, "Animate this", [asset.url]);
     const sent: { url: string; headers: Headers; body: Record<string, unknown> }[] = [];
@@ -233,5 +233,51 @@ describe("claude request", () => {
     expect(msgs.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(msgs[2].content[0]).toMatchObject({ type: "tool_result", tool_use_id: "toolu_1" });
     expect(agent.getThread(t.id)!.thread.items.at(-1)).toMatchObject({ role: "assistant", text: "Ready when you are." });
+  });
+});
+
+describe("ollama agent", () => {
+  it("talks to Ollama's chat API with tools and maps its tool calls back", async () => {
+    const http = await import("node:http");
+    const seen: { messages: { role: string; content: string; tool_calls?: unknown[]; tool_name?: string }[]; tools: { function: { name: string } }[]; model: string }[] = [];
+    const replies = [
+      { message: { role: "assistant", content: "<think>hmm</think>Let me look.", tool_calls: [{ function: { name: "search_models", arguments: { kind: "image" } } }] }, done_reason: "stop" },
+      { message: { role: "assistant", content: "Nano Banana Pro is a great pick." }, done_reason: "stop" },
+    ];
+    const server = http.createServer((req, res) => {
+      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [] }));
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        seen.push(JSON.parse(body));
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(replies.shift()));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    setSetting("ollamaUrl", `http://127.0.0.1:${port}`);
+    setSetting("ollamaModel", "qwen3:8b");
+    try {
+      expect(await agent.resolveAgent()).toBe("ollama");
+      const t = agent.createThread({ engine: "open", agent: "ollama" });
+      agent.addMessage(t.id, "Which image model should I use?");
+      await agent.run(t.id);
+      expect(seen).toHaveLength(2);
+      expect(seen[0].model).toBe("qwen3:8b");
+      expect(seen[0].messages[0].role).toBe("system");
+      expect(seen[0].tools.map((x) => x.function.name)).toContain("generate");
+      const second = seen[1].messages;
+      expect(second.map((m) => m.role)).toEqual(["system", "user", "assistant", "tool"]);
+      expect(second[2].tool_calls).toHaveLength(1);
+      expect(second[3].tool_name).toBe("search_models");
+      expect(JSON.parse(second[3].content).models.length).toBeGreaterThan(0);
+      const items = agent.getThread(t.id)!.thread.items;
+      expect(items.find((i) => i.role === "assistant")).toMatchObject({ text: "Let me look." });
+      expect(items.at(-1)).toMatchObject({ role: "assistant", text: "Nano Banana Pro is a great pick." });
+    } finally {
+      server.close();
+      setSetting("ollamaUrl", "");
+    }
   });
 });

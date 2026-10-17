@@ -35,8 +35,8 @@ export interface AssistThread {
   id: string;
   title: string;
   status: AssistStatus;
-  /** "claude" = the full agent; "offline" = a rule-based planner (no LLM configured). */
-  agent: "claude" | "offline";
+  /** "claude" = Claude; "ollama" = a local model through Ollama; "offline" = a rule-based planner (no LLM). */
+  agent: "claude" | "ollama" | "offline";
   engine: Engine;
   /** Run plans without the approval card. */
   autoApprove: boolean;

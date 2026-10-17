@@ -29,6 +29,13 @@ const SUGGESTIONS = [
 
 const KIND_ICON: Record<MediaKind | "storyboard", typeof ImageIcon> = { image: ImageIcon, video: Video, audio: AudioLines, storyboard: Clapperboard };
 
+const AGENT_LABEL: Record<AssistThread["agent"], string> = { claude: "Claude", ollama: "Local LLM", offline: "Offline planner" };
+const AGENT_HINT: Record<AssistThread["agent"], string> = {
+  claude: "Claude plans the shoot, picks models and runs them with your approval.",
+  ollama: "Runs on your Ollama model (Settings → Prompt enhancement). Smaller local models follow instructions less reliably than Claude.",
+  offline: "A simple rule-based planner. Add an Anthropic API key, or run Ollama, for the full assistant that picks models, chains steps and checks results.",
+};
+
 interface Attachment {
   id: string;
   preview: string;
@@ -442,17 +449,16 @@ export function AssistView() {
   }, [count, status]);
 
   const agent = thread?.agent ?? threads.data?.agent;
-  const offline = agent === "offline";
   const agentBadge = agent && (
     <Tooltip>
       <TooltipTrigger asChild>
         <Link href="/settings" className="inline-flex h-7 items-center gap-1.5 rounded-full bg-muted px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground">
-          {offline ? <Cpu className="size-3" /> : <Bot className="size-3" />}
-          <span className={cn(id && "hidden sm:inline")}>{offline ? "Offline planner" : "Claude"}</span>
+          {agent === "claude" ? <Bot className="size-3" /> : <Cpu className="size-3" />}
+          <span className={cn(id && "hidden sm:inline")}>{AGENT_LABEL[agent]}</span>
         </Link>
       </TooltipTrigger>
       <TooltipContent className="max-w-64">
-        {offline ? "A simple rule-based planner. Add an Anthropic API key in Settings for the full assistant that picks models, chains steps and checks results." : "Claude plans the shoot, picks models and runs them with your approval."}
+        {AGENT_HINT[agent]}
       </TooltipContent>
     </Tooltip>
   );

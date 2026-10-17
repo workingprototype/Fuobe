@@ -157,17 +157,35 @@ export function updateThread(id: string, patch: { autoApprove?: boolean; title?:
   return s.thread;
 }
 
-/** Claude when a key is set (and the install allows it), else the offline planner. */
-export function agentKind(): AssistThread["agent"] {
-  const choice = getSetting("enhanceProvider");
-  if (!getSetting("anthropicKey") || choice === "none" || choice === "ollama") return "offline";
-  return choice === "anthropic" || engineMode() !== "open" ? "claude" : "offline";
+let ollamaProbe: { at: number; url: string; ok: boolean } | null = null;
+async function ollamaReachable(): Promise<boolean> {
+  const url = getSetting("ollamaUrl").replace(/\/+$/, "");
+  if (ollamaProbe && ollamaProbe.url === url && Date.now() - ollamaProbe.at < 30_000) return ollamaProbe.ok;
+  const ok = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(800) })
+    .then((r) => r.ok)
+    .catch(() => false);
+  ollamaProbe = { at: Date.now(), url, ok };
+  return ok;
 }
 
-export function createThread(opts: { engine: Engine; autoApprove?: boolean; title?: string }): AssistThread {
+/**
+ * Which LLM drives new chats: Claude when a key is set (on open-source-only installs only when
+ * picked explicitly), else a reachable local Ollama, else the offline planner.
+ */
+export async function resolveAgent(): Promise<AssistThread["agent"]> {
+  const choice = getSetting("enhanceProvider");
+  const key = !!getSetting("anthropicKey");
+  if (choice === "none") return "offline";
+  if (choice === "anthropic") return key ? "claude" : "offline";
+  if (choice === "ollama") return "ollama";
+  if (key && engineMode() !== "open") return "claude";
+  return (await ollamaReachable()) ? "ollama" : "offline";
+}
+
+export function createThread(opts: { engine: Engine; agent: AssistThread["agent"]; autoApprove?: boolean; title?: string }): AssistThread {
   const now = Date.now();
   const s: State = {
-    thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: agentKind(), engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
+    thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: opts.agent, engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
     messages: [],
     pending: null,
   };
@@ -288,6 +306,74 @@ export const claude: ModelCall = async ({ system, messages, tools }) => {
     tools,
     messages: await hydrate(messages),
   });
+};
+
+type OllamaMessage = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: { function: { name: string; arguments: unknown } }[]; tool_name?: string };
+
+const blockText = (c: ToolResult["content"]): string =>
+  typeof c === "string" ? c : (c ?? []).map((b) => (b.type === "text" ? b.text : b.type === "image" ? "[image omitted]" : "")).join("\n");
+
+/** The stored (Anthropic-shaped) history as Ollama chat messages. Images stay as their URLs in the text. */
+export function toOllamaMessages(system: ModelRequest["system"], messages: MessageParam[]): OllamaMessage[] {
+  const names = new Map<string, string>();
+  const out: OllamaMessage[] = [{ role: "system", content: `${system.stable}\n\n${system.turn}` }];
+  for (const m of messages) {
+    if (typeof m.content === "string") {
+      out.push({ role: m.role, content: m.content });
+      continue;
+    }
+    if (m.role === "assistant") {
+      const text = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
+      const calls = m.content.flatMap((b) => {
+        if (b.type !== "tool_use") return [];
+        names.set(b.id, b.name);
+        return [{ function: { name: b.name, arguments: b.input } }];
+      });
+      out.push({ role: "assistant", content: text, ...(calls.length && { tool_calls: calls }) });
+      continue;
+    }
+    for (const b of m.content) if (b.type === "tool_result") out.push({ role: "tool", tool_name: names.get(b.tool_use_id), content: `${b.is_error ? "Error: " : ""}${blockText(b.content)}` });
+    const text = m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n");
+    if (text) out.push({ role: "user", content: text });
+  }
+  return out;
+}
+
+/** A local model through Ollama's tool calling (qwen3, llama3.x, mistral…), answering in the same shape as Claude. */
+export const ollama: ModelCall = async ({ system, messages, tools }) => {
+  const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: getSetting("ollamaModel"),
+      stream: false,
+      messages: toOllamaMessages(system, messages),
+      tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
+      options: { num_ctx: 16384 },
+    }),
+    signal: AbortSignal.timeout(300_000),
+  }).catch((e: Error) => {
+    throw new Error(`Couldn't reach Ollama at ${getSetting("ollamaUrl")} (${e.message}). Is it running?`);
+  });
+  if (!res.ok) throw new Error(`Ollama returned ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const j = (await res.json()) as { message?: { content?: string; tool_calls?: { function: { name: string; arguments: unknown } }[] }; done_reason?: string };
+  const content: Anthropic.Beta.BetaContentBlock[] = [];
+  const text = (j.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  if (text) content.push({ type: "text", text, citations: null } as Anthropic.Beta.BetaTextBlock);
+  for (const c of j.message?.tool_calls ?? []) {
+    let input = c.function.arguments;
+    if (typeof input === "string") {
+      try {
+        input = JSON.parse(input);
+      } catch {
+        input = { INVALID_JSON: input };
+      }
+    }
+    content.push({ type: "tool_use", id: `toolu_ollama_${nanoid(10)}`, name: c.function.name, input } as unknown as Anthropic.Beta.BetaToolUseBlock);
+  }
+  const stop: Anthropic.Beta.BetaStopReason = j.message?.tool_calls?.length ? "tool_use" : j.done_reason === "length" ? "max_tokens" : "end_turn";
+  if (!content.length) content.push({ type: "text", text: "…", citations: null } as Anthropic.Beta.BetaTextBlock);
+  return { id: `msg_ollama_${nanoid(8)}`, type: "message", role: "assistant", model: getSetting("ollamaModel"), content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
 };
 
 /** A rule-based planner with the same shape as a model reply, for installs without an LLM. */
@@ -430,7 +516,7 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   return "continue";
 }
 
-const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, offline };
+const MODELS: Record<AssistThread["agent"], ModelCall> = { claude, ollama, offline };
 
 /**
  * Run the agent until it ends its turn or waits for approval. Call it right after addMessage or
@@ -468,6 +554,7 @@ function errorText(e: unknown): string {
   if (e instanceof Anthropic.AuthenticationError) return "Your Anthropic API key was rejected. Check it in Settings → API keys.";
   if (e instanceof Anthropic.RateLimitError) return "Claude is rate-limited right now. Try again in a minute.";
   if (e instanceof Anthropic.APIError) return `Claude returned an error (${e.status ?? "network"}): ${e.message}`;
+  if (e instanceof DOMException && e.name === "TimeoutError") return "The model took too long to answer. Try again, or pick a smaller model.";
   return (e as Error).message || "Something went wrong";
 }
 
