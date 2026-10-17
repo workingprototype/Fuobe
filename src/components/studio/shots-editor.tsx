@@ -1,19 +1,14 @@
 "use client";
 
-import { Clapperboard, FileVideo2, Minus, Plus, X } from "lucide-react";
-import { useState } from "react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { FileVideo2, Minus, Plus, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GenParams, ModelDef } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 
 type Shot = NonNullable<GenParams["shots"]>[number];
 
-const chip = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors";
-
-/** Off · Auto (the model cuts by itself) · Custom (you write each shot). */
-export function MultiShotChip({ model, params, onChange }: { model: ModelDef; params: GenParams; onChange: (p: Partial<GenParams>) => void }) {
-  const [open, setOpen] = useState(false);
+/** Off · Auto (the model cuts by itself) · Custom (you write each shot): a segmented control for the settings panel. */
+export function MultiShotControl({ model, params, onChange }: { model: ModelDef; params: GenParams; onChange: (p: Partial<GenParams>) => void }) {
   const ms = model.options.multiShot!;
   const mode = params.shots ? "custom" : params.multiShot === "auto" ? "auto" : "off";
   const concat = ms.mode === "concat";
@@ -24,49 +19,46 @@ export function MultiShotChip({ model, params, onChange }: { model: ModelDef; pa
     ...(concat ? [] : [{ id: "auto", label: "Auto", hint: "The model plans the cuts" } as const]),
     { id: "custom", label: "Custom", hint: `Write up to ${ms.maxShots} shots` },
   ] as const;
+  const pick = (id: (typeof options)[number]["id"]) => {
+    if (id === "off") onChange({ shots: undefined, multiShot: undefined });
+    if (id === "auto") onChange({ shots: undefined, multiShot: "auto" });
+    if (id === "custom" && !params.shots)
+      onChange({
+        multiShot: undefined,
+        shots: [
+          { prompt: "", duration: each },
+          { prompt: "", duration: each },
+        ],
+      });
+  };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, mode !== "off" ? "bg-brand-faint text-brand-text hover:bg-brand-faint-hover" : "bg-secondary text-secondary-foreground hover:bg-accent")}>
-          <Clapperboard className="size-3.5" />
-          {mode === "custom" ? `${params.shots!.length} shots` : mode === "auto" ? "Multi-shot · Auto" : "Multi-shot"}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" align="start" side="top">
-        <p className="px-1 pb-2 text-[13px] font-medium">Multi-shot</p>
-        <div className="space-y-1">
-          {options.map((o) => (
-            <button
-              key={o.id}
-              onClick={() => {
-                if (o.id === "off") onChange({ shots: undefined, multiShot: undefined });
-                if (o.id === "auto") onChange({ shots: undefined, multiShot: "auto" });
-                if (o.id === "custom" && !params.shots)
-                  onChange({
-                    multiShot: undefined,
-                    shots: [
-                      { prompt: "", duration: each },
-                      { prompt: "", duration: each },
-                    ],
-                  });
-                setOpen(false);
-              }}
-              className={cn("flex w-full flex-col rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-accent", mode === o.id && "bg-brand-faint")}
-            >
-              <span className={cn("text-[13px] font-medium", mode === o.id && "text-brand-text")}>{o.label}</span>
-              <span className="text-[12px] text-muted-foreground">{o.hint}</span>
-            </button>
-          ))}
-        </div>
-        <p className="px-1 pt-2 text-[11px] text-muted-foreground">
-          {ms.mode === "native"
-            ? `${model.name} takes each shot as its own prompt.`
-            : concat
-              ? `Each shot renders as its own ${model.name} clip, then they're joined into one video.`
-              : `${model.name} follows shots written into the prompt.`}
-        </p>
-      </PopoverContent>
-    </Popover>
+    <div className="space-y-1.5">
+      <div role="radiogroup" aria-label="Multi-shot" className="flex rounded-full bg-muted p-0.5">
+        {options.map((o) => (
+          <Tooltip key={o.id}>
+            <TooltipTrigger asChild>
+              <button
+                role="radio"
+                aria-checked={mode === o.id}
+                onClick={() => pick(o.id)}
+                className={cn("h-7 flex-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition", mode === o.id && "bg-background text-foreground shadow-soft")}
+              >
+                {o.label}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{o.hint}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        {ms.mode === "native"
+          ? `${model.name} takes each shot as its own prompt.`
+          : concat
+            ? `Each shot renders as its own ${model.name} clip, then they're joined into one video.`
+            : `${model.name} follows shots written into the prompt.`}
+        {mode === "custom" && " Write each shot under the prompt."}
+      </p>
+    </div>
   );
 }
 

@@ -1,12 +1,13 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Check, Clapperboard, Loader2, Palette, X } from "lucide-react";
+import { Ban, Check, Clapperboard, Loader2, Palette } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { ModelOptions } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { Chip, ClearableChip } from "./chip";
 
 interface ProviderPreset {
   id: string;
@@ -14,10 +15,6 @@ interface ProviderPreset {
   preview?: string;
   group?: string;
 }
-
-const chip =
-  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors bg-secondary text-secondary-foreground hover:bg-accent";
-const active = "bg-brand-faint text-brand-text hover:bg-brand-faint-hover";
 
 const label = (v: string | number) =>
   String(v)
@@ -46,59 +43,66 @@ export function ProviderPresetChip({
   const items = useMemo(() => (list.data?.items ?? []).filter((p) => !q || p.name.toLowerCase().includes(q.toLowerCase())), [list.data, q]);
   const selected = list.data?.items.find((p) => p.id === value);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, value && active)}>
-          <Palette className="size-3.5" />
-          {selected?.name ?? (value ? spec.label : `${spec.label}${spec.required ? "" : ": default"}`)}
-          {value && !spec.required && (
-            <X
-              className="-mr-1 size-3.5 opacity-70 hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange(undefined);
-              }}
-            />
+    <ClearableChip active={!!value && !spec.required} onClear={() => onChange(undefined)} clearLabel={`Clear ${spec.label.toLowerCase()}`}>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Chip icon={Palette} active={!!value}>
+            {selected?.name ?? (value ? spec.label : `${spec.label}${spec.required ? "" : ": default"}`)}
+          </Chip>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12}>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={`Search ${spec.label.toLowerCase()}s`}
+            aria-label={`Search ${spec.label.toLowerCase()}s`}
+            className="mb-2 h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:border-primary"
+          />
+          {list.isLoading ? (
+            <div className="grid h-40 place-items-center">
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : list.data?.error && !items.length ? (
+            <p className="px-1 py-8 text-center text-[13px] text-muted-foreground">{list.data.error}</p>
+          ) : (
+            <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto">
+              {!spec.required && !q && (
+                <button
+                  onClick={() => {
+                    onChange(undefined);
+                    setOpen(false);
+                  }}
+                  className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", !value && "ring-2")}
+                >
+                  <span className="grid aspect-[3/4] w-full place-items-center rounded-md bg-muted text-muted-foreground">
+                    <Ban className="size-5" />
+                  </span>
+                  <span className="truncate px-0.5 text-[12px] font-medium">Default</span>
+                </button>
+              )}
+              {items.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    onChange(p.id, p.name);
+                    setOpen(false);
+                  }}
+                  className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
+                >
+                  <span className="aspect-[3/4] w-full overflow-hidden rounded-md bg-muted">
+                    {p.preview && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.preview} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    )}
+                  </span>
+                  <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
+                </button>
+              ))}
+            </div>
           )}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder={`Search ${spec.label.toLowerCase()}s`}
-          className="mb-2 h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:border-primary"
-        />
-        {list.isLoading ? (
-          <div className="grid h-40 place-items-center">
-            <Loader2 className="size-4 animate-spin text-muted-foreground" />
-          </div>
-        ) : list.data?.error && !items.length ? (
-          <p className="px-1 py-8 text-center text-[13px] text-muted-foreground">{list.data.error}</p>
-        ) : (
-          <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto">
-            {items.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => {
-                  onChange(p.id, p.name);
-                  setOpen(false);
-                }}
-                className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
-              >
-                <span className="aspect-[3/4] w-full overflow-hidden rounded-md bg-muted">
-                  {p.preview && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.preview} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                  )}
-                </span>
-                <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+        </PopoverContent>
+      </Popover>
+    </ClearableChip>
   );
 }
 
@@ -116,10 +120,9 @@ export function ControlsChip({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, set.length > 0 && active)}>
-          <Clapperboard className="size-3.5" />
+        <Chip icon={Clapperboard} active={set.length > 0}>
           {set.length ? `Director · ${set.length}` : "Director"}
-        </button>
+        </Chip>
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,420px)] space-y-2 p-3" align="start" side="top" collisionPadding={12}>
         <p className="text-[13px] font-medium">Director controls</p>
@@ -129,7 +132,7 @@ export function ControlsChip({
             <label key={c.param} className="space-y-1">
               <span className="text-[12px] text-muted-foreground">{c.label}</span>
               <Select value={values[c.param] === undefined ? "__auto" : String(values[c.param])} onValueChange={(v) => onChange(c.param, v === "__auto" ? undefined : typeof c.values[0] === "number" ? Number(v) : v)}>
-                <SelectTrigger size="sm" className="w-full">
+                <SelectTrigger size="sm" className="w-full" aria-label={c.label}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
@@ -145,7 +148,7 @@ export function ControlsChip({
           ))}
         </div>
         {set.length > 0 && (
-          <button onClick={() => set.forEach((c) => onChange(c.param, undefined))} className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
+          <button onClick={() => set.forEach((c) => onChange(c.param, undefined))} className="inline-flex items-center gap-1 rounded text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
             <Check className="size-3" /> Reset to Auto
           </button>
         )}

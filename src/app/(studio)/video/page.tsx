@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { StudioPage } from "@/components/studio/studio-page";
+import { Studio } from "@/components/studio/studio";
 import { VIDEO_STUDIO } from "@/lib/studios";
 
 export const metadata: Metadata = { title: "Create video" };
 
 export default function Page() {
-  return <StudioPage config={VIDEO_STUDIO} />;
+  return <Studio config={VIDEO_STUDIO} />;
 }

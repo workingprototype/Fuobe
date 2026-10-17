@@ -4,6 +4,7 @@ import { AtSign, AudioLines, MapPin, Package, Palette, Plus, ScanFace } from "lu
 import Link from "next/link";
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { elementKindInfo, mentionAtCaret, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { hasMention } from "@/lib/composer";
 import { cn } from "@/lib/utils";
 
 export const ELEMENT_ICONS: Record<ElementKind, typeof ScanFace> = {
@@ -55,8 +56,10 @@ export const PromptInput = forwardRef<
     placeholder?: string;
     elements: StudioElement[];
     className?: string;
+    /** Docked and not focused: keep the prompt to one line. */
+    collapsed?: boolean;
   }
->(function PromptInput({ value, onChange, onSubmit, placeholder, elements, className }, ref) {
+>(function PromptInput({ value, onChange, onSubmit, placeholder, elements, className, collapsed }, ref) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState<number | null>(null);
@@ -126,7 +129,12 @@ export const PromptInput = forwardRef<
         }}
         onSelect={syncCaret}
         onClick={syncCaret}
-        onBlur={() => setTimeout(() => setCaret(null), 120)}
+        onBlur={(e) => {
+          const el = e.currentTarget;
+          setTimeout(() => setCaret(null), 120);
+          // Collapsing to one line: show the start of the prompt, not wherever the caret was.
+          if (collapsed) el.scrollTop = 0;
+        }}
         onScroll={(e) => {
           if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop;
         }}
@@ -155,10 +163,13 @@ export const PromptInput = forwardRef<
         }}
         rows={1}
         placeholder={placeholder}
-        spellCheck
+        aria-label="Prompt"
+        // Spellcheck would underline every @handle in red.
+        spellCheck={!hasMention(value)}
         className={cn(
           shared,
-          "scrollbar-none relative field-sizing-content max-h-52 min-h-12 resize-none bg-transparent text-transparent caret-foreground outline-none placeholder:text-subtle-foreground selection:bg-brand-faint selection:text-transparent",
+          "scrollbar-none relative field-sizing-content resize-none bg-transparent text-transparent caret-foreground outline-none placeholder:text-subtle-foreground selection:bg-brand-faint selection:text-transparent",
+          collapsed ? "max-h-[38px] min-h-[38px] overflow-hidden" : "max-h-52 min-h-12",
         )}
       />
       {open && (

@@ -1,7 +1,3 @@
-"use client";
-
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
 import {
   AUDIO_STUDIO,
   DIALOGUE_STUDIO,
@@ -18,8 +14,8 @@ import {
   VIDEO_UPSCALE_STUDIO,
   VOICE_CHANGE_STUDIO,
 } from "@/lib/studios";
-import { cn } from "@/lib/utils";
-import { StudioPage } from "./studio-page";
+import { studioCatalog } from "@/lib/studio-catalog";
+import { ModeStudio, type Mode } from "./mode-studio";
 
 const MODES = {
   upscale: [
@@ -44,34 +40,11 @@ const MODES = {
   ],
 } as const;
 
-function Inner({ kind }: { kind: keyof typeof MODES }) {
-  const sp = useSearchParams();
-  const router = useRouter();
-  const modes = MODES[kind];
-  const current = modes.find((m) => m.id === sp.get("mode")) ?? (sp.get("video") ? modes.find((m) => m.id === "video") : undefined) ?? modes[0];
-  const tabs = (
-    <div className="scrollbar-none inline-flex h-9 max-w-[52vw] items-center overflow-x-auto rounded-full bg-muted p-0.5 lg:max-w-none">
-      {modes.map((m) => (
-        <button
-          key={m.id}
-          onClick={() => router.replace(`?mode=${m.id}`)}
-          className={cn(
-            "h-8 shrink-0 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition",
-            current.id === m.id && "bg-background text-foreground shadow-soft",
-          )}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
-  );
-  return <StudioPage key={current.id} config={current.config} header={tabs} />;
-}
-
+/**
+ * A hub of studios switched by `?mode=` (Audio, Video tools, Upscale). Server component: each
+ * mode's models are picked here, so the page ships only those.
+ */
 export function ModeSwitchStudio({ kind }: { kind: keyof typeof MODES }) {
-  return (
-    <Suspense fallback={null}>
-      <Inner kind={kind} />
-    </Suspense>
-  );
+  const modes: Mode[] = MODES[kind].map((m) => ({ id: m.id, label: m.label, config: m.config, catalog: studioCatalog(m.config) }));
+  return <ModeStudio modes={modes} />;
 }
