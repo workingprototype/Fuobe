@@ -11,7 +11,7 @@ _Last updated: 2026-10-17 (second round). The research behind this is in [`docs/
 | 🟡 | **Partial**: works, but approximates Higgsfield or misses part of the feature |
 | ⬜ | **Not started** |
 
-**What "verified" can't cover on this machine:** there are no paid API keys and no GPU here. Every cloud model call and every open-source output is therefore 🟢 at best: request shapes come from the providers' own schemas and every ComfyUI graph is accepted by a real ComfyUI, but nothing has produced a real image, video or voice yet.
+**What "verified" can't cover on this machine:** there are no paid API keys and no GPU here. Every cloud model call and every open-source output is therefore 🟢 at best: request shapes come from the providers' own schemas and every ComfyUI graph is accepted by a real ComfyUI. The only real outputs so far come from the tools that need no model weights (joining clips, palette match), which ran on a CPU ComfyUI here.
 
 ## 1. What has been verified
 
