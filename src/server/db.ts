@@ -101,6 +101,18 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS assist_threads_updated ON assist_threads(updated_at DESC);`,
+  // Canvas boards: the node graph (edited by the user) and each generator node's last run (written by the server).
+  `CREATE TABLE IF NOT EXISTS canvases (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    graph_json TEXT NOT NULL DEFAULT '{"nodes":[],"edges":[]}',
+    runs_json TEXT NOT NULL DEFAULT '{}',
+    template_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    edited_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
 ];
 
 declare global {
