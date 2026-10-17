@@ -93,8 +93,8 @@ export interface Plan {
 const PROMPTLESS = new Set<Operation>([
   "concat", "frame", "color-match", "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
-  // round 3 (open engine): tools that work from their inputs; captions need the cue text as the prompt
-  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d",
+  // round 3: tools that work from their inputs (open caption burn-in takes timed lines as its prompt and says so when they're missing)
+  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions",
 ]);
 
 export function planGeneration(

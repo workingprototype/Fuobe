@@ -133,6 +133,9 @@ describe("round-3 open models", () => {
     expect(planGeneration({ feature: "image", modelId: "oss-qwen-layered", inputs: { images: ["/a.png"] }, params: { numLayers: 4 } }, getModel, getPreset).op).toBe("layers");
     expect(planGeneration({ feature: "captions", modelId: "oss-qwen3-asr", inputs: { video: "/v.mp4" } }, getModel, getPreset).op).toBe("transcribe");
     expect(() => planGeneration({ feature: "3d", modelId: "oss-trellis2" }, getModel, getPreset)).toThrow(/photo/);
+    // Whisper transcribes by itself; the burn-in's provider asks for timed lines when they're missing.
+    expect(planGeneration({ feature: "captions", modelId: "oss-captions-whisper", inputs: { video: "/v.mp4" } }, getModel, getPreset).op).toBe("captions");
+    expect(() => planGeneration({ feature: "captions", modelId: "oss-captions-burnin" }, getModel, getPreset)).toThrow(/video to caption/);
   });
 
   it("runs Virtual Try-On on the try-on LoRA on the open engine", () => {
