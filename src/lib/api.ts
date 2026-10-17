@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
 
@@ -284,4 +285,66 @@ export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {
     [mode],
   );
   return [mode === "both" ? engine : mode, set, mode];
+}
+
+// ---------------------------------------------------------------------------
+// Assist
+
+export function useAssistThreads() {
+  return useQuery({
+    queryKey: ["assist"],
+    queryFn: async () => json<{ threads: AssistThreadSummary[]; agent: AssistThread["agent"] }>(await fetch("/api/assist")),
+  });
+}
+
+export function useAssistThread(id: string | null) {
+  return useQuery({
+    queryKey: ["assist", id],
+    enabled: !!id,
+    queryFn: async () => json<AssistThreadView>(await fetch(`/api/assist/${id}`)),
+    // Fast while the agent works, slower while generations render, idle otherwise.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (!d) return false;
+      if (d.thread.status === "running") return 900;
+      return d.generations.some((g) => g.status === "queued" || g.status === "running") ? 1500 : false;
+    },
+  });
+}
+
+export function useAssistActions() {
+  const qc = useQueryClient();
+  const refresh = (id: string) => {
+    void qc.invalidateQueries({ queryKey: ["assist", id] });
+    void qc.invalidateQueries({ queryKey: ["assist"], exact: true });
+  };
+  const post = async <T,>(url: string, body: unknown, method = "POST") =>
+    json<T>(await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+  return {
+    start: async (body: { text: string; attachments?: string[]; engine: Engine; autoApprove: boolean }) => {
+      const t = await post<AssistThread>("/api/assist", body);
+      qc.setQueryData<AssistThreadView>(["assist", t.id], { thread: t, generations: [] });
+      refresh(t.id);
+      return t;
+    },
+    send: async (id: string, body: { text: string; attachments?: string[] }) => {
+      const t = await post<AssistThread>(`/api/assist/${id}/messages`, body);
+      qc.setQueryData<AssistThreadView>(["assist", id], (old) => ({ thread: t, generations: old?.generations ?? [] }));
+      refresh(id);
+    },
+    answer: async (id: string, approve: boolean) => {
+      const t = await post<AssistThread>(`/api/assist/${id}/approval`, { approve });
+      qc.setQueryData<AssistThreadView>(["assist", id], (old) => ({ thread: t, generations: old?.generations ?? [] }));
+      refresh(id);
+    },
+    setAutoApprove: async (id: string, autoApprove: boolean) => {
+      await post(`/api/assist/${id}`, { autoApprove }, "PATCH");
+      refresh(id);
+    },
+    remove: async (id: string) => {
+      await fetch(`/api/assist/${id}`, { method: "DELETE" });
+      qc.removeQueries({ queryKey: ["assist", id] });
+      void qc.invalidateQueries({ queryKey: ["assist"], exact: true });
+    },
+  };
 }

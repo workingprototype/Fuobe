@@ -185,6 +185,12 @@ function prepare(original: GenerationRequest) {
   return { req, plan, route, demo, providerId, cost: demo ? 0 : estimateCost(plan.model, plan.params, 1) };
 }
 
+/** What a request would run as — model, operation, job count and cost — without starting it. */
+export function previewGeneration(req: GenerationRequest) {
+  const { plan, demo, providerId, cost } = prepare(req);
+  return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+}
+
 export interface CreateOptions {
   /** Group several requests (storyboard frames) into one batch. */
   batchId?: string;

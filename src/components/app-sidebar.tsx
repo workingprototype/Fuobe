@@ -6,6 +6,7 @@ import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
   AtSign,
+  MessageCircle,
   GalleryHorizontal,
   Layers,
   Crop,
@@ -58,6 +59,7 @@ const NAV = [
     label: "Create",
     items: [
       { href: "/", label: "Home", icon: Home },
+      { href: "/assist", label: "Assist", icon: MessageCircle },
       { href: "/image", label: "Image", icon: ImageIcon },
       { href: "/video", label: "Video", icon: Video },
       { href: "/edit", label: "Edit", icon: Wand2 },
