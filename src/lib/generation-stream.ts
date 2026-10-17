@@ -6,6 +6,7 @@
  *   event: deleted      data: {"id": "..."}
  *   : ping              (every 15 s)
  */
+import { replaceEqualDeep } from "@tanstack/react-query";
 import type { Generation } from "./catalog/types";
 import { byNewest, matchesFilter, type FeedFilter } from "./library";
 
@@ -121,6 +122,40 @@ export function applyToThread<T extends { generations: Generation[] }>(view: T |
   const generations = view.generations.slice();
   generations[at] = ev.generation;
   return { ...view, generations };
+}
+
+/**
+ * Structural sharing by id for generation lists. React Query's default compares arrays index by
+ * index, so one new result at the top (everything shifts by one) would hand every row a new
+ * object and re-render the whole feed. Matching by id keeps every unchanged generation identical.
+ */
+export function shareById(prev: unknown, next: unknown): unknown {
+  if (!Array.isArray(prev) || !Array.isArray(next)) return replaceEqualDeep(prev, next);
+  const byId = new Map((prev as Generation[]).map((g) => [g.id, g]));
+  let same = prev.length === next.length;
+  const out = (next as Generation[]).map((g, i) => {
+    const old = byId.get(g.id);
+    const v = old ? (replaceEqualDeep(old, g) as Generation) : g;
+    if (v !== prev[i]) same = false;
+    return v;
+  });
+  return same ? prev : out;
+}
+
+/** The same for paged lists ({ pages, pageParams }), matching across pages. */
+export function sharePagesById(prev: unknown, next: unknown): unknown {
+  const p = prev as Pages | undefined;
+  const n = next as Pages | undefined;
+  if (!p?.pages || !n?.pages) return replaceEqualDeep(prev, next);
+  const all = p.pages.flat();
+  const pages = n.pages.map((page, i) => {
+    const shared = shareById(all, page) as Generation[];
+    const old = p.pages[i];
+    return old && old.length === shared.length && shared.every((g, k) => g === old[k]) ? old : shared;
+  });
+  const samePages = pages.length === p.pages.length && pages.every((page, i) => page === p.pages[i]);
+  const pageParams = replaceEqualDeep(p.pageParams, n.pageParams);
+  return samePages && pageParams === p.pageParams ? p : { ...n, pages, pageParams };
 }
 
 /** Reconnect delays: 1 s, 2 s, 4 s … capped at 30 s (5 min once the endpoint said it doesn't exist). */

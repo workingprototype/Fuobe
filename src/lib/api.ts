@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
-import { applyToList, applyToPages, applyToThread, backoff, parseSse, toStreamEvent, type Pages, type StreamEvent } from "./generation-stream";
+import { applyToList, applyToPages, applyToThread, backoff, parseSse, shareById, sharePagesById, toStreamEvent, type Pages, type StreamEvent } from "./generation-stream";
 import { filterToSearch, type FeedFilter, type Folder } from "./library";
 
 export interface Asset {
@@ -180,6 +180,7 @@ export function useGenerations(filter: FeedFilter, opts: { keepPrevious?: boolea
     queryKey: feedKey(filter),
     queryFn: async () => (await json<{ items: Generation[] }>(await fetch(`/api/generations?${filterToSearch(filter)}`))).items,
     placeholderData: opts.keepPrevious ? keepPreviousData : undefined,
+    structuralSharing: shareById,
     refetchInterval: (q) => pollEvery(q.state.data, connected),
   });
 }
@@ -201,6 +202,7 @@ export function useLibrary(filter: FeedFilter) {
       return f.trashed ? (tail.deletedAt ?? undefined) : tail.createdAt;
     },
     placeholderData: keepPreviousData,
+    structuralSharing: sharePagesById,
     refetchInterval: (q) => pollEvery(q.state.data?.pages.flat(), connected),
   });
 }

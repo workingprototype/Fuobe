@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
-import { applyToList, applyToPages, applyToThread, backoff, parseSse, toStreamEvent } from "@/lib/generation-stream";
+import { applyToList, applyToPages, applyToThread, backoff, parseSse, shareById, sharePagesById, toStreamEvent } from "@/lib/generation-stream";
 import { buildEntries, dayLabel, downloadName, matchesFilter, splitByDate, trashDaysLeft } from "@/lib/library";
 import { cuesToSrt, cueTime, layerInfo, modelPreview, outputActions, textOf } from "@/lib/output-actions";
 
@@ -161,6 +161,26 @@ describe("stream reducer", () => {
     expect(applyToThread(view, ev(fresh))).toBe(view);
     expect(applyToThread(view, ev({ ...p1[0], favorite: true, updatedAt: 99_999 }))!.generations[0].favorite).toBe(true);
     expect(applyToThread(view, { type: "deleted", id: p1[0].id })!.generations).toEqual([]);
+  });
+
+  it("shares unchanged generations by id when the list shifts (one new result at the top)", () => {
+    const a = gen();
+    const b = gen();
+    const prev = [b, a];
+    const fresh = gen();
+    // What the server returns next: new objects (JSON), shifted by one.
+    const next = JSON.parse(JSON.stringify([fresh, b, a])) as Generation[];
+    const shared = shareById(prev, next) as Generation[];
+    expect(shared[1]).toBe(b);
+    expect(shared[2]).toBe(a);
+    expect(shareById(prev, JSON.parse(JSON.stringify(prev)))).toBe(prev);
+    const changed = shareById(prev, [{ ...b, status: "failed" }, a]) as Generation[];
+    expect(changed[0]).not.toBe(b);
+    expect(changed[1]).toBe(a);
+    const pages = { pages: [[b], [a]], pageParams: [undefined, b.createdAt] };
+    const morePages = sharePagesById(pages, JSON.parse(JSON.stringify({ pages: [[fresh, b], [a]], pageParams: [null, b.createdAt] }))) as { pages: Generation[][] };
+    expect(morePages.pages[0][1]).toBe(b);
+    expect(morePages.pages[1]).toBe(pages.pages[1]);
   });
 
   it("backs off between reconnects", () => {
