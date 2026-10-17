@@ -64,6 +64,12 @@ def field_map(op, ep, inputs, opts):
     if "negative_prompt" in inputs:
         fm["negativePrompt"] = "negative_prompt"
         opts["negativePrompt"] = True
+    # Recraft's palette on Higgsfield: colors [{rgb: [r, g, b]}] and background_color {rgb: [r, g, b]} (Soul HEX).
+    colors = (inputs.get("colors") or {}).get("items") or {}
+    if "rgb" in (colors.get("fields") or {}):
+        fm["palette"] = {"key": "colors", "format": "rgb-array"}
+        if "rgb" in ((inputs.get("background_color") or {}).get("fields") or {}):
+            fm["palette"]["background"] = "background_color"
     if "seed" in inputs:
         fm["seed"] = "seed"
         opts["seed"] = True
@@ -233,6 +239,7 @@ EXTRA = {
     "qwen-image-3": [("t2i", "alibaba/qwen-image-3/text-to-image"), ("edit", "alibaba/qwen-image-3/edit")],
     "z-image-turbo-cloud": [("t2i", "z-image/turbo")],
     "recraft-4-1": [("t2i", "recraft/v4.1/text-to-image")],
+    "recraft-4-1-pro": [("t2i", "recraft/v4.1/pro/text-to-image")],
 }
 
 models = []

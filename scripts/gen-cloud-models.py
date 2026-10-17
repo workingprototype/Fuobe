@@ -46,9 +46,13 @@ RATIO = re.compile(r"^\d+(\.\d+)?:\d+(\.\d+)?$")
 M = []
 
 
-def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False):
+def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
+          sliders=None, controls=None):
+    """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
+    numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
-                  badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden))
+                  badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
+                  sliders=sliders or [], controls=controls or []))
 
 
 # ----- Image
@@ -117,7 +121,7 @@ model("flux-fill-pro", "FLUX.1 Fill [pro]", "Black Forest Labs", "flux", "image"
 model("z-image-inpaint", "Z-Image Turbo Inpaint (hosted)", "Alibaba Tongyi", "z-image", "image", "Cheapest, fastest masked inpainting",
       [("inpaint", "fal-ai/z-image/turbo/inpaint")], badges=["fast"], pricing=("megapixel", 0.01))
 model("recraft-4-1", "Recraft V4.1", "Recraft", "recraft", "image",
-      "Brand-ready illustration, icons and design assets",
+      "Brand-ready illustration, icons and design assets in your colour palette",
       [("t2i", "fal-ai/recraft/v4.1/text-to-image")], defaults={"aspectRatio": "1:1"})
 model("qwen-image-3", "Qwen Image 3", "Alibaba Qwen", "qwen-image", "image",
       "Hosted Qwen with superb bilingual text rendering",
@@ -130,6 +134,71 @@ model("z-image-turbo-cloud", "Z-Image Turbo (hosted)", "Alibaba Tongyi", "z-imag
       [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"})], badges=["fast"], defaults={"aspectRatio": "1:1"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
+
+# ----- Image: palettes, styles and references (research part 3; Soul HEX, Moodboards)
+model("recraft-4-1-pro", "Recraft V4.1 Pro", "Recraft", "recraft", "image",
+      "Recraft's top tier — 2K design-grade images in your exact palette",
+      [("t2i", "fal-ai/recraft/v4.1/pro/text-to-image")], badges=["pro"], defaults={"aspectRatio": "1:1"})
+model("recraft-4-style", "Recraft V4 Styles", "Recraft", "recraft", "image",
+      "Generate in a saved Recraft style, or one made on the fly from up to 10 reference images",
+      [("t2i", "recraft/v4/style/text-to-image"), ("edit", "recraft/v4/style/text-to-image")],
+      pricing=("image", 0.035, "+$0.005 when a new style is made from references"), defaults={"aspectRatio": "1:1"},
+      controls=[("style_match", "Style match")])
+model("recraft-4-style-pro", "Recraft V4 Styles Pro", "Recraft", "recraft", "image",
+      "Recraft styles at Pro quality",
+      [("t2i", "recraft/v4/style/pro/text-to-image"), ("edit", "recraft/v4/style/pro/text-to-image")],
+      badges=["pro"], pricing=("image", 0.1, "+$0.005 when a new style is made from references"), defaults={"aspectRatio": "1:1"},
+      controls=[("style_match", "Style match")])
+model("ideogram-3", "Ideogram 3.0", "Ideogram", "ideogram", "image",
+      "Posters and type in your exact brand colours, with 60+ style presets and style references",
+      [("t2i", "fal-ai/ideogram/v3"),
+       # Remix and edit take image_urls as style references: the picture being edited is not one of them.
+       ("edit", "fal-ai/ideogram/v3/remix", "fal", {"drop": ["images", "styleImages"]}),
+       ("inpaint", "fal-ai/ideogram/v3/edit", "fal", {"drop": ["images"]})],
+      pricing=("image", 0.06, "Balanced; Turbo $0.03, Quality $0.09"), defaults={"aspectRatio": "1:1"},
+      sliders=[("strength", "Remix strength")], controls=[("rendering_speed", "Speed"), ("style", "Style"), ("style_preset", "Preset")])
+model("krea-2-style", "Krea 2 Style Reference", "Krea", "krea", "image",
+      "Match the look of 1–3 reference images in a new picture, zero-shot",
+      [("edit", "fal-ai/krea-2/turbo/style")], badges=["new", "fast"], defaults={"aspectRatio": "1:1"},
+      sliders=[("style_scale", "Style strength")])
+model("flux-redux-ultra", "FLUX1.1 [pro] Ultra Redux", "Black Forest Labs", "flux", "image",
+      "Variations and remixes of an image, steered by a prompt, up to 4MP",
+      [("edit", "fal-ai/flux-pro/v1.1-ultra/redux")], defaults={"aspectRatio": "1:1"},
+      sliders=[("image_prompt_strength", "Reference strength")])
+model("flux-redux-pro", "FLUX1.1 [pro] Redux", "Black Forest Labs", "flux", "image",
+      "Image-prompted FLUX: keeps the reference's look while you change the scene",
+      [("edit", "fal-ai/flux-pro/v1.1/redux")], defaults={"aspectRatio": "1:1"})
+
+# ----- Image: characters, angles, try-on and product shots (research part 3)
+model("instant-character", "Instant Character", "Tencent Hunyuan", "instant-character", "image",
+      "One photo of a character, any new scene — no training",
+      [("edit", "fal-ai/instant-character")], defaults={"aspectRatio": "1:1"}, sliders=[("scale", "Character strength")])
+model("qwen-multiple-angles", "Qwen Multiple Angles", "Alibaba Qwen", "qwen-image", "image",
+      "See the same shot from another angle: rotate, tilt and zoom the camera",
+      [("edit", "fal-ai/qwen-image-edit-2511-multiple-angles")], badges=["new"],
+      sliders=[("horizontal_angle", "Rotate (°)"), ("vertical_angle", "Tilt (°)"), ("zoom", "Zoom")])
+model("fashn-tryon", "FASHN Try-On 1.6", "FASHN", "fashn", "image",
+      "Put a garment on a person: model photo first, then the garment",
+      [("edit", "fal-ai/fashn/tryon/v1.6")], badges=["top"],
+      controls=[("category", "Garment"), ("mode", "Quality"), ("garment_photo_type", "Garment photo")])
+model("google-try-on", "Google Virtual Try-On", "Google", "imagen", "image",
+      "Google's try-on: a person photo and a product photo",
+      [("edit", "google/virtual-try-on")], pricing=("image", 0.075))
+model("leffa-tryon", "Leffa Virtual Try-On", "Leffa", "leffa", "image",
+      "Open-weights try-on for tops, bottoms and dresses",
+      [("edit", "fal-ai/leffa/virtual-tryon")], fixed={"garment_type": "upper_body"}, controls=[("garment_type", "Garment")])
+model("bria-product-shot", "Bria Product Shot", "Bria", "bria", "image",
+      "Your product photo in a new scene — describe it or add a reference scene",
+      [("edit", "fal-ai/bria/product-shot")], controls=[("placement_type", "Placement")])
+model("product-photography", "Product Photography", "fal", "image-apps", "image",
+      "One tap: a clean studio shot of your product",
+      [("edit", "fal-ai/image-apps-v2/product-photography", "fal", {"drop": ["aspectRatio"]})])
+model("bria-background-replace", "Bria Background Replace", "Bria", "bria", "image",
+      "Keep the subject, swap the background for a prompt or a reference image",
+      [("edit", "fal-ai/bria/background/replace")])
+model("bria-extract-object", "Bria Extract Object", "Bria", "bria", "image",
+      "Cut out one thing by name, e.g. “the red mug”",
+      [("edit", "bria/extract-object")])
 
 # ----- Video
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
@@ -212,7 +281,9 @@ model("wan-3-prime", "Wan 3.0 Prime", "Alibaba Wan", "wan", "video", "Highest-fi
       badges=["pro", "audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
 model("wan-2-7", "Wan 2.7", "Alibaba Wan", "wan", "video", "Hosted Wan with references and video edit",
       [("t2v", "fal-ai/wan/v2.7/text-to-video"), ("i2v", "fal-ai/wan/v2.7/image-to-video", "fal", "+flf2v"),
-       ("ref2v", "fal-ai/wan/v2.7/reference-to-video"), ("v2v", "fal-ai/wan/v2.7/edit-video")],
+       ("ref2v", "fal-ai/wan/v2.7/reference-to-video"), ("v2v", "fal-ai/wan/v2.7/edit-video"),
+       # Replicate's Wan 2.7 video edit keeps the source's length and framing: its own ratio/duration enums would widen the fal routes'.
+       ("v2v", "wan-video/wan-2.7-videoedit", "replicate", {"drop": ["aspectRatio", "duration"]})],
       badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
 model("wan-2-6", "Wan 2.6", "Alibaba Wan", "wan", "video", "Multi-shot Wan with audio",
       [("t2v", "wan/v2.6/text-to-video"), ("i2v", "wan/v2.6/image-to-video"), ("ref2v", "wan/v2.6/reference-to-video")],
@@ -257,6 +328,31 @@ model("ltx-reframe", "LTX Reframe", "Lightricks", "ltx", "video", "Change a clip
 model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "video", "Open-weights reframe: outpaints the new edges with a prompt",
       [("reframe", "fal-ai/wan-vace-14b/reframe")], defaults={"aspectRatio": "9:16"})
 
+# ----- Video restyle / edit (research part 3; Shorts Studio, Mixed Media, Ad Multiplier)
+model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-horse", "video",
+      "Restyle or swap things in 3–60 s clips, with up to 5 reference images",
+      [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
+      pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56"),
+      controls=[("audio_setting", "Audio")])
+model("lucy-edit-pro", "Lucy Edit Pro", "Decart", "lucy", "video",
+      "Text-guided video edits that keep motion and identity — outfits, props, styles",
+      [("v2v", "decart/lucy-edit/pro")], defaults={"resolution": "720p"}, fixed={"sync_mode": False}, pricing=("second", 0.15, "720p"))
+model("runway-aleph-2", "Runway Aleph 2", "Runway", "runway", "video",
+      "Runway's in-context video editor: restyle, relight, add or remove anything",
+      [("v2v", "runwayml/aleph-2", "replicate")], badges=["pro"])
+model("kling-o3-4k-edit", "Kling O3 4K Edit", "Kuaishou", "kling", "video",
+      "Kling O3 video edits rendered in native 4K, keeps the original audio",
+      [("v2v", "fal-ai/kling-video/o3/4k/video-to-video/edit")], badges=["4k"], pricing=("second", 0.42))
+model("grok-imagine-video-edit", "Grok Imagine Video Edit", "xAI", "grok", "video",
+      "Edit clips up to 8 s with a sentence",
+      [("v2v", "xai/grok-imagine-video/edit-video")], badges=["fast"],
+      pricing=("second", 0.06, "480p incl. input seconds; 720p $0.08"))
+model("ltx-2-3-restyle", "LTX 2.3 Reference Restyle", "Lightricks", "ltx", "video",
+      "Restyle a clip from a styled first frame, following its depth, edges or pose",
+      [("v2v", "fal-ai/ltx-2.3-22b/reference-video-to-video")], badges=["audio"],
+      pricing=("video", 0.18, "≈5 s at 720p; billed per megapixel of video"),
+      sliders=[("video_strength", "Strength")], controls=[("preprocessor", "Follow"), ("camera_lora", "Camera")])
+
 # ----- Avatars & lipsync
 model("kling-avatar-2", "Kling Avatar 2.0", "Kuaishou", "kling", "video", "Photo + voice → expressive talking video",
       [("avatar", "fal-ai/kling-video/ai-avatar/v2/pro")], badges=["top"])
@@ -300,6 +396,13 @@ model("chatterbox-cloud", "Chatterbox (hosted)", "Resemble AI", "chatterbox", "a
       [("tts", "fal-ai/chatterbox/text-to-speech")], pricing=("request", 0.025, "per 1k chars"))
 model("index-tts-2-cloud", "IndexTTS-2 (hosted)", "Bilibili", "index-tts", "audio", "Zero-shot cloning with emotion control",
       [("tts", "fal-ai/index-tts-2/text-to-speech")], pricing=("second", 0.002))
+# Higgsfield's Audio model selector also lists Inworld and MiniMax Speech (research part 3 / part 2).
+model("inworld-tts", "Inworld TTS 1.5 Max", "Inworld", "inworld", "audio", "The cheapest natural narration — 113 voices in 15 languages",
+      [("tts", "fal-ai/inworld-tts")], badges=["fast"], pricing=("request", 0.01, "per 1k chars"), defaults={"voice": "Craig (en)"})
+model("minimax-speech-2-8", "MiniMax Speech 2.8 HD", "MiniMax", "minimax-speech", "audio", "Expressive multilingual speech with emotion control",
+      [("tts", "fal-ai/minimax/speech-2.8-hd", "fal", {"fixed": {"output_format": "url"}})], pricing=("request", 0.1, "per 1k chars"),
+      defaults={"voice": "Wise_Woman"}, sliders=[("voice_setting.speed", "Speed")],
+      controls=[("voice_setting.emotion", "Emotion"), ("language_boost", "Language")])
 model("elevenlabs-voice-changer", "ElevenLabs Voice Changer", "ElevenLabs", "elevenlabs", "audio", "Re-voice a recording with any premade voice",
       [("voice-change", "fal-ai/elevenlabs/voice-changer")], pricing=("minute", 0.3), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
 model("chatterbox-vc-cloud", "Chatterbox Voice Conversion (hosted)", "Resemble AI", "chatterbox", "audio", "Turn a recording into any voice from a sample",
@@ -310,6 +413,35 @@ model("heygen-translate-fast", "HeyGen Translate Speed", "HeyGen", "heygen", "vi
       [("dub", "fal-ai/heygen/v2/translate/speed")], badges=["fast"], pricing=("second", 0.05))
 model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "video", "Dub video or audio while keeping each speaker's voice",
       [("dub", "fal-ai/elevenlabs/dubbing")], pricing=("minute", 0.6))
+# Sound effects and music (research part 3): Mirelo and Sonilo are the jobs Higgsfield's Audio runs.
+model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Higgsfield's sound-effects model — layered, cinematic SFX up to 10 minutes",
+      [("sfx", "mirelo-ai/sfx2.0/text-to-audio")], badges=["top", "new"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30, 60]},
+      pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
+model("sonilo-sfx", "Sonilo SFX 1.1", "Sonilo", "sonilo", "audio", "Fast, cheap sound effects up to 3 minutes",
+      [("sfx", "sonilo/v1.1/text-to-sound-effects")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 8, 15, 30]})
+model("stable-audio-3-sfx", "Stable Audio 3 SFX", "Stability AI", "stable-audio", "audio", "Stability's small SFX model — crisp one-shots and ambiences",
+      [("sfx", "fal-ai/stable-audio-3/small/sfx/text-to-audio")], defaults={"duration": 10}, options={"durations": [5, 10, 30, 60]})
+model("stable-audio-2-5", "Stable Audio 2.5", "Stability AI", "stable-audio", "audio", "Sound design and music beds up to 3 minutes",
+      [("sfx", "fal-ai/stable-audio-25/text-to-audio"), ("music", "fal-ai/stable-audio-25/text-to-audio"),
+       ("sfx", "stability-ai/stable-audio-2.5", "replicate"), ("music", "stability-ai/stable-audio-2.5", "replicate")],
+      defaults={"duration": 30}, options={"durations": [10, 30, 60, 120, 190]})
+model("cassette-sfx", "CassetteAI Sound Effects", "CassetteAI", "cassette", "audio", "One-cent sound effects up to 30 s",
+      [("sfx", "cassetteai/sound-effects-generator")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30]})
+model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Higgsfield's Seed Audio: speech, ambience, music and Foley from one prompt",
+      [("sfx", "bytedance/seed-audio-1.0"), ("tts", "bytedance/seed-audio-1.0")], badges=["new"])
+model("sonilo-music", "Sonilo Music 1.1", "Sonilo", "sonilo", "audio", "Higgsfield's music model — full tracks up to 10 minutes",
+      [("music", "sonilo/v1.1/text-to-music")], badges=["top", "new"], defaults={"duration": 30}, options={"durations": [15, 30, 60, 120, 240]})
+model("lyria-3", "Lyria 3", "Google", "lyria", "audio", "Google DeepMind's music model, from a prompt or an image",
+      [("music", "fal-ai/lyria3"), ("music", "google/lyria-3", "replicate")])
+model("lyria-3-pro", "Lyria 3 Pro", "Google", "lyria", "audio", "Longer, richer Lyria 3 tracks",
+      [("music", "fal-ai/lyria3/pro"), ("music", "google/lyria-3-pro", "replicate")], badges=["pro"])
+model("minimax-music-2-5", "MiniMax Music 2.5", "MiniMax", "minimax-music", "audio", "Songs with vocals, or instrumentals",
+      [("music", "fal-ai/minimax-music/v2.5")])
+model("stable-audio-3-music", "Stable Audio 3 Music", "Stability AI", "stable-audio", "audio", "Quick, cheap loops and beds up to 2 minutes",
+      [("music", "fal-ai/stable-audio-3/small/music/text-to-audio")], badges=["fast"], defaults={"duration": 30}, options={"durations": [10, 30, 60, 120]})
+model("mureka-song", "Mureka 9.5", "Mureka", "mureka", "audio", "Full songs with vocals in many genres",
+      [("music", "mureka/api/generate/song")], pricing=("request", 0.75, "prompt-to-song on mureka-9.5; with lyrics $0.225"),
+      controls=[("model", "Version"), ("gender", "Voice")])
 model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", "audio", "Describe a sound, get a sound",
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
@@ -327,6 +459,65 @@ model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight 
       options={"controls": [{"param": "relight_parameters.bg_source", "label": "Light from", "values": ["Left", "Right", "Top", "Bottom"], "default": "Left"}]})
 model("mmaudio-cloud", "MMAudio", "hkchengrex", "mmaudio", "video", "Add matching sound to a silent video",
       [("v2a", "fal-ai/mmaudio-v2")], pricing=("second", 0.001))
+model("mirelo-sfx-2-video", "Mirelo SFX 2.0 for video", "Mirelo", "mirelo", "video", "Sound effects in sync with your video, speech kept",
+      [("v2a", "mirelo-ai/sfx2.0/video-to-video")], badges=["top", "new"], pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
+
+# ----- Image tools: layers, text layers, cut-outs, vectors (research part 3; Higgsfield Layers)
+model("seedream-5-layers", "Seedream 5.0 Layers", "ByteDance", "seedream", "image",
+      "The model Higgsfield Layers runs on: background + up to 16 named, positioned layers",
+      [("layers", "bytedance/seedream/v5/pro/layerize")], badges=["top", "new"], defaults={"resolution": "auto"},
+      pricing=("request", 0.17, "$0.034 per layer, ≈5 layers; double above 1536²"))
+model("seedream-5-flash-layers", "Seedream 5.0 Flash Layers", "ByteDance", "seedream", "image", "Faster, cheaper Seedream layer split",
+      [("layers", "bytedance/seedream/v5/flash/layerize")], badges=["fast"], defaults={"resolution": "auto"})
+model("qwen-image-layered-cloud", "Qwen-Image Layered (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights layer split: 1–10 full-canvas RGBA layers",
+      [("layers", "fal-ai/qwen-image-layered"), ("layers", "qwen/qwen-image-layered", "replicate")])
+model("ideogram-3-text-layers", "Ideogram 3.0 Text Layers", "Ideogram", "ideogram", "image",
+      "Lift the text off a poster: a clean background plus editable text blocks",
+      [("text-layers", "fal-ai/ideogram/v3/layerize-text")], badges=["new"])
+model("ideogram-remove-bg", "Ideogram Remove Background", "Ideogram", "ideogram", "image", "Clean transparent cut-outs for one cent",
+      [("bg-remove", "fal-ai/ideogram/remove-background")], badges=["fast"], pricing=("image", 0.01))
+model("recraft-vectorize", "Recraft Vectorize", "Recraft", "recraft", "image", "Turn any image into a clean, editable SVG",
+      [("vectorize", "fal-ai/recraft/vectorize"), ("vectorize", "recraft-ai/recraft-vectorize", "replicate")], badges=["top"])
+model("image2svg", "Image to SVG (VTracer)", "VTracer", "vtracer", "image", "Half-cent tracing for logos, icons and flat art",
+      [("vectorize", "fal-ai/image2svg")], badges=["fast"], controls=[("colormode", "Colours"), ("mode", "Curves")])
+
+# ----- Video & audio utilities (research part 3): steps for chains (trim, soundtrack) and studios (captions, transcripts, stems)
+model("trim-video", "Trim video", "fal", "utility", "video", "Keep the part between two times",
+      [("trim", "fal-ai/workflow-utilities/trim-video", "fal", {"drop": ["duration"]})],
+      pricing=("request", 0.001, "billed per compute second"), hidden=True)
+model("merge-audio-video", "Add soundtrack", "fal", "utility", "video", "Replace a video's sound with an audio track",
+      [("mux", "fal-ai/ffmpeg-api/merge-audio-video")], pricing=("second", 0.0002), hidden=True)
+model("auto-subtitle", "Auto Subtitle", "fal", "captions", "video", "Transcribes and burns in TikTok-style karaoke captions",
+      [("captions", "fal-ai/workflow-utilities/auto-subtitle")], badges=["top"],
+      sliders=[("words_per_subtitle", "Words per caption"), ("font_size", "Size")],
+      controls=[("font_weight", "Weight"), ("font_color", "Colour"), ("highlight_color", "Highlight"), ("position", "Position")])
+model("veed-subtitles", "VEED Subtitles", "VEED", "veed", "video", "30 designed caption styles, with optional translation",
+      [("captions", "veed/subtitles", "fal", {"drop": ["language"]})], fixed={"preset": "simple"}, controls=[("preset", "Style")])
+model("scribe-v2", "ElevenLabs Scribe v2", "ElevenLabs", "elevenlabs", "text", "Word-timed transcripts with speakers and sound events",
+      [("transcribe", "fal-ai/elevenlabs/speech-to-text/scribe-v2"), ("transcribe", "elevenlabs/scribe-v2", "replicate")], badges=["top"],
+      pricing=("minute", 0.008, "+30% with key terms"))
+model("wizper", "Wizper (Whisper v3)", "fal", "whisper", "text", "Fast Whisper large-v3 transcripts in segments",
+      [("transcribe", "fal-ai/wizper")], badges=["fast"])
+model("whisper", "Whisper large-v3", "OpenAI", "whisper", "text", "Whisper with word timings and speaker labels",
+      [("transcribe", "fal-ai/whisper")])
+model("demucs", "Demucs stem split", "Meta", "demucs", "audio", "Split a track into vocals, drums, bass and the rest",
+      [("separate-audio", "fal-ai/demucs")], fixed={"model": "htdemucs"})
+
+# ----- Image to 3D (research part 3; product spins, 3D blocking)
+model("hunyuan-3d-3-1-pro", "Hunyuan3D 3.1 Pro", "Tencent Hunyuan", "hunyuan-3d", "model3d", "Textured, game-ready 3D models from a product photo",
+      [("image-to-3d", "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d")], badges=["top", "new"], pricing=("request", 0.375, "+$0.15 with PBR"),
+      controls=[("generate_type", "Mode")])
+model("hunyuan-3d-3-1-rapid", "Hunyuan3D 3.1 Rapid", "Tencent Hunyuan", "hunyuan-3d", "model3d", "Faster, cheaper single-view Hunyuan3D",
+      [("image-to-3d", "fal-ai/hunyuan-3d/v3.1/rapid/image-to-3d")], badges=["fast"], pricing=("request", 0.225, "+$0.15 with PBR"))
+model("trellis-2", "TRELLIS.2", "Microsoft", "trellis", "model3d", "Open-weights image to GLB with detailed geometry",
+      [("image-to-3d", "fal-ai/trellis-2")], defaults={"resolution": "1024"}, pricing=("request", 0.3, "1024p; 512p $0.25, 1536p $0.35"))
+model("tripo-h3-1", "Tripo H3.1", "Tripo", "tripo", "model3d", "Clean topology and PBR textures, ready for engines",
+      [("image-to-3d", "tripo3d/h3.1/image-to-3d")], pricing=("request", 0.3, "standard textures; untextured $0.20, HD $0.40"),
+      controls=[("texture_quality", "Texture"), ("geometry_quality", "Geometry")])
+model("meshy-7-1", "Meshy 7.1", "Meshy", "meshy", "model3d", "Textured models with optional auto-rigging; describe the texture in the prompt",
+      [("image-to-3d", "meshy/v7.1/image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
+      controls=[("model_type", "Mesh"), ("topology", "Topology")])
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +560,76 @@ def num(v):
         return None
 
 
+def spec_at(inputs, path):
+    """The research spec of a (possibly dotted) input field: voice_setting.voice_id → inputs.voice_setting.fields.voice_id."""
+    head, _, rest = path.partition(".")
+    spec = inputs.get(head)
+    for part in rest.split(".") if rest else []:
+        spec = ((spec or {}).get("fields") or {}).get(part)
+    return spec if isinstance(spec, dict) else None
+
+
+def palette_format(spec):
+    """How an API wants its colour palette (FieldMap.palette.format), from the research schema."""
+    if not spec:
+        return None
+    if spec.get("type") == "object" and "members" in (spec.get("fields") or {}):
+        return "ideogram"  # Ideogram color_palette {members: [{rgb: {r, g, b}, color_weight}]}
+    if spec.get("type") == "array":
+        item = spec.get("itemSchema") or (spec.get("items") if isinstance(spec.get("items"), dict) else {}) or {}
+        if {"r", "g", "b"} <= set(item):
+            return "rgb-object"  # Recraft on fal: [{r, g, b}]
+        if "rgb" in (item.get("fields") or item):
+            return "rgb-array"  # Recraft on Higgsfield: [{rgb: [r, g, b]}]
+        if spec.get("items") == "string":
+            return "hex"
+    return None
+
+
+def voice_list(spec):
+    """Premade voices from a voice field's enum (Inworld "Loretta (en)") or documented examples (MiniMax "Wise_Woman")."""
+    vals = (spec or {}).get("values") or (spec or {}).get("examples") or []
+    out = []
+    for v in vals:
+        if not isinstance(v, str):
+            continue
+        m_ = re.match(r"^(.*?)\s*\(([^)]+)\)$", v)
+        if m_:  # "Loretta (en)"
+            out.append({"id": v, "name": m_.group(1), "hint": m_.group(2)})
+        elif re.fullmatch(r"[a-z]+(_[a-z]+)+", v):  # Seed's "vivi_mixed_en_zh_ja_es_id": a name, then its languages
+            name, *langs = v.split("_")
+            out.append({"id": v, "name": name.capitalize(), "hint": " · ".join(x for x in langs if x != "mixed")})
+        else:  # MiniMax's "Wise_Woman"
+            out.append({"id": v, "name": v.replace("_", " ")})
+    return out
+
+
+def time_field(key, spec):
+    """FieldMap DurationField for a time in seconds (start/end of a trim, an audio offset)."""
+    t = "number" if (spec or {}).get("type") in ("number", "integer") else "string"
+    return {"key": key, "type": t, **({"multiplier": 1000} if key.endswith("_ms") else {})}
+
+
+def add_slider(opts, param, label, spec):
+    if not spec or "minimum" not in spec or "maximum" not in spec or any(s["param"] == param for s in opts.get("sliders", [])):
+        return
+    lo, hi = spec["minimum"], spec["maximum"]
+    opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": 0.05 if hi - lo <= 4 else 1,
+                                           "default": spec.get("default", lo)})
+
+
+def add_control(opts, param, label, spec):
+    vals = [v for v in ((spec or {}).get("values") or []) if v != ""]
+    if not vals or any(c["param"] == param for c in opts.get("controls", [])):
+        return
+    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": spec["default"]} if "default" in spec else {})})
+
+
+def mask_format(ep):
+    """Ideogram paints black = change; OpenAI's GPT Image uses transparent = change; others white."""
+    return "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
+
+
 def build_route(op, ep, provider, m, opts, ropts=None):
     ropts = ropts or {}
     e = EPS.get((provider, ep))
@@ -379,6 +640,21 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         warn(f"{m['id']}: {ep} is not verified")
     inputs = e.get("inputs") or {}
     kf = dict(e.get("keyFields") or {})
+    # A route can ignore key fields whose meaning doesn't fit Fuobe's slot (e.g. Ideogram edit's style refs).
+    for k in ropts.get("drop") or []:
+        kf.pop(k, None)
+    # Part 3 slot names that are the same canonical input: the person in a try-on is the main image,
+    # style references are the reference images, a garment / scene / style image is the second image.
+    if "person" in kf and "image" not in kf:
+        kf["image"] = kf.pop("person")
+    if "styleImages" in kf and "images" not in kf and (inputs.get(kf["styleImages"]) or {}).get("type") == "array":
+        kf["images"] = kf["styleImages"]
+    for k in ("garment", "sceneImage", "styleImage"):
+        if k in kf and "image2" not in kf and (inputs.get(kf[k]) or {}).get("type") != "array":
+            kf["image2"] = kf[k]
+    # Transcription and stem splitting work from the audio; ignore any prompt-like hint field.
+    if op in ("transcribe", "separate-audio"):
+        kf.pop("prompt", None)
     fmap = {}
     # Prompt
     if "prompt" in kf:
@@ -399,19 +675,24 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["voice"] = kf["voice"]
     if "voice" in kf and "elevenlabs" in ep:
         opts["voices"] = ELEVEN_VOICES
+    elif "voice" in kf and "voices" not in opts and voice_list(spec_at(inputs, kf["voice"])):
+        opts["voices"] = voice_list(spec_at(inputs, kf["voice"]))
     if "dialogue" in kf:
         fmap["dialogue"] = {"key": kf["dialogue"], "text": "text", "voice": "voice"}
     if "targetLanguage" in kf:
         fmap["targetLanguage"] = kf["targetLanguage"]
         enum = (inputs.get(kf["targetLanguage"]) or {}).get("values")
         opts["languages"] = enum or ISO_LANGUAGES
-    sliders = [
-        {"param": k, "label": SLIDER_LABELS[k], "min": v["minimum"], "max": v["maximum"], "step": 0.05 if v["maximum"] - v["minimum"] <= 4 else 1,
-         "default": v.get("default", v["minimum"])}
-        for k, v in inputs.items() if k in SLIDER_LABELS and isinstance(v, dict) and "minimum" in v and "maximum" in v
-    ]
-    if sliders:
-        opts["sliders"] = sliders
+    # The model's own slider/control labels win over the generic voice-setting labels below.
+    for path, label in m.get("sliders") or []:
+        add_slider(opts, path, label, spec_at(inputs, path))
+    for path, label in m.get("controls") or []:
+        add_control(opts, path, label, spec_at(inputs, path))
+    for k, v in inputs.items():
+        # Voice settings belong to speech models; a transcriber's "temperature" is not a voice's variety.
+        if k in SLIDER_LABELS and isinstance(v, dict) and (op in ("tts", "voice-change", "dialogue") or k == "strength"):
+            # "strength" is a voice setting on speech models only (Topaz's is the enhancement strength).
+            add_slider(opts, k, "Strength" if k == "strength" and m["kind"] != "audio" else SLIDER_LABELS[k], v)
     # Some APIs call their boolean sound switch "audio" (Wan 3.0); that's generateAudio, not an audio file.
     if "audio" in kf and (inputs.get(kf["audio"]) or {}).get("type") == "boolean":
         kf.setdefault("generateAudio", kf.pop("audio"))
@@ -438,6 +719,34 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         opts["draft"] = True
     if "draftId" in kf:
         fmap["draftId"] = kf["draftId"]
+    # Research part 3 slots.
+    if "image2" in kf:
+        fmap["image2"] = kf["image2"]
+    for k in ("startTime", "endTime"):
+        if k in kf:
+            fmap[k] = time_field(kf[k], inputs.get(kf[k]))
+    if "fps" in kf:
+        fmap["fps"] = kf["fps"]
+    if "styleId" in kf:
+        fmap["styleId"] = kf["styleId"]
+    if "numLayers" in kf:
+        fmap["numLayers"] = kf["numLayers"]
+    if "palette" in kf:
+        fmt = palette_format(inputs.get(kf["palette"]))
+        if fmt:
+            fmap["palette"] = {"key": kf["palette"], "format": fmt}
+            bg = kf.get("backgroundColor")
+            if bg and {"r", "g", "b"} <= set((inputs.get(bg) or {}).get("fields") or {}):
+                fmap["palette"]["background"] = bg
+        else:
+            warn(f"{m['id']}: {ep} palette field {kf['palette']} has an unknown shape")
+    # The language of the speech: transcription, captions and dubbing take it as their "language".
+    src_lang = kf.get("sourceLanguage") or (kf.get("language") if op in ("transcribe", "captions", "dub") else None)
+    if src_lang:
+        fmap["sourceLanguage"] = src_lang
+    # Transcribers take a video file in their audio field too.
+    if op == "transcribe" and "audio" in kf and "video" not in kf:
+        fmap["video"] = kf["audio"]
     # LTX/others sometimes have image key named differently but keyFields covers it.
     if "negativePrompt" in fmap:
         opts["negativePrompt"] = True
@@ -452,6 +761,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         key = kf["aspectRatio"]
         spec = inputs.get(key, {})
         enum = spec.get("values") or spec.get("enumValues") or []
+        if not enum and spec.get("type") == "union":
+            # "enum or free string" unions (FLUX Ultra's aspect_ratio): offer the enum.
+            enum = [v for var in spec.get("variants") or [] for v in (var.get("values") or [])]
         if key == "image_size" or any("landscape" in str(v) or "square" in str(v) for v in enum):
             fmap["aspectRatio"] = {"key": key, "values": IMAGE_SIZE_MAP}
             opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
@@ -466,6 +778,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         key = kf["resolution"]
         fmap["resolution"] = key
         enum = (inputs.get(key) or {}).get("values") or []
+        if enum and (inputs.get(key) or {}).get("valueType") in ("integer", "number"):
+            # Numeric tiers (TRELLIS 512/1024/1536) are picked as strings and sent as numbers.
+            fmap["resolution"] = {"key": key, "values": {str(v): v for v in enum}}
         opts["resolutions"] = union(opts.get("resolutions", []), [str(v) for v in enum])
     # Duration
     if "duration" in kf:
@@ -508,7 +823,10 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         mx = num((inputs.get(fmap["images"]) or {}).get("maxItems")) or None
         opts["maxImages"] = max(opts.get("maxImages", 1), mx or (10 if op == "edit" else 4))
     elif "image" in fmap:
-        opts["maxImages"] = max(opts.get("maxImages", 0), 1)
+        opts["maxImages"] = max(opts.get("maxImages", 0), 2 if "image2" in fmap else 1)
+    # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
+    if op == "inpaint" and "mask" in fmap and mask_format(ep):
+        fmap["maskFormat"] = mask_format(ep)
     route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
     if ropts.get("note"):
         route["note"] = ropts["note"]
@@ -521,10 +839,12 @@ def build_route(op, ep, provider, m, opts, ropts=None):
 
 def parse_price(e):
     p = str(e.get("price") or "")
-    m = re.search(r"\$(\d+(?:\.\d+)?)\s*(?:per|/)\s*(?:output\s+)?(image|images|second|seconds|video|minute|minutes|megapixel)", p)
+    m = re.search(r"\$(\d+(?:\.\d+)?)\s*(?:per|/)\s*(?:output\s+)?(image|images|second|seconds|video|videos|minute|minutes|megapixels|megapixel|"
+                  r"generation|generations|request|requests|audios|audio file)\b", p)
     if not m:
         return None
-    unit = {"images": "image", "seconds": "second", "minutes": "minute"}.get(m.group(2), m.group(2))
+    unit = {"images": "image", "seconds": "second", "minutes": "minute", "videos": "video", "megapixels": "megapixel", "generation": "request", "generations": "request",
+            "requests": "request", "audios": "request", "audio file": "request"}.get(m.group(2), m.group(2))
     return {"unit": unit, "usd": float(m.group(1))}
 
 
@@ -549,8 +869,7 @@ for m in M:
             # The mask belongs on the inpaint route only; plain edits never send one.
             mk = route["map"].pop("mask", None) or next((k for k in ("mask_url", "mask_image_url", "mask") if k in inputs and inputs[k].get("type") != "array"), None)
             if mk:
-                # Ideogram paints black = change; OpenAI's GPT Image uses transparent = change.
-                fmt = "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
+                fmt = mask_format(ep)
                 routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
         if len(r) > 3 and r[3] == "+flf2v" and not ropts:
             if "endImage" in route["map"]:
