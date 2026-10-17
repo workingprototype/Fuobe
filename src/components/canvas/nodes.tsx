@@ -4,6 +4,7 @@ import { Handle, Position, useUpdateNodeInternals, type Node, type NodeProps } f
 import {
   AlertCircle,
   AudioLines,
+  Box,
   Check,
   Cloud,
   Copy,
@@ -253,6 +254,13 @@ function OutputThumb({ o, onOpen, className, large }: { o: OutputFile; onOpen: (
       </button>
     );
   }
+  if (o.kind === "model3d") {
+    return (
+      <button onClick={onOpen} className={cn("flex h-20 w-full items-center justify-center gap-2 rounded-lg bg-muted text-[12px] font-medium text-muted-foreground hover:text-foreground", NO_DRAG, className)}>
+        <Box className="size-4" /> 3D model
+      </button>
+    );
+  }
   if (o.kind === "audio") {
     return (
       <div className={cn("flex items-center gap-2 rounded-lg bg-brand-faint p-2 text-brand-text", NO_DRAG, className)}>
@@ -434,11 +442,16 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   };
 
   const running = r.state === "running" || r.state === "queued";
+  // A pinned node never runs: its menu offers the unpin instead of Run.
   const menu: MenuItem[] = [
-    { label: "Run node", icon: Play, onSelect: () => ed.run([id]) },
-    { label: "Re-run", icon: RotateCcw, onSelect: () => ed.run([id], true) },
+    ...(data.pinned
+      ? []
+      : [
+          { label: "Run node", icon: Play, onSelect: () => ed.run([id]) },
+          { label: "Re-run", icon: RotateCcw, onSelect: () => ed.run([id], true) },
+        ]),
     ...(running ? [{ label: "Cancel", icon: Square, onSelect: () => ed.cancel(id) }] : []),
-    { label: data.pinned ? "Unpin result" : "Pin result", icon: data.pinned ? PinOff : Pin, onSelect: () => ed.update(id, { pinned: !data.pinned }), separatorBefore: true },
+    { label: data.pinned ? "Unpin result" : "Pin result", icon: data.pinned ? PinOff : Pin, onSelect: () => ed.update(id, { pinned: !data.pinned }), separatorBefore: !data.pinned },
     ...(r.outputs.some((x) => ["image", "video", "audio"].includes(x.o.kind)) ? [{ label: "Use result as an input", icon: ImagePlus, onSelect: () => ed.toInput(id) }] : []),
     ...baseMenu(ed, id),
   ];
@@ -479,19 +492,19 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => (running ? ed.cancel(id) : ed.run([id], !step && !!reused))}
+                  onClick={() => (running ? ed.cancel(id) : data.pinned ? ed.update(id, { pinned: false }) : ed.run([id], !step && !!reused))}
                   disabled={ed.running && !running}
                   className={cn(
                     "grid size-7 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-50",
-                    running ? "bg-muted text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:bg-primary/90",
+                    running || data.pinned ? "bg-muted text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:bg-primary/90",
                     NO_DRAG,
                   )}
-                  aria-label={running ? "Cancel" : step ? "Run node" : "Run node again"}
+                  aria-label={running ? "Cancel" : data.pinned ? "Unpin result" : step ? "Run node" : "Run node again"}
                 >
-                  {running ? <Square className="size-3" /> : step ? <Play className="size-3.5" /> : <RotateCcw className="size-3.5" />}
+                  {running ? <Square className="size-3" /> : data.pinned ? <PinOff className="size-3.5" /> : step ? <Play className="size-3.5" /> : <RotateCcw className="size-3.5" />}
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{running ? "Cancel" : step ? "Run this node (and what it needs)" : "Run it again"}</TooltipContent>
+              <TooltipContent>{running ? "Cancel" : data.pinned ? "Unpin to run it again" : step ? "Run this node (and what it needs)" : "Run it again"}</TooltipContent>
             </Tooltip>
           )}
         </div>

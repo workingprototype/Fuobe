@@ -648,7 +648,12 @@ export function effectiveOp(graph: CanvasGraph, n: CanvasNode): Operation | unde
   if (!model) return undefined;
   const built = buildRequest(graph, n, model);
   if ("error" in built) return undefined;
-  const op = inferOperation(model, withPlaceholders(built.request));
+  let op = inferOperation(model, withPlaceholders(built.request));
+  // Connected elements bring reference images (applyMentions on the server): text-only ops become edits / references.
+  if (graph.edges.some((e) => e.target === n.id && e.targetHandle === "elements")) {
+    if (op === "t2i" && supportsOp(model, "edit")) op = "edit";
+    else if (op === "t2v" && supportsOp(model, "ref2v")) op = "ref2v";
+  }
   return ops.includes(op) ? op : ops[0];
 }
 

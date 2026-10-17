@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Play, RotateCcw, Square, Upload } from "lucide-react";
+import { AlertCircle, PinOff, Play, RotateCcw, Square, Upload } from "lucide-react";
 import { useRef } from "react";
 import { getModel } from "@/lib/catalog";
 import { isGenerator, NODE_SPECS, nodeLabel, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
@@ -58,11 +58,11 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
         <EngineBadge model={model} />
         {gen && (
           <button
-            onClick={() => (running ? ed.cancel(node.id) : ed.run([node.id], !step))}
-            className={cn("grid size-9 shrink-0 place-items-center rounded-full", running ? "bg-muted" : "bg-primary text-primary-foreground")}
-            aria-label={running ? "Cancel" : step ? "Run node" : "Run it again"}
+            onClick={() => (running ? ed.cancel(node.id) : node.data.pinned ? ed.update(node.id, { pinned: false }) : ed.run([node.id], !step))}
+            className={cn("grid size-9 shrink-0 place-items-center rounded-full", running || node.data.pinned ? "bg-muted" : "bg-primary text-primary-foreground")}
+            aria-label={running ? "Cancel" : node.data.pinned ? "Unpin result" : step ? "Run node" : "Run it again"}
           >
-            {running ? <Square className="size-3.5" /> : step ? <Play className="size-4" /> : <RotateCcw className="size-4" />}
+            {running ? <Square className="size-3.5" /> : node.data.pinned ? <PinOff className="size-4" /> : step ? <Play className="size-4" /> : <RotateCcw className="size-4" />}
           </button>
         )}
       </header>

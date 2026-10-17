@@ -126,6 +126,8 @@ describe("canvas graph → plan", () => {
     expect(by.avatar.request).toMatchObject({ op: "avatar", inputs: { images: ["/api/files/u/face.png"] }, chain: [{ slot: "audio" }] });
     expect(by.avatar.deps).toEqual(["tts"]);
     expect(by.still.request.prompt).toBe("On a rooftop at night\n\nWith @Maya.");
+    // The element's reference images turn text-to-image into an edit (as the server's applyMentions does).
+    expect(effectiveOp(g, g.nodes.find((n) => n.id === "still")!)).toBe("edit");
     // Tool order: join's clip and the voice come before the nodes that use them.
     expect(plan.order.indexOf("tts")).toBeLessThan(plan.order.indexOf("avatar"));
     expect(plan.order.indexOf("c1")).toBeLessThan(plan.order.indexOf("join"));

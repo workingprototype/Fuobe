@@ -313,13 +313,32 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     [touch],
   );
 
+  /** Deleted nodes come back with their edges from the toast's Undo. */
+  const offerUndo = useCallback(
+    (count: number, before: { nodes: FlowNode[]; edges: Edge[] }) =>
+      toast(count === 1 ? "Node deleted" : `${count} nodes deleted`, {
+        duration: 5000,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setNodes(before.nodes);
+            setEdges(before.edges);
+            touch();
+          },
+        },
+      }),
+    [touch],
+  );
+
   const remove = useCallback(
     (nodeId: string) => {
+      const before = latest.current;
       setNodes((ns) => ns.filter((n) => n.id !== nodeId));
       setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
       touch();
+      offerUndo(1, before);
     },
-    [touch],
+    [touch, offerUndo],
   );
 
   const duplicate = useCallback(
@@ -362,10 +381,13 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
+      const removed = changes.filter((c) => c.type === "remove").length;
+      const before = latest.current;
       setNodes((ns) => applyNodeChanges(changes, ns));
       if (changes.some((c) => c.type === "remove" || c.type === "add" || c.type === "replace" || (c.type === "position" && !c.dragging))) touch();
+      if (removed) offerUndo(removed, before);
     },
-    [touch],
+    [touch, offerUndo],
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) => {
@@ -616,11 +638,17 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     const m = getModel(s.request.modelId);
     return m && isDemo(m);
   });
-  const summary = plan.steps.length
-    ? `${plan.steps.length} to run · ${planDemo ? "Demo · free" : plan.costUnknown ? "price unknown" : plan.costUsd === 0 ? "Free" : `≈ ${formatCost(plan.costUsd)}`}`
-    : generators.length
-      ? "Up to date"
-      : "";
+  const attention = new Set(plan.errors.map((e) => e.nodeId)).size;
+  const summary = [
+    plan.steps.length
+      ? `${plan.steps.length} to run · ${planDemo ? "Demo · free" : plan.costUnknown ? "price unknown" : plan.costUsd === 0 ? "Free" : `≈ ${formatCost(plan.costUsd)}`}`
+      : generators.length && !attention
+        ? "Up to date"
+        : "",
+    attention ? `${attention} need${attention === 1 ? "s" : ""} attention` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <EditorContext.Provider value={api}>
