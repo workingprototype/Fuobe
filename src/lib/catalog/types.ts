@@ -57,7 +57,8 @@ export type Operation =
   | "image-to-3d" // image → a 3D model (.glb), optionally a turntable video
   | "separate-audio" // audio or video → voice and background stems
   | "translate" // text → the same text in params.targetLanguage (LLM)
-  | "write"; // brief → text (LLM: scripts, ad copy, shot lists)
+  | "write" // brief → text (LLM: scripts, ad copy, shot lists)
+  | "vectorize"; // image → the same picture as an SVG
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -104,6 +105,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "separate-audio": "Separate voice",
   translate: "Translate",
   write: "Write",
+  vectorize: "Vectorize",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -151,6 +153,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "separate-audio": "audio",
   translate: "text",
   write: "text",
+  vectorize: "image",
 };
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
@@ -220,13 +223,20 @@ export interface FieldMap {
   endTime?: DurationField;
   /** Frames per second (frame sampling, images to video). */
   fps?: string;
-  /** Colour palette: hex strings converted to the API's shape. */
-  palette?: { key: string; format: "hex" | "rgb-object" | "rgb-array" | "ideogram" };
+  /**
+   * Colour palette: hex strings converted to the API's shape ("rgb-object" = Recraft on fal [{r,g,b}],
+   * "rgb-array" = Recraft on Higgsfield [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
+   * `background` names the API's background-colour field: a hex string sent as params.extra[background]
+   * is converted to the same shape.
+   */
+  palette?: { key: string; format: "hex" | "rgb-object" | "rgb-array" | "ideogram"; background?: string };
   /** A saved style id (Recraft styles, Soul 2.0 moodboards). */
   styleId?: string;
   /** How many layers to split an image into. */
   numLayers?: string;
   sourceLanguage?: string;
+  /** Second image field (inputs.images[1]): a try-on garment, a product shot's scene reference, a style image. */
+  image2?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
 }

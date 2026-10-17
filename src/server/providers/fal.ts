@@ -1,6 +1,6 @@
 import "server-only";
 import { createFalClient } from "@fal-ai/client";
-import { buildPayload, extractMedia } from "@/lib/catalog/payload";
+import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { ProviderError, type ProviderAdapter } from "./types";
 
@@ -74,7 +74,7 @@ export const falProvider: ProviderAdapter = {
     };
   },
 
-  async poll({ meta }) {
+  async poll({ meta, route }) {
     const status = (await falFetch(`${meta.statusUrl as string}?logs=1`)) as {
       status: string;
       queue_position?: number;
@@ -93,7 +93,8 @@ export const falProvider: ProviderAdapter = {
       if (status.error) return { state: "failed", error: status.error };
       try {
         const result = await falFetch(meta.responseUrl as string);
-        const outputs = extractMedia(result);
+        // Layers, text blocks, transcripts, 3D models and stems keep their structure (OutputFile.meta / text).
+        const outputs = extractOutputs(result, route?.op);
         if (!outputs.length) return { state: "failed", error: `No media in response: ${JSON.stringify(result).slice(0, 300)}` };
         // Seedance draft mode: keep the id that finishes this take at 1080p.
         const draftId = /"draft_id"\s*:\s*"([^"]+)"/.exec(JSON.stringify(result))?.[1];
