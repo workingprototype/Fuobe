@@ -432,11 +432,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (b.fps && fpsIn) values.fps = fpsIn;
   const fps = Number(values.fps ?? d.fps ?? 16);
   const start = Math.max(0, input.startTime ?? 0);
-  const window = input.endTime !== undefined ? Math.max(0, input.endTime - start) : input.duration;
+  const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : input.duration;
   if (b.startTime && input.startTime !== undefined) values.startTime = start;
   if (b.startFrame && input.startTime !== undefined) values.startFrame = Math.round(start * fps);
   if (b.duration) {
-    if (input.endTime !== undefined) values.duration = window;
+    if (input.endTime !== undefined) values.duration = span;
     else if (input.duration) values.duration = input.duration;
     else if (ctx.op === "trim") values.duration = 0; // from the start time to the end
   }
@@ -457,7 +457,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.width = Math.max(multiple, Math.floor((dims.width * k) / multiple) * multiple);
     values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
   }
-  if (b.frames && window) values.frames = computeFrames(window, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
+  if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
   // Drawn motion paths (normalised to the start frame) → one pixel point per output frame (Wan-Move).
   const paths = extra.motionPaths as MotionPaths | undefined;
   delete extra.motionPaths;
@@ -508,7 +508,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     if (b[k] && values[k] === undefined && values[prev] !== undefined) values[k] = values[prev];
   }
   for (const k of mediaKeys(manifest, workflow)) {
-    if (values[k] === undefined || values[k] === "") throw new ProviderError(`${MEDIA_HINT[k] ?? `Add the ${k} input`} — ${manifest.title.split(":")[0]} needs it`);
+    if (values[k] === undefined || values[k] === "") throw new ProviderError(MEDIA_HINT[k] ?? `Add the ${k} input`);
   }
 
   const bound = applyBindings(workflow, b, values);
