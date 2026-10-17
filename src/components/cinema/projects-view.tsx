@@ -1,0 +1,164 @@
+"use client";
+
+import { Clapperboard, Copy, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, Settings2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { toast } from "sonner";
+import { PageShell } from "@/components/page-shell";
+import { PageHeader } from "@/components/preset-gallery";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { CinemaProject } from "@/lib/catalog/cinema";
+import { formatCost, timeAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { useCinemaProjects, useUpdateProject } from "./hooks";
+import { ProjectDialog } from "./project-settings";
+
+/** A calm gradient for projects without a cover, stable per project. */
+export function projectHue(id: string): number {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+
+function Cover({ project, className }: { project: CinemaProject; className?: string }) {
+  const src = project.cover ?? project.stats?.cover;
+  const hue = projectHue(project.id);
+  if (src && /\.(mp4|webm|mov)(\?|$)/i.test(src))
+    return <video src={`${src}#t=0.1`} muted playsInline preload="metadata" className={cn("size-full object-cover", className)} />;
+  if (src)
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt="" loading="lazy" className={cn("size-full object-cover", className)} />;
+  return (
+    <div className={cn("grid size-full place-items-center", className)} style={{ background: `linear-gradient(135deg, oklch(0.42 0.06 ${hue}), oklch(0.26 0.04 ${(hue + 40) % 360}))` }}>
+      <Clapperboard className="size-7 text-white/70" />
+    </div>
+  );
+}
+
+function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettings: () => void }) {
+  const update = useUpdateProject(project.id);
+  const href = `/cinema/${project.id}`;
+  return (
+    <div className="group/card relative animate-fade-up">
+      <Link href={href} className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <div className="relative aspect-video overflow-hidden rounded-xl bg-muted">
+          <Cover project={project} className="transition-transform duration-300 ease-move group-hover/card:scale-[1.02]" />
+          {project.pinned && (
+            <span className="absolute top-2 left-2 grid size-7 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
+              <Pin className="size-3.5" />
+            </span>
+          )}
+        </div>
+        <div className="mt-2.5 min-w-0 px-0.5">
+          <h3 className="truncate text-[15px] font-medium">{project.name}</h3>
+          {project.description && <p className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">{project.description}</p>}
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            Updated {timeAgo(project.updatedAt)}
+            {project.stats ? ` · ${project.stats.items} take${project.stats.items === 1 ? "" : "s"}` : ""}
+            {project.stats?.spentUsd ? <span className="font-mono"> · ≈ {formatCost(project.stats.spentUsd)}</span> : null}
+            {project.costCapUsd != null ? <span className="font-mono"> / {formatCost(project.costCapUsd) || "$0"}</span> : null}
+          </p>
+        </div>
+      </Link>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="absolute top-2 right-2 grid size-8 place-items-center rounded-full bg-black/45 text-white opacity-100 backdrop-blur transition-opacity hover:bg-black/65 focus-visible:opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100 data-[state=open]:opacity-100"
+            aria-label={`${project.name} actions`}
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => update.mutate({ pinned: !project.pinned })}>
+            {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "Unpin" : "Pin"}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => window.open(href, "_blank")}>
+            <ExternalLink /> Open in new tab
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              void navigator.clipboard.writeText(new URL(href, window.location.origin).toString());
+              toast("Link copied");
+            }}
+          >
+            <Copy /> Copy link
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onSettings}>
+            <Settings2 /> Settings
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+export function CinemaProjects() {
+  const { data, isLoading } = useCinemaProjects();
+  const router = useRouter();
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<CinemaProject | null>(null);
+  return (
+    <PageShell wide>
+      <PageHeader title="Cinema Studio" description="Direct films shot by shot: genre, camera, lens, palette and light, with characters and locations that stay the same.">
+        <Button onClick={() => setCreating(true)}>
+          <Plus /> New project
+        </Button>
+      </PageHeader>
+      {isLoading ? (
+        <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i}>
+              <Skeleton className="aspect-video rounded-xl" />
+              <Skeleton className="mt-3 h-4 w-2/3" />
+              <Skeleton className="mt-2 h-3 w-1/3" />
+            </div>
+          ))}
+        </div>
+      ) : !data?.length ? (
+        <div className="mx-auto flex max-w-md flex-col items-center pt-[8vh] text-center">
+          <div className="grid size-14 place-items-center rounded-2xl bg-brand-faint text-brand-text">
+            <Clapperboard className="size-6" />
+          </div>
+          <h2 className="mt-5 font-heading text-[26px] leading-tight">Start your first production</h2>
+          <p className="mt-2 text-[15px] text-muted-foreground">Projects keep your generations, elements, and chats together – create one to start.</p>
+          <Button className="mt-6" onClick={() => setCreating(true)}>
+            <Plus /> New project
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {data.map((p) => (
+            <ProjectCard key={p.id} project={p} onSettings={() => setEditing(p)} />
+          ))}
+          <button
+            onClick={() => setCreating(true)}
+            className="flex aspect-video flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border-strong text-[13px] font-medium text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text"
+          >
+            <Plus className="size-5" /> New project
+          </button>
+        </div>
+      )}
+      <ProjectDialog
+        open={creating}
+        onOpenChange={setCreating}
+        onDone={(p) => {
+          setCreating(false);
+          if (p) router.push(`/cinema/${p.id}`);
+        }}
+      />
+      <ProjectDialog
+        open={!!editing}
+        onOpenChange={(o) => !o && setEditing(null)}
+        project={editing ?? undefined}
+        spentUsd={editing?.stats?.spentUsd}
+        onDone={() => setEditing(null)}
+        onDeleted={() => setEditing(null)}
+      />
+    </PageShell>
+  );
+}

@@ -1,0 +1,677 @@
+"use client";
+
+import {
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ArrowUp,
+  AtSign,
+  AudioLines,
+  Check,
+  ChevronDown,
+  Clapperboard,
+  Clock,
+  Copy as CopyIcon,
+  FileVideo,
+  Grid2x2,
+  ImageIcon,
+  ImagePlus,
+  Loader2,
+  Lock,
+  MapPin,
+  Maximize,
+  Plus,
+  RectangleHorizontal,
+  Sparkles,
+  UserRoundPlus,
+  Video,
+  Volume2,
+  VolumeX,
+  Wand2,
+  X,
+} from "lucide-react";
+import { nanoid } from "nanoid";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Kbd } from "@/components/ui/kbd";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { PromptInput, ELEMENT_ICONS, type PromptInputHandle } from "@/components/studio/prompt-input";
+import { ShotsEditor } from "@/components/studio/shots-editor";
+import { uploadFile, useAssets, useStatus } from "@/lib/api";
+import { getModel } from "@/lib/catalog";
+import {
+  BATCH,
+  CINEMA_MODELS,
+  DURATION,
+  GRID_SIZES,
+  GRID_TYPES,
+  HIGGSFIELD_ONLY,
+  IMAGE_ASPECTS,
+  IMAGE_RESOLUTIONS,
+  VIDEO_ASPECTS,
+  VIDEO_RESOLUTIONS,
+  checkReferences,
+  planCinema,
+  type DirectorSettings,
+} from "@/lib/catalog/cinema";
+import { findMentions, type StudioElement } from "@/lib/catalog/elements";
+import type { Engine, MediaKind } from "@/lib/catalog/types";
+import { formatCost } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { MoveChips, MovePicker } from "./camera-moves";
+import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } from "./director-panel";
+import { draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
+import { useCinemaGenerate } from "./hooks";
+import { firstFrame, mediaDuration } from "./media";
+
+const chip = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors";
+const chipIdle = "bg-secondary text-secondary-foreground hover:bg-accent";
+const chipOn = "bg-brand-faint text-brand-text hover:bg-brand-faint-hover";
+
+function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { id: T; label: string; icon?: typeof Video }[]; onChange: (v: T) => void; label: string }) {
+  return (
+    <div className="inline-flex h-8 shrink-0 rounded-full bg-muted p-0.5" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          onClick={() => onChange(o.id)}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full px-2.5 text-[12.5px] font-medium transition-colors",
+            value === o.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {o.icon && <o.icon className="size-3.5" />}
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PickChip<T extends string | number>({ icon: Icon, label, value, options, onChange, format }: { icon: typeof Video; label: string; value: T; options: T[]; onChange: (v: T) => void; format?: (v: T) => string }) {
+  const f = format ?? ((v: T) => String(v));
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className={cn(chip, chipIdle)} aria-label={label}>
+          <Icon className="size-3.5" />
+          {f(value)}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={String(value)} onValueChange={(v) => onChange(options.find((o) => String(o) === v)!)}>
+          {options.map((o) => (
+            <DropdownMenuRadioItem key={String(o)} value={String(o)}>
+              {f(o)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function DurationChip({ value, effective, onChange }: { value: number; effective?: number; onChange: (v: number) => void }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className={cn(chip, chipIdle)} aria-label="Duration">
+          <Clock className="size-3.5" />
+          {effective && effective !== value ? (
+            <span>
+              <span className="text-muted-foreground line-through">{value}s</span> {effective}s
+            </span>
+          ) : (
+            `${value}s`
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 space-y-3 p-3" align="start" side="top" collisionPadding={12}>
+        <div className="flex items-center justify-between">
+          <p className="text-[13px] font-medium">Duration</p>
+          <span className="font-mono text-[13px]">{value}s</span>
+        </div>
+        <Slider value={[value]} min={DURATION.min} max={DURATION.max} step={1} onValueChange={([v]) => onChange(v)} aria-label="Duration in seconds" />
+        <div className="flex flex-wrap gap-1">
+          {[4, 5, 8, 10, 15, 20, 30].map((d) => (
+            <button key={d} type="button" onClick={() => onChange(d)} className={cn("h-6 rounded-full px-2 font-mono text-[11.5px]", value === d ? "bg-primary text-primary-foreground" : "bg-secondary hover:bg-accent")}>
+              {d}s
+            </button>
+          ))}
+        </div>
+        {effective && effective !== value && <p className="text-[11.5px] text-muted-foreground">This model makes {effective}s clips — use Extend to make the scene longer.</p>}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function RefThumb({ r, index, startFrame, onRemove }: { r: RefItem; index: number; startFrame: boolean; onRemove: () => void }) {
+  const kindLabel = r.kind === "image" ? `Image ${index + 1}` : r.kind === "video" ? `Video ${index + 1}` : `Audio ${index + 1}`;
+  return (
+    <div className="group/ref relative size-14 shrink-0 overflow-hidden rounded-xl border bg-muted" title={r.name ?? kindLabel}>
+      {r.kind === "image" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={r.preview} alt="" className="size-full object-cover" />
+      ) : r.kind === "video" ? (
+        <video src={`${r.preview}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" />
+      ) : (
+        <span className="grid size-full place-items-center bg-brand-faint text-brand-text">
+          <AudioLines className="size-5" />
+        </span>
+      )}
+      <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-1 pt-2 pb-0.5 text-[9.5px] font-medium text-white">
+        {startFrame ? "Start frame" : kindLabel}
+        {r.duration && Number.isFinite(r.duration) ? ` · ${Math.round(r.duration)}s` : ""}
+      </span>
+      {r.uploading && (
+        <span className="absolute inset-0 grid place-items-center bg-background/60">
+          <Loader2 className="size-4 animate-spin" />
+        </span>
+      )}
+      <button type="button" onClick={onRemove} className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background" aria-label={`Remove ${kindLabel}`}>
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+const kindOf = (f: File): MediaKind => (f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : "image");
+
+/** Upload files into the reference tray (preview first, then the server URL; durations measured for clips). */
+export function useAddRefs(setDraft: (fn: (d: CinemaDraft) => Partial<CinemaDraft>) => void) {
+  return (files: FileList | File[]) => {
+    for (const f of [...files]) {
+      if (f.size > 200 * 1024 * 1024) {
+        toast.error("That file's over 200 MB. Try a smaller one.");
+        continue;
+      }
+      const id = nanoid(6);
+      const kind = kindOf(f);
+      const preview = URL.createObjectURL(f);
+      setDraft((d) => ({ refs: [...d.refs, { id, ref: "", preview, kind, name: f.name, uploading: true }] }));
+      if (kind === "video" || kind === "audio") void mediaDuration(preview, kind).then((duration) => setDraft((d) => ({ refs: d.refs.map((r) => (r.id === id ? { ...r, duration } : r)) })));
+      uploadFile(f)
+        .then((a) => setDraft((d) => ({ refs: d.refs.map((r) => (r.id === id ? { ...r, ref: a.url, preview: a.url, uploading: false } : r)) })))
+        .catch((e) => {
+          setDraft((d) => ({ refs: d.refs.filter((r) => r.id !== id) }));
+          toast.error((e as Error).message || "Upload failed. Please try again.");
+        });
+    }
+  };
+}
+
+function AddRef({ onFiles, onPick }: { onFiles: (f: FileList) => void; onPick: (r: RefItem) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const assets = useAssets(undefined, undefined);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex size-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-border-strong text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text"
+              aria-label="Add references"
+            >
+              <Plus className="size-4" />
+              <span className="text-[10px] font-medium">Add</span>
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Images, videos or audio as references · drop or paste anywhere</TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-[min(92vw,360px)] p-2" align="start" side="top" collisionPadding={12}>
+        <button
+          type="button"
+          onClick={() => input.current?.click()}
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] font-medium hover:bg-accent"
+        >
+          <ImagePlus className="size-4" /> Upload images, videos or audio
+        </button>
+        <p className="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">From your library</p>
+        <div className="grid max-h-56 grid-cols-4 gap-1 overflow-y-auto">
+          {(assets.data ?? []).slice(0, 40).map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => {
+                onPick({ id: nanoid(6), ref: a.url, preview: a.url, kind: a.kind, name: a.name ?? undefined });
+                setOpen(false);
+              }}
+              className="relative aspect-square overflow-hidden rounded-md bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Use ${a.name ?? a.kind}`}
+            >
+              {a.kind === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={a.url} alt="" loading="lazy" className="size-full object-cover" />
+              ) : a.kind === "video" ? (
+                <video src={`${a.url}#t=0.1`} muted preload="metadata" className="size-full object-cover" />
+              ) : (
+                <AudioLines className="m-auto size-4 text-muted-foreground" />
+              )}
+            </button>
+          ))}
+          {!assets.isLoading && !assets.data?.length && <p className="col-span-4 px-2 py-3 text-[12px] text-muted-foreground">Nothing in your library yet.</p>}
+        </div>
+        <input
+          ref={input}
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/mp4"
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) onFiles(e.target.files);
+            e.target.value = "";
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export interface PromptBarProps {
+  projectId: string;
+  folderId: string | null;
+  engine: Engine;
+  draft: CinemaDraft;
+  setDraft: (patch: Partial<CinemaDraft> | ((d: CinemaDraft) => Partial<CinemaDraft>)) => void;
+  settings: DirectorSettings;
+  onSettings: (patch: Partial<DirectorSettings>) => void;
+  palettes: { name: string; hex: string[] }[];
+  onPalettes: (p: { name: string; hex: string[] }[]) => void;
+  context: { higgsfield: boolean; cloudAllowed: boolean };
+  brief: string;
+  spentUsd: number;
+  costCapUsd: number | null;
+  elements: StudioElement[];
+  promptRef: React.RefObject<PromptInputHandle | null>;
+  onCast: () => void;
+  onLocation: () => void;
+}
+
+const ACTIONS: { id: BarAction; label: string; icon: typeof Video; hint: string }[] = [
+  { id: "generate", label: "New take", icon: Sparkles, hint: "Use the selected take only as context" },
+  { id: "extend-forward", label: "Extend", icon: ArrowRightToLine, hint: "Sequel: continue the take forward" },
+  { id: "extend-backward", label: "Prequel", icon: ArrowLeftToLine, hint: "What happened just before the take" },
+  { id: "edit", label: "Edit", icon: Wand2, hint: "Change something in the take (object, face, weather)" },
+];
+
+export function PromptBar(props: PromptBarProps) {
+  const { projectId, folderId, engine, draft, setDraft, settings, onSettings, context, brief, spentUsd, costCapUsd, elements, promptRef } = props;
+  const generate = useCinemaGenerate(projectId);
+  const status = useStatus().data;
+  const [movesOpen, setMovesOpen] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const addRefs = useAddRefs((fn) => setDraft(fn));
+  const input = useMemo(() => draftToInput(draft, engine, settings), [draft, engine, settings]);
+  const plan = useMemo(() => planCinema({ ...input, brief }, context), [input, brief, context]);
+  const model = plan.model;
+  const mentions = useMemo(() => findMentions(draft.prompt, elements), [draft.prompt, elements]);
+  const characters = mentions.filter((e) => e.kind === "character");
+  const refCheck = checkReferences({
+    images: draft.refs.filter((r) => r.kind === "image").length,
+    videos: draft.refs.filter((r) => r.kind === "video").map((r) => r.duration ?? NaN),
+    audios: draft.refs.filter((r) => r.kind === "audio").map((r) => r.duration ?? NaN),
+    elements: mentions.length,
+  });
+  const demo = !!status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured);
+  const cost = demo ? 0 : plan.costUsd;
+  const overCap = costCapUsd != null && cost != null && cost > 0 && spentUsd + cost > costCapUsd + 1e-9;
+  const uploading = draft.refs.some((r) => r.uploading);
+  const blocker = uploading
+    ? "Uploading…"
+    : refCheck ?? plan.blocker ?? (overCap ? `Over the project's ${formatCost(costCapUsd)} limit (≈ ${formatCost(spentUsd)} spent) — raise it in project settings` : undefined);
+  const video = draft.mode === "video";
+  const action = input.action;
+  const busy = generate.isPending || preparing;
+  const effectiveDuration = plan.steps.find((s) => s.key === "main")?.request.params?.duration;
+
+  const submit = async () => {
+    if (busy) return;
+    if (blocker) {
+      toast.error(blocker);
+      return;
+    }
+    let frame: string | undefined;
+    const src = draft.source;
+    if (src?.kind === "video" && (action === "extend-backward" || (action === "edit" && engine === "open"))) {
+      setPreparing(true);
+      frame = (await firstFrame(src.url)) ?? undefined;
+      setPreparing(false);
+    }
+    generate.mutate(
+      { input: draftToInput(draft, engine, settings, frame), folderId },
+      {
+        onSuccess: (r) => toast.success(r.items.length > 1 ? `${r.items.length} jobs queued` : "Queued", { duration: 1500 }),
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+  const submitRef = useRef(submit);
+  useEffect(() => {
+    submitRef.current = submit;
+  });
+  // ⌘/Ctrl+Enter generates from anywhere in the workspace (the prompt's own Enter already does).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      void submitRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const onPrompt = (v: string) => {
+    // Typing "#" opens the camera-move picker (the # itself doesn't stay in the prompt).
+    const el = document.activeElement as HTMLTextAreaElement | null;
+    const caret = el?.tagName === "TEXTAREA" ? (el.selectionStart ?? v.length) : v.length;
+    if (video && v.length === draft.prompt.length + 1 && v[caret - 1] === "#" && (caret === 1 || /\s/.test(v[caret - 2]))) {
+      setDraft({ prompt: v.slice(0, caret - 1) + v.slice(caret) });
+      setMovesOpen(true);
+      return;
+    }
+    setDraft({ prompt: v });
+  };
+
+  const modelKey = `${draft.mode}:${engine}` as const;
+  const modelList = CINEMA_MODELS[draft.mode][engine];
+  const pickable = action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid");
+  const placeholder = video
+    ? action === "edit"
+      ? "Describe the change, e.g. “make it snow”, “replace the car with a horse”"
+      : action === "extend-forward"
+        ? "What happens next? (optional)"
+        : action === "extend-backward"
+          ? "What happened just before? (optional)"
+          : "Describe your scene – use @ to add characters & locations, # for camera moves"
+    : draft.imageTool === "grid"
+      ? "Describe the scene – the whole grid shares it"
+      : "Describe your still – use @ to add characters & locations";
+
+  return (
+    <div
+      className="group/composer w-full rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+      onPaste={(e) => {
+        const files = [...e.clipboardData.files];
+        if (files.length) {
+          e.preventDefault();
+          addRefs(files);
+        }
+      }}
+    >
+      {/* Selected take: extend forward / backward or edit it */}
+      {video && draft.source?.kind === "video" && (
+        <div className="flex flex-wrap items-center gap-2 px-1 pb-2">
+          <span className="relative h-9 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+            <video src={`${draft.source.url}#t=0.1`} muted playsInline preload="metadata" className="size-full object-cover" />
+          </span>
+          <span className="min-w-0 text-[12px] text-muted-foreground">
+            <span className="block truncate font-medium text-foreground">{draft.source.label}</span>
+            Selected take
+          </span>
+          <div className="scrollbar-none flex max-w-full gap-0.5 overflow-x-auto rounded-full bg-muted p-0.5" role="radiogroup" aria-label="What to do with the take">
+            {ACTIONS.map((a) => (
+              <Tooltip key={a.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.action === a.id}
+                    onClick={() => setDraft({ action: a.id })}
+                    className={cn(
+                      "inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium",
+                      draft.action === a.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <a.icon className="size-3.5" /> {a.label}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{a.hint}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+          <button type="button" onClick={() => setDraft({ source: null, action: "generate" })} className="ml-auto grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Clear the selected take">
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* References */}
+      <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-0.5 pb-2">
+        {(() => {
+          const n: Record<string, number> = {};
+          return draft.refs.map((r) => {
+            const i = (n[r.kind] = (n[r.kind] ?? -1) + 1);
+            return <RefThumb key={r.id} r={r} index={i} startFrame={r.kind === "image" && i === 0 && video && action === "generate"} onRemove={() => setDraft((d) => ({ refs: d.refs.filter((x) => x.id !== r.id) }))} />;
+          });
+        })()}
+        <AddRef onFiles={addRefs} onPick={(r) => setDraft((d) => ({ refs: [...d.refs, r] }))} />
+        {!draft.refs.length && <span className="text-[12px] text-subtle-foreground">Start frame, references, clips or audio — or @ a character</span>}
+      </div>
+
+      {video && <MoveChips moves={draft.moves} onChange={(moves) => setDraft({ moves })} />}
+
+      <PromptInput ref={promptRef} value={draft.prompt} onChange={onPrompt} onSubmit={() => void submit()} placeholder={placeholder} elements={elements} />
+
+      {video && draft.multiShot.mode === "manual" && (
+        <ShotsEditor
+          model={model}
+          shots={draft.multiShot.shots.length ? draft.multiShot.shots : [{ prompt: "", duration: 3 }]}
+          onChange={(shots) => setDraft({ multiShot: shots ? { mode: "manual", shots } : { mode: "off", shots: [] } })}
+        />
+      )}
+
+      {mentions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+          {mentions.map((el) => {
+            const Icon = ELEMENT_ICONS[el.kind];
+            const emo = settings.emotions?.[el.handle.toLowerCase()];
+            return (
+              <span key={el.id} className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background pr-2.5 pl-0.5 text-[12px] font-medium">
+                <span className="grid size-6 place-items-center overflow-hidden rounded-full bg-muted">
+                  {el.references[0] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={el.references[0]} alt="" className="size-full object-cover" />
+                  ) : (
+                    <Icon className="size-3.5" />
+                  )}
+                </span>
+                {el.name}
+                {emo && <span className="text-[11px] text-muted-foreground">· {emo.family}</span>}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Director's Panel */}
+      <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-0.5 pb-1.5 sm:flex-wrap sm:overflow-visible">
+        <FilmSetupChip settings={settings} onChange={onSettings} mode={draft.mode} />
+        <CameraChip settings={settings} onChange={onSettings} mode={draft.mode} engine={engine} moves={draft.moves} onMovesChange={(moves) => setDraft({ moves })} />
+        <PaletteChip settings={settings} onChange={onSettings} engine={engine} saved={props.palettes} onSave={props.onPalettes} />
+        <LightingChip settings={settings} onChange={onSettings} />
+        <EmotionChip settings={settings} onChange={onSettings} characters={characters} />
+      </div>
+
+      {/* Generation settings */}
+      <div className="flex items-end gap-2">
+        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
+          <Segmented
+            label="Mode"
+            value={draft.mode}
+            onChange={(mode) => setDraft({ mode })}
+            options={[
+              { id: "video", label: "Video", icon: Video },
+              { id: "image", label: "Image", icon: ImageIcon },
+            ]}
+          />
+          {!video && (
+            <Segmented
+              label="Image tool"
+              value={draft.imageTool}
+              onChange={(imageTool) => setDraft({ imageTool })}
+              options={[
+                { id: "still", label: "Still" },
+                { id: "grid", label: "Grid", icon: Grid2x2 },
+              ]}
+            />
+          )}
+          {!video && draft.imageTool === "grid" && (
+            <>
+              <PickChip icon={Grid2x2} label="Grid size" value={draft.grid.size} options={GRID_SIZES.map((g) => g.id)} onChange={(size) => setDraft((d) => ({ grid: { ...d.grid, size } }))} format={(v) => GRID_SIZES.find((g) => g.id === v)!.name} />
+              <PickChip icon={Clapperboard} label="Grid type" value={draft.grid.type} options={GRID_TYPES.map((g) => g.id)} onChange={(type) => setDraft((d) => ({ grid: { ...d.grid, type } }))} format={(v) => GRID_TYPES.find((g) => g.id === v)!.name} />
+            </>
+          )}
+
+          {/* Model */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={!pickable}>
+              <button type="button" className={cn(chip, chipIdle, "max-w-[220px] disabled:opacity-100")} aria-label="Model">
+                <Sparkles className="size-3.5 shrink-0" />
+                <span className="truncate">{model.name}</span>
+                {pickable && <ChevronDown className="size-3 shrink-0 opacity-60" />}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" className="w-72">
+              <DropdownMenuLabel>{engine === "open" ? "Open-source models" : "Cloud models"}</DropdownMenuLabel>
+              {modelList.map((id) => {
+                const m = getModel(id);
+                if (!m) return null;
+                const locked = HIGGSFIELD_ONLY.has(id) && !context.higgsfield;
+                const sel = model.id === id;
+                return (
+                  <DropdownMenuItem key={id} disabled={locked} onClick={() => setDraft((d) => ({ models: { ...d.models, [modelKey]: id } }))} className="items-start">
+                    <span className="mt-0.5 w-4">{sel && <Check className="size-3.5" />}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1 text-[13px] font-medium">
+                        {m.name} {locked && <Lock className="size-3" />}
+                      </span>
+                      <span className="block text-[11.5px] leading-snug text-muted-foreground">{locked ? "Needs a Higgsfield key (Settings)" : m.tagline}</span>
+                    </span>
+                  </DropdownMenuItem>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+                {engine === "open" ? "The Director is written into the prompt; camera moves use camera LoRAs or Wan Fun Camera where they exist." : "Cinema Studio 4.0 reads the Director natively; the others get it written into the prompt."}
+              </p>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={() => promptRef.current?.startMention()} className={cn("grid size-8 shrink-0 place-items-center rounded-full", chipIdle)} aria-label="Add an element">
+                <AtSign className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Add a character, location or prop · type @</TooltipContent>
+          </Tooltip>
+          {video && (
+            <MovePicker
+              open={movesOpen}
+              onOpenChange={(o) => {
+                setMovesOpen(o);
+                if (!o) requestAnimationFrame(() => promptRef.current?.focus());
+              }}
+              engine={engine}
+              selected={draft.moves}
+              onPick={(slug) => setDraft((d) => ({ moves: [...d.moves, slug] }))}
+            />
+          )}
+
+          <PickChip icon={RectangleHorizontal} label="Aspect ratio" value={draft.aspect[draft.mode]} options={video ? VIDEO_ASPECTS : IMAGE_ASPECTS} onChange={(v) => setDraft((d) => ({ aspect: { ...d.aspect, [d.mode]: v } }))} />
+          {video && action !== "edit" && <DurationChip value={draft.duration} effective={effectiveDuration} onChange={(duration) => setDraft({ duration })} />}
+          <PickChip
+            icon={Maximize}
+            label="Resolution"
+            value={draft.resolution[draft.mode]}
+            options={video ? VIDEO_RESOLUTIONS : IMAGE_RESOLUTIONS}
+            onChange={(v) => setDraft((d) => ({ resolution: { ...d.resolution, [d.mode]: v } }))}
+          />
+          {action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid") && (
+            <PickChip icon={CopyIcon} label={video ? "Takes" : "Images"} value={draft.batch} options={Array.from({ length: BATCH.max }, (_, i) => i + 1)} onChange={(batch) => setDraft({ batch })} format={(v) => `×${v}`} />
+          )}
+          {video && model.options.audio === true && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" onClick={() => setDraft((d) => ({ audio: !d.audio }))} className={cn(chip, draft.audio ? chipOn : chipIdle)} aria-pressed={draft.audio} aria-label="Audio">
+                  {draft.audio ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />} Audio
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{draft.audio ? "This generation will include generated audio." : "Silent take"}</TooltipContent>
+            </Tooltip>
+          )}
+          {video && action === "generate" && (
+            <PickChip
+              icon={FileVideo}
+              label="Multi-shot"
+              value={draft.multiShot.mode}
+              options={["off", "auto", "manual"]}
+              onChange={(mode) => setDraft((d) => ({ multiShot: { mode, shots: mode === "manual" && !d.multiShot.shots.length ? [{ prompt: "", duration: 3 }, { prompt: "", duration: 3 }] : d.multiShot.shots } }))}
+              format={(v) => (v === "off" ? "Single shot" : v === "auto" ? "Multi-shot · Auto" : "Multi-shot · Manual")}
+            />
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={props.onCast} className={cn(chip, chipIdle)} aria-label="Soul Cast: build a character">
+                <UserRoundPlus className="size-3.5" /> Cast
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Soul Cast: build an AI actor and save it as a character</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={props.onLocation} className={cn(chip, chipIdle)} aria-label="Soul Location: build a location">
+                <MapPin className="size-3.5" /> Location
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Soul Location: keep every scene in the same world</TooltipContent>
+          </Tooltip>
+        </div>
+        <span className={cn("hidden shrink-0 font-mono text-[12px] sm:inline", overCap ? "text-destructive" : "text-muted-foreground")}>
+          {demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : ""}
+        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              onClick={() => void submit()}
+              disabled={busy}
+              aria-label="Generate"
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {blocker ?? (
+              <span className="flex items-center gap-1.5">
+                Generate{plan.outputs > 1 ? ` ${plan.outputs}` : ""} <Kbd>⌘</Kbd>
+                <Kbd>↵</Kbd>
+              </span>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {(plan.notes.length > 0 || preparing) && (
+        <p className="px-2 pt-1.5 text-[11.5px] leading-snug text-muted-foreground">
+          {preparing ? "Reading the take's first frame…" : plan.notes.slice(0, 3).join(" · ")}
+        </p>
+      )}
+      {(blocker && !uploading && (refCheck || overCap)) && <p className="px-2 pt-1 text-[11.5px] text-destructive">{blocker}</p>}
+      <span className="sr-only" aria-live="polite">
+        {cost != null ? `Estimated cost ${demo ? "free in demo mode" : formatCost(cost)}` : ""}
+      </span>
+    </div>
+  );
+}

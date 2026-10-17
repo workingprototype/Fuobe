@@ -74,6 +74,7 @@ const NAV = [
   {
     label: "Studios",
     items: [
+      { href: "/cinema", label: "Cinema Studio", icon: Clapperboard },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },

@@ -1,7 +1,17 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
-import { SWATCH_PLACEHOLDER, planCinema, withPlaceholders, type CinemaContext, type CinemaGenerateInput, type CinemaPlan, type CinemaStep } from "@/lib/catalog/cinema";
+import {
+  SWATCH_PLACEHOLDER,
+  planCinema,
+  withPlaceholders,
+  type CinemaContext,
+  type CinemaGenerateInput,
+  type CinemaPlan,
+  type CinemaStep,
+  type CinemaTakeInfo,
+  type DirectorSettings,
+} from "@/lib/catalog/cinema";
 import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { CinemaError, addItems, getProject, spentUsd } from "./cinema";
 import { createGenerations, previewGeneration } from "./generations";
@@ -39,8 +49,11 @@ export function swatchUrl(hex: string[]): string {
   return asset.url;
 }
 
+/** A generate request from the workspace: the brief always comes from the project, the Director settings unless sent. */
+export type CinemaRequest = Omit<CinemaGenerateInput, "settings" | "brief"> & { settings?: DirectorSettings };
+
 /** The plan with this project's brief and (unless the request carries its own) Director settings. */
-export function planForProject(projectId: string, input: CinemaGenerateInput): CinemaPlan {
+export function planForProject(projectId: string, input: CinemaRequest): CinemaPlan {
   const project = getProject(projectId);
   if (!project) throw new CinemaError("Project not found", 404);
   return planCinema({ ...input, settings: input.settings ?? project.director, brief: project.brief.body }, cinemaContext());
@@ -73,7 +86,7 @@ export interface CinemaRunResult {
  * Plan, check the project's cost cap, create the chained generations and record them in the project
  * (in `folderId`, the scene the user is looking at).
  */
-export function generateInProject(projectId: string, input: CinemaGenerateInput, folderId: string | null = null): CinemaRunResult {
+export function generateInProject(projectId: string, input: CinemaRequest, folderId: string | null = null): CinemaRunResult {
   const project = getProject(projectId);
   if (!project) throw new CinemaError("Project not found", 404);
   const plan = planForProject(projectId, input);
@@ -91,6 +104,13 @@ export function generateInProject(projectId: string, input: CinemaGenerateInput,
     }
   }
 
+  const take: CinemaTakeInfo = {
+    mode: input.mode,
+    action: input.action,
+    prompt: input.prompt.slice(0, 4000),
+    ...(input.moves?.length ? { moves: input.moves } : {}),
+    ...(input.action === "grid" && input.grid ? { grid: input.grid } : {}),
+  };
   const batchId = nanoid(10);
   const made: Record<string, Generation[]> = {};
   const all: Generation[] = [];
@@ -110,9 +130,9 @@ export function generateInProject(projectId: string, input: CinemaGenerateInput,
     }
   } catch (e) {
     // Keep what already started visible in the project, then report the step that failed.
-    if (all.length) addItems(projectId, all.map((g) => g.id), folderId);
+    if (all.length) addItems(projectId, all.map((g) => g.id), folderId, take);
     throw new CinemaError((e as Error).message, 422);
   }
-  addItems(projectId, all.map((g) => g.id), folderId);
+  addItems(projectId, all.map((g) => g.id), folderId, take);
   return { items: all, plan: { notes: plan.notes, costUsd: plan.costUsd, outputs: plan.outputs, modelId: plan.model.id } };
 }

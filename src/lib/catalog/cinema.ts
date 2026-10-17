@@ -140,6 +140,15 @@ export interface CinemaTile {
   col: number;
 }
 
+/** What the user asked for when a take was made (the generation itself stores the compiled prompt). */
+export interface CinemaTakeInfo {
+  mode: CinemaMode;
+  action: CinemaAction;
+  prompt: string;
+  moves?: string[];
+  grid?: { size: GridSize; type: GridType };
+}
+
 /** A generation's membership in a project (and its folder = scene). */
 export interface CinemaItem {
   generationId: string;
@@ -147,6 +156,7 @@ export interface CinemaItem {
   createdAt: number;
   /** Grid contact sheets: the tiles cut from it in the browser, saved as uploads. */
   tiles?: CinemaTile[];
+  take?: CinemaTakeInfo;
 }
 
 /** One shot the AI Director proposes; "Load into prompt bar" copies it into the composer. */

@@ -1,9 +1,9 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import type { CinemaFolder, CinemaItem, CinemaProject, CinemaTile, DirectorMessage, DirectorSettings } from "@/lib/catalog/cinema";
+import type { CinemaFolder, CinemaItem, CinemaProject, CinemaTakeInfo, CinemaTile, DirectorMessage, DirectorSettings } from "@/lib/catalog/cinema";
 import type { Generation } from "@/lib/catalog/types";
 import { db } from "./db";
-import { deleteGeneration, getGeneration, listGenerations } from "./generations";
+import { createGenerations, deleteGeneration, getGeneration, listGenerations } from "./generations";
 
 /**
  * Cinema Studio projects: Director settings, brief and AI Director chat per project, nested folders
@@ -91,8 +91,14 @@ const toFolder = (r: FolderRow): CinemaFolder => ({
 });
 
 const toItem = (r: ItemRow): CinemaItem => {
-  const meta = parse<{ tiles?: CinemaTile[] }>(r.meta_json, {});
-  return { generationId: r.generation_id, folderId: r.folder_id, createdAt: r.created_at, ...(meta.tiles?.length ? { tiles: meta.tiles } : {}) };
+  const meta = parse<{ tiles?: CinemaTile[]; take?: CinemaTakeInfo }>(r.meta_json, {});
+  return {
+    generationId: r.generation_id,
+    folderId: r.folder_id,
+    createdAt: r.created_at,
+    ...(meta.tiles?.length ? { tiles: meta.tiles } : {}),
+    ...(meta.take ? { take: meta.take } : {}),
+  };
 };
 
 /** A generation that still exists (soft-deleted rows from the Trash, when there is one, are left out). */
@@ -262,7 +268,12 @@ export function descendants(projectId: string, folderId: string): Set<string> {
   let grew = true;
   while (grew) {
     grew = false;
-    for (const f of folders) if (f.parentId && out.has(f.parentId) && !out.has(f.id)) (out.add(f.id), (grew = true));
+    for (const f of folders) {
+      if (f.parentId && out.has(f.parentId) && !out.has(f.id)) {
+        out.add(f.id);
+        grew = true;
+      }
+    }
   }
   return out;
 }
@@ -331,7 +342,7 @@ export function deleteFolder(projectId: string, id: string): void {
 // ---------------------------------------------------------------------------
 // Items: the project's generations
 
-export type CinemaGeneration = Generation & { folderId: string | null; tiles?: CinemaTile[] };
+export type CinemaGeneration = Generation & { folderId: string | null; tiles?: CinemaTile[]; take?: CinemaTakeInfo };
 
 export interface ItemQuery {
   /** A folder id; null = the project root only; undefined = everything in the project. */
@@ -355,7 +366,7 @@ export function listItems(projectId: string, q: ItemQuery = {}): CinemaGeneratio
     if (!g) continue;
     if (q.favorites && !g.favorite) continue;
     const item = toItem(r);
-    out.push({ ...g, folderId: item.folderId, ...(item.tiles ? { tiles: item.tiles } : {}) });
+    out.push({ ...g, folderId: item.folderId, ...(item.tiles ? { tiles: item.tiles } : {}), ...(item.take ? { take: item.take } : {}) });
   }
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -370,12 +381,13 @@ export function listStudioGenerations(): CinemaGeneration[] {
     .map((g) => ({ ...g, folderId: folders.get(g.id) ?? null }));
 }
 
-export function addItems(projectId: string, generationIds: string[], folderId: string | null = null): void {
+export function addItems(projectId: string, generationIds: string[], folderId: string | null = null, take?: CinemaTakeInfo): void {
   requireProject(projectId);
   if (folderId) checkParent(projectId, folderId);
   const now = Date.now();
-  const ins = db().prepare("INSERT OR IGNORE INTO cinema_items (project_id, generation_id, folder_id, meta_json, created_at) VALUES (?, ?, ?, NULL, ?)");
-  db().transaction(() => generationIds.forEach((id, i) => ins.run(projectId, id, folderId, now + i)))();
+  const meta = take ? JSON.stringify({ take }) : null;
+  const ins = db().prepare("INSERT OR IGNORE INTO cinema_items (project_id, generation_id, folder_id, meta_json, created_at) VALUES (?, ?, ?, ?, ?)");
+  db().transaction(() => generationIds.forEach((id, i) => ins.run(projectId, id, folderId, meta, now + i)))();
   touch(projectId);
 }
 
@@ -404,6 +416,27 @@ export function setFavorites(projectId: string, generationIds: string[], favorit
   requireProject(projectId);
   const up = db().prepare("UPDATE generations SET favorite = ?, updated_at = ? WHERE id = ? AND id IN (SELECT generation_id FROM cinema_items WHERE project_id = ?)");
   db().transaction(() => generationIds.forEach((id) => up.run(favorite ? 1 : 0, Date.now(), id, projectId)))();
+}
+
+/**
+ * Run a failed or canceled take again, in the same folder. A chained step that already got its
+ * inputs runs on its own; one whose earlier step failed needs that step retried first.
+ */
+export function retryItem(projectId: string, generationId: string): Generation[] {
+  const r = db().prepare("SELECT * FROM cinema_items WHERE project_id = ? AND generation_id = ?").get(projectId, generationId) as ItemRow | undefined;
+  const g = r ? liveGeneration(generationId) : null;
+  if (!r || !g) throw new CinemaError("That take isn't in this project", 404);
+  const req = { ...g.request };
+  if (req.chain?.length || req.chainFrom) {
+    const filled = req.chain?.every((c) => (c.slot === "images" || c.slot === "videos" ? (req.inputs?.[c.slot]?.length ?? 0) > 0 : c.slot === "prompt" ? !!req.prompt : !!req.inputs?.[c.slot]));
+    if (!filled) throw new CinemaError("An earlier step of this take didn't finish — retry that one first", 422);
+    delete req.chain;
+    delete req.chainFrom;
+  }
+  const created = createGenerations(req, g.batchId ? { batchId: g.batchId } : {});
+  const item = toItem(r);
+  addItems(projectId, created.map((x) => x.id), item.folderId, item.take);
+  return created;
 }
 
 export function setTiles(projectId: string, generationId: string, tiles: CinemaTile[]): CinemaItem {
