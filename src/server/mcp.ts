@@ -13,9 +13,10 @@ import { engineMode } from "./settings";
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "fuobe", title: "Fuobe studio", version: "1.0.0" };
 const INSTRUCTIONS =
-  "Fuobe is an AI image, video and audio studio (paid cloud models and open-source ComfyUI workflows). " +
-  "Look up models with search_models, price a plan with estimate_cost and tell the user the cost before you call generate or create_storyboard. " +
-  "Generations run in the background: poll check_generations (wait_seconds up to 120) for output URLs. Output URLs are paths on this Fuobe server.";
+  "Fuobe is an AI image, video and audio studio (paid cloud models and open-source ComfyUI workflows); it also transcribes, translates and writes text and turns images into 3D models. " +
+  "Look up models with search_models (kinds image, video, audio, text, model3d), price a plan with estimate_cost and tell the user the cost before you call generate or create_storyboard. " +
+  'Chain steps in one generate call with "after" (a still, then animate it). ' +
+  "Generations run in the background: poll check_generations (wait_seconds up to 120) for output URLs; text results come back inline. Output URLs are paths on this Fuobe server.";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";

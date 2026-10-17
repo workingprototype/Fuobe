@@ -1,13 +1,15 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { modelsFor } from "@/lib/catalog";
-import { OPERATION_LABELS, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
+import { getModel, modelsFor } from "@/lib/catalog";
+import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type AssistItem, type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
+import { createPipeline } from "../chains";
 import { listElements } from "../elements";
-import { createGenerations, getGeneration, listGenerations, previewGeneration } from "../generations";
+import { createGenerations, getGeneration, listGenerations, outputKind, previewChained, previewGeneration } from "../generations";
 import { provider } from "../providers";
+import { llmBackends } from "../providers/llm";
 import { engineMode } from "../settings";
 import { readRef } from "../storage";
 import { createStoryboard } from "../storyboard";
@@ -44,19 +46,21 @@ const ref = z.string().describe("A file URL from the chat: an attachment or an e
 // ---------------------------------------------------------------------------
 // search_models
 
-const KINDS = ["image", "video", "audio"] as const;
+/** Output kinds: "text" = transcripts, translations and scripts; "model3d" = 3D models (.glb). */
+const KINDS = ["image", "video", "audio", "text", "model3d"] as const;
 
 function summarize(m: ModelDef) {
   const o = m.options;
-  const configured = m.routes.some((r) => provider(r.provider).isConfigured());
+  const local = m.routes.some((r) => r.provider === "llm");
+  const configured = m.routes.some((r) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured()));
   return {
     id: m.id,
     name: m.name,
     vendor: m.vendor,
-    engine: m.engine === "open" ? "open source (ComfyUI)" : "paid cloud API",
+    engine: m.engine === "open" ? (local ? "open source (Ollama, on this machine)" : "open source (ComfyUI)") : local ? "Claude (or Ollama when no key is set)" : "paid cloud API",
     about: m.tagline,
     does: [...new Set(m.routes.map((r) => r.op))].map((op) => `${op} (${OPERATION_LABELS[op]})`),
-    price: m.engine === "open" ? "free (your GPU)" : m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}` : "unknown",
+    price: m.engine === "open" ? (local ? "free (your machine)" : "free (your GPU)") : m.pricing ? `$${m.pricing.usd} per ${m.pricing.unit}${m.pricing.note ? ` — ${m.pricing.note}` : ""}` : "unknown",
     connected: configured,
     ...(o.aspectRatios && { aspectRatios: o.aspectRatios }),
     ...(o.resolutions && { resolutions: o.resolutions }),
@@ -68,6 +72,7 @@ function summarize(m: ModelDef) {
     ...(o.multiShot && { multiShot: `up to ${o.multiShot.maxShots} shots` }),
     ...(o.voices?.length && { voices: o.voices.slice(0, 12).map((v) => v.id) }),
     ...(o.voiceClone && { voiceClone: true }),
+    ...(o.languages?.length && { languages: o.languages.length > 12 ? `${o.languages.slice(0, 12).join(", ")}…` : o.languages.join(", ") }),
     ...(o.presets && { needs: o.presets.required ? `a ${o.presets.label} (pick in the studio)` : undefined }),
   };
 }
@@ -77,8 +82,13 @@ const searchModels = defineTool({
   description:
     "Look up the models this studio can run for a kind of output. Call it before generate whenever you haven't already looked up models for this kind of job in this chat, and whenever the user names a model, asks what's best or cheapest, or wants a capability (audio, end frame, multi-shot, a voice). Returns ids, what each does, price, options and whether a provider is connected.",
   schema: z.object({
-    kind: z.enum(KINDS).describe("Output kind."),
-    task: z.string().optional().describe("Operation id to filter by, e.g. t2i, edit, t2v, i2v, flf2v, ref2v, extend, lipsync, avatar, tts, upscale-image."),
+    kind: z.enum(KINDS).describe("Output kind: image, video, audio, text (transcripts, translations, scripts) or model3d (3D models)."),
+    task: z
+      .string()
+      .optional()
+      .describe(
+        "Operation id to filter by, e.g. t2i, edit, t2v, i2v, flf2v, ref2v, extend, lipsync, avatar, tts, upscale-image, layers, text-layers, trim, transcribe, captions, mux, separate-audio, translate, write, image-to-3d.",
+      ),
     query: z.string().optional().describe("Words to match in the model name, vendor or description, e.g. 'kling', 'cheap', 'photoreal'."),
   }),
   async run({ kind, task, query }, ctx) {
@@ -144,8 +154,24 @@ function genSummary(id: string) {
     ...(g.progress !== null && g.status === "running" && { progress: g.progress }),
     ...(g.error && { error: g.error }),
     ...(g.provider === "mock" && { demo: true }),
-    outputs: g.outputs.map((o) => ({ url: o.url, kind: o.kind, ...(o.draftId && { draftId: o.draftId }) })),
+    outputs: g.outputs.map((o) => ({
+      url: o.url,
+      kind: o.kind,
+      ...(o.draftId && { draftId: o.draftId }),
+      // Text results are read, not opened: a transcript, translation or script comes back inline.
+      ...(o.text !== undefined && { text: o.text.length > 6000 ? `${o.text.slice(0, 6000)}… (${o.text.length} characters; the full text is at the URL)` : o.text }),
+      ...(o.meta && outputMeta(o.meta)),
+    })),
   };
+}
+
+/** The structured extras worth telling a model about (layer names and boxes, stems, cue counts). */
+function outputMeta(meta: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const k of ["name", "z", "bbox", "stem", "language", "turntable", "demo"]) if (meta[k] !== undefined) out[k] = meta[k];
+  if (Array.isArray(meta.cues)) out.cues = meta.cues.length;
+  if (Array.isArray(meta.textBlocks)) out.textBlocks = meta.textBlocks;
+  return Object.keys(out).length ? { meta: out } : {};
 }
 
 const listRecent = defineTool({
@@ -208,21 +234,57 @@ const checkGenerations = defineTool({
 
 const Job = z.object({
   model_id: z.string().describe("Model id from search_models."),
-  prompt: z.string().describe("The full prompt. Put @handles here to use saved elements."),
-  op: z.string().optional().describe("Operation id (t2i, edit, t2v, i2v, flf2v, ref2v, extend, tts…). Usually inferred from the inputs; set it when ambiguous."),
+  prompt: z.string().describe("The full prompt (for translate: the text to translate; for write: the brief). Put @handles here to use saved elements."),
+  op: z
+    .string()
+    .optional()
+    .describe(
+      "Operation id (t2i, edit, t2v, i2v, flf2v, ref2v, extend, tts, layers, transcribe, translate, write, trim, captions, mux, separate-audio, image-to-3d…). Usually inferred from the inputs; set it when ambiguous.",
+    ),
   images: z.array(ref).optional().describe("Input images: the image to edit, the start frame, or references, in order."),
   end_image: ref.optional().describe("End frame (first-and-last-frame video)."),
-  video: ref.optional().describe("Input video (extend, edit, lipsync, upscale…)."),
-  audio: ref.optional().describe("Input audio (lipsync, avatar)."),
+  video: ref.optional().describe("Input video (extend, edit, lipsync, upscale, trim, captions, transcribe…)."),
+  audio: ref.optional().describe("Input audio (lipsync, avatar, transcribe, separate-audio, mux)."),
+  voice_audio: ref.optional().describe("A recording of the voice to speak with (voice-cloning text to speech)."),
   aspect_ratio: z.string().optional().describe("e.g. 16:9, 9:16, 1:1 — one the model lists."),
   resolution: z.string().optional().describe("e.g. 1080p, 2K — one the model lists."),
   duration: z.number().optional().describe("Seconds, for video and music — one the model lists."),
   outputs: z.number().int().optional().describe("How many takes (1–4)."),
+  shots: z.number().int().optional().describe("Multi-shot video: cut the clip into this many shots (2–6), for models that list multi-shot."),
   generate_audio: z.boolean().optional().describe("Native audio on/off, for video models that offer it."),
   voice: z.string().optional().describe("Voice id for text to speech."),
+  target_language: z.string().optional().describe("Language to translate or dub into, e.g. Spanish."),
+  source_language: z.string().optional().describe("Language of the source speech or text, if known."),
+  start_time: z.number().optional().describe("Trim: where the kept part starts, in seconds."),
+  end_time: z.number().optional().describe("Trim: where the kept part ends, in seconds."),
+  num_layers: z.number().int().optional().describe("Layers: how many layers to split the image into."),
+  system: z.string().optional().describe("Write: extra instructions for the writer (tone, format, length)."),
+  after: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Index (0-based) of an earlier job in this same call whose result this job uses: it starts by itself when that job finishes. An image becomes the start frame or the image to edit, a video the input video, audio the soundtrack (or the voice to clone, for tts), text the prompt.",
+    ),
   negative_prompt: z.string().optional(),
 });
 type JobInput = z.infer<typeof Job>;
+
+const SHOT_TYPES = ["Wide establishing shot", "Medium shot", "Close-up", "Detail shot", "Low-angle hero shot", "Slow push-in to the final frame"];
+
+/** n shots that fit the model: per-shot clips for joined (open) models, one total length for the others. */
+function shotList(model: ModelDef | undefined, n: number): { prompt: string; duration: number }[] | undefined {
+  const ms = model?.options.multiShot;
+  if (!ms) return undefined;
+  const count = Math.max(2, Math.min(ms.maxShots, n));
+  const durations = model.options.durations ?? [];
+  let each = model.defaults?.duration ?? 5;
+  if (ms.mode !== "concat") {
+    const total = [...durations].sort((a, b) => a - b).find((d) => d % count === 0 && d / count >= 3) ?? Math.max(...durations, count * 3);
+    each = total / count;
+  }
+  return Array.from({ length: count }, (_, i) => ({ prompt: SHOT_TYPES[i % SHOT_TYPES.length], duration: each }));
+}
 
 function toRequest(j: JobInput): GenerationRequest {
   const inputs = {
@@ -230,7 +292,9 @@ function toRequest(j: JobInput): GenerationRequest {
     ...(j.end_image && { endImage: j.end_image }),
     ...(j.video && { video: j.video }),
     ...(j.audio && { audio: j.audio }),
+    ...(j.voice_audio && { voiceAudio: j.voice_audio }),
   };
+  const shots = j.shots && j.shots > 1 ? shotList(getModel(j.model_id), j.shots) : undefined;
   return {
     feature: "assist",
     modelId: j.model_id,
@@ -241,41 +305,115 @@ function toRequest(j: JobInput): GenerationRequest {
     params: {
       aspectRatio: j.aspect_ratio,
       resolution: j.resolution,
-      duration: j.duration,
+      duration: shots ? undefined : j.duration,
       numOutputs: j.outputs ? Math.max(1, Math.min(4, j.outputs)) : undefined,
       generateAudio: j.generate_audio,
       voice: j.voice,
+      targetLanguage: j.target_language,
+      sourceLanguage: j.source_language,
+      startTime: j.start_time,
+      endTime: j.end_time,
+      numLayers: j.num_layers,
+      ...(shots && { shots }),
+      ...(j.system && { extra: { system: j.system } }),
     },
   };
 }
 
-function planJob(j: JobInput): PlannedJob {
-  const req = toRequest(j);
-  try {
-    const p = previewGeneration(req);
-    return { tool: "generate", modelId: p.model.id, modelName: p.model.name, kind: p.model.kind, op: p.op, prompt: j.prompt, count: p.outputs, costUsd: p.costUsd, demo: p.demo };
-  } catch (e) {
-    return { tool: "generate", modelId: j.model_id, modelName: j.model_id, kind: "image", op: (j.op as Operation) ?? "t2i", prompt: j.prompt, count: 0, costUsd: 0, demo: false, error: (e as Error).message };
+/** Where an earlier job's result goes in a later one, by what it is and what the later job does. */
+function slotFor(kind: MediaKind, op: Operation | undefined): ChainSlot {
+  if (kind === "text") return { slot: "prompt" };
+  if (kind === "video") return { slot: op === "concat" ? "videos" : "video" };
+  if (kind === "audio") return { slot: op === "tts" || op === "voice-change" ? "voiceAudio" : "audio" };
+  return { slot: "images", position: "first" };
+}
+
+interface ChainedJob {
+  job: JobInput;
+  req: GenerationRequest;
+  /** Index of the job this one waits for. */
+  after?: number;
+  preview?: ReturnType<typeof previewChained>;
+  error?: string;
+}
+
+/** Validate and price the jobs of one generate call, wiring `after` into chain slots. Never throws. */
+function chainJobs(jobs: JobInput[]): ChainedJob[] {
+  const out: ChainedJob[] = [];
+  jobs.forEach((job, i) => {
+    const req = toRequest(job);
+    const after = job.after;
+    if (after === undefined) {
+      try {
+        out.push({ job, req, preview: previewChained(req, 0) });
+      } catch (e) {
+        out.push({ job, req, error: (e as Error).message });
+      }
+      return;
+    }
+    const dep = out[after];
+    if (!Number.isInteger(after) || after < 0 || after >= i || !dep) {
+      out.push({ job, req, after, error: `"after" must point at an earlier job in this call (0–${i - 1})` });
+      return;
+    }
+    if (!dep.preview) {
+      out.push({ job, req, after, error: `Job ${after} can't run, so this one can't either` });
+      return;
+    }
+    const chained: GenerationRequest = { ...req, chain: [slotFor(outputKind(dep.preview.op, dep.preview.model), req.op)] };
+    try {
+      out.push({ job, req: chained, after, preview: previewChained(chained, 1) });
+    } catch (e) {
+      out.push({ job, req: chained, after, error: (e as Error).message });
+    }
+  });
+  return out;
+}
+
+function plannedJob(c: ChainedJob): PlannedJob {
+  if (c.preview) {
+    const p = c.preview;
+    return { tool: "generate", modelId: p.model.id, modelName: p.model.name, kind: outputKind(p.op, p.model), op: p.op, prompt: c.job.prompt, count: p.outputs, costUsd: p.costUsd, demo: p.demo };
   }
+  const m = getModel(c.job.model_id);
+  return { tool: "generate", modelId: c.job.model_id, modelName: m?.name ?? c.job.model_id, kind: m?.kind ?? "image", op: (c.job.op as Operation) ?? "t2i", prompt: c.job.prompt, count: 0, costUsd: 0, demo: false, error: c.error };
 }
 
 const GenerateInput = z.object({
   summary: z.string().describe("One short sentence describing the plan, shown on the approval card."),
-  jobs: z.array(Job).describe("1–6 jobs. Jobs in one call run in parallel; to use one job's output in another, call generate again after check_generations."),
+  jobs: z
+    .array(Job)
+    .describe("1–6 jobs. Jobs run in parallel, except a job with \"after\", which waits for that earlier job and uses its result (a still, then animate it; transcribe, then translate, then voice it)."),
 });
 
 const generate = defineTool({
   name: "generate",
   description:
-    "Start image, video or audio generations. The app shows the user the plan with its cost and runs it once they approve, so call this directly instead of asking for confirmation in text. Returns generation ids; their results appear in the chat by themselves.",
+    "Start image, video, audio, text (transcribe, translate, write) or 3D generations, alone or chained with \"after\". The app shows the user the plan with its cost and runs it once they approve, so call this directly instead of asking for confirmation in text. Returns generation ids; their results appear in the chat by themselves.",
   schema: GenerateInput,
   gated: true,
   strict: true,
-  plan: ({ jobs }) => jobs.slice(0, 6).map(planJob),
+  plan: ({ jobs }) => chainJobs(jobs.slice(0, 6)).map(plannedJob),
   async run({ jobs }) {
+    const list = jobs.slice(0, 6);
+    if (list.some((j) => j.after !== undefined)) {
+      // Chained jobs: one pipeline, created only if every step is valid.
+      const chained = chainJobs(list);
+      const bad = chained.findIndex((c) => c.error);
+      if (bad >= 0) return { content: JSON.stringify({ error: `Job ${bad}: ${chained[bad].error}` }), isError: true };
+      const p = createPipeline(chained.map((c, i) => ({ key: `job${i}`, request: c.req, ...(c.after !== undefined && { after: `job${c.after}` }) })));
+      const results = chained.map((c, i) => {
+        const g = p.byKey[`job${i}`];
+        return { model: c.job.model_id, started: [g.id], ...(c.after !== undefined && { waitsFor: p.byKey[`job${c.after}`].id }), demo: g.provider === "mock" || undefined, costUsd: g.costUsd || undefined };
+      });
+      return {
+        content: JSON.stringify({ results, note: "Chained jobs start by themselves when the job they wait for finishes." }),
+        items: [{ id: "", role: "generations", ids: p.items.map((g) => g.id) }],
+      };
+    }
     const ids: string[] = [];
     const results: unknown[] = [];
-    for (const j of jobs.slice(0, 6)) {
+    for (const j of list) {
       try {
         const gens = createGenerations(toRequest(j));
         ids.push(...gens.map((g) => g.id));
@@ -381,9 +519,23 @@ export function apiTools(): Anthropic.Beta.BetaTool[] {
   }));
 }
 
-export function planFor(name: string, input: unknown, ctx: ToolContext): { jobs: PlannedJob[]; total: number | null } {
+const describeIssues = (issues: { path: PropertyKey[]; message: string }[]) => `Invalid input: ${issues.map((i) => `${i.path.map(String).join(".")} ${i.message}`).join("; ")}`;
+
+/** The error a tool call's arguments would get, or null when they're valid. */
+export function validateInput(name: string, input: unknown): string | null {
+  const tool = getTool(name);
+  if (!tool) return `Unknown tool ${name}`;
+  const parsed = tool.schema.safeParse(input);
+  return parsed.success ? null : describeIssues(parsed.error.issues);
+}
+
+/** Price a gated call. Arguments are validated first: plan() only ever sees input its schema accepts. */
+export function planFor(name: string, input: unknown, ctx: ToolContext): { jobs: PlannedJob[]; total: number | null; error?: string } {
   const t = getTool(name);
-  const jobs = t?.plan?.(input, ctx) ?? [];
+  if (!t?.plan) return { jobs: [], total: 0 };
+  const parsed = t.schema.safeParse(input);
+  if (!parsed.success) return { jobs: [], total: 0, error: describeIssues(parsed.error.issues) };
+  const jobs = t.plan(parsed.data, ctx);
   return { jobs, total: totalCost(jobs) };
 }
 
@@ -392,7 +544,7 @@ export async function executeTool(name: string, input: unknown, ctx: ToolContext
   const tool = getTool(name);
   if (!tool) return { content: `Unknown tool ${name}`, isError: true };
   const parsed = tool.schema.safeParse(input);
-  if (!parsed.success) return { content: `Invalid input: ${parsed.error.issues.map((i: { path: PropertyKey[]; message: string }) => `${i.path.map(String).join(".")} ${i.message}`).join("; ")}`, isError: true };
+  if (!parsed.success) return { content: describeIssues(parsed.error.issues), isError: true };
   try {
     return await tool.run(parsed.data, ctx);
   } catch (e) {

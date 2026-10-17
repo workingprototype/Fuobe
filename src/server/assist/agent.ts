@@ -8,7 +8,7 @@ import { db } from "../db";
 import { getGeneration } from "../generations";
 import { engineMode, getSetting } from "../settings";
 import { readRef } from "../storage";
-import { apiTools, executeTool, getTool, planFor, type ToolContext } from "./tools";
+import { apiTools, executeTool, getTool, planFor, validateInput, type ToolContext } from "./tools";
 
 /**
  * The Assist agent loop. History is kept exactly as the API returned it (append-only, thinking
@@ -217,7 +217,8 @@ function closeDanglingToolUses(messages: MessageParam[]): void {
   }
 }
 
-const FILE_KIND = (url: string) => (/\.(mp4|webm|mov|mkv)$/i.test(url) ? "video" : /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(url) ? "audio" : "image");
+const FILE_KIND = (url: string) =>
+  /\.(mp4|webm|mov|mkv)$/i.test(url) ? "video" : /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(url) ? "audio" : /\.(txt|srt|vtt|json)$/i.test(url) ? "text" : /\.(glb|gltf)$/i.test(url) ? "model3d" : "image";
 
 function userBlocks(text: string, attachments: string[]): UserBlock[] {
   const blocks: UserBlock[] = [];
@@ -268,7 +269,8 @@ How you work:
 - Look up models with search_models before you generate, and pick the model that best fits the job, the user's engine preference and their budget. Prefer connected models. Mention the model you picked and why in one line.
 - Write rich, specific prompts: subject, setting, light, lens and composition; for video, the motion and camera move in time order. Keep any text the user wants rendered exactly.
 - Call generate (or create_storyboard) directly. The app shows the user a plan card with the cost and runs it when they approve — never ask "shall I go ahead?" in text.
-- For multi-step work (an image, then animate it; a hero shot, then variations), wait for the first results with check_generations and pass its output URL into the next generate call. Use look=true when judging the results matters.
+- For multi-step work (an image, then animate it; transcribe, translate, then voice it), put the steps in one generate call and set "after" on each later job: it starts by itself when the earlier job finishes and gets its result as input. When you need to judge a result before deciding the next step, wait with check_generations instead (look=true to see images) and pass the output URL into the next call.
+- Besides images, video and audio, models can transcribe speech, translate or write text (scripts, captions, ad copy), split images into layers, separate voice from background, trim, caption or re-sound clips, and turn an image into a 3D model: search_models with kind "text" or "model3d" finds the text and 3D ones.
 - Use the user's files by the URLs listed in their message. Earlier outputs are found with list_recent. Saved characters and products are Elements: check list_elements and write their @handle in prompts.
 - Results show up in the chat by themselves, so don't repeat URLs back. After starting jobs, say briefly what's coming; after they finish, give a short take and suggest a next step.
 - Be brief and friendly. Plain sentences, no headings. Prices are estimates in USD; open-source models run free on the user's own GPU.`;
@@ -394,28 +396,70 @@ export const offline: ModelCall = async ({ messages, ctx }) => {
   const plan = offlinePlan(said, ctx.engine);
   if (!plan) return reply([text("Tell me what to make — an image, a video, a voice-over or a storyboard — and attach any photos to use.")], "end_turn");
   return reply(
-    [text(plan.say), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
+    [text(`${plan.say}\n\n${OFFLINE_NOTE}`), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
     "tool_use",
   );
 };
 
-const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+/** Under every offline plan: the rule-based planner is a fallback, not the assistant. */
+export const OFFLINE_NOTE = "Offline planner — connect Claude or Ollama in Settings for better plans.";
 
-/** Read a request like "3 vertical videos of a fox, animate this" into one tool call. */
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+const NUM = "(\\d|one|two|three|four|five|six|seven|eight)";
+const num = (s: string) => NUMBER_WORDS[s] ?? Number(s);
+
+/**
+ * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats,
+ * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs),
+ * storyboards, music and voice-overs, translations and scripts.
+ */
 export function offlinePlan(message: string, preferred: Engine): { tool: string; input: Record<string, unknown>; say: string } | null {
   const [body, attached = ""] = message.split(/\n\nAttached files[^\n]*\n/);
   const text = body.trim();
   if (!text) return null;
-  const files = [...attached.matchAll(/^- (image|video|audio) \d+: (\S+)$/gm)].map((m) => ({ kind: m[1], url: m[2] }));
+  const files = [...attached.matchAll(/^- (image|video|audio|text|model3d) \d+: (\S+)$/gm)].map((m) => ({ kind: m[1], url: m[2] }));
   const images = files.filter((f) => f.kind === "image").map((f) => f.url);
   const t = text.toLowerCase();
   const mode = engineMode();
   const engine: Engine = mode === "both" ? preferred : mode;
   const count = (() => {
-    const m = /\b(\d|one|two|three|four|five|six|seven|eight)\s+(?:\w+\s+)?(images?|pictures?|photos?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?|shots?)\b/.exec(t);
-    return m ? (NUMBER_WORDS[m[1]] ?? Number(m[1])) : undefined;
+    const m = new RegExp(
+      `\\b${NUM}\\s+(?:[\\w-]+\\s+)?(images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?)\\b`,
+    ).exec(t);
+    return m ? num(m[1]) : undefined;
+  })();
+  // "a 3-shot ad", "in 4 shots": one clip cut into shots, not several clips.
+  const shots = (() => {
+    const m = new RegExp(`\\b${NUM}[- ]shots?\\b`).exec(t) ?? new RegExp(`\\bin\\s+${NUM}\\s+shots\\b`).exec(t);
+    return m ? Math.max(2, Math.min(6, num(m[1]))) : undefined;
   })();
   const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : undefined;
+  const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
+  const textModel = engine === "open" ? "oss-text-llm" : "text-llm";
+
+  // "… hero still, then animate it": the image first, then a video made from it (one plan, two chained jobs).
+  const thenAnimate = /\bthen\b[^.?!]*\b(animate|animated|animation|bring (it|them) to life|make (it|them) move|turn (it|them) into an? (video|clip))\b/.test(t);
+  const [beforeThen] = text.split(/[,;]?\s*\bthen\b/i);
+  if (thenAnimate && /\b(still|photo|picture|image|portrait|poster|frame|shot|render|key ?visual)\b/i.test(beforeThen)) {
+    const subject = beforeThen
+      .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/[\s,;:—–-]+$/, "")
+      .trim();
+    const still = { model_id: pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels), prompt: subject, ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
+    const clip = {
+      model_id: pick(VIDEO_STUDIO.defaultModels),
+      prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`,
+      after: 0,
+      ...(shots && { shots }),
+      ...(aspect && { aspect_ratio: aspect }),
+    };
+    return {
+      tool: "generate",
+      input: { summary: `Still, then animated: ${subject.slice(0, 70)}`, jobs: [still, clip] },
+      say: `I'll make the still first, then animate it${shots ? ` as a ${shots}-shot clip` : ""} — the video starts by itself as soon as the still is ready.`,
+    };
+  }
 
   if (/\b(storyboard|comic|panels|shot list)\b/.test(t) || (count && /\b(frames|scenes|panels)\b/.test(t))) {
     const frames = Math.max(1, Math.min(8, count ?? 4));
@@ -425,10 +469,29 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
       say: `I'll split that into ${frames} frames with the same characters and look, each made from the one before.`,
     };
   }
-  const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
+
+  // Text steps: translations and scripts run on the LLM (demo text when none is connected).
+  const lang = /\btranslat\w*\b[^:]*?\b(?:into|to)\s+([a-z]+(?:\s\([^)]*\))?)/i.exec(text)?.[1];
+  if (lang && /\btranslat/.test(t)) {
+    const language = lang.charAt(0).toUpperCase() + lang.slice(1);
+    const source = /["“]([^"”]+)["”]/.exec(text)?.[1] ?? (text.includes(":") ? text.slice(text.indexOf(":") + 1).trim() : text);
+    return {
+      tool: "generate",
+      input: { summary: `Translate into ${language}`, jobs: [{ model_id: textModel, op: "translate", prompt: source, target_language: language }] },
+      say: `I'll translate that into ${language}.`,
+    };
+  }
   const isMusic = /\b(music|song|soundtrack|beat|jingle)\b/.test(t);
+  const isWriting = !isMusic && /^(please\s+)?(write|draft|come up with|give me)\b/.test(t) && /\b(script|scripts|copy|captions?|taglines?|slogans?|hooks?|outline|story|poem|email|description|post|blog|headlines?|lines)\b/.test(t);
+  if (isWriting) {
+    return {
+      tool: "generate",
+      input: { summary: `Write: ${text.slice(0, 80)}`, jobs: [{ model_id: textModel, op: "write", prompt: text }] },
+      say: "I'll write that for you.",
+    };
+  }
   const isSpeech = !isMusic && /\b(voice ?over|narrat\w*|read (this|it|out)|say|speak|text to speech|tts)\b/.test(t);
-  const isVideo = !isMusic && !isSpeech && (files.some((f) => f.kind === "video") || /\b(videos?|clips?|animate|animation|motion|films?|footage|movies?|trailers?|commercials?)\b/.test(t));
+  const isVideo = !isMusic && !isSpeech && (files.some((f) => f.kind === "video") || !!shots || /\b(videos?|clips?|animate|animation|motion|films?|footage|movies?|trailers?|commercials?|ads?)\b/.test(t));
   if (isMusic || isSpeech) {
     const quoted = /["“]([^"”]+)["”]/.exec(text)?.[1] ?? text.replace(/^.*?:\s*/, "");
     return {
@@ -439,8 +502,20 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
   }
   const studio = isVideo ? VIDEO_STUDIO : images.length ? EDIT_STUDIO : IMAGE_STUDIO;
   const n = Math.max(1, Math.min(4, count ?? (isVideo ? 1 : 2)));
-  const job = { model_id: pick(studio.defaultModels), prompt: text, ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }), ...(aspect && { aspect_ratio: aspect }), ...(n > 1 && { outputs: n }) };
-  const what = isVideo ? (images.length ? "animate your image" : "make the video") : images.length ? "edit your image" : `make ${n} take${n === 1 ? "" : "s"}`;
+  const multi = isVideo && shots ? shots : undefined;
+  const job = {
+    model_id: pick(studio.defaultModels),
+    prompt: text,
+    ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }),
+    ...(aspect && { aspect_ratio: aspect }),
+    ...(n > 1 && { outputs: n }),
+    ...(multi && { shots: multi }),
+  };
+  const what = isVideo
+    ? `${images.length ? "animate your image" : "make the video"}${multi ? ` as ${multi} shots` : ""}`
+    : images.length
+      ? "edit your image"
+      : `make ${n} take${n === 1 ? "" : "s"}`;
   return { tool: "generate", input: { summary: `${isVideo ? "Video" : images.length ? "Edit" : "Image"}: ${text.slice(0, 80)}`, jobs: [job] }, say: `I'll ${what} with the default ${isVideo ? "video" : "image"} model.` };
 }
 
@@ -494,6 +569,12 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   const gated: Pending["gated"] = [];
   for (const u of uses) {
     if (getTool(u.name)?.gated && !s.thread.autoApprove) {
+      // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
+      const invalid = validateInput(u.name, u.input);
+      if (invalid) {
+        results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: invalid });
+        continue;
+      }
       gated.push({ id: u.id, name: u.name, input: u.input });
       continue;
     }
@@ -589,8 +670,7 @@ function decline(s: State, why = "The user declined this plan. Ask what they'd l
   return ordered([...p.results, ...p.gated.map((g) => ({ type: "tool_result" as const, tool_use_id: g.id, is_error: true, content: why }))], p.order);
 }
 
-async function approve(s: State): Promise<ToolResult[]> {
-  const p = settle(s, true);
+async function runApproved(s: State, p: Pending): Promise<ToolResult[]> {
   const results = [...p.results];
   for (const g of p.gated) {
     const { result, items } = await runTool(g.name, g.input, { engine: s.thread.engine });
@@ -604,10 +684,27 @@ async function approve(s: State): Promise<ToolResult[]> {
 export async function answerApproval(id: string, ok: boolean): Promise<AssistThread> {
   const s = load(id);
   if (!s) throw new Error("Not found");
-  if (!s.pending || s.thread.status !== "waiting") throw new AssistBusyError("Nothing is waiting for approval");
-  const results = ok ? await approve(s) : decline(s);
-  s.messages.push({ role: "user", content: results });
-  s.thread.status = "running";
-  save(s);
+  if (!s.pending || s.thread.status !== "waiting" || runs.has(id)) throw new AssistBusyError("Nothing is waiting for approval");
+  if (!ok) {
+    s.messages.push({ role: "user", content: decline(s) });
+    s.thread.status = "running";
+    save(s);
+    return s.thread;
+  }
+  // Claim the thread before the first await: a second approval (another tab, a retry) or a new
+  // message now finds it busy instead of running the same paid plan twice or being overwritten.
+  runs.add(id);
+  try {
+    const p = settle(s, true);
+    s.thread.status = "running";
+    save(s);
+    const results = await runApproved(s, p);
+    s.messages.push({ role: "user", content: results });
+    // Keep a toggle the user flipped meanwhile.
+    s.thread.autoApprove = (db().prepare("SELECT auto_approve FROM assist_threads WHERE id = ?").get(id) as { auto_approve: number } | undefined)?.auto_approve === 1;
+    save(s);
+  } finally {
+    runs.delete(id);
+  }
   return s.thread;
 }
