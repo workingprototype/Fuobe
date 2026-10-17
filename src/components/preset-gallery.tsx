@@ -1,77 +1,254 @@
 "use client";
 
 import Link from "next/link";
-import { Cloud, Cpu, Search, Sparkles } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Cloud, Cpu, Lock, Search, Sparkles, X } from "lucide-react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "@/components/page-shell";
 import { PRESET_ICONS } from "@/components/preset-icons";
-import { useEngine } from "@/lib/api";
-import type { Preset } from "@/lib/catalog/types";
+import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
+import { useEngineMode } from "@/lib/api";
+import { searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
-export function PresetCard({ preset, href, compact }: { preset: Preset; href: string; compact?: boolean }) {
-  const Icon = PRESET_ICONS[preset.look.icon] ?? Sparkles;
+export { PageHeader };
+
+/** A tiny label shown on hover/focus (CSS only: a gallery has hundreds of these). */
+function EngineChip({ engine }: { engine: "cloud" | "open" }) {
+  const label = engine === "cloud" ? "Runs on cloud models" : "Runs on open-source models";
+  const Icon = engine === "cloud" ? Cloud : Cpu;
+  return (
+    <span role="img" aria-label={label} className="group/eng pointer-events-auto relative grid size-5 place-items-center rounded-full bg-black/35 text-white">
+      <Icon className="size-3" />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute right-0 bottom-full z-10 mb-1.5 rounded-md bg-tooltip px-2 py-1 text-[11px] whitespace-nowrap text-tooltip-foreground opacity-0 shadow-soft transition-opacity group-hover/eng:opacity-100"
+      >
+        {engine === "cloud" ? "Cloud" : "Open source"}
+      </span>
+    </span>
+  );
+}
+
+export const PresetCard = memo(function PresetCard({ preset, href, compact }: { preset: PresetCardData; href: string; compact?: boolean }) {
+  const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
+  const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
   return (
     <Link
+      ref={ref}
       href={href}
-      className="group flex flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+      {...handlers}
+      className="group/card flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div
-        className={cn("relative grid place-items-center overflow-hidden rounded-lg text-white", compact ? "aspect-[4/3]" : "aspect-[4/3]")}
-        style={{ background: `linear-gradient(135deg, ${preset.look.from}, ${preset.look.to})` }}
-      >
-        <div
-          className="absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-          style={{ background: `radial-gradient(circle at 30% 20%, oklch(1 0 0 / 35%), transparent 60%)` }}
-        />
-        <Icon className="size-8 drop-shadow transition-transform duration-500 ease-enter group-hover:scale-125 group-hover:rotate-[-6deg]" />
-        <div className="absolute right-1.5 bottom-1.5 flex gap-1">
-          {preset.cloud && (
-            <span className="grid size-5 place-items-center rounded-full bg-black/25 backdrop-blur" title="Cloud version">
-              <Cloud className="size-3" />
-            </span>
-          )}
-          {preset.open && (
-            <span className="grid size-5 place-items-center rounded-full bg-black/25 backdrop-blur" title="Open-source version">
-              <Cpu className="size-3" />
-            </span>
-          )}
-        </div>
-        {preset.badges?.includes("top") && (
+      <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
+        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} />
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
+        <span className="pointer-events-none absolute bottom-1.5 left-1.5 grid size-6 place-items-center rounded-md bg-black/30 text-white">
+          <Icon className="size-3.5" />
+        </span>
+        <span className="pointer-events-none absolute right-1.5 bottom-1.5 flex gap-1">
+          {preset.cloud && <EngineChip engine="cloud" />}
+          {preset.open && <EngineChip engine="open" />}
+        </span>
+        {preset.top && (
           <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-highlight px-1 text-[10px] font-semibold text-highlight-foreground">Popular</span>
         )}
       </div>
-      <div className="px-0.5">
+      <div className="min-w-0 px-0.5">
         <p className="truncate text-[13px] font-medium">{preset.name}</p>
         {!compact && <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground">{preset.description}</p>}
       </div>
     </Link>
   );
+});
+
+type RunsOn = "all" | "cloud" | "open";
+const RUNS_ON: { value: RunsOn; label: string; icon?: typeof Cloud }[] = [
+  { value: "all", label: "All" },
+  { value: "cloud", label: "Cloud", icon: Cloud },
+  { value: "open", label: "Open source", icon: Cpu },
+];
+
+/** "Runs on: All · Cloud · Open source", as a radio group with arrow-key support. */
+function RunsOnControl({ value, onChange, locked }: { value: RunsOn; onChange: (v: RunsOn) => void; locked?: "cloud" | "open" }) {
+  if (locked)
+    return (
+      <Link
+        href="/settings#engine"
+        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-muted px-3 text-[13px] text-muted-foreground hover:text-foreground"
+        title="Set in Settings → Engine mode"
+      >
+        <Lock className="size-3.5" /> {locked === "open" ? "Open source only" : "Cloud only"}
+      </Link>
+    );
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <span id="runs-on-label" className="text-[12px] whitespace-nowrap text-muted-foreground">
+        Runs on
+      </span>
+      <div
+        role="radiogroup"
+        aria-labelledby="runs-on-label"
+        className="flex h-9 items-center rounded-full bg-muted p-0.5"
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          e.preventDefault();
+          const i = RUNS_ON.findIndex((o) => o.value === value);
+          const next = RUNS_ON[(i + (e.key === "ArrowRight" ? 1 : RUNS_ON.length - 1)) % RUNS_ON.length];
+          onChange(next.value);
+          (e.currentTarget.querySelector(`[data-value="${next.value}"]`) as HTMLElement | null)?.focus();
+        }}
+      >
+        {RUNS_ON.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={value === o.value}
+            tabIndex={value === o.value ? 0 : -1}
+            data-value={o.value}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:px-3",
+              value === o.value && "bg-background text-foreground shadow-soft",
+            )}
+          >
+            {o.icon && <o.icon className="size-3.5" />}
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-export function PresetGallery({ presets, href }: { presets: Preset[]; /** "{id}" is replaced with the preset id. */ href: string }) {
+/** Keeps data-fade-start / data-fade-end on a horizontal scroller in sync with its scroll position. */
+function useFadeEdges<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      el.toggleAttribute("data-fade-start", el.scrollLeft > 2);
+      el.toggleAttribute("data-fade-end", el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, []);
+  return ref;
+}
+
+const FIRST_PAGE = 30;
+const PAGE = 40;
+
+const GRID = "grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
+
+export function PresetGallery({
+  presets,
+  href,
+  noun = "presets",
+}: {
+  presets: PresetCardData[];
+  /** "{id}" is replaced with the preset id. */
+  href: string;
+  /** Plural shown in the result count, e.g. "effects". */
+  noun?: string;
+}) {
   const [cat, setCat] = useState("All");
   const [q, setQ] = useState("");
-  const [engine, , mode] = useEngine();
-  const [onlyEngineChoice, setOnlyEngine] = useState(false);
-  // When the install is locked to one engine, only show presets that engine can run.
-  const onlyEngine = mode !== "both" || onlyEngineChoice;
+  const [runsOnChoice, setRunsOn] = useState<RunsOn>("all");
+  const [shown, setShown] = useState(FIRST_PAGE);
+  // "both" until hydrated, so the server HTML and the first client render agree.
+  const mode = useEngineMode();
+  const locked = mode === "both" ? undefined : mode;
+  const runsOn: RunsOn = locked ?? runsOnChoice;
+  const query = useDeferredValue(q.trim().toLowerCase());
+
+  const index = useMemo(() => presets.map((p) => [p, searchText(p)] as const), [presets]);
   const cats = useMemo(() => ["All", ...new Set(presets.map((p) => p.category))], [presets]);
-  const list = presets.filter(
-    (p) =>
-      (cat === "All" || p.category === cat) &&
-      (!q || `${p.name} ${p.description} ${p.category}`.toLowerCase().includes(q.toLowerCase())) &&
-      (!onlyEngine || (engine === "open" ? p.open : p.cloud)),
+  const list = useMemo(
+    () =>
+      index
+        .filter(([p, text]) => (cat === "All" || p.category === cat) && (!query || text.includes(query)) && (runsOn === "all" || p[runsOn]))
+        .map(([p]) => p),
+    [index, cat, query, runsOn],
   );
+  // A new filter starts from the first page again.
+  const filterKey = `${cat}|${query}|${runsOn}`;
+  const [lastKey, setLastKey] = useState(filterKey);
+  if (lastKey !== filterKey) {
+    setLastKey(filterKey);
+    setShown(FIRST_PAGE);
+  }
+
+  const more = useCallback(() => setShown((n) => n + PAGE), []);
+  const sentinel = useRef<HTMLButtonElement>(null);
+  const hasMore = shown < list.length;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more(), { rootMargin: "600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, more, shown]);
+
+  const strip = useFadeEdges<HTMLDivElement>();
+  const stale = q.trim().toLowerCase() !== query;
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="scrollbar-none flex min-w-0 flex-1 gap-1 overflow-x-auto">
+      <div className="space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative w-full sm:w-80">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={`Search ${presets.length} ${noun}`}
+              aria-label={`Search ${noun}`}
+              className="h-9 w-full rounded-full border bg-background pr-9 pl-9 text-[14px] outline-none placeholder:text-subtle-foreground focus:border-primary focus:ring-4 focus:ring-brand-faint [&::-webkit-search-cancel-button]:hidden"
+            />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ("")}
+                className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2 sm:ml-auto sm:justify-end">
+            <span className="order-last text-[12px] whitespace-nowrap text-muted-foreground tabular-nums sm:order-first sm:mr-2" aria-live="polite">
+              {list.length === presets.length ? `${presets.length} ${noun}` : `${list.length} of ${presets.length}`}
+            </span>
+            <RunsOnControl value={runsOn} onChange={setRunsOn} locked={locked} />
+          </div>
+        </div>
+        <div
+          ref={strip}
+          role="group"
+          aria-label="Categories"
+          className="fade-x scrollbar-none -mx-1 flex snap-x scroll-px-1 gap-1 overflow-x-auto px-1"
+        >
           {cats.map((c) => (
             <button
               key={c}
-              onClick={() => setCat(c)}
+              type="button"
+              aria-pressed={cat === c}
+              onClick={(e) => {
+                setCat(c);
+                e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+              }}
               className={cn(
-                "h-8 shrink-0 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                "h-8 shrink-0 snap-start rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
                 cat === c && "bg-secondary text-foreground",
               )}
             >
@@ -79,48 +256,72 @@ export function PresetGallery({ presets, href }: { presets: Preset[]; /** "{id}"
             </button>
           ))}
         </div>
-        {mode === "both" && (
-          <button
-            onClick={() => setOnlyEngine((v) => !v)}
-            className={cn(
-              "h-8 rounded-full border px-3 text-[13px] text-muted-foreground hover:bg-accent",
-              onlyEngine && "border-primary bg-brand-faint text-brand-text",
-            )}
-          >
-            Only {engine === "open" ? "open source" : "cloud"}
-          </button>
-        )}
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search"
-            className="h-8 w-44 rounded-lg border bg-background pr-2 pl-8 text-sm outline-none focus:border-primary"
-          />
-        </div>
       </div>
       {list.length ? (
-        <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {list.map((p) => (
-            <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} />
-          ))}
-        </div>
+        <>
+          <div className={cn(GRID, "transition-opacity", stale && "opacity-70")}>
+            {list.slice(0, shown).map((p) => (
+              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} />
+            ))}
+          </div>
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                ref={sentinel}
+                type="button"
+                onClick={more}
+                className="h-9 rounded-full border bg-background px-4 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Show more · {list.length - shown} left
+              </button>
+            </div>
+          )}
+        </>
       ) : (
-        <p className="py-16 text-center text-sm text-muted-foreground">No matches for “{q}”.</p>
+        <div className="py-16 text-center">
+          <p className="font-heading text-[22px]">{query ? `No matches for “${q.trim()}”` : `No ${noun} here`}</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {runsOn !== "all" && !locked ? "Try another engine, or clear the filters." : "Try another word or category."}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setQ("");
+              setCat("All");
+              if (!locked) setRunsOn("all");
+            }}
+            className="mt-4 h-8 rounded-full border px-3 text-[13px] font-medium hover:bg-accent"
+          >
+            Clear filters
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
-export function PageHeader({ title, description, children }: { title: string; description?: string; children?: React.ReactNode }) {
+/** Skeleton for the gallery pages (loading.tsx). */
+export function PresetGallerySkeleton() {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 pb-6">
-      <div>
-        <h1 className="font-heading text-[34px] leading-tight">{title}</h1>
-        {description && <p className="mt-1 max-w-2xl text-[15px] text-muted-foreground">{description}</p>}
+    <div className="space-y-4" aria-hidden>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="h-9 w-full animate-pulse rounded-full bg-muted sm:w-80" />
+        <div className="h-9 w-56 animate-pulse rounded-full bg-muted sm:ml-auto" />
       </div>
-      {children}
+      <div className="flex gap-1 overflow-hidden">
+        {Array.from({ length: 9 }, (_, i) => (
+          <div key={i} className="h-8 w-20 shrink-0 animate-pulse rounded-full bg-muted" />
+        ))}
+      </div>
+      <div className={GRID}>
+        {Array.from({ length: 10 }, (_, i) => (
+          <div key={i} className="space-y-2 p-1.5">
+            <div className="aspect-[4/3] animate-pulse rounded-lg bg-muted" />
+            <div className="h-3.5 w-2/3 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-full animate-pulse rounded bg-muted" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
