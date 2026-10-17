@@ -19,8 +19,10 @@ import {
   Crop,
   FastForward,
   Sparkles,
+  UserRoundPlus,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -33,10 +35,31 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getModel, getPreset } from "@/lib/catalog";
 import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
-import { useCreateGeneration, useGenerationActions } from "@/lib/api";
+import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
 import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Viewer } from "./viewer";
+
+/** "a 26-year-old surfer from Lisbon, freckles" → "Surfer From Lisbon" — a starting name, renamed on the element page. */
+function characterName(prompt: string | undefined): string {
+  const words = (prompt ?? "").replace(/@\S+/g, "").replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/\d/.test(w) && !/^(the|and|with|from|who|year|old|of)$/i.test(w));
+  const pick = words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  return pick || "New character";
+}
+
+/** Save an image as a character element (AI Influencer sheets, any portrait) to @mention it later. */
+function useSaveAsCharacter() {
+  const save = useSaveElement();
+  const router = useRouter();
+  return (g: Generation, o: OutputFile) =>
+    save.mutate(
+      { name: characterName(g.request.prompt), kind: "character", references: [o.url] },
+      {
+        onSuccess: (el) => toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } }),
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+}
 
 export function downloadName(g: Generation, o: OutputFile, i: number): string {
   const ext = o.url.split(".").pop()?.split("?")[0] ?? "bin";
@@ -185,6 +208,7 @@ export function GenerationGroup({
       onError: (e) => toast.error((e as Error).message),
     });
   const finalize = useFinalizeDraft();
+  const saveCharacter = useSaveAsCharacter();
   const p = g.request.params ?? {};
   const meta = [
     g.request.step?.label,
@@ -320,6 +344,9 @@ export function GenerationGroup({
                       </IconAction>
                       <IconAction label="Use as reference" href={`/image?ref=${encodeURIComponent(o.url)}`}>
                         <ImagePlus className="size-4" />
+                      </IconAction>
+                      <IconAction label="Save as character" onClick={() => saveCharacter(g, o)}>
+                        <UserRoundPlus className="size-4" />
                       </IconAction>
                     </>
                   ) : (

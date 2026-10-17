@@ -368,6 +368,26 @@ export const APPS: Preset[] = [
       "Relight the image with {option:light} {option:dir}. Keep the subject, composition and all details identical; only the light, shadows, reflections and color temperature change.",
   }),
   app({
+    name: "AI Influencer",
+    category: "Identity",
+    description: "Invent an original character and get a full character sheet",
+    icon: "UserRoundCog",
+    hue: 280,
+    inputs: [],
+    userPrompt: "required",
+    placeholder: "Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”",
+    prompt: "{prompt}",
+    cloud: { modelId: "ai-influencer", op: "t2i" },
+    open: {
+      modelId: "oss-z-image-turbo",
+      op: "t2i",
+      params: { aspectRatio: "16:9" },
+      promptTemplate:
+        "Character design sheet of an original character: {prompt}. Front view, three-quarter view, side view and back view side by side, plus a row of four facial expressions; full body, the same face, hairstyle and outfit in every view; plain light-grey studio background, soft even light, photorealistic, high detail.",
+    },
+    parity: "Save the sheet as a character (tile menu) to use it in any prompt with @. The open version prompts Z-Image Turbo for the sheet",
+  }),
+  app({
     name: "Match Lighting",
     category: "Camera",
     description: "Relight a photo to match the light in a reference shot",

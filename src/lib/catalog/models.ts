@@ -691,10 +691,32 @@ function withLastFrameExtend(m: ModelDef): ModelDef {
   return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
 }
 
+/**
+ * Higgsfield's AI Influencer character sheet. Not in Higgsfield's docs catalog (console docs and
+ * the pricing API only — docs/research/higgsfield-api.json), so it's defined here, not generated.
+ */
+const AI_INFLUENCER: ModelDef = {
+  id: "ai-influencer",
+  name: "AI Influencer",
+  vendor: "Higgsfield",
+  family: "soul",
+  engine: "cloud",
+  kind: "image",
+  tagline: "An original character sheet from a short brief — human or creature",
+  badges: ["new"],
+  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
+  options: {
+    seed: true,
+    controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
+  },
+  pricing: { unit: "image", usd: 0.05 },
+};
+
 /** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
 const cloud: ModelDef[] = [
   ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)).map(withLastFrameExtend),
   ...HIGGSFIELD_MODELS,
+  AI_INFLUENCER,
   ...cloudTools,
 ];
 
