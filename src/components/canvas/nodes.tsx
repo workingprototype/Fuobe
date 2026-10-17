@@ -9,6 +9,7 @@ import {
   Cloud,
   Copy,
   Cpu,
+  Download,
   ImagePlus,
   Library,
   Loader2,
@@ -31,6 +32,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LanguageChip, SlidersChip } from "@/components/studio/audio-controls";
+import { downloadName } from "@/components/studio/feed";
 import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ControlsChip } from "@/components/studio/model-controls";
 import { ModelPicker } from "@/components/studio/model-picker";
@@ -263,9 +265,9 @@ function OutputThumb({ o, onOpen, className, large }: { o: OutputFile; onOpen: (
   }
   if (o.kind === "audio") {
     return (
-      <div className={cn("flex items-center gap-2 rounded-lg bg-brand-faint p-2 text-brand-text", NO_DRAG, className)}>
+      <div className={cn("flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-brand-faint p-2 text-brand-text", NO_DRAG, className)}>
         <AudioLines className="size-4 shrink-0" />
-        <audio src={o.url} controls preload="none" className="h-8 min-w-0 flex-1" />
+        <audio src={o.url} controls preload="metadata" className="h-8 w-full min-w-0 flex-1" />
       </div>
     );
   }
@@ -321,7 +323,7 @@ function Results({ id, r, compact }: { id: string; r: NodeResults; compact?: boo
   if (!r.outputs.length) return null;
   const shown = r.outputs.slice(0, 4);
   return (
-    <div className={cn("grid gap-1.5", shown.length > 1 && "grid-cols-2")}>
+    <div className={cn("grid gap-1.5", shown.length > 1 ? "grid-cols-[repeat(2,minmax(0,1fr))]" : "grid-cols-[minmax(0,1fr)]")}>
       {shown.map((x, k) => (
         <OutputThumb key={`${x.g.id}-${x.i}`} o={x.o} onOpen={() => ed.open(id, k)} />
       ))}
@@ -411,7 +413,9 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   const ops = nodeOps(node, model);
   const auto = type === "model" && ops.length > 1;
   const inferred = auto ? effectiveOp(ed.graph, ed.graph.nodes.find((n) => n.id === id) ?? node) : undefined;
-  const [pickerEngine, setPickerEngine] = useState<Engine>(model?.engine ?? ed.engine);
+  // The picker opens on the node's own engine (or the install's only one); its switch browses the other.
+  const [browseEngine, setBrowseEngine] = useState<Engine | null>(null);
+  const pickerEngine: Engine = ed.mode !== "both" ? ed.mode : (browseEngine ?? model?.engine ?? ed.engine);
   const choices = useMemo(() => modelChoices(node), [node]);
   const step = ed.plan.steps.find((s) => s.nodeId === id);
   const reused = ed.plan.reused.find((s) => s.nodeId === id);
@@ -431,6 +435,7 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   const pickModel = (m: ModelDef) => {
     const keepOp = data.op && m.routes.some((x) => x.op === data.op) ? data.op : undefined;
     ed.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params) });
+    setBrowseEngine(null);
   };
 
   // Upscale / Remove background: image or video.
@@ -453,6 +458,20 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
     ...(running ? [{ label: "Cancel", icon: Square, onSelect: () => ed.cancel(id) }] : []),
     { label: data.pinned ? "Unpin result" : "Pin result", icon: data.pinned ? PinOff : Pin, onSelect: () => ed.update(id, { pinned: !data.pinned }), separatorBefore: !data.pinned },
     ...(r.outputs.some((x) => ["image", "video", "audio"].includes(x.o.kind)) ? [{ label: "Use result as an input", icon: ImagePlus, onSelect: () => ed.toInput(id) }] : []),
+    ...(r.outputs.length
+      ? [
+          {
+            label: r.outputs.length > 1 ? "Download first result" : "Download result",
+            icon: Download,
+            onSelect: () => {
+              const { g, o, i } = r.outputs[0];
+              const a = document.createElement("a");
+              a.href = `${o.url}?download=${encodeURIComponent(downloadName(g, o, i))}`;
+              a.click();
+            },
+          },
+        ]
+      : []),
     ...baseMenu(ed, id),
   ];
   const promptPort = ports.find((p) => p.id === "prompt");
@@ -524,7 +543,7 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
         <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", ed.readOnly && "pointer-events-none")}>
           {choices.length ? (
             <div className={NO_DRAG}>
-              <ModelPicker models={choices} value={model} onChange={pickModel} engine={pickerEngine} onEngineChange={setPickerEngine} />
+              <ModelPicker models={choices} value={model} onChange={pickModel} engine={pickerEngine} onEngineChange={setBrowseEngine} />
             </div>
           ) : (
             <p className="text-[12px] text-muted-foreground">No model for this yet.</p>
@@ -645,9 +664,9 @@ function MediaPreview({ kind, url }: { kind: MediaKind; url: string }) {
   if (kind === "video") return <video src={url} muted playsInline loop controls preload="metadata" className={cn("max-h-52 w-full rounded-lg bg-media object-contain", NO_DRAG)} />;
   if (kind === "audio")
     return (
-      <div className={cn("flex items-center gap-2 rounded-lg bg-brand-faint p-2 text-brand-text", NO_DRAG)}>
+      <div className={cn("flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-brand-faint p-2 text-brand-text", NO_DRAG)}>
         <AudioLines className="size-4 shrink-0" />
-        <audio src={url} controls preload="metadata" className="h-8 min-w-0 flex-1" />
+        <audio src={url} controls preload="metadata" className="h-8 w-full min-w-0 flex-1" />
       </div>
     );
   // eslint-disable-next-line @next/next/no-img-element
@@ -839,7 +858,7 @@ const OutputNode = memo(function OutputNode({ id, type, data, selected }: NodePr
         {sources.length === 0 ? (
           <p className="py-6 text-center text-[12px] text-muted-foreground">Connect results here to preview them side by side.</p>
         ) : (
-          <div className={cn("grid gap-2", sources.length > 1 && "grid-cols-2", sources.length > 2 && w >= 540 && "grid-cols-3")}>
+          <div className={cn("grid gap-2", sources.length > 2 && w >= 540 ? "grid-cols-3" : sources.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
             {sources.map((s) => (
               <figure key={s.id} className="min-w-0 space-y-1">
                 <SourcePreview node={s} />
