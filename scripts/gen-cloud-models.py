@@ -24,6 +24,12 @@ for e in RESEARCH_2["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     # Keep part 1's key fields (aspect ratio mappings etc.) and add part 2's.
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
+# Part 3 (layers, styles/palettes, restyle, video utilities, captions, transcription, SFX/music, 3D, try-on,
+# product shots): same merge, so re-verified endpoints keep the key fields parts 1-2 recorded.
+RESEARCH_3 = json.loads((ROOT / "docs/research/paid-model-apis-3.json").read_text())
+for e in RESEARCH_3["endpoints"]:
+    prev = EPS.get((e["provider"], e["endpoint"]))
+    EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
