@@ -494,5 +494,14 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
     const text = textOf(response)?.trim();
     if (text) out = transcriptOutputs(response);
   }
+  const r = body(response);
+  if (isObj(r)) {
+    // Recraft makes a style from reference images on the fly and returns its id: keep it to reuse the style.
+    const styleId = str(r.style_id);
+    if (styleId) out = out.map((o) => ({ ...o, meta: { ...o.meta, styleId } }));
+    // Cut-out endpoints (Bria extract-object) return the matte next to the image.
+    const mask = fileOf(r.mask)?.url;
+    if (mask) out = out.map((o) => (o.url === mask ? { ...o, meta: { ...o.meta, role: "mask" } } : o));
+  }
   return out;
 }

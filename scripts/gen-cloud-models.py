@@ -421,10 +421,6 @@ model("sonilo-sfx", "Sonilo SFX 1.1", "Sonilo", "sonilo", "audio", "Fast, cheap 
       [("sfx", "sonilo/v1.1/text-to-sound-effects")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 8, 15, 30]})
 model("stable-audio-3-sfx", "Stable Audio 3 SFX", "Stability AI", "stable-audio", "audio", "Stability's small SFX model — crisp one-shots and ambiences",
       [("sfx", "fal-ai/stable-audio-3/small/sfx/text-to-audio")], defaults={"duration": 10}, options={"durations": [5, 10, 30, 60]})
-model("stable-audio-2-5", "Stable Audio 2.5", "Stability AI", "stable-audio", "audio", "Sound design and music beds up to 3 minutes",
-      [("sfx", "fal-ai/stable-audio-25/text-to-audio"), ("music", "fal-ai/stable-audio-25/text-to-audio"),
-       ("sfx", "stability-ai/stable-audio-2.5", "replicate"), ("music", "stability-ai/stable-audio-2.5", "replicate")],
-      defaults={"duration": 30}, options={"durations": [10, 30, 60, 120, 190]})
 model("cassette-sfx", "CassetteAI Sound Effects", "CassetteAI", "cassette", "audio", "One-cent sound effects up to 30 s",
       [("sfx", "cassetteai/sound-effects-generator")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30]})
 model("seed-audio", "Seed Audio 1.0", "ByteDance", "seed-audio", "audio", "Higgsfield's Seed Audio: speech, ambience, music and Foley from one prompt",
@@ -442,6 +438,10 @@ model("stable-audio-3-music", "Stable Audio 3 Music", "Stability AI", "stable-au
 model("mureka-song", "Mureka 9.5", "Mureka", "mureka", "audio", "Full songs with vocals in many genres",
       [("music", "mureka/api/generate/song")], pricing=("request", 0.75, "prompt-to-song on mureka-9.5; with lyrics $0.225"),
       controls=[("model", "Version"), ("gender", "Voice")])
+model("stable-audio-2-5", "Stable Audio 2.5", "Stability AI", "stable-audio", "audio", "Sound design and music beds up to 3 minutes",
+      [("sfx", "fal-ai/stable-audio-25/text-to-audio"), ("music", "fal-ai/stable-audio-25/text-to-audio"),
+       ("sfx", "stability-ai/stable-audio-2.5", "replicate"), ("music", "stability-ai/stable-audio-2.5", "replicate")],
+      defaults={"duration": 30}, options={"durations": [10, 30, 60, 120, 190]})
 model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", "audio", "Describe a sound, get a sound",
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",

@@ -9039,80 +9039,6 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
-    "id": "stable-audio-2-5",
-    "name": "Stable Audio 2.5",
-    "vendor": "Stability AI",
-    "family": "stable-audio",
-    "engine": "cloud",
-    "kind": "audio",
-    "tagline": "Sound design and music beds up to 3 minutes",
-    "routes": [
-      {
-        "op": "sfx",
-        "provider": "fal",
-        "endpoint": "fal-ai/stable-audio-25/text-to-audio",
-        "map": {
-          "seed": "seed",
-          "duration": {
-            "key": "seconds_total",
-            "type": "number"
-          }
-        }
-      },
-      {
-        "op": "music",
-        "provider": "fal",
-        "endpoint": "fal-ai/stable-audio-25/text-to-audio",
-        "map": {
-          "seed": "seed",
-          "duration": {
-            "key": "seconds_total",
-            "type": "number"
-          }
-        }
-      },
-      {
-        "op": "sfx",
-        "provider": "replicate",
-        "endpoint": "stability-ai/stable-audio-2.5",
-        "map": {
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
-        }
-      },
-      {
-        "op": "music",
-        "provider": "replicate",
-        "endpoint": "stability-ai/stable-audio-2.5",
-        "map": {
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
-        }
-      }
-    ],
-    "options": {
-      "seed": true,
-      "durations": [
-        10,
-        30,
-        60,
-        120,
-        190
-      ]
-    },
-    "defaults": {
-      "duration": 30
-    },
-    "pricing": {
-      "unit": "request",
-      "usd": 0.2
-    }
-  },
-  {
     "id": "cassette-sfx",
     "name": "CassetteAI Sound Effects",
     "vendor": "CassetteAI",
@@ -9443,6 +9369,80 @@ export const CLOUD_MODELS: ModelDef[] = [
       "unit": "request",
       "usd": 0.75,
       "note": "prompt-to-song on mureka-9.5; with lyrics $0.225"
+    }
+  },
+  {
+    "id": "stable-audio-2-5",
+    "name": "Stable Audio 2.5",
+    "vendor": "Stability AI",
+    "family": "stable-audio",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Sound design and music beds up to 3 minutes",
+    "routes": [
+      {
+        "op": "sfx",
+        "provider": "fal",
+        "endpoint": "fal-ai/stable-audio-25/text-to-audio",
+        "map": {
+          "seed": "seed",
+          "duration": {
+            "key": "seconds_total",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "music",
+        "provider": "fal",
+        "endpoint": "fal-ai/stable-audio-25/text-to-audio",
+        "map": {
+          "seed": "seed",
+          "duration": {
+            "key": "seconds_total",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "sfx",
+        "provider": "replicate",
+        "endpoint": "stability-ai/stable-audio-2.5",
+        "map": {
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "music",
+        "provider": "replicate",
+        "endpoint": "stability-ai/stable-audio-2.5",
+        "map": {
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "durations": [
+        10,
+        30,
+        60,
+        120,
+        190
+      ]
+    },
+    "defaults": {
+      "duration": 30
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.2
     }
   },
   {
