@@ -134,7 +134,7 @@ export function getCanvas(id: string): Canvas | null {
   return r ? toCanvas(r) : null;
 }
 
-/** The newest finished image or video among the canvas's results. */
+/** The newest finished image among the canvas's results (a video when it made no image). */
 function previewOf(runs: CanvasRuns): CanvasSummary["preview"] {
   const ids = Object.values(runs)
     .sort((a, b) => b.at - a.at)
@@ -142,7 +142,9 @@ function previewOf(runs: CanvasRuns): CanvasSummary["preview"] {
     .slice(0, 60);
   if (!ids.length) return null;
   const rows = db()
-    .prepare(`SELECT outputs_json FROM generations WHERE id IN (${ids.map(() => "?").join(",")}) AND status = 'succeeded' AND kind IN ('image','video') ORDER BY completed_at DESC LIMIT 1`)
+    .prepare(
+      `SELECT outputs_json FROM generations WHERE id IN (${ids.map(() => "?").join(",")}) AND status = 'succeeded' AND kind IN ('image','video') ORDER BY kind = 'image' DESC, completed_at DESC LIMIT 1`,
+    )
     .all(...ids) as { outputs_json: string }[];
   const o = rows[0] ? (JSON.parse(rows[0].outputs_json) as { url: string; kind: MediaKind }[]).find((x) => x.kind === "image" || x.kind === "video") : undefined;
   return o ? { url: o.url, kind: o.kind } : null;

@@ -128,6 +128,12 @@ export interface OutlineBox {
   type: CanvasNodeType;
 }
 
+/** The board in miniature: node boxes and the edges between them (as indexes into `boxes`). */
+export interface Outline {
+  boxes: OutlineBox[];
+  links: [number, number][];
+}
+
 export interface CanvasSummary {
   id: string;
   name: string;
@@ -135,7 +141,7 @@ export interface CanvasSummary {
   templateId: string | null;
   /** The newest finished image or video made on this canvas. */
   preview: { url: string; kind: MediaKind } | null;
-  outline: OutlineBox[];
+  outline: Outline;
   createdAt: number;
   updatedAt: number;
   editedAt: number | null;
@@ -808,7 +814,10 @@ function hash(s: string): string {
 
 /** The node's identity for "is this result still fresh": its request (minus labels) and the generations it builds on. */
 export function nodeSignature(req: GenerationRequest, depIds: string[]): string {
-  const { step: _step, frame: _frame, feature: _feature, ...rest } = req;
+  const rest: Partial<GenerationRequest> = { ...req };
+  delete rest.step;
+  delete rest.frame;
+  delete rest.feature;
   return hash(stable({ ...rest, deps: depIds }));
 }
 
@@ -1013,8 +1022,13 @@ export function cleanGraph(graph: CanvasGraph): CanvasGraph {
   return g;
 }
 
-export function outline(graph: CanvasGraph): OutlineBox[] {
-  return graph.nodes.filter((n) => n.type !== "note").slice(0, 40).map((n) => ({ x: Math.round(n.position.x), y: Math.round(n.position.y), type: n.type }));
+export function outline(graph: CanvasGraph): Outline {
+  const nodes = graph.nodes.filter((n) => n.type !== "note").slice(0, 40);
+  const index = new Map(nodes.map((n, i) => [n.id, i]));
+  return {
+    boxes: nodes.map((n) => ({ x: Math.round(n.position.x), y: Math.round(n.position.y), type: n.type })),
+    links: graph.edges.flatMap((e) => (index.has(e.source) && index.has(e.target) ? [[index.get(e.source)!, index.get(e.target)!] as [number, number]] : [])),
+  };
 }
 
 let seq = 0;
@@ -1072,7 +1086,9 @@ function tpl(nodes: TplNode[], edges: [string, string, string?][]): (engine: Eng
   };
 }
 
-const COL = 360;
+/** Column and row spacing: a generator node with a result is about 300 × 460 px. */
+const COL = 380;
+const ROW = 500;
 
 export const CANVAS_TEMPLATES: CanvasTemplate[] = [
   {
@@ -1103,12 +1119,12 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     hue: 30,
     build: tpl(
       [
-        { id: "product", type: "image-input", x: 0, y: 200, data: { label: "Product photo" } },
+        { id: "product", type: "image-input", x: 0, y: ROW, data: { label: "Product photo" } },
         { id: "front", type: "model", x: COL, y: 0, data: { mediaKind: "image", label: "Front ¾ angle", op: "edit", prompt: "The same product from a three-quarter front angle on a seamless studio background, soft key light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
-        { id: "side", type: "model", x: COL, y: 230, data: { mediaKind: "image", label: "Side profile", op: "edit", prompt: "The same product in a clean side profile on a seamless studio background, rim light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
-        { id: "top", type: "model", x: COL, y: 460, data: { mediaKind: "image", label: "Top-down", op: "edit", prompt: "The same product shot top-down as a flat lay on a seamless studio background, even light" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
-        { id: "video", type: "model", x: COL * 2, y: 200, data: { mediaKind: "video", label: "Ad clip", op: "ref2v", prompt: "A premium product commercial: the camera orbits the product from the reference angles, studio lighting, slow and smooth", params: { aspectRatio: "16:9", duration: 5 } }, models: { cloud: "seedance-2-5", open: "oss-wan-vace" } },
-        { id: "out", type: "output", x: COL * 3, y: 220, data: { label: "Ad" } },
+        { id: "side", type: "model", x: COL, y: ROW, data: { mediaKind: "image", label: "Side profile", op: "edit", prompt: "The same product in a clean side profile on a seamless studio background, rim light, sharp details" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
+        { id: "top", type: "model", x: COL, y: ROW * 2, data: { mediaKind: "image", label: "Top-down", op: "edit", prompt: "The same product shot top-down as a flat lay on a seamless studio background, even light" }, models: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } },
+        { id: "video", type: "model", x: COL * 2, y: ROW - 40, data: { mediaKind: "video", label: "Ad clip", op: "ref2v", prompt: "A premium product commercial: the camera orbits the product from the reference angles, studio lighting, slow and smooth", params: { aspectRatio: "16:9", duration: 5 } }, models: { cloud: "seedance-2-5", open: "oss-wan-vace" } },
+        { id: "out", type: "output", x: COL * 3, y: ROW, data: { label: "Ad" } },
       ],
       [
         ["product", "front", "images"],
@@ -1129,12 +1145,12 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     hue: 200,
     build: tpl(
       [
-        { id: "script", type: "prompt", x: 0, y: 230, data: { label: "Script", text: "A paper boat sails down a rain-soaked city gutter, rides a little waterfall into a storm drain and comes out on a sunny canal." } },
+        { id: "script", type: "prompt", x: 0, y: ROW, data: { label: "Script", text: "A paper boat sails down a rain-soaked city gutter, rides a little waterfall into a storm drain and comes out on a sunny canal." } },
         ...[0, 1, 2].map((i) => ({
           id: `frame${i + 1}`,
           type: "model" as const,
           x: COL,
-          y: i * 230,
+          y: i * ROW,
           data: {
             mediaKind: "image" as const,
             label: `Frame ${i + 1}`,
@@ -1151,7 +1167,7 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
           id: `shot${i + 1}`,
           type: "model" as const,
           x: COL * 2,
-          y: i * 230,
+          y: i * ROW,
           data: {
             mediaKind: "video" as const,
             label: `Shot ${i + 1}`,
@@ -1161,8 +1177,8 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
           },
           models: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" },
         })),
-        { id: "film", type: "join", x: COL * 3, y: 230, data: { label: "Film" }, models: { cloud: "join-clips", open: "oss-join-clips" } },
-        { id: "out", type: "output", x: COL * 4, y: 250, data: { label: "Film" } },
+        { id: "film", type: "join", x: COL * 3, y: ROW, data: { label: "Film" }, models: { cloud: "join-clips", open: "oss-join-clips" } },
+        { id: "out", type: "output", x: COL * 4, y: ROW, data: { label: "Film" } },
       ],
       [
         ["script", "frame1", "prompt"],
@@ -1188,9 +1204,9 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
       const models = engine === "open" ? ["oss-z-image-turbo", "oss-qwen-image", "oss-flux1-krea"] : ["nano-banana-pro", "seedream-5-pro", "flux-2-pro"];
       return tpl(
         [
-          { id: "prompt", type: "prompt", x: 0, y: 230, data: { label: "Prompt", text: "Portrait of an elderly fisherman mending a net at dawn, soft window light, film grain" } },
-          ...models.map((m, i) => ({ id: `m${i + 1}`, type: "model" as const, x: COL, y: i * 230, data: { mediaKind: "image" as const, modelId: m, params: { aspectRatio: "3:4" } } })),
-          { id: "out", type: "output", x: COL * 2, y: 200, data: { label: "Compare" }, width: 560 },
+          { id: "prompt", type: "prompt", x: 0, y: ROW - 60, data: { label: "Prompt", text: "Portrait of an elderly fisherman mending a net at dawn, soft window light, film grain" } },
+          ...models.map((m, i) => ({ id: `m${i + 1}`, type: "model" as const, x: COL, y: i * (ROW - 60), data: { mediaKind: "image" as const, modelId: m, params: { aspectRatio: "3:4" } } })),
+          { id: "out", type: "output", x: COL * 2, y: ROW - 120, data: { label: "Compare" }, width: 560 },
         ],
         [["prompt", "m1", "prompt"], ["prompt", "m2", "prompt"], ["prompt", "m3", "prompt"], ["m1", "out"], ["m2", "out"], ["m3", "out"]],
       )(engine);
@@ -1205,9 +1221,9 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
     build: tpl(
       [
         { id: "portrait", type: "image-input", x: 0, y: 0, data: { label: "Portrait" } },
-        { id: "sample", type: "audio-input", x: 0, y: 220, data: { label: "Voice sample (10–30 s)" } },
-        { id: "script", type: "prompt", x: 0, y: 420, data: { label: "Script", text: "Hi! This whole clip was made on a Fuobe canvas from one photo and a few seconds of my voice." } },
-        { id: "voice", type: "tts", x: COL, y: 280, data: { label: "Cloned voice" }, models: { cloud: "chatterbox-cloud", open: "oss-chatterbox" } },
+        { id: "sample", type: "audio-input", x: 0, y: 340, data: { label: "Voice sample (10–30 s)" } },
+        { id: "script", type: "prompt", x: 0, y: 540, data: { label: "Script", text: "Hi! This whole clip was made on a Fuobe canvas from one photo and a few seconds of my voice." } },
+        { id: "voice", type: "tts", x: COL, y: 400, data: { label: "Cloned voice" }, models: { cloud: "chatterbox-cloud", open: "oss-chatterbox" } },
         { id: "avatar", type: "model", x: COL * 2, y: 80, data: { mediaKind: "video", label: "Talking avatar", op: "avatar", prompt: "A friendly presenter talking to the camera, natural head movement" }, models: { cloud: "kling-avatar-2", open: "oss-infinitetalk" } },
         { id: "out", type: "output", x: COL * 3, y: 100, data: { label: "Clip" } },
       ],

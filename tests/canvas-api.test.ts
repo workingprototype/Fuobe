@@ -83,7 +83,12 @@ describe("canvas API", () => {
     res = await list.GET();
     const items = ((await res.json()) as { items: CanvasSummary[] }).items;
     expect(items[0]).toMatchObject({ id, name: "Fox film", nodeCount: 4, preview: null });
-    expect(items[0].outline).toHaveLength(4);
+    expect(items[0].outline.boxes).toHaveLength(4);
+    expect(items[0].outline.links).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 3],
+    ]);
   });
 
   it("runs the graph as chained generations, then reuses fresh results", async () => {
@@ -110,7 +115,8 @@ describe("canvas API", () => {
     const view = (await res.json()) as { canvas: Canvas; generations: Generation[] };
     expect(view.generations.map((g) => g.status).sort()).toEqual(["succeeded", "succeeded"]);
     const listed = ((await (await list.GET()).json()) as { items: CanvasSummary[] }).items.find((c) => c.id === id)!;
-    expect(listed.preview?.kind).toBe("video");
+    // Cards prefer a still over a clip.
+    expect(listed.preview).toEqual({ url: gens.getGeneration(img.id)!.outputs[0].url, kind: "image" });
 
     // Nothing changed: Run all starts nothing.
     res = await run.POST(req("POST", {}), ctx(id));
