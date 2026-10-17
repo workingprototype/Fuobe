@@ -18,6 +18,12 @@ RESEARCH = json.loads((ROOT / "docs/research/paid-model-apis.json").read_text())
 EPS = {}
 for e in RESEARCH["endpoints"]:
     EPS.setdefault((e["provider"], e["endpoint"]), e)
+# Part 2 (multi-shot, draft, extend, reframe, audio, training) re-verified some endpoints with more key fields.
+RESEARCH_2 = json.loads((ROOT / "docs/research/paid-model-apis-2.json").read_text())
+for e in RESEARCH_2["endpoints"]:
+    prev = EPS.get((e["provider"], e["endpoint"]))
+    # Keep part 1's key fields (aspect ratio mappings etc.) and add part 2's.
+    EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
@@ -100,6 +106,10 @@ model("flux-kontext-max", "FLUX.1 Kontext [max]", "Black Forest Labs", "flux", "
 model("ideogram-4-5", "Ideogram 4.5", "Ideogram", "ideogram", "image",
       "Best-in-class typography, posters and graphic design",
       [("t2i", "ideogram/v4.5"), ("edit", "ideogram/v4.5/edit")], defaults={"aspectRatio": "1:1"})
+model("flux-fill-pro", "FLUX.1 Fill [pro]", "Black Forest Labs", "flux", "image", "Precise inpainting and object replacement with a mask",
+      [("inpaint", "fal-ai/flux-pro/v1/fill")], pricing=("megapixel", 0.05), hidden=False)
+model("z-image-inpaint", "Z-Image Turbo Inpaint (hosted)", "Alibaba Tongyi", "z-image", "image", "Cheapest, fastest masked inpainting",
+      [("inpaint", "fal-ai/z-image/turbo/inpaint")], badges=["fast"], pricing=("megapixel", 0.01))
 model("recraft-4-1", "Recraft V4.1", "Recraft", "recraft", "image",
       "Brand-ready illustration, icons and design assets",
       [("t2i", "fal-ai/recraft/v4.1/text-to-image")], defaults={"aspectRatio": "1:1"})
@@ -111,7 +121,7 @@ model("wan-2-7-image", "Wan 2.7 Image", "Alibaba Wan", "wan", "image",
       [("t2i", "fal-ai/wan/v2.7/pro/text-to-image"), ("edit", "fal-ai/wan/v2.7/pro/edit")], defaults={"aspectRatio": "16:9"})
 model("z-image-turbo-cloud", "Z-Image Turbo (hosted)", "Alibaba Tongyi", "z-image", "image",
       "Sub-second photoreal images",
-      [("t2i", "fal-ai/z-image/turbo")], badges=["fast"], defaults={"aspectRatio": "1:1"})
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"})], badges=["fast"], defaults={"aspectRatio": "1:1"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -119,13 +129,16 @@ model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal t
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
       "Higgsfield's default — multi-shot cinema with native audio, up to 30s",
       [("t2v", "bytedance/seedance-2.5/text-to-video"), ("i2v", "bytedance/seedance-2.5/image-to-video", "fal", "+flf2v"),
-       ("ref2v", "bytedance/seedance-2.5/reference-to-video")],
-      badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"})
+       ("ref2v", "bytedance/seedance-2.5/reference-to-video"),
+       ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
+       ("finalize", "bytedance/seedance-2.5/draft/complete")],
+      badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("seedance-2-0", "Seedance 2.0", "ByteDance", "seedance", "video",
       "Smooth multi-shot motion with audio",
       [("t2v", "bytedance/seedance-2.0/text-to-video"), ("i2v", "bytedance/seedance-2.0/image-to-video", "fal", "+flf2v"),
        ("ref2v", "bytedance/seedance-2.0/reference-to-video")],
-      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"})
+      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("seedance-2-0-fast", "Seedance 2.0 Fast", "ByteDance", "seedance", "video",
       "Seedance 2 at draft speed",
       [("t2v", "bytedance/seedance-2.0/fast/text-to-video"), ("i2v", "bytedance/seedance-2.0/fast/image-to-video", "fal", "+flf2v"),
@@ -170,10 +183,12 @@ model("kling-2-5-turbo", "Kling 2.5 Turbo Pro", "Kuaishou", "kling", "video",
 model("veo-3-1", "Veo 3.1", "Google", "veo", "video",
       "State-of-the-art realism with synchronized sound and dialogue",
       [("t2v", "fal-ai/veo3.1"), ("i2v", "fal-ai/veo3.1/image-to-video"), ("flf2v", "fal-ai/veo3.1/first-last-frame-to-video"),
-       ("ref2v", "fal-ai/veo3.1/reference-to-video"), ("t2v", "google/veo-3.1", "replicate"), ("i2v", "google/veo-3.1", "replicate")],
+       ("ref2v", "fal-ai/veo3.1/reference-to-video"), ("t2v", "google/veo-3.1", "replicate"), ("i2v", "google/veo-3.1", "replicate"),
+       ("extend", "fal-ai/veo3.1/extend-video", "fal", {"note": "fal retires Veo 3.1 extend on 2026-11-17"})],
       badges=["top", "audio", "hd"], pricing=("second", 0.4, "audio-off-half"), defaults={"aspectRatio": "16:9", "duration": 8, "resolution": "1080p"})
 model("veo-3-1-fast", "Veo 3.1 Fast", "Google", "veo", "video", "Veo quality at a fraction of the cost",
-      [("t2v", "fal-ai/veo3.1/fast"), ("i2v", "fal-ai/veo3.1/fast/image-to-video"), ("flf2v", "fal-ai/veo3.1/fast/first-last-frame-to-video")],
+      [("t2v", "fal-ai/veo3.1/fast"), ("i2v", "fal-ai/veo3.1/fast/image-to-video"), ("flf2v", "fal-ai/veo3.1/fast/first-last-frame-to-video"),
+       ("extend", "fal-ai/veo3.1/fast/extend-video", "fal", {"note": "fal retires Veo 3.1 extend on 2026-11-17"})],
       badges=["fast", "audio"], pricing=("second", 0.15), defaults={"aspectRatio": "16:9", "duration": 8, "resolution": "1080p"})
 model("veo-3-1-lite", "Veo 3.1 Lite", "Google", "veo", "video", "Cheapest Veo for drafts and volume",
       [("t2v", "fal-ai/veo3.1/lite"), ("i2v", "fal-ai/veo3.1/lite/image-to-video")],
@@ -195,7 +210,7 @@ model("wan-2-7", "Wan 2.7", "Alibaba Wan", "wan", "video", "Hosted Wan with refe
       badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
 model("wan-2-6", "Wan 2.6", "Alibaba Wan", "wan", "video", "Multi-shot Wan with audio",
       [("t2v", "wan/v2.6/text-to-video"), ("i2v", "wan/v2.6/image-to-video"), ("ref2v", "wan/v2.6/reference-to-video")],
-      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
+      badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"}, options={"multiShot": {"mode": "prompt", "maxShots": 6}})
 model("wan-2-5", "Wan 2.5", "Alibaba Wan", "wan", "video", "Audio-driven video up to 1080p",
       [("t2v", "fal-ai/wan-25-preview/text-to-video"), ("i2v", "fal-ai/wan-25-preview/image-to-video")],
       badges=["audio"], pricing=("second", 0.15, "1080p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
@@ -203,7 +218,8 @@ model("minimax-h3", "MiniMax H3", "MiniMax", "hailuo", "video", "Expressive char
       [("t2v", "minimax/h3/text-to-video"), ("i2v", "minimax/h3/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3/reference-to-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
 model("minimax-h3-max", "MiniMax H3 Max", "MiniMax", "hailuo", "video", "Top-tier MiniMax with extend",
-      [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video")],
+      [("t2v", "minimax/h3-max/text-to-video"), ("i2v", "minimax/h3-max/image-to-video", "fal", "+flf2v"), ("ref2v", "minimax/h3-max/reference-to-video"),
+       ("extend", "minimax/h3-max/extend-video")],
       badges=["pro"], defaults={"aspectRatio": "16:9"})
 model("hailuo-2-3", "MiniMax Hailuo 2.3", "MiniMax", "hailuo", "video", "Expressive characters and dynamic action",
       [("t2v", "fal-ai/minimax/hailuo-2.3/pro/text-to-video"), ("i2v", "fal-ai/minimax/hailuo-2.3/pro/image-to-video")],
@@ -213,20 +229,27 @@ model("hailuo-02", "MiniMax Hailuo 02", "MiniMax", "hailuo", "video", "Physics-h
       pricing=("second", 0.045), defaults={"duration": 6, "resolution": "768P"}, fixed={"prompt_optimizer": True})
 model("flux-3-video", "FLUX.3 Video", "Black Forest Labs", "flux", "video", "BFL's video model with keyframes and edits",
       [("t2v", "blackforestlabs/flux-3/text-to-video"), ("i2v", "blackforestlabs/flux-3/image-to-video"),
-       ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video")],
+       ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video"),
+       ("extend", "blackforestlabs/flux-3/extend-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
 model("pixverse-v6", "PixVerse V6", "PixVerse", "pixverse", "video", "Stylized social video with transitions",
-      [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition")],
+      [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition"),
+       ("extend", "fal-ai/pixverse/v6/extend")],
       defaults={"aspectRatio": "16:9"})
 model("vidu-q3", "Vidu Q3", "Shengshu", "vidu", "video", "Anime-friendly video with references",
       [("t2v", "fal-ai/vidu/q3/text-to-video"), ("i2v", "fal-ai/vidu/q3/image-to-video"), ("ref2v", "fal-ai/vidu/q3/reference-to-video/mix")],
       defaults={"aspectRatio": "16:9"})
 model("luma-ray-3-2", "Luma Ray 3.2", "Luma", "luma", "video", "HDR, physically convincing motion",
-      [("t2v", "luma/agent/ray/v3.2/text-to-video"), ("i2v", "luma/agent/ray/v3.2/image-to-video"), ("v2v", "luma/agent/ray/v3.2/video-to-video")],
+      [("t2v", "luma/agent/ray/v3.2/text-to-video"), ("i2v", "luma/agent/ray/v3.2/image-to-video"), ("v2v", "luma/agent/ray/v3.2/video-to-video"),
+       ("reframe", "luma/agent/ray/v3.2/reframe")],
       defaults={"aspectRatio": "16:9"})
+model("ltx-reframe", "LTX Reframe", "Lightricks", "ltx", "video", "Change a clip's aspect ratio — fast, no prompt needed",
+      [("reframe", "fal-ai/ltx-2.3/reframe")], defaults={"aspectRatio": "9:16"})
+model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "video", "Open-weights reframe: outpaints the new edges with a prompt",
+      [("reframe", "fal-ai/wan-vace-14b/reframe")], defaults={"aspectRatio": "9:16"})
 
 # ----- Avatars & lipsync
 model("kling-avatar-2", "Kling Avatar 2.0", "Kuaishou", "kling", "video", "Photo + voice → expressive talking video",
@@ -257,17 +280,68 @@ model("seedvr-video", "SeedVR2 Video Upscale", "ByteDance Seed", "seedvr", "vide
       [("upscale-video", "fal-ai/seedvr/upscale/video")])
 model("birefnet-cloud", "BiRefNet background removal", "ZhengPeng7", "birefnet", "image", "Clean cut-outs with hair detail",
       [("bg-remove", "fal-ai/birefnet/v2")], pricing=("image", 0.0), fixed={"operating_resolution": "2048x2048", "output_format": "png"})
-model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Expressive multilingual speech",
-      [("tts", "fal-ai/elevenlabs/tts/eleven-v3")], pricing=("request", 0.1, "per 1k chars"), fixed={"voice": "Rachel"})
+model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Most expressive speech — audio tags like [whispers] and [laughs]",
+      [("tts", "fal-ai/elevenlabs/tts/eleven-v3")], badges=["top"], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-v4", "ElevenLabs v4", "ElevenLabs", "elevenlabs", "audio", "Newest ElevenLabs voice model — natural, stable long-form",
+      [("tts", "elevenlabs/tts/eleven-v4")], badges=["new"], pricing=("request", 0.08, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-v4-turbo", "ElevenLabs v4 Turbo", "ElevenLabs", "elevenlabs", "audio", "Low-latency v4 at half the price",
+      [("tts", "elevenlabs/tts/eleven-v4-turbo")], badges=["fast"], pricing=("request", 0.04, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-multilingual-v2", "ElevenLabs Multilingual v2", "ElevenLabs", "elevenlabs", "audio", "29 languages with speed and style control",
+      [("tts", "fal-ai/elevenlabs/tts/multilingual-v2")], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("elevenlabs-dialogue", "ElevenLabs Dialogue", "ElevenLabs", "elevenlabs", "audio", "Several speakers, one natural conversation",
+      [("dialogue", "fal-ai/elevenlabs/text-to-dialogue/eleven-v3")], badges=["new"], pricing=("request", 0.1, "per 1k chars"), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("chatterbox-cloud", "Chatterbox (hosted)", "Resemble AI", "chatterbox", "audio", "Clone any voice from a 10-second sample",
+      [("tts", "fal-ai/chatterbox/text-to-speech")], pricing=("request", 0.025, "per 1k chars"))
+model("index-tts-2-cloud", "IndexTTS-2 (hosted)", "Bilibili", "index-tts", "audio", "Zero-shot cloning with emotion control",
+      [("tts", "fal-ai/index-tts-2/text-to-speech")], pricing=("second", 0.002))
+model("elevenlabs-voice-changer", "ElevenLabs Voice Changer", "ElevenLabs", "elevenlabs", "audio", "Re-voice a recording with any premade voice",
+      [("voice-change", "fal-ai/elevenlabs/voice-changer")], pricing=("minute", 0.3), defaults={"voice": "JBFqnCBsd6RMkjVDRZzb"})
+model("chatterbox-vc-cloud", "Chatterbox Voice Conversion (hosted)", "Resemble AI", "chatterbox", "audio", "Turn a recording into any voice from a sample",
+      [("voice-change", "fal-ai/chatterbox/speech-to-speech")], pricing=("minute", 0.015))
+model("heygen-translate", "HeyGen Translate", "HeyGen", "heygen", "video", "Lip-synced video translation into 170+ languages and accents",
+      [("dub", "fal-ai/heygen/v2/translate/precision")], badges=["top"], pricing=("second", 0.1))
+model("heygen-translate-fast", "HeyGen Translate Speed", "HeyGen", "heygen", "video", "Faster, cheaper lip-synced translation",
+      [("dub", "fal-ai/heygen/v2/translate/speed")], badges=["fast"], pricing=("second", 0.05))
+model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "video", "Dub video or audio while keeping each speaker's voice",
+      [("dub", "fal-ai/elevenlabs/dubbing")], pricing=("minute", 0.6))
 model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", "audio", "Describe a sound, get a sound",
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
       [("music", "fal-ai/elevenlabs/music")], pricing=("minute", 0.6), defaults={"duration": 30}, options={"durations": [15, 30, 60, 120]})
+model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject",
+      [("bg-remove-video", "fal-ai/birefnet/v2/video")], pricing=("second", 0.0), fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
+model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video", "Production-grade video matting with audio kept",
+      [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
+      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
+model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
+      [("depth-video", "fal-ai/depth-anything-video")], pricing=("second", 0.04), fixed={"model": "VDA-Base", "colormap": "grayscale"})
+model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
+      [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
+      fixed={"relit_cond_type": "ic", "relight_parameters.bg_source": "Left"},
+      options={"controls": [{"param": "relight_parameters.bg_source", "label": "Light from", "values": ["Left", "Right", "Top", "Bottom"], "default": "Left"}]})
 model("mmaudio-cloud", "MMAudio", "hkchengrex", "mmaudio", "video", "Add matching sound to a silent video",
       [("v2a", "fal-ai/mmaudio-v2")], pricing=("second", 0.001))
 
 
 # ---------------------------------------------------------------------------
+
+# Numeric voice settings exposed as sliders.
+SLIDER_LABELS = {
+    "stability": "Stability", "similarity_boost": "Similarity", "style": "Style exaggeration", "speed": "Speed",
+    "exaggeration": "Emotion", "cfg": "Pace / guidance", "temperature": "Variety", "strength": "Voice strength",
+}
+
+# ElevenLabs premade voices (docs/research/paid-model-apis-2.json → elevenlabsVoices). Sent by voice_id.
+_EL = RESEARCH_2.get("elevenlabsVoices") or {}
+ELEVEN_VOICES = [
+    {"id": v["voice_id"], "name": v["name"], "hint": " · ".join(x for x in [(v.get("label") or "").partition(" - ")[2], v.get("accent")] if x)}
+    for v in (_EL.get("voices") or [])
+]
+
+# ElevenLabs dubbing takes ISO 639-1 codes.
+ISO_LANGUAGES = ["en", "es", "fr", "de", "it", "pt", "pl", "hi", "ja", "ko", "zh", "ar", "ru", "tr", "nl", "sv", "id", "fil", "uk", "el", "cs",
+                 "ro", "da", "fi", "bg", "hr", "sk", "ms", "ta", "vi", "hu", "no"]
+
 
 def warn(msg):
     print(f"warning: {msg}", file=sys.stderr)
@@ -289,7 +363,8 @@ def num(v):
         return None
 
 
-def build_route(op, ep, provider, m, opts):
+def build_route(op, ep, provider, m, opts, ropts=None):
+    ropts = ropts or {}
     e = EPS.get((provider, ep))
     if not e:
         warn(f"{m['id']}: endpoint {provider}:{ep} not in research")
@@ -305,11 +380,58 @@ def build_route(op, ep, provider, m, opts):
             fmap["prompt"] = kf["prompt"]
     else:
         fmap["prompt"] = False
+    # Relight endpoints take the lighting description as the prompt.
+    if "lightingPrompt" in kf:
+        fmap["prompt"] = kf["lightingPrompt"]
+    # Zero-shot TTS takes its reference voice in the "audio" field; voice conversion names it separately.
+    if op == "tts" and "audio" in kf:
+        kf["referenceVoice"] = kf.pop("audio")
+    if "referenceVoice" in kf and (inputs.get(kf["referenceVoice"]) or {}).get("type") != "array":
+        fmap["voiceAudio"] = kf["referenceVoice"]
+        opts["voiceClone"] = True
+    if "voice" in kf and "[]" not in kf["voice"]:
+        fmap["voice"] = kf["voice"]
+    if "voice" in kf and "elevenlabs" in ep:
+        opts["voices"] = ELEVEN_VOICES
+    if "dialogue" in kf:
+        fmap["dialogue"] = {"key": kf["dialogue"], "text": "text", "voice": "voice"}
+    if "targetLanguage" in kf:
+        fmap["targetLanguage"] = kf["targetLanguage"]
+        enum = (inputs.get(kf["targetLanguage"]) or {}).get("values")
+        opts["languages"] = enum or ISO_LANGUAGES
+    sliders = [
+        {"param": k, "label": SLIDER_LABELS[k], "min": v["minimum"], "max": v["maximum"], "step": 0.05 if v["maximum"] - v["minimum"] <= 4 else 1,
+         "default": v.get("default", v["minimum"])}
+        for k, v in inputs.items() if k in SLIDER_LABELS and isinstance(v, dict) and "minimum" in v and "maximum" in v
+    ]
+    if sliders:
+        opts["sliders"] = sliders
+    # Some APIs call their boolean sound switch "audio" (Wan 3.0); that's generateAudio, not an audio file.
+    if "audio" in kf and (inputs.get(kf["audio"]) or {}).get("type") == "boolean":
+        kf.setdefault("generateAudio", kf.pop("audio"))
     for k in ["negativePrompt", "image", "images", "endImage", "mask", "video", "audio", "numOutputs", "seed", "generateAudio"]:
         if k in kf:
             if k in ("video", "audio", "image", "endImage", "mask") and (inputs.get(kf[k]) or {}).get("type") == "array":
-                continue  # array-of-media inputs (reference videos/audios) aren't wired yet
+                if k == "video" and ropts.get("videoArray"):
+                    fmap["videoArray"] = kf[k]
+                continue  # other array-of-media inputs (reference videos/audios) aren't wired yet
             fmap[k] = kf[k]
+    # Multi-shot, draft mode and draft completion (research part 2 key fields).
+    if "multiShot" in kf and op in ("t2v", "i2v", "ref2v") and (inputs.get(kf["multiShot"]) or {}).get("type") in ("array", "string"):
+        item = (inputs.get(kf["multiShot"]) or {}).get("itemSchema") or {}
+        dtype = "string" if (item.get("duration") or {}).get("valueType") == "string" else "number"
+        ms = {"key": kf["multiShot"], "durationType": dtype}
+        if (inputs.get(kf["multiShot"]) or {}).get("type") == "string":
+            ms["json"] = True
+        if "shotType" in kf:
+            ms["shotType"] = kf["shotType"]
+        fmap["multiShot"] = ms
+        opts["multiShot"] = {"mode": "native", "maxShots": 6}
+    if "draft" in kf and op in ("t2v", "i2v", "ref2v"):
+        fmap["draft"] = kf["draft"]
+        opts["draft"] = True
+    if "draftId" in kf:
+        fmap["draftId"] = kf["draftId"]
     # LTX/others sometimes have image key named differently but keyFields covers it.
     if "negativePrompt" in fmap:
         opts["negativePrompt"] = True
@@ -353,7 +475,8 @@ def build_route(op, ep, provider, m, opts):
             fmap["duration"] = {"key": key, "type": dtype, **({"suffix": suffix} if suffix else {})}
             if len(vals) > 6:
                 pick = [v for v in vals if v in (3, 4, 5, 6, 8, 10, 12, 15, 20, 30)] or vals[:6]
-                vals = pick[:7]
+                # Keep the longest option: multi-shot budgets and the duration picker both need the real maximum.
+                vals = pick[:6] + [pick[-1]] if len(pick) > 7 else pick
             opts["durations"] = union(opts.get("durations", []), vals)
         else:
             dtype = "number" if spec.get("type") in ("integer", "number") else "string"
@@ -363,9 +486,11 @@ def build_route(op, ep, provider, m, opts):
         if key.endswith("_ms"):
             fmap["duration"]["multiplier"] = 1000
     # Text-to-speech etc. carry the prompt in "text".
+    if ropts.get("fixed"):
+        m = {**m, "fixed": {**m["fixed"], **ropts["fixed"]}}
     if m["fixed"]:
-        fmap["fixed"] = {k: v for k, v in m["fixed"].items() if k in inputs}
-        missing = [k for k in m["fixed"] if k not in inputs]
+        fmap["fixed"] = {k: v for k, v in m["fixed"].items() if k.split(".")[0] in inputs}
+        missing = [k for k in m["fixed"] if k.split(".")[0] not in inputs]
         if missing:
             warn(f"{m['id']}: fixed fields {missing} not in {ep} inputs")
         if not fmap["fixed"]:
@@ -378,7 +503,14 @@ def build_route(op, ep, provider, m, opts):
         opts["maxImages"] = max(opts.get("maxImages", 1), mx or (10 if op == "edit" else 4))
     elif "image" in fmap:
         opts["maxImages"] = max(opts.get("maxImages", 0), 1)
-    return {"op": op, "provider": provider, "endpoint": ep, "map": fmap}, e
+    route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
+    if ropts.get("note"):
+        route["note"] = ropts["note"]
+    if ropts.get("loraEndpoint"):
+        if (provider, ropts["loraEndpoint"]) not in EPS:
+            warn(f"{m['id']}: LoRA endpoint {ropts['loraEndpoint']} not in research")
+        route["loraEndpoint"] = ropts["loraEndpoint"]
+    return route, e
 
 
 def parse_price(e):
@@ -398,13 +530,23 @@ for m in M:
     for r in m["routes"]:
         op, ep = r[0], r[1]
         provider = r[2] if len(r) > 2 else "fal"
-        res = build_route(op, ep, provider, m, opts)
+        ropts = r[3] if len(r) > 3 and isinstance(r[3], dict) else {}
+        res = build_route(op, ep, provider, m, opts, ropts)
         if not res:
             continue
         route, e = res
         first_e = first_e or e
         routes.append(route)
-        if len(r) > 3 and r[3] == "+flf2v":
+        # Edit endpoints that take a mask also get a native inpaint route.
+        if op == "edit":
+            inputs = e.get("inputs") or {}
+            # The mask belongs on the inpaint route only; plain edits never send one.
+            mk = route["map"].pop("mask", None) or next((k for k in ("mask_url", "mask_image_url", "mask") if k in inputs and inputs[k].get("type") != "array"), None)
+            if mk:
+                # Ideogram paints black = change; OpenAI's GPT Image uses transparent = change.
+                fmt = "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
+                routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
+        if len(r) > 3 and r[3] == "+flf2v" and not ropts:
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})
             else:

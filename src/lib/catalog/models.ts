@@ -1,5 +1,6 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
-import type { ModelDef, ModelRoute, Operation } from "./types";
+import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
+import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
  * Model catalog.
@@ -9,6 +10,21 @@ import type { ModelDef, ModelRoute, Operation } from "./types";
  */
 
 const comfy = (op: Operation, workflow: string, note?: string): ModelRoute => ({ op, provider: "comfyui", endpoint: workflow, note });
+
+/** Chatterbox Multilingual's language list (FL_ChatterboxMultilingualTTS). */
+const CHATTERBOX_LANGUAGES = [
+  "English (en)", "Spanish (es)", "French (fr)", "German (de)", "Italian (it)", "Portuguese (pt)", "Dutch (nl)", "Polish (pl)", "Russian (ru)",
+  "Turkish (tr)", "Arabic (ar)", "Hebrew (he)", "Hindi (hi)", "Japanese (ja)", "Korean (ko)", "Chinese (zh)", "Malay (ms)", "Swedish (sv)",
+  "Danish (da)", "Norwegian (no)", "Finnish (fi)", "Greek (el)", "Swahili (sw)",
+];
+const CHATTERBOX_SLIDERS = [
+  { param: "exaggeration", label: "Emotion", min: 0.25, max: 2, step: 0.05, default: 0.5 },
+  { param: "cfg", label: "Pace / guidance", min: 0.2, max: 1, step: 0.05, default: 0.5 },
+  { param: "temperature", label: "Variety", min: 0.05, max: 2, step: 0.05, default: 0.8 },
+];
+
+/** Open models have no multi-shot of their own: each shot renders separately, then the clips are joined. */
+const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
 const IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"];
 const VID_AR = ["16:9", "9:16", "1:1"];
@@ -218,7 +234,7 @@ const open: ModelDef[] = [
     tagline: "Best open video model with Lightx2v 4-step LoRAs — minutes, not hours",
     badges: ["fast", "top"],
     routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b")],
-    options: { aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
   o({
@@ -229,7 +245,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Full-quality Wan 2.2 (20 steps) — text, image and start/end frame",
     routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b")],
-    options: { aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
   o({
@@ -241,7 +257,7 @@ const open: ModelDef[] = [
     tagline: "720p video on a single consumer GPU",
     badges: ["fast"],
     routes: [comfy("t2v", "wan22-ti2v-5b"), comfy("i2v", "wan22-ti2v-5b-i2v")],
-    options: { aspectRatios: VID_AR, durations: [3, 5], resolutions: ["720p"], seed: true, negativePrompt: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["720p"], seed: true, negativePrompt: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -253,7 +269,7 @@ const open: ModelDef[] = [
     tagline: "Open video with native synchronized audio, up to 10s",
     badges: ["audio", "new"],
     routes: [comfy("t2v", "ltx25-t2v"), comfy("i2v", "ltx25-i2v")],
-    options: { aspectRatios: VID_AR, durations: [5, 8, 10], resolutions: ["720p", "1080p"], seed: true, negativePrompt: true, audio: "always" },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5, 8, 10], resolutions: ["720p", "1080p"], seed: true, negativePrompt: true, audio: "always" },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -265,7 +281,7 @@ const open: ModelDef[] = [
     tagline: "Fast open video with audio",
     badges: ["audio"],
     routes: [comfy("t2v", "ltx2-t2v"), comfy("i2v", "ltx2-i2v")],
-    options: { aspectRatios: VID_AR, durations: [5, 8], resolutions: ["720p"], seed: true, negativePrompt: true, audio: "always" },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5, 8], resolutions: ["720p"], seed: true, negativePrompt: true, audio: "always" },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -276,7 +292,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Lightweight 8.3B model with strong motion",
     routes: [comfy("t2v", "hunyuan15-t2v-720p"), comfy("i2v", "hunyuan15-i2v-720p")],
-    options: { aspectRatios: VID_AR, durations: [5], resolutions: ["720p"], seed: true, negativePrompt: true },
+    options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [5], resolutions: ["720p"], seed: true, negativePrompt: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "720p" },
   }),
   o({
@@ -421,7 +437,176 @@ const open: ModelDef[] = [
     hidden: true,
   }),
 
+  // ---------------- Video tools (extend, reframe, relight, draw-to-video, mattes, depth)
+  o({
+    id: "oss-wan22-vace-extend",
+    name: "Wan 2.2 Fun VACE Extend",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Continues a clip from its last 16 frames — same look and characters",
+    routes: [comfy("extend", "video-extend-wan22-fun-vace", "Lightx2v 4-step")],
+    options: { durations: [3, 4, 5, 6], resolutions: ["480p", "720p"], seed: true, negativePrompt: true },
+    defaults: { duration: 4, resolution: "480p" },
+  }),
+  o({
+    id: "oss-wan22-vace-reframe",
+    name: "Wan 2.2 Fun VACE Reframe",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Outpaints a clip to a new aspect ratio",
+    routes: [comfy("reframe", "video-reframe-wan22-fun-vace", "Lightx2v 4-step")],
+    options: { aspectRatios: ["9:16", "16:9", "1:1", "4:5", "3:4", "4:3", "21:9"], resolutions: ["480p", "720p"], seed: true, negativePrompt: true },
+    defaults: { aspectRatio: "9:16", resolution: "480p" },
+  }),
+  o({
+    id: "oss-wan-move",
+    name: "Wan-Move",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Draw motion paths on the first frame — things move exactly along them",
+    badges: ["new"],
+    routes: [comfy("i2v", "draw-to-video-wan-move")],
+    options: { durations: [3, 4, 5], seed: true, negativePrompt: true, motionPaths: true },
+    defaults: { duration: 5 },
+  }),
+  o({
+    id: "oss-bernini-relight",
+    name: "Bernini-R Relight",
+    vendor: "Bernini",
+    family: "wan",
+    kind: "video",
+    tagline: "Relight a video from a description of the new light",
+    routes: [comfy("relight-video", "video-relight-bernini-r", "Wan 2.2 fine-tune, 6 steps")],
+    options: { resolutions: ["480p", "720p"], seed: true, negativePrompt: true },
+    defaults: { resolution: "480p" },
+  }),
+  o({
+    id: "oss-video-matte-birefnet",
+    name: "BiRefNet video matte",
+    vendor: "ZhengPeng7",
+    family: "birefnet",
+    kind: "video",
+    tagline: "Cut the subject out of every frame — transparent WebM plus a matte",
+    routes: [comfy("bg-remove-video", "video-bg-remove-birefnet")],
+    options: {},
+  }),
+  o({
+    id: "oss-video-matte-sam3",
+    name: "SAM 3 video cutout",
+    vendor: "Meta",
+    family: "sam",
+    kind: "video",
+    tagline: "Keep just the object you name (“the dog”, “the red car”)",
+    routes: [comfy("bg-remove-video", "video-bg-remove-sam3")],
+    options: {},
+  }),
+  o({
+    id: "oss-video-depth-da3",
+    name: "Depth Anything 3",
+    vendor: "ByteDance",
+    family: "depth-anything",
+    kind: "video",
+    tagline: "Per-frame depth maps for compositing and 3D effects",
+    routes: [comfy("depth-video", "video-depth-da3")],
+    options: {},
+  }),
+  o({
+    id: "oss-video-depth-vda",
+    name: "Video Depth Anything (small)",
+    vendor: "ByteDance",
+    family: "depth-anything",
+    kind: "video",
+    tagline: "Temporally stable, flicker-free depth",
+    routes: [comfy("depth-video", "video-depth-vda-small")],
+    options: {},
+  }),
+  o({
+    id: "oss-qwen-relight",
+    name: "Qwen-Image-Edit Relight",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "Relight a photo from a description (Relight LoRA, 4 steps)",
+    routes: [comfy("edit", "relight-qwen-edit-2509", "Relight LoRA + Lightning")],
+    options: { seed: true, negativePrompt: true, maxImages: 1 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-qwen-relight-ref",
+    name: "Qwen-Image-Edit Relight (reference)",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "Relight a photo to match a reference image's light (Relight LoRA, 4 steps)",
+    routes: [comfy("edit", "relight-qwen-edit-2509-reference", "Relight LoRA + Lightning, image 2 = lighting reference")],
+    options: { seed: true, negativePrompt: true, maxImages: 2 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-qwen-next-scene",
+    name: "Qwen-Image-Edit Next Scene",
+    vendor: "Alibaba Qwen",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "The next storyboard panel from the previous one (next-scene LoRA)",
+    routes: [comfy("edit", "storyboard-qwen-edit-2509-next-scene", "next-scene LoRA v2")],
+    options: { seed: true, negativePrompt: true, maxImages: 2 },
+    hidden: true,
+  }),
+
   // ---------------- Audio
+  o({
+    id: "oss-chatterbox",
+    name: "Chatterbox Multilingual",
+    vendor: "Resemble AI",
+    family: "chatterbox",
+    kind: "audio",
+    tagline: "Clone any voice from a short sample, in 23 languages",
+    badges: ["top"],
+    routes: [comfy("tts", "tts-chatterbox-multilingual")],
+    options: { voiceClone: true, languages: CHATTERBOX_LANGUAGES, sliders: CHATTERBOX_SLIDERS, seed: true },
+  }),
+  o({
+    id: "oss-indextts2",
+    name: "IndexTTS-2",
+    vendor: "Bilibili",
+    family: "index-tts",
+    kind: "audio",
+    tagline: "Expressive zero-shot cloning (commercial use under 100M users)",
+    routes: [comfy("tts", "tts-indextts2")],
+    options: { voiceClone: true },
+  }),
+  o({
+    id: "oss-chatterbox-dialogue",
+    name: "Chatterbox Dialogue",
+    vendor: "Resemble AI",
+    family: "chatterbox",
+    kind: "audio",
+    tagline: "Two speakers, each cloned from a sample",
+    routes: [comfy("dialogue", "tts-dialogue-chatterbox")],
+    options: {
+      voiceClone: true,
+      voices: [
+        { id: "A", name: "Speaker A" },
+        { id: "B", name: "Speaker B" },
+      ],
+      sliders: CHATTERBOX_SLIDERS,
+      seed: true,
+    },
+  }),
+  o({
+    id: "oss-chatterbox-vc",
+    name: "Chatterbox Voice Conversion",
+    vendor: "Resemble AI",
+    family: "chatterbox",
+    kind: "audio",
+    tagline: "Say it in anyone's voice — keeps your timing and emotion",
+    routes: [comfy("voice-change", "voice-change-chatterbox")],
+    options: { voiceClone: true, seed: true },
+  }),
   o({
     id: "oss-ace-step",
     name: "ACE-Step 1.5",
@@ -433,6 +618,122 @@ const open: ModelDef[] = [
     options: { durations: [30, 60, 120, 180], seed: true },
     defaults: { duration: 60 },
   }),
+  // Utilities used by chained jobs (multi-shot, storyboard films, extend) and the Video tools page.
+  o({
+    id: "oss-join-clips",
+    name: "Join clips",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Join 2–4 clips into one video, scaled to one size",
+    routes: [comfy("concat", "video-concat-{n}")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"] },
+    defaults: { aspectRatio: "16:9", resolution: "720p" },
+  }),
+  o({
+    id: "oss-palette-image",
+    name: "Palette match",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "image",
+    tagline: "Recolour an image to the palette of a reference image",
+    routes: [comfy("color-match", "palette-transfer-image")],
+    options: { sliders: [{ param: "strength", label: "Strength", min: 0, max: 1, step: 0.05, default: 0.8 }] },
+  }),
+  o({
+    id: "oss-palette-video",
+    name: "Palette match (video)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Give every frame of a video the colours of a reference image",
+    routes: [comfy("color-match", "palette-transfer-video")],
+    options: { sliders: [{ param: "strength", label: "Strength", min: 0, max: 1, step: 0.05, default: 0.8 }] },
+  }),
 ];
 
-export const MODELS: ModelDef[] = [...CLOUD_MODELS, ...open];
+/** fal's FFmpeg utilities (docs/research/paid-model-apis-2.md): the cloud side of join clips and Kling extend. */
+const cloudTools: ModelDef[] = [
+  {
+    id: "join-clips",
+    name: "Join clips",
+    vendor: "fal",
+    family: "utility",
+    engine: "cloud",
+    kind: "video",
+    tagline: "Join clips into one video, in order",
+    routes: [{ op: "concat", provider: "fal", endpoint: "fal-ai/ffmpeg-api/merge-videos", map: { prompt: false, videos: "video_urls" } }],
+    options: {},
+    pricing: { unit: "request", usd: 0, note: "billed per compute second, ≈ free" },
+  },
+  {
+    id: "extract-frame",
+    name: "Extract frame",
+    vendor: "fal",
+    family: "utility",
+    engine: "cloud",
+    kind: "image",
+    tagline: "The first, middle or last frame of a video",
+    routes: [{ op: "frame", provider: "fal", endpoint: "fal-ai/ffmpeg-api/extract-frame", map: { prompt: false, video: "video_url", fixed: { frame_type: "last" } } }],
+    options: {},
+    pricing: { unit: "request", usd: 0.001 },
+    hidden: true,
+  },
+];
+
+/**
+ * Kling has no extend endpoint: Fuobe continues a clip from its last frame with Kling's own
+ * image-to-video and joins the two (fal's FFmpeg tools; src/server/chains.ts).
+ */
+function withLastFrameExtend(m: ModelDef): ModelDef {
+  const i2v = m.routes.find((r) => r.op === "i2v" && r.provider === "fal");
+  if (m.family !== "kling" || m.kind !== "video" || !i2v || m.routes.some((r) => r.op === "extend")) return m;
+  return { ...m, routes: [...m.routes, { op: "extend", provider: "fal", endpoint: LAST_FRAME_CHAIN, note: "last frame → Kling image-to-video → joined" }] };
+}
+
+/**
+ * Higgsfield's AI Influencer character sheet. Not in Higgsfield's docs catalog (console docs and
+ * the pricing API only — docs/research/higgsfield-api.json), so it's defined here, not generated.
+ */
+const AI_INFLUENCER: ModelDef = {
+  id: "ai-influencer",
+  name: "AI Influencer",
+  vendor: "Higgsfield",
+  family: "soul",
+  engine: "cloud",
+  kind: "image",
+  tagline: "An original character sheet from a short brief — human or creature",
+  badges: ["new"],
+  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
+  options: {
+    seed: true,
+    controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
+  },
+  pricing: { unit: "image", usd: 0.05 },
+};
+
+/** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
+const cloud: ModelDef[] = [
+  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)).map(withLastFrameExtend),
+  ...HIGGSFIELD_MODELS,
+  AI_INFLUENCER,
+  ...cloudTools,
+];
+
+/** Tools that run entirely in the browser; recorded in the library like any other result. */
+const local: ModelDef[] = [
+  {
+    id: "local-color-grade",
+    name: "Color Grading",
+    vendor: "Fuobe",
+    family: "local",
+    engine: "open",
+    kind: "image",
+    tagline: "Real-time WebGL grading in your browser — free, nothing leaves your machine",
+    routes: [{ op: "grade", provider: "local", endpoint: "webgl" }],
+    options: {},
+    hidden: true,
+  },
+];
+
+export const MODELS: ModelDef[] = [...cloud, ...open, ...local];

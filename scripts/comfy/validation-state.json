@@ -11,6 +11,12 @@
     "error": null,
     "at": "2026-10-16T20:57:20.767Z"
   },
+  "draw-to-video-wan-move": {
+    "sha256": "6c75d5e1b69774db6dea6e8879f61c3701ea60384e85e1e0291118cc77c1795e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:15.735Z"
+  },
   "face-swap-reactor": {
     "sha256": "3bff3a7975736ff83aef7e2040c1af8b7dc18ac4e273bcd5dce73ab7eecf4a8a",
     "validated": true,
@@ -155,6 +161,18 @@
     "error": null,
     "at": "2026-10-16T20:57:26.870Z"
   },
+  "palette-transfer-image": {
+    "sha256": "3287bd729386b870c9797679512d46526e17e66b09736029ca55867c6670e43f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:35.753Z"
+  },
+  "palette-transfer-video": {
+    "sha256": "84f4875277baf7ff18e5984d9dc2880f5d244b0eb0083e6332aab78c35563d0f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:22.947Z"
+  },
   "qwen-image-2512-t2i": {
     "sha256": "c18da4a3488120bdcee722e4ae7d187385544ec4805753e7dae6946ddb6f6ba5",
     "validated": true,
@@ -185,11 +203,47 @@
     "error": null,
     "at": "2026-10-16T20:57:17.108Z"
   },
+  "relight-qwen-edit-2509": {
+    "sha256": "06aa8787ebbc6fd40a4e95b3040a748c4544598ee7b795530c0e90e841a96ac8",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:14.660Z"
+  },
+  "relight-qwen-edit-2509-reference": {
+    "sha256": "45bb7c00ddb772a49156189708cbd831555046c7867155244c7bb3edf30839ce",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:15.071Z"
+  },
   "sdxl-t2i": {
     "sha256": "ae16cc9b74193179da08136571719871c3e31e2abacf5297985657c2fe5e9fbf",
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:16.889Z"
+  },
+  "storyboard-qwen-edit-2509-next-scene": {
+    "sha256": "779d2a53bb5d45cfad1fe9da71e9258b4cf04af0036ae4708d74cc3788938106",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:21.091Z"
+  },
+  "tts-chatterbox-multilingual": {
+    "sha256": "087e75d50567a17128d2bc728589eab2c3d97c7353f95946f21f5a60a58cd798",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:12.875Z"
+  },
+  "tts-dialogue-chatterbox": {
+    "sha256": "64d5a090c039ecadf7961864287c5ffdcaa2b7a52cde9d6d8f181baa6fcda8ce",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:13.296Z"
+  },
+  "tts-indextts2": {
+    "sha256": "649777b51ce3ad2b6528d45b9b81269ee0f4b27be858d50de4f25cc7d533b732",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:13.039Z"
   },
   "upscale-image-esrgan": {
     "sha256": "e26aac88303d6b46d78b1adbf43d1b3d6b07c88650c94e6309ec4971e6e22ef9",
@@ -220,6 +274,72 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.882Z"
+  },
+  "video-bg-remove-birefnet": {
+    "sha256": "08da8d310a04add6eb729fb67f3a82b63b0a806368ce49fc498dfe6aeb58c83e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:21.314Z"
+  },
+  "video-bg-remove-sam3": {
+    "sha256": "111df3bc07d19b0b7c05b31150a260799a991fdd82f5b0407fa476338489452a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:21.559Z"
+  },
+  "video-concat-2": {
+    "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:19.651Z"
+  },
+  "video-concat-3": {
+    "sha256": "d0d5eb952887e1a550c64a22fa1a42414a36e92cd7f678851ec6d6ce41834dcb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:20.104Z"
+  },
+  "video-concat-4": {
+    "sha256": "baac8cfe6fb58ca137e0f75d154ec357fd5283614b602e43dae5635beead5faf",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:20.703Z"
+  },
+  "video-depth-da3": {
+    "sha256": "4c2dd5a6ee8b99eb9eeaf3ea5c9e7b3439964dc87171afef8dbbe2db53676f81",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:21.879Z"
+  },
+  "video-depth-vda-small": {
+    "sha256": "aa686ba74bb94dad4ef71f54eed453589d6330e3b25ae79ed5721637fe8902bb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:22.128Z"
+  },
+  "video-extend-wan22-fun-vace": {
+    "sha256": "c6e30d4d5acf5d3d97c59fe02194e4b80fc21278ea0e946547060b80efd70ae0",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:13.889Z"
+  },
+  "video-reframe-wan22-fun-vace": {
+    "sha256": "3d97f02a5da7badd11df1f1334de2924b4fc930c8976597b25c231d342b629de",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:14.272Z"
+  },
+  "video-relight-bernini-r": {
+    "sha256": "218ca68fa4c552a6e5f986973f33f122ad43f27b6808ef493a2d9f9733b8a72d",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:15.433Z"
+  },
+  "voice-change-chatterbox": {
+    "sha256": "ad8b9d59f8cb4632f2859db6a0ee2e8b6114263a9507f144554cd827ceea3f0c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-16T23:33:13.548Z"
   },
   "wan-animate2": {
     "sha256": "efee2e4874102ff8a7f075993e406e05b355a843762220ad38278209de05c63a",

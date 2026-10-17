@@ -1,0 +1,41 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "voice_reference.wav"
+    },
+    "_meta": {
+      "title": "Voice reference"
+    }
+  },
+  "2": {
+    "class_type": "IndexTTS2Simple",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "text": "Hello! This voice was cloned from a short reference clip.",
+      "emotion_control_weight": 1,
+      "use_fp16": true,
+      "output_gain": 1
+    },
+    "_meta": {
+      "title": "IndexTTS-2"
+    }
+  },
+  "3": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "filename_prefix": "fuobe/tts-indextts2",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "Save MP3"
+    }
+  }
+}

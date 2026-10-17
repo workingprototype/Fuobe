@@ -1,0 +1,73 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "voice_reference.wav"
+    },
+    "_meta": {
+      "title": "Voice reference"
+    }
+  },
+  "2": {
+    "class_type": "FL_ChatterboxMultilingualTTS",
+    "inputs": {
+      "text": "Hello! This voice was cloned from a short reference clip.",
+      "language": "English (en)",
+      "exaggeration": 0.5,
+      "cfg_weight": 0.5,
+      "temperature": 0.8,
+      "repetition_penalty": 2.0,
+      "min_p": 0.05,
+      "top_p": 1.0,
+      "seed": [
+        "11",
+        1
+      ],
+      "audio_prompt": [
+        "1",
+        0
+      ],
+      "use_cpu": false,
+      "keep_model_loaded": false
+    },
+    "_meta": {
+      "title": "Chatterbox Multilingual TTS"
+    }
+  },
+  "3": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "filename_prefix": "fuobe/tts-chatterbox-mtl",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "Save MP3"
+    }
+  },
+  "10": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Seed (any size)"
+    }
+  },
+  "11": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a % 4294967296",
+      "values.a": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seed mod 2^32"
+    }
+  }
+}

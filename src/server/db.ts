@@ -61,6 +61,46 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );`,
+  // Characters become Elements (characters, locations, props, styles) with @handles and trained LoRAs.
+  `ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'character';
+  ALTER TABLE characters ADD COLUMN handle TEXT;
+  ALTER TABLE characters ADD COLUMN loras_json TEXT;`,
+  // Identity training jobs (Soul ID, fal LoRA trainers, AI-Toolkit).
+  `CREATE TABLE IF NOT EXISTS trainings (
+    id TEXT PRIMARY KEY,
+    element_id TEXT NOT NULL,
+    target TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress REAL,
+    message TEXT,
+    external_id TEXT,
+    meta_json TEXT,
+    trigger_word TEXT,
+    error TEXT,
+    cost_usd REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS trainings_element ON trainings(element_id);`,
+  // Chained jobs (storyboard frames wait for the previous frame).
+  `ALTER TABLE generations ADD COLUMN depends_on TEXT;`,
+  // Assist chats: the model's message history, the transcript shown in the UI and a pending approval.
+  `CREATE TABLE IF NOT EXISTS assist_threads (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    agent TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    auto_approve INTEGER NOT NULL DEFAULT 0,
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    items_json TEXT NOT NULL DEFAULT '[]',
+    pending_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_threads_updated ON assist_threads(updated_at DESC);`,
 ];
 
 declare global {

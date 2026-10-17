@@ -16,8 +16,13 @@ import {
   ZoomIn,
   Cpu,
   Cloud,
+  Crop,
+  FastForward,
+  Sparkles,
+  UserRoundPlus,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -30,14 +35,35 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getModel, getPreset } from "@/lib/catalog";
 import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
-import { useCreateGeneration, useGenerationActions } from "@/lib/api";
+import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
 import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Viewer } from "./viewer";
 
+/** "a 26-year-old surfer from Lisbon, freckles" → "Surfer From Lisbon" — a starting name, renamed on the element page. */
+function characterName(prompt: string | undefined): string {
+  const words = (prompt ?? "").replace(/@\S+/g, "").replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/\d/.test(w) && !/^(the|and|with|from|who|year|old|of)$/i.test(w));
+  const pick = words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  return pick || "New character";
+}
+
+/** Save an image as a character element (AI Influencer sheets, any portrait) to @mention it later. */
+function useSaveAsCharacter() {
+  const save = useSaveElement();
+  const router = useRouter();
+  return (g: Generation, o: OutputFile) =>
+    save.mutate(
+      { name: characterName(g.request.prompt), kind: "character", references: [o.url] },
+      {
+        onSuccess: (el) => toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } }),
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+}
+
 export function downloadName(g: Generation, o: OutputFile, i: number): string {
   const ext = o.url.split(".").pop()?.split("?")[0] ?? "bin";
-  const base = (g.prompt ?? g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
+  const base = (g.request.prompt || g.prompt || g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
   return `${base}-${g.id.slice(0, 6)}${i ? `-${i + 1}` : ""}.${ext}`;
 }
 
@@ -98,13 +124,13 @@ export function MediaThumb({ output, className, autoPlay }: { output: OutputFile
   return <img src={output.url} alt="" loading="lazy" className={cn("size-full object-cover", className)} />;
 }
 
-function tileRatio(g: Generation): number {
+export function tileRatio(g: Generation): number {
   const ar = g.request.params?.aspectRatio ?? getModel(g.modelId)?.defaults?.aspectRatio;
   if (g.kind === "audio") return 1.6;
   return ratioValue(ar && ar !== "auto" ? ar : undefined, g.kind === "video" ? 16 / 9 : 1);
 }
 
-function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
+export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const { cancel } = useGenerationActions();
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
@@ -137,7 +163,7 @@ function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   );
 }
 
-function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
+export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRetry: () => void }) {
   return (
     <div className="flex h-full flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
       <div className="min-h-0 space-y-1 overflow-hidden">
@@ -149,6 +175,16 @@ function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number; onRet
       </button>
     </div>
   );
+}
+
+/** Seedance draft mode: render the chosen 480p take again at 1080p with the same seed and settings. */
+export function useFinalizeDraft() {
+  const create = useCreateGeneration();
+  return (g: Generation, draftId: string) =>
+    create.mutate(
+      { feature: g.feature, modelId: g.modelId, op: "finalize", prompt: g.request.prompt, params: { draftId, resolution: "1080p", duration: g.request.params?.duration } },
+      { onSuccess: () => toast.success("Rendering the final 1080p version"), onError: (e) => toast.error((e as Error).message) },
+    );
 }
 
 export function GenerationGroup({
@@ -171,8 +207,11 @@ export function GenerationGroup({
     create.mutate(g.request, {
       onError: (e) => toast.error((e as Error).message),
     });
+  const finalize = useFinalizeDraft();
+  const saveCharacter = useSaveAsCharacter();
   const p = g.request.params ?? {};
   const meta = [
+    g.request.step?.label,
     preset?.name,
     model?.name ?? g.modelId,
     OPERATION_LABELS[g.op],
@@ -186,12 +225,12 @@ export function GenerationGroup({
       <header className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 font-heading text-[19px] leading-snug" title={g.prompt ?? undefined}>
-            {(preset ? g.request.prompt?.trim() : g.prompt) || preset?.name || "Untitled"}
+            {g.request.prompt?.trim() || preset?.name || g.prompt || "Untitled"}
           </h3>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               {g.engine === "open" ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
-              {g.provider === "mock" ? "Demo" : g.engine === "open" ? "Open source" : "Cloud"}
+              {g.provider === "mock" ? "Demo" : g.provider === "local" ? "Browser" : g.engine === "open" ? "Open source" : "Cloud"}
             </span>
             {meta.map((m, i) => (
               <span key={i} className="before:mr-1.5 before:content-['·']">
@@ -272,6 +311,17 @@ export function GenerationGroup({
               style={{ aspectRatio: o.kind === "audio" ? 1.6 : ratio }}
             >
               <MediaThumb output={o} />
+              {o.draftId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    finalize(g, o.draftId!);
+                  }}
+                  className="absolute top-2 left-2 inline-flex h-7 items-center gap-1 rounded-full bg-black/55 pr-2.5 pl-2 text-[12px] font-medium text-white backdrop-blur transition-colors hover:bg-black/75"
+                >
+                  <Sparkles className="size-3.5" /> Draft · render 1080p
+                </button>
+              )}
               {g.favorite && <Heart className="absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow" />}
               {o.kind !== "audio" && (
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-0.5 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
@@ -295,9 +345,18 @@ export function GenerationGroup({
                       <IconAction label="Use as reference" href={`/image?ref=${encodeURIComponent(o.url)}`}>
                         <ImagePlus className="size-4" />
                       </IconAction>
+                      <IconAction label="Save as character" onClick={() => saveCharacter(g, o)}>
+                        <UserRoundPlus className="size-4" />
+                      </IconAction>
                     </>
                   ) : (
                     <>
+                      <IconAction label="Extend" href={`/extend?video=${encodeURIComponent(o.url)}`}>
+                        <FastForward className="size-4" />
+                      </IconAction>
+                      <IconAction label="Reframe" href={`/reframe?video=${encodeURIComponent(o.url)}`}>
+                        <Crop className="size-4" />
+                      </IconAction>
                       <IconAction label="Lipsync" href={`/lipsync?video=${encodeURIComponent(o.url)}`}>
                         <Mic2 className="size-4" />
                       </IconAction>

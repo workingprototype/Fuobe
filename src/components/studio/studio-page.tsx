@@ -77,6 +77,8 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
     refs,
     presetId: r.presetId,
     presetOptions: r.presetOptions ?? {},
+    presetStrength: r.presetStrength,
+    mix: r.mix,
   };
 }
 
@@ -188,7 +190,15 @@ function StudioBody({ header }: { header?: React.ReactNode }) {
   );
 }
 
-function StudioInner({ config, header, initialRefs }: { config: StudioConfig; header?: React.ReactNode; initialRefs?: string[] }) {
+interface StudioPageProps {
+  config: StudioConfig;
+  header?: React.ReactNode;
+  initialRefs?: string[];
+  /** Prompt to start with when the URL doesn't carry one (e.g. "@Maya "). */
+  initialPrompt?: string;
+}
+
+function StudioInner({ config, header, initialRefs, initialPrompt }: StudioPageProps) {
   const sp = useSearchParams();
   const [engine] = useEngine();
   // Recompute the initial draft only when the handoff params change.
@@ -196,6 +206,7 @@ function StudioInner({ config, header, initialRefs }: { config: StudioConfig; he
   const initial = useMemo(() => {
     const d = initialDraft(config, new URLSearchParams(key), engine);
     if (initialRefs?.length) d.refs = [...initialRefs.map((u) => slot(u)!), ...d.refs];
+    if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
     return d;
   }, [config, key]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
@@ -205,10 +216,10 @@ function StudioInner({ config, header, initialRefs }: { config: StudioConfig; he
   );
 }
 
-export function StudioPage({ config, header, initialRefs }: { config: StudioConfig; header?: React.ReactNode; initialRefs?: string[] }) {
+export function StudioPage(props: StudioPageProps) {
   return (
     <Suspense fallback={null}>
-      <StudioInner config={config} header={header} initialRefs={initialRefs} />
+      <StudioInner {...props} />
     </Suspense>
   );
 }

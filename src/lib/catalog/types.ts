@@ -33,7 +33,20 @@ export type Operation =
   | "sfx"
   | "music"
   | "v2a" // video → audio/foley
-  | "interpolate";
+  | "interpolate"
+  | "extend" // video → the same clip, continued
+  | "grade" // colour grade, rendered in the browser
+  | "reframe" // video → same video at a new aspect ratio (AI-filled edges)
+  | "finalize" // draft video → full-quality render of the same take
+  | "dialogue" // several speakers → one audio track
+  | "voice-change" // speech audio → the same speech in another voice
+  | "dub" // video (or audio) → translated, re-voiced and lip-synced
+  | "bg-remove-video" // video → the subject on a transparent background
+  | "depth-video" // video → depth map video
+  | "relight-video" // video → the same shot under new lighting
+  | "concat" // several clips → one video, in order
+  | "frame" // video → one of its frames (the last, for extending)
+  | "color-match"; // image or video + reference image → recoloured to the reference's palette
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -57,6 +70,19 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   music: "Music",
   v2a: "Video to audio",
   interpolate: "Frame interpolation",
+  extend: "Extend video",
+  grade: "Color grade",
+  reframe: "Reframe",
+  finalize: "Final render",
+  dialogue: "Dialogue",
+  "voice-change": "Voice change",
+  dub: "Translate & dub",
+  "bg-remove-video": "Video background removal",
+  "depth-video": "Video depth map",
+  "relight-video": "Video relight",
+  concat: "Join clips",
+  frame: "Extract frame",
+  "color-match": "Match colors",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -81,9 +107,22 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   music: "audio",
   v2a: "video",
   interpolate: "video",
+  extend: "video",
+  grade: "image",
+  reframe: "video",
+  finalize: "video",
+  dialogue: "audio",
+  "voice-change": "audio",
+  dub: "video",
+  "bg-remove-video": "video",
+  "depth-video": "video",
+  "relight-video": "video",
+  concat: "video",
+  frame: "image",
+  "color-match": "image",
 };
 
-export type ProviderId = "fal" | "replicate" | "openai" | "google" | "comfyui" | "mock";
+export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local";
 
 /** Duration encodings differ between APIs ("5" vs 5 vs "5s"). */
 export interface DurationField {
@@ -113,14 +152,37 @@ export interface FieldMap {
   images?: string;
   endImage?: string;
   mask?: string;
+  /** What the mask's paint means to this API: white (default), black or transparent = change. */
+  maskFormat?: "white" | "black" | "alpha";
   video?: string;
+  /** Video field that takes an array (receives the one input video). */
+  videoArray?: string;
+  /** Array field that receives every clip of `inputs.videos`, in order (join clips). */
+  videos?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
   resolution?: string | EnumField;
   duration?: DurationField;
   numOutputs?: string;
   seed?: string;
-  generateAudio?: string;
+  /** Inclusive seed limits when the API accepts a narrow range (Fuobe's seeds are folded into it). */
+  seedRange?: [number, number];
+  /** Boolean field, or an on/off enum such as Kling's `sound: "on" | "off"`. */
+  generateAudio?: string | { key: string; on: unknown; off: unknown };
+  /** Premade voice name / id (ElevenLabs `voice`). Dotted keys write nested fields. */
+  voice?: string;
+  /** Reference clip to clone a voice from (zero-shot TTS) or to convert into (voice change). */
+  voiceAudio?: string;
+  /** Multi-speaker lines: an array of {text, voice}. */
+  dialogue?: { key: string; text: string; voice: string };
+  /** Language to translate into (dubbing). */
+  targetLanguage?: string;
+  /** Native multi-shot: an array of {prompt, duration} (Kling's `multi_prompt`). */
+  multiShot?: { key: string; durationType: "string" | "number"; json?: boolean; shotType?: string; flag?: string };
+  /** Boolean draft switch (Seedance 2.5 renders a cheap 480p take and returns a draft id). */
+  draft?: string;
+  /** Field that takes the draft id to finish. */
+  draftId?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
 }
@@ -133,6 +195,8 @@ export interface ModelRoute {
   map?: FieldMap;
   /** Optional note shown in the UI (e.g. "uses Lightx2v 4-step LoRA"). */
   note?: string;
+  /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
+  loraEndpoint?: string;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -150,6 +214,24 @@ export interface ModelOptions {
   /** true = optional toggle, "always" = native audio always on. */
   audio?: boolean | "always";
   endFrame?: boolean;
+  /** Multi-shot support: "native" sends per-shot prompts, "prompt" writes the shots into one prompt. */
+  multiShot?: { mode: "native" | "prompt" | "concat"; maxShots: number };
+  /** Draft mode (cheap preview, then a full render of the take you like). */
+  draft?: boolean;
+  /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
+  presets?: { source: string; param: string; label: string; required?: boolean };
+  /** Premade voices the model offers (shown in the voice picker). */
+  voices?: { id: string; name: string; hint?: string }[];
+  /** Takes a reference recording to clone a voice from. */
+  voiceClone?: boolean;
+  /** Follows motion paths drawn on the start frame (Wan-Move). */
+  motionPaths?: boolean;
+  /** Languages it can translate into. */
+  languages?: string[];
+  /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
+  sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
+  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
+  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
 }
 
 export interface Pricing {
@@ -169,8 +251,10 @@ export interface ModelDef {
   badges?: Badge[];
   routes: ModelRoute[];
   options: ModelOptions;
-  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio">>;
+  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice">>;
   pricing?: Pricing;
+  /** Trained identities this model accepts by id (Higgsfield Soul ID). */
+  identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
 }
@@ -184,6 +268,19 @@ export interface GenParams {
   seed?: number;
   generateAudio?: boolean;
   enhancePrompt?: boolean;
+  /** Premade voice (TTS, voice change). */
+  voice?: string;
+  /** Dialogue lines, each with its own voice. */
+  dialogue?: { text: string; voice?: string }[];
+  /** Dubbing target language. */
+  targetLanguage?: string;
+  /** Multi-shot: shots in order (empty/undefined = one shot). "auto" lets the model cut by itself. */
+  shots?: { prompt: string; duration: number }[];
+  multiShot?: "auto";
+  /** Render a cheap draft first (Seedance 2.5 draft mode). */
+  draft?: boolean;
+  /** Finish this draft at full quality (op "finalize"). */
+  draftId?: string;
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
@@ -210,12 +307,40 @@ export interface GenerationRequest {
     images?: string[];
     endImage?: string;
     mask?: string;
+    /** The first image with painted instructions: a red-tinted mask (inpaint) or drawn arrows/notes (draw to edit/video). */
+    sketch?: string;
     video?: string;
     audio?: string;
+    /** Reference recording of the voice to speak with / convert into. */
+    voiceAudio?: string;
+    /** Second speaker's reference voice (open-source dialogue). */
+    voiceAudio2?: string;
+    /** Several clips in order (join clips). */
+    videos?: string[];
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
   presetOptions?: Record<string, string>;
+  /** Motions/effects: how strongly the preset applies (0–1, default 1). */
+  presetStrength?: number;
+  /** Higgsfield's Mix: a second motion or effect on top of the first, with its own strength. */
+  mix?: { presetId: string; strength: number };
+  /** Server-side only: LoRAs added by @element mentions (trained identities). */
+  loras?: LoraRef[];
+  /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
+  chainFrom?: "first" | "last";
+  /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
+  chain?: ChainSlot[];
+  /** Storyboard frame this request makes (shown under the frame). */
+  frame?: { scene: string; index: number; of: number };
+  /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
+  step?: { label: string; index: number; of: number };
+}
+
+export interface ChainSlot {
+  slot: "images" | "endImage" | "video" | "videos" | "audio";
+  /** For list slots: put it before or after the request's own items (default last). */
+  position?: "first" | "last";
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
@@ -227,6 +352,9 @@ export interface GenInput extends GenParams {
   mask?: string;
   video?: string;
   audio?: string;
+  voiceAudio?: string;
+  voiceAudio2?: string;
+  videos?: string[];
   loras?: LoraRef[];
 }
 
@@ -234,6 +362,8 @@ export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "
 
 export interface OutputFile {
   url: string;
+  /** Draft renders: the id to finish this take at full quality. */
+  draftId?: string;
   kind: MediaKind;
   contentType?: string;
   width?: number;
@@ -267,7 +397,7 @@ export interface Generation {
 
 /** Input slot a preset asks the user for. */
 export interface InputSlot {
-  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask";
+  key: "image" | "image2" | "image3" | "endImage" | "video" | "audio" | "mask" | "sketch" | "voiceAudio" | "voiceAudio2";
   label: string;
   hint?: string;
   accept: MediaKind;
@@ -319,3 +449,6 @@ export interface Preset {
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
 }
+
+/** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */
+export const LAST_FRAME_CHAIN = "chain:last-frame";

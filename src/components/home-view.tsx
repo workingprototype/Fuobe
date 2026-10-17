@@ -23,7 +23,7 @@ const TOOLS = [
   { href: "/effects", label: "Effects", desc: `${EFFECTS.length} viral VFX`, icon: Sparkles, hue: 20 },
   { href: "/apps", label: "Apps", desc: `${APPS.length} one-click tools`, icon: Wand2, hue: 200 },
   { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2, hue: 150 },
-  { href: "/characters", label: "Characters", desc: "Consistent people", icon: ScanFace, hue: 320 },
+  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace, hue: 320 },
   { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn, hue: 240 },
   { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines, hue: 60 },
 ];
@@ -49,7 +49,7 @@ export function HomeView() {
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
   const status = useStatus().data;
-  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured);
+  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
   const comfyReady = !!status?.providers.comfyui?.configured;
   const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
 

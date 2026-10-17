@@ -1,8 +1,8 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Clapperboard, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clapperboard, Columns2, Crop, FastForward, SlidersHorizontal, Sparkles, Copy, Download, Heart, RotateCcw, Trash2, Wand2, X, ZoomIn } from "lucide-react";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -12,7 +12,8 @@ import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { useGenerationActions } from "@/lib/api";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { downloadName } from "./feed";
+import { CompareSlider } from "./compare-slider";
+import { downloadName, useFinalizeDraft } from "./feed";
 
 function Row({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
   if (value === undefined || value === null || value === "") return null;
@@ -45,6 +46,10 @@ export function Viewer({
   const preset = g.presetId ? getPreset(g.presetId) : undefined;
   const p = g.request.params ?? {};
   const dl = `${o.url}?download=${encodeURIComponent(downloadName(g, o, index))}`;
+  // Edits, inpaints, upscales and app results can be compared with the image they started from.
+  const source = o.kind === "image" && g.op !== "t2i" ? g.request.inputs?.images?.[0] : undefined;
+  const [comparing, setComparing] = useState(false);
+  const finalize = useFinalizeDraft();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -52,6 +57,7 @@ export function Viewer({
       if (e.key === "ArrowLeft") onPrev?.();
       else if (e.key === "ArrowRight") onNext?.();
       else if (e.key.toLowerCase() === "f") void favorite(g);
+      else if (e.key.toLowerCase() === "c" && source) setComparing((v) => !v);
       else if (e.key.toLowerCase() === "d") {
         const a = document.createElement("a");
         a.href = dl;
@@ -64,7 +70,7 @@ export function Viewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onPrev, onNext, favorite, g, dl, onReuse, onClose]);
+  }, [onPrev, onNext, favorite, g, dl, onReuse, onClose, source]);
 
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
@@ -79,9 +85,22 @@ export function Viewer({
             <video key={o.url} src={o.url} controls autoPlay loop playsInline className="max-h-full max-w-full" />
           ) : o.kind === "audio" ? (
             <audio key={o.url} src={o.url} controls autoPlay className="w-2/3" />
+          ) : comparing && source ? (
+            <CompareSlider before={source} after={o.url} alt={g.prompt ?? ""} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img key={o.url} src={o.url} alt={g.prompt ?? ""} className="max-h-full max-w-full object-contain" />
+          )}
+          {source && (
+            <button
+              onClick={() => setComparing((v) => !v)}
+              className={cn(
+                "absolute bottom-4 left-1/2 inline-flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full px-4 text-[13px] font-medium backdrop-blur transition-colors",
+                comparing ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25",
+              )}
+            >
+              <Columns2 className="size-4" /> {comparing ? "Hide original" : "Compare"}
+            </button>
           )}
           {onPrev && (
             <button onClick={onPrev} aria-label="Previous" className="absolute top-1/2 left-3 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20">
@@ -103,8 +122,8 @@ export function Viewer({
           </div>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
             <div>
-              <p className="font-heading text-[20px] leading-snug">{(preset ? g.request.prompt?.trim() : g.prompt) || preset?.name}</p>
-              {preset && g.prompt && <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">Sent to the model: {g.prompt}</p>}
+              <p className="font-heading text-[20px] leading-snug">{g.request.prompt?.trim() || preset?.name || g.prompt}</p>
+              {g.prompt && g.prompt !== g.request.prompt?.trim() && <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">Sent to the model: {g.prompt}</p>}
               {g.prompt && (
                 <button
                   onClick={() => {
@@ -119,7 +138,7 @@ export function Viewer({
             </div>
             <div className="divide-y rounded-lg border px-3">
               <Row label="Model" value={model?.name ?? g.modelId} />
-              <Row label="Engine" value={g.provider === "mock" ? "Demo" : g.engine === "open" ? "Open source · ComfyUI" : `Cloud · ${g.provider}`} />
+              <Row label="Engine" value={g.provider === "mock" ? "Demo" : g.provider === "local" ? "In your browser" : g.engine === "open" ? "Open source · ComfyUI" : `Cloud · ${g.provider}`} />
               <Row label="Mode" value={OPERATION_LABELS[g.op]} />
               <Row label="Preset" value={preset?.name} />
               <Row label="Aspect ratio" value={p.aspectRatio} />
@@ -152,6 +171,32 @@ export function Viewer({
                   </Link>
                 </Button>
               </>
+            )}
+            {o.draftId && (
+              <Button variant="default" size="sm" className="col-span-2" onClick={() => finalize(g, o.draftId!)}>
+                <Sparkles /> Render this draft in 1080p
+              </Button>
+            )}
+            {o.kind === "video" && (
+              <>
+                <Button asChild variant="secondary" size="sm">
+                  <Link href={`/extend?video=${encodeURIComponent(o.url)}`}>
+                    <FastForward /> Extend
+                  </Link>
+                </Button>
+                <Button asChild variant="secondary" size="sm">
+                  <Link href={`/reframe?video=${encodeURIComponent(o.url)}`}>
+                    <Crop /> Reframe
+                  </Link>
+                </Button>
+              </>
+            )}
+            {(o.kind === "image" || o.kind === "video") && (
+              <Button asChild variant="secondary" size="sm">
+                <Link href={`/color-grade?${o.kind}=${encodeURIComponent(o.url)}`}>
+                  <SlidersHorizontal /> Grade
+                </Link>
+              </Button>
             )}
             <Button asChild variant="secondary" size="sm">
               <Link href={`/upscale?${o.kind === "video" ? "video" : "image"}=${encodeURIComponent(o.url)}`}>
@@ -186,6 +231,7 @@ export function Viewer({
           <p className="flex flex-wrap gap-x-3 gap-y-1 border-t px-4 py-2 text-[11px] text-muted-foreground">
             <span><Kbd>←</Kbd> <Kbd>→</Kbd> browse</span>
             <span><Kbd>F</Kbd> favorite</span>
+            {source && <span><Kbd>C</Kbd> compare</span>}
             <span><Kbd>D</Kbd> download</span>
             {onReuse && <span><Kbd>R</Kbd> reuse</span>}
           </p>

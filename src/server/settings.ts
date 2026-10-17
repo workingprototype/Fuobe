@@ -19,14 +19,23 @@ export const SETTINGS = {
   /** Which engines this install offers: open-source only, paid cloud APIs only, or both. */
   engineMode: { key: "engine.mode", env: "FUOBE_ENGINE_MODE", default: "both", options: ["both", "open", "cloud"] },
   /** Which aggregator to try first when a cloud model is on several. */
-  cloudProvider: { key: "cloud.provider", env: "FUOBE_CLOUD_PROVIDER", default: "auto", options: ["auto", "fal", "replicate"] },
+  cloudProvider: { key: "cloud.provider", env: "FUOBE_CLOUD_PROVIDER", default: "auto", options: ["auto", "fal", "replicate", "higgsfield"] },
   falKey: { key: "fal.key", env: "FAL_KEY", secret: true },
   replicateToken: { key: "replicate.token", env: "REPLICATE_API_TOKEN", secret: true },
+  /** "KEY_ID:KEY_SECRET" from console.higgsfield.ai (HF_KEY / HF_API_KEY + HF_API_SECRET also work). */
+  higgsfieldKey: { key: "higgsfield.key", env: "HIGGSFIELD_API_KEY", secret: true },
   openaiKey: { key: "openai.key", env: "OPENAI_API_KEY", secret: true },
   googleKey: { key: "google.key", env: "GEMINI_API_KEY", secret: true },
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
   comfyUrl: { key: "comfyui.url", env: "COMFYUI_URL", default: "http://127.0.0.1:8188" },
   comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
+  /** ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there. */
+  comfyLorasDir: { key: "comfyui.lorasDir", env: "COMFYUI_LORAS_DIR" },
+  /** AI-Toolkit UI (ostris/ai-toolkit, port 8675) for open-source character LoRA training. */
+  aiToolkitUrl: { key: "aitk.url", env: "AI_TOOLKIT_URL" },
+  aiToolkitToken: { key: "aitk.token", env: "AI_TOOLKIT_AUTH", secret: true },
+  /** Where AI-Toolkit can read datasets Fuobe writes (defaults to Fuobe's data folder — same machine). */
+  aiToolkitDatasetDir: { key: "aitk.datasetDir", env: "AI_TOOLKIT_DATASET_DIR" },
   /** "auto" = demo outputs only when the chosen provider is not configured. */
   demoMode: { key: "demo.mode", env: "FUOBE_DEMO_MODE", default: "auto", options: ["auto", "on", "off"] },
   enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto", options: ["auto", "anthropic", "ollama", "none"] },

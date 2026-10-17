@@ -5,10 +5,18 @@ function enumValue(field: string | EnumField, value: string): [string, unknown] 
   return [field.key, field.values && value in field.values ? field.values[value] : value];
 }
 
+/** Write `a.b.c` as nested objects (MiniMax's voice_setting.voice_id etc.). */
+function setPath(out: Record<string, unknown>, key: string, value: unknown) {
+  const parts = key.split(".");
+  let o = out;
+  for (const k of parts.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
+  o[parts[parts.length - 1]] = value;
+}
+
 /** Build a provider payload from canonical input using a route's {@link FieldMap}. Pure + unit-tested. */
 export function buildPayload(map: FieldMap, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (map.prompt !== false && input.prompt !== undefined) out[map.prompt ?? "prompt"] = input.prompt;
+  if (map.prompt !== false && input.prompt !== undefined) setPath(out, map.prompt ?? "prompt", input.prompt);
   if (map.negativePrompt && input.negativePrompt) out[map.negativePrompt] = input.negativePrompt;
 
   const images = input.images ?? [];
@@ -17,6 +25,8 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.endImage && input.endImage) out[map.endImage] = input.endImage;
   if (map.mask && input.mask) out[map.mask] = input.mask;
   if (map.video && input.video) out[map.video] = input.video;
+  if (map.videoArray && input.video) out[map.videoArray] = [input.video];
+  if (map.videos && input.videos?.length) out[map.videos] = input.videos;
   if (map.audio && input.audio) out[map.audio] = input.audio;
 
   if (map.aspectRatio && input.aspectRatio) {
@@ -33,11 +43,41 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[d.key] = d.type === "number" ? v : `${v}${d.suffix ?? ""}`;
   }
   if (map.numOutputs && input.numOutputs !== undefined) out[map.numOutputs] = input.numOutputs;
-  if (map.seed && input.seed !== undefined && input.seed >= 0) out[map.seed] = input.seed;
-  if (map.generateAudio && input.generateAudio !== undefined) out[map.generateAudio] = input.generateAudio;
+  if (map.seed && input.seed !== undefined && input.seed >= 0) {
+    const r = map.seedRange;
+    out[map.seed] = r ? r[0] + (input.seed % (r[1] - r[0] + 1)) : input.seed;
+  }
+  if (map.generateAudio && input.generateAudio !== undefined) {
+    const g = map.generateAudio;
+    if (typeof g === "string") out[g] = input.generateAudio;
+    else out[g.key] = input.generateAudio ? g.on : g.off;
+  }
 
-  Object.assign(out, map.fixed ?? {});
-  Object.assign(out, input.extra ?? {});
+  // Native multi-shot replaces the single prompt with per-shot prompts.
+  if (map.multiShot && (input.shots?.length || input.multiShot === "auto")) {
+    const ms = map.multiShot;
+    if (input.shots?.length) {
+      const shots = input.shots.map((s) => ({ prompt: s.prompt, duration: ms.durationType === "string" ? String(s.duration) : s.duration }));
+      out[ms.key] = ms.json ? JSON.stringify(shots) : shots;
+      if (map.prompt !== false) delete out[map.prompt ?? "prompt"];
+      if (ms.shotType) out[ms.shotType] = "customize";
+    } else if (ms.shotType) {
+      out[ms.shotType] = "intelligent";
+    }
+    if (ms.flag) out[ms.flag] = true;
+  }
+  if (map.draft && input.draft) out[map.draft] = true;
+  // Voices, dialogue and dubbing.
+  if (map.voice && input.voice) setPath(out, map.voice, input.voice);
+  if (map.voiceAudio && input.voiceAudio) out[map.voiceAudio] = input.voiceAudio;
+  if (map.dialogue && input.dialogue?.length) {
+    const d = map.dialogue;
+    out[d.key] = input.dialogue.map((l) => ({ [d.text]: l.text, [d.voice]: l.voice ?? input.voice }));
+  }
+  if (map.targetLanguage && input.targetLanguage) out[map.targetLanguage] = input.targetLanguage;
+  if (map.draftId && input.draftId) out[map.draftId] = input.draftId;
+
+  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) setPath(out, k, v);
   return out;
 }
 

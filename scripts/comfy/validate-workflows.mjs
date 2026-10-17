@@ -70,8 +70,15 @@ function sampleValue(key, entry, uploads) {
     case 'negativePrompt': return 'blurry, low quality';
     case 'image': case 'image2': case 'image3': case 'image4': case 'endImage': return uploads.png;
     case 'mask': return uploads.mask;
-    case 'video': return uploads.mp4;
-    case 'audio': return uploads.wav;
+    case 'video': case 'video2': case 'video3': case 'video4': return uploads.mp4;
+    case 'audio': case 'audio2': return uploads.wav;
+    case 'tracks': {
+      // Wan-Move: one {x,y} per output frame per track (a moving stroke + a static anchor)
+      const n = Number(entry.defaults?.frames ?? 81);
+      const stroke = Array.from({ length: n }, (_, i) => ({ x: 200 + Math.round((300 * i) / (n - 1)), y: 300 - Math.round((100 * i) / (n - 1)) }));
+      const anchor = Array.from({ length: n }, () => ({ x: 600, y: 220 }));
+      return JSON.stringify([stroke, anchor]);
+    }
     case 'seed': return 123456789;
     case 'tags': return 'synthwave, upbeat, female vocals, 120 bpm';
     case 'lyrics': return '[verse]\nNeon lights on the open road\n[chorus]\nWe keep on running';

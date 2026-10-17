@@ -1,0 +1,306 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input_video.mp4"
+    },
+    "_meta": {
+      "title": "Source clip"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "3": {
+    "class_type": "ImageResizeKJv2",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "width": 1136,
+      "height": 640,
+      "upscale_method": "lanczos",
+      "keep_proportion": "pad",
+      "pad_color": "127, 127, 127",
+      "crop_position": "center",
+      "divisible_by": 16,
+      "device": "cpu"
+    },
+    "_meta": {
+      "title": "Fit source into target + gray pad (mask 1 = pad)"
+    }
+  },
+  "8": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {}
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "A street musician plays guitar on a busy city sidewalk, wide cinematic shot.",
+      "clip": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Positive prompt"
+    }
+  },
+  "10": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Negative prompt"
+    }
+  },
+  "11": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {}
+  },
+  "12": {
+    "class_type": "WanVaceToVideo",
+    "inputs": {
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "10",
+        0
+      ],
+      "vae": [
+        "11",
+        0
+      ],
+      "width": 1136,
+      "height": 640,
+      "length": 81,
+      "batch_size": 1,
+      "strength": 1,
+      "control_video": [
+        "3",
+        0
+      ],
+      "control_masks": [
+        "3",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "WanVaceToVideo"
+    }
+  },
+  "13": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Fun VACE high noise"
+    }
+  },
+  "14": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Fun VACE low noise"
+    }
+  },
+  "15": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "13",
+        0
+      ],
+      "lora_name": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {}
+  },
+  "16": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "14",
+        0
+      ],
+      "lora_name": "wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {}
+  },
+  "17": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "15",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {}
+  },
+  "18": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "16",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {}
+  },
+  "19": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "17",
+        0
+      ],
+      "add_noise": "enable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "12",
+        0
+      ],
+      "negative": [
+        "12",
+        1
+      ],
+      "latent_image": [
+        "12",
+        2
+      ],
+      "start_at_step": 0,
+      "end_at_step": 2,
+      "return_with_leftover_noise": "enable"
+    },
+    "_meta": {
+      "title": "Sampler high (0-2)"
+    }
+  },
+  "20": {
+    "class_type": "KSamplerAdvanced",
+    "inputs": {
+      "model": [
+        "18",
+        0
+      ],
+      "add_noise": "disable",
+      "noise_seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "12",
+        0
+      ],
+      "negative": [
+        "12",
+        1
+      ],
+      "latent_image": [
+        "19",
+        0
+      ],
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable"
+    },
+    "_meta": {
+      "title": "Sampler low (2-4)"
+    }
+  },
+  "21": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "20",
+        0
+      ],
+      "trim_amount": [
+        "12",
+        3
+      ]
+    },
+    "_meta": {}
+  },
+  "22": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "21",
+        0
+      ],
+      "vae": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "23": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "22",
+        0
+      ],
+      "fps": 16,
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {}
+  },
+  "24": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "23",
+        0
+      ],
+      "filename_prefix": "fuobe/video-reframe-wan22-fun-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  }
+}

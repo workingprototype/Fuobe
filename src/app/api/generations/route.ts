@@ -14,8 +14,12 @@ const RequestSchema = z.object({
       images: z.array(z.string()).max(14).optional(),
       endImage: z.string().optional(),
       mask: z.string().optional(),
+      sketch: z.string().optional(),
       video: z.string().optional(),
       audio: z.string().optional(),
+      voiceAudio: z.string().optional(),
+      voiceAudio2: z.string().optional(),
+      videos: z.array(z.string()).max(24).optional(),
     })
     .optional(),
   params: z
@@ -27,10 +31,19 @@ const RequestSchema = z.object({
       seed: z.number().int().optional(),
       generateAudio: z.boolean().optional(),
       enhancePrompt: z.boolean().optional(),
+      shots: z.array(z.object({ prompt: z.string().max(2000), duration: z.number().positive().max(60) })).max(12).optional(),
+      multiShot: z.literal("auto").optional(),
+      draft: z.boolean().optional(),
+      draftId: z.string().max(8192).optional(),
+      voice: z.string().max(200).optional(),
+      dialogue: z.array(z.object({ text: z.string().max(5000), voice: z.string().max(200).optional() })).max(200).optional(),
+      targetLanguage: z.string().max(80).optional(),
       extra: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
   presetOptions: z.record(z.string(), z.string()).optional(),
+  presetStrength: z.number().min(0).max(1).optional(),
+  mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
 });
 
 export async function GET(request: Request) {

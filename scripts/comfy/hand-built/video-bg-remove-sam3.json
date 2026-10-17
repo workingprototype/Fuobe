@@ -1,0 +1,118 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input_video.mp4"
+    },
+    "_meta": {
+      "title": "Source clip"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "3": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "_meta": {}
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "person",
+      "clip": [
+        "3",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "What to keep (text)"
+    }
+  },
+  "5": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "model": [
+        "3",
+        0
+      ],
+      "conditioning": [
+        "4",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+    },
+    "_meta": {
+      "title": "SAM 3.1 video tracking"
+    }
+  },
+  "6": {
+    "class_type": "SAM3_TrackToMask",
+    "inputs": {
+      "track_data": [
+        "5",
+        0
+      ],
+      "object_indices": ""
+    },
+    "_meta": {}
+  },
+  "7": {
+    "class_type": "InvertMask",
+    "inputs": {
+      "mask": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "8": {
+    "class_type": "JoinImageWithAlpha",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "alpha": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {}
+  },
+  "9": {
+    "class_type": "SaveWEBM",
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "filename_prefix": "fuobe/video-alpha-sam3",
+      "codec": "vp9",
+      "fps": [
+        "2",
+        2
+      ],
+      "crf": 24.0
+    },
+    "_meta": {
+      "title": "Save transparent WebM (VP9 alpha)"
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "speaker_a.wav"
+    },
+    "_meta": {
+      "title": "Speaker A voice"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "speaker_b.wav"
+    },
+    "_meta": {
+      "title": "Speaker B voice"
+    }
+  },
+  "3": {
+    "class_type": "FL_ChatterboxDialogTTS",
+    "inputs": {
+      "dialog_text": "SPEAKER A: Did you see the new trailer?\nSPEAKER B: I did, the lighting was unreal.",
+      "speaker_A_Audio": [
+        "1",
+        0
+      ],
+      "speaker_B_Audio": [
+        "2",
+        0
+      ],
+      "exaggeration": 0.5,
+      "cfg_weight": 0.5,
+      "temperature": 0.8,
+      "seed": [
+        "11",
+        1
+      ],
+      "use_cpu": false,
+      "keep_model_loaded": false
+    },
+    "_meta": {
+      "title": "Chatterbox Dialog TTS"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/tts-dialog-chatterbox",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "Save MP3 (mixed dialogue)"
+    }
+  },
+  "10": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Seed (any size)"
+    }
+  },
+  "11": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a % 4294967296",
+      "values.a": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seed mod 2^32"
+    }
+  }
+}

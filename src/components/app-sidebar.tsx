@@ -5,6 +5,13 @@ import { usePathname } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Suspense } from "react";
 import {
+  AtSign,
+  MessageCircle,
+  GalleryHorizontal,
+  Layers,
+  Crop,
+  FastForward,
+  Brush,
   AudioLines,
   Boxes,
   Clapperboard,
@@ -17,8 +24,8 @@ import {
   Mic2,
   Moon,
   Plus,
-  ScanFace,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Sun,
@@ -52,11 +59,15 @@ const NAV = [
     label: "Create",
     items: [
       { href: "/", label: "Home", icon: Home },
+      { href: "/assist", label: "Assist", icon: MessageCircle },
       { href: "/image", label: "Image", icon: ImageIcon },
       { href: "/video", label: "Video", icon: Video },
       { href: "/edit", label: "Edit", icon: Wand2 },
+      { href: "/inpaint", label: "Inpaint", icon: Brush },
+      { href: "/color-grade", label: "Color grading", icon: SlidersHorizontal },
       { href: "/motions", label: "Camera motions", icon: Film },
       { href: "/effects", label: "Effects", icon: Sparkles },
+      { href: "/storyboard", label: "Storyboard", icon: GalleryHorizontal },
       { href: "/apps", label: "Apps", icon: LayoutGrid },
     ],
   },
@@ -66,7 +77,10 @@ const NAV = [
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },
-      { href: "/characters", label: "Characters", icon: ScanFace },
+      { href: "/extend", label: "Extend video", icon: FastForward },
+      { href: "/reframe", label: "Reframe", icon: Crop },
+      { href: "/video-tools", label: "Video tools", icon: Layers },
+      { href: "/elements", label: "Elements", icon: AtSign },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },
     ],
@@ -125,7 +139,7 @@ function ActiveNav() {
 export function AppSidebar() {
   const { resolvedTheme, setTheme } = useTheme();
   const status = useStatus().data;
-  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured);
+  const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured || status.providers.higgsfield?.configured);
   const comfy = status?.providers.comfyui?.configured;
   const mode = useEngineMode();
   const ready = mode === "open" ? comfy : mode === "cloud" ? cloud : cloud || comfy;

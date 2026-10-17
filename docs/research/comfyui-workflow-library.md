@@ -9,6 +9,7 @@ _Generated 2026-10-16 by the `scripts/comfy` pipeline. Machine-readable source o
 * 45 come from **official templates** (converted to API format by the real frontend: `app.loadGraphData()` → `app.graphToPrompt()`), 2 from **custom-node example workflows**, 4 are **hand-built** from `/object_info` definitions. Modifications are listed in each entry's `notes` and flagged `(modified, see notes)` in `source`.
 * Everything except 5 workflows runs on **core ComfyUI nodes only** — in 2026 core ComfyUI natively covers InfiniteTalk, SeedVR2, BiRefNet, RIFE/FILM, Wan Animate 2, LTX-2.x, so custom packs are only needed for: ReActor face swap, RMBG, MMAudio, the WanVideoWrapper InfiniteTalk variant, and the RIFE-VFI variant (plus VHS/KJNodes helpers).
 * 86 distinct model files, **740 GB** if you download everything. A sensible starter set (Z-Image Turbo, Qwen-Image-Edit 2509, Wan 2.2 5B, Wan 2.2 14B I2V lightx2v, BiRefNet, RealESRGAN, RIFE, ACE-Step) is ≈ 112 GB.
+* **2026-10-16 update: +20 workflows** from [`comfyui-oss-2.md`](comfyui-oss-2.md) (TTS / dialogue / voice change, video extend / reframe / relight, draw-to-video, multi-shot concat, storyboard, video alpha + depth, palette lock): **all 20 validated** on the same ComfyUI commit with three more packs. The manifest now has 73 entries (incl. the 2 self-test graphs), **73/73 validated**. Details, new binding keys and new capability values: [section 10](#10-comfyui-oss-2-additions-2026-10-16).
 * Validation used zero-byte placeholder model files and tiny uploaded fixtures; **no model was executed** (CPU-only box, no weights). Validation proves graph structure, node/input names, types, ranges, combo values and file references — not output quality.
 
 ## 2. The library
@@ -102,6 +103,14 @@ Each manifest entry has `bindings: { key: [{node, input}, ...] }`. To run a work
 | `cameraMotion` | enum | (extension) `wan22-fun-camera-14b`: `Static`, `Pan Up`, `Pan Down`, `Pan Left`, `Pan Right`, `Zoom In`, `Zoom Out`, `Anti Clockwise (ACW)`, `ClockWise (CW)` |
 | `multiplier` | int 2-16 | (extension) frame interpolation factor; output fps = source fps × multiplier |
 | `bpm` | int | (extension) ACE-Step tempo |
+| `audio2` | uploaded file name | (extension, oss-2) second `LoadAudio`: dialogue speaker B, voice-change target voice |
+| `video2`, `video3`, `video4` | uploaded file name | (extension, oss-2) shots 2..4 of `video-concat-*` |
+| `language` | enum string | (extension, oss-2) Chatterbox Multilingual, `"Name (code)"`, e.g. `"German (de)"` (23 values, see section 10) |
+| `exaggeration`, `temperature` | float | (extension, oss-2) Chatterbox emotion exaggeration (0.25-2, 0.5) / sampling temperature (0.05-2, 0.8) |
+| `contextFrames` | int, multiple of 4 | (extension, oss-2) `video-extend-wan22-fun-vace`: source tail frames used as context (16) |
+| `tracks` | JSON string | (extension, oss-2) `draw-to-video-wan-move` motion paths: `[[{"x":px,"y":px}, …one per output frame], …]` |
+| `motionStrength` | float | (extension, oss-2) Wan-Move track conditioning strength (1.0) |
+| `strength` | float 0-10 | (extension, oss-2) `ColorTransfer` strength (0.8) |
 
 Other manifest fields: `defaults` (numeric widget values of the bound inputs + `frameStep`), `limits` (`maxWidth`, `maxHeight`, `maxFrames`, `dimensionMultiple`, `maxDurationSec`, `padMultiple`, `maxMultiplier`), `models[]` (`file`, `folder` under `models/`, `url`, `sizeGb`, optional `gated: true` = Hugging Face licence click-through, download needs an HF token), `customNodes[]`, `autoDownloads[]` (weights the node fetches itself on first run), `validationError` (only when validation failed), `buildWarnings` (only if the build found problems; none currently). Top level also carries `comfyuiVersion`, `workflowTemplatesVersion`, `frontendVersion`.
 
@@ -116,8 +125,10 @@ Other manifest fields: `defaults` (numeric widget values of the bound inputs + `
 | `SaveVideo` (all native video workflows) | `images[]` **plus** `animated: [true]` | `{"filename":"wan22-i2v-14b_00001_.mp4","subfolder":"fuobe","type":"output","metadata":{"kind":"video","width":…,"fps":…,"frame_count":…}}` |
 | `VHS_VideoCombine` (`infinitetalk-wanwrapper`, `interpolate-rife-vfi`, `v2a-mmaudio`) | **`gifs[]`** | `{"filename":"v2a-mmaudio_00001-audio.mp4","subfolder":"fuobe","type":"output","format":"video/h264-mp4","frame_rate":…,"fullpath":…}` — with audio the file name ends in `-audio.mp4`; VHS also writes a silent `.mp4` and a `.png` metadata frame next to it |
 | `SaveAudio` / `SaveAudioAdvanced` | `audio[]` | `{"filename":"music-ace-step-15_00001.mp3","subfolder":"fuobe","type":"output"}` |
+| `SaveAudioMP3` (TTS / dialogue / voice change) | `audio[]` | `.mp3` (V0) |
+| `SaveWEBM` (`video-bg-remove-*`) | **`images[]`** plus `animated: [true]` | `.webm` (VP9 with alpha) — the key says *images*; classify by the `.webm` extension or the manifest `outputs[].kind` (`video`) |
 
-The manifest `outputs[]` lists the node ids to read (other nodes produce nothing: preview/compare outputs of the templates were removed). Progress: open `ws://<host>/ws?clientId=<client_id>` (same `client_id` as in `/prompt`) for `progress`, `executing`, `executed`, `execution_success`, `execution_error` messages. Cancel: `POST /interrupt {"prompt_id": …}`, `POST /queue {"delete": [prompt_id]}`. Model presence: `GET /models/<folder>` (folders used by the library: `diffusion_models`, `checkpoints`, `text_encoders`, `vae`, `loras`, `clip_vision`, `upscale_models`, `audio_encoders`, `model_patches`, `latent_upscale_models`, `background_removal`, `frame_interpolation`, `mmaudio`, `insightface`, `facerestore_models`).
+The manifest `outputs[]` lists the node ids to read (other nodes produce nothing: preview/compare outputs of the templates were removed). Progress: open `ws://<host>/ws?clientId=<client_id>` (same `client_id` as in `/prompt`) for `progress`, `executing`, `executed`, `execution_success`, `execution_error` messages. Cancel: `POST /interrupt {"prompt_id": …}`, `POST /queue {"delete": [prompt_id]}`. Model presence: `GET /models/<folder>` (folders used by the library: `diffusion_models`, `checkpoints`, `text_encoders`, `vae`, `loras`, `clip_vision`, `upscale_models`, `audio_encoders`, `model_patches`, `latent_upscale_models`, `background_removal`, `frame_interpolation`, `mmaudio`, `insightface`, `facerestore_models`, `geometry_estimation`).
 
 ## 5. Per-workflow quirks worth knowing
 
@@ -235,12 +246,15 @@ Runtime self-downloads (not in `models`): ComfyUI-RMBG model (BEN2 by default �
 |---|---|---|---|
 | [kijai/ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper) | `088128b` | ok | infinitetalk-wanwrapper |
 | [Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) | `4d907be` | ok | infinitetalk-wanwrapper, interpolate-rife-vfi, v2a-mmaudio |
-| [kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | `17195fc` | ok | infinitetalk-wanwrapper |
+| [kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | `17195fc` | ok | infinitetalk-wanwrapper, video-extend-wan22-fun-vace, video-reframe-wan22-fun-vace |
 | [numz/ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | `4490bd1` | **import fails on CPU** (device combo) — not used; core SeedVR2 used instead | — |
 | [Fannovel16/ComfyUI-Frame-Interpolation](https://github.com/Fannovel16/ComfyUI-Frame-Interpolation) | `26545cc` | ok (no cupy) | interpolate-rife-vfi |
 | [1038lab/ComfyUI-RMBG](https://github.com/1038lab/ComfyUI-RMBG) | `229529e` | ok (after installing triton, decord, pycocotools) | bg-remove-rmbg |
 | [Gourieff/ComfyUI-ReActor](https://github.com/Gourieff/ComfyUI-ReActor) | `3be5f35` | ok (insightface 2.1 wheel) | face-swap-reactor |
 | [kijai/ComfyUI-MMAudio](https://github.com/kijai/ComfyUI-MMAudio) | `8eaeb72` | ok | v2a-mmaudio |
+| [filliptm/ComfyUI_Fill-ChatterBox](https://github.com/filliptm/ComfyUI_Fill-ChatterBox) | `f7d7a16` | ok (resampy, s3tokenizer, conformer, soundfile) | tts-chatterbox-multilingual, tts-dialogue-chatterbox, voice-change-chatterbox |
+| [snicolast/ComfyUI-IndexTTS2](https://github.com/snicolast/ComfyUI-IndexTTS2) | `5b33e02` | ok — registers with numpy only; runtime deps **not** installed (`INDEXTTS_RUNTIME=1`) | tts-indextts2 |
+| [yuvraj108c/ComfyUI-Video-Depth-Anything](https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything) | `a0db08e` | ok (einops, easydict, Imath, OpenEXR) | video-depth-vda-small |
 
 ## 8. What failed / was skipped, and why
 
@@ -262,5 +276,123 @@ cd scripts/comfy && npm install && npm run all # export (Playwright) → build (
 
 * `npm run export` drives headless Chromium (`/opt/pw-browsers/chromium-*/chrome-linux/chrome`) against the running ComfyUI and writes `scripts/comfy/build/raw/*.api.json`.
 * `npm run build` applies `library.spec.mjs` (transforms, bindings, notes) and resolves model URLs (template `properties.models` metadata, else `KNOWN_MODELS`) and sizes (Hugging Face `x-linked-size`, tree API for gated repos). Output is deterministic; `validated` is carried over from `scripts/comfy/validation-state.json` when a workflow file's sha256 is unchanged.
-* `npm run validate` creates zero-byte placeholder models (deleted afterwards), uploads fixtures, fills every binding with sample values and `POST /prompt` (ComfyUI validates synchronously inside that request). To guarantee nothing executes, a "blocker" prompt (chain of 1-second KJNodes `Sleep` nodes) first occupies ComfyUI's single worker, so each validation prompt is merely *pending* and is removed right away with `POST /queue {"delete":[id]}`; at the end the blocker is interrupted and `POST /queue {"clear":true}` + `POST /interrupt` are sent (`--shared` skips these global calls). This matters because several nodes download weights as soon as they execute (RMBG, RIFE VFI, wav2vec, ReActor). It updates `manifest.json` and writes `object_info.subset.json` (147 node classes). It can be pointed at a real GPU server (`COMFYUI_URL`, `COMFYUI_DIR`) — it never overwrites real model files.
+* `npm run validate` creates zero-byte placeholder models (deleted afterwards), uploads fixtures, fills every binding with sample values and `POST /prompt` (ComfyUI validates synchronously inside that request). To guarantee nothing executes, a "blocker" prompt (chain of 1-second KJNodes `Sleep` nodes) first occupies ComfyUI's single worker, so each validation prompt is merely *pending* and is removed right away with `POST /queue {"delete":[id]}`; at the end the blocker is interrupted and `POST /queue {"clear":true}` + `POST /interrupt` are sent (`--shared` skips these global calls). This matters because several nodes download weights as soon as they execute (RMBG, RIFE VFI, wav2vec, ReActor). It updates `manifest.json` and writes `object_info.subset.json` (174 node classes after the oss-2 additions). It can be pointed at a real GPU server (`COMFYUI_URL`, `COMFYUI_DIR`) — it never overwrites real model files.
 * To upgrade templates: bump `comfyui-workflow-templates` (ComfyUI `requirements.txt`), re-run; the build fails loudly if a bound node/input disappeared.
+
+## 10. comfyui-oss-2 additions (2026-10-16)
+
+Twenty workflows that close the gaps found in [`comfyui-oss-2.md`](comfyui-oss-2.md) / [`comfyui-oss-2.json`](comfyui-oss-2.json). They are **hand-built** API graphs (`scripts/comfy/hand-built/<id>.json`, transcribed from the research graphs that had already passed live `/prompt`, or derived from the library's `qwen-image-edit-2509.json`), declared in `library.spec.mjs` and built/validated by the normal pipeline (`npm run build -- <ids>`, `node validate-workflows.mjs <ids>`).
+
+**Validation:** ComfyUI `fc04da91` (v0.41.0-7, CPU) with all library packs plus `ComfyUI_Fill-ChatterBox`, `ComfyUI-IndexTTS2` and `ComfyUI-Video-Depth-Anything` at the commits in section 7 (all in `install-comfyui.sh`). **20/20 accepted** (HTTP 200, `prompt_id`, no `node_errors`) with zero-byte placeholder weights and uploaded fixtures; nothing was executed except two model-free sanity runs: the `ComfyMathExpression` nodes used by `video-extend` (65 + 16 → 81, `0 - 16` → −16, seed `2^47+5 % 2^32` → 5) and `ImageResizeKJv2` pad mode used by `video-reframe` (64×64 into 128×64: mask 255 on the 32 px side bars, 0 on the image; bars filled with 127 gray). Negative tests (a bad `language` value, a CONDITIONING wired into the math node) were rejected. A second pass with **seed = 2^47 + 12345** (what `randomSeed()` in the app can produce) passed for all **73** workflows.
+
+### 10.1 Workflows
+
+| id | capability | what it does | validated | bindings | output | models GB (new) | VRAM | license |
+|---|---|---|---|---|---|---|---|---|
+| `tts-chatterbox-multilingual` | tts | text → speech in a cloned voice, 23 languages | **yes** | prompt, audio, language, seed, exaggeration, cfg, temperature | 3: `.mp3` | auto 3.2 | 6 | MIT weights |
+| `tts-indextts2` | tts | text → speech, cloned voice, most expressive | **yes** (graph); runtime deps not installed | prompt, audio | 3: `.mp3` | auto ≈ 6 | 8 | bilibili IndexTTS licence: commercial OK below 100M MAU / RMB 1B revenue, no training other models |
+| `tts-dialogue-chatterbox` | **dialogue** (new) | 2-speaker script → mixed dialogue | **yes** | prompt, audio, audio2, seed, exaggeration, cfg, temperature | 4: `.mp3` | auto 3.2 | 6 | MIT weights |
+| `voice-change-chatterbox` | **voice-change** (new) | speech → same performance in another voice | **yes** | audio, audio2, seed | 4: `.mp3` | auto 1.1 | 3 | MIT weights |
+| `video-extend-wan22-fun-vace` | extend | continue a clip (context frames + new frames, overlap blend) | **yes** | video, prompt, negativePrompt, width, height, frames, contextFrames, fps, seed, steps, cfg, shift | 28: `.mp4` | 44.2 (34.7) | 24 | Apache-2.0 |
+| `video-reframe-wan22-fun-vace` | reframe | new aspect ratio, AI-filled borders | **yes** | video, prompt, negativePrompt, width, height, frames, fps, seed, steps, cfg, shift | 24: `.mp4` | 44.2 (shared with extend) | 24 | Apache-2.0 |
+| `relight-qwen-edit-2509` | edit | relight a photo from a text description | **yes** | prompt, negativePrompt, image, seed, steps, cfg, loraStrength | 469: `.png` | 31.2 (0.24) | 24 | Apache-2.0 |
+| `relight-qwen-edit-2509-reference` | edit | relight `image` with the light of `image2` | **yes** | prompt, negativePrompt, image, image2, seed, steps, cfg, loraStrength | 469: `.png` | 31.2 (0.24) | 24 | Apache-2.0 |
+| `video-relight-bernini-r` | v2v | prompt-driven video relight / restyle | **yes** | video, prompt, negativePrompt, width, height, frames, seed, steps, cfg | 20: `.mp4` | 38.8 (31.8) | 24 | Apache-2.0 |
+| `draw-to-video-wan-move` | **draw-to-video** (new) | start frame + drawn motion paths → video | **yes** | image, tracks, prompt, negativePrompt, width, height, frames, motionStrength, fps, seed, steps, cfg, shift | 18: `.mp4` | 25.4 (16.4) | 24 | Apache-2.0 |
+| `video-concat-2` / `-3` / `-4` | **concat** (new) | join 2/3/4 shots (multi-shot assembly) | **yes** | video, video2[, video3[, video4]], width, height, fps | 22: `.mp4` | 0 | 0 (CPU) | no model |
+| `storyboard-qwen-edit-2509-next-scene` | edit | next storyboard panel from previous panel + character reference | **yes** | prompt, negativePrompt, image, image2, seed, steps, cfg, loraStrength | 469: `.png` | 31.2 (0.3) | 24 | Apache-2.0 + MIT LoRA |
+| `video-bg-remove-birefnet` | **bg-remove-video** (new) | transparent-background video | **yes** | video | 7: `.webm` (VP9 alpha), 10: matte `.mp4` | 0.44 (shared) | 4 | MIT |
+| `video-bg-remove-sam3` | **bg-remove-video** (new) | keep only the object named in `prompt` | **yes** | video, prompt | 9: `.webm` (VP9 alpha) | 1.75 (1.75) | 6 | Meta SAM License (commercial OK) |
+| `video-depth-da3` | **depth-video** (new) | depth-map video (per frame) | **yes** | video | 7: `.mp4` | 1.34 (1.34) | 4 | Apache-2.0 (mono-large only) |
+| `video-depth-vda-small` | **depth-video** (new) | temporally stable depth-map video | **yes** | video | 7: `.mp4` | auto 0.12 | 4 | Apache-2.0 (Small only; Base/Large are **CC-BY-NC**) |
+| `palette-transfer-image` | grade | lock an image to a HEX palette swatch | **yes** | image, image2, strength | 4: `.png` | 0 | 0 (CPU) | no model |
+| `palette-transfer-video` | v2v | same for a clip, flicker-free (`uniform` stats) | **yes** | video, image, strength | 6: `.mp4` (keeps audio) | 0 | 0 (CPU) | no model |
+
+"auto" = the node pack downloads its weights on first run (listed in the entry's `autoDownloads`; pre-seed them on production servers). New weights for all 20: **≈ 86.7 GB** of manifest models (Fun VACE 34.7, Bernini-R 31.1, Wan-Move 16.4, SAM 3.1 1.75, DA3 1.34, LoRAs 1.4) + ≈ 7.6 GB auto-downloaded TTS / depth weights. UMT5, Wan VAE, CLIP-vision H, the lightx2v LoRAs and all Qwen-Image-Edit 2509 files are shared with existing workflows.
+
+None of the 20 uses a non-commercial model. Watch-outs: IndexTTS-2's licence has scale thresholds; Video Depth Anything Base/Large and DA3 Large/Giant are CC-BY-NC (do not swap them in); the Chatterbox pack repo ships no LICENSE file (weights are MIT).
+
+### 10.2 New `capability` values (= op)
+
+Existing values were reused where the input/output shape matches (`tts`, `extend`, `reframe`, `edit`, `v2v`, `grade`). New ones, needed because their inputs or output kind differ from every existing op:
+
+| capability | input → output | suggested `OPERATION_OUTPUT` |
+|---|---|---|
+| `dialogue` | script + 2 voice clips → audio | audio |
+| `voice-change` | audio + target-voice audio → audio | audio |
+| `draw-to-video` | image + `tracks` JSON → video | video |
+| `concat` | 2-4 videos → video | video |
+| `bg-remove-video` | video → video with alpha (`.webm`) | video (the existing `bg-remove` is image-only) |
+| `depth-video` | video → depth video | video |
+
+`palette-transfer-image` uses `grade` (image output) and `palette-transfer-video` / `video-relight-bernini-r` use `v2v`.
+
+### 10.3 New binding keys
+
+All are passed through `ProviderInput.extra` until `BindingKey` lists them (`audio2` / `video2-4` need upload slots like `audio` / `video`):
+
+| key | type | meaning | default |
+|---|---|---|---|
+| `audio2` | uploaded file name | second audio: dialogue speaker B (`tts-dialogue-chatterbox`), target voice (`voice-change-chatterbox`) | — |
+| `video2`, `video3`, `video4` | uploaded file name | shots 2-4 (`video-concat-*`) | — |
+| `language` | string enum | Chatterbox Multilingual language: Arabic (ar), Danish (da), German (de), Greek (el), English (en), Spanish (es), Finnish (fi), French (fr), Hebrew (he), Hindi (hi), Italian (it), Japanese (ja), Korean (ko), Malay (ms), Dutch (nl), Norwegian (no), Polish (pl), Portuguese (pt), Russian (ru), Swedish (sv), Swahili (sw), Turkish (tr), Chinese (zh) — the value is the whole string, e.g. `"French (fr)"` | `"English (en)"` |
+| `exaggeration` | float 0.25-2 | Chatterbox emotion intensity | 0.5 |
+| `temperature` | float 0.05-2 | Chatterbox sampling temperature | 0.8 |
+| `contextFrames` | int, multiple of 4 | `video-extend`: how many source tail frames condition the continuation (and are cross-faded) | 16 |
+| `tracks` | JSON string | `draw-to-video-wan-move`: `[[{"x":px,"y":px}, …], …]`, one point per output frame per track, all tracks equally long, pixel space of `width`×`height` | sample in the JSON |
+| `motionStrength` | float 0-100 | Wan-Move track conditioning strength | 1.0 |
+| `strength` | float 0-10 | `ColorTransfer` strength | 0.8 |
+
+Reused keys with workflow-specific meaning: `prompt` = text to speak / dialogue script (`SPEAKER A:` / `SPEAKER B:` lines) / object to keep (SAM 3.1); `audio` = voice reference (TTS) / speaker A / the performance to convert (voice change); `cfg` = Chatterbox `cfg_weight` (**0-1**, default 0.5, not a diffusion CFG); `image2` = lighting reference / character reference / palette swatch; `image` in `palette-transfer-video` = the swatch; `frames` in `video-extend` = **new** frames (4n+1), not the window.
+
+New optional manifest field: **`license`** (string) on these 20 entries.
+
+### 10.4 Models
+
+| file | folder | GB | new? | used by |
+|---|---|---|---|---|
+| [`wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors`](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_high_noise_14B_fp8_scaled.safetensors) | diffusion_models | 17.35 | new | video-extend, video-reframe |
+| [`wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors`](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_fun_vace_low_noise_14B_fp8_scaled.safetensors) | diffusion_models | 17.35 | new | video-extend, video-reframe |
+| [`wan2.2_bernini_r_high_noise_fp8_scaled.safetensors`](https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_high_noise_fp8_scaled.safetensors) | diffusion_models | 15.57 | new | video-relight-bernini-r |
+| [`wan2.2_bernini_r_low_noise_fp8_scaled.safetensors`](https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_low_noise_fp8_scaled.safetensors) | diffusion_models | 15.57 | new | video-relight-bernini-r |
+| [`Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors`](https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/WanMove/Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors) | diffusion_models | 16.4 | new | draw-to-video-wan-move |
+| [`sam3.1_multiplex_fp16.safetensors`](https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors) | checkpoints | 1.75 | new | video-bg-remove-sam3 |
+| [`depth_anything_3_mono_large.safetensors`](https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors) | geometry_estimation | 1.34 | new | video-depth-da3 |
+| [`Qwen-Image-Edit-2509-Relight.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Relight.safetensors) | loras | 0.24 | new | relight-qwen-edit-2509 |
+| [`Qwen-Image-Edit-2509-Light-Migration.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Light-Migration.safetensors) | loras | 0.24 | new | relight-qwen-edit-2509-reference |
+| [`next-scene_lora-v2-3000.safetensors`](https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/main/next-scene_lora-v2-3000.safetensors) | loras | 0.3 | new | storyboard-qwen-edit-2509-next-scene |
+| [`lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors`](https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors) | loras | 0.63 | new | video-relight-bernini-r |
+| `wan2.2_t2v_lightx2v_4steps_lora_v1.1_{high,low}_noise.safetensors` | loras | 2 × 1.23 | shared | video-extend, video-reframe (+ wan22-t2v-14b-lightx2v) |
+| `lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`, `clip_vision_h.safetensors` | loras / clip_vision | 0.74 / 1.26 | shared | draw-to-video-wan-move |
+| `umt5_xxl_fp8_e4m3fn_scaled.safetensors`, `wan_2.1_vae.safetensors` | text_encoders / vae | 6.74 / 0.25 | shared | all Wan-based additions |
+| `qwen_image_edit_2509_fp8_e4m3fn`, `qwen_2.5_vl_7b_fp8_scaled`, `qwen_image_vae`, `Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16` | … | 30.9 | shared | relight ×2, storyboard |
+| `birefnet.safetensors` | background_removal | 0.44 | shared | video-bg-remove-birefnet |
+| ResembleAI/chatterbox (multilingual `t3_mtl23ls_v2` 2.14 + `s3gen.pt` 1.06; English `t3_cfg` 2.13 + `s3gen` 1.06; VC `s3gen.pt`) | `models/chatterbox/…` (auto) | ≈ 6.4 | auto | Chatterbox ×3 |
+| IndexTeam/IndexTTS-2 (`gpt.pth` 3.48, `s2mel.pth` 1.2, `qwen0.6bemo4-merge` 1.19, + w2v-bert / MaskGCT / CAMPPlus / BigVGAN) | `custom_nodes/ComfyUI-IndexTTS2/checkpoints` | ≈ 6+ | manual + auto | tts-indextts2 |
+| depth-anything/Video-Depth-Anything-Small `video_depth_anything_vits.pth` | `models/videodepthanything` (auto) | 0.12 | auto | video-depth-vda-small |
+
+### 10.5 Quirks the app must handle
+
+* **Seeds.** The Chatterbox nodes cap `seed` at 2^32−1 while the app's `randomSeed()` goes to 2^48. The three Chatterbox graphs bind `seed` to a `PrimitiveInt` (node 10) and fold it with `ComfyMathExpression "a % 4294967296"` (node 11) — no app change needed. IndexTTS-2 has no seed.
+* **TTS / dialogue / VC** need every bound `audio`/`audio2` upload (the build enforces that every `Load*` is bound): 5-15 s of clean speech per reference. Dialogue lines must start with `SPEAKER A:` / `SPEAKER B:`. Output is MP3 V0 under `audio[]`. Install `resemble-perth` so Chatterbox output carries the Perth watermark, and gate cloning behind a consent step.
+* **IndexTTS-2** registers without its runtime stack; executing it needs `INDEXTTS_RUNTIME=1 scripts/comfy/install-comfyui.sh` (pynini 2.1.7 has a cp313 wheel; the pack pins 2.1.6, which must be compiled) and the `IndexTeam/IndexTTS-2` checkpoint folder. Run it on a separate worker.
+* **video-extend:** `frames` = new frames (4n+1, from `duration × fps`), `contextFrames` multiple of 4; window = frames + contextFrames ≤ 121 (so `limits.maxFrames` = 105). Output = the whole source (scaled + center-cropped to width×height) + the continuation, cross-faded over `contextFrames`; loop the job to go longer. Resample sources to 16 fps. Audio is dropped.
+* **video-reframe:** `width`/`height` are the **target** size (from `aspectRatio`); the source is fitted inside and padded automatically (`ImageResizeKJv2` pad mode → mask). `frames` ≤ source frame count. Do not call it when the aspect ratio is unchanged (no padding → a 64×64 placeholder mask → the whole clip is regenerated). This replaces the research graph's `sourceWidth`/`sourceHeight` + pad keys, so no new keys are needed.
+* **video-relight-bernini-r:** keep the source aspect ratio for `width`/`height` and set `frames` to the source frame count (4n+1); output fps follows the source (linked), no audio.
+* **draw-to-video-wan-move:** `tracks` length per track must equal `frames`; coordinates are in the resized (`width`×`height`, center-cropped) frame. Add parallel tracks per object and static tracks to pin the background. 480p model: long side ≤ 832.
+* **video-concat-N:** hard cuts; all clips are scaled/center-cropped to `width`×`height` and concatenated at `fps` (no retiming), audio dropped. Assemble multi-shot as storyboard → per-shot `wan22-i2v-14b-lightx2v` / `wan22-flf2v-14b` → concat → `v2a-mmaudio`/music. LTX-2.5 native multishot (shot-list prompt through `ltx25-t2v`/`ltx25-i2v`) needs no new graph.
+* **video-bg-remove-*:** `SaveWEBM` files are reported under `images[]` (with `animated: true`); `collectFiles` should rely on the declared kind / `.webm` extension. Browsers play VP9-alpha WebM (Chrome/Firefox/Edge); Safari needs HEVC-alpha or the matte MP4 (`video-bg-remove-birefnet` node 10).
+* **relight / storyboard** prepend their LoRA trigger in node 1002 (`重新照明,` / the light-migration instruction / `Next Scene:`); bind only the user text to `prompt`.
+
+### 10.6 Considered but not added
+
+| option | why not |
+|---|---|
+| VibeVoice 1.5B/7B dialogue | Microsoft's card restricts use to research; needs `gguf` (missing from its requirements). Graph validated in the research JSON if wanted later. |
+| Seed-VC voice conversion | GPL-3.0 code and weights; AIFSH pack stale since 2024-11 and not installable on the CPU box. |
+| Wan 2.1 ATI trajectory | Older (Wan 2.1, 121-point tracks); Wan-Move covers draw-to-video. |
+| SVI 2.0 Pro / Wan I2V multi-frame extend | Proper SVI chaining passes the sampler *latent* between chunks, which a file-in/file-out job cannot; the I2V multi-frame trick has the weakest continuity. |
+| Wan 2.1 VACE 14B reframe | 34.7 GB fp16 DiT for the same job; Fun VACE is shared with extend. |
+| LTX-2.x extend / outpaint IC-LoRA | Revenue-gated licence and extra packs (LTXVideo, VHS, ComfyMath). |
+| Core `TrainLoraNode` character LoRA | Does not fit the manifest model: `SaveLoRA` reports no UI output (nothing to fetch from `/history`), the result is a `.safetensors` (not image/video/audio), the dataset must be a folder in ComfyUI's `input/` (not an upload), and a run holds the GPU for 20-90 min. Use the ai-toolkit worker from comfyui-oss-2 §8 instead. |
+| HoloCine multi-shot | CC-BY-NC-SA, no ComfyUI node. |

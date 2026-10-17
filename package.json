@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "rm -rf .next && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:e2e:comfyui": "node tests/e2e/comfyui-selftest.mjs",
-    "gen:catalog": "python3 scripts/gen-cloud-models.py && python3 scripts/gen-oss-loras.py && node scripts/gen-icon-map.mjs",
+    "gen:catalog": "python3 scripts/gen-cloud-models.py && python3 scripts/gen-higgsfield-models.py && python3 scripts/gen-oss-loras.py && node scripts/gen-icon-map.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

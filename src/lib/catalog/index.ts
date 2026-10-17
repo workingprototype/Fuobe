@@ -60,6 +60,8 @@ function withFunCamera(p: Preset): Preset {
 /** Open-source routes that need a dedicated workflow rather than an edit prompt. */
 const APP_OPEN_OVERRIDES: Record<string, Preset["open"]> = {
   "app-face-swap": { modelId: "oss-reactor", op: "face-swap" },
+  // Qwen-Image-Edit with the Relight LoRA beats a plain edit prompt for lighting changes.
+  "app-relight": { modelId: "oss-qwen-relight", op: "edit" },
 };
 
 export const APPS: Preset[] = RAW_APPS.map((a) => (APP_OPEN_OVERRIDES[a.id] ? { ...a, open: APP_OPEN_OVERRIDES[a.id] } : a)).map(withOssLoras);

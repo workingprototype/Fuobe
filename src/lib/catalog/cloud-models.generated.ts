@@ -631,6 +631,33 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "resolution": "quality"
         }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2.5/flare/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
+        }
       }
     ],
     "options": {
@@ -721,6 +748,33 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "resolution": "quality"
         }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2.5/sunburst/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
+        }
       }
     ],
     "options": {
@@ -807,6 +861,33 @@ export const CLOUD_MODELS: ModelDef[] = [
             }
           },
           "resolution": "quality"
+        }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "openai/gpt-image-2/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "alpha"
         }
       }
     ],
@@ -898,6 +979,36 @@ export const CLOUD_MODELS: ModelDef[] = [
           "fixed": {
             "quality": "high"
           }
+        }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "fal-ai/gpt-image-1.5/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "fixed": {
+            "quality": "high"
+          },
+          "mask": "mask_image_url",
+          "maskFormat": "alpha"
         }
       }
     ],
@@ -1190,6 +1301,35 @@ export const CLOUD_MODELS: ModelDef[] = [
           },
           "resolution": "quality"
         }
+      },
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "ideogram/v4.5/edit",
+        "map": {
+          "image": "image_url",
+          "images": "reference_image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "resolution": "quality",
+          "mask": "mask_url",
+          "maskFormat": "black"
+        }
       }
     ],
     "options": {
@@ -1221,6 +1361,71 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "image",
       "usd": 0.03
+    }
+  },
+  {
+    "id": "flux-fill-pro",
+    "name": "FLUX.1 Fill [pro]",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Precise inpainting and object replacement with a mask",
+    "routes": [
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-pro/v1/fill",
+        "map": {
+          "image": "image_url",
+          "mask": "mask_url",
+          "numOutputs": "num_images",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 1
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.05
+    }
+  },
+  {
+    "id": "z-image-inpaint",
+    "name": "Z-Image Turbo Inpaint (hosted)",
+    "vendor": "Alibaba Tongyi",
+    "family": "z-image",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Cheapest, fastest masked inpainting",
+    "routes": [
+      {
+        "op": "inpaint",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo/inpaint",
+        "map": {
+          "image": "image_url",
+          "mask": "mask_image_url",
+          "numOutputs": "num_images",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 1
+    },
+    "badges": [
+      "fast"
+    ],
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.01
     }
   },
   {
@@ -1478,7 +1683,8 @@ export const CLOUD_MODELS: ModelDef[] = [
               "4:5": "portrait_4_3"
             }
           }
-        }
+        },
+        "loraEndpoint": "fal-ai/z-image/turbo/lora"
       }
     ],
     "options": {
@@ -1558,6 +1764,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seedance-2.5/text-to-video",
         "map": {
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1574,6 +1781,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1590,6 +1798,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1606,6 +1815,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "images": "image_urls",
           "seed": "seed",
           "generateAudio": "generate_audio",
+          "draft": "draft",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -1613,9 +1823,40 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "string"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "bytedance/seedance-2.5/reference-to-video",
+        "map": {
+          "images": "image_urls",
+          "videoArray": "video_urls",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          },
+          "fixed": {
+            "task": "extension"
+          }
+        }
+      },
+      {
+        "op": "finalize",
+        "provider": "fal",
+        "endpoint": "bytedance/seedance-2.5/draft/complete",
+        "map": {
+          "prompt": false,
+          "draftId": "draft_id",
+          "resolution": "resolution"
+        }
       }
     ],
     "options": {
+      "draft": true,
       "audio": true,
       "aspectRatios": [
         "auto",
@@ -1638,11 +1879,15 @@ export const CLOUD_MODELS: ModelDef[] = [
         8,
         10,
         12,
-        15
+        30
       ],
       "endFrame": true,
       "maxImages": 4,
-      "seed": true
+      "seed": true,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "top",
@@ -1759,7 +2004,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         15
       ],
       "endFrame": true,
-      "maxImages": 9
+      "maxImages": 9,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "audio"
@@ -1999,6 +2248,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "negativePrompt": "negative_prompt",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2015,6 +2269,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "start_image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2030,6 +2289,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "start_image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2038,6 +2302,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "negativePrompt": true,
       "audio": true,
       "aspectRatios": [
@@ -2052,7 +2320,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 1
@@ -2087,6 +2355,10 @@ export const CLOUD_MODELS: ModelDef[] = [
         "provider": "fal",
         "endpoint": "fal-ai/kling-video/v3/turbo/pro/text-to-video",
         "map": {
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2108,6 +2380,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "aspectRatios": [
         "16:9",
         "9:16",
@@ -2120,7 +2396,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "maxImages": 1
     },
@@ -2202,7 +2478,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 1
@@ -2232,6 +2508,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "fal-ai/kling-video/o3/pro/text-to-video",
         "map": {
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2247,6 +2528,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2261,6 +2547,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "duration": {
             "key": "duration",
             "type": "string"
@@ -2276,6 +2567,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "images": "image_urls",
           "endImage": "end_image_url",
           "generateAudio": "generate_audio",
+          "multiShot": {
+            "key": "multi_prompt",
+            "durationType": "string",
+            "shotType": "shot_type"
+          },
           "aspectRatio": "aspect_ratio",
           "duration": {
             "key": "duration",
@@ -2294,6 +2590,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "multiShot": {
+        "mode": "native",
+        "maxShots": 6
+      },
       "audio": true,
       "aspectRatios": [
         "16:9",
@@ -2307,7 +2607,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 4
@@ -2738,6 +3038,25 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "number"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/veo3.1/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        },
+        "note": "fal retires Veo 3.1 extend on 2026-11-17"
       }
     ],
     "options": {
@@ -2841,6 +3160,25 @@ export const CLOUD_MODELS: ModelDef[] = [
             "suffix": "s"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/veo3.1/fast/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        },
+        "note": "fal retires Veo 3.1 extend on 2026-11-17"
       }
     ],
     "options": {
@@ -3369,7 +3707,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         6,
         8,
         10,
-        12
+        15
       ],
       "endFrame": true,
       "maxImages": 4
@@ -3463,7 +3801,11 @@ export const CLOUD_MODELS: ModelDef[] = [
         10,
         15
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "multiShot": {
+        "mode": "prompt",
+        "maxShots": 6
+      }
     },
     "badges": [
       "audio"
@@ -3721,6 +4063,21 @@ export const CLOUD_MODELS: ModelDef[] = [
             "type": "number"
           }
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "minimax/h3-max/extend-video",
+        "map": {
+          "video": "video_url",
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
       }
     ],
     "options": {
@@ -3731,12 +4088,14 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4:3",
         "1:1",
         "3:4",
-        "9:16"
+        "9:16",
+        "auto"
       ],
       "resolutions": [
         "480P",
         "768P",
-        "1080P"
+        "1080P",
+        "2K"
       ],
       "endFrame": true,
       "maxImages": 9
@@ -3934,6 +4293,21 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "video": "video_url"
         }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "blackforestlabs/flux-3/extend-video",
+        "map": {
+          "video": "video_url",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          }
+        }
       }
     ],
     "options": {
@@ -4097,6 +4471,22 @@ export const CLOUD_MODELS: ModelDef[] = [
           "seed": "seed",
           "generateAudio": "generate_audio_switch",
           "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "number"
+          }
+        }
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/pixverse/v6/extend",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio_switch",
           "resolution": "resolution",
           "duration": {
             "key": "duration",
@@ -4271,6 +4661,21 @@ export const CLOUD_MODELS: ModelDef[] = [
             "suffix": "s"
           }
         }
+      },
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "luma/agent/ray/v3.2/reframe",
+        "map": {
+          "video": "video_url",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string",
+            "suffix": "s"
+          }
+        }
       }
     ],
     "options": {
@@ -4296,6 +4701,100 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "defaults": {
       "aspectRatio": "16:9"
+    }
+  },
+  {
+    "id": "ltx-reframe",
+    "name": "LTX Reframe",
+    "vendor": "Lightricks",
+    "family": "ltx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Change a clip's aspect ratio \u2014 fast, no prompt needed",
+    "routes": [
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3/reframe",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "4:5",
+        "5:4",
+        "9:16",
+        "16:9"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ]
+    },
+    "defaults": {
+      "aspectRatio": "9:16"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1
+    }
+  },
+  {
+    "id": "wan-vace-reframe",
+    "name": "Wan VACE Reframe (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Open-weights reframe: outpaints the new edges with a prompt",
+    "routes": [
+      {
+        "op": "reframe",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan-vace-14b/reframe",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "first_frame_url",
+          "endImage": "last_frame_url",
+          "video": "video_url",
+          "seed": "seed",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "endFrame": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "1:1",
+        "9:16"
+      ],
+      "resolutions": [
+        "auto",
+        "240p",
+        "360p",
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "9:16"
+    },
+    "pricing": {
+      "unit": "video",
+      "usd": 0.08
     }
   },
   {
@@ -4548,6 +5047,16 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "sliders": [
+        {
+          "param": "strength",
+          "label": "Voice strength",
+          "min": 0.01,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.01
+        }
+      ],
       "maxImages": 1
     },
     "pricing": {
@@ -4719,7 +5228,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "elevenlabs",
     "engine": "cloud",
     "kind": "audio",
-    "tagline": "Expressive multilingual speech",
+    "tagline": "Most expressive speech \u2014 audio tags like [whispers] and [laughs]",
     "routes": [
       {
         "op": "tts",
@@ -4727,17 +5236,1527 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "fal-ai/elevenlabs/tts/eleven-v3",
         "map": {
           "prompt": "text",
-          "fixed": {
-            "voice": "Rachel"
-          }
+          "voice": "voice"
         }
       }
     ],
-    "options": {},
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "sliders": [
+        {
+          "param": "stability",
+          "label": "Stability",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.5
+        }
+      ]
+    },
+    "badges": [
+      "top"
+    ],
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
     "pricing": {
       "unit": "request",
       "usd": 0.1,
       "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "elevenlabs-v4",
+    "name": "ElevenLabs v4",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Newest ElevenLabs voice model \u2014 natural, stable long-form",
+    "routes": [
+      {
+        "op": "tts",
+        "provider": "fal",
+        "endpoint": "elevenlabs/tts/eleven-v4",
+        "map": {
+          "prompt": "text",
+          "voice": "voice",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "sliders": [
+        {
+          "param": "stability",
+          "label": "Stability",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.5
+        },
+        {
+          "param": "similarity_boost",
+          "label": "Similarity",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.75
+        }
+      ],
+      "seed": true
+    },
+    "badges": [
+      "new"
+    ],
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.08,
+      "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "elevenlabs-v4-turbo",
+    "name": "ElevenLabs v4 Turbo",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Low-latency v4 at half the price",
+    "routes": [
+      {
+        "op": "tts",
+        "provider": "fal",
+        "endpoint": "elevenlabs/tts/eleven-v4-turbo",
+        "map": {
+          "prompt": "text",
+          "voice": "voice",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "sliders": [
+        {
+          "param": "stability",
+          "label": "Stability",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.5
+        },
+        {
+          "param": "similarity_boost",
+          "label": "Similarity",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.75
+        }
+      ],
+      "seed": true
+    },
+    "badges": [
+      "fast"
+    ],
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.04,
+      "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "elevenlabs-multilingual-v2",
+    "name": "ElevenLabs Multilingual v2",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "29 languages with speed and style control",
+    "routes": [
+      {
+        "op": "tts",
+        "provider": "fal",
+        "endpoint": "fal-ai/elevenlabs/tts/multilingual-v2",
+        "map": {
+          "prompt": "text",
+          "voice": "voice"
+        }
+      }
+    ],
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "sliders": [
+        {
+          "param": "stability",
+          "label": "Stability",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.5
+        },
+        {
+          "param": "similarity_boost",
+          "label": "Similarity",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.75
+        },
+        {
+          "param": "style",
+          "label": "Style exaggeration",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "speed",
+          "label": "Speed",
+          "min": 0.7,
+          "max": 1.2,
+          "step": 0.05,
+          "default": 1
+        }
+      ]
+    },
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.1,
+      "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "elevenlabs-dialogue",
+    "name": "ElevenLabs Dialogue",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Several speakers, one natural conversation",
+    "routes": [
+      {
+        "op": "dialogue",
+        "provider": "fal",
+        "endpoint": "fal-ai/elevenlabs/text-to-dialogue/eleven-v3",
+        "map": {
+          "prompt": false,
+          "dialogue": {
+            "key": "inputs",
+            "text": "text",
+            "voice": "voice"
+          },
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "sliders": [
+        {
+          "param": "stability",
+          "label": "Stability",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        }
+      ],
+      "seed": true
+    },
+    "badges": [
+      "new"
+    ],
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.1,
+      "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "chatterbox-cloud",
+    "name": "Chatterbox (hosted)",
+    "vendor": "Resemble AI",
+    "family": "chatterbox",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Clone any voice from a 10-second sample",
+    "routes": [
+      {
+        "op": "tts",
+        "provider": "fal",
+        "endpoint": "fal-ai/chatterbox/text-to-speech",
+        "map": {
+          "prompt": "text",
+          "voiceAudio": "audio_url",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "voiceClone": true,
+      "sliders": [
+        {
+          "param": "exaggeration",
+          "label": "Emotion",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.25
+        },
+        {
+          "param": "temperature",
+          "label": "Variety",
+          "min": 0.05,
+          "max": 2,
+          "step": 0.05,
+          "default": 0.7
+        },
+        {
+          "param": "cfg",
+          "label": "Pace / guidance",
+          "min": 0.1,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.5
+        }
+      ],
+      "seed": true
+    },
+    "pricing": {
+      "unit": "request",
+      "usd": 0.025,
+      "note": "per 1k chars"
+    }
+  },
+  {
+    "id": "index-tts-2-cloud",
+    "name": "IndexTTS-2 (hosted)",
+    "vendor": "Bilibili",
+    "family": "index-tts",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Zero-shot cloning with emotion control",
+    "routes": [
+      {
+        "op": "tts",
+        "provider": "fal",
+        "endpoint": "fal-ai/index-tts-2/text-to-speech",
+        "map": {
+          "voiceAudio": "audio_url"
+        }
+      }
+    ],
+    "options": {
+      "voiceClone": true,
+      "sliders": [
+        {
+          "param": "strength",
+          "label": "Voice strength",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 1
+        }
+      ]
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.002
+    }
+  },
+  {
+    "id": "elevenlabs-voice-changer",
+    "name": "ElevenLabs Voice Changer",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Re-voice a recording with any premade voice",
+    "routes": [
+      {
+        "op": "voice-change",
+        "provider": "fal",
+        "endpoint": "fal-ai/elevenlabs/voice-changer",
+        "map": {
+          "prompt": false,
+          "voice": "voice",
+          "audio": "audio_url",
+          "seed": "seed"
+        }
+      }
+    ],
+    "options": {
+      "voices": [
+        {
+          "id": "CwhRBWXzGAHq8TQ4Fs17",
+          "name": "Roger",
+          "hint": "Laid-Back, Casual, Resonant \u00b7 american"
+        },
+        {
+          "id": "EXAVITQu4vr4xnSDxMaL",
+          "name": "Sarah",
+          "hint": "Mature, Reassuring, Confident \u00b7 american"
+        },
+        {
+          "id": "FGY2WhTYpPnrIDTdsKH5",
+          "name": "Laura",
+          "hint": "Enthusiast, Quirky Attitude \u00b7 american"
+        },
+        {
+          "id": "IKne3meq5aSn9XLyUdCD",
+          "name": "Charlie",
+          "hint": "Deep, Confident, Energetic \u00b7 australian"
+        },
+        {
+          "id": "JBFqnCBsd6RMkjVDRZzb",
+          "name": "George",
+          "hint": "Warm, Captivating Storyteller \u00b7 british"
+        },
+        {
+          "id": "N2lVS1w4EtoT3dr4eOWO",
+          "name": "Callum",
+          "hint": "Husky Trickster \u00b7 american"
+        },
+        {
+          "id": "SAz9YHcvj6GT2YYXdXww",
+          "name": "River",
+          "hint": "Relaxed, Neutral, Informative \u00b7 american"
+        },
+        {
+          "id": "SOYHLrjzK2X1ezoPC6cr",
+          "name": "Harry",
+          "hint": "Fierce Warrior \u00b7 american"
+        },
+        {
+          "id": "TX3LPaxmHKxFdv7VOQHJ",
+          "name": "Liam",
+          "hint": "Energetic, Social Media Creator \u00b7 american"
+        },
+        {
+          "id": "Xb7hH8MSUJpSbSDYk0k2",
+          "name": "Alice",
+          "hint": "Clear, Engaging Educator \u00b7 british"
+        },
+        {
+          "id": "XrExE9yKIg1WjnnlVkGX",
+          "name": "Matilda",
+          "hint": "Knowledgable, Professional \u00b7 american"
+        },
+        {
+          "id": "bIHbv24MWmeRgasZH58o",
+          "name": "Will",
+          "hint": "Relaxed Optimist \u00b7 american"
+        },
+        {
+          "id": "cgSgspJ2msm6clMCkdW9",
+          "name": "Jessica",
+          "hint": "Playful, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "cjVigY5qzO86Huf0OWal",
+          "name": "Eric",
+          "hint": "Smooth, Trustworthy \u00b7 american"
+        },
+        {
+          "id": "hpp4J3VqNfWAUOO0d1Us",
+          "name": "Bella",
+          "hint": "Professional, Bright, Warm \u00b7 american"
+        },
+        {
+          "id": "iP95p4xoKVk53GoZ742B",
+          "name": "Chris",
+          "hint": "Charming, Down-to-Earth \u00b7 american"
+        },
+        {
+          "id": "nPczCjzI2devNBz1zQrb",
+          "name": "Brian",
+          "hint": "Deep, Resonant and Comforting \u00b7 american"
+        },
+        {
+          "id": "onwK4e9ZLuTAKqWW03F9",
+          "name": "Daniel",
+          "hint": "Steady Broadcaster \u00b7 british"
+        },
+        {
+          "id": "pFZP5JQG7iQjIQuC4Bku",
+          "name": "Lily",
+          "hint": "Velvety Actress \u00b7 british"
+        },
+        {
+          "id": "pNInz6obpgDQGcFmaJgB",
+          "name": "Adam",
+          "hint": "Dominant, Firm \u00b7 american"
+        },
+        {
+          "id": "pqHfZKP75CvOlQylNhV4",
+          "name": "Bill",
+          "hint": "Wise, Mature, Balanced \u00b7 american"
+        }
+      ],
+      "seed": true
+    },
+    "defaults": {
+      "voice": "JBFqnCBsd6RMkjVDRZzb"
+    },
+    "pricing": {
+      "unit": "minute",
+      "usd": 0.3
+    }
+  },
+  {
+    "id": "chatterbox-vc-cloud",
+    "name": "Chatterbox Voice Conversion (hosted)",
+    "vendor": "Resemble AI",
+    "family": "chatterbox",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Turn a recording into any voice from a sample",
+    "routes": [
+      {
+        "op": "voice-change",
+        "provider": "fal",
+        "endpoint": "fal-ai/chatterbox/speech-to-speech",
+        "map": {
+          "prompt": false,
+          "voiceAudio": "target_voice_audio_url",
+          "audio": "source_audio_url"
+        }
+      }
+    ],
+    "options": {
+      "voiceClone": true
+    },
+    "pricing": {
+      "unit": "minute",
+      "usd": 0.015
+    }
+  },
+  {
+    "id": "heygen-translate",
+    "name": "HeyGen Translate",
+    "vendor": "HeyGen",
+    "family": "heygen",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Lip-synced video translation into 170+ languages and accents",
+    "routes": [
+      {
+        "op": "dub",
+        "provider": "fal",
+        "endpoint": "fal-ai/heygen/v2/translate/precision",
+        "map": {
+          "prompt": false,
+          "targetLanguage": "output_language",
+          "video": "video_url"
+        }
+      }
+    ],
+    "options": {
+      "languages": [
+        "English",
+        "Spanish",
+        "French",
+        "Hindi",
+        "Italian",
+        "German",
+        "Polish",
+        "Portuguese",
+        "Chinese",
+        "Japanese",
+        "Dutch",
+        "Turkish",
+        "Korean",
+        "Danish",
+        "Arabic",
+        "Romanian",
+        "Mandarin",
+        "Filipino",
+        "Swedish",
+        "Indonesian",
+        "Ukrainian",
+        "Greek",
+        "Czech",
+        "Bulgarian",
+        "Malay",
+        "Slovak",
+        "Croatian",
+        "Tamil",
+        "Finnish",
+        "Russian",
+        "Afrikaans (South Africa)",
+        "Albanian (Albania)",
+        "Amharic (Ethiopia)",
+        "Arabic (Algeria)",
+        "Arabic (Bahrain)",
+        "Arabic (Egypt)",
+        "Arabic (Iraq)",
+        "Arabic (Jordan)",
+        "Arabic (Kuwait)",
+        "Arabic (Lebanon)",
+        "Arabic (Libya)",
+        "Arabic (Morocco)",
+        "Arabic (Oman)",
+        "Arabic (Qatar)",
+        "Arabic (Saudi Arabia)",
+        "Arabic (Syria)",
+        "Arabic (Tunisia)",
+        "Arabic (United Arab Emirates)",
+        "Arabic (Yemen)",
+        "Armenian (Armenia)",
+        "Azerbaijani (Latin, Azerbaijan)",
+        "Bangla (Bangladesh)",
+        "Basque",
+        "Bengali (India)",
+        "Bosnian (Bosnia and Herzegovina)",
+        "Bulgarian (Bulgaria)",
+        "Burmese (Myanmar)",
+        "Catalan",
+        "Chinese (Cantonese, Traditional)",
+        "Chinese (Jilu Mandarin, Simplified)",
+        "Chinese (Mandarin, Simplified)",
+        "Chinese (Northeastern Mandarin, Simplified)",
+        "Chinese (Southwestern Mandarin, Simplified)",
+        "Chinese (Taiwanese Mandarin, Traditional)",
+        "Chinese (Wu, Simplified)",
+        "Chinese (Zhongyuan Mandarin Henan, Simplified)",
+        "Chinese (Zhongyuan Mandarin Shaanxi, Simplified)",
+        "Croatian (Croatia)",
+        "Czech (Czechia)",
+        "Danish (Denmark)",
+        "Dutch (Belgium)",
+        "Dutch (Netherlands)",
+        "English (Australia)",
+        "English (Canada)",
+        "English (Hong Kong SAR)",
+        "English (India)",
+        "English (Ireland)",
+        "English (Kenya)",
+        "English (New Zealand)",
+        "English (Nigeria)",
+        "English (Philippines)",
+        "English (Singapore)",
+        "English (South Africa)",
+        "English (Tanzania)",
+        "English (UK)",
+        "English (United States)",
+        "Estonian (Estonia)",
+        "Filipino (Philippines)",
+        "Finnish (Finland)",
+        "French (Belgium)",
+        "French (Canada)",
+        "French (France)",
+        "French (Switzerland)",
+        "Galician",
+        "Georgian (Georgia)",
+        "German (Austria)",
+        "German (Germany)",
+        "German (Switzerland)",
+        "Greek (Greece)",
+        "Gujarati (India)",
+        "Hebrew (Israel)",
+        "Hindi (India)",
+        "Hungarian (Hungary)",
+        "Icelandic (Iceland)",
+        "Indonesian (Indonesia)",
+        "Irish (Ireland)",
+        "Italian (Italy)",
+        "Japanese (Japan)",
+        "Javanese (Latin, Indonesia)",
+        "Kannada (India)",
+        "Kazakh (Kazakhstan)",
+        "Khmer (Cambodia)",
+        "Korean (Korea)",
+        "Lao (Laos)",
+        "Latvian (Latvia)",
+        "Lithuanian (Lithuania)",
+        "Macedonian (North Macedonia)",
+        "Malay (Malaysia)",
+        "Malayalam (India)",
+        "Maltese (Malta)",
+        "Marathi (India)",
+        "Mongolian (Mongolia)",
+        "Nepali (Nepal)",
+        "Norwegian Bokm\u00e5l (Norway)",
+        "Pashto (Afghanistan)",
+        "Persian (Iran)",
+        "Polish (Poland)",
+        "Portuguese (Brazil)",
+        "Portuguese (Portugal)",
+        "Romanian (Romania)",
+        "Russian (Russia)",
+        "Serbian (Latin, Serbia)",
+        "Sinhala (Sri Lanka)",
+        "Slovak (Slovakia)",
+        "Slovenian (Slovenia)",
+        "Somali (Somalia)",
+        "Spanish (Argentina)",
+        "Spanish (Bolivia)",
+        "Spanish (Chile)",
+        "Spanish (Colombia)",
+        "Spanish (Costa Rica)",
+        "Spanish (Cuba)",
+        "Spanish (Dominican Republic)",
+        "Spanish (Ecuador)",
+        "Spanish (El Salvador)",
+        "Spanish (Equatorial Guinea)",
+        "Spanish (Guatemala)",
+        "Spanish (Honduras)",
+        "Spanish (Mexico)",
+        "Spanish (Nicaragua)",
+        "Spanish (Panama)",
+        "Spanish (Paraguay)",
+        "Spanish (Peru)",
+        "Spanish (Puerto Rico)",
+        "Spanish (Spain)",
+        "Spanish (United States)",
+        "Spanish (Uruguay)",
+        "Spanish (Venezuela)",
+        "Sundanese (Indonesia)",
+        "Swahili (Kenya)",
+        "Swahili (Tanzania)",
+        "Swedish (Sweden)",
+        "Tamil (India)",
+        "Tamil (Malaysia)",
+        "Tamil (Singapore)",
+        "Tamil (Sri Lanka)",
+        "Telugu (India)",
+        "Thai (Thailand)",
+        "Turkish (T\u00fcrkiye)",
+        "Ukrainian (Ukraine)",
+        "Urdu (India)",
+        "Urdu (Pakistan)",
+        "Uzbek (Latin, Uzbekistan)",
+        "Vietnamese (Vietnam)",
+        "Welsh (United Kingdom)",
+        "Zulu (South Africa)",
+        "English - Your Accent",
+        "English - American Accent"
+      ]
+    },
+    "badges": [
+      "top"
+    ],
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1
+    }
+  },
+  {
+    "id": "heygen-translate-fast",
+    "name": "HeyGen Translate Speed",
+    "vendor": "HeyGen",
+    "family": "heygen",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Faster, cheaper lip-synced translation",
+    "routes": [
+      {
+        "op": "dub",
+        "provider": "fal",
+        "endpoint": "fal-ai/heygen/v2/translate/speed",
+        "map": {
+          "prompt": false,
+          "targetLanguage": "output_language",
+          "video": "video_url"
+        }
+      }
+    ],
+    "options": {
+      "languages": [
+        "English",
+        "Spanish",
+        "French",
+        "Hindi",
+        "Italian",
+        "German",
+        "Polish",
+        "Portuguese",
+        "Chinese",
+        "Japanese",
+        "Dutch",
+        "Turkish",
+        "Korean",
+        "Danish",
+        "Arabic",
+        "Romanian",
+        "Mandarin",
+        "Filipino",
+        "Swedish",
+        "Indonesian",
+        "Ukrainian",
+        "Greek",
+        "Czech",
+        "Bulgarian",
+        "Malay",
+        "Slovak",
+        "Croatian",
+        "Tamil",
+        "Finnish",
+        "Russian",
+        "Afrikaans (South Africa)",
+        "Albanian (Albania)",
+        "Amharic (Ethiopia)",
+        "Arabic (Algeria)",
+        "Arabic (Bahrain)",
+        "Arabic (Egypt)",
+        "Arabic (Iraq)",
+        "Arabic (Jordan)",
+        "Arabic (Kuwait)",
+        "Arabic (Lebanon)",
+        "Arabic (Libya)",
+        "Arabic (Morocco)",
+        "Arabic (Oman)",
+        "Arabic (Qatar)",
+        "Arabic (Saudi Arabia)",
+        "Arabic (Syria)",
+        "Arabic (Tunisia)",
+        "Arabic (United Arab Emirates)",
+        "Arabic (Yemen)",
+        "Armenian (Armenia)",
+        "Azerbaijani (Latin, Azerbaijan)",
+        "Bangla (Bangladesh)",
+        "Basque",
+        "Bengali (India)",
+        "Bosnian (Bosnia and Herzegovina)",
+        "Bulgarian (Bulgaria)",
+        "Burmese (Myanmar)",
+        "Catalan",
+        "Chinese (Cantonese, Traditional)",
+        "Chinese (Jilu Mandarin, Simplified)",
+        "Chinese (Mandarin, Simplified)",
+        "Chinese (Northeastern Mandarin, Simplified)",
+        "Chinese (Southwestern Mandarin, Simplified)",
+        "Chinese (Taiwanese Mandarin, Traditional)",
+        "Chinese (Wu, Simplified)",
+        "Chinese (Zhongyuan Mandarin Henan, Simplified)",
+        "Chinese (Zhongyuan Mandarin Shaanxi, Simplified)",
+        "Croatian (Croatia)",
+        "Czech (Czechia)",
+        "Danish (Denmark)",
+        "Dutch (Belgium)",
+        "Dutch (Netherlands)",
+        "English (Australia)",
+        "English (Canada)",
+        "English (Hong Kong SAR)",
+        "English (India)",
+        "English (Ireland)",
+        "English (Kenya)",
+        "English (New Zealand)",
+        "English (Nigeria)",
+        "English (Philippines)",
+        "English (Singapore)",
+        "English (South Africa)",
+        "English (Tanzania)",
+        "English (UK)",
+        "English (United States)",
+        "Estonian (Estonia)",
+        "Filipino (Philippines)",
+        "Finnish (Finland)",
+        "French (Belgium)",
+        "French (Canada)",
+        "French (France)",
+        "French (Switzerland)",
+        "Galician",
+        "Georgian (Georgia)",
+        "German (Austria)",
+        "German (Germany)",
+        "German (Switzerland)",
+        "Greek (Greece)",
+        "Gujarati (India)",
+        "Hebrew (Israel)",
+        "Hindi (India)",
+        "Hungarian (Hungary)",
+        "Icelandic (Iceland)",
+        "Indonesian (Indonesia)",
+        "Irish (Ireland)",
+        "Italian (Italy)",
+        "Japanese (Japan)",
+        "Javanese (Latin, Indonesia)",
+        "Kannada (India)",
+        "Kazakh (Kazakhstan)",
+        "Khmer (Cambodia)",
+        "Korean (Korea)",
+        "Lao (Laos)",
+        "Latvian (Latvia)",
+        "Lithuanian (Lithuania)",
+        "Macedonian (North Macedonia)",
+        "Malay (Malaysia)",
+        "Malayalam (India)",
+        "Maltese (Malta)",
+        "Marathi (India)",
+        "Mongolian (Mongolia)",
+        "Nepali (Nepal)",
+        "Norwegian Bokm\u00e5l (Norway)",
+        "Pashto (Afghanistan)",
+        "Persian (Iran)",
+        "Polish (Poland)",
+        "Portuguese (Brazil)",
+        "Portuguese (Portugal)",
+        "Romanian (Romania)",
+        "Russian (Russia)",
+        "Serbian (Latin, Serbia)",
+        "Sinhala (Sri Lanka)",
+        "Slovak (Slovakia)",
+        "Slovenian (Slovenia)",
+        "Somali (Somalia)",
+        "Spanish (Argentina)",
+        "Spanish (Bolivia)",
+        "Spanish (Chile)",
+        "Spanish (Colombia)",
+        "Spanish (Costa Rica)",
+        "Spanish (Cuba)",
+        "Spanish (Dominican Republic)",
+        "Spanish (Ecuador)",
+        "Spanish (El Salvador)",
+        "Spanish (Equatorial Guinea)",
+        "Spanish (Guatemala)",
+        "Spanish (Honduras)",
+        "Spanish (Mexico)",
+        "Spanish (Nicaragua)",
+        "Spanish (Panama)",
+        "Spanish (Paraguay)",
+        "Spanish (Peru)",
+        "Spanish (Puerto Rico)",
+        "Spanish (Spain)",
+        "Spanish (United States)",
+        "Spanish (Uruguay)",
+        "Spanish (Venezuela)",
+        "Sundanese (Indonesia)",
+        "Swahili (Kenya)",
+        "Swahili (Tanzania)",
+        "Swedish (Sweden)",
+        "Tamil (India)",
+        "Tamil (Malaysia)",
+        "Tamil (Singapore)",
+        "Tamil (Sri Lanka)",
+        "Telugu (India)",
+        "Thai (Thailand)",
+        "Turkish (T\u00fcrkiye)",
+        "Ukrainian (Ukraine)",
+        "Urdu (India)",
+        "Urdu (Pakistan)",
+        "Uzbek (Latin, Uzbekistan)",
+        "Vietnamese (Vietnam)",
+        "Welsh (United Kingdom)",
+        "Zulu (South Africa)",
+        "English - Your Accent",
+        "English - American Accent"
+      ]
+    },
+    "badges": [
+      "fast"
+    ],
+    "pricing": {
+      "unit": "second",
+      "usd": 0.05
+    }
+  },
+  {
+    "id": "elevenlabs-dubbing",
+    "name": "ElevenLabs Dubbing",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Dub video or audio while keeping each speaker's voice",
+    "routes": [
+      {
+        "op": "dub",
+        "provider": "fal",
+        "endpoint": "fal-ai/elevenlabs/dubbing",
+        "map": {
+          "prompt": false,
+          "targetLanguage": "target_lang",
+          "video": "video_url",
+          "audio": "audio_url"
+        }
+      }
+    ],
+    "options": {
+      "languages": [
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "pl",
+        "hi",
+        "ja",
+        "ko",
+        "zh",
+        "ar",
+        "ru",
+        "tr",
+        "nl",
+        "sv",
+        "id",
+        "fil",
+        "uk",
+        "el",
+        "cs",
+        "ro",
+        "da",
+        "fi",
+        "bg",
+        "hr",
+        "sk",
+        "ms",
+        "ta",
+        "vi",
+        "hu",
+        "no"
+      ]
+    },
+    "pricing": {
+      "unit": "minute",
+      "usd": 0.6
     }
   },
   {
@@ -4814,6 +6833,147 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "minute",
       "usd": 0.6
+    }
+  },
+  {
+    "id": "birefnet-video",
+    "name": "BiRefNet video (hosted)",
+    "vendor": "ZhengPeng7",
+    "family": "birefnet",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Transparent WebM cut-outs of the subject",
+    "routes": [
+      {
+        "op": "bg-remove-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/birefnet/v2/video",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "fixed": {
+            "video_output_type": "VP9 (.webm)",
+            "model": "General Use (Heavy)"
+          }
+        }
+      }
+    ],
+    "options": {},
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0
+    }
+  },
+  {
+    "id": "bria-video-bg",
+    "name": "Bria video background removal",
+    "vendor": "Bria",
+    "family": "bria",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Production-grade video matting with audio kept",
+    "routes": [
+      {
+        "op": "bg-remove-video",
+        "provider": "fal",
+        "endpoint": "bria/video/background-removal/v3",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "fixed": {
+            "background_color": "Transparent",
+            "output_container_and_codec": "webm_vp9"
+          }
+        }
+      }
+    ],
+    "options": {},
+    "pricing": {
+      "unit": "second",
+      "usd": 0.05
+    }
+  },
+  {
+    "id": "depth-anything-video-cloud",
+    "name": "Video Depth Anything (hosted)",
+    "vendor": "ByteDance",
+    "family": "depth-anything",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Stable depth maps for every frame",
+    "routes": [
+      {
+        "op": "depth-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/depth-anything-video",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "resolution": "resolution",
+          "fixed": {
+            "model": "VDA-Base",
+            "colormap": "grayscale"
+          }
+        }
+      }
+    ],
+    "options": {
+      "resolutions": [
+        "auto",
+        "360p",
+        "480p",
+        "720p",
+        "1080p"
+      ]
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.04
+    }
+  },
+  {
+    "id": "lightx-relight",
+    "name": "LightX Relight",
+    "vendor": "LightX",
+    "family": "lightx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Relight a video from a description and a light direction",
+    "routes": [
+      {
+        "op": "relight-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/lightx/relight",
+        "map": {
+          "prompt": "relight_parameters.relight_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "fixed": {
+            "relit_cond_type": "ic",
+            "relight_parameters.bg_source": "Left"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "controls": [
+        {
+          "param": "relight_parameters.bg_source",
+          "label": "Light from",
+          "values": [
+            "Left",
+            "Right",
+            "Top",
+            "Bottom"
+          ],
+          "default": "Left"
+        }
+      ]
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1
     }
   },
   {

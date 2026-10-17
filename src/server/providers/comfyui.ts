@@ -1,6 +1,7 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
+import { tracksFor, type MotionPaths } from "@/lib/motion-paths";
 import { nanoid } from "nanoid";
 import {
   applyBindings,
@@ -186,7 +187,11 @@ export const comfyProvider: ProviderAdapter = {
   },
 
   async submit({ route, input, generationId }) {
-    const { manifest, workflow } = getWorkflow(route.endpoint);
+    // "video-concat-{n}": one workflow per clip count.
+    const clips = input.videos ?? [];
+    const endpoint = route.endpoint.replace("{n}", String(Math.max(2, Math.min(4, clips.length))));
+    if (route.endpoint.includes("{n}") && clips.length > 4) throw new ProviderError("ComfyUI joins up to 4 clips at a time");
+    const { manifest, workflow } = getWorkflow(endpoint);
     const d = manifest.defaults;
     const images = input.images ?? [];
     const values: Partial<Record<BindingKey, unknown>> = {
@@ -198,14 +203,29 @@ export const comfyProvider: ProviderAdapter = {
       image4: images[3],
       endImage: input.endImage,
       mask: input.mask,
-      video: input.video,
+      video: input.video ?? clips[0],
+      video2: clips[1],
+      video3: clips[2],
+      video4: clips[3],
       audio: input.audio,
       seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
     };
+    // Voice workflows: "audio" is the voice to speak with (TTS), speaker A (dialogue) or the speech to convert
+    // (voice change, whose target voice is "audio2").
+    if (route.op === "tts") values.audio = input.voiceAudio ?? input.audio;
+    if (route.op === "dialogue") {
+      values.audio = input.voiceAudio;
+      values.audio2 = input.voiceAudio2;
+      values.prompt = (input.dialogue ?? []).filter((l) => l.text.trim()).map((l) => `SPEAKER ${l.voice === "B" ? "B" : "A"}: ${l.text.trim()}`).join("\n");
+    }
+    if (route.op === "voice-change") values.audio2 = input.voiceAudio;
+    if (manifest.bindings.language && input.targetLanguage) values.language = input.targetLanguage;
     if (manifest.bindings.width || manifest.bindings.height) {
       const multiple = Number(manifest.limits?.dimensionMultiple ?? 16);
+      // With motion paths the frame keeps the start image's shape, so the paths need no cropping.
+      const srcAspect = (input.extra?.motionPaths as MotionPaths | undefined)?.aspect;
       const dims = computeDimensions(
-        input.aspectRatio === "auto" ? undefined : input.aspectRatio,
+        srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? undefined : input.aspectRatio,
         input.resolution,
         { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) },
         multiple,
@@ -221,10 +241,18 @@ export const comfyProvider: ProviderAdapter = {
       const fps = Number(d.fps ?? 16);
       values.frames = computeFrames(input.duration, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
     }
+    // Drawn motion paths (normalised to the start frame) → one pixel point per output frame (Wan-Move).
+    const extra = { ...(input.extra ?? {}) };
+    const paths = extra.motionPaths as MotionPaths | undefined;
+    delete extra.motionPaths;
+    if (manifest.bindings.tracks && paths?.paths.length) {
+      const frames = Number(values.frames ?? d.frames ?? 81);
+      values.tracks = JSON.stringify(tracksFor(paths, Number(values.width ?? d.width ?? 832), Number(values.height ?? d.height ?? 480), frames));
+    }
     if (manifest.bindings.duration && input.duration) values.duration = input.duration;
     if (manifest.bindings.tags && !manifest.bindings.prompt) values.tags = input.prompt;
     if (manifest.bindings.filenamePrefix) values.filenamePrefix = `fuobe/${generationId}`;
-    for (const [k, v] of Object.entries(input.extra ?? {})) values[k as BindingKey] = v;
+    for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
 
     const bound = applyBindings(workflow, manifest.bindings, values);
     const missing = bound.missing;

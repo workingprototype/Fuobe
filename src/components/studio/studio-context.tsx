@@ -20,8 +20,8 @@ export interface StudioConfig {
   ops: Operation[];
   feed: FeedFilter;
   slots: InputSlot[];
-  /** Extra reference images (multi-reference edit / image prompt). */
-  multiRef?: { label: string; max: number };
+  /** Extra reference images (multi-reference edit / image prompt), or a list of clips (kind "video": join clips). */
+  multiRef?: { label: string; max: number; kind?: MediaKind };
   /** Preset picker shown in the composer. */
   presetPicker?: "motion" | "effect";
   preset?: Preset;
@@ -30,6 +30,10 @@ export interface StudioConfig {
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
   hidePrompt?: boolean;
+  /** Paint tools offered on the first image: an inpaint mask and/or freehand drawing. */
+  sketch?: ("mask" | "draw")[];
+  /** Open the editor as soon as an image is attached (Inpaint). */
+  sketchAutoOpen?: "mask" | "draw";
   /** Appended to the user prompt on submit (e.g. identity lock for characters). */
   promptSuffix?: string;
 }
@@ -43,6 +47,9 @@ export interface Draft {
   refs: SlotValue[];
   presetId?: string;
   presetOptions: Record<string, string>;
+  /** Motions/effects: strength of the preset, and an optional second one mixed in (Mix). */
+  presetStrength?: number;
+  mix?: { presetId: string; strength: number };
 }
 
 interface Ctx {

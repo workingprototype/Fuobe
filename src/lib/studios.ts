@@ -31,6 +31,7 @@ export const EDIT_STUDIO: StudioConfig = {
   feed: { kind: "image", features: ["edit"] },
   slots: [{ key: "image", label: "Image", accept: "image", required: true }],
   multiRef: { label: "Add ref", max: 6 },
+  sketch: ["mask", "draw"],
   defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
   suggestions: [
     "Make it golden hour",
@@ -38,6 +39,23 @@ export const EDIT_STUDIO: StudioConfig = {
     "Turn this into a watercolor painting",
     "Put the person from image 2 next to them, same lighting",
   ],
+};
+
+export const INPAINT_STUDIO: StudioConfig = {
+  feature: "edit",
+  title: "Inpaint",
+  hero: "Paint it, then say what goes there",
+  subtitle: "GPT Image, Ideogram and FLUX Fill take the mask directly; other edit models are shown the painted area.",
+  placeholder: "What should fill the painted area? e.g. “a vase of white tulips”",
+  kind: "image",
+  ops: ["inpaint", "edit"],
+  feed: { kind: "image", features: ["edit"] },
+  slots: [{ key: "image", label: "Image", accept: "image", required: true }],
+  multiRef: { label: "Add ref", max: 3 },
+  sketch: ["mask"],
+  sketchAutoOpen: "mask",
+  defaultModels: { cloud: "nano-banana-pro", open: "oss-flux-fill" },
+  suggestions: ["Remove it and fill in the background", "A golden retriever sitting there", "Make the shirt navy linen", "Add sunglasses"],
 };
 
 export const VIDEO_STUDIO: StudioConfig = {
@@ -53,6 +71,7 @@ export const VIDEO_STUDIO: StudioConfig = {
     { key: "endImage", label: "End frame", accept: "image" },
   ],
   multiRef: { label: "Add ref", max: 3 },
+  sketch: ["draw"],
   presetPicker: "motion",
   defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" },
   suggestions: [
@@ -105,13 +124,85 @@ export const AUDIO_STUDIO: StudioConfig = {
   feature: "audio",
   title: "Audio",
   hero: "Give it a voice",
-  placeholder: "What should it say, or what should it sound like?",
+  subtitle: "Premade ElevenLabs voices, or clone any voice from a 10-second sample.",
+  placeholder: "What should it say? Try ElevenLabs v3 audio tags like [whispers] or [laughs]",
   kind: "audio",
-  ops: ["tts", "sfx", "music"],
+  ops: ["tts"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-tts", open: "oss-ace-step" },
-  suggestions: ["Welcome to Fuobe — make anything, with any model.", "Thunder rolling over a quiet forest", "Lo-fi hip hop beat with soft piano, 80 bpm"],
+  defaultModels: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
+  suggestions: ["Welcome to Fuobe — make anything, with any model.", "[whispers] Don't look now… but I think it's following us.", "Breaking news: the robots have learned to paint."],
+};
+
+export const DIALOGUE_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Write a conversation",
+  subtitle: "Every line gets its own voice; the model handles timing, interruptions and tone.",
+  placeholder: "",
+  kind: "audio",
+  ops: ["dialogue"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-dialogue", open: "oss-chatterbox-dialogue" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const VOICE_CHANGE_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Say it in another voice",
+  subtitle: "Keeps your timing and emotion, swaps the voice.",
+  placeholder: "",
+  kind: "audio",
+  ops: ["voice-change"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [{ key: "audio", label: "Recording", accept: "audio", required: true }],
+  defaultModels: { cloud: "elevenlabs-voice-changer", open: "oss-chatterbox-vc" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const TRANSLATE_STUDIO: StudioConfig = {
+  feature: "translate",
+  title: "Audio",
+  hero: "Speak every language",
+  subtitle: "Translates the speech, keeps each speaker's voice and re-syncs the lips.",
+  placeholder: "",
+  kind: "video",
+  ops: ["dub"],
+  feed: { features: ["translate"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "heygen-translate", open: "" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const SFX_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "Describe a sound",
+  placeholder: "e.g. “thunder rolling over a quiet forest, rain on leaves”",
+  kind: "audio",
+  ops: ["sfx"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-sfx", open: "" },
+  suggestions: ["Thunder rolling over a quiet forest", "Footsteps on gravel, distant birds", "Sci-fi door whooshing open"],
+};
+
+export const MUSIC_STUDIO: StudioConfig = {
+  feature: "audio",
+  title: "Audio",
+  hero: "What should it sound like?",
+  placeholder: "Genre, mood, instruments, tempo — add lyrics on new lines",
+  kind: "audio",
+  ops: ["music"],
+  feed: { kind: "audio", features: ["audio"] },
+  slots: [],
+  defaultModels: { cloud: "elevenlabs-music", open: "oss-ace-step" },
+  suggestions: ["Lo-fi hip hop beat with soft piano, 80 bpm", "Epic orchestral trailer music building to a drop", "Upbeat indie pop with handclaps and a whistled hook"],
 };
 
 export const FOLEY_STUDIO: StudioConfig = {
@@ -183,4 +274,97 @@ export const VIDEO_EDIT_STUDIO: StudioConfig = {
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   multiRef: { label: "Add ref", max: 4 },
   defaultModels: { cloud: "kling-o3", open: "oss-wan22-fun-control" },
+};
+
+export const EXTEND_STUDIO: StudioConfig = {
+  feature: "extend",
+  title: "Extend video",
+  hero: "What happens next?",
+  subtitle: "Continues the clip from its last frames — same look, same characters.",
+  placeholder: "Describe what happens next… e.g. “the camera keeps tracking as she runs into the crowd”",
+  kind: "video",
+  ops: ["extend"],
+  feed: { features: ["extend"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-vace-extend" },
+  suggestions: ["The camera pulls back to reveal the whole city", "She turns and smiles at the camera", "A storm rolls in and lightning hits"],
+};
+
+export const REFRAME_STUDIO: StudioConfig = {
+  feature: "reframe",
+  title: "Reframe",
+  hero: "Same shot, new shape",
+  subtitle: "Turn a 16:9 clip into 9:16 (or any ratio) — the model invents what was outside the frame.",
+  placeholder: "Optional: what should fill the new space? e.g. “more of the crowd and the night sky”",
+  kind: "video",
+  ops: ["reframe"],
+  feed: { features: ["reframe"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "luma-ray-3-2", open: "oss-wan22-vace-reframe" },
+  promptOptional: true,
+};
+
+export const VIDEO_MATTE_STUDIO: StudioConfig = {
+  feature: "video-tools",
+  title: "Video tools",
+  hero: "Cut out the subject",
+  subtitle: "Every frame matted — a transparent WebM you can drop over anything.",
+  placeholder: "Optional (SAM 3): what to keep, e.g. “the dog”",
+  kind: "video",
+  ops: ["bg-remove-video"],
+  feed: { features: ["video-tools"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "bria-video-bg", open: "oss-video-matte-birefnet" },
+  promptOptional: true,
+};
+
+export const VIDEO_DEPTH_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "A depth map for every frame",
+  subtitle: "For compositing, fog, parallax and 3D effects.",
+  placeholder: "",
+  ops: ["depth-video"],
+  defaultModels: { cloud: "depth-anything-video-cloud", open: "oss-video-depth-vda" },
+  hidePrompt: true,
+};
+
+export const VIDEO_RELIGHT_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "Relight the shot",
+  subtitle: "Describe the new light — golden hour, neon, a single window, a campfire.",
+  placeholder: "e.g. “warm sunset light from the left, long soft shadows”",
+  ops: ["relight-video"],
+  defaultModels: { cloud: "lightx-relight", open: "oss-bernini-relight" },
+  promptOptional: false,
+  suggestions: ["Warm golden-hour sun from the left", "Pink and blue neon from the street", "A single cold window light, dark room", "Flickering campfire light from below"],
+};
+
+export const JOIN_CLIPS_STUDIO: StudioConfig = {
+  feature: "video-tools",
+  title: "Video tools",
+  hero: "Join clips into one video",
+  subtitle: "Add clips in order — they're scaled to one size and cut together.",
+  placeholder: "",
+  kind: "video",
+  ops: ["concat"],
+  feed: { features: ["video-tools"] },
+  slots: [],
+  multiRef: { label: "Add clip", max: 12, kind: "video" },
+  defaultModels: { cloud: "join-clips", open: "oss-join-clips" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
+export const VIDEO_COLOR_MATCH_STUDIO: StudioConfig = {
+  ...VIDEO_MATTE_STUDIO,
+  hero: "Match the colors of a reference",
+  subtitle: "Every frame takes on the palette of the image you add — no AI model, runs on CPU.",
+  placeholder: "",
+  ops: ["color-match"],
+  slots: [
+    { key: "video", label: "Video", accept: "video", required: true },
+    { key: "image", label: "Color reference", accept: "image", required: true },
+  ],
+  defaultModels: { cloud: "", open: "oss-palette-video" },
+  hidePrompt: true,
 };
