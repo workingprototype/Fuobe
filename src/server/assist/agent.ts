@@ -8,7 +8,7 @@ import { db } from "../db";
 import { getGeneration } from "../generations";
 import { engineMode, getSetting } from "../settings";
 import { readRef } from "../storage";
-import { apiTools, getTool, planFor, type ToolContext } from "./tools";
+import { apiTools, executeTool, getTool, planFor, type ToolContext } from "./tools";
 
 /**
  * The Assist agent loop. History is kept exactly as the API returned it (append-only, thinking
@@ -362,16 +362,8 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
 // The loop
 
 async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<{ result: Omit<ToolResult, "tool_use_id">; items: AssistItem[] }> {
-  const tool = getTool(name);
-  if (!tool) return { result: { type: "tool_result", is_error: true, content: `Unknown tool ${name}` }, items: [] };
-  const parsed = tool.schema.safeParse(input);
-  if (!parsed.success) return { result: { type: "tool_result", is_error: true, content: `Invalid input: ${parsed.error.issues.map((i: { path: PropertyKey[]; message: string }) => `${i.path.map(String).join(".")} ${i.message}`).join("; ")}` }, items: [] };
-  try {
-    const out = await tool.run(parsed.data, ctx);
-    return { result: { type: "tool_result", content: out.content, ...(out.isError && { is_error: true }) }, items: out.items ?? [] };
-  } catch (e) {
-    return { result: { type: "tool_result", is_error: true, content: (e as Error).message }, items: [] };
-  }
+  const out = await executeTool(name, input, ctx);
+  return { result: { type: "tool_result", content: out.content, ...(out.isError && { is_error: true }) }, items: out.items ?? [] };
 }
 
 function ordered(results: ToolResult[], order: string[]): ToolResult[] {

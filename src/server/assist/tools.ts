@@ -356,7 +356,7 @@ export const TOOLS: ToolDef<any>[] = [searchModels, listElementsTool, listRecent
 export const getTool = (name: string) => TOOLS.find((t) => t.name === name);
 
 /** JSON Schema for the API: every object closed, constraints the API doesn't take removed (zod still checks them). */
-function apiSchema(schema: z.ZodType): Anthropic.Beta.BetaTool.InputSchema {
+export function apiSchema(schema: z.ZodType): Anthropic.Beta.BetaTool.InputSchema {
   const json = z.toJSONSchema(schema) as Record<string, unknown>;
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(walk);
@@ -385,4 +385,17 @@ export function planFor(name: string, input: unknown, ctx: ToolContext): { jobs:
   const t = getTool(name);
   const jobs = t?.plan?.(input, ctx) ?? [];
   return { jobs, total: totalCost(jobs) };
+}
+
+/** Validate and run a tool. Never throws: failures come back as an error result. */
+export async function executeTool(name: string, input: unknown, ctx: ToolContext): Promise<ToolOutcome> {
+  const tool = getTool(name);
+  if (!tool) return { content: `Unknown tool ${name}`, isError: true };
+  const parsed = tool.schema.safeParse(input);
+  if (!parsed.success) return { content: `Invalid input: ${parsed.error.issues.map((i: { path: PropertyKey[]; message: string }) => `${i.path.map(String).join(".")} ${i.message}`).join("; ")}`, isError: true };
+  try {
+    return await tool.run(parsed.data, ctx);
+  } catch (e) {
+    return { content: (e as Error).message, isError: true };
+  }
 }

@@ -87,6 +87,34 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
   );
 }
 
+/** How to point an MCP client (Claude Code, Claude Desktop…) at this studio. */
+function McpSnippet({ token, needsToken }: { token: string | null; needsToken: boolean }) {
+  const [origin] = useState(() => (typeof window === "undefined" ? "http://localhost:3000" : window.location.origin));
+  const auth = needsToken ? ` --header "Authorization: Bearer ${token ?? "fuobe_…"}"` : "";
+  const cmd = `claude mcp add --transport http fuobe ${origin}/api/mcp${auth}`;
+  return (
+    <div className="space-y-1.5 sm:w-[36rem]">
+      <p className="text-[12px] font-medium">Connect an agent over MCP</p>
+      <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-2">
+        <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap">{cmd}</code>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(cmd);
+            toast("Copied");
+          }}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+          aria-label="Copy command"
+        >
+          <Copy className="size-3.5" />
+        </button>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Any MCP client works (streamable HTTP). It can search models, price a plan, generate and fetch results{needsToken ? " — create a token for it first" : ""}.
+      </p>
+    </div>
+  );
+}
+
 function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void }) {
   const [name, setName] = useState("");
   const [fresh, setFresh] = useState<string | null>(null);
@@ -154,6 +182,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
           ))}
         </ul>
       )}
+      <McpSnippet token={fresh} needsToken={status.enabled} />
       <div className="flex gap-2 sm:w-[36rem]">
         <Input placeholder="Token name, e.g. “Claude Desktop”" value={name} onChange={(e) => setName(e.target.value)} />
         <Button size="sm" variant="secondary" className="h-9" disabled={!name.trim()} onClick={() => void create()}>
