@@ -101,6 +101,12 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS assist_threads_updated ON assist_threads(updated_at DESC);`,
+  // When each generation reached its provider (and when the provider started it): timeouts run from here, not from creation.
+  `CREATE TABLE IF NOT EXISTS generation_runs (
+    id TEXT PRIMARY KEY,
+    submitted_at INTEGER NOT NULL,
+    started_at INTEGER
+  );`,
 ];
 
 declare global {
