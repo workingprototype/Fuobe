@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioLines, Check, Globe, Minus, Plus, SlidersHorizontal, Upload, User, X } from "lucide-react";
+import { AudioLines, Check, Globe, Minus, Plus, Upload, User, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -154,38 +154,32 @@ export function VoicePicker({
   );
 }
 
-/** Numeric voice settings (stability, similarity, speed…), sent as-is. */
-export function SlidersChip({ model, values, onChange }: { model: ModelDef; values: Record<string, unknown>; onChange: (param: string, v?: number) => void }) {
+/** Numeric model settings (stability, similarity, speed, strength…), sent as-is. Shown in the settings panel. */
+export function SliderControls({ model, values, onChange }: { model: ModelDef; values: Record<string, unknown>; onChange: (param: string, v?: number) => void }) {
   const sliders = model.options.sliders ?? [];
-  const changed = sliders.filter((s) => typeof values[s.param] === "number" && values[s.param] !== s.default).length;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, changed ? on : idle)}>
-          <SlidersHorizontal className="size-3.5" /> {changed ? `Settings · ${changed}` : "Settings"}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 space-y-4 p-3" align="start" side="top">
-        {sliders.map((s) => {
-          const v = typeof values[s.param] === "number" ? (values[s.param] as number) : s.default;
-          return (
-            <div key={s.param} className="space-y-2">
-              <div className="flex justify-between text-[13px]">
-                <span>{s.label}</span>
-                <button
-                  className="font-mono text-[12px] text-muted-foreground"
-                  onDoubleClick={() => onChange(s.param, undefined)}
-                  title="Double-click to reset"
-                >
-                  {Number(v.toFixed(2))}
-                </button>
-              </div>
-              <Slider value={[v]} min={s.min} max={s.max} step={s.step} onValueChange={([x]) => onChange(s.param, x)} />
+    <div className="space-y-3.5">
+      {sliders.map((s) => {
+        const v = typeof values[s.param] === "number" ? (values[s.param] as number) : s.default;
+        const changed = v !== s.default;
+        return (
+          <div key={s.param} className="space-y-2">
+            <div className="flex items-center justify-between text-[13px]">
+              <span>{s.label}</span>
+              <span className="flex items-center gap-1.5">
+                {changed && (
+                  <button className="rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50" onClick={() => onChange(s.param, undefined)} aria-label={`Reset ${s.label}`}>
+                    Reset
+                  </button>
+                )}
+                <span className="text-[12px] text-muted-foreground tabular-nums">{Number(v.toFixed(2))}</span>
+              </span>
             </div>
-          );
-        })}
-      </PopoverContent>
-    </Popover>
+            <Slider value={[v]} min={s.min} max={s.max} step={s.step} onValueChange={([x]) => onChange(s.param, x)} aria-label={s.label} />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
