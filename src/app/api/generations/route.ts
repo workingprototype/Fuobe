@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createGenerations, listGenerations } from "@/server/generations";
+import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 
 const RequestSchema = z.object({
   feature: z.string().min(1),
@@ -53,20 +54,15 @@ const RequestSchema = z.object({
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
 });
 
+/**
+ * List generations, newest first. Filters: kind / kinds, features (`x*` = prefix), models, statuses,
+ * favorites=1, folder=<id>, q, since / until (createdAt ms), trash=1 (the Trash, newest deletion first),
+ * paging with before=<createdAt> (<deletedAt> in the Trash) and limit (≤ 200).
+ */
 export async function GET(request: Request) {
   await connection();
-  const u = new URL(request.url);
-  const items = listGenerations({
-    feature: u.searchParams.get("feature") ?? undefined,
-    features: u.searchParams.get("features")?.split(",").filter(Boolean),
-    kind: u.searchParams.get("kind") ?? undefined,
-    favorites: u.searchParams.get("favorites") === "1",
-    status: u.searchParams.get("status") ?? undefined,
-    q: u.searchParams.get("q") ?? undefined,
-    before: u.searchParams.get("before") ? Number(u.searchParams.get("before")) : undefined,
-    limit: u.searchParams.get("limit") ? Number(u.searchParams.get("limit")) : undefined,
-  });
-  return Response.json({ items });
+  ensureTrashPurge();
+  return Response.json({ items: listGenerations(listOptionsFrom(new URL(request.url).searchParams)) });
 }
 
 export async function POST(request: Request) {

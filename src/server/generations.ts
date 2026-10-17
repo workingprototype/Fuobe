@@ -27,7 +27,7 @@ import { provider } from "./providers";
 import type { RemoteOutput } from "./providers/types";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
-import { contentTypeFor, readRef, saveFile } from "./storage";
+import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
 
 interface Row {
   id: string;
@@ -55,9 +55,28 @@ interface Row {
   updated_at: number;
   completed_at: number | null;
   depends_on: string | null;
+  /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
+  deleted_at?: number | null;
+  folder_id?: string | null;
 }
 
-function toGeneration(r: Row): Generation {
+/** Trash and folder columns, joined onto every library read. */
+const LIBRARY_COLUMNS = "g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id";
+const LIBRARY_JOIN = "generations g LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id";
+
+export function toGeneration(r: Row): Generation {
+  const request = JSON.parse(r.request_json) as GenerationRequest;
+  const model = getModel(r.model_id);
+  const ar = request.params?.aspectRatio ?? model?.defaults?.aspectRatio;
+  // Rows read without the library join (the runner's own SELECTs) look the trash and folder up.
+  const lib =
+    r.deleted_at !== undefined && r.folder_id !== undefined
+      ? { deleted_at: r.deleted_at, folder_id: r.folder_id }
+      : (db()
+          .prepare(
+            "SELECT (SELECT deleted_at FROM generation_trash WHERE generation_id = ?) AS deleted_at, (SELECT folder_id FROM folder_items WHERE generation_id = ?) AS folder_id",
+          )
+          .get(r.id, r.id) as { deleted_at: number | null; folder_id: string | null });
   return {
     id: r.id,
     batchId: r.batch_id,
@@ -72,7 +91,7 @@ function toGeneration(r: Row): Generation {
     progress: r.progress,
     message: r.message,
     prompt: r.prompt,
-    request: JSON.parse(r.request_json) as GenerationRequest,
+    request,
     outputs: JSON.parse(r.outputs_json) as OutputFile[],
     error: r.error,
     costUsd: r.cost_usd,
@@ -80,6 +99,11 @@ function toGeneration(r: Row): Generation {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
+    modelName: model?.name ?? r.model_id,
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    aspectRatio: ar && ar !== "auto" ? ar : null,
+    deletedAt: lib.deleted_at ?? null,
+    folderId: lib.folder_id ?? null,
   };
 }
 
@@ -91,10 +115,12 @@ function update(id: string, fields: Partial<Row>): void {
     .run({ ...fields, __now: Date.now(), __id: id });
 }
 
-export function getGeneration(id: string): Generation | null {
+/** One generation; a row in the Trash reads as missing unless `includeDeleted`. */
+export function getGeneration(id: string, opts: { includeDeleted?: boolean } = {}): Generation | null {
   ensureRunner();
-  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
-  return r ? toGeneration(r) : null;
+  const r = db().prepare(`SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE g.id = ?`).get(id) as Row | undefined;
+  if (!r || (r.deleted_at && !opts.includeDeleted)) return null;
+  return toGeneration(r);
 }
 
 export interface ListOptions {
@@ -102,55 +128,77 @@ export interface ListOptions {
   feature?: string;
   features?: string[];
   kind?: string;
+  kinds?: string[];
+  models?: string[];
   favorites?: boolean;
   status?: string;
+  statuses?: string[];
+  /** Only the Trash, newest deletion first (`before` is then a deletedAt cursor). Otherwise the Trash is left out. */
+  trashed?: boolean;
+  folderId?: string;
   limit?: number;
+  /** Paging cursor: made before this (deleted before, in the Trash). */
   before?: number;
+  /** Date range on createdAt: since ≤ t < until. */
+  since?: number;
+  until?: number;
   q?: string;
 }
 
+const featureLike = (f: string) => (f.endsWith("*") ? `${f.slice(0, -1)}%` : f);
+
 export function listGenerations(o: ListOptions = {}): Generation[] {
-  const where: string[] = [];
+  const where: string[] = [o.trashed ? "t.deleted_at IS NOT NULL" : "t.deleted_at IS NULL"];
   const args: unknown[] = [];
-  if (o.batchId) {
-    where.push("batch_id = ?");
-    args.push(o.batchId);
-  }
-  if (o.feature) {
-    where.push("feature = ?");
-    args.push(o.feature);
-  }
-  if (o.features?.length) {
-    where.push(`(${o.features.map(() => "feature LIKE ?").join(" OR ")})`);
-    args.push(...o.features.map((f) => (f.endsWith("*") ? `${f.slice(0, -1)}%` : f)));
-  }
-  if (o.kind) {
-    where.push("kind = ?");
-    args.push(o.kind);
-  }
-  if (o.favorites) where.push("favorite = 1");
-  if (o.status) {
-    where.push("status = ?");
-    args.push(o.status);
-  }
-  if (o.before) {
-    where.push("created_at < ?");
-    args.push(o.before);
-  }
-  if (o.q) {
-    where.push("prompt LIKE ?");
-    args.push(`%${o.q}%`);
-  }
-  const sql = `SELECT * FROM generations ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT ?`;
-  return (db().prepare(sql).all(...args, Math.min(o.limit ?? 60, 200)) as Row[]).map(toGeneration);
+  const add = (sql: string, ...values: unknown[]) => {
+    where.push(sql);
+    args.push(...values);
+  };
+  const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
+  if (o.batchId) add("g.batch_id = ?", o.batchId);
+  if (o.feature) add("g.feature = ?", o.feature);
+  if (o.features?.length) add(`(${o.features.map(() => "g.feature LIKE ?").join(" OR ")})`, ...o.features.map(featureLike));
+  if (o.kind) add("g.kind = ?", o.kind);
+  if (o.kinds?.length) oneOf("g.kind", o.kinds);
+  if (o.models?.length) oneOf("g.model_id", o.models);
+  if (o.favorites) add("g.favorite = 1");
+  if (o.status) add("g.status = ?", o.status);
+  if (o.statuses?.length) oneOf("g.status", o.statuses);
+  if (o.folderId) add("fi.folder_id = ?", o.folderId);
+  if (o.before) add(o.trashed ? "t.deleted_at < ?" : "g.created_at < ?", o.before);
+  if (o.since) add("g.created_at >= ?", o.since);
+  if (o.until) add("g.created_at < ?", o.until);
+  const q = o.q?.trim();
+  // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
+  if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
+  const order = o.trashed ? "t.deleted_at DESC, g.created_at DESC" : "g.created_at DESC, g.id DESC";
+  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ?`;
+  return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
 
 export function setFavorite(id: string, favorite: boolean): void {
   update(id, { favorite: favorite ? 1 : 0 });
 }
 
+/**
+ * Delete for good (Trash → Delete forever, Empty trash, the 30-day purge): the row, its trash and
+ * folder entries, and the output files nothing else still points at (an element's photos, another
+ * job's inputs). Dependents still waiting on it fail ("An earlier step didn't finish").
+ */
 export function deleteGeneration(id: string): void {
-  db().prepare("DELETE FROM generations WHERE id = ?").run(id);
+  const assets = db().prepare("SELECT id FROM assets WHERE generation_id = ?").all(id) as { id: string }[];
+  db().transaction(() => {
+    db().prepare("DELETE FROM generations WHERE id = ?").run(id);
+    db().prepare("DELETE FROM generation_trash WHERE generation_id = ?").run(id);
+    db().prepare("DELETE FROM folder_items WHERE generation_id = ?").run(id);
+  })();
+  for (const a of assets) {
+    // File URLs end in the asset id (…/<id>.png), so the id finds both URL and id references.
+    const used =
+      db().prepare("SELECT 1 FROM generations WHERE instr(request_json, ?) > 0 OR instr(outputs_json, ?) > 0 LIMIT 1").get(a.id, a.id) ??
+      db().prepare("SELECT 1 FROM characters WHERE instr(reference_asset_ids_json, ?) > 0 LIMIT 1").get(a.id);
+    if (!used) deleteAsset(a.id);
+  }
 }
 
 // ---------------------------------------------------------------------------
