@@ -38,6 +38,13 @@ const RequestSchema = z.object({
       voice: z.string().max(200).optional(),
       dialogue: z.array(z.object({ text: z.string().max(5000), voice: z.string().max(200).optional() })).max(200).optional(),
       targetLanguage: z.string().max(80).optional(),
+      startTime: z.number().min(0).max(36_000).optional(),
+      endTime: z.number().min(0).max(36_000).optional(),
+      fps: z.number().positive().max(240).optional(),
+      palette: z.array(z.string().regex(/^#?[0-9a-fA-F]{6}$/)).max(16).optional(),
+      styleId: z.string().max(200).optional(),
+      sourceLanguage: z.string().max(80).optional(),
+      numLayers: z.number().int().min(1).max(20).optional(),
       extra: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),

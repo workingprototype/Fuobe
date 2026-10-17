@@ -279,15 +279,34 @@ function slotsFor(req: GenerationRequest, n: number): ChainSlot[] {
   return Array.from({ length: n }, () => ({ slot: "images" as const, position: req.chainFrom ?? "last" }));
 }
 
-const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = { images: "image", endImage: "image", video: "video", videos: "video", audio: "audio" };
+const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
+  images: "image",
+  endImage: "image",
+  video: "video",
+  videos: "video",
+  audio: "audio",
+  voiceAudio: "audio",
+  prompt: "text",
+};
 
 function placeholderFor(s: ChainSlot): string {
-  return SLOT_KIND[s.slot] === "image" ? "/api/files/placeholder.png" : SLOT_KIND[s.slot] === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
+  const kind = SLOT_KIND[s.slot];
+  if (kind === "text") return "Placeholder text from an earlier step";
+  return kind === "image" ? "/api/files/placeholder.png" : kind === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
 }
 
-/** Put the dependencies' outputs into the request's inputs, slot by slot (lists keep dependency order). */
+/** What a chained step takes from a dependency's output: the file URL, or the text for "prompt". */
+function chainValue(o: OutputFile | undefined, s: ChainSlot): string | undefined {
+  return s.slot === "prompt" ? o?.text : o?.url;
+}
+
+/**
+ * Put the dependencies' outputs into the request's inputs, slot by slot (lists keep dependency order).
+ * A "prompt" slot gets the dependency's text: it fills "{text}" in the prompt, or becomes the prompt.
+ */
 export function withChainInputs(req: GenerationRequest, urls: string[]): GenerationRequest {
   const inputs = { ...req.inputs };
+  let prompt = req.prompt;
   const slots = slotsFor(req, urls.length);
   for (const k of ["images", "videos"] as const) {
     const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && (s.position ?? "last") === pos ? [urls[i]] : []));
@@ -296,9 +315,10 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
     if (first.length || last.length) inputs[k] = [...first, ...(inputs[k] ?? []), ...last];
   }
   slots.forEach((s, i) => {
-    if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = urls[i];
+    if (s.slot === "prompt") prompt = prompt?.includes("{text}") ? prompt.replaceAll("{text}", urls[i]) : urls[i];
+    else if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = urls[i];
   });
-  return { ...req, inputs };
+  return { ...req, prompt, inputs };
 }
 
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. */
@@ -319,7 +339,7 @@ async function advanceDependents(): Promise<void> {
       continue;
     }
     if (deps.some((d) => d!.status !== "succeeded")) continue;
-    const urls = deps.map((d, i) => (JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot])?.url);
+    const urls = deps.map((d, i) => chainValue((JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot]), slots[i]));
     if (urls.some((u) => !u)) {
       update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[urls.findIndex((u) => !u)].slot]} to use`, message: null, completed_at: Date.now() });
       continue;

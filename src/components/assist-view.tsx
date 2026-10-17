@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, AudioLines, Bot, Check, CircleAlert, Clapperboard, Cpu, History, ImageIcon, Loader2, Paperclip, Plus, Search, Sparkles, Trash2, Video, X } from "lucide-react";
+import { ArrowUp, AudioLines, Bot, Box, Check, CircleAlert, Clapperboard, Cpu, FileText, History, ImageIcon, Loader2, Paperclip, Plus, Search, Sparkles, Trash2, Video, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +27,7 @@ const SUGGESTIONS = [
   "A 10-second vertical video of a fox running through snow, with sound",
 ];
 
-const KIND_ICON: Record<MediaKind | "storyboard", typeof ImageIcon> = { image: ImageIcon, video: Video, audio: AudioLines, storyboard: Clapperboard };
+const KIND_ICON: Record<MediaKind | "storyboard", typeof ImageIcon> = { image: ImageIcon, video: Video, audio: AudioLines, text: FileText, model3d: Box, storyboard: Clapperboard };
 
 const AGENT_LABEL: Record<AssistThread["agent"], string> = { claude: "Claude", ollama: "Local LLM", offline: "Offline planner" };
 const AGENT_HINT: Record<AssistThread["agent"], string> = {

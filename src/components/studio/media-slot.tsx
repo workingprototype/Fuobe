@@ -24,6 +24,8 @@ const ACCEPT: Record<MediaKind, string> = {
   image: "image/png,image/jpeg,image/webp,image/gif",
   video: "video/mp4,video/webm,video/quicktime",
   audio: "audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/flac,audio/mp4,audio/webm",
+  text: "text/plain,.txt,.srt,.vtt",
+  model3d: ".glb,.gltf,model/gltf-binary",
 };
 
 const MAX_MB = 200;
