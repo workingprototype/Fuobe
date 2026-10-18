@@ -308,6 +308,12 @@ export interface ModelOptions {
   maxAudios?: number;
   /** Spoken languages it can be told (transcription, captions): sent as params.sourceLanguage; unset = its default. */
   sourceLanguages?: string[];
+  /**
+   * What this model needs beyond its operation's own inputs, checked before a job is created (the
+   * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
+   * model whose operation is otherwise promptless.
+   */
+  requires?: { images?: number; prompt?: boolean; msg: string };
 }
 
 export interface Pricing {

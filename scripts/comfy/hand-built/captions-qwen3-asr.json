@@ -21,7 +21,7 @@
       "forced_aligner": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
       "language": "auto",
       "hints": "",
-      "output_format": "srt",
+      "output_format": "none",
       "output_path": "fuobe/captions",
       "split_mode": "split_by_punctuation_or_pause_or_length",
       "max_gap_sec": 0.6,

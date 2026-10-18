@@ -195,6 +195,9 @@ export function planGeneration(
     throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
+  const requires = model.options.requires;
+  if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
+  if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (!prompt && !promptOptional(model, op)) {
     throw new Error("Write a prompt first");
   }

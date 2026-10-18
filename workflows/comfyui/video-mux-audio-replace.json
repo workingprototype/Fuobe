@@ -5,19 +5,7 @@
       "file": "input.mp4"
     },
     "_meta": {
-      "title": "Video"
-    }
-  },
-  "2": {
-    "class_type": "GetVideoComponents",
-    "inputs": {
-      "video": [
-        "1",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "Frames + fps"
+      "title": "Video (its picture is copied, never decoded)"
     }
   },
   "3": {
@@ -30,26 +18,20 @@
     }
   },
   "7": {
-    "class_type": "CreateVideo",
+    "class_type": "ConcatenateVideo",
     "inputs": {
-      "images": [
-        "2",
+      "videos.video0": [
+        "1",
         0
       ],
-      "fps": [
-        "2",
-        2
-      ],
-      "audio": [
+      "codec": "auto",
+      "complete_audio": [
         "3",
         0
-      ],
-      "bit_depth": "auto",
-      "color_space": "sRGB",
-      "codec": "none"
+      ]
     },
     "_meta": {
-      "title": "Video with the new soundtrack"
+      "title": "Same picture, new soundtrack (stream copy)"
     }
   },
   "8": {

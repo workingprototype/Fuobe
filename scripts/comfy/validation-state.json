@@ -12,16 +12,16 @@
     "at": "2026-10-16T20:57:20.767Z"
   },
   "captions-burnin": {
-    "sha256": "22437cbe3fe0a87b4c1806b258b280b0dd454dd5d9f3b67d4d2a929d046b25c0",
+    "sha256": "8bb4d7bca5145d94ee1d509e50e23ef40e4cd21cb7c152bbba32751eca4ea013",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:02:03.382Z"
+    "at": "2026-10-18T07:29:28.801Z"
   },
   "captions-qwen3-asr": {
-    "sha256": "97802a02aefd8eee5a1abe6ca6284569a9b367dd6b0024560cc8ad61e6606b43",
+    "sha256": "75286c2efad353c7285df2eea90782db99e7b7e994adeeaaf242a2e70c790bf7",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:02:03.322Z"
+    "at": "2026-10-18T06:58:45.186Z"
   },
   "captions-whisper-burnin": {
     "sha256": "31b33c6ce7f5d15b97fec8367f5ad005f15162f6b76530e5ff8feca633bf3c56",
@@ -174,10 +174,10 @@
     "at": "2026-10-16T20:57:26.862Z"
   },
   "layers-qwen-image-layered": {
-    "sha256": "88d1f27279ece0e954938599c7a2cf568f08cd86bc2b5bad6914cd34efed46f4",
+    "sha256": "7e8aae04b028f3e0000ca59ab953c4af5be0a1a65f734481d8162179d6cc9e77",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:01:59.498Z"
+    "at": "2026-10-18T06:58:43.946Z"
   },
   "layers-qwen-image-layered-control": {
     "sha256": "cf214475197005342e0966857d6817c15aec2eafb3d28727bfd07e956e53bfd7",
@@ -192,10 +192,10 @@
     "at": "2026-10-17T21:02:50.385Z"
   },
   "lipsync-v2v-infinitetalk": {
-    "sha256": "7537cb5b9d35a1fe9fbc60bf48bbb2674d45be28af5170890fee8d5d430e9e8d",
+    "sha256": "42e30f1bec920686a7b7bb1c41cbf336e97fd696c790526cf0e7c1b9457fb98b",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:02:04.091Z"
+    "at": "2026-10-18T06:58:47.182Z"
   },
   "ltx2-i2v": {
     "sha256": "db32b2b64be6be2ec2a9e64cae5e74c042d2eada6131eee52f6a6c2866e2dab9",
@@ -486,16 +486,16 @@
     "at": "2026-10-16T23:33:13.889Z"
   },
   "video-mux-audio": {
-    "sha256": "16866be82207d7578d2ad054a69b048eb69184c354ab362406baa3934f24a54f",
+    "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:02:04.314Z"
+    "at": "2026-10-18T07:29:29.151Z"
   },
   "video-mux-audio-replace": {
-    "sha256": "df3d48d40396813dc5f3c94000096cac6f783428a6c68881209c3a2428ee2672",
+    "sha256": "612d36e755d90f5d62e4a8ea92dc825019b42d0882ad469d0597e6f7b9bc36dc",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:02:04.419Z"
+    "at": "2026-10-18T07:29:29.488Z"
   },
   "video-reframe-wan22-fun-vace": {
     "sha256": "3d97f02a5da7badd11df1f1334de2924b4fc930c8976597b25c231d342b629de",

@@ -253,11 +253,8 @@
         "245",
         0
       ],
-      "custom_height": [
-        "246",
-        0
-      ],
-      "frame_load_cap": 0,
+      "custom_height": 0,
+      "frame_load_cap": 1000,
       "skip_first_frames": 0,
       "select_every_nth": 1,
       "format": "Wan"
