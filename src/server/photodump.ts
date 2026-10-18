@@ -1,6 +1,6 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { getModel } from "@/lib/catalog";
+import { getModel, getPreset } from "@/lib/catalog";
 import { castPrompt, type CastValues } from "@/lib/catalog/cinema";
 import {
   castSheetModel,
@@ -228,6 +228,8 @@ export function createFashion(input: FashionRun) {
 // ---------------------------------------------------------------------------
 // Character Sheet
 
+const AI_INFLUENCER = "app-ai-influencer";
+
 export type SheetRun =
   | { mode: "reference"; engine: Engine; images: string[]; details?: string }
   | { mode: "cast"; engine: Engine; cast: CastValues; details?: string }
@@ -249,7 +251,7 @@ function sheetRequest(input: SheetRun): { request: GenerationRequest; notes: str
   // A description: the AI Influencer app (Higgsfield's character-sheet model, or Z-Image Turbo).
   if (!input.prompt.trim()) throw new Error("Describe your character first");
   return {
-    request: { feature: "app:app-ai-influencer", presetId: "app-ai-influencer", modelId: engine === "open" ? "oss-z-image-turbo" : "ai-influencer", prompt: input.prompt.trim() },
+    request: { feature: "app:app-ai-influencer", presetId: AI_INFLUENCER, modelId: (engine === "open" ? getPreset(AI_INFLUENCER)?.open : getPreset(AI_INFLUENCER)?.cloud)?.modelId ?? "ai-influencer", prompt: input.prompt.trim() },
     notes: [],
   };
 }

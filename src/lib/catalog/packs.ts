@@ -681,7 +681,7 @@ export function fashionReducer(s: FashionState, a: FashionAction): FashionState 
   switch (a.type) {
     case "template":
       // A new set invalidates everything made in the old one.
-      return a.id === s.templateId ? s : { ...FASHION_START, step: s.step, templateId: a.id, elementId: s.elementId };
+      return a.id === s.templateId ? s : { ...FASHION_START, templateId: a.id, elementId: s.elementId };
     case "element":
       return a.id === s.elementId ? s : { ...s, elementId: a.id, baseIds: [], base: undefined, outfitIds: [], outfit: undefined, photosetBatch: undefined };
     case "next":
@@ -759,4 +759,39 @@ export function castFieldVisible(key: string, values: Record<string, unknown>): 
   if (key === "facial_hair") return values.gender !== "Female";
   if (key === "facial_hair_color") return values.gender !== "Female" && BEARDED.includes(String(values.facial_hair));
   return true;
+}
+
+/** A Soul Cast field as the page gets it from the server (cinema.ts's SOUL_CAST_FIELDS without `when`). */
+export interface CastFieldData {
+  key: string;
+  label: string;
+  tab: string;
+  question?: string;
+  kind: "list" | "ruler" | "multi";
+  options: (string | number)[];
+  default?: string | number;
+  format?: string;
+  manual?: boolean;
+}
+
+export type CastAnswers = Record<string, string | number | string[] | undefined>;
+
+/** Higgsfield's Randomize (mirrors cinema.ts randomizeCast): genre, era, race, gender, age and archetype. */
+export function randomCast(fields: CastFieldData[], values: CastAnswers, rand: () => number = Math.random): CastAnswers {
+  const next: CastAnswers = { ...values };
+  for (const key of ["genre", "era", "race", "gender", "age", "archetype"]) {
+    const f = fields.find((x) => x.key === key);
+    if (f?.options.length) next[key] = f.options[Math.floor(rand() * f.options.length) % f.options.length];
+  }
+  if (next.gender === "Female") {
+    delete next.facial_hair;
+    delete next.facial_hair_color;
+  }
+  return next;
+}
+
+/** A starting name for the saved character (mirrors cinema.ts castName): "Rebel 30", "Western lead". */
+export function castNameFor(values: CastAnswers): string {
+  if (values.archetype) return values.age ? `${values.archetype} ${values.age}` : String(values.archetype);
+  return values.genre ? `${values.genre} lead` : "Cast member";
 }

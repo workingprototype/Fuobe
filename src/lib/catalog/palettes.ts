@@ -366,8 +366,8 @@ export const SIGNATURE_MODELS = {
 const NOT_READY = "This moodboard is still training. Try again once it is ready.";
 
 const hasOp = (m: ModelDef, op: string) => m.routes.some((r) => r.op === op);
-/** Room for style references beyond the user's own images (multi-reference edit models). */
-const refBudget = (m: ModelDef, existing: number) => (hasOp(m, "edit") ? Math.max(0, (m.options.maxImages ?? 1) - existing) : 0);
+/** Room for style references beyond the user's own images (multi-reference edit models; a one-image edit would just edit the reference). */
+const refBudget = (m: ModelDef, existing: number) => (hasOp(m, "edit") && (m.options.maxImages ?? 1) >= 2 ? Math.max(0, (m.options.maxImages ?? 1) - existing) : 0);
 const tidy = (s: string | undefined) => (s ?? "").trim().replace(/[.\s]+$/, "");
 const join = (prompt: string | undefined, sentence: string) => (tidy(prompt) ? `${tidy(prompt)}. ${sentence}` : sentence);
 

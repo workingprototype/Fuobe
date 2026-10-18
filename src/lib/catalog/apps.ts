@@ -378,14 +378,15 @@ export const APPS: Preset[] = [
     placeholder: "Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”",
     prompt: "{prompt}",
     cloud: { modelId: "ai-influencer", op: "t2i" },
+    // The Soul Cast sheet workflow: Z-Image Turbo draws the turnaround (front, three-quarter, profile, back) and
+    // cuts it into the four views, which make a better character element than one wide sheet.
     open: {
-      modelId: "oss-z-image-turbo",
+      modelId: "oss-zimage-soul-cast",
       op: "t2i",
-      params: { aspectRatio: "16:9" },
-      promptTemplate:
-        "Character design sheet of an original character: {prompt}. Front view, three-quarter view, side view and back view side by side, plus a row of four facial expressions; full body, the same face, hairstyle and outfit in every view; plain light-grey studio background, soft even light, photorealistic, high detail.",
+      promptTemplate: "An original character: {prompt}. The same face, hairstyle and outfit in every view, photorealistic, high detail.",
     },
-    parity: "Save the sheet as a character (tile menu) to use it in any prompt with @. The open version prompts Z-Image Turbo for the sheet",
+    parity:
+      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. The open version draws the turnaround on Z-Image Turbo and cuts it into the four views",
   }),
   app({
     name: "Match Lighting",
