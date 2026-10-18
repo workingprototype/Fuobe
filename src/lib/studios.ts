@@ -95,6 +95,7 @@ export const LIPSYNC_STUDIO: StudioConfig = {
     { key: "video", label: "Video", accept: "video", hint: "To re-sync an existing clip" },
     { key: "audio", label: "Voice", accept: "audio", required: true },
   ],
+  anyOf: [["image", "video"]],
   defaultModels: { cloud: "kling-avatar-2", open: "oss-infinitetalk" },
   promptOptional: true,
 };
@@ -228,13 +229,8 @@ export function appStudio(preset: Preset): StudioConfig {
     feature: `app:${preset.id}`,
     title: preset.name,
     hero: preset.description,
-    subtitle: [
-      preset.cloud ? `Cloud: ${getModel(preset.cloud.modelId)?.name}` : "No cloud version yet",
-      preset.open ? `Open source: ${getModel(preset.open.modelId)?.name}` : "No open-source version yet",
-      preset.parity,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    // The models it runs on are in the preset card's Details popover (PresetHeader).
+    subtitle: preset.parity,
     placeholder: preset.promptPlaceholder ?? "Add details (optional)",
     kind,
     ops,

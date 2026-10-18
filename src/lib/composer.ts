@@ -112,9 +112,32 @@ export function slotMessage(label: string): string {
 
 type SlotValues = Partial<Record<InputSlot["key"], { ref: string; uploading?: boolean } | null>>;
 
-/** The first required slot that's still empty (the one Generate should point at). */
-export function firstMissingSlot(slots: InputSlot[], values: SlotValues): InputSlot | undefined {
-  return slots.find((s) => s.required && !values[s.key]?.ref && !values[s.key]?.uploading);
+/** A missing input: one required slot, or (`group`) a set of optional slots of which one is needed ("a portrait or a video"). */
+export type MissingSlot = InputSlot & { group?: InputSlot[] };
+
+/**
+ * The first input Generate is waiting for, in the order the tiles are shown: an empty required
+ * slot, or a group from `anyOf` (studio config: "one of these") with none of its slots filled.
+ * A group comes back as its first slot plus `group`, so Generate pulses that tile.
+ */
+export function firstMissingSlot(slots: InputSlot[], values: SlotValues, anyOf: InputSlot["key"][][] = []): MissingSlot | undefined {
+  const filled = (k: InputSlot["key"]) => !!values[k]?.ref || !!values[k]?.uploading;
+  const groups = anyOf.map((g) => slots.filter((s) => g.includes(s.key))).filter((g) => g.length > 0);
+  for (const s of slots) {
+    if (s.required && !filled(s.key)) return s;
+    const group = groups.find((g) => g[0].key === s.key);
+    if (group && !group.some((x) => filled(x.key))) return group.length > 1 ? { ...s, group } : s;
+  }
+  return undefined;
+}
+
+/** ["a portrait", "a video"] → "a portrait or a video"; three → "a, b or c". */
+const orList = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`);
+
+/** "Add a portrait or a video" for a group, else the slot's own message. */
+export function missingMessage(m: MissingSlot): string {
+  if (!m.group || m.group.length < 2) return slotMessage(m.label);
+  return `Add ${orList(m.group.map((s) => slotMessage(s.label).replace(/^Add /, "")))}`;
 }
 
 export interface Blocker {
@@ -132,7 +155,7 @@ export function blockerFor(s: {
   loading?: string | null;
   model: boolean;
   engineError?: string | null;
-  missing?: InputSlot;
+  missing?: MissingSlot;
   uploading: boolean;
   planError?: string | null;
   promptMissing: boolean;
@@ -140,7 +163,7 @@ export function blockerFor(s: {
   if (s.loading) return { message: s.loading };
   if (!s.model) return { message: "Pick a model" };
   if (s.engineError) return { message: s.engineError };
-  if (s.missing) return { message: slotMessage(s.missing.label), slot: s.missing.key };
+  if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
   if (s.uploading) return { message: "Uploading…" };
   if (s.planError) return { message: s.planError };
   if (s.promptMissing) return { message: "Write a prompt first" };
@@ -211,11 +234,131 @@ export function replaceAttachment<T extends Attachment>(
   return null;
 }
 
-/** Which kinds the "+" menu can take for this studio. */
+/**
+ * Where a batch of files would land, before any of them uploads: each file's index goes to
+ * `placed` (it gets a slot or a reference tile) or `rejected` (no room: the references are full or
+ * the model takes none). Placement is simulated in order, as `placeAttachment` does it for real.
+ */
+export function fitAttachments(
+  state: AttachState,
+  slots: InputSlot[],
+  multiRef: { kind?: MediaKind } | undefined,
+  refMax: number,
+  kinds: MediaKind[],
+): { placed: number[]; rejected: number[] } {
+  let s = state;
+  const placed: number[] = [];
+  const rejected: number[] = [];
+  kinds.forEach((kind, i) => {
+    const next = placeAttachment(s, slots, multiRef, refMax, { id: `fit-${i}`, ref: "", preview: "", kind });
+    if (!next) return void rejected.push(i);
+    placed.push(i);
+    s = { slots: next.slots ?? s.slots, refs: next.refs ?? s.refs };
+  });
+  return { placed, rejected };
+}
+
+/** What to tell someone whose attachment found no room ("This model takes up to 3 reference images"). */
+export function noRoomMessage(refMax: number, kind: MediaKind = "image"): string {
+  const noun = kind === "video" ? "clip" : kind === "audio" ? "audio file" : "reference image";
+  if (refMax <= 0) return `This model doesn't take ${noun}s — pick another model to add one`;
+  return `This model takes up to ${refMax} ${noun}${refMax === 1 ? "" : "s"}`;
+}
+
+/**
+ * A drawing (inpaint mask, sketch, Wan-Move motion paths) belongs to the image it was drawn on:
+ * when the image slot gets another image, or none, the drawing goes with it. Returns the patch
+ * to apply with the new slots (the same slots when the image didn't change, e.g. its upload finished).
+ */
+export function onImageChange<T extends Attachment>(
+  prev: { slots: Partial<Record<InputSlot["key"], T | null>>; params: GenParams },
+  nextSlots: Partial<Record<InputSlot["key"], T | null>>,
+): { slots: Partial<Record<InputSlot["key"], T | null>>; params?: GenParams } {
+  const before = prev.slots.image ?? null;
+  const after = nextSlots.image ?? null;
+  const same = before === after || (!!before && !!after && ((!!before.id && before.id === after.id) || (!!before.ref && before.ref === after.ref)));
+  if (same) return { slots: nextSlots };
+  const slots = { ...nextSlots, mask: null, sketch: null };
+  if (prev.params.extra?.motionPaths === undefined) return { slots };
+  const extra = { ...prev.params.extra };
+  delete extra.motionPaths;
+  return { slots, params: { ...prev.params, extra: Object.keys(extra).length ? extra : undefined } };
+}
+
+/** Which kinds the "+" menu (and paste / drop) can take for this studio. Voice samples have their own picker. */
 export function acceptedKinds(slots: InputSlot[], multiRef?: { kind?: MediaKind }): MediaKind[] {
   const kinds = new Set<MediaKind>(slots.filter((s) => s.key !== "mask" && s.key !== "sketch" && s.key !== "voiceAudio" && s.key !== "voiceAudio2").map((s) => s.accept));
   if (multiRef) kinds.add(multiRef.kind ?? "image");
   return [...kinds];
+}
+
+// ---------------------------------------------------------------------------
+// Hand-off params ("/video?image=…") arriving after the first paint
+
+/** The URL params a studio prefills its draft from; anything else in the query is ignored. */
+export const HANDOFF_PARAMS = ["image", "ref", "video", "audio", "prompt", "preset", "model"] as const;
+
+/** A stable key for the hand-off part of a query string ("" when there's none). */
+export function handoffKey(search: string | URLSearchParams | null | undefined): string {
+  const sp = typeof search === "string" || !search ? new URLSearchParams(search ?? "") : search;
+  const out = new URLSearchParams();
+  for (const k of HANDOFF_PARAMS) {
+    const v = sp.get(k);
+    if (v) out.set(k, v);
+  }
+  return out.toString();
+}
+
+export interface DraftShape {
+  prompt: string;
+  negativePrompt: string;
+  modelId: string;
+  params: GenParams;
+  slots: Partial<Record<InputSlot["key"], Attachment | null>>;
+  refs: Attachment[];
+  presetId?: string;
+  presetOptions: Record<string, string>;
+  presetStrength?: number;
+  mix?: { presetId: string; strength: number };
+}
+
+const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const sameAttachment = (a: Attachment | null | undefined, b: Attachment | null | undefined) => (a ?? null) === (b ?? null) || (!!a && !!b && a.id === b.id && a.ref === b.ref);
+
+/**
+ * Apply a draft computed from hand-off params (`next`) to the live draft (`current`) without
+ * undoing what the person already did: a field still equal to the draft the composer started
+ * with (`base`) takes the hand-off value; a field they changed (typed a prompt before the page
+ * hydrated, attached a photo) keeps theirs. Returns the patch.
+ */
+export function mergeHandoff<D extends DraftShape>(base: D, current: D, next: D): Partial<D> {
+  const patch: Partial<D> = {};
+  if (current.prompt === base.prompt && current.prompt !== next.prompt) patch.prompt = next.prompt;
+  if (current.negativePrompt === base.negativePrompt && current.negativePrompt !== next.negativePrompt) patch.negativePrompt = next.negativePrompt;
+  if (current.modelId === base.modelId && same(current.params, base.params) && (current.modelId !== next.modelId || !same(current.params, next.params))) {
+    patch.modelId = next.modelId;
+    patch.params = next.params;
+  }
+  const keys = new Set([...Object.keys(base.slots), ...Object.keys(current.slots), ...Object.keys(next.slots)] as InputSlot["key"][]);
+  let slotsChanged = false;
+  const slots = { ...current.slots };
+  for (const k of keys) {
+    if (sameAttachment(current.slots[k], base.slots[k]) && !sameAttachment(current.slots[k], next.slots[k])) {
+      slots[k] = next.slots[k] ?? null;
+      slotsChanged = true;
+    }
+  }
+  if (slotsChanged) patch.slots = slots as D["slots"];
+  const refsUntouched = current.refs === base.refs || (current.refs.length === base.refs.length && current.refs.every((r, i) => sameAttachment(r, base.refs[i])));
+  if (refsUntouched && (next.refs.length || current.refs.length)) patch.refs = next.refs as D["refs"];
+  const preset = (d: D) => [d.presetId, d.presetOptions, d.presetStrength, d.mix];
+  if (same(preset(current), preset(base)) && !same(preset(current), preset(next))) {
+    patch.presetId = next.presetId;
+    patch.presetOptions = next.presetOptions;
+    patch.presetStrength = next.presetStrength;
+    patch.mix = next.mix;
+  }
+  return patch;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,9 +368,13 @@ export function filterModels(models: ModelDef[], opts: { kind?: MediaKind; ops?:
   return models.filter((m) => !m.hidden && (!opts.kind || m.kind === opts.kind) && (!opts.ops || m.routes.some((r) => opts.ops!.includes(r.op))));
 }
 
-/** "Best for this studio": the studio's default first, then top picks, then what's new. */
-export function bestForStudio(models: ModelDef[], engine: Engine, defaultId: string | undefined, max = 4): ModelDef[] {
-  const pool = models.filter((m) => m.engine === engine);
+/**
+ * "Best for this studio": the studio's default first, then top picks, then what's new — among
+ * the models that do the studio's main operation (`op`, e.g. text-to-image in the Image studio),
+ * so a single-purpose tool (garment try-on) never ranks above a general model.
+ */
+export function bestForStudio(models: ModelDef[], engine: Engine, defaultId: string | undefined, max = 4, op?: Operation): ModelDef[] {
+  const pool = models.filter((m) => m.engine === engine && (!op || m.id === defaultId || m.routes.some((r) => r.op === op)));
   const score = (m: ModelDef) => (m.id === defaultId ? 0 : m.badges?.includes("top") ? 1 : m.badges?.includes("new") ? 2 : 9);
   return pool
     .map((m, i) => [m, score(m), i] as const)

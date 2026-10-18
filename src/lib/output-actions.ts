@@ -88,14 +88,14 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("reframe", "Reframe", `/reframe?video=${q(o.url)}`);
       link("lipsync", "Lipsync", `/lipsync?video=${q(o.url)}`);
-      link("upscale", "Upscale", `/upscale?video=${q(o.url)}`);
-      link("add-sound", "Add sound", `/audio?video=${q(o.url)}`);
+      link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
+      link("add-sound", "Add sound", `/audio/video?video=${q(o.url)}`);
       link("grade", "Color grade", `/color-grade?video=${q(o.url)}`);
       break;
     case "audio":
       link("lipsync", "Lipsync", `/lipsync?audio=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
-      link("voice-change", "Change voice", `/audio?mode=voice-change&audio=${q(o.url)}`);
+      link("voice-change", "Change voice", `/audio/voice-change?audio=${q(o.url)}`);
       break;
     case "text":
       out.push({ id: "copy-text", label: "Copy", placement: "primary" }, file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });

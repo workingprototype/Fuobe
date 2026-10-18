@@ -1,13 +1,15 @@
 "use client";
 
 import { ArrowUp, Loader2, Upload } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
+import { handoffKey, mergeHandoff } from "@/lib/composer";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
 import { ComposerBridgeCtx, useComposerBridge, type ComposerBridge } from "./attachments";
@@ -16,7 +18,7 @@ import { Composer } from "./composer";
 import { EngineSwitch } from "./engine-switch";
 import { Feed } from "./feed";
 import type { SlotValue } from "./media-slot";
-import { StudioProvider, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
+import { StudioProvider, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
 function kindOfUrl(url: string): MediaKind {
   if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
@@ -151,6 +153,25 @@ function inView(id: string): boolean {
 
 const EMPTY: Generation[] = [];
 
+/** The preset card (U23) is its own chunk: only app pages and studios with a motion or effect picked load it. */
+const PresetHeader = dynamic(() => import("@/components/preset-header").then((m) => m.PresetHeader));
+
+/** While a preset (app, camera motion, effect) is active and the feed is empty: what it does and what to add, above the composer. */
+function ActivePresetHeader() {
+  const { config, draft, setDraft } = useStudio();
+  const catalog = useCatalog();
+  const preset = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
+  if (!preset) return null;
+  return (
+    <PresetHeader
+      preset={preset}
+      className="mb-3"
+      modelName={(id) => catalog.getModel(id)?.name}
+      onClear={config.preset ? undefined : () => setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined })}
+    />
+  );
+}
+
 /** Sticky page header (title + engine), with an optional row of mode tabs under it. */
 function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
   const [engine, setEngine] = useEngine();
@@ -249,6 +270,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
               </button>
             </div>
           )}
+        {!hasItems && <ActivePresetHeader />}
         <div data-composer className={cn("mx-auto w-full", hasItems ? "max-w-[800px]" : "max-w-[760px]")}>
           <Composer docked={hasItems} />
         </div>
@@ -297,46 +319,88 @@ interface StudioPageProps {
   initialPrompt?: string;
 }
 
-type DraftProps = Omit<StudioPageProps, "catalog"> & { sp: URLSearchParams | null };
+type DraftProps = Omit<StudioPageProps, "catalog">;
 
-/** The studio for one set of URL params (null: the static shell, rendered before the URL is known). */
-function StudioDraft({ config, sp, header, tabs, initialRefs, initialPrompt }: DraftProps) {
+/** Reports the URL's hand-off params. It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
+function UrlParams({ onChange }: { onChange: (key: string) => void }) {
+  const key = handoffKey(useSearchParams());
+  // Layout effect: on a client navigation the prefilled draft is in place before the first paint.
+  useLayoutEffect(() => onChange(key), [key, onChange]);
+  return null;
+}
+
+/**
+ * Applies the URL's hand-off params (`/video?image=…`) to the draft once they're known: right
+ * after hydration on a direct visit (the static shell can't know them), or on the first render
+ * of a client navigation. Fields the person already changed — a prompt typed before the page
+ * hydrated — are kept. A later change of the params (Animate → Video while on Video) starts a
+ * fresh draft instead.
+ */
+function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: string; start: Draft; build: React.RefObject<(key: string) => Draft>; ready: boolean; onNavigate: (key: string) => void }) {
+  const { setDraft } = useStudioActions();
+  const [url, setUrl] = useState<string | null>(null);
+  const applied = useRef({ key: startKey, ready, base: start, seen: false });
+  useLayoutEffect(() => {
+    if (url === null) return;
+    const a = applied.current;
+    if (a.seen && url !== a.key) return onNavigate(url);
+    a.seen = true;
+    if (url === a.key && ready === a.ready) return;
+    const next = build.current(url);
+    const base = a.base;
+    setDraft((d) => mergeHandoff(base, d, next));
+    applied.current = { key: url, ready, base: next, seen: true };
+  }, [url, ready, build, setDraft, onNavigate]);
+  return (
+    <Suspense fallback={null}>
+      <UrlParams onChange={setUrl} />
+    </Suspense>
+  );
+}
+
+/**
+ * The studio. It renders the same tree in the static shell and after hydration (the URL is read
+ * by HandoffSync alone), so the composer the shell painted is the one you type into: nothing
+ * typed or focused before hydration is lost.
+ */
+function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: DraftProps) {
   const [engine] = useEngine();
   const catalog = useCatalog();
   const bridge = useMemo<ComposerBridge>(() => ({ current: null }), []);
-  // Recompute the initial draft only when the handoff params change (or a client-side catalog arrives).
-  const key = sp?.toString() ?? "";
-  const initial = useMemo(() => {
+  const build = (key: string) => {
     const d = initialDraft(config, new URLSearchParams(key), engine, catalog);
     if (initialRefs?.length) d.refs = [...initialRefs.map((u) => slot(u)!), ...d.refs];
     if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
     return d;
-  }, [config, key, catalog.ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+  const buildRef = useRef(build);
+  useLayoutEffect(() => {
+    buildRef.current = build;
+  });
+  // The draft the composer starts from: the defaults (the URL is unknown in the static shell), or
+  // the hand-off params of a client navigation to new ones (a new epoch remounts the provider).
+  const [start, setStart] = useState({ key: "", epoch: 0 });
+  const initial = useMemo(() => build(start.key), [start, config]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onNavigate = useCallback((key: string) => setStart((s) => ({ key, epoch: s.epoch + 1 })), []);
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
-      <StudioProvider key={`${key}|${catalog.ready}`} config={config} initial={initial}>
+      <StudioProvider key={start.epoch} config={config} initial={initial}>
         <StudioBody header={header} tabs={tabs} />
+        <HandoffSync startKey={start.key} start={initial} build={buildRef} ready={catalog.ready} onNavigate={onNavigate} />
       </StudioProvider>
     </ComposerBridgeCtx.Provider>
   );
 }
 
-function StudioFromUrl(props: Omit<DraftProps, "sp">) {
-  const sp = useSearchParams();
-  return <StudioDraft {...props} sp={sp} />;
-}
-
 /**
- * A studio page: header, hero, composer and feed. The URL (hand-off params) is read under
- * Suspense; its fallback is the same studio with a default draft, so the prerendered HTML already
- * holds the title, the hero and a composer instead of an empty main area.
+ * A studio page: header, hero, composer and feed. Everything but the URL is in the static shell:
+ * the title, the hero and a composer you can start typing into before the page hydrates. The
+ * hand-off params (`?image=`, `?prompt=`…) are applied once known (HandoffSync).
  */
 export function StudioPage({ catalog, ...props }: StudioPageProps) {
   return (
     <CatalogProvider catalog={catalog} config={props.config}>
-      <Suspense fallback={<StudioDraft {...props} sp={null} />}>
-        <StudioFromUrl {...props} />
-      </Suspense>
+      <StudioDraft {...props} />
     </CatalogProvider>
   );
 }

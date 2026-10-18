@@ -36,6 +36,8 @@ export interface StudioConfig {
   sketchAutoOpen?: "mask" | "draw";
   /** Appended to the user prompt on submit (e.g. identity lock for characters). */
   promptSuffix?: string;
+  /** Optional slots of which one is needed (Lipsync: a portrait or a video): Generate names the group. */
+  anyOf?: SlotKey[][];
 }
 
 export interface Draft {

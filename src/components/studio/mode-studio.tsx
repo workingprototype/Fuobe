@@ -1,39 +1,41 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
 import { StudioPage } from "./studio-page";
 import type { StudioConfig } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 
-export interface Mode {
+export interface ModeTab {
   id: string;
   label: string;
-  config: StudioConfig;
-  catalog: StudioCatalog;
+  href: string;
 }
 
 /** Underline tabs on their own row under the page title; they scroll sideways (with faded edges) on phones. */
-function ModeTabs({ modes, current }: { modes: Mode[]; current: string }) {
+function ModeTabs({ tabs, current }: { tabs: ModeTab[]; current: string }) {
   const [ref, fade] = useEdgeFade<HTMLDivElement>();
   const active = useRef<HTMLAnchorElement>(null);
-  // Keep the selected tab in view when the row scrolls.
+  // Keep the selected tab in view when the row scrolls (only the row: the page stays put).
   useEffect(() => {
-    active.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [current]);
+    const el = active.current;
+    const row = ref.current;
+    if (!el || !row) return;
+    const left = el.offsetLeft - row.offsetLeft;
+    if (left < row.scrollLeft || left + el.offsetWidth > row.scrollLeft + row.clientWidth) row.scrollLeft = left - 12;
+  }, [current, ref]);
   return (
     <nav aria-label="Modes" className="border-b">
       <div ref={ref} style={fade} className="scrollbar-none flex gap-1 overflow-x-auto px-3 sm:px-6">
-        {modes.map((m) => {
+        {tabs.map((m) => {
           const on = m.id === current;
           return (
             <Link
               key={m.id}
               ref={on ? active : undefined}
-              href={`?mode=${m.id}`}
+              href={m.href}
               replace
               scroll={false}
               aria-current={on ? "page" : undefined}
@@ -52,21 +54,7 @@ function ModeTabs({ modes, current }: { modes: Mode[]; current: string }) {
   );
 }
 
-function Pick({ modes, current }: { modes: Mode[]; current: Mode }) {
-  return <StudioPage key={current.id} config={current.config} catalog={current.catalog} tabs={<ModeTabs modes={modes} current={current.id} />} />;
-}
-
-function FromUrl({ modes }: { modes: Mode[] }) {
-  const sp = useSearchParams();
-  const current = modes.find((m) => m.id === sp.get("mode")) ?? (sp.get("video") ? modes.find((m) => m.id === "video") : undefined) ?? modes[0];
-  return <Pick modes={modes} current={current} />;
-}
-
-/** Studios switched by `?mode=`; the prerendered shell shows the first mode. */
-export function ModeStudio({ modes }: { modes: Mode[] }) {
-  return (
-    <Suspense fallback={<Pick modes={modes} current={modes[0]} />}>
-      <FromUrl modes={modes} />
-    </Suspense>
-  );
+/** One mode of a hub (Audio, Video tools, Upscale): its studio with the hub's tabs. Each mode has its own path. */
+export function ModeStudio({ tabs, current, config, catalog }: { tabs: ModeTab[]; current: string; config: StudioConfig; catalog: StudioCatalog }) {
+  return <StudioPage config={config} catalog={catalog} tabs={<ModeTabs tabs={tabs} current={current} />} />;
 }
