@@ -543,6 +543,8 @@ export interface PresetChoice {
   label: string;
   /** Text substituted for {option:<key>} in the prompt template. */
   prompt: string;
+  /** Model settings this choice sets (params.extra), e.g. the camera angle sliders of Qwen Multiple Angles; what the user set wins. */
+  extra?: Record<string, number | string>;
 }
 
 export interface PresetOption {

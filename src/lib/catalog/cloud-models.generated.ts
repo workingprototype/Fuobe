@@ -11450,6 +11450,34 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "elevenlabs-voice-isolation",
+    "name": "ElevenLabs Voice Isolation",
+    "vendor": "ElevenLabs",
+    "family": "elevenlabs",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "Clean speech from a video or recording \u2014 music and noise removed",
+    "routes": [
+      {
+        "op": "separate-audio",
+        "provider": "fal",
+        "endpoint": "fal-ai/elevenlabs/audio-isolation",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "audio": "audio_url"
+        }
+      }
+    ],
+    "options": {
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "minute",
+      "usd": 0.1
+    }
+  },
+  {
     "id": "hunyuan-3d-3-1-pro",
     "name": "Hunyuan3D 3.1 Pro",
     "vendor": "Tencent Hunyuan",

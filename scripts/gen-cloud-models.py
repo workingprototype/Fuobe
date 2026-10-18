@@ -522,6 +522,9 @@ model("whisper", "Whisper large-v3", "OpenAI", "whisper", "text", "Whisper large
       [("transcribe", "fal-ai/whisper")], fixed={"chunk_level": "word"})
 model("demucs", "Demucs stem split", "Meta", "demucs", "audio", "Split a track into vocals, drums, bass and the rest",
       [("separate-audio", "fal-ai/demucs")], fixed={"model": "htdemucs"})
+# Translate & dub (cloud, step by step): the clean voice straight from the video, to clone in the new language.
+model("elevenlabs-voice-isolation", "ElevenLabs Voice Isolation", "ElevenLabs", "elevenlabs", "audio", "Clean speech from a video or recording — music and noise removed",
+      [("separate-audio", "fal-ai/elevenlabs/audio-isolation")], pricing=("minute", 0.1))
 
 # ----- Image to 3D (research part 3; product spins, 3D blocking)
 model("hunyuan-3d-3-1-pro", "Hunyuan3D 3.1 Pro", "Tencent Hunyuan", "hunyuan-3d", "model3d", "Textured, game-ready 3D models from a product photo",

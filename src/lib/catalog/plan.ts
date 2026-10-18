@@ -136,6 +136,9 @@ export function planGeneration(
     // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt.
     const sameModel = route.modelId === model.id;
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
+    // Option choices that set model settings (Angles: rotate / tilt / zoom); a value the user set wins.
+    const chosen = Object.assign({}, ...(preset.options ?? []).map((o) => o.choices.find((c) => c.value === (req.presetOptions?.[o.key] ?? o.default ?? o.choices[0]?.value))?.extra ?? {}));
+    if (sameModel && Object.keys(chosen).length) params = { ...params, extra: { ...chosen, ...params.extra } };
     loras = sameModel ? (route.loras ?? []) : [];
     if (sameModel) op = op ?? route.op;
   }

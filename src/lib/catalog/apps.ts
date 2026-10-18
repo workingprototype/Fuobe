@@ -91,6 +91,13 @@ function videoApp(a: Omit<AppSpec, "cloud" | "open">): Preset {
   return app({ ...a, cloud: VIDEO_CLOUD, open: VIDEO_OPEN });
 }
 
+/** An option whose choices also set one of the model's settings (params.extra[param]). */
+const angleOption = (key: string, label: string, param: string, choices: [string, string, number][]): PresetOption => ({
+  key,
+  label,
+  choices: choices.map(([l, p, v]) => ({ value: slug(l), label: l, prompt: p, extra: { [param]: v } })),
+});
+
 const opt = (key: string, label: string, choices: [string, string][]): PresetOption => ({
   key,
   label,
@@ -248,25 +255,42 @@ export const APPS: Preset[] = [
     icon: "Rotate3d",
     hue: 190,
     badges: ["top"],
+    // The cloud model turns its rotate / tilt / zoom settings into the Multiple-Angles LoRA's own words; the open
+    // route runs that LoRA on Qwen-Image-Edit 2511 with the same words ("<sks> front-left quarter view …").
     options: [
-      opt("angle", "Angle", [
-        ["Front", "a straight-on front view at eye level"],
-        ["Left 45°", "rotated 45 degrees to the left around the subject"],
-        ["Right 45°", "rotated 45 degrees to the right around the subject"],
-        ["Left profile", "a full left side profile view"],
-        ["Right profile", "a full right side profile view"],
-        ["Back", "a view from directly behind"],
-        ["High angle", "a high-angle view looking down at the subject"],
-        ["Bird's eye", "a top-down bird's-eye view from directly above"],
-        ["Low angle", "a low-angle view looking up at the subject"],
-        ["Worm's eye", "an extreme worm's-eye view from the ground"],
-        ["Close-up", "a tight close-up"],
-        ["Wide", "a wide shot showing the full environment"],
+      angleOption("angle", "Angle", "horizontal_angle", [
+        ["Front", "front view", 0],
+        ["Front right", "front-right quarter view", 45],
+        ["Right side", "right side view", 90],
+        ["Back right", "back-right quarter view", 135],
+        ["Back", "back view", 180],
+        ["Back left", "back-left quarter view", 225],
+        ["Left side", "left side view", 270],
+        ["Front left", "front-left quarter view", 315],
+      ]),
+      angleOption("height", "Height", "vertical_angle", [
+        ["Eye level", "eye-level shot", 0],
+        ["Low angle", "low-angle shot", -30],
+        ["Elevated", "elevated shot", 30],
+        ["High angle", "high-angle shot", 60],
+      ]),
+      angleOption("distance", "Distance", "zoom", [
+        ["Medium", "medium shot", 5],
+        ["Close-up", "close-up", 10],
+        ["Wide", "wide shot", 0],
       ]),
     ],
-    prompt:
-      "Show the exact same scene and subject from {option:angle}, as if the camera physically moved. Keep identity, outfit, props, lighting direction and environment consistent; reveal plausible unseen sides.",
-    parity: "Open version should add the Qwen-Edit multiple-angles LoRA for best results",
+    userPrompt: "optional",
+    placeholder: "Anything to keep in mind (optional)",
+    prompt: "Show the exact same scene and subject as a {option:angle}, {option:height}, {option:distance}, as if the camera physically moved. Keep identity, outfit, props, lighting and environment consistent. {prompt}",
+    cloud: { modelId: "qwen-multiple-angles", op: "edit", promptTemplate: "{prompt}" },
+    open: {
+      modelId: "oss-qwen-edit",
+      op: "edit",
+      loras: [{ file: "qwen-image-edit-2511-multiple-angles-lora.safetensors", url: "https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA/resolve/main/qwen-image-edit-2511-multiple-angles-lora.safetensors", strength: 1 }],
+      promptTemplate: "<sks> {option:angle} {option:height} {option:distance}. {prompt}",
+    },
+    parity: "Both engines run the same Multiple-Angles LoRA: hosted by fal on the cloud, added to Qwen-Image-Edit 2511 on the open engine (0.3 GB)",
   }),
   app({
     name: "Shots",
@@ -473,6 +497,31 @@ export const APPS: Preset[] = [
     parity: "Higgsfield renders it as an animated end-card video; Fuobe makes the still (animate it with Product 360)",
   }),
   app({
+    name: "Product Shot",
+    category: "Product",
+    description: "Your product photo, relit into a new scene",
+    icon: "Aperture",
+    hue: 30,
+    badges: ["new"],
+    inputs: [product, { key: "image2", label: "Scene reference", hint: "Optional: a photo of the setting you want", accept: "image", required: false }],
+    options: [
+      opt("scene", "Scene", [
+        ["Marble counter", "on a white marble kitchen counter, soft morning window light"],
+        ["Studio podium", "on a minimal stone podium in a studio, soft key light and gentle shadows"],
+        ["Nature", "outdoors on a mossy rock in a sunlit forest, dappled light"],
+        ["Beach", "on warm sand at the beach at golden hour, the sea softly blurred behind"],
+        ["Dark luxury", "on dark slate with dramatic rim light and reflections, luxury mood"],
+        ["Bathroom shelf", "on a clean bathroom shelf with plants, bright and airy"],
+      ]),
+    ],
+    userPrompt: "optional",
+    placeholder: "Or describe your own scene (optional)",
+    prompt: "The product {option:scene}. {prompt}",
+    cloud: { modelId: "bria-product-shot", op: "edit" },
+    open: { modelId: "oss-product-shot", op: "edit" },
+    parity: "The open version cuts the product out, puts it on white and relights it into the scene with Qwen-Image-Edit 2509 + the White_to_Scene LoRA; the scene reference photo is used on the cloud only",
+  }),
+  app({
     name: "Product Placement",
     category: "Product",
     description: "Place your product into any scene",
@@ -554,6 +603,19 @@ export const APPS: Preset[] = [
     prompt: "The product from the image rotates slowly 360 degrees on a turntable in a clean studio, consistent lighting, product details stay exact",
     cloud: VIDEO_CLOUD,
     open: VIDEO_OPEN,
+  }),
+  app({
+    name: "Image to 3D",
+    category: "Product",
+    description: "A 3D model of your product (.glb) to spin, download and animate",
+    icon: "Box",
+    hue: 240,
+    badges: ["new"],
+    inputs: [product],
+    prompt: "",
+    cloud: { modelId: "hunyuan-3d-3-1-pro", op: "image-to-3d" },
+    open: { modelId: "oss-trellis2", op: "image-to-3d" },
+    parity: "The open version (TRELLIS.2) also renders a turntable video; for cloud models the 3D page records one in your browser",
   }),
   videoApp({
     name: "Billboard Ad",
@@ -767,6 +829,8 @@ export const APPS: Preset[] = [
     ],
     prompt:
       "Dress the person from the first image in the garment from the second image. Keep the person's face, body, pose and background; reproduce the garment's fabric, color, pattern, logo and fit realistically, with natural folds and shadows.",
+    // FASHN Try-On 1.6 was built for exactly this (Garment / Quality settings); it takes no prompt.
+    cloud: { modelId: "fashn-tryon", op: "edit" },
   }),
   app({
     name: "Outfit Swap",
@@ -1608,8 +1672,10 @@ export const APPS: Preset[] = [
       "Create an exploded knolling layout of everything in the image: each object, garment and accessory separated and neatly arranged on a clean light background, each with a small label naming it. Keep every item's exact design, colors and logos.",
     parity: "Approximation: Higgsfield's AI Lens also identifies brands and prices; Fuobe only produces the breakdown image",
   }),
+  // Higgsfield's Virality Predictor (a brain-response model) is the /virality page: a labelled heuristic hook
+  // analysis. This app is the "make a stronger opening frame" step it links to.
   app({
-    name: "Virality Predictor",
+    name: "Hook Frame",
     category: "Utility",
     description: "Turn your opening frame into a stronger hook",
     icon: "TrendingUp",
@@ -1617,8 +1683,6 @@ export const APPS: Preset[] = [
     inputs: [{ key: "image", label: "Opening frame", hint: "The first frame of your video", accept: "image", required: true }],
     prompt:
       "Rework this opening frame into a scroll-stopping hook thumbnail: stronger contrast and color, clearer focal point on the face or product, a more expressive moment and bold composition. Keep the same people, product and setting; add no text.",
-    parity:
-      "Not reproducible: Higgsfield scores a clip with a proprietary engagement model (score, hold rate, heatmap). Fuobe has no analysis model, so this app only improves the hook frame",
   }),
   app({
     name: "Similarity Score",

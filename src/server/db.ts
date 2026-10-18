@@ -175,6 +175,21 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Translate & dub sessions and Katana jobs (av-tools): what the person asked for and the generation ids of each step.
+  `CREATE TABLE IF NOT EXISTS dub_sessions (
+    id TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS dub_sessions_updated ON dub_sessions(updated_at DESC);
+  CREATE TABLE IF NOT EXISTS katana_jobs (
+    id TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS katana_jobs_updated ON katana_jobs(updated_at DESC);`,
 ];
 
 declare global {
