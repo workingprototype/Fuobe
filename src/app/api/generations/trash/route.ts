@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { listGenerations } from "@/server/generations";
 import { emptyTrash, ensureTrashPurge, listOptionsFrom } from "@/server/library";
 
-/** The Trash, most recently deleted first (paging: before=<deletedAt>). Same filters as GET /api/generations. */
+/** The Trash, most recently deleted first (paging: before=<deletedAt>:<id> of the last row). Same filters as GET /api/generations. */
 export async function GET(request: Request) {
   await connection();
   ensureTrashPurge();

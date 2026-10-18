@@ -140,8 +140,13 @@ export interface ListOptions {
   trashed?: boolean;
   folderId?: string;
   limit?: number;
-  /** Paging cursor: made before this (deleted before, in the Trash). */
+  /**
+   * Paging cursor: made before this (deleted before, in the Trash). With `beforeId` it is the last
+   * row of the previous page, so rows sharing its timestamp (a bulk trash, a batch made in one
+   * millisecond) are paged by id instead of skipped.
+   */
   before?: number;
+  beforeId?: string;
   /** Date range on createdAt: since ≤ t < until. */
   since?: number;
   until?: number;
@@ -168,13 +173,18 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   if (o.status) add("g.status = ?", o.status);
   if (o.statuses?.length) oneOf("g.status", o.statuses);
   if (o.folderId) add("fi.folder_id = ?", o.folderId);
-  if (o.before) add(o.trashed ? "t.deleted_at < ?" : "g.created_at < ?", o.before);
+  if (o.before) {
+    const col = o.trashed ? "t.deleted_at" : "g.created_at";
+    if (o.beforeId) add(`(${col} < ? OR (${col} = ? AND g.id < ?))`, o.before, o.before, o.beforeId);
+    else add(`${col} < ?`, o.before);
+  }
   if (o.since) add("g.created_at >= ?", o.since);
   if (o.until) add("g.created_at < ?", o.until);
   const q = o.q?.trim();
   // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
   if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
-  const order = o.trashed ? "t.deleted_at DESC, g.created_at DESC" : "g.created_at DESC, g.id DESC";
+  // The cursor's order: timestamp, then id (both descending).
+  const order = o.trashed ? "t.deleted_at DESC, g.id DESC" : "g.created_at DESC, g.id DESC";
   const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ?`;
   return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
@@ -184,9 +194,40 @@ export function setFavorite(id: string, favorite: boolean): void {
 }
 
 /**
+ * Everywhere a stored file can still be in use, by URL (which ends in the asset id, …/<id>.png) or
+ * by id: other jobs' inputs and outputs, elements, Assist chats (attachments, results), Cinema
+ * covers, palettes and takes, canvas nodes. `except` names a column whose row belongs to the
+ * generation being purged (its own row and Cinema membership don't keep its files).
+ */
+const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
+  { table: "generations", cols: ["request_json", "outputs_json"], except: "id" },
+  { table: "characters", cols: ["reference_asset_ids_json", "loras_json", "lora_file"] },
+  { table: "trainings", cols: ["meta_json"] },
+  { table: "assist_threads", cols: ["messages_json", "items_json", "pending_json"] },
+  { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
+  { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
+  { table: "canvases", cols: ["graph_json"] },
+];
+
+/** Whether anything still refers to this stored file (see ASSET_REFS). */
+export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
+  for (const r of ASSET_REFS) {
+    const where = r.cols.map((c) => `instr(COALESCE(${c}, ''), @id) > 0`).join(" OR ");
+    const except = r.except ? ` AND ${r.except} != @g` : "";
+    try {
+      if (db().prepare(`SELECT 1 FROM ${r.table} WHERE (${where})${except} LIMIT 1`).get({ id: assetId, g: exceptGeneration })) return true;
+    } catch {
+      // A table or column this install doesn't have yet: nothing there to keep the file for.
+    }
+  }
+  return false;
+}
+
+/**
  * Delete for good (Trash → Delete forever, Empty trash, the 30-day purge): the row, its trash and
- * folder entries, and the output files nothing else still points at (an element's photos, another
- * job's inputs). Dependents still waiting on it fail ("An earlier step didn't finish").
+ * folder entries, and the output files nothing else still points at (assetInUse). Dependents still
+ * waiting on it fail ("An earlier step didn't finish"). Use deleteForever / emptyTrash in
+ * src/server/library.ts (they cancel running jobs first); moving to the Trash is trashGenerations.
  */
 export function deleteGeneration(id: string): void {
   const assets = db().prepare("SELECT id FROM assets WHERE generation_id = ?").all(id) as { id: string }[];
@@ -195,13 +236,7 @@ export function deleteGeneration(id: string): void {
     db().prepare("DELETE FROM generation_trash WHERE generation_id = ?").run(id);
     db().prepare("DELETE FROM folder_items WHERE generation_id = ?").run(id);
   })();
-  for (const a of assets) {
-    // File URLs end in the asset id (…/<id>.png), so the id finds both URL and id references.
-    const used =
-      db().prepare("SELECT 1 FROM generations WHERE instr(request_json, ?) > 0 OR instr(outputs_json, ?) > 0 LIMIT 1").get(a.id, a.id) ??
-      db().prepare("SELECT 1 FROM characters WHERE instr(reference_asset_ids_json, ?) > 0 LIMIT 1").get(a.id);
-    if (!used) deleteAsset(a.id);
-  }
+  for (const a of assets) if (!assetInUse(a.id, id)) deleteAsset(a.id);
 }
 
 // ---------------------------------------------------------------------------
