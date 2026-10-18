@@ -12,7 +12,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -144,8 +144,14 @@ export function Composer({ docked }: { docked: boolean }) {
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
-  const slots = preset?.inputs ?? config.slots;
   const opts = model?.options ?? {};
+  // Try-on names its images: "Person photo", then "Add garment" (instead of "Image" / "Add ref").
+  const baseSlots = preset?.inputs ?? config.slots;
+  const named = useMemo(
+    () => namedImageSlots(baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length),
+    [baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length],
+  );
+  const slots = named.slots;
   // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
   const refMax = !config.multiRef
     ? 0
@@ -332,7 +338,7 @@ export function Composer({ docked }: { docked: boolean }) {
           {config.multiRef && draft.refs.length < refMax && (
             <MediaSlot
               slotKey="refs"
-              label={config.multiRef.label}
+              label={named.refLabel ?? config.multiRef.label}
               kind={config.multiRef.kind ?? "image"}
               value={null}
               onFile={attach.addRefFile}

@@ -98,6 +98,21 @@ export function hiddenChanges(params: GenParams, negativePrompt: string, model?:
 const VOWEL = /^[aeiou]/i;
 const DETERMINER = /^(your|the|a|an|some|any|my|this|that)\b/i;
 
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/**
+ * Models that name their images (try-on: "person photo", then "garment") label the studio's image
+ * slots in that order, and the next reference tile after the `refs` already added ("Add garment").
+ * Same array when nothing changes.
+ */
+export function namedImageSlots(slots: InputSlot[], names: string[] | undefined, refLabel?: string, refs = 0): { slots: InputSlot[]; refLabel?: string } {
+  if (!names?.length) return { slots, refLabel };
+  let i = 0;
+  const named = slots.map((s) => (s.accept === "image" && s.key !== "mask" && s.key !== "sketch" && names[i] ? { ...s, label: sentence(names[i++]) } : s));
+  const next = names[i + refs];
+  return { slots: i ? named : slots, refLabel: refLabel && next ? `Add ${next}` : refLabel };
+}
+
 /** "Target photo" → "Add a target photo"; "Your clip" → "Add your clip"; "Image" → "Add an image". */
 export function slotMessage(label: string): string {
   const l = label.trim();
