@@ -9,7 +9,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { MediaThumb } from "@/components/studio/result-media";
 import { VideoTrimmer, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { LookCard } from "@/components/shorts/preset-card";
-import { ClipBar, ClipDrop, costText, Field, Segmented } from "@/components/shorts/ui";
+import { ClipBar, ClipDrop, costText, Field, Segmented, tabKeys } from "@/components/shorts/ui";
 import { clipDuration, useSourceClip } from "@/components/shorts/use-source-clip";
 import { uploadFile, useEngine } from "@/lib/api";
 import {
@@ -69,13 +69,14 @@ export function MixedStudio({ models }: { models: Record<Engine, RestyleModelInf
       <header className="sticky top-0 z-20 flex h-14 items-center gap-2 bg-background/85 px-3 backdrop-blur sm:px-6">
         <SidebarTrigger className="md:hidden" />
         <h1 className="sr-only font-heading text-[22px] leading-none sm:not-sr-only sm:truncate">Mixed Media</h1>
-        <div role="tablist" aria-label="Mixed Media" className="fade-x scrollbar-none flex h-8 min-w-0 items-center overflow-x-auto rounded-full bg-muted p-0.5 sm:ml-4">
+        <div role="tablist" aria-label="Mixed Media" onKeyDown={tabKeys} className="fade-x scrollbar-none flex h-8 min-w-0 items-center overflow-x-auto rounded-full bg-muted p-0.5 sm:ml-4">
           {TABS.map((t) => (
             <button
               key={t.id}
               role="tab"
               type="button"
               aria-selected={tab === t.id}
+              tabIndex={tab === t.id ? 0 : -1}
               onClick={() => pick(t.id)}
               className={cn("h-7 shrink-0 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground", tab === t.id && "bg-background text-foreground shadow-soft")}
             >

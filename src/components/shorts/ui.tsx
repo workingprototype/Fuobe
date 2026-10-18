@@ -48,6 +48,19 @@ export function Segmented<T extends string | number>({
   );
 }
 
+/** Tabs pattern for a role="tablist": arrows (and Home / End) move to the next tab and open it; only the open tab is a Tab stop. */
+export function tabKeys(e: React.KeyboardEvent<HTMLElement>) {
+  const step = ({ ArrowRight: 1, ArrowLeft: -1 } as Record<string, number>)[e.key];
+  if (step === undefined && e.key !== "Home" && e.key !== "End") return;
+  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+  if (!tabs.length) return;
+  e.preventDefault();
+  const at = tabs.indexOf(document.activeElement as HTMLElement);
+  const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (Math.max(at, 0) + step + tabs.length) % tabs.length;
+  tabs[next].focus();
+  tabs[next].click();
+}
+
 /** A labelled block in a setup panel. */
 export function Field({ label, htmlFor, hint, children }: { label: string; htmlFor?: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (

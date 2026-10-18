@@ -28,7 +28,7 @@ import { CustomPresetDialog } from "./custom-preset-dialog";
 import { useShortsActions, useShortsEstimate, useShortsPresets, type ShortsBody } from "./hooks";
 import { CreateCard, CustomCard, LookCard } from "./preset-card";
 import { ShortsHistory } from "./history";
-import { ClipBar, ClipDrop, costText, Field, Segmented, Steps } from "./ui";
+import { ClipBar, ClipDrop, costText, Field, Segmented, Steps, tabKeys } from "./ui";
 import { clipDuration, useSourceClip } from "./use-source-clip";
 
 export type ModelChoice = RestyleModelInfo;
@@ -72,13 +72,14 @@ export function ShortsStudio({ models }: { models: Record<Engine, ModelChoice[]>
       <header className="sticky top-0 z-20 flex h-14 items-center gap-2 bg-background/85 px-3 backdrop-blur sm:px-6">
         <SidebarTrigger className="md:hidden" />
         <h1 className="truncate font-heading text-[22px] leading-none">Shorts Studio</h1>
-        <div role="tablist" aria-label="Shorts Studio" className="ml-2 flex h-8 items-center rounded-full bg-muted p-0.5 sm:ml-4">
+        <div role="tablist" aria-label="Shorts Studio" onKeyDown={tabKeys} className="ml-2 flex h-8 items-center rounded-full bg-muted p-0.5 sm:ml-4">
           {(["presets", "history"] as const).map((t) => (
             <button
               key={t}
               role="tab"
               type="button"
               aria-selected={tab === t}
+              tabIndex={tab === t ? 0 : -1}
               onClick={() => pickTab(t)}
               className={cn("h-7 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground", tab === t && "bg-background text-foreground shadow-soft")}
             >
