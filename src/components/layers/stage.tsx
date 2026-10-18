@@ -89,13 +89,18 @@ export function Stage(p: StageProps) {
     setView({ zoom, x: (size.w - doc.width * zoom) / 2, y: (size.h - doc.height * zoom) / 2 });
   }, [size.w, size.h, doc.width, doc.height]);
 
-  // Fit on first layout and whenever the canvas changes size (Expand & Crop).
+  // Fit on first layout and whenever the canvas changes size (Expand & Crop); while the user hasn't
+  // zoomed or panned, keep fitting as the stage itself resizes (a tool's form opening, the window).
+  const userView = useRef(false);
   useEffect(() => {
-    const key = `${doc.width}x${doc.height}|${size.w > 0}`;
-    if (!size.w || fitted.current === key) return;
-    fitted.current = key;
+    const key = `${doc.width}x${doc.height}`;
+    if (!size.w || !size.h) return;
+    if (fitted.current !== key) {
+      fitted.current = key;
+      userView.current = false;
+    } else if (userView.current) return;
     fit();
-  }, [doc.width, doc.height, size.w, fit]);
+  }, [doc.width, doc.height, size.w, size.h, fit]);
 
   const nodes = useMemo(() => {
     const list = [...doc.nodes].sort((a, b) => a.z - b.z).map((n) => (live && n.id === live.id ? live : n));
@@ -132,6 +137,7 @@ export function Stage(p: StageProps) {
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      userView.current = true;
       const r = el.getBoundingClientRect();
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
@@ -149,15 +155,21 @@ export function Stage(p: StageProps) {
 
   // Space held = hand tool; zoom keys.
   const zoomBy = useCallback(
-    (k: number) =>
+    (k: number) => {
+      userView.current = true;
       setView((v) => {
         const zoom = Math.min(16, Math.max(0.05, v.zoom * k));
         const cx = size.w / 2;
         const cy = size.h / 2;
         return { zoom, x: cx - ((cx - v.x) / v.zoom) * zoom, y: cy - ((cy - v.y) / v.zoom) * zoom };
-      }),
+      });
+    },
     [size.w, size.h],
   );
+  const refit = useCallback(() => {
+    userView.current = false;
+    fit();
+  }, [fit]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -166,7 +178,7 @@ export function Stage(p: StageProps) {
         e.preventDefault();
       } else if (e.key === "+" || e.key === "=") zoomBy(1.25);
       else if (e.key === "-") zoomBy(0.8);
-      else if (e.key === "0") fit();
+      else if (e.key === "0") refit();
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpace(false);
@@ -177,7 +189,7 @@ export function Stage(p: StageProps) {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [zoomBy, fit]);
+  }, [zoomBy, refit]);
 
   const toDoc = (clientX: number, clientY: number): [number, number] => {
     const r = box.current!.getBoundingClientRect();
@@ -240,6 +252,7 @@ export function Stage(p: StageProps) {
       setDragKind(d.kind);
     };
     if (panning) {
+      userView.current = true;
       begin({ kind: "pan", sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y });
       return;
     }
@@ -451,7 +464,7 @@ export function Stage(p: StageProps) {
       </div>
 
       {/* Canvas tools */}
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background/95 p-1 shadow-normal backdrop-blur">
+      <div className="scrollbar-none absolute bottom-3 left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-0.5 overflow-x-auto rounded-full border bg-background/95 p-1 shadow-normal backdrop-blur">
         {!p.readOnly && (
           <>
             <ModeButton icon={MousePointer2} label="Select and move" k="V" active={mode === "select"} onClick={() => p.setMode("select")} />
@@ -459,7 +472,7 @@ export function Stage(p: StageProps) {
             <ModeButton icon={Brush} label={selectedId ? "Brush: paint the mask back" : "Brush (pick a layer first)"} k="B" active={mode === "brush"} disabled={!selectedId} onClick={() => p.setMode("brush")} />
             <ModeButton icon={Eraser} label={selectedId ? "Eraser: hide parts of the layer" : "Eraser (pick a layer first)"} k="E" active={mode === "eraser"} disabled={!selectedId} onClick={() => p.setMode("eraser")} />
             {(mode === "brush" || mode === "eraser") && (
-              <div className="flex w-32 items-center gap-2 px-2">
+              <div className="flex w-32 shrink-0 items-center gap-2 px-2">
                 <Slider aria-label="Brush size" min={4} max={Math.max(64, Math.round(Math.max(doc.width, doc.height) / 6))} step={1} value={[p.brushSize]} onValueChange={([v]) => p.setBrushSize(v)} />
               </div>
             )}
@@ -467,11 +480,11 @@ export function Stage(p: StageProps) {
           </>
         )}
         <ModeButton icon={Minus} label="Zoom out" k="−" onClick={() => zoomBy(0.8)} />
-        <button type="button" onClick={fit} className="h-8 min-w-12 rounded-full px-1.5 font-mono text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Fit to screen">
+        <button type="button" onClick={refit} className="h-8 min-w-12 shrink-0 rounded-full px-1.5 font-mono text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Fit to screen">
           {Math.round(view.zoom * 100)}%
         </button>
         <ModeButton icon={Plus} label="Zoom in" k="+" onClick={() => zoomBy(1.25)} />
-        <ModeButton icon={Maximize} label="Fit to screen" k="0" onClick={fit} />
+        <ModeButton icon={Maximize} label="Fit to screen" k="0" onClick={refit} />
       </div>
     </div>
   );
@@ -488,7 +501,7 @@ function ModeButton({ icon: Icon, label, k, active, disabled, onClick }: { icon:
           disabled={disabled}
           onClick={onClick}
           className={cn(
-            "grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent",
+            "grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent",
             active && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover",
           )}
         >

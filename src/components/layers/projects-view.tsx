@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton";
 import { LibraryGrid } from "@/components/studio/media-slot";
 import { PageShell } from "@/components/page-shell";
-import { uploadFile } from "@/lib/api";
+import { uploadFile, useHydrated } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
 import type { LayerProject } from "@/lib/layers";
 import { cn } from "@/lib/utils";
@@ -162,6 +162,7 @@ function ProjectsInner() {
   const { rename, remove } = useLayerActions();
   const { busy, open, openFile } = useOpenImage();
   const file = useRef<HTMLInputElement>(null);
+  const hydrated = useHydrated();
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState<LayerProject | null>(null);
   const [draft, setDraft] = useState("");
@@ -214,19 +215,22 @@ function ProjectsInner() {
           <p className="mx-auto mt-2 max-w-[560px] text-body text-pretty text-muted-foreground">Separate, edit, and rebuild any image. Every element, now yours to edit.</p>
           <Capabilities />
           <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
-            <input
-              ref={file}
-              type="file"
-              accept={IMAGE_TYPES}
-              className="sr-only"
-              tabIndex={-1}
-              aria-hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) void openFile(f);
-              }}
-            />
+            {/* Mounted after hydration: browsers may touch file inputs (caret colour) before React takes over. */}
+            {hydrated && (
+              <input
+                ref={file}
+                type="file"
+                accept={IMAGE_TYPES}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void openFile(f);
+                }}
+              />
+            )}
             <Button size="lg" className="rounded-full px-5" onClick={() => file.current?.click()} disabled={!!busy}>
               {busy ? <Loader2 className="animate-spin" /> : <Upload />} Upload Media
             </Button>

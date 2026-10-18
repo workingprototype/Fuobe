@@ -643,7 +643,7 @@ export function LayersPanel() {
   };
 
   return (
-    <aside className="flex min-h-0 w-[300px] shrink-0 flex-col border-l bg-background" aria-label="Layers panel">
+    <aside className="flex min-h-0 w-[264px] shrink-0 flex-col border-l bg-background xl:w-[300px]" aria-label="Layers panel">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
         <h2 className="text-[13px] font-semibold">Layers</h2>
         <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>

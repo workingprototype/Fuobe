@@ -592,6 +592,12 @@ export function startJob(id: string, input: LayerJobInput): LayerJob {
     if (e instanceof LayersError) throw e;
     throw new LayersError((e as Error).message || "Could not start the split");
   }
+  // Starting the same tool again on the same target retires its failed or canceled run.
+  const settled = jobs.map((j) => {
+    if (j.state !== "pending" || j.tool !== input.tool || (j.nodeId ?? null) !== (input.nodeId ?? null)) return j;
+    const r = resultOf(j);
+    return r && (r.status === "failed" || r.status === "canceled") ? { ...j, state: "dismissed" as const } : j;
+  });
   const job: LayerJob = {
     id: nanoid(8),
     tool: input.tool,
@@ -604,7 +610,7 @@ export function startJob(id: string, input: LayerJobInput): LayerJob {
     state: "pending",
     createdAt: Date.now(),
   };
-  saveJobs(id, [...jobs, job]);
+  saveJobs(id, [...settled, job]);
   return { ...job, result: resultOf(job) };
 }
 

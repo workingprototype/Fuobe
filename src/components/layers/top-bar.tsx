@@ -49,7 +49,7 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
       <DropdownMenuTrigger asChild>
         <Button size={compact ? "icon" : "sm"} variant="secondary" className="rounded-full" disabled={busy} aria-label="Download">
           {busy ? <Loader2 className="animate-spin" /> : <Download />}
-          {!compact && "Download"}
+          {!compact && <span className="hidden xl:inline">Download</span>}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

@@ -1033,7 +1033,8 @@ export function ToolRail() {
   const current = TOOLS.find((t) => t.id === tool);
   const running = jobs.filter(isRunning).length;
   return (
-    <aside className="flex min-h-0 w-[280px] shrink-0 flex-col border-r bg-background" aria-label="Tools">
+    // Below 1280 px the list folds to icons (tooltips name them) so the canvas keeps its room; a tool's form stays readable.
+    <aside className={cn("flex min-h-0 shrink-0 flex-col border-r bg-background", current ? "w-[256px] xl:w-[280px]" : "w-[60px] xl:w-[280px]")} aria-label="Tools">
       {current ? (
         <>
           <div className="flex h-12 shrink-0 items-center gap-1 px-2">
@@ -1075,11 +1076,12 @@ export function ToolRail() {
         </>
       ) : (
         <>
-          <div className="flex h-12 shrink-0 items-center gap-2 px-3">
-            <h2 className="text-[13px] font-semibold">Tools</h2>
+          <div className="flex h-12 shrink-0 items-center justify-center gap-2 px-3 xl:justify-start">
+            <h2 className="hidden text-[13px] font-semibold xl:block">Tools</h2>
             {running > 0 && (
-              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-brand-faint px-2 py-0.5 text-[11px] font-medium text-brand-text">
-                <Loader2 className="size-3 animate-spin" /> {running} running
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-faint px-2 py-0.5 text-[11px] font-medium text-brand-text xl:ml-auto" title={`${running} running`}>
+                <Loader2 className="size-3 animate-spin" /> {running}
+                <span className="hidden xl:inline">running</span>
               </span>
             )}
           </div>
@@ -1087,28 +1089,36 @@ export function ToolRail() {
             <ul className="space-y-0.5 px-2 pb-4">
               {TOOLS.map((t) => (
                 <li key={t.id}>
-                  <button
-                    type="button"
-                    disabled={!!mask}
-                    title={mask ? "Unavailable while editing a mask" : undefined}
-                    onClick={() => openTool(t.id)}
-                    className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent"
-                  >
-                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
-                      <t.icon className="size-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5 text-[13px] font-medium">
-                        {t.label}
-                        {t.isNew && <span className="rounded-full bg-highlight px-1.5 py-px text-[10px] font-semibold text-highlight-foreground">New</span>}
-                      </span>
-                      <span className="block truncate text-[11px] text-muted-foreground">{t.hint}</span>
-                    </span>
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        disabled={!!mask}
+                        aria-label={t.label}
+                        onClick={() => openTool(t.id)}
+                        className="flex w-full items-center gap-3 rounded-lg px-1.5 py-2 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent xl:px-2.5"
+                      >
+                        <span className="relative grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
+                          <t.icon className="size-4" />
+                          {t.isNew && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-highlight ring-2 ring-background xl:hidden" aria-hidden />}
+                        </span>
+                        <span className="hidden min-w-0 flex-1 xl:block">
+                          <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                            {t.label}
+                            {t.isNew && <span className="rounded-full bg-highlight px-1.5 py-px text-[10px] font-semibold text-highlight-foreground">New</span>}
+                          </span>
+                          <span className="block truncate text-[11px] text-muted-foreground">{t.hint}</span>
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="xl:hidden">
+                      {mask ? "Unavailable while editing a mask" : `${t.label} — ${t.hint}`}
+                    </TooltipContent>
+                  </Tooltip>
                 </li>
               ))}
             </ul>
-            <p className="px-4 pb-4 text-[11px] text-pretty text-subtle-foreground">Tools act on the selected layer. Deselect the layer to use a tool on the whole image.</p>
+            <p className="hidden px-4 pb-4 text-[11px] text-pretty text-subtle-foreground xl:block">Tools act on the selected layer. Deselect the layer to use a tool on the whole image.</p>
           </div>
         </>
       )}

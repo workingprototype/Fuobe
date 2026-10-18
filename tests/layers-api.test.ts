@@ -257,6 +257,14 @@ describe("layers API", () => {
     const second = (await res.json()) as LayerJob;
     res = await job.PATCH(req("PATCH", { state: "dismissed" }), ctx({ id, jobId: second.id }));
     expect(((await res.json()) as LayerJob).state).toBe("dismissed");
+    // A run that failed or was canceled elsewhere is retired when the tool runs again on that layer.
+    const third = (await (await jobs.POST(req("POST", { ...body, settings: {} }), ctx({ id }))).json()) as LayerJob;
+    await gens.cancelGeneration(third.generationIds[0]);
+    res = await jobs.POST(req("POST", { ...body, settings: {} }), ctx({ id }));
+    expect(res.status).toBe(201);
+    const after = (await (await one.GET(req("GET"), ctx({ id }))).json()) as LayerProjectView;
+    expect(after.jobs.find((j) => j.id === third.id)?.state).toBe("dismissed");
+    for (const j of after.jobs.filter((x) => x.state === "pending")) await job.DELETE(req("DELETE"), ctx({ id, jobId: j.id }));
     // Validation errors come back as 400 with a reason.
     res = await jobs.POST(req("POST", { tool: "regional", engine: "cloud", image: source, frame: [0, 0, 10, 10] }), ctx({ id }));
     expect(res.status).toBe(400);

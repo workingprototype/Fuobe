@@ -74,7 +74,7 @@ function EditorSkeleton() {
 
 export function LayersEditor({ id, models }: { id: string; models: Record<string, LayerModelInfo> }) {
   const q = useLayerProject(id);
-  if (q.data) return <Editor key={id} initial={q.data} models={models} />;
+  if (q.data) return <Editor key={id} view={q.data} refetch={q.refetch} models={models} />;
   if (q.error) {
     if (q.error instanceof LayersRequestError && q.error.status === 404) {
       return <NotFoundState title="This project doesn't exist">It may have been deleted. The images it was opened on are still in your library.</NotFoundState>;
@@ -84,10 +84,10 @@ export function LayersEditor({ id, models }: { id: string; models: Record<string
   return <EditorSkeleton />;
 }
 
-function Editor({ initial, models }: { initial: LayerProjectView; models: Record<string, LayerModelInfo> }) {
+function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: () => Promise<{ data?: LayerProjectView }>; models: Record<string, LayerModelInfo> }) {
+  // The document is the editor's once loaded; later fetches bring jobs and versions.
+  const [initial] = useState(view);
   const id = initial.project.id;
-  const q = useLayerProject(id);
-  const view = q.data ?? initial;
   const actions = useLayerActions();
   const isMobile = useIsMobile();
   const [engine, setEngine] = useEngine();
@@ -132,7 +132,6 @@ function Editor({ initial, models }: { initial: LayerProjectView; models: Record
     },
     [setHead],
   );
-  const refetch = q.refetch;
 
   // ---- Autosave into the head version (debounced; flushed with keepalive when leaving).
   const pending = useRef<LayerDoc | null>(null);
