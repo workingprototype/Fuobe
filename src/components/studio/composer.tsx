@@ -123,7 +123,8 @@ export function Composer({ docked }: { docked: boolean }) {
 
   const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
-  const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: config.ops }), [catalog.models, config.kind, config.ops]);
+  const pickerOps = config.pickerOps ?? config.ops;
+  const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: pickerOps }), [catalog.models, config.kind, pickerOps]);
   const model: ModelDef | undefined = catalog.getModel(draft.modelId);
   const presetLoading = !!draft.presetId && !preset && !catalog.complete;
 
@@ -192,8 +193,9 @@ export function Composer({ docked }: { docked: boolean }) {
       planError = (e as Error).message;
     }
   }
+  // Models that take no prompt (try-on, 3D, transcription, upscalers) never ask for one.
   const promptMissing =
-    !config.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
+    !config.promptOptional && !opts.promptless && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
     loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
@@ -255,7 +257,7 @@ export function Composer({ docked }: { docked: boolean }) {
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none";
+  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
   const effectiveOp = studioOp ?? op;
   const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
