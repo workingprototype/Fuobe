@@ -2,6 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 
@@ -189,6 +190,95 @@ describe("LLM provider", () => {
 
   it("asks for a language before translating", () => {
     expect(() => gens.createGenerations({ feature: "dub", modelId: "text-llm", op: "translate", prompt: "x" })).toThrow(/Pick a language/);
+  });
+
+  it("retries merged subtitle lines in smaller pieces, then cue by cue, one request at a time on Ollama", async () => {
+    // A small local model: serves one request at a time, and merges every numbered batch into one line.
+    let inFlight = 0;
+    let most = 0;
+    const users: string[] = [];
+    const slow = http.createServer((req, res) => {
+      if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [] }));
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        inFlight++;
+        most = Math.max(most, inFlight);
+        const user = (JSON.parse(body) as { messages: { content: string }[] }).messages[1].content;
+        users.push(user);
+        const lines = user.split("\n");
+        const content = /^\[\d+\]/.test(user) && lines.length > 1 ? `${lines[0]} ${lines.slice(1).map((l) => l.replace(/^\[\d+\]\s*/, "")).join(" ")}` : `(es) ${user.replace(/^\[\d+\]\s*/, "")}`;
+        setTimeout(() => {
+          inFlight--;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ message: { content } }));
+        }, 15);
+      });
+    });
+    await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+    try {
+      setSetting("ollamaUrl", `http://127.0.0.1:${(slow.address() as { port: number }).port}`);
+      await llm.probeOllama(true);
+      const cues = Array.from({ length: 35 }, (_, i) => ({ start: i * 2, end: i * 2 + 1.5, text: `Line ${i + 1}` }));
+      const [g] = gens.createGenerations({ feature: "dub", modelId: "oss-text-llm", op: "translate", prompt: JSON.stringify(cues), params: { targetLanguage: "Spanish" } });
+      const done = await settle(g.id);
+      expect(done.status, done.error ?? "").toBe("succeeded");
+      expect(done.outputs[0].meta?.cues).toEqual(cues.map((c) => ({ ...c, text: `(es) ${c.text}` })));
+      // Never more than one request at Ollama, so no request's timeout runs out while it queues.
+      expect(most).toBe(1);
+      // 30 → three tries of 10 → cue by cue; the last 5 go cue by cue straight away.
+      expect(users.filter((u) => u.split("\n").length === 30)).toHaveLength(1);
+      expect(users.filter((u) => u.split("\n").length === 10)).toHaveLength(3);
+      expect(users.filter((u) => u.split("\n").length === 5)).toHaveLength(1);
+      expect(users.filter((u) => !u.startsWith("["))).toHaveLength(35);
+    } finally {
+      slow.close();
+    }
+  });
+
+  it("asks Ollama itself the first time it routes to a new address, instead of falling back to demo text", async () => {
+    // Ollama in its own thread, so it can answer while routing waits for it.
+    const worker = new Worker(
+      `const http = require("node:http");
+      const { parentPort } = require("node:worker_threads");
+      const s = http.createServer((req, res) => {
+        if (req.url === "/api/tags") return res.end(JSON.stringify({ models: [] }));
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => res.end(JSON.stringify({ message: { content: "(threaded) " + JSON.parse(body).messages[1].content } })));
+      });
+      s.listen(0, "127.0.0.1", () => parentPort.postMessage(s.address().port));`,
+      { eval: true },
+    );
+    try {
+      const port = await new Promise<number>((r) => worker.once("message", r));
+      // Just changed in Settings: no probe has seen this address yet.
+      setSetting("ollamaUrl", `http://127.0.0.1:${port}`);
+      const [g] = gens.createGenerations({ feature: "ads", modelId: "oss-text-llm", op: "write", prompt: "A tagline for a bakery" });
+      expect(g.provider).toBe("llm");
+      expect((await settle(g.id)).outputs[0].text).toBe("(threaded) A tagline for a bakery");
+    } finally {
+      await worker.terminate();
+    }
+  });
+
+  it("keeps long text out of the feed (cut inline, whole in its file) and chains the whole text", async () => {
+    await useOllama(true);
+    const brief = "Make it longer. ".repeat(5_000); // 80k characters
+    const [g] = gens.createGenerations({ feature: "ads", modelId: "oss-text-llm", op: "write", prompt: brief });
+    const done = await settle(g.id);
+    expect(done.status, done.error ?? "").toBe("succeeded");
+    const out = done.outputs[0];
+    expect(out.text).toHaveLength(gens.MAX_INLINE_TEXT);
+    expect(out.meta).toMatchObject({ truncated: true });
+    const { readRef } = await import("@/server/storage");
+    const full = (await readRef(out.url)).data.toString("utf8");
+    expect(full.length).toBeGreaterThan(gens.MAX_INLINE_TEXT);
+    expect(full.startsWith(out.text!)).toBe(true);
+    // The next step reads the whole text from the file.
+    const [next] = gens.createGenerations({ feature: "ads", modelId: "oss-text-llm", op: "write", prompt: "{text}", chain: [{ slot: "prompt" }] }, { dependsOn: g.id });
+    const chained = await settle(next.id);
+    expect(chained.request.prompt).toBe(full);
   });
 
   it("fails a job that a restart interrupted", async () => {

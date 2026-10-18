@@ -1,4 +1,5 @@
 import "server-only";
+import { Worker } from "node:worker_threads";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { cueText, parseCues, toSrt, type Cue } from "@/lib/cues";
@@ -50,11 +51,38 @@ export async function probeOllama(force = false): Promise<boolean> {
   return ok;
 }
 
+const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
+const flag = new Int32Array(workerData.sab);
+fetch(workerData.url, { signal: AbortSignal.timeout(workerData.timeout) })
+  .then((r) => Atomics.store(flag, 0, r.ok ? 1 : 2), () => Atomics.store(flag, 0, 2))
+  .finally(() => Atomics.notify(flag, 0));`;
+
+/** Blocking check (a few ms for a refused port, at most `timeoutMs` for a host that doesn't answer). */
+function probeOllamaSync(url: string, timeoutMs = 1500): boolean {
+  let ok = false;
+  try {
+    const sab = new SharedArrayBuffer(4);
+    const flag = new Int32Array(sab);
+    const worker = new Worker(PROBE_WORKER, { eval: true, workerData: { sab, url: `${url}/api/tags`, timeout: timeoutMs } });
+    Atomics.wait(flag, 0, 0, timeoutMs + 1000);
+    ok = Atomics.load(flag, 0) === 1;
+    void worker.terminate();
+  } catch {}
+  globalThis.__fuobeOllamaReach = { ok, at: Date.now(), url };
+  return ok;
+}
+
+/**
+ * Routing is synchronous, so it reads the cached answer, refreshed in the background. The first
+ * check for an address (right after boot, or after the Ollama URL changes in Settings) waits for a
+ * real answer instead: a translate posted then must not fall back to demo text while Ollama is up.
+ */
 function ollamaReady(): boolean {
   const cur = globalThis.__fuobeOllamaReach;
   const url = ollamaUrl();
-  if (!cur || cur.url !== url || Date.now() - cur.at > PROBE_MS) void probeOllama();
-  return !!cur && cur.url === url && cur.ok;
+  if (!cur || cur.url !== url) return probeOllamaSync(url);
+  if (Date.now() - cur.at > PROBE_MS) void probeOllama();
+  return cur.ok;
 }
 
 /**
@@ -179,6 +207,8 @@ const WRITE_SYSTEM = `You are a writer for a video and image studio: scripts, vo
 - Reply with the text only: no preamble, no notes, no quotes around it.`;
 
 const CUE_BATCH = 30;
+/** When a model merges or drops numbered lines, the batch is retried in pieces this size, then cue by cue. */
+const CUE_RETRY = 10;
 const CHUNK_CHARS = 8000;
 
 /** Plain text in pieces that fit one call: paragraphs grouped up to ~8k characters. */
@@ -206,16 +236,51 @@ function readNumbered(answer: string, from: number, count: number): string[] | n
   return out.every((x) => x !== undefined && x !== "") ? (out as string[]) : null;
 }
 
-export async function translateCues(cues: Cue[], lang: string, from: string | undefined, ask: (system: string, user: string) => Promise<string>, onProgress?: (done: number) => void): Promise<Cue[]> {
+/** Run `f` over `items` with at most `limit` calls in flight, keeping the order. */
+async function pool<T, R>(items: T[], limit: number, f: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await f(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
+
+export interface TranslateCuesOptions {
+  /** Requests in flight at once for cue-by-cue translation (1 for Ollama, which serves one at a time). */
+  concurrency?: number;
+  onProgress?: (done: number) => void;
+}
+
+/**
+ * Translate subtitles in numbered batches, keeping each cue's timing. A batch whose answer has lines
+ * merged or missing (small local models do this) is retried in smaller numbered pieces (30 → 10),
+ * and only then cue by cue, a few at a time: a local model queues parallel requests behind each
+ * other, and each request's timeout runs from when it was sent.
+ */
+export async function translateCues(cues: Cue[], lang: string, from: string | undefined, ask: (system: string, user: string) => Promise<string>, opts: TranslateCuesOptions = {}): Promise<Cue[]> {
+  const numbered = async (batch: Cue[], first: number): Promise<string[] | null> =>
+    readNumbered(await ask(cuesSystem(lang, from), batch.map((c, k) => `[${first + k}] ${c.text.trim().replace(/\n/g, " <br> ")}`).join("\n")), first, batch.length);
+  const run = async (batch: Cue[], first: number, size: number): Promise<string[]> => {
+    const lines = await numbered(batch, first);
+    if (lines) return lines;
+    if (size > CUE_RETRY && batch.length > CUE_RETRY) {
+      const out: string[] = [];
+      for (let k = 0; k < batch.length; k += CUE_RETRY) out.push(...(await run(batch.slice(k, k + CUE_RETRY), first + k, CUE_RETRY)));
+      return out;
+    }
+    return pool(batch, opts.concurrency ?? 1, (c) => ask(translateSystem(lang, from), c.text));
+  };
   const out: Cue[] = [];
   for (let i = 0; i < cues.length; i += CUE_BATCH) {
     const batch = cues.slice(i, i + CUE_BATCH);
-    const answer = await ask(cuesSystem(lang, from), batch.map((c, k) => `[${i + k + 1}] ${c.text.trim().replace(/\n/g, " <br> ")}`).join("\n"));
-    let lines = readNumbered(answer, i + 1, batch.length);
-    // The model merged or dropped a line: translate this batch cue by cue instead.
-    if (!lines) lines = await Promise.all(batch.map((c) => ask(translateSystem(lang, from), c.text)));
-    batch.forEach((c, k) => out.push({ start: c.start, end: c.end, text: lines![k].replace(/\s*<br>\s*/gi, "\n").trim() }));
-    onProgress?.(out.length);
+    const lines = await run(batch, i + 1, CUE_BATCH);
+    batch.forEach((c, k) => out.push({ start: c.start, end: c.end, text: lines[k].replace(/\s*<br>\s*/gi, "\n").trim() }));
+    opts.onProgress?.(out.length);
   }
   return out;
 }
@@ -247,7 +312,8 @@ async function runJob(op: string, input: GenInput, backends: Backend[], job: Llm
   const from = input.sourceLanguage;
   const cues = parseCues(source);
   if (cues) {
-    const translated = await translateCues(cues, lang, from, ask, (done) => (job.progress = Math.min(0.95, done / cues.length)));
+    // Claude takes a few cues at once; Ollama works through requests one by one.
+    const translated = await translateCues(cues, lang, from, ask, { concurrency: backends[0] === "claude" ? 4 : 1, onProgress: (done) => (job.progress = Math.min(0.95, done / cues.length)) });
     return [textOutput(cueText(translated), translated, { language: lang })];
   }
   const parts = chunks(source);
