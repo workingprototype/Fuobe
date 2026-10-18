@@ -406,6 +406,8 @@ export function useElement(id: string) {
   return useQuery({
     queryKey: ["elements", id],
     queryFn: async () => json<StudioElement>(await fetch(`/api/elements/${id}`)),
+    // An unknown element is a 404 page, not a network hiccup: don't retry it.
+    retry: (n, e) => !/not found|\(404\)/i.test((e as Error).message) && n < 1,
     // Pick up the trained identity as soon as a training job finishes.
     refetchInterval: (q) => (q.state.data?.status === "training" ? 3000 : false),
   });

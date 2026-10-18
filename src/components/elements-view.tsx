@@ -29,6 +29,7 @@ import { ELEMENT_ICONS } from "@/components/studio/prompt-input";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import { useDeleteElement, useElements, useSaveElement } from "@/lib/api";
 import { ELEMENT_KINDS, elementKindInfo, handleFor, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 const TIPS: Record<ElementKind, string> = {
@@ -229,9 +230,9 @@ function HandleCopy({ handle }: { handle: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
-      onClick={(e) => {
+      onClick={async (e) => {
         e.preventDefault();
-        void navigator.clipboard?.writeText(`@${handle}`);
+        if (!(await copyText(`@${handle}`))) return void toast.error("Couldn’t copy — select the handle instead");
         setDone(true);
         setTimeout(() => setDone(false), 1200);
       }}
@@ -254,7 +255,7 @@ function ElementCard({ el }: { el: StudioElement }) {
           {el.references[0] && <audio src={el.references[0]} controls className="w-full" />}
         </div>
       ) : (
-        <Link href={`/elements/${el.id}`} className="block">
+        <Link href={`/elements/${el.id}`} className="block" aria-label={`Open ${el.name}`}>
           <div className="grid aspect-square grid-cols-2 grid-rows-2 gap-0.5 bg-muted">
             {el.references.length ? (
               el.references.slice(0, 4).map((r, i, arr) => (

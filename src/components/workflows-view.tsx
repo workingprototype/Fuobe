@@ -3,13 +3,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Circle, CircleAlert, Copy, ExternalLink, RotateCcw, Search, Workflow } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useProgressive } from "@/components/use-progressive";
+import { copyText } from "@/lib/clipboard";
 import type { ManifestWorkflow } from "@/lib/comfy";
 import { cn } from "@/lib/utils";
+import { capabilityGroup, usedByIndex, WORKFLOW_GROUPS, type ComfyRoute } from "@/lib/workflow-usage";
 
 type WF = Omit<ManifestWorkflow, "models"> & { models: (ManifestWorkflow["models"][number] & { present: boolean | null })[] };
 
@@ -20,28 +23,12 @@ interface ComfyStatus {
   workflows: WF[];
 }
 
-/** An open model's ComfyUI route, from the catalog on the server ("video-concat-{n}" style endpoints match by pattern). */
-export interface ComfyRoute {
-  endpoint: string;
-  name: string;
-}
-
 function downloadScript(wf: WF): string {
   const lines = wf.models
     .filter((m) => m.url && m.present !== true)
     .map((m) => `mkdir -p "$COMFYUI/models/${m.folder}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`);
   const nodes = wf.customNodes.map((n) => `git -C "$COMFYUI/custom_nodes" clone ${n.repo}`);
   return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...nodes, ...lines].join("\n");
-}
-
-export function usedByIndex(routes: ComfyRoute[]) {
-  const exact = new Map<string, string[]>();
-  const patterns: { re: RegExp; name: string }[] = [];
-  for (const r of routes) {
-    if (r.endpoint.includes("{n}")) patterns.push({ re: new RegExp(`^${r.endpoint.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace("{n}", "\\d")}$`), name: r.name });
-    else exact.set(r.endpoint, [...(exact.get(r.endpoint) ?? []), r.name]);
-  }
-  return (id: string) => [...new Set([...(exact.get(id) ?? []), ...patterns.filter((p) => p.re.test(id)).map((p) => p.name)])];
 }
 
 async function fetchStatus(): Promise<ComfyStatus> {
@@ -58,7 +45,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
     <article className="flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1 basis-48">
-          <h3 className="font-medium break-words">{wf.title}</h3>
+          <h2 className="font-medium break-words">{wf.title}</h2>
           <p className="font-mono text-[11px] break-all text-muted-foreground">{wf.id}</p>
         </div>
         <div className="flex shrink-0 gap-1">
@@ -118,9 +105,9 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
           variant="secondary"
           size="sm"
           className="max-w-full"
-          onClick={() => {
-            void navigator.clipboard.writeText(downloadScript(wf));
-            toast("Install commands copied");
+          onClick={async () => {
+            if (await copyText(downloadScript(wf))) toast("Install commands copied");
+            else toast.error("Couldn’t copy — your browser blocked the clipboard");
           }}
         >
           <Copy /> <span className="truncate">{missing ? `Copy install commands (${missing} missing)` : "Copy install commands"}</span>
@@ -133,13 +120,28 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
 export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
   const q = useQuery({ queryKey: ["comfyui"], queryFn: fetchStatus });
   const [search, setSearch] = useState("");
+  const [cap, setCap] = useState("All");
   const term = useDeferredValue(search.trim().toLowerCase());
   const usedBy = useMemo(() => usedByIndex(routes), [routes]);
   const workflows = useMemo(() => q.data?.workflows ?? [], [q.data]);
+  // Filter chips by what a workflow makes (Image, Video, Audio, Text & 3D), with counts.
+  const caps = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const w of workflows) n.set(capabilityGroup(w.capability), (n.get(capabilityGroup(w.capability)) ?? 0) + 1);
+    return [["All", workflows.length] as const, ...WORKFLOW_GROUPS.filter((g) => n.has(g)).map((g) => [g, n.get(g)!] as const)];
+  }, [workflows]);
   const list = useMemo(
-    () => (term ? workflows.filter((w) => `${w.id} ${w.title} ${w.capability} ${usedBy(w.id).join(" ")}`.toLowerCase().includes(term)) : workflows),
-    [workflows, term, usedBy],
+    () =>
+      workflows.filter(
+        (w) =>
+          (cap === "All" || capabilityGroup(w.capability) === cap) &&
+          (!term || `${w.id} ${w.title} ${w.capability} ${usedBy(w.id).join(" ")}`.toLowerCase().includes(term)),
+      ),
+    [workflows, term, cap, usedBy],
   );
+  // 105 cards with model lists: render a page at a time.
+  const { shown, hasMore, moreFrom, sentinel, left } = useProgressive(list.length, `${cap}|${term}`, 20, 30);
+  const grid = useRef<HTMLDivElement>(null);
 
   if (q.isPending)
     return (
@@ -191,21 +193,51 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
               className="h-9 w-full rounded-full border bg-background pr-3 pl-9 text-[14px] outline-none placeholder:text-subtle-foreground focus:border-primary focus:ring-4 focus:ring-brand-faint"
             />
           </div>
-          <span className="text-[12px] text-muted-foreground tabular-nums sm:ml-auto">
+          <span className="text-[12px] text-muted-foreground tabular-nums sm:ml-auto" aria-live="polite">
             {list.length === workflows.length ? `${workflows.length} workflows` : `${list.length} of ${workflows.length}`} · {validated} validated
           </span>
+        </div>
+      )}
+      {caps.length > 2 && (
+        <div role="group" aria-label="What it makes" className="scrollbar-none -mx-1 flex gap-1 overflow-x-auto px-1">
+          {caps.map(([c, n]) => (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={cap === c}
+              onClick={() => setCap(c)}
+              className={cn(
+                "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                cap === c && "bg-secondary text-foreground",
+              )}
+            >
+              {c}
+              <span className="text-[11px] text-subtle-foreground tabular-nums">{n}</span>
+            </button>
+          ))}
         </div>
       )}
       {!workflows.length ? (
         <p className="text-sm text-muted-foreground">No workflows in workflows/comfyui/manifest.json yet.</p>
       ) : !list.length ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">No workflows match “{search.trim()}”.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          {term ? `No ${cap === "All" ? "" : `${cap} `}workflows match “${search.trim()}”.` : `No ${cap} workflows.`}
+        </p>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-2">
-          {list.map((wf) => (
-            <WorkflowCard key={wf.id} wf={wf} usedBy={usedBy(wf.id)} />
-          ))}
-        </div>
+        <>
+          <div ref={grid} className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-2">
+            {list.slice(0, shown).map((wf) => (
+              <WorkflowCard key={wf.id} wf={wf} usedBy={usedBy(wf.id)} />
+            ))}
+          </div>
+          {hasMore && (
+            <div className="flex justify-center">
+              <Button ref={sentinel} variant="outline" size="sm" className="rounded-full" onClick={(e) => moreFrom(e, grid.current)}>
+                Show more · {left} left
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
