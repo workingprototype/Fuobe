@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, Heart, Library, MoreHorizontal, PanelLeft, Pin, PinOff, Settings2, Upload } from "lucide-react";
+import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, FolderTree, Heart, Library, MoreHorizontal, Pin, PinOff, Settings2, Upload } from "lucide-react";
 import { nanoid } from "nanoid";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -15,16 +15,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { PromptInputHandle } from "@/components/studio/prompt-input";
 import { useElements, useEngine, useSaveElement } from "@/lib/api";
-import type { CinemaFolder, DirectorSettings, DirectorShot } from "@/lib/catalog/cinema";
+import { rigError, type CinemaFolder, type DirectorSettings, type DirectorShot } from "@/lib/catalog/cinema";
 import type { StudioElement } from "@/lib/catalog/elements";
 import type { OutputFile } from "@/lib/catalog/types";
-import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CinemaFeed, type FeedHandlers } from "./cinema-feed";
 import { initialDraft, type CinemaDraft } from "./draft";
 import { ElementsPanel } from "./elements-panel";
 import { FolderSidebar, subtree, viewKey, type CinemaView } from "./folder-sidebar";
-import { useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
+import { formatUsd } from "./money";
+import { useAutosave, useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
 import { cutGrid } from "./media";
 import { ProjectDialog } from "./project-settings";
 import { PromptBar, useAddRefs } from "./prompt-bar";
@@ -169,15 +169,22 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
   const setDraft = (patch: Partial<CinemaDraft> | ((d: CinemaDraft) => Partial<CinemaDraft>)) => setDraftState((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }));
   const [settings, setSettings] = useState<DirectorSettings>(project.director);
   const update = useUpdateProject(id);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Director settings save per project a moment after the last change, and at once when the
+  // workspace goes away (another page, a closed tab): the last pick is never dropped.
+  const settingsSaver = useAutosave<DirectorSettings>(
+    (director, { keepalive }) => update.mutate({ director, keepalive }, { onError: (e) => toast.error((e as Error).message) }),
+    500,
+  );
+  // The last lighting the server would accept: a custom rig being edited into an invalid state isn't saved.
+  const savedLighting = useRef(project.director.lighting ?? null);
   const onSettings = (patch: Partial<DirectorSettings>) => {
     const next = { ...settings, ...patch };
     setSettings(next);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    // Persist per project, a moment after the last change.
-    saveTimer.current = setTimeout(() => update.mutate({ director: next }, { onError: (e) => toast.error((e as Error).message) }), 500);
+    const lighting = next.lighting ?? null;
+    const invalid = lighting?.kind === "custom" && !!rigError(lighting.lights);
+    if (!invalid) savedLighting.current = lighting;
+    settingsSaver.schedule(invalid ? { ...next, lighting: savedLighting.current } : next);
   };
-  useEffect(() => () => void (saveTimer.current && clearTimeout(saveTimer.current)), []);
   const elements = useElements().data ?? [];
   const xl = useMedia("(min-width: 1280px)");
   const [panel, setPanel] = useState<"director" | "brief" | null>(null);
@@ -332,19 +339,31 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           </TooltipTrigger>
           <TooltipContent>All projects</TooltipContent>
         </Tooltip>
-        <button type="button" onClick={() => setFoldersOpen(true)} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden" aria-label="Folders">
-          <PanelLeft className="size-4" />
-        </button>
+        {/* Scenes (folders) open as a sheet below lg: a folder icon, unlike the app sidebar's panel icon next to it. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setFoldersOpen(true)}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[12.5px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden"
+              aria-label="Scenes and folders"
+            >
+              <FolderTree className="size-4" /> <span className="hidden sm:inline">Scenes</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Scenes, favorites and elements</TooltipContent>
+        </Tooltip>
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-heading text-[20px] leading-tight sm:text-[22px]">{project.name}</h1>
           <p className="hidden truncate text-[11.5px] text-muted-foreground sm:block">
             Cinema Studio
             {project.description ? ` · ${project.description}` : ""}
-            {spentUsd > 0 || project.costCapUsd != null ? ` · ≈ ${spentUsd > 0 ? formatCost(spentUsd) : "$0"} spent` : ""}
-            {project.costCapUsd != null ? ` of ${project.costCapUsd > 0 ? formatCost(project.costCapUsd) : "$0"}` : ""}
+            {spentUsd > 0 || project.costCapUsd != null ? ` · ≈ ${formatUsd(spentUsd)} spent` : ""}
+            {project.costCapUsd != null ? ` of ${formatUsd(project.costCapUsd)}` : ""}
           </p>
         </div>
-        <EngineSwitch value={engine} onChange={setEngine} size="sm" />
+        {/* Icons only on phones (labels from sm up), so the project name keeps its room. */}
+        <EngineSwitch value={engine} onChange={setEngine} />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

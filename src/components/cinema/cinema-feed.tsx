@@ -2,10 +2,11 @@
 
 import {
   CalendarDays,
-  Check,
   Clapperboard,
+  ExternalLink,
   Copy,
   Download,
+  Eye,
   FastForward,
   FolderInput,
   Grid3x3,
@@ -24,20 +25,24 @@ import {
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -49,7 +54,7 @@ import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { MoveToItems } from "./folder-sidebar";
-import { useItemActions, type CinemaGeneration } from "./hooks";
+import { foreign, useItemActions, type CinemaGeneration } from "./hooks";
 
 type Layout = "square" | "masonry" | "list";
 type TypeFilter = "all" | "image" | "video" | "audio";
@@ -156,9 +161,16 @@ export interface FeedHandlers {
   onSaveElement: (g: CinemaGeneration, url: string, kind: "character" | "location") => void;
 }
 
+/** A grid contact sheet and its tiles are one take: deleting any of them deletes the lot. */
+export function deleteLabel(g: CinemaGeneration): string {
+  const tiles = g.tiles?.length ?? (g.feature === "cinema-grid" && g.outputs.length > 1 ? g.outputs.length - 1 : 0);
+  return tiles ? `Delete grid (sheet + ${tiles} tiles)` : "Delete take";
+}
+
 function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; folders: CinemaFolder[]; projectId: string; handlers: FeedHandlers; onDelete: (ids: string[]) => void }) {
   const actions = useItemActions(projectId);
   const o = u.output;
+  const elsewhere = foreign(u.g, projectId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -171,7 +183,7 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
           <MoreHorizontal className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
         <DropdownMenuItem onClick={() => handlers.onLoad(u.g)}>
           <RotateCcw /> Load into prompt bar
         </DropdownMenuItem>
@@ -208,7 +220,7 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
             </a>
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => void actions.favorite([u.g.id], !u.g.favorite)}>
+        <DropdownMenuItem onClick={() => void actions.favorite([u.g.id], !u.g.favorite).catch((e) => toast.error((e as Error).message))}>
           <Heart /> {u.g.favorite ? "Unlike" : "Like"}
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -219,19 +231,36 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
         >
           <Copy /> Copy prompt
         </DropdownMenuItem>
-        {!u.tile && (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <FolderInput /> Move to
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
-              <MoveToItems folders={folders} onMove={(f) => void actions.move([u.g.id], f).then(() => toast("Moved", { duration: 1200 }))} />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+        {elsewhere ? (
+          // Another project's take (My Generations): it moves within its own project.
+          <DropdownMenuItem asChild>
+            <Link href={`/cinema/${u.g.projectId}`}>
+              <ExternalLink /> Open its project
+            </Link>
+          </DropdownMenuItem>
+        ) : (
+          !u.tile && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <FolderInput /> Move to
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
+                <MoveToItems
+                  folders={folders}
+                  onMove={(f) =>
+                    void actions
+                      .move([u.g.id], f)
+                      .then((n) => toast(n ? "Moved" : "That take isn't in this project", { duration: 1500 }))
+                      .catch((e) => toast.error((e as Error).message))
+                  }
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          )
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={() => onDelete([u.g.id])}>
-          <Trash2 /> Delete take
+          <Trash2 /> {deleteLabel(u.g)}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -274,7 +303,7 @@ function TileView({
     active(g) ? (
       <PendingTile g={g} ratio={aspect} />
     ) : g.status !== "succeeded" ? (
-      <FailedTile g={g} ratio={aspect} onRetry={() => void actions.retry(g.id).catch((e) => toast.error((e as Error).message))} />
+      <FailedTile g={g} ratio={aspect} onRetry={() => void actions.retry(g).catch((e) => toast.error((e as Error).message))} />
     ) : (
       <div className={cn("relative size-full", fit && "bg-muted")}>
         {/* Behind the video: visible until (or if) the browser can draw its first frame. */}
@@ -332,44 +361,50 @@ function TileView({
       </div>
     );
   }
-  return (
-    <div
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-label={clickable ? `${step ? `${step}: ` : ""}${promptOf(g)}` : undefined}
-      draggable={!u.tile}
-      onDragStart={(e) => e.dataTransfer.setData("application/x-cinema-takes", JSON.stringify(dragIds()))}
+  // The tile opens (or, while selecting, toggles) through a real button laid over the media, next to
+  // the checkbox and the action buttons rather than around them (no nested interactive controls).
+  const overlay = (clickable || selecting) && (
+    <button
+      type="button"
+      aria-label={selecting ? `${selected ? "Unselect" : "Select"}: ${promptOf(g)}` : `Open ${step ? `${step}: ` : ""}${promptOf(g)}`}
+      aria-pressed={selecting ? selected : undefined}
       onClick={(e) => {
         if (selecting || e.metaKey || e.ctrlKey || e.shiftKey) onToggle(e.shiftKey);
-        else if (clickable) onOpen();
+        else onOpen();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && clickable) onOpen();
-        if (e.key === " ") {
+        if (e.key === " " && !selecting) {
           e.preventDefault();
           onToggle(false);
         }
       }}
+      className={cn("absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", clickable && !selecting && "cursor-zoom-in")}
+    />
+  );
+  return (
+    <div
+      draggable={!u.tile}
+      onDragStart={(e) => e.dataTransfer.setData("application/x-cinema-takes", JSON.stringify(dragIds()))}
       className={cn(
-        "group/tile relative overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group/tile relative overflow-hidden rounded-xl bg-muted",
         layout === "masonry" && "mb-3 break-inside-avoid",
-        clickable && "cursor-zoom-in",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
       )}
       style={{ aspectRatio: aspect }}
     >
       {media}
+      {overlay}
       {checkbox}
       <div className="pointer-events-none absolute top-2 right-2 flex items-center gap-1">
         {g.favorite && <Heart className="size-4 fill-highlight text-highlight drop-shadow" />}
       </div>
       {g.status === "succeeded" && (
-        <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-black/65 to-transparent p-2 pt-8 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within/tile:opacity-100 sm:group-hover/tile:opacity-100">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 bg-gradient-to-t from-black/65 to-transparent p-2 pt-8 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within/tile:opacity-100 sm:group-hover/tile:opacity-100">
           <div className="flex min-w-0 flex-wrap gap-1">
             {step && <Badge>{step}</Badge>}
             {u.output?.kind === "video" && g.request.params?.duration ? <Badge>{g.request.params.duration}s</Badge> : null}
           </div>
-          <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <div className="pointer-events-auto flex shrink-0 items-center gap-0.5">
             {u.output?.kind === "video" && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -468,7 +503,6 @@ export function CinemaFeed({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [anchor, setAnchor] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<string[] | null>(null);
   // Date filters count from when the feed opened.
   const [now] = useState(() => Date.now());
 
@@ -527,25 +561,60 @@ export function CinemaFeed({
   }, [all, prefs.split]);
 
   const layoutCls = prefs.layout === "square" ? "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5" : prefs.layout === "masonry" ? "columns-2 gap-3 sm:columns-3 lg:columns-4 2xl:columns-5" : "space-y-2";
+  // Delete moves to the Trash (the takes stay filed in their project): Undo puts them back.
   const del = async (list: string[]) => {
-    await actions.remove(list);
     setSelected(new Set());
-    toast(list.length > 1 ? `${list.length} takes deleted` : "Deleted", { duration: 1500 });
+    try {
+      await actions.remove(list);
+    } catch (e) {
+      toast.error((e as Error).message);
+      return;
+    }
+    toast(list.length > 1 ? `${list.length} takes moved to Trash` : "Moved to Trash", {
+      id: "cinema-trash",
+      duration: 6000,
+      action: { label: "Undo", onClick: () => void actions.restore(list).catch((e) => toast.error((e as Error).message)) },
+    });
   };
+  const own = live.filter((id) => !items.some((g) => g.id === id && foreign(g, projectId)));
+  const layouts = [
+    ["square", LayoutGrid, "Square"],
+    ["masonry", Rows3, "Masonry"],
+    ["list", List, "List"],
+  ] as const;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1">{title}</div>
+        <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{title}</div>
         {toolbarExtra}
-        <div className="inline-flex h-8 rounded-full bg-muted p-0.5" role="radiogroup" aria-label="Layout">
-          {(
-            [
-              ["square", LayoutGrid, "Square"],
-              ["masonry", Rows3, "Masonry"],
-              ["list", List, "List"],
-            ] as const
-          ).map(([id, Icon, label]) => (
+        {/* Phones: layout, split and fit share one View menu so the toolbar fits on a line. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[12.5px] font-medium hover:bg-accent sm:hidden" aria-label="View options">
+              <Eye className="size-3.5" /> View
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuLabel>Layout</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={prefs.layout} onValueChange={(v) => setPrefs({ layout: v as Layout })}>
+              {layouts.map(([id, Icon, label]) => (
+                <DropdownMenuRadioItem key={id} value={id}>
+                  <Icon /> {label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuCheckboxItem checked={prefs.split} onCheckedChange={(split) => setPrefs({ split: !!split })}>
+              Split by date
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuCheckboxItem checked={prefs.fit} onCheckedChange={(fit) => setPrefs({ fit: !!fit })}>
+              Fit previews (whole frame)
+            </DropdownMenuCheckboxItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <div className="hidden h-8 rounded-full bg-muted p-0.5 sm:inline-flex" role="radiogroup" aria-label="Layout">
+          {layouts.map(([id, Icon, label]) => (
             <Tooltip key={id}>
               <TooltipTrigger asChild>
                 <button
@@ -565,7 +634,7 @@ export function CinemaFeed({
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" aria-pressed={prefs.split} onClick={() => setPrefs({ split: !prefs.split })} className={cn("grid size-8 place-items-center rounded-full", prefs.split ? "bg-brand-faint text-brand-text" : "bg-secondary hover:bg-accent")} aria-label="Split by date">
+            <button type="button" aria-pressed={prefs.split} onClick={() => setPrefs({ split: !prefs.split })} className={cn("hidden size-8 place-items-center rounded-full sm:grid", prefs.split ? "bg-brand-faint text-brand-text" : "bg-secondary hover:bg-accent")} aria-label="Split by date">
               <CalendarDays className="size-3.5" />
             </button>
           </TooltipTrigger>
@@ -573,7 +642,7 @@ export function CinemaFeed({
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" aria-pressed={prefs.fit} onClick={() => setPrefs({ fit: !prefs.fit })} className={cn("inline-flex h-8 items-center rounded-full px-2.5 text-[12px] font-medium", prefs.fit ? "bg-brand-faint text-brand-text" : "bg-secondary hover:bg-accent")} aria-label={prefs.fit ? "Fit previews" : "Fill previews"}>
+            <button type="button" aria-pressed={prefs.fit} onClick={() => setPrefs({ fit: !prefs.fit })} className={cn("hidden h-8 items-center rounded-full px-2.5 text-[12px] font-medium sm:inline-flex", prefs.fit ? "bg-brand-faint text-brand-text" : "bg-secondary hover:bg-accent")} aria-label={prefs.fit ? "Fit previews" : "Fill previews"}>
               <Grid3x3 className="mr-1 size-3.5" />
               {prefs.fit ? "Fit" : "Fill"}
             </button>
@@ -590,28 +659,38 @@ export function CinemaFeed({
             <X className="size-3.5" /> Unselect all <kbd className="ml-0.5 font-mono text-[10px]">Esc</kbd>
           </button>
           <span className="flex-1" />
-          <button type="button" onClick={() => void actions.favorite(live, !items.filter((g) => live.includes(g.id)).every((g) => g.favorite))} className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium hover:bg-accent">
+          <button
+            type="button"
+            onClick={() => void actions.favorite(live, !items.filter((g) => live.includes(g.id)).every((g) => g.favorite)).catch((e) => toast.error((e as Error).message))}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium hover:bg-accent"
+          >
             <Heart className="size-3.5" /> {items.filter((g) => live.includes(g.id)).every((g) => g.favorite) ? "Unlike" : "Like"}
           </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium hover:bg-accent">
-                <FolderInput className="size-3.5" /> Move to
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
-              <MoveToItems
-                folders={folders}
-                onMove={(f) =>
-                  void actions.move(live, f).then(() => {
-                    toast(`Moved ${live.length} take${live.length > 1 ? "s" : ""}`, { duration: 1500 });
-                    setSelected(new Set());
-                  })
-                }
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <button type="button" onClick={() => setConfirm(live)} className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium text-destructive hover:bg-destructive/10">
+          {own.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium hover:bg-accent">
+                  <FolderInput className="size-3.5" /> Move to
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
+                {own.length < live.length && <DropdownMenuLabel className="text-[11.5px] font-normal text-muted-foreground">Takes from other projects stay where they are</DropdownMenuLabel>}
+                <MoveToItems
+                  folders={folders}
+                  onMove={(f) =>
+                    void actions
+                      .move(own, f)
+                      .then((n) => {
+                        toast(`Moved ${n} take${n === 1 ? "" : "s"}`, { duration: 1500 });
+                        setSelected(new Set());
+                      })
+                      .catch((e) => toast.error((e as Error).message))
+                  }
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <button type="button" onClick={() => void del(live)} className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-medium text-destructive hover:bg-destructive/10">
             <Trash2 className="size-3.5" /> Delete
           </button>
         </div>
@@ -647,7 +726,7 @@ export function CinemaFeed({
                     projectId={projectId}
                     folders={folders}
                     handlers={handlers}
-                    onDelete={(list) => setConfirm(list)}
+                    onDelete={(list) => void del(list)}
                     dragIds={() => (selected.has(u.g.id) ? live : [u.g.id])}
                   />
                 ))}
@@ -665,6 +744,7 @@ export function CinemaFeed({
             setOpen(null);
             // The viewer likes and deletes through /api/generations: pick those changes up.
             void qc.invalidateQueries({ queryKey: ["cinema", projectId, "items"] });
+            void qc.invalidateQueries({ queryKey: ["cinema", "studio"] });
           }}
           onPrev={pos > 0 ? () => setOpen(viewable[pos - 1].key) : undefined}
           onNext={pos < viewable.length - 1 ? () => setOpen(viewable[pos + 1].key) : undefined}
@@ -672,26 +752,6 @@ export function CinemaFeed({
         />
       )}
 
-      <AlertDialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{confirm && confirm.length > 1 ? `Delete ${confirm.length} takes?` : "Delete this take?"}</AlertDialogTitle>
-            <AlertDialogDescription>They&apos;ll be removed from this project and your library, and can&apos;t be recovered.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                if (confirm) void del(confirm);
-                setConfirm(null);
-              }}
-            >
-              <Check /> Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

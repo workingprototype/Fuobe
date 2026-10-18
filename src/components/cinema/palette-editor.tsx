@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
-import { HARMONIES, harmonyPalette, hslToHex, kmeans, rgbToHex, type Harmony, type RGB } from "./color-math";
+import { HARMONIES, harmonyPalette, hexToRgb, hslToHex, kmeans, rgbToHex, rgbToHsl, type Harmony, type RGB } from "./color-math";
 
 interface Point {
   /** 0–1 across the image. */
@@ -188,72 +188,157 @@ function FromImage({ onColors }: { onColors: (hex: string[]) => void }) {
 
 const WHEEL_BASE = "#c0583a";
 
+/** Where a hue (degrees, 0 = top, clockwise) and saturation (0–1) sit on the wheel, in % of its box. */
+function wheelSpot(hue: number, sat: number): { left: string; top: string } {
+  const a = (hue * Math.PI) / 180;
+  const r = Math.max(0, Math.min(1, sat)) * 46;
+  return { left: `${50 + r * Math.sin(a)}%`, top: `${50 - r * Math.cos(a)}%` };
+}
+
+/**
+ * An HSL colour wheel: drag (or use the arrow keys on) the base handle to pick hue and saturation;
+ * the harmony's other hues show as markers that turn with it.
+ */
+function HueWheel({ base, harmony, onBase }: { base: string; harmony: Harmony; onBase: (hex: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [h, s, l] = rgbToHsl(hexToRgb(base));
+  // Very dark or light bases pick at mid lightness, so the wheel still shows a change.
+  const light = l < 0.2 || l > 0.8 ? 0.5 : l;
+  const offsets = (HARMONIES.find((x) => x.id === harmony)?.offsets ?? [0]).filter((o) => o !== 0);
+  const pick = (e: React.PointerEvent) => {
+    const box = ref.current?.getBoundingClientRect();
+    if (!box) return;
+    const x = e.clientX - box.left - box.width / 2;
+    const y = e.clientY - box.top - box.height / 2;
+    const hue = ((Math.atan2(x, -y) * 180) / Math.PI + 360) % 360;
+    const sat = Math.max(0.05, Math.min(1, Math.hypot(x, y) / ((box.width / 2) * 0.92)));
+    onBase(hslToHex(hue, sat, light));
+  };
+  return (
+    <div
+      ref={ref}
+      role="slider"
+      tabIndex={0}
+      aria-label="Base colour on the wheel (arrows: left/right hue, up/down saturation)"
+      aria-valuemin={0}
+      aria-valuemax={359}
+      aria-valuenow={Math.round(h)}
+      aria-valuetext={`Hue ${Math.round(h)}°, saturation ${Math.round(s * 100)}%`}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        pick(e);
+      }}
+      onPointerMove={(e) => {
+        if (e.buttons) pick(e);
+      }}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 15 : 5;
+        const next =
+          e.key === "ArrowRight" ? [h + step, s] : e.key === "ArrowLeft" ? [h - step, s] : e.key === "ArrowUp" ? [h, Math.min(1, s + 0.05)] : e.key === "ArrowDown" ? [h, Math.max(0.05, s - 0.05)] : null;
+        if (!next) return;
+        e.preventDefault();
+        onBase(hslToHex(next[0], next[1], light));
+      }}
+      className="relative size-40 shrink-0 cursor-crosshair touch-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      style={{
+        background:
+          "radial-gradient(closest-side, hsl(0 0% 55%) 0%, hsl(0 0% 55% / 0) 100%), conic-gradient(from 0deg, hsl(0 80% 55%), hsl(60 80% 55%), hsl(120 80% 55%), hsl(180 80% 55%), hsl(240 80% 55%), hsl(300 80% 55%), hsl(360 80% 55%))",
+      }}
+    >
+      {offsets.map((o) => (
+        <span
+          key={o}
+          aria-hidden
+          className="pointer-events-none absolute size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-soft"
+          style={{ ...wheelSpot(h + o, s), background: hslToHex(h + o, s, light) }}
+        />
+      ))}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-strong"
+        style={{ ...wheelSpot(h, s), background: base }}
+      />
+    </div>
+  );
+}
+
 function ColorWheel({ onColors }: { onColors: (hex: string[]) => void }) {
   const [base, setBase] = useState(WHEEL_BASE);
   const [harmony, setHarmony] = useState<Harmony>("analogous");
   const [count, setCount] = useState(6);
   const update = (b = base, h = harmony, n = count) => onColors(harmonyPalette(b, h, n));
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <input type="color" value={base} onChange={(e) => {
-            setBase(e.target.value);
-            update(e.target.value);
-          }} className="size-10 shrink-0 cursor-pointer rounded-lg border bg-transparent p-0.5" aria-label="Base colour" />
-        <Input
-          value={base}
-          onChange={(e) => {
-            const v = e.target.value.trim();
-            setBase(v);
-            if (/^#[0-9a-f]{6}$/i.test(v)) update(v);
-          }}
-          className="h-9 w-28 font-mono"
-          aria-label="Base colour hex"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            const b = hslToHex(Math.random() * 360, 0.35 + Math.random() * 0.45, 0.35 + Math.random() * 0.3);
-            const h = HARMONIES[Math.floor(Math.random() * HARMONIES.length)].id;
-            setBase(b);
-            setHarmony(h);
-            update(b, h);
-          }}
-        >
-          <Shuffle /> Random
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Harmony">
-        {HARMONIES.map((h) => (
-          <button
-            key={h.id}
-            type="button"
-            role="radio"
-            aria-checked={harmony === h.id}
-            onClick={() => {
-              setHarmony(h.id);
-              update(base, h.id);
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+      <HueWheel
+        base={/^#[0-9a-f]{6}$/i.test(base) ? base : WHEEL_BASE}
+        harmony={harmony}
+        onBase={(hex) => {
+          setBase(hex);
+          update(hex);
+        }}
+      />
+      <div className="w-full min-w-0 flex-1 space-y-3">
+        <div className="flex items-center gap-2">
+          <input type="color" value={base} onChange={(e) => {
+              setBase(e.target.value);
+              update(e.target.value);
+            }} className="size-10 shrink-0 cursor-pointer rounded-lg border bg-transparent p-0.5" aria-label="Base colour" />
+          <Input
+            value={base}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              setBase(v);
+              if (/^#[0-9a-f]{6}$/i.test(v)) update(v);
             }}
-            className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium", harmony === h.id ? "bg-primary text-primary-foreground" : "bg-secondary hover:bg-accent")}
+            className="h-9 w-28 font-mono"
+            aria-label="Base colour hex"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              const b = hslToHex(Math.random() * 360, 0.35 + Math.random() * 0.45, 0.35 + Math.random() * 0.3);
+              const h = HARMONIES[Math.floor(Math.random() * HARMONIES.length)].id;
+              setBase(b);
+              setHarmony(h);
+              update(b, h);
+            }}
           >
-            {h.name}
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center gap-3">
-        <span className="shrink-0 text-[12px] text-muted-foreground">Colours</span>
-        <Slider value={[count]} min={2} max={12} step={1} onValueChange={([v]) => {
-            setCount(v);
-            update(base, harmony, v);
-          }} aria-label="Number of colours" />
-        <span className="w-5 font-mono text-[12px]">{count}</span>
+            <Shuffle /> Random
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Harmony">
+          {HARMONIES.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              role="radio"
+              aria-checked={harmony === h.id}
+              onClick={() => {
+                setHarmony(h.id);
+                update(base, h.id);
+              }}
+              className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium", harmony === h.id ? "bg-primary text-primary-foreground" : "bg-secondary hover:bg-accent")}
+            >
+              {h.name}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-[12px] text-muted-foreground">Colours</span>
+          <Slider value={[count]} min={2} max={12} step={1} onValueChange={([v]) => {
+              setCount(v);
+              update(base, harmony, v);
+            }} aria-label="Number of colours" />
+          <span className="w-5 font-mono text-[12px]">{count}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-/** New palette: from an image (k-means in the browser, draggable sample points) or a colour-wheel harmony. */
+/** New palette
+: from an image (k-means in the browser, draggable sample points) or a colour-wheel harmony. */
 export function PaletteEditor({ open, onOpenChange, onSave }: { open: boolean; onOpenChange: (o: boolean) => void; onSave: (p: { name: string; hex: string[] }) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

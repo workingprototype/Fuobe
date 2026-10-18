@@ -13,7 +13,7 @@ import {
   type DirectorSettings,
 } from "@/lib/catalog/cinema";
 import type { Generation, GenerationRequest } from "@/lib/catalog/types";
-import { CinemaError, addItems, getProject, spentUsd } from "./cinema";
+import { CinemaError, folderExists, getProject, recordTakes, spentUsd } from "./cinema";
 import { createGenerations, previewGeneration } from "./generations";
 import { encodePng } from "./png";
 import { provider } from "./providers";
@@ -59,16 +59,32 @@ export function planForProject(projectId: string, input: CinemaRequest): CinemaP
   return planCinema({ ...input, settings: input.settings ?? project.director, brief: project.brief.body }, cinemaContext());
 }
 
-/** What the run will really cost (0 for demo-mode steps), from the server's own route choice. */
-function realCost(steps: CinemaStep[]): number {
+type Preview = ReturnType<typeof previewGeneration>;
+
+/**
+ * Check and price every step before any is created, from the server's own route choice (engine
+ * mode, keys, demo): a step that can't run must not leave the earlier ones running and billed.
+ */
+function previewSteps(steps: CinemaStep[]): Preview[] {
+  return steps.map((s) => {
+    try {
+      return previewGeneration(withPlaceholders(s));
+    } catch (e) {
+      throw new CinemaError((e as Error).message, 422);
+    }
+  });
+}
+
+/** What the run will really cost (0 for demo-mode steps). */
+function realCost(steps: CinemaStep[], previews: Preview[]): number {
   let total = 0;
   const jobs: Record<string, number> = {};
-  for (const s of steps) {
-    const p = previewGeneration(withPlaceholders(s));
+  steps.forEach((s, i) => {
+    const p = previews[i];
     const n = s.perJobOf ? (jobs[s.perJobOf] ?? 1) : 1;
     jobs[s.key] = s.after?.length ? n : p.jobs;
     total += (p.costUsd ?? 0) * n;
-  }
+  });
   return Math.round(total * 1000) / 1000;
 }
 
@@ -79,22 +95,32 @@ function terminal(list: Generation[]): Generation[] {
 
 export interface CinemaRunResult {
   items: Generation[];
+  /** Where the takes were filed: the scene asked for, or the project root when that scene no longer exists. */
+  folderId: string | null;
   plan: Pick<CinemaPlan, "notes" | "costUsd" | "outputs"> & { modelId: string };
 }
 
 /**
- * Plan, check the project's cost cap, create the chained generations and record them in the project
- * (in `folderId`, the scene the user is looking at).
+ * Plan, check every step and the project's cost cap, create the chained generations and record them
+ * in the project (in `folderId`, the scene the user is looking at).
  */
 export function generateInProject(projectId: string, input: CinemaRequest, folderId: string | null = null): CinemaRunResult {
   const project = getProject(projectId);
   if (!project) throw new CinemaError("Project not found", 404);
+  const notes: string[] = [];
+  // A scene deleted since the view loaded (the sidebar, another tab): file the takes at the root rather than lose them.
+  let folder = folderId;
+  if (folder && !folderExists(projectId, folder)) {
+    folder = null;
+    notes.push("That scene was deleted, so the take is in Home");
+  }
   const plan = planForProject(projectId, input);
   if (plan.blocker) throw new CinemaError(plan.blocker, 422);
   if (!plan.steps.length) throw new CinemaError("Nothing to generate", 422);
+  const previews = previewSteps(plan.steps);
 
   if (project.costCapUsd != null) {
-    const cost = realCost(plan.steps);
+    const cost = realCost(plan.steps, previews);
     const spent = spentUsd(projectId);
     if (cost > 0 && spent + cost > project.costCapUsd + 1e-9) {
       throw new CinemaError(
@@ -130,9 +156,9 @@ export function generateInProject(projectId: string, input: CinemaRequest, folde
     }
   } catch (e) {
     // Keep what already started visible in the project, then report the step that failed.
-    if (all.length) addItems(projectId, all.map((g) => g.id), folderId, take);
+    recordTakes(projectId, all, folder, take);
     throw new CinemaError((e as Error).message, 422);
   }
-  addItems(projectId, all.map((g) => g.id), folderId, take);
-  return { items: all, plan: { notes: plan.notes, costUsd: plan.costUsd, outputs: plan.outputs, modelId: plan.model.id } };
+  recordTakes(projectId, all, folder, take);
+  return { items: all, folderId: folder, plan: { notes: [...notes, ...plan.notes], costUsd: plan.costUsd, outputs: plan.outputs, modelId: plan.model.id } };
 }

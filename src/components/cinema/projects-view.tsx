@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CinemaProject } from "@/lib/catalog/cinema";
-import { formatCost, timeAgo } from "@/lib/format";
+import { formatUsd } from "./money";
+import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCinemaProjects, useUpdateProject } from "./hooks";
 import { ProjectDialog } from "./project-settings";
@@ -61,8 +62,8 @@ function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettin
             {project.stats?.spentUsd || project.costCapUsd != null ? (
               <span className="font-mono">
                 {" "}
-                · ≈ {formatCost(project.stats?.spentUsd ?? 0) === "Free" ? "$0" : formatCost(project.stats?.spentUsd ?? 0)}
-                {project.costCapUsd != null ? ` of ${formatCost(project.costCapUsd) === "Free" ? "$0" : formatCost(project.costCapUsd)}` : ""}
+                · ≈ {formatUsd(project.stats?.spentUsd)}
+                {project.costCapUsd != null ? ` of ${formatUsd(project.costCapUsd)}` : ""}
               </span>
             ) : null}
           </p>

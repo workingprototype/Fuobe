@@ -270,7 +270,21 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
       </div>
       <div className="space-y-1.5">
         <p className="text-[12.5px] font-medium">Describe your character (optional)</p>
-        <Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 1000))} rows={2} className="resize-none text-[13px]" placeholder="e.g. “a retired safecracker with kind eyes and a nervous smile”" />
+        <Textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value.slice(0, 1000))}
+          onKeyDown={(e) => {
+            // ⌘/Ctrl+Enter makes the cast sheet (handled here, so the prompt bar behind the dialog never sees it).
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              if (!generate.isPending) run();
+            }
+          }}
+          rows={2}
+          className="resize-none text-[13px]"
+          placeholder="e.g. “a retired safecracker with kind eyes and a nervous smile”"
+          aria-label="Describe your character"
+        />
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t pt-3">
         <Button variant="ghost" size="sm" onClick={() => setValues((v) => randomizeCast(v))}>
@@ -350,11 +364,13 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
           value={prompt}
           onChange={(e) => setPrompt(e.target.value.slice(0, 2500))}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && prompt.trim()) {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+              // Always handled here (even with an empty description), so it never reaches the prompt bar.
               e.preventDefault();
-              run();
+              if (prompt.trim() && !generate.isPending) run();
             }
           }}
+
           rows={3}
           className="resize-none text-[13.5px]"
           placeholder="e.g. “a rain-soaked rooftop bar in Tokyo, neon signs, wet tiles, a single string of bulbs”"
