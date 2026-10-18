@@ -4,7 +4,9 @@
 // download the stored output): the self-tests, then the round-3 video tools on a clip the engine makes
 // itself — add a soundtrack (one track, then voice + background), a VHS meta-batch pass, trim, cut a resampled segment and burn
 // in captions. With ffprobe/ffmpeg on PATH every output is probed (streams, duration, frames, size) and the
-// captioned frames are compared with the source frames.
+// captioned frames are compared with the source frames; then a real-sized clip (600 frames, 640x360 @ 30 fps, with
+// sound, made by ffmpeg) goes through mux, mix, captions and trim while the ComfyUI process's RSS is sampled
+// (local server only: COMFYUI_PID, else the "main.py --port <port>" process found with pgrep; COMFYUI_PORT, default 8188).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +16,34 @@ import zlib from "node:zlib";
 const app = process.argv[2] ?? "http://localhost:3000";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-selftest-"));
 const hasFfprobe = spawnSync("ffprobe", ["-version"]).status === 0;
+const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0;
 if (!hasFfprobe) console.warn("! ffprobe not found: outputs are checked for kind and size only");
+
+/** The local ComfyUI process, to watch its memory (null when it isn't on this machine). */
+function comfyPid() {
+  if (process.env.COMFYUI_PID) return Number(process.env.COMFYUI_PID);
+  const r = spawnSync("pgrep", ["-f", `main.py.*--port ${process.env.COMFYUI_PORT ?? "8188"}`], { encoding: "utf8" });
+  const pid = Number(r.stdout?.split("\n")[0]);
+  return pid && fs.existsSync(`/proc/${pid}/status`) ? pid : null;
+}
+const rssOf = (pid) => Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, "utf8"))?.[1] ?? 0) * 1024;
+/** Run fn while sampling the ComfyUI process's RSS; returns fn's result and the peak growth in GB. */
+async function watchMemory(fn) {
+  const pid = comfyPid();
+  if (!pid) return { result: await fn(), peakGb: null };
+  const base = rssOf(pid);
+  let peak = base;
+  const timer = setInterval(() => {
+    try {
+      peak = Math.max(peak, rssOf(pid));
+    } catch {}
+  }, 50);
+  try {
+    return { result: await fn(), peakGb: (peak - base) / 2 ** 30 };
+  } finally {
+    clearInterval(timer);
+  }
+}
 
 function png(w, h) {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
@@ -186,20 +215,62 @@ async function videoTools() {
   );
   if (hasFfprobe) expectProbe("segment 1-2 s @ 4 fps, 1:1", probe(seg.files[0].local), { frames: 5, fps: 4, size: [480, 480], audio: true });
 
-  const cues = "0.00-1.00: Hello from Fuobe\n1.20-2.50: Open captions";
+  const cues = "0.00-1.00: Hello from Fuobe\n1.50-2.50: Open captions";
   const captioned = (await generate("captions", { modelId: "oss-captions-burnin", op: "captions", prompt: cues, inputs: { video: muxed.url }, params: { extra: { fontSize: 9 } } }, ["video"])).files[0];
   if (hasFfprobe) {
     expectProbe("captions burn-in", probe(captioned.local), { frames: 24, fps: 8, size: [320, 240], audio: true, duration: 3, tolerance: 0.2 });
     const during = changedPixels(frameAt(captioned.local, 0.5), frameAt(muxed.local, 0.5));
-    const gap = changedPixels(frameAt(captioned.local, 1.1), frameAt(muxed.local, 1.1));
+    const gap = changedPixels(frameAt(captioned.local, 1.25), frameAt(muxed.local, 1.25));
     if (during < 200 || gap > 50) throw new Error(`captions: ${during} pixels changed under a cue, ${gap} in the gap`);
-    console.log(`  captions visible: ${during} pixels changed at 0.5 s (cue), ${gap} at 1.1 s (gap)`);
+    console.log(`  captions visible: ${during} pixels changed at 0.5 s (cue), ${gap} at 1.25 s (gap)`);
   }
+}
+
+/** A real-sized clip through the memory-sensitive tools: picture stream-copied (mux), chunked burn-in (captions). */
+async function realClip() {
+  if (!hasFfmpeg || !hasFfprobe) {
+    console.warn("! ffmpeg/ffprobe not found: skipping the 600-frame clip");
+    return;
+  }
+  const src = path.join(tmp, "real.mp4");
+  const made = spawnSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100", "-t", "20", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", src]);
+  if (made.status !== 0) throw new Error(`ffmpeg: ${made.stderr}`);
+  const clip = await upload(fs.readFileSync(src), "video/mp4", "real.mp4");
+  const voice = await upload(wav(12, 550), "audio/wav", "real-voice.wav");
+  const bed = await upload(wav(20, 220), "audio/wav", "real-bed.wav");
+  const report = (label, gb) => console.log(`  ${label}: ComfyUI RSS ${gb === null ? "not sampled (remote server)" : `+${gb.toFixed(2)} GB at peak`}`);
+
+  const one = await watchMemory(() => generate("real mux", { modelId: "oss-mux", op: "mux", inputs: { video: clip, audio: voice } }, ["video"]));
+  expectProbe("real mux (one track)", probe(one.result.files[0].local), { frames: 600, fps: 30, size: [640, 360], audio: true, duration: 20, tolerance: 0.1 });
+  report("mux, 600 frames", one.peakGb);
+
+  const mix = await watchMemory(() => generate("real mix", { modelId: "oss-mux", op: "mux", inputs: { video: clip, audio: voice }, params: { extra: { audio2: bed, backgroundVolumeDb: -12 } } }, ["video"]));
+  const mixed = probe(mix.result.files[0].local);
+  expectProbe("real mux (voice over a 20 s bed)", mixed, { frames: 600, fps: 30, audio: true, duration: 20, tolerance: 0.1 });
+  if (mixed.audio.duration < 19.5) throw new Error(`real mix: the soundtrack stops at ${mixed.audio.duration} s (the 12 s voice cut the bed short)`);
+  report("mix, 600 frames", mix.peakGb);
+
+  // Captions over most of the clip: 9 cues of 1.8 s with 0.2 s gaps, the last 2 s uncaptioned.
+  const cues = Array.from({ length: 9 }, (_, i) => `${(i * 2).toFixed(2)}-${(i * 2 + 1.8).toFixed(2)}: Caption number ${i + 1}`).join("\n");
+  const cap = await watchMemory(() => generate("real captions", { modelId: "oss-captions-burnin", op: "captions", prompt: cues, inputs: { video: clip } }, ["video"]));
+  const captioned = cap.result.files[0].local;
+  expectProbe("real captions", probe(captioned), { frames: 600, fps: 30, size: [640, 360], audio: true, duration: 20, tolerance: 0.1 });
+  const under = changedPixels(frameAt(captioned, 5.0), frameAt(src, 5.0));
+  const gap = changedPixels(frameAt(captioned, 5.9), frameAt(src, 5.9));
+  const after = changedPixels(frameAt(captioned, 19), frameAt(src, 19));
+  if (under < 200 || gap > 400 || after > 400) throw new Error(`real captions: ${under} pixels changed under a cue, ${gap} in a gap, ${after} after the last cue`);
+  console.log(`  captions visible: ${under} pixels changed at 5.0 s (cue), ${gap} at 5.9 s (gap), ${after} at 19 s (after the last cue)`);
+  report("captions, 600 frames", cap.peakGb);
+
+  const cut = await watchMemory(() => generate("real trim", { modelId: "oss-trim", op: "trim", inputs: { video: clip }, params: { startTime: 4, endTime: 14 } }, ["video"]));
+  expectProbe("real trim 4-14 s", probe(cut.result.files[0].local), { fps: 30, size: [640, 360], audio: true, duration: 10, tolerance: 0.1 });
+  report("trim, 300 frames", cut.peakGb);
 }
 
 try {
   await selftests();
   await videoTools();
+  await realClip();
   console.log("ComfyUI engine OK");
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
