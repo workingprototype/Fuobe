@@ -78,6 +78,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'startTime', 'startFrame', 'numLayers', 'maxSize', 'controlStrength', 'framesPerBatch', 'maxTokens', 'maxChars',
   'backgroundVolumeDb', 'startStep', 'audioScale', 'lipsExpression', 'fontSize', 'textureSize', 'turntableFps',
   'octreeResolution', 'columns', 'rows',
+  // av-tools (Wave B)
+  'frameIndex',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -94,6 +96,8 @@ export const BINDING_KEYS = new Set([
   'maxChars', 'backgroundVolumeDb', 'startStep', 'audioScale', 'lengthMode', 'lipsExpression', 'whisperModel',
   'fontSize', 'fontColor', 'captionPosition', 'textureSize', 'turntableFps', 'octreeResolution', 'columns', 'rows',
   'gridPrompt', 'sheetPrompt',
+  // av-tools (Wave B, see library.spec.mjs header)
+  'frameIndex',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

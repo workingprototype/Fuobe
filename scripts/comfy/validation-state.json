@@ -107,6 +107,12 @@
     "error": null,
     "at": "2026-10-16T20:57:15.735Z"
   },
+  "frame-extract": {
+    "sha256": "0f695a5ddf779a1d7b57f1c817e14c36e53534c81148449055f39c55cf9952ab",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T11:37:13.707Z"
+  },
   "grid-zimage-contact-sheet": {
     "sha256": "68bc71594b404d9cc14c7eb75817b4b0d3661ebb1bef2c6f17b6bc3fbe67646e",
     "validated": true,
@@ -250,6 +256,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-17T21:02:01.173Z"
+  },
+  "product-shot-qwen-edit-2509": {
+    "sha256": "4cf09c72001f97c6ebdec621c2bd4116cf699a310329104a5fde9bac81b5c7fb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T11:37:15.500Z"
   },
   "qwen-image-2512-t2i": {
     "sha256": "c18da4a3488120bdcee722e4ae7d187385544ec4805753e7dae6946ddb6f6ba5",
@@ -430,6 +442,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.825Z"
+  },
+  "v2a-hunyuan-foley": {
+    "sha256": "2b6f39b10c3d7bfdef30257682a207b7b89af5f246c38c5aa782de7b3b496359",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T11:37:15.134Z"
   },
   "v2a-mmaudio": {
     "sha256": "3f8f0c2713a0e46202546db49a0228601d987a10577c96f248211259c7483608",

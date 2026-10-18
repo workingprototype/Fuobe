@@ -385,7 +385,8 @@ describe("canvas templates", () => {
   it("disables palette entries with no model on an install's only engine", () => {
     expect(paletteItems("both").filter((p) => p.disabled)).toEqual([]);
     const open = paletteItems("open");
-    expect(open.find((p) => p.id === "frame")?.disabled).toMatch(/^No open-source model for extract frame yet/);
+    // ComfyUI's frame-extract workflow (oss-extract-frame) runs Extract frame on open-only installs too.
+    expect(open.find((p) => p.id === "frame")?.disabled).toBeUndefined();
     expect(open.find((p) => p.id === "model-image")?.disabled).toBeUndefined();
     expect(open.find((p) => p.id === "join")?.disabled).toBeUndefined();
   });
