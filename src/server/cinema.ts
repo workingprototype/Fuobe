@@ -148,7 +148,7 @@ function requireProject(id: string): CinemaProject {
  * or taking out takes never lowers it: that money is spent.
  */
 const SPENT = `COALESCE(SUM(CASE
-    WHEN g.id IS NULL THEN COALESCE(json_extract(i.meta_json, '$.cost'), 0)
+    WHEN g.id IS NULL OR json_extract(i.meta_json, '$.costLocked') THEN COALESCE(json_extract(i.meta_json, '$.cost'), 0)
     WHEN g.status IN ('failed', 'canceled') THEN 0
     ELSE COALESCE(g.cost_usd, 0) END), 0)`;
 
@@ -538,16 +538,16 @@ export function removeItems(projectId: string, generationIds: string[], opts: { 
   requireProject(projectId);
   const ids = memberIds(projectId, generationIds);
   if (!ids.length) return 0;
+  // Snapshot what each take cost (nothing if it failed) before it goes: taking it out hides it, and
+  // the Trash cancels a running take, which would otherwise read as free.
+  const cost = `COALESCE((SELECT CASE WHEN g.status IN ('failed', 'canceled') THEN 0 ELSE COALESCE(g.cost_usd, 0) END FROM generations g WHERE g.id = cinema_items.generation_id), json_extract(meta_json, '$.cost'), 0)`;
+  const snapshot = db().prepare(
+    opts.deleteGenerations
+      ? `UPDATE cinema_items SET meta_json = json_set(COALESCE(meta_json, '{}'), '$.costLocked', json('true'), '$.cost', ${cost}) WHERE project_id = ? AND generation_id = ?`
+      : `UPDATE cinema_items SET meta_json = json_set(COALESCE(meta_json, '{}'), '$.removed', json('true'), '$.cost', ${cost}) WHERE project_id = ? AND generation_id = ?`,
+  );
+  db().transaction(() => ids.forEach((id) => snapshot.run(projectId, id)))();
   if (opts.deleteGenerations) trashGenerations(ids);
-  else {
-    // Snapshot what each take cost (nothing if it failed) before hiding it.
-    const out = db().prepare(
-      `UPDATE cinema_items SET meta_json = json_set(COALESCE(meta_json, '{}'), '$.removed', json('true'), '$.cost',
-         COALESCE((SELECT CASE WHEN g.status IN ('failed', 'canceled') THEN 0 ELSE COALESCE(g.cost_usd, 0) END FROM generations g WHERE g.id = cinema_items.generation_id), json_extract(meta_json, '$.cost'), 0))
-       WHERE project_id = ? AND generation_id = ?`,
-    );
-    db().transaction(() => ids.forEach((id) => out.run(projectId, id)))();
-  }
   touch(projectId);
   return ids.length;
 }
