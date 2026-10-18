@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractOutputs, textDataUri, wordsToCues } from "@/lib/catalog/payload";
+import { extractOutputs, noOutputsError, textDataUri, wordsToCues } from "@/lib/catalog/payload";
 
 // Response fixtures follow docs/research/paid-model-apis-3.json → outputFields / outputShape of each endpoint.
 const file = (url: string, content_type?: string) => ({ url, file_name: url.split("/").pop(), file_size: 1234, ...(content_type ? { content_type } : {}) });
@@ -155,6 +155,17 @@ describe("transcripts", () => {
     expect(extractOutputs({ text: "A red mug on a table." })).toMatchObject([{ kind: "text", text: "A red mug on a table." }]);
     expect(extractOutputs({ output: ["A ", "red ", "mug"] })).toMatchObject([{ kind: "text", text: "A red mug" }]);
     expect(extractOutputs({ seed: 1, timings: {} })).toEqual([]);
+    // Text operations answer in text too; a plain answer has no empty cue list in its meta.
+    expect(extractOutputs({ text: "Hola." }, "translate")).toMatchObject([{ kind: "text", text: "Hola.", meta: {} }]);
+    expect(extractOutputs({ text: "Hola." }, "transcribe")[0].meta).toEqual({});
+  });
+
+  it("a media operation's text-only answer (a refusal) is no result, and its words become the error", () => {
+    const refusal = { images: [], text: "Sorry, I can't make that." };
+    expect(extractOutputs(refusal, "t2i")).toEqual([]);
+    expect(extractOutputs({ output: "I can't help with that." }, "t2v")).toEqual([]);
+    expect(noOutputsError(refusal)).toBe("The model replied: Sorry, I can't make that.");
+    expect(noOutputsError({ seed: 1 })).toMatch(/^No media in response: \{"seed":1\}/);
   });
 });
 
@@ -200,10 +211,11 @@ describe("3D models, stems and other extras", () => {
     ]);
   });
 
-  it("keeps Recraft's new style id and labels Bria's matte", () => {
+  it("keeps Recraft's new style id and puts Bria's matte on the cut-out", () => {
     expect(extractOutputs({ images: [file("https://v3.fal.media/files/a.png", "image/png")], style_id: "style-9" }, "t2i")[0].meta).toEqual({ styleId: "style-9" });
     const cut = extractOutputs({ image: file("https://v3.fal.media/files/cut.png", "image/png"), mask: file("https://v3.fal.media/files/mask.png", "image/png") }, "edit");
-    expect(cut.map((o) => o.meta)).toEqual([undefined, { role: "mask" }]);
+    // One result in the feed: the matte rides along instead of being a second picture.
+    expect(cut).toEqual([{ url: "https://v3.fal.media/files/cut.png", kind: "image", contentType: "image/png", meta: { mask: "https://v3.fal.media/files/mask.png" } }]);
   });
 
   it("plain media responses come back unchanged", () => {

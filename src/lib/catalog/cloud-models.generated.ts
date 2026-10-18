@@ -1823,37 +1823,8 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "recraft",
     "engine": "cloud",
     "kind": "image",
-    "tagline": "Generate in a saved Recraft style, or one made on the fly from up to 10 reference images",
+    "tagline": "A new picture in the style of 1\u201310 reference images",
     "routes": [
-      {
-        "op": "t2i",
-        "provider": "fal",
-        "endpoint": "recraft/v4/style/text-to-image",
-        "map": {
-          "images": "image_urls",
-          "styleId": "style_id",
-          "palette": {
-            "key": "colors",
-            "format": "rgb-object",
-            "background": "background_color"
-          },
-          "aspectRatio": {
-            "key": "image_size",
-            "values": {
-              "1:1": "square_hd",
-              "4:3": "landscape_4_3",
-              "3:4": "portrait_4_3",
-              "16:9": "landscape_16_9",
-              "9:16": "portrait_16_9",
-              "3:2": "landscape_4_3",
-              "2:3": "portrait_4_3",
-              "21:9": "landscape_16_9",
-              "5:4": "landscape_4_3",
-              "4:5": "portrait_4_3"
-            }
-          }
-        }
-      },
       {
         "op": "edit",
         "provider": "fal",
@@ -1925,37 +1896,8 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "recraft",
     "engine": "cloud",
     "kind": "image",
-    "tagline": "Recraft styles at Pro quality",
+    "tagline": "Recraft styles from your references, at Pro quality",
     "routes": [
-      {
-        "op": "t2i",
-        "provider": "fal",
-        "endpoint": "recraft/v4/style/pro/text-to-image",
-        "map": {
-          "images": "image_urls",
-          "styleId": "style_id",
-          "palette": {
-            "key": "colors",
-            "format": "rgb-object",
-            "background": "background_color"
-          },
-          "aspectRatio": {
-            "key": "image_size",
-            "values": {
-              "1:1": "square_hd",
-              "4:3": "landscape_4_3",
-              "3:4": "portrait_4_3",
-              "16:9": "landscape_16_9",
-              "9:16": "portrait_16_9",
-              "3:2": "landscape_4_3",
-              "2:3": "portrait_4_3",
-              "21:9": "landscape_16_9",
-              "5:4": "landscape_4_3",
-              "4:5": "portrait_4_3"
-            }
-          }
-        }
-      },
       {
         "op": "edit",
         "provider": "fal",
@@ -2121,7 +2063,6 @@ export const CLOUD_MODELS: ModelDef[] = [
           "param": "style",
           "label": "Style",
           "values": [
-            "AUTO",
             "GENERAL",
             "REALISTIC",
             "DESIGN"
@@ -2605,6 +2546,11 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "minImages": 2,
+      "imageLabels": [
+        "person photo",
+        "garment"
+      ],
       "controls": [
         {
           "param": "category",
@@ -2612,10 +2558,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "values": [
             "tops",
             "bottoms",
-            "one-pieces",
-            "auto"
-          ],
-          "default": "auto"
+            "one-pieces"
+          ]
         },
         {
           "param": "mode",
@@ -2631,16 +2575,15 @@ export const CLOUD_MODELS: ModelDef[] = [
           "param": "garment_photo_type",
           "label": "Garment photo",
           "values": [
-            "auto",
             "model",
             "flat-lay"
-          ],
-          "default": "auto"
+          ]
         }
       ],
       "seed": true,
       "maxOutputs": 4,
-      "maxImages": 2
+      "maxImages": 2,
+      "promptless": true
     },
     "badges": [
       "top"
@@ -2672,8 +2615,14 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "minImages": 2,
+      "imageLabels": [
+        "person photo",
+        "garment"
+      ],
       "maxOutputs": 4,
-      "maxImages": 2
+      "maxImages": 2,
+      "promptless": true
     },
     "pricing": {
       "unit": "image",
@@ -2697,13 +2646,18 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "image": "human_image_url",
           "image2": "garment_image_url",
-          "fixed": {
+          "defaults": {
             "garment_type": "upper_body"
           }
         }
       }
     ],
     "options": {
+      "minImages": 2,
+      "imageLabels": [
+        "person photo",
+        "garment"
+      ],
       "controls": [
         {
           "param": "garment_type",
@@ -2712,10 +2666,12 @@ export const CLOUD_MODELS: ModelDef[] = [
             "upper_body",
             "lower_body",
             "dresses"
-          ]
+          ],
+          "default": "upper_body"
         }
       ],
-      "maxImages": 2
+      "maxImages": 2,
+      "promptless": true
     },
     "pricing": {
       "unit": "request",
@@ -2785,7 +2741,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "pricing": {
       "unit": "image",
@@ -2915,6 +2872,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seedance-2.5/reference-to-video",
         "map": {
           "images": "image_urls",
+          "videos": "video_urls",
+          "audios": "audio_urls",
           "seed": "seed",
           "generateAudio": "generate_audio",
           "draft": "draft",
@@ -2933,6 +2892,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "images": "image_urls",
           "videoArray": "video_urls",
+          "audios": "audio_urls",
           "seed": "seed",
           "generateAudio": "generate_audio",
           "aspectRatio": "aspect_ratio",
@@ -2985,6 +2945,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       ],
       "endFrame": true,
       "maxImages": 4,
+      "maxVideos": 10,
+      "maxAudios": 10,
       "seed": true,
       "multiShot": {
         "mode": "prompt",
@@ -3069,6 +3031,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seedance-2.0/reference-to-video",
         "map": {
           "images": "image_urls",
+          "videos": "video_urls",
+          "audios": "audio_urls",
           "generateAudio": "generate_audio",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -3107,6 +3071,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       ],
       "endFrame": true,
       "maxImages": 9,
+      "maxVideos": 3,
+      "maxAudios": 3,
       "multiShot": {
         "mode": "prompt",
         "maxShots": 6
@@ -3187,6 +3153,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seedance-2.0/fast/reference-to-video",
         "map": {
           "images": "image_urls",
+          "videos": "video_urls",
+          "audios": "audio_urls",
           "generateAudio": "generate_audio",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -3222,7 +3190,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         15
       ],
       "endFrame": true,
-      "maxImages": 9
+      "maxImages": 9,
+      "maxVideos": 3,
+      "maxAudios": 3
     },
     "badges": [
       "fast",
@@ -3822,11 +3792,25 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "fal-ai/kling-video/v3/pro/motion-control",
         "map": {
           "image": "image_url",
-          "video": "video_url"
+          "video": "video_url",
+          "defaults": {
+            "character_orientation": "video"
+          }
         }
       }
     ],
     "options": {
+      "controls": [
+        {
+          "param": "character_orientation",
+          "label": "Facing",
+          "values": [
+            "image",
+            "video"
+          ],
+          "default": "video"
+        }
+      ],
       "maxImages": 1
     },
     "pricing": {
@@ -4443,6 +4427,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "google/gemini-omni-flash/v1.1/reference-to-video",
         "map": {
           "images": "image_urls",
+          "videos": "reference_video_urls",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -4473,7 +4458,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4k"
       ],
       "endFrame": true,
-      "maxImages": 10
+      "maxImages": 10,
+      "maxVideos": 3
     },
     "badges": [
       "new",
@@ -4551,6 +4537,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "alibaba/wan-3.0/reference-to-video",
         "map": {
           "images": "reference_image_urls",
+          "videos": "reference_video_urls",
+          "audios": "reference_audio_urls",
           "seed": "seed",
           "generateAudio": "audio",
           "aspectRatio": "aspect_ratio",
@@ -4578,7 +4566,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1080p"
       ],
       "endFrame": true,
-      "maxImages": 10
+      "maxImages": 10,
+      "maxVideos": 5,
+      "maxAudios": 5
     },
     "badges": [
       "new",
@@ -4655,6 +4645,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "alibaba/wan-3.0-prime/reference-to-video",
         "map": {
           "images": "reference_image_urls",
+          "videos": "reference_video_urls",
+          "audios": "reference_audio_urls",
           "seed": "seed",
           "generateAudio": "audio",
           "aspectRatio": "aspect_ratio",
@@ -4682,7 +4674,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1080p"
       ],
       "endFrame": true,
-      "maxImages": 10
+      "maxImages": 10,
+      "maxVideos": 5,
+      "maxAudios": 5
     },
     "badges": [
       "pro",
@@ -4763,6 +4757,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "negativePrompt": "negative_prompt",
           "images": "reference_image_urls",
+          "videos": "reference_video_urls",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -4822,7 +4817,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         15
       ],
       "endFrame": true,
-      "maxImages": 4
+      "maxImages": 4,
+      "maxVideos": 3
     },
     "badges": [
       "audio"
@@ -4884,6 +4880,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "wan/v2.6/reference-to-video",
         "map": {
           "negativePrompt": "negative_prompt",
+          "videos": "video_urls",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -4914,6 +4911,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         15
       ],
       "maxImages": 1,
+      "maxVideos": 3,
       "multiShot": {
         "mode": "prompt",
         "maxShots": 6
@@ -5066,6 +5064,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "minimax/h3/reference-to-video",
         "map": {
           "images": "reference_image_urls",
+          "videos": "reference_video_urls",
+          "audios": "reference_audio_urls",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -5093,7 +5093,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4K"
       ],
       "endFrame": true,
-      "maxImages": 9
+      "maxImages": 9,
+      "maxVideos": 3,
+      "maxAudios": 3
     },
     "badges": [
       "new"
@@ -5126,6 +5128,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "defaults": {
+            "prompt_expansion_mode": "balanced"
           }
         }
       },
@@ -5141,6 +5146,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "defaults": {
+            "prompt_expansion_mode": "balanced"
           }
         }
       },
@@ -5156,6 +5164,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "defaults": {
+            "prompt_expansion_mode": "balanced"
           }
         }
       },
@@ -5167,12 +5178,17 @@ export const CLOUD_MODELS: ModelDef[] = [
           "image": "image_url",
           "images": "reference_image_urls",
           "endImage": "end_image_url",
+          "videos": "reference_video_urls",
+          "audios": "reference_audio_urls",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "defaults": {
+            "prompt_expansion_mode": "balanced"
           }
         }
       },
@@ -5182,6 +5198,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "minimax/h3-max/extend-video",
         "map": {
           "video": "video_url",
+          "audios": "reference_audio_urls",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
@@ -5210,7 +5227,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2K"
       ],
       "endFrame": true,
-      "maxImages": 9
+      "maxImages": 9,
+      "maxVideos": 3,
+      "maxAudios": 3
     },
     "badges": [
       "pro"
@@ -5847,7 +5866,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       "resolutions": [
         "720p",
         "1080p"
-      ]
+      ],
+      "promptless": true
     },
     "defaults": {
       "aspectRatio": "9:16"
@@ -5936,10 +5956,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "param": "audio_setting",
           "label": "Audio",
           "values": [
-            "auto",
             "origin"
-          ],
-          "default": "auto"
+          ]
         }
       ],
       "seed": true,
@@ -6134,10 +6152,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "values": [
             "depth",
             "canny",
-            "pose",
-            "none"
-          ],
-          "default": "none"
+            "pose"
+          ]
         },
         {
           "param": "camera_lora",
@@ -6149,10 +6165,8 @@ export const CLOUD_MODELS: ModelDef[] = [
             "dolly_right",
             "jib_up",
             "jib_down",
-            "static",
-            "none"
-          ],
-          "default": "none"
+            "static"
+          ]
         }
       ],
       "negativePrompt": true,
@@ -6364,7 +6378,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "new"
@@ -6394,7 +6409,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "minute",
       "usd": 5
@@ -6469,7 +6486,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1440p",
         "2160p"
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "pricing": {
       "unit": "megapixel",
@@ -6496,7 +6514,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "pricing": {
       "unit": "image",
@@ -6525,7 +6544,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.02
@@ -6559,7 +6580,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1080p",
         "1440p",
         "2160p"
-      ]
+      ],
+      "promptless": true
     },
     "pricing": {
       "unit": "megapixel",
@@ -6590,7 +6612,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "pricing": {
       "unit": "image",
@@ -7380,7 +7403,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "default": 0
         }
       ],
-      "seed": true
+      "seed": true,
+      "promptless": true
     },
     "badges": [
       "new"
@@ -8242,8 +8266,7 @@ export const CLOUD_MODELS: ModelDef[] = [
             "Slovenian",
             "Catalan",
             "Nynorsk",
-            "Afrikaans",
-            "auto"
+            "Afrikaans"
           ]
         }
       ]
@@ -8386,7 +8409,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "hint": "Wise, Mature, Balanced \u00b7 american"
         }
       ],
-      "seed": true
+      "seed": true,
+      "promptless": true
     },
     "defaults": {
       "voice": "JBFqnCBsd6RMkjVDRZzb"
@@ -8417,7 +8441,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "voiceClone": true
+      "voiceClone": true,
+      "promptless": true
     },
     "pricing": {
       "unit": "minute",
@@ -8624,7 +8649,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "Zulu (South Africa)",
         "English - Your Accent",
         "English - American Accent"
-      ]
+      ],
+      "promptless": true
     },
     "badges": [
       "top"
@@ -8834,7 +8860,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "Zulu (South Africa)",
         "English - Your Accent",
         "English - American Accent"
-      ]
+      ],
+      "promptless": true
     },
     "badges": [
       "fast"
@@ -8900,7 +8927,42 @@ export const CLOUD_MODELS: ModelDef[] = [
         "vi",
         "hu",
         "no"
-      ]
+      ],
+      "sourceLanguages": [
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "pl",
+        "hi",
+        "ja",
+        "ko",
+        "zh",
+        "ar",
+        "ru",
+        "tr",
+        "nl",
+        "sv",
+        "id",
+        "fil",
+        "uk",
+        "el",
+        "cs",
+        "ro",
+        "da",
+        "fi",
+        "bg",
+        "hr",
+        "sk",
+        "ms",
+        "ta",
+        "vi",
+        "hu",
+        "no"
+      ],
+      "promptless": true
     },
     "pricing": {
       "unit": "minute",
@@ -8973,6 +9035,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "fixed": {
+            "audio_format": "mp3"
           }
         }
       }
@@ -9093,7 +9158,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seed-audio-1.0",
         "map": {
           "voice": "voice",
-          "image": "image_url"
+          "image": "image_url",
+          "audios": "audio_urls"
         }
       },
       {
@@ -9102,7 +9168,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "bytedance/seed-audio-1.0",
         "map": {
           "voice": "voice",
-          "image": "image_url"
+          "image": "image_url",
+          "audios": "audio_urls"
         }
       }
     ],
@@ -9124,6 +9191,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "hint": "en \u00b7 es \u00b7 id \u00b7 pt \u00b7 zh"
         }
       ],
+      "maxAudios": 3,
       "maxImages": 1,
       "sliders": [
         {
@@ -9266,13 +9334,17 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "minimax-music",
     "engine": "cloud",
     "kind": "audio",
-    "tagline": "Songs with vocals, or instrumentals",
+    "tagline": "Songs with vocals, lyrics written from your prompt",
     "routes": [
       {
         "op": "music",
         "provider": "fal",
         "endpoint": "fal-ai/minimax-music/v2.5",
-        "map": {}
+        "map": {
+          "fixed": {
+            "lyrics_optimizer": true
+          }
+        }
       }
     ],
     "options": {},
@@ -9354,14 +9426,6 @@ export const CLOUD_MODELS: ModelDef[] = [
             "mureka-9.5"
           ],
           "default": "mureka-9.5"
-        },
-        {
-          "param": "gender",
-          "label": "Voice",
-          "values": [
-            "female",
-            "male"
-          ]
         }
       ]
     },
@@ -9544,7 +9608,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.0
@@ -9573,7 +9639,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.05
@@ -9610,7 +9678,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "480p",
         "720p",
         "1080p"
-      ]
+      ],
+      "promptless": true
     },
     "pricing": {
       "unit": "second",
@@ -9717,6 +9786,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "defaults": {
+            "duration": 600
           }
         }
       }
@@ -9812,8 +9884,9 @@ export const CLOUD_MODELS: ModelDef[] = [
       "resolution": "auto"
     },
     "pricing": {
-      "unit": "image",
-      "usd": 0.027
+      "unit": "request",
+      "usd": 0.135,
+      "note": "$0.027 per layer, \u22485 layers"
     }
   },
   {
@@ -9908,7 +9981,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "fast"
@@ -9947,7 +10021,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "top"
@@ -9997,7 +10072,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "default": "spline"
         }
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "fast"
@@ -10034,7 +10110,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "request",
       "usd": 0.001,
@@ -10066,7 +10144,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.0002
@@ -10080,7 +10160,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "captions",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Transcribes and burns in TikTok-style karaoke captions",
+    "tagline": "TikTok-style karaoke captions; English unless you pick the spoken language",
     "routes": [
       {
         "op": "captions",
@@ -10173,7 +10253,42 @@ export const CLOUD_MODELS: ModelDef[] = [
           ],
           "default": "bottom"
         }
-      ]
+      ],
+      "sourceLanguages": [
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "pl",
+        "hi",
+        "ja",
+        "ko",
+        "zh",
+        "ar",
+        "ru",
+        "tr",
+        "nl",
+        "sv",
+        "id",
+        "fil",
+        "uk",
+        "el",
+        "cs",
+        "ro",
+        "da",
+        "fi",
+        "bg",
+        "hr",
+        "sk",
+        "ms",
+        "ta",
+        "vi",
+        "hu",
+        "no"
+      ],
+      "promptless": true
     },
     "badges": [
       "top"
@@ -10200,6 +10315,175 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "targetLanguage": "translation_language",
           "video": "video_url",
+          "sourceLanguage": {
+            "key": "language",
+            "values": [
+              "af-ZA",
+              "am-ET",
+              "ar-AE",
+              "ar-BH",
+              "ar-DZ",
+              "ar-EG",
+              "ar-IL",
+              "ar-IQ",
+              "ar-JO",
+              "ar-KW",
+              "ar-LB",
+              "ar-MA",
+              "ar-OM",
+              "ar-PS",
+              "ar-QA",
+              "ar-SA",
+              "ar-TN",
+              "ast-ES",
+              "az-AZ",
+              "ba",
+              "bas",
+              "be-BY",
+              "bg-BG",
+              "br",
+              "bs-BA",
+              "ca-ES",
+              "ceb-PH",
+              "ckb-IQ",
+              "cs-CZ",
+              "cy-GB",
+              "da-DK",
+              "de-DE",
+              "dyu",
+              "el-GR",
+              "en-AU",
+              "en-GB",
+              "en-IN",
+              "en-NZ",
+              "en-US",
+              "eo",
+              "es-AR",
+              "es-BO",
+              "es-CL",
+              "es-CO",
+              "es-CR",
+              "es-DO",
+              "es-EC",
+              "es-ES",
+              "es-GT",
+              "es-HN",
+              "es-MX",
+              "es-NI",
+              "es-PA",
+              "es-PE",
+              "es-PR",
+              "es-PY",
+              "es-SV",
+              "es-US",
+              "es-UY",
+              "es-VE",
+              "et-EE",
+              "eu-ES",
+              "fa-IR",
+              "ff",
+              "fi-FI",
+              "fil-PH",
+              "fo",
+              "fr-CA",
+              "fr-FR",
+              "fy",
+              "ga",
+              "gd",
+              "gl-ES",
+              "ha-NG",
+              "haw",
+              "he-IL",
+              "hr-HR",
+              "hsb",
+              "ht",
+              "hu-HU",
+              "hy-AM",
+              "id-ID",
+              "ig",
+              "is-IS",
+              "it-IT",
+              "ja-JP",
+              "ja-Latn-JP",
+              "jv-ID",
+              "ka-GE",
+              "kab",
+              "kam-KE",
+              "kea-CV",
+              "kk-KZ",
+              "ko-KR",
+              "ku",
+              "ky-KG",
+              "la",
+              "lb-LU",
+              "lg",
+              "lij",
+              "ln-CD",
+              "lo-LA",
+              "lt-LT",
+              "luo-KE",
+              "lv-LV",
+              "mg",
+              "mi-NZ",
+              "mk-MK",
+              "mn-MN",
+              "ms-MY",
+              "mt-MT",
+              "nb-NO",
+              "nl-NL",
+              "nso-ZA",
+              "ny-MW",
+              "oc-FR",
+              "pl-PL",
+              "ps-AF",
+              "pt-BR",
+              "pt-PT",
+              "ro-RO",
+              "roh",
+              "ru-RU",
+              "rw-RW",
+              "sah",
+              "sk-SK",
+              "sl-SI",
+              "sm",
+              "sn-ZW",
+              "so-SO",
+              "sq-AL",
+              "sr-Latn-RS",
+              "sr-RS",
+              "srd",
+              "ss",
+              "su-ID",
+              "sv-SE",
+              "sw-KE",
+              "sw-TZ",
+              "tg-TJ",
+              "th-TH",
+              "tk",
+              "tn",
+              "tok",
+              "ton",
+              "tr-TR",
+              "ts-ZA",
+              "tt",
+              "uk-UA",
+              "umb-AO",
+              "ur-IN",
+              "ur-PK",
+              "uz-UZ",
+              "vi-VN",
+              "vro",
+              "wo-SN",
+              "xh-ZA",
+              "yi",
+              "yo-NG",
+              "yue-Hant-HK",
+              "zh",
+              "zh-HK",
+              "zh-TW",
+              "zu-ZA"
+            ]
+          },
           "fixed": {
             "preset": "simple"
           }
@@ -10460,11 +10744,134 @@ export const CLOUD_MODELS: ModelDef[] = [
             "vegas"
           ]
         }
-      ]
+      ],
+      "sourceLanguages": [
+        "af",
+        "am",
+        "ar",
+        "ast",
+        "az",
+        "ba",
+        "bas",
+        "be",
+        "bg",
+        "br",
+        "bs",
+        "ca",
+        "ceb",
+        "ckb",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "dyu",
+        "el",
+        "en",
+        "eo",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "ff",
+        "fi",
+        "fil",
+        "fo",
+        "fr",
+        "fy",
+        "ga",
+        "gd",
+        "gl",
+        "ha",
+        "haw",
+        "he",
+        "hr",
+        "hsb",
+        "ht",
+        "hu",
+        "hy",
+        "id",
+        "ig",
+        "is",
+        "it",
+        "ja",
+        "jv",
+        "ka",
+        "kab",
+        "kam",
+        "kea",
+        "kk",
+        "ko",
+        "ku",
+        "ky",
+        "la",
+        "lb",
+        "lg",
+        "lij",
+        "ln",
+        "lo",
+        "lt",
+        "luo",
+        "lv",
+        "mg",
+        "mi",
+        "mk",
+        "mn",
+        "ms",
+        "mt",
+        "nb",
+        "nl",
+        "nso",
+        "ny",
+        "oc",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "roh",
+        "ru",
+        "rw",
+        "sah",
+        "sk",
+        "sl",
+        "sm",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "srd",
+        "ss",
+        "su",
+        "sv",
+        "sw",
+        "tg",
+        "th",
+        "tk",
+        "tn",
+        "tok",
+        "ton",
+        "tr",
+        "ts",
+        "tt",
+        "uk",
+        "umb",
+        "ur",
+        "uz",
+        "vi",
+        "vro",
+        "wo",
+        "xh",
+        "yi",
+        "yo",
+        "yue",
+        "zh",
+        "zu"
+      ],
+      "promptless": true
     },
     "pricing": {
       "unit": "minute",
-      "usd": 0.1
+      "usd": 0.1,
+      "note": "basic styles; dynamic styles (glass, whisper, glide, fusion, terminal, handwritten, backdrop) and >1080p 2x; translation +$0.20/min"
     }
   },
   {
@@ -10499,7 +10906,43 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "sourceLanguages": [
+        "en",
+        "es",
+        "fr",
+        "de",
+        "it",
+        "pt",
+        "pl",
+        "hi",
+        "ja",
+        "ko",
+        "zh",
+        "ar",
+        "ru",
+        "tr",
+        "nl",
+        "sv",
+        "id",
+        "fil",
+        "uk",
+        "el",
+        "cs",
+        "ro",
+        "da",
+        "fi",
+        "bg",
+        "hr",
+        "sk",
+        "ms",
+        "ta",
+        "vi",
+        "hu",
+        "no"
+      ],
+      "promptless": true
+    },
     "badges": [
       "top"
     ],
@@ -10516,7 +10959,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "whisper",
     "engine": "cloud",
     "kind": "text",
-    "tagline": "Fast Whisper large-v3 transcripts in segments",
+    "tagline": "Fast Whisper large-v3 transcripts in segments, any language",
     "routes": [
       {
         "op": "transcribe",
@@ -10525,12 +10968,221 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "prompt": false,
           "audio": "audio_url",
-          "sourceLanguage": "language",
-          "video": "audio_url"
+          "sourceLanguage": {
+            "key": "language",
+            "values": [
+              "af",
+              "am",
+              "ar",
+              "as",
+              "az",
+              "ba",
+              "be",
+              "bg",
+              "bn",
+              "bo",
+              "br",
+              "bs",
+              "ca",
+              "cs",
+              "cy",
+              "da",
+              "de",
+              "el",
+              "en",
+              "es",
+              "et",
+              "eu",
+              "fa",
+              "fi",
+              "fo",
+              "fr",
+              "gl",
+              "gu",
+              "ha",
+              "haw",
+              "he",
+              "hi",
+              "hr",
+              "ht",
+              "hu",
+              "hy",
+              "id",
+              "is",
+              "it",
+              "ja",
+              "jw",
+              "ka",
+              "kk",
+              "km",
+              "kn",
+              "ko",
+              "la",
+              "lb",
+              "ln",
+              "lo",
+              "lt",
+              "lv",
+              "mg",
+              "mi",
+              "mk",
+              "ml",
+              "mn",
+              "mr",
+              "ms",
+              "mt",
+              "my",
+              "ne",
+              "nl",
+              "nn",
+              "no",
+              "oc",
+              "pa",
+              "pl",
+              "ps",
+              "pt",
+              "ro",
+              "ru",
+              "sa",
+              "sd",
+              "si",
+              "sk",
+              "sl",
+              "sn",
+              "so",
+              "sq",
+              "sr",
+              "su",
+              "sv",
+              "sw",
+              "ta",
+              "te",
+              "tg",
+              "th",
+              "tk",
+              "tl",
+              "tr",
+              "tt",
+              "uk",
+              "ur",
+              "uz",
+              "vi",
+              "yi",
+              "yo",
+              "zh"
+            ]
+          },
+          "video": "audio_url",
+          "defaults": {
+            "language": null
+          }
         }
       }
     ],
-    "options": {},
+    "options": {
+      "sourceLanguages": [
+        "af",
+        "am",
+        "ar",
+        "as",
+        "az",
+        "ba",
+        "be",
+        "bg",
+        "bn",
+        "bo",
+        "br",
+        "bs",
+        "ca",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "fi",
+        "fo",
+        "fr",
+        "gl",
+        "gu",
+        "ha",
+        "haw",
+        "he",
+        "hi",
+        "hr",
+        "ht",
+        "hu",
+        "hy",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jw",
+        "ka",
+        "kk",
+        "km",
+        "kn",
+        "ko",
+        "la",
+        "lb",
+        "ln",
+        "lo",
+        "lt",
+        "lv",
+        "mg",
+        "mi",
+        "mk",
+        "ml",
+        "mn",
+        "mr",
+        "ms",
+        "mt",
+        "my",
+        "ne",
+        "nl",
+        "nn",
+        "no",
+        "oc",
+        "pa",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "ru",
+        "sa",
+        "sd",
+        "si",
+        "sk",
+        "sl",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "su",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "tk",
+        "tl",
+        "tr",
+        "tt",
+        "uk",
+        "ur",
+        "uz",
+        "vi",
+        "yi",
+        "yo",
+        "zh"
+      ],
+      "promptless": true
+    },
     "badges": [
       "fast"
     ]
@@ -10542,7 +11194,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "whisper",
     "engine": "cloud",
     "kind": "text",
-    "tagline": "Whisper with word timings and speaker labels",
+    "tagline": "Whisper large-v3 with word timings, any language",
     "routes": [
       {
         "op": "transcribe",
@@ -10551,12 +11203,221 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "prompt": false,
           "audio": "audio_url",
-          "sourceLanguage": "language",
-          "video": "audio_url"
+          "sourceLanguage": {
+            "key": "language",
+            "values": [
+              "af",
+              "am",
+              "ar",
+              "as",
+              "az",
+              "ba",
+              "be",
+              "bg",
+              "bn",
+              "bo",
+              "br",
+              "bs",
+              "ca",
+              "cs",
+              "cy",
+              "da",
+              "de",
+              "el",
+              "en",
+              "es",
+              "et",
+              "eu",
+              "fa",
+              "fi",
+              "fo",
+              "fr",
+              "gl",
+              "gu",
+              "ha",
+              "haw",
+              "he",
+              "hi",
+              "hr",
+              "ht",
+              "hu",
+              "hy",
+              "id",
+              "is",
+              "it",
+              "ja",
+              "jw",
+              "ka",
+              "kk",
+              "km",
+              "kn",
+              "ko",
+              "la",
+              "lb",
+              "ln",
+              "lo",
+              "lt",
+              "lv",
+              "mg",
+              "mi",
+              "mk",
+              "ml",
+              "mn",
+              "mr",
+              "ms",
+              "mt",
+              "my",
+              "ne",
+              "nl",
+              "nn",
+              "no",
+              "oc",
+              "pa",
+              "pl",
+              "ps",
+              "pt",
+              "ro",
+              "ru",
+              "sa",
+              "sd",
+              "si",
+              "sk",
+              "sl",
+              "sn",
+              "so",
+              "sq",
+              "sr",
+              "su",
+              "sv",
+              "sw",
+              "ta",
+              "te",
+              "tg",
+              "th",
+              "tk",
+              "tl",
+              "tr",
+              "tt",
+              "uk",
+              "ur",
+              "uz",
+              "vi",
+              "yi",
+              "yo",
+              "zh"
+            ]
+          },
+          "video": "audio_url",
+          "fixed": {
+            "chunk_level": "word"
+          }
         }
       }
     ],
-    "options": {}
+    "options": {
+      "sourceLanguages": [
+        "af",
+        "am",
+        "ar",
+        "as",
+        "az",
+        "ba",
+        "be",
+        "bg",
+        "bn",
+        "bo",
+        "br",
+        "bs",
+        "ca",
+        "cs",
+        "cy",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es",
+        "et",
+        "eu",
+        "fa",
+        "fi",
+        "fo",
+        "fr",
+        "gl",
+        "gu",
+        "ha",
+        "haw",
+        "he",
+        "hi",
+        "hr",
+        "ht",
+        "hu",
+        "hy",
+        "id",
+        "is",
+        "it",
+        "ja",
+        "jw",
+        "ka",
+        "kk",
+        "km",
+        "kn",
+        "ko",
+        "la",
+        "lb",
+        "ln",
+        "lo",
+        "lt",
+        "lv",
+        "mg",
+        "mi",
+        "mk",
+        "ml",
+        "mn",
+        "mr",
+        "ms",
+        "mt",
+        "my",
+        "ne",
+        "nl",
+        "nn",
+        "no",
+        "oc",
+        "pa",
+        "pl",
+        "ps",
+        "pt",
+        "ro",
+        "ru",
+        "sa",
+        "sd",
+        "si",
+        "sk",
+        "sl",
+        "sn",
+        "so",
+        "sq",
+        "sr",
+        "su",
+        "sv",
+        "sw",
+        "ta",
+        "te",
+        "tg",
+        "th",
+        "tk",
+        "tl",
+        "tr",
+        "tt",
+        "uk",
+        "ur",
+        "uz",
+        "vi",
+        "yi",
+        "yo",
+        "zh"
+      ],
+      "promptless": true
+    }
   },
   {
     "id": "demucs",
@@ -10580,7 +11441,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "promptless": true
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.0007
@@ -10617,7 +11480,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "default": "Normal"
         }
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "top",
@@ -10649,7 +11513,8 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "badges": [
       "fast"
@@ -10693,7 +11558,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1024",
         "1536"
       ],
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "defaults": {
       "resolution": "1024"
@@ -10746,7 +11612,8 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       ],
       "seed": true,
-      "maxImages": 1
+      "maxImages": 1,
+      "promptless": true
     },
     "pricing": {
       "unit": "request",

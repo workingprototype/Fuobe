@@ -18,6 +18,8 @@ interface ProviderPreset {
 
 const label = (v: string | number) =>
   String(v)
+    // API enums in capitals (Ideogram's "80S_ILLUSTRATION", "TURBO") read as words.
+    .replace(/^(?=.*[A-Z])[A-Z0-9 _-]+$/, (s) => s.toLowerCase())
     .replace(/[-_]/g, " ")
     .replace(/^f(\d)(\d)?/, (_, a, b) => `f/${a}${b ? `.${b}` : ""}`)
     .replace(/^\w/, (c) => c.toUpperCase());
@@ -136,7 +138,8 @@ export function ControlsChip({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
-                  <SelectItem value="__auto">Auto</SelectItem>
+                  {/* Auto sends nothing: the model's default, named when it's known (Leffa: Upper body). */}
+                  <SelectItem value="__auto">{c.default !== undefined ? `Auto · ${label(c.default)}` : "Auto"}</SelectItem>
                   {c.values.map((v) => (
                     <SelectItem key={String(v)} value={String(v)}>
                       {label(v)}

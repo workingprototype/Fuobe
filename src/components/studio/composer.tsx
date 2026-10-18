@@ -12,7 +12,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -123,7 +123,8 @@ export function Composer({ docked }: { docked: boolean }) {
 
   const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
-  const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: config.ops }), [catalog.models, config.kind, config.ops]);
+  const pickerOps = config.pickerOps ?? config.ops;
+  const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: pickerOps }), [catalog.models, config.kind, pickerOps]);
   const model: ModelDef | undefined = catalog.getModel(draft.modelId);
   const presetLoading = !!draft.presetId && !preset && !catalog.complete;
 
@@ -143,8 +144,14 @@ export function Composer({ docked }: { docked: boolean }) {
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
-  const slots = preset?.inputs ?? config.slots;
   const opts = model?.options ?? {};
+  // Try-on names its images: "Person photo", then "Add garment" (instead of "Image" / "Add ref").
+  const baseSlots = preset?.inputs ?? config.slots;
+  const named = useMemo(
+    () => namedImageSlots(baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length),
+    [baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length],
+  );
+  const slots = named.slots;
   // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
   const refMax = !config.multiRef
     ? 0
@@ -192,8 +199,9 @@ export function Composer({ docked }: { docked: boolean }) {
       planError = (e as Error).message;
     }
   }
+  // Models that take no prompt (try-on, 3D, transcription, upscalers) never ask for one.
   const promptMissing =
-    !config.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
+    !config.promptOptional && !opts.promptless && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
     loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
@@ -255,7 +263,7 @@ export function Composer({ docked }: { docked: boolean }) {
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none";
+  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
   const effectiveOp = studioOp ?? op;
   const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
@@ -330,7 +338,7 @@ export function Composer({ docked }: { docked: boolean }) {
           {config.multiRef && draft.refs.length < refMax && (
             <MediaSlot
               slotKey="refs"
-              label={config.multiRef.label}
+              label={named.refLabel ?? config.multiRef.label}
               kind={config.multiRef.kind ?? "image"}
               value={null}
               onFile={attach.addRefFile}

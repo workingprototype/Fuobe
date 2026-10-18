@@ -16,14 +16,14 @@ for (const e of research) byId.set(`${e.provider}:${e.endpoint}`, { ...byId.get(
 function fieldsOf(map: FieldMap): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(map)) {
-    if (k === "fixed" || k === "seedRange" || k === "maskFormat") continue;
+    if (k === "fixed" || k === "defaults" || k === "seedRange" || k === "maskFormat") continue;
     if (typeof v === "string") out.push(v);
     else if (v && typeof v === "object") {
       const o = v as Record<string, unknown>;
       for (const f of ["key", "background", "shotType", "flag"]) if (typeof o[f] === "string") out.push(o[f] as string);
     }
   }
-  return [...out, ...Object.keys(map.fixed ?? {})].map((f) => f.split(".")[0].replace("[]", ""));
+  return [...out, ...Object.keys(map.fixed ?? {}), ...Object.keys(map.defaults ?? {})].map((f) => f.split(".")[0].replace("[]", ""));
 }
 
 /** The models this round added (research part 3), with the operation each is for. */
@@ -37,8 +37,8 @@ const ROUND3: Record<string, Operation> = {
   "recraft-vectorize": "vectorize",
   image2svg: "vectorize",
   "recraft-4-1-pro": "t2i",
-  "recraft-4-style": "t2i",
-  "recraft-4-style-pro": "t2i",
+  "recraft-4-style": "edit",
+  "recraft-4-style-pro": "edit",
   "ideogram-3": "t2i",
   "krea-2-style": "edit",
   "flux-redux-ultra": "edit",
@@ -223,11 +223,12 @@ describe("round-3 payloads", () => {
       image_url: "bottle.png",
       ref_image_url: "scene.png",
     });
-    expect(buildPayload(route("recraft-4-style", "t2i").map!, { prompt: "a fox", styleId: "st-123", aspectRatio: "16:9" })).toEqual({
+    expect(buildPayload(route("recraft-4-style", "edit").map!, { prompt: "a fox", images: ["a.png", "b.png"], aspectRatio: "16:9" })).toEqual({
       prompt: "a fox",
-      style_id: "st-123",
+      image_urls: ["a.png", "b.png"],
       image_size: "landscape_16_9",
     });
+    expect(buildPayload(route("recraft-4-style", "edit").map!, { prompt: "a fox", images: ["a.png"], styleId: "st-123" })).toMatchObject({ style_id: "st-123" });
     expect(buildPayload(route("qwen-image-layered-cloud").map!, { prompt: "a poster", images: ["a.png"], numLayers: 6 })).toEqual({ prompt: "a poster", image_url: "a.png", num_layers: 6 });
     expect(buildPayload(route("qwen-image-layered-cloud", "layers", "replicate").map!, { prompt: "a poster", images: ["a.png"], numLayers: 6 })).toEqual({
       description: "a poster",

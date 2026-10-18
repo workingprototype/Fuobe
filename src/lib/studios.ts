@@ -9,6 +9,9 @@ export const IMAGE_STUDIO: StudioConfig = {
   placeholder: "Describe an image… try “a koi pond at night, neon rain”",
   kind: "image",
   ops: ["t2i", "edit"],
+  // Text-to-image models (most also edit with refs); single-purpose edit tools (try-on, product shots,
+  // style transfer, angles) are listed in the Edit studio.
+  pickerOps: ["t2i"],
   feed: { kind: "image", features: ["image", "edit", "app:*", "character:*"] },
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
@@ -188,7 +191,7 @@ export const SFX_STUDIO: StudioConfig = {
   ops: ["sfx"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-sfx", open: "" },
+  defaultModels: { cloud: "mirelo-sfx-2", open: "" },
   suggestions: ["Thunder rolling over a quiet forest", "Footsteps on gravel, distant birds", "Sci-fi door whooshing open"],
 };
 
@@ -201,7 +204,7 @@ export const MUSIC_STUDIO: StudioConfig = {
   ops: ["music"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-music", open: "oss-ace-step" },
+  defaultModels: { cloud: "sonilo-music", open: "oss-ace-step" },
   suggestions: ["Lo-fi hip hop beat with soft piano, 80 bpm", "Epic orchestral trailer music building to a drop", "Upbeat indie pop with handclaps and a whistled hook"],
 };
 
@@ -214,7 +217,7 @@ export const FOLEY_STUDIO: StudioConfig = {
   ops: ["v2a"],
   feed: { features: ["audio"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
-  defaultModels: { cloud: "mmaudio-cloud", open: "oss-mmaudio" },
+  defaultModels: { cloud: "mirelo-sfx-2-video", open: "oss-mmaudio" },
   promptOptional: true,
 };
 

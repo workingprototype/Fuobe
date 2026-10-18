@@ -1,4 +1,4 @@
-import type { DurationField, EnumField, FieldMap, GenInput, MediaKind, Operation } from "./types";
+import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
@@ -65,9 +65,36 @@ export function paletteValue(format: PaletteFormat, palette: string[]): unknown 
   return colors.map((c) => colorValue(format, c.rgb, c.hex));
 }
 
+/** The ISO 639 code in "de", "de-DE", "pt_BR" or "German (de)"; undefined for a bare name. */
+function languageCode(v: string): string | undefined {
+  return (/\(([a-z]{2,3})(?:-[A-Za-z]+)?\)\s*$/i.exec(v)?.[1] ?? /^([a-z]{2,3})(?:[-_][A-Za-z0-9]+)*$/i.exec(v)?.[1])?.toLowerCase();
+}
+
+/**
+ * The entry of an API's language list that means `lang`: the same value ("es-MX"), else the entry for
+ * its ISO code: the bare code (Wizper's "es"), its home locale ("es-ES", "de-DE"), US English, or the
+ * first locale listed ("ko-KR"). Undefined when the API doesn't know it, so the field is left out and
+ * the API falls back to detecting it.
+ */
+export function languageValue(values: string[], lang: string): string | undefined {
+  const v = lang.trim();
+  const exact = values.find((x) => x.toLowerCase() === v.toLowerCase().replace("_", "-"));
+  if (exact) return exact;
+  const code = languageCode(v);
+  if (!code) return undefined;
+  const lower = values.map((x) => x.toLowerCase());
+  for (const want of [code, `${code}-${code}`, `${code}-us`]) {
+    const i = lower.indexOf(want);
+    if (i >= 0) return values[i];
+  }
+  return values.find((x) => x.toLowerCase().startsWith(`${code}-`));
+}
+
 /** Build a provider payload from canonical input using a route's {@link FieldMap}. Pure + unit-tested. */
 export function buildPayload(map: FieldMap, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  // Fallbacks first: every canonical field and params.extra below overrides them.
+  for (const [k, v] of Object.entries(map.defaults ?? {})) setPath(out, k, v);
   if (map.prompt !== false && input.prompt !== undefined) setPath(out, map.prompt ?? "prompt", input.prompt);
   if (map.negativePrompt && input.negativePrompt) out[map.negativePrompt] = input.negativePrompt;
 
@@ -81,6 +108,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.videoArray && input.video) out[map.videoArray] = [input.video];
   if (map.videos && input.videos?.length) out[map.videos] = input.videos;
   if (map.audio && input.audio) out[map.audio] = input.audio;
+  if (map.audios && input.audios?.length) out[map.audios] = input.audios;
 
   if (map.aspectRatio && input.aspectRatio) {
     const [k, v] = enumValue(map.aspectRatio, input.aspectRatio);
@@ -124,7 +152,15 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[d.key] = input.dialogue.map((l) => ({ [d.text]: l.text, [d.voice]: l.voice ?? input.voice }));
   }
   if (map.targetLanguage && input.targetLanguage) out[map.targetLanguage] = input.targetLanguage;
-  if (map.sourceLanguage && input.sourceLanguage) out[map.sourceLanguage] = input.sourceLanguage;
+  if (map.sourceLanguage && input.sourceLanguage?.trim()) {
+    const s = map.sourceLanguage;
+    // Free-text language fields take ISO codes ("de-DE" and "German (de)" are sent as "de").
+    if (typeof s === "string") out[s] = languageCode(input.sourceLanguage.trim()) ?? input.sourceLanguage.trim();
+    else {
+      const v = languageValue(s.values, input.sourceLanguage);
+      if (v !== undefined) out[s.key] = v;
+    }
+  }
   if (map.draftId && input.draftId) out[map.draftId] = input.draftId;
 
   // Trims, frame rates, palettes, saved styles and layer counts (research part 3).
@@ -420,7 +456,7 @@ function transcriptOutputs(response: unknown): ExtractedOutput[] {
   if (!text && !cues.length) return [];
   const languages = (o.languages ?? o.inferred_languages) as unknown;
   const language = str(o.language_code) ?? str(o.language) ?? (Array.isArray(languages) ? str(languages[0]) : undefined);
-  return [{ url: textDataUri(text), kind: "text", contentType: "text/plain", text, meta: compact({ cues, language }) }];
+  return [{ url: textDataUri(text), kind: "text", contentType: "text/plain", text, meta: compact({ cues: cues.length ? cues : undefined, language }) }];
 }
 
 /**
@@ -461,8 +497,9 @@ function stemOutputs(response: unknown): ExtractedOutput[] {
 
 /**
  * Every result of a provider response, with structure the operation defines: layers (name, z, bbox),
- * text blocks, transcripts (text + cues), 3D models and audio stems. A response with no media but
- * text comes back as one text output instead of nothing.
+ * text blocks, transcripts (text + cues), 3D models and audio stems. A text operation's response with
+ * no media but text comes back as one text output; for media operations a text-only answer (a refusal)
+ * is no result — {@link noOutputsError} turns it into the job's error.
  */
 export function extractOutputs(response: unknown, op?: Operation): ExtractedOutput[] {
   let out: ExtractedOutput[];
@@ -490,18 +527,23 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
     const t = transcriptOutputs(response)[0];
     if (t) out = [{ ...out[0], meta: { ...out[0].meta, transcript: t.text, ...(t.meta?.cues ? { cues: t.meta.cues } : {}) } }, ...out.slice(1)];
   }
-  if (!out.length) {
-    const text = textOf(response)?.trim();
-    if (text) out = transcriptOutputs(response);
-  }
+  if (!out.length && (op === undefined || OPERATION_OUTPUT[op] === "text") && textOf(response)?.trim()) out = transcriptOutputs(response);
   const r = body(response);
   if (isObj(r)) {
     // Recraft makes a style from reference images on the fly and returns its id: keep it to reuse the style.
     const styleId = str(r.style_id);
     if (styleId) out = out.map((o) => ({ ...o, meta: { ...o.meta, styleId } }));
-    // Cut-out endpoints (Bria extract-object) return the matte next to the image.
+    // Cut-out endpoints (Bria extract-object) return the matte next to the image: it rides along on the
+    // cut-out (meta.mask) instead of landing in the feed as a second result.
     const mask = fileOf(r.mask)?.url;
-    if (mask) out = out.map((o) => (o.url === mask ? { ...o, meta: { ...o.meta, role: "mask" } } : o));
+    if (mask && out.some((o) => o.url !== mask)) out = out.filter((o) => o.url !== mask).map((o) => ({ ...o, meta: { ...o.meta, mask } }));
   }
   return out;
+}
+
+/** The job's error when a response held no result: the model's own words when it answered in text. */
+export function noOutputsError(response: unknown): string {
+  const text = textOf(response)?.trim();
+  if (text) return `The model replied: ${text.length > 300 ? `${text.slice(0, 300)}…` : text}`;
+  return `No media in response: ${JSON.stringify(response).slice(0, 300)}`;
 }

@@ -571,6 +571,7 @@ async function submit(
       voiceAudio: await prep(req.inputs?.voiceAudio),
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
       videos: (await Promise.all((req.inputs?.videos ?? []).map(prep))).filter(Boolean) as string[],
+      audios: (await Promise.all((req.inputs?.audios ?? []).map(prep))).filter(Boolean) as string[],
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,

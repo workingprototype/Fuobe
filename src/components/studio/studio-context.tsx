@@ -18,6 +18,8 @@ export interface StudioConfig {
   kind: MediaKind;
   /** Operations whose models appear in the picker. */
   ops: Operation[];
+  /** Narrower than `ops` for the picker list: the Image studio lists text-to-image models; edit-only tools live in Edit. */
+  pickerOps?: Operation[];
   feed: FeedFilter;
   slots: InputSlot[];
   /** Extra reference images (multi-reference edit / image prompt), or a list of clips (kind "video": join clips). */

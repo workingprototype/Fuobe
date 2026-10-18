@@ -192,7 +192,7 @@ export interface FieldMap {
   video?: string;
   /** Video field that takes an array (receives the one input video). */
   videoArray?: string;
-  /** Array field that receives every clip of `inputs.videos`, in order (join clips). */
+  /** Array field that receives every clip of `inputs.videos`, in order (join clips; reference videos for reference-to-video). */
   videos?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
@@ -234,11 +234,22 @@ export interface FieldMap {
   styleId?: string;
   /** How many layers to split an image into. */
   numLayers?: string;
-  sourceLanguage?: string;
+  /**
+   * Language of the speech. With `values` (the API's own list, e.g. VEED's "es-ES"), the request's
+   * language is matched to an entry by exact value or ISO code, and left out when nothing matches.
+   */
+  sourceLanguage?: string | { key: string; values: string[] };
   /** Second image field (inputs.images[1]): a try-on garment, a product shot's scene reference, a style image. */
   image2?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
+  /** Array field that receives `inputs.audios` (reference audio clips: Seedance / Cinema Studio reference-to-video). */
+  audios?: string;
+  /**
+   * Fields sent unless the request sets them (a canonical field or params.extra wins): Wizper's
+   * `language: null` (detect instead of assuming English), Mirelo's full-length soundtrack.
+   */
+  defaults?: Record<string, unknown>;
 }
 
 export interface ModelRoute {
@@ -286,6 +297,17 @@ export interface ModelOptions {
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
   /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
   controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /** Images it needs before it can run (try-on: the person and the garment). */
+  minImages?: number;
+  /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
+  imageLabels?: string[];
+  /** None of its routes takes a prompt (try-on, 3D, transcription): the composer can hide the prompt box. */
+  promptless?: boolean;
+  /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
+  maxVideos?: number;
+  maxAudios?: number;
+  /** Spoken languages it can be told (transcription, captions): sent as params.sourceLanguage; unset = its default. */
+  sourceLanguages?: string[];
 }
 
 export interface Pricing {
@@ -384,8 +406,10 @@ export interface GenerationRequest {
     voiceAudio?: string;
     /** Second speaker's reference voice (open-source dialogue). */
     voiceAudio2?: string;
-    /** Several clips in order (join clips). */
+    /** Several clips in order (join clips), or reference videos (reference-to-video: Seedance, Cinema Studio). */
     videos?: string[];
+    /** Reference audio clips (reference-to-video: voices, music or sound the clip should follow). */
+    audios?: string[];
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
@@ -438,6 +462,7 @@ export interface GenInput extends GenParams {
   voiceAudio?: string;
   voiceAudio2?: string;
   videos?: string[];
+  audios?: string[];
   loras?: LoraRef[];
 }
 

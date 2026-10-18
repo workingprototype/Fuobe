@@ -22,6 +22,8 @@ const RequestSchema = z.object({
       voiceAudio: z.string().optional(),
       voiceAudio2: z.string().optional(),
       videos: z.array(z.string()).max(24).optional(),
+      // Reference audio clips for reference-to-video (Seedance 2.5 / Cinema Studio take up to 10).
+      audios: z.array(z.string()).max(10).optional(),
     })
     .optional(),
   params: z

@@ -67,7 +67,7 @@ describe("createPipeline validation", () => {
     setSetting("falKey", "fal-test-key");
     try {
       // The fixtures run on fal (now "connected"); the LLM has nothing to run on.
-      expect(() => createPipeline([step("words", "test-transcribe"), { ...step("es", "text-llm", { op: "translate", params: { targetLanguage: "Spanish" } }), after: "words", chain: [{ slot: "prompt" }] }])).toThrow(
+      expect(() => createPipeline([step("words", "test-transcribe", { inputs: { audio: "/api/files/placeholder.wav" } }), { ...step("es", "text-llm", { op: "translate", params: { targetLanguage: "Spanish" } }), after: "words", chain: [{ slot: "prompt" }] }])).toThrow(
         /Step “es” would run as a demo \(Claude needs Claude or Ollama\)/,
       );
       expect(() => assertOneMode([{ label: "Joining clips", modelId: "join-clips", op: "concat" }, { label: "Writing", modelId: "text-llm", op: "write" }])).toThrow(/Writing needs Claude or Ollama/);

@@ -55,10 +55,22 @@ def field_map(op, ep, inputs, opts):
     if end and op in ("i2v", "flf2v"):
         fm["endImage"] = end
         opts["endFrame"] = True
+    clips = op not in ("t2i", "t2v", "i2v", "flf2v")  # text/frame routes stay clean, as with image_urls
     if "video_url" in inputs:
         fm["video"] = "video_url"
+        # Seedance 2.5 edit / extend take reference clips beside the video they work on.
+        if "video_urls" in inputs and clips:
+            fm["videos"] = "video_urls"
     elif "video_urls" in inputs and op in ("v2v", "extend"):
         fm["videoArray"] = "video_urls"
+    elif "video_urls" in inputs and clips:
+        # Reference videos (Cinema Studio 4.0, Seedance, Wan, MiniMax reference-to-video): inputs.videos.
+        fm["videos"] = "video_urls"
+    if "audio_urls" in inputs and clips:
+        fm["audios"] = "audio_urls"
+    for field, key, canon in (("video_urls", "maxVideos", "videos"), ("audio_urls", "maxAudios", "audios")):
+        if fm.get(canon) == field:
+            opts[key] = max(opts.get(key, 0), int(inputs[field].get("maxItems") or 3))
     if "audio_url" in inputs and inputs["audio_url"].get("required"):
         fm["audio"] = "audio_url"
     if "negative_prompt" in inputs:

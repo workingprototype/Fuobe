@@ -23,6 +23,7 @@ const EXT_BY_TYPE: Record<string, string> = {
   "audio/ogg": "ogg",
   "audio/flac": "flac",
   "audio/mp4": "m4a",
+  "audio/aac": "aac",
   // Text outputs (transcripts, translations, scripts) and 3D models.
   "text/plain": "txt",
   "application/x-subrip": "srt",
@@ -47,6 +48,7 @@ const TYPE_BY_EXT: Record<string, string> = {
   ogg: "audio/ogg",
   flac: "audio/flac",
   m4a: "audio/mp4",
+  aac: "audio/aac",
   txt: "text/plain",
   srt: "application/x-subrip",
   vtt: "text/vtt",
