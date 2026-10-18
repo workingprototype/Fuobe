@@ -2,9 +2,11 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
+  CANVAS_TEXT_MAX as TEXT_MAX,
   cleanGraph,
   EMPTY_GRAPH,
   getTemplate,
+  NODE_SPECS,
   nodeLabel,
   nodeMap,
   nodeSignature,
@@ -70,18 +72,27 @@ const Params = z.object({
   extra: z.record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean()])).optional(),
 });
 
+/** Free text is clamped, not refused: one over-long paste must never stop the whole board from saving. */
+const clamped = (max: number) => z.string().transform((s) => s.slice(0, max));
+
+/** Element handles are letters, digits, `_` and `-` (handleFor); anything else is dropped. */
+const Handle = z
+  .string()
+  .max(200)
+  .transform((h) => h.replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 60) || undefined);
+
 const NodeData = z.object({
-  label: z.string().max(80).optional(),
-  text: z.string().max(10_000).optional(),
+  label: clamped(80).optional(),
+  text: clamped(TEXT_MAX).optional(),
   // Media comes from Fuobe's own storage (uploads, the library, generated outputs).
   url: z.string().startsWith("/api/files/").max(2000).optional(),
-  name: z.string().max(200).optional(),
+  name: clamped(200).optional(),
   elementId: z.string().max(40).optional(),
-  handle: z.string().max(60).optional(),
+  handle: Handle.optional(),
   preview: z.string().startsWith("/api/files/").max(2000).optional(),
   modelId: z.string().max(120).optional(),
   op: z.string().max(40).optional(),
-  prompt: z.string().max(10_000).optional(),
+  prompt: clamped(TEXT_MAX).optional(),
   params: Params.optional(),
   pinned: z.boolean().optional(),
   mediaKind: z.enum(KINDS).optional(),
@@ -116,6 +127,24 @@ export const GraphSchema = z.object({
   viewport: z.object({ x: Num, y: Num, zoom: Num.positive().max(10) }).optional(),
 });
 
+/** Why a graph from the browser was refused, naming the node (the editor shows it in a toast). */
+export function graphProblem(input: unknown): string {
+  const parsed = GraphSchema.safeParse(input);
+  const fallback = "That board couldn't be saved — reload the page";
+  if (parsed.success) return fallback;
+  const [list, index, ...rest] = parsed.error.issues[0]?.path ?? [];
+  if (list === "nodes" && typeof index === "number") {
+    const n = (input as { nodes?: { type?: string; data?: { label?: unknown } }[] }).nodes?.[index];
+    const custom = typeof n?.data?.label === "string" && n.data.label.trim() ? n.data.label.trim().slice(0, 80) : undefined;
+    const label = custom ?? NODE_SPECS[n?.type as CanvasNodeType]?.label ?? "A node";
+    const field = rest.filter((p): p is string => typeof p === "string" && p !== "data").join(" ");
+    return `“${label}” couldn't be saved${field ? ` (its ${field})` : ""}: change it or remove the node`;
+  }
+  if (list === "nodes") return "This board has too many nodes to save (300 at most)";
+  if (list === "edges") return "This board has too many connections to save (1,200 at most)";
+  return fallback;
+}
+
 /** A parsed graph, with duplicate node ids, dangling edges and edges into missing handles removed. */
 export function parseGraph(input: unknown): CanvasGraph | null {
   const parsed = GraphSchema.safeParse(input);
@@ -134,6 +163,9 @@ export function getCanvas(id: string): Canvas | null {
   return r ? toCanvas(r) : null;
 }
 
+/** Generations in the Trash count as gone: never a card preview, never a fresh result to reuse. */
+const NOT_TRASHED = "NOT EXISTS (SELECT 1 FROM generation_trash t WHERE t.generation_id = g.id)";
+
 /** The newest finished image among the canvas's results (a video when it made no image). */
 function previewOf(runs: CanvasRuns): CanvasSummary["preview"] {
   const ids = Object.values(runs)
@@ -143,7 +175,7 @@ function previewOf(runs: CanvasRuns): CanvasSummary["preview"] {
   if (!ids.length) return null;
   const rows = db()
     .prepare(
-      `SELECT outputs_json FROM generations WHERE id IN (${ids.map(() => "?").join(",")}) AND status = 'succeeded' AND kind IN ('image','video') ORDER BY kind = 'image' DESC, completed_at DESC LIMIT 1`,
+      `SELECT g.outputs_json FROM generations g WHERE g.id IN (${ids.map(() => "?").join(",")}) AND g.status = 'succeeded' AND g.kind IN ('image','video') AND ${NOT_TRASHED} ORDER BY g.kind = 'image' DESC, g.completed_at DESC LIMIT 1`,
     )
     .all(...ids) as { outputs_json: string }[];
   const o = rows[0] ? (JSON.parse(rows[0].outputs_json) as { url: string; kind: MediaKind }[]).find((x) => x.kind === "image" || x.kind === "video") : undefined;
@@ -277,8 +309,9 @@ export interface RunResult {
   costUsd: number;
 }
 
+/** A result's status; undefined once it's gone (deleted, or in the Trash), so its node runs again. */
 function statusOf(id: string): Generation["status"] | undefined {
-  return (db().prepare("SELECT status FROM generations WHERE id = ?").get(id) as { status: Generation["status"] } | undefined)?.status;
+  return (db().prepare(`SELECT g.status FROM generations g WHERE g.id = ? AND ${NOT_TRASHED}`).get(id) as { status: Generation["status"] } | undefined)?.status;
 }
 
 export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {

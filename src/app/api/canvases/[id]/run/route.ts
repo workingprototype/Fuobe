@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseGraph, runCanvas } from "@/server/canvas";
+import { graphProblem, parseGraph, runCanvas } from "@/server/canvas";
 
 const Body = z.object({
   /** Node ids to run with everything upstream (Run node, Run selected); omit for Run all. */
@@ -19,7 +19,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/canvases/[i
   const parsed = Body.safeParse(await request.json().catch(() => ({})));
   if (!parsed.success) return Response.json({ error: "Invalid run request" }, { status: 400 });
   const graph = parsed.data.graph === undefined ? undefined : parseGraph(parsed.data.graph);
-  if (graph === null) return Response.json({ error: "That board couldn't be read — reload the page" }, { status: 400 });
+  if (graph === null) return Response.json({ error: graphProblem(parsed.data.graph) }, { status: 400 });
   const result = runCanvas(id, { targets: parsed.data.targets, force: parsed.data.force, graph });
   if (!result) return Response.json({ error: "Not found" }, { status: 404 });
   if (!result.ran.length && result.errors.length) {

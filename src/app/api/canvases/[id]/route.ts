@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { z } from "zod";
-import { canvasView, deleteCanvas, parseGraph, updateCanvas } from "@/server/canvas";
+import { canvasView, deleteCanvas, graphProblem, parseGraph, updateCanvas } from "@/server/canvas";
 
 const Patch = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -21,7 +21,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/canvases/[
   const parsed = Patch.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Give the canvas a name" }, { status: 400 });
   const graph = parsed.data.graph === undefined ? undefined : parseGraph(parsed.data.graph);
-  if (graph === null) return Response.json({ error: "That board couldn't be saved — reload the page" }, { status: 400 });
+  if (graph === null) return Response.json({ error: graphProblem(parsed.data.graph) }, { status: 400 });
   const c = updateCanvas(id, { name: parsed.data.name, graph });
   return c ? Response.json(c) : Response.json({ error: "Not found" }, { status: 404 });
 }

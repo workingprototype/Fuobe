@@ -123,6 +123,31 @@ export function applyToThread<T extends { generations: Generation[] }>(view: T |
   return { ...view, generations };
 }
 
+/** The shape of a canvas board's cache (["canvases", id]): the board's runs and the generations they made. */
+export interface CanvasViewLike {
+  canvas: { runs: Record<string, { ids: string[] }> };
+  generations: Generation[];
+}
+
+/**
+ * A canvas board holds the generations its nodes made: patch them by id, drop trashed or deleted
+ * ones (the node then reads as not run), and bring back a restored one that a node's run still names.
+ */
+export function applyToCanvasView<T extends CanvasViewLike>(view: T | undefined, ev: StreamEvent): T | undefined {
+  if (!view) return view;
+  const id = ev.type === "deleted" ? ev.id : ev.generation.id;
+  const at = view.generations.findIndex((g) => g.id === id);
+  if (ev.type === "deleted" || ev.generation.deletedAt) return at < 0 ? view : { ...view, generations: view.generations.filter((g) => g.id !== id) };
+  if (at >= 0) {
+    if (view.generations[at].updatedAt > ev.generation.updatedAt) return view;
+    const generations = view.generations.slice();
+    generations[at] = ev.generation;
+    return { ...view, generations };
+  }
+  const ours = Object.values(view.canvas.runs).some((r) => r.ids.includes(id));
+  return ours ? { ...view, generations: [...view.generations, ev.generation] } : view;
+}
+
 /**
  * Structural sharing by id for generation lists. React Query's default compares arrays index by
  * index, so one new result at the top (everything shifts by one) would hand every row a new
