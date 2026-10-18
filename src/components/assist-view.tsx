@@ -66,18 +66,42 @@ function Composer({
   const uploading = files.some((f) => !f.url);
   const ready = text.trim().length > 0 && !uploading && !sending && !disabled;
 
+  // Local previews (object URLs) are released once the upload settles, when removed, and on unmount.
+  const blobs = useRef(new Set<string>());
+  const release = (url: string) => {
+    if (blobs.current.delete(url)) URL.revokeObjectURL(url);
+  };
+  useEffect(() => {
+    const live = blobs.current;
+    return () => {
+      live.forEach((u) => URL.revokeObjectURL(u));
+      live.clear();
+    };
+  }, []);
+
   const add = (list: FileList | null) => {
     for (const f of Array.from(list ?? []).slice(0, 8 - files.length)) {
       const id = nanoid(6);
       const kind: MediaKind = f.type.startsWith("video") ? "video" : f.type.startsWith("audio") ? "audio" : "image";
-      setFiles((xs) => [...xs, { id, kind, preview: URL.createObjectURL(f) }]);
+      const blob = URL.createObjectURL(f);
+      blobs.current.add(blob);
+      setFiles((xs) => [...xs, { id, kind, preview: blob }]);
       uploadFile(f)
-        .then((a) => setFiles((xs) => xs.map((x) => (x.id === id ? { ...x, url: a.url } : x))))
+        // Show the uploaded file, then let the blob go (after the element has switched over).
+        .then((a) => {
+          setFiles((xs) => xs.map((x) => (x.id === id ? { ...x, url: a.url, preview: a.url } : x)));
+          setTimeout(() => release(blob), 1500);
+        })
         .catch((e) => {
           toast.error((e as Error).message);
           setFiles((xs) => xs.filter((x) => x.id !== id));
+          release(blob);
         });
     }
+  };
+  const remove = (f: Attachment) => {
+    setFiles((xs) => xs.filter((x) => x.id !== f.id));
+    if (f.preview.startsWith("blob:")) release(f.preview);
   };
 
   const send = async () => {
@@ -117,7 +141,7 @@ function Composer({
               )}
               {!f.url && <Loader2 className="absolute inset-0 m-auto size-4 animate-spin text-foreground" />}
               <button
-                onClick={() => setFiles((xs) => xs.filter((x) => x.id !== f.id))}
+                onClick={() => remove(f)}
                 className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-foreground/80 text-background"
                 aria-label="Remove attachment"
               >

@@ -4,6 +4,7 @@ import { FileVideo2, Minus, Plus, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { GenParams, ModelDef } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { radioKeys, radioTab } from "./radio-keys";
 
 type Shot = NonNullable<GenParams["shots"]>[number];
 
@@ -33,13 +34,15 @@ export function MultiShotControl({ model, params, onChange }: { model: ModelDef;
   };
   return (
     <div className="space-y-1.5">
-      <div role="radiogroup" aria-label="Multi-shot" className="flex rounded-full bg-muted p-0.5">
+      <div role="radiogroup" aria-label="Multi-shot" onKeyDown={radioKeys} className="flex rounded-full bg-muted p-0.5">
         {options.map((o) => (
           <Tooltip key={o.id}>
             <TooltipTrigger asChild>
               <button
+                type="button"
                 role="radio"
                 aria-checked={mode === o.id}
+                tabIndex={radioTab(mode === o.id)}
                 onClick={() => pick(o.id)}
                 className={cn("h-7 flex-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition", mode === o.id && "bg-background text-foreground shadow-soft")}
               >

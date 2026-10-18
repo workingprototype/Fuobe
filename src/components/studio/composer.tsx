@@ -2,7 +2,7 @@
 
 import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -19,11 +19,12 @@ import { AttachMenu } from "./attach-menu";
 import { useAttach, useComposerBridge, useUploadReaper } from "./attachments";
 import { DialogueEditor, LanguageChip, VoicePicker } from "./audio-controls";
 import { loadFullCatalog, useCatalog } from "./catalog";
-import { Chip } from "./chip";
+import { Chip, chipBase, chipIdle } from "./chip";
 import { MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
 import { ControlsChip, ProviderPresetChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
+import { radioKeys, radioTab } from "./radio-keys";
 import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
@@ -85,10 +86,18 @@ function buildRequest(
   };
 }
 
+/** Docked and collapsed, the composer hides its tiles: this event asks it to open first. */
+const EXPAND_EVENT = "composer:expand";
+
 /** Point at an attachment tile: scroll it into view and pulse its outline. */
-function pulseSlot(root: HTMLElement | null, key: string) {
+function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
   const el = root?.querySelector<HTMLElement>(`[data-slot-key="${key}"]`);
-  if (!el) return;
+  if (!el) {
+    if (retried || !root) return;
+    root.dispatchEvent(new Event(EXPAND_EVENT));
+    requestAnimationFrame(() => pulseSlot(root, key, true));
+    return;
+  }
   el.scrollIntoView({ block: "nearest", inline: "nearest" });
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim() || "currentColor";
@@ -120,6 +129,16 @@ export function Composer({ docked }: { docked: boolean }) {
   const bridgeRef = useComposerBridge();
   const [chipRow, fade] = useEdgeFade<HTMLDivElement>();
   useUploadReaper(draft);
+  // Typed into before the page hydrated: the prompt already has focus (onFocus never ran).
+  useLayoutEffect(() => {
+    if (root.current?.contains(document.activeElement)) setFocused(true);
+  }, []);
+  useEffect(() => {
+    const el = root.current;
+    const expand = () => setFocused(true);
+    el?.addEventListener(EXPAND_EVENT, expand);
+    return () => el?.removeEventListener(EXPAND_EVENT, expand);
+  }, []);
 
   const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
@@ -180,7 +199,9 @@ export function Composer({ docked }: { docked: boolean }) {
 
   // Plan with stand-ins for attachments that are missing or still uploading, so the cost and the
   // operation are known up front and the blocker can name the slot in the studio's own words.
-  const missing = firstMissingSlot(slots, draft.slots);
+  // Studios that need one of several inputs (Lipsync: a portrait or a video) name the group.
+  const anyOf = preset?.inputs ? undefined : config.anyOf;
+  const missing = firstMissingSlot(slots, draft.slots, anyOf);
   const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading);
   const engineError = lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null;
   let op: Operation | undefined;
@@ -191,6 +212,10 @@ export function Composer({ docked }: { docked: boolean }) {
       const stand = (v: SlotValue | null | undefined, kind: MediaKind): SlotValue | null | undefined => (v?.uploading ? { ...v, ref: PLACEHOLDER[kind] } : v);
       const planSlots: Draft["slots"] = Object.fromEntries(Object.entries(draft.slots).map(([k, v]) => [k, stand(v, v?.kind ?? "image")]));
       for (const s of slots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
+      for (const g of anyOf ?? []) {
+        const first = slots.find((s) => s.key === g[0]);
+        if (first && !g.some((k) => planSlots[k]?.ref)) planSlots[first.key] = { ref: PLACEHOLDER[first.accept], preview: "", kind: first.accept };
+      }
       const { request: planned } = prepare({ ...draft, slots: planSlots, refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue) });
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
@@ -276,6 +301,70 @@ export function Composer({ docked }: { docked: boolean }) {
   const showAttachments =
     (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
   const collapsed = docked && !focused;
+  // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
+  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
+
+  // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
+  const blocking = blocker?.message;
+  useEffect(() => {
+    toast.dismiss("composer-blocker");
+  }, [blocking]);
+
+  // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
+  const voiceChips = (
+    <>
+      {model && (opts.voices?.length || opts.voiceClone) && effectiveOp !== "dialogue" && (
+        <VoicePicker
+          model={model}
+          voice={p.voice}
+          sample={draft.slots.voiceAudio}
+          label={effectiveOp === "voice-change" ? "New voice" : "Voice"}
+          onChange={(c) => {
+            if (c?.kind === "preset") setDraft((d) => ({ params: { ...d.params, voice: c.id }, slots: { ...d.slots, voiceAudio: null } }));
+            if (c?.kind === "sample") setSlot("voiceAudio", c.value);
+          }}
+        />
+      )}
+      {/* Open-source dialogue clones each speaker from a sample. */}
+      {model &&
+        opts.voiceClone &&
+        effectiveOp === "dialogue" &&
+        (["voiceAudio", "voiceAudio2"] as const).map((key, i) => (
+          <VoicePicker
+            key={key}
+            model={{ ...model, options: { ...model.options, voices: [] } }}
+            sample={draft.slots[key]}
+            label={`Speaker ${i ? "B" : "A"}`}
+            onChange={(c) => c?.kind === "sample" && setSlot(key, c.value)}
+          />
+        ))}
+      {model && opts.languages && (
+        <LanguageChip languages={opts.languages} value={p.targetLanguage} label={effectiveOp === "dub" ? "Translate to…" : "Language"} onChange={(targetLanguage) => setP({ targetLanguage })} />
+      )}
+    </>
+  );
+  const styleChips = (
+    <>
+      {(config.presetPicker || (preset && (preset.type === "motion" || preset.type === "effect"))) && (
+        <PresetChips
+          picker={config.presetPicker}
+          preset={preset}
+          presetId={draft.presetId}
+          strength={draft.presetStrength ?? 1}
+          mix={draft.mix}
+          onPreset={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
+          onMix={(patch) => setDraft(patch)}
+        />
+      )}
+      {opts.presets && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
+      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
+    </>
+  );
+  const hasSecondary =
+    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
+    !!config.presetPicker ||
+    preset?.type === "motion" ||
+    preset?.type === "effect";
 
   return (
     <div
@@ -300,7 +389,7 @@ export function Composer({ docked }: { docked: boolean }) {
         }
       }}
     >
-      {showAttachments && (
+      {showAttachments && !collapsed && (
         <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-2">
           {slots.map((s) => (
             <MediaSlot
@@ -398,15 +487,17 @@ export function Composer({ docked }: { docked: boolean }) {
       {preset?.options?.length ? (
         <div className="flex flex-wrap gap-3 px-1.5 pb-2">
           {preset.options.map((o) => (
-            <div key={o.key} role="radiogroup" aria-label={o.label} className="flex flex-wrap items-center gap-1">
+            <div key={o.key} role="radiogroup" aria-label={o.label} onKeyDown={radioKeys} className="flex flex-wrap items-center gap-1">
               <span className="mr-1 text-[12px] text-muted-foreground">{o.label}</span>
               {o.choices.map((c) => {
                 const sel = (draft.presetOptions[o.key] ?? o.default ?? o.choices[0].value) === c.value;
                 return (
                   <button
                     key={c.value}
+                    type="button"
                     role="radio"
                     aria-checked={sel}
+                    tabIndex={radioTab(sel)}
                     onClick={() => setDraft((d) => ({ presetOptions: { ...d.presetOptions, [o.key]: c.value } }))}
                     className={cn("h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors", sel ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}
                   >
@@ -421,42 +512,71 @@ export function Composer({ docked }: { docked: boolean }) {
 
       {/* Toolbar: one row; it scrolls (with faded edges) when it doesn't fit. */}
       <div className="flex items-center gap-2">
-        <div ref={chipRow} style={fade} className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
+        {/* Phones (below sm): "+", Settings (icon), the model (it shrinks to fit) and @; the other chips are in the settings sheet. */}
+        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
           {kinds.length > 0 && <AttachMenu kinds={kinds} onFiles={attach.attachFiles} onPick={attach.attach} />}
-          {!lockedModel ? (
-            catalog.ready ? (
-              <ModelPicker
-                models={models}
-                value={model}
-                engine={engine}
-                onEngineChange={setEngine}
-                defaultModels={config.defaultModels}
-                onChange={(m) => {
-                  setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
-                  if (m.engine !== engine) setEngine(m.engine);
-                }}
-              />
-            ) : (
-              <Chip icon={Loader2} disabled className="[&>svg]:animate-spin">
-                Loading models…
-              </Chip>
-            )
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Chip icon={Sparkles}>{model?.name ?? "…"}</Chip>
-              </TooltipTrigger>
-              <TooltipContent>{preset?.name} runs on {model?.name ?? "its own model"}</TooltipContent>
-            </Tooltip>
+          {collapsed && showAttachments && attached.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setFocused(true)}
+              aria-label={`${attached.length} attached. Show attachments`}
+              className={cn(chipBase, chipIdle, "gap-1.5 pl-1 max-sm:order-1")}
+            >
+              <span className="flex -space-x-2.5">
+                {attached.slice(0, 3).map((v, i) => (
+                  <span key={v.id ?? `${v.ref}-${i}`} className="size-6 overflow-hidden rounded-full border-2 border-secondary bg-muted">
+                    <SlotPreview value={v} />
+                  </span>
+                ))}
+              </span>
+              <span className="tabular-nums">
+                {attached.length}
+                <span className="max-sm:hidden"> attached</span>
+              </span>
+            </button>
           )}
+          {/* The model chip may shrink (its name truncates) on phones, so the row fits without scrolling. */}
+          <span className="flex min-w-0 shrink-0 max-sm:order-2 max-sm:min-w-[4.5rem] max-sm:shrink max-sm:[&>button]:min-w-0 max-sm:[&>button]:shrink max-sm:[&>button>svg:first-child]:hidden">
+            {!lockedModel ? (
+              catalog.ready ? (
+                <ModelPicker
+                  models={models}
+                  value={model}
+                  engine={engine}
+                  onEngineChange={setEngine}
+                  defaultModels={config.defaultModels}
+                  onChange={(m) => {
+                    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
+                    if (m.engine !== engine) setEngine(m.engine);
+                  }}
+                />
+              ) : (
+                <Chip icon={Loader2} disabled className="[&>svg]:animate-spin">
+                  Loading models…
+                </Chip>
+              )
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Chip icon={Sparkles}>
+                    <span className="min-w-0 truncate">{model?.name ?? "…"}</span>
+                  </Chip>
+                </TooltipTrigger>
+                <TooltipContent>{preset?.name} runs on {model?.name ?? "its own model"}</TooltipContent>
+              </Tooltip>
+            )}
+          </span>
           {showPrompt && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={() => promptRef.current?.startMention()}
-                  // Phones: typing @ does the same, so the button gives its place to the settings chip.
-                  className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 max-sm:order-last"
+                  // Phones: at the end of the row (typing @ does the same); folded away with the docked composer.
+                  className={cn(
+                    "grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 max-sm:order-3",
+                    collapsed && "max-sm:hidden",
+                  )}
                   aria-label="Add an element"
                 >
                   <AtSign className="size-3.5" />
@@ -465,34 +585,7 @@ export function Composer({ docked }: { docked: boolean }) {
               <TooltipContent>Add a character, location or prop · type @</TooltipContent>
             </Tooltip>
           )}
-          {model && (opts.voices?.length || opts.voiceClone) && effectiveOp !== "dialogue" && (
-            <VoicePicker
-              model={model}
-              voice={p.voice}
-              sample={draft.slots.voiceAudio}
-              label={effectiveOp === "voice-change" ? "New voice" : "Voice"}
-              onChange={(c) => {
-                if (c?.kind === "preset") setDraft((d) => ({ params: { ...d.params, voice: c.id }, slots: { ...d.slots, voiceAudio: null } }));
-                if (c?.kind === "sample") setSlot("voiceAudio", c.value);
-              }}
-            />
-          )}
-          {/* Open-source dialogue clones each speaker from a sample. */}
-          {model &&
-            opts.voiceClone &&
-            effectiveOp === "dialogue" &&
-            (["voiceAudio", "voiceAudio2"] as const).map((key, i) => (
-              <VoicePicker
-                key={key}
-                model={{ ...model, options: { ...model.options, voices: [] } }}
-                sample={draft.slots[key]}
-                label={`Speaker ${i ? "B" : "A"}`}
-                onChange={(c) => c?.kind === "sample" && setSlot(key, c.value)}
-              />
-            ))}
-          {model && opts.languages && (
-            <LanguageChip languages={opts.languages} value={p.targetLanguage} label={effectiveOp === "dub" ? "Translate to…" : "Language"} onChange={(targetLanguage) => setP({ targetLanguage })} />
-          )}
+          <span className="contents max-sm:hidden">{voiceChips}</span>
           <SettingsChip
             model={model}
             op={op}
@@ -506,20 +599,17 @@ export function Composer({ docked }: { docked: boolean }) {
             enhancing={enhancing}
             onRewrite={runEnhance}
             opNote={opNote}
+            className="max-sm:order-1"
+            extras={
+              hasSecondary ? (
+                <>
+                  {voiceChips}
+                  {styleChips}
+                </>
+              ) : undefined
+            }
           />
-          {(config.presetPicker || (preset && (preset.type === "motion" || preset.type === "effect"))) && (
-            <PresetChips
-              picker={config.presetPicker}
-              preset={preset}
-              presetId={draft.presetId}
-              strength={draft.presetStrength ?? 1}
-              mix={draft.mix}
-              onPreset={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
-              onMix={(patch) => setDraft(patch)}
-            />
-          )}
-          {opts.presets && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
-          {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
+          <span className="contents max-sm:hidden">{styleChips}</span>
         </div>
         {costText && (
           <Tooltip>

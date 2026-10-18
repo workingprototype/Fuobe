@@ -59,6 +59,21 @@ function priceHint(m: ModelDef): string {
   return `${formatCost(m.pricing.usd)}${unit}`;
 }
 
+const STAR_KEY_HINT = "Alt+S";
+
+/**
+ * Alt+S (or ⌥S) stars or unstars the highlighted model, so starring works from the keyboard
+ * while focus stays in the search field. Rows are cmdk items valued "<group>:<model id>".
+ */
+function starKey(e: React.KeyboardEvent<HTMLElement>, toggle: (id: string) => void) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.code !== "KeyS") return;
+  const value = e.currentTarget.querySelector('[cmdk-item][data-selected="true"]')?.getAttribute("data-value");
+  const id = value?.slice(value.indexOf(":") + 1);
+  if (!id) return;
+  e.preventDefault();
+  toggle(id);
+}
+
 function ModelRow({
   m,
   selected,
@@ -77,7 +92,10 @@ function ModelRow({
       <VendorMark vendor={m.vendor} engine={m.engine} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className={cn("truncate text-[13px] font-medium", selected && "text-brand-text")}>{m.name}</span>
+          <span className={cn("truncate text-[13px] font-medium", selected && "text-brand-text")}>
+            {m.name}
+            {starred && <span className="sr-only">, starred</span>}
+          </span>
           <ModelBadges model={m} max={2} />
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
@@ -91,15 +109,17 @@ function ModelRow({
         </span>
       </span>
       <span className="shrink-0 text-right text-[11px] text-subtle-foreground tabular-nums">{priceHint(m)}</span>
+      {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"
+        tabIndex={-1}
+        aria-hidden
+        title={starred ? `Unstar (${STAR_KEY_HINT})` : `Star (${STAR_KEY_HINT})`}
         onPointerDown={(e) => e.preventDefault()}
         onClick={(e) => {
           e.stopPropagation();
           onStar();
         }}
-        aria-label={starred ? `Unstar ${m.name}` : `Star ${m.name}`}
-        aria-pressed={starred}
         className={cn(
           "grid size-7 shrink-0 place-items-center rounded-full text-subtle-foreground transition hover:bg-accent hover:text-foreground focus-visible:opacity-100",
           starred ? "text-highlight-foreground" : "opacity-100 sm:opacity-0 sm:group-hover/command-item:opacity-100 sm:group-data-selected/command-item:opacity-100",
@@ -158,7 +178,12 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   const [recent] = useStoredList(RECENT_MODELS);
   const [starred, setStarred] = useStoredList(STARRED_MODELS);
   const engines = useMemo<Engine[]>(() => (mode === "both" ? ["cloud", "open"] : [mode]), [mode]);
-  const best = useMemo(() => bestForStudio(models, engine, defaultModels?.[engine]).map((m) => m.id), [models, engine, defaultModels]);
+  // "Best" ranks models that do what the studio's default does first (its main operation), not single-purpose tools.
+  const best = useMemo(() => {
+    const id = defaultModels?.[engine];
+    const op = models.find((m) => m.id === id)?.routes[0]?.op;
+    return bestForStudio(models, engine, id, 4, op).map((m) => m.id);
+  }, [models, engine, defaultModels]);
   const { groups, count } = useMemo(() => groupModels({ models, engine, engines, query: q, recent, starred, best }), [models, engine, engines, q, recent, starred, best]);
   const ready = (m: ModelDef) => m.routes.some((r) => status?.providers[r.provider]?.configured);
   const shown = groups.flatMap((g) => g.models);
@@ -172,7 +197,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
   };
 
   return (
-    <Command shouldFilter={false} loop label="Models" className="rounded-none! bg-transparent p-0">
+    <Command shouldFilter={false} loop label="Models" onKeyDown={(e) => starKey(e, (id) => setStarred((s) => toggleIn(s, id)))} className="rounded-none! bg-transparent p-0">
       <div className="flex items-center gap-2 p-1 sm:p-2 sm:pb-1">
         <div className="min-w-0 flex-1 [&_[data-slot=command-input-wrapper]]:p-0">
           <CommandInput value={q} onValueChange={setQ} placeholder={mode === "both" ? "Search all models" : "Search models"} aria-label="Search models" autoFocus={!mobile} />
@@ -192,6 +217,9 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
             </span>
           </>
         )}
+        <span className="ml-auto shrink-0 whitespace-nowrap max-sm:hidden">
+          <kbd className="font-sans">{STAR_KEY_HINT}</kbd> stars
+        </span>
       </div>
       <CommandList className="max-h-[min(52vh,420px)] border-t sm:max-h-[min(56vh,440px)]">
         {groups.map((g) => (

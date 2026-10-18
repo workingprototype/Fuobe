@@ -70,6 +70,8 @@ export function ProviderPresetChip({
             <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto">
               {!spec.required && !q && (
                 <button
+                  type="button"
+                  aria-pressed={!value}
                   onClick={() => {
                     onChange(undefined);
                     setOpen(false);
@@ -85,6 +87,8 @@ export function ProviderPresetChip({
               {items.map((p) => (
                 <button
                   key={p.id}
+                  type="button"
+                  aria-pressed={value === p.id}
                   onClick={() => {
                     onChange(p.id, p.name);
                     setOpen(false);

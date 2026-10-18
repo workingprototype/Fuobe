@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import {
   AUDIO_STUDIO,
   DIALOGUE_STUDIO,
@@ -15,36 +18,56 @@ import {
   VOICE_CHANGE_STUDIO,
 } from "@/lib/studios";
 import { studioCatalog } from "@/lib/studio-catalog";
-import { ModeStudio, type Mode } from "./mode-studio";
+import { HUB_MODES, modeHref, type HubKind } from "@/lib/hubs";
+import { ModeStudio } from "./mode-studio";
+import type { StudioConfig } from "./studio-context";
 
-const MODES = {
-  upscale: [
-    { id: "image", label: "Image", config: UPSCALE_STUDIO },
-    { id: "video", label: "Video", config: VIDEO_UPSCALE_STUDIO },
-  ],
-  audio: [
-    { id: "speech", label: "Speech", config: AUDIO_STUDIO },
-    { id: "dialogue", label: "Dialogue", config: DIALOGUE_STUDIO },
-    { id: "voice-change", label: "Voice change", config: VOICE_CHANGE_STUDIO },
-    { id: "translate", label: "Translate", config: TRANSLATE_STUDIO },
-    { id: "sfx", label: "Sound effects", config: SFX_STUDIO },
-    { id: "music", label: "Music", config: MUSIC_STUDIO },
-    { id: "video", label: "Sound for video", config: FOLEY_STUDIO },
-  ],
-  "video-tools": [
-    { id: "matte", label: "Remove background", config: VIDEO_MATTE_STUDIO },
-    { id: "relight", label: "Relight", config: VIDEO_RELIGHT_STUDIO },
-    { id: "depth", label: "Depth map", config: VIDEO_DEPTH_STUDIO },
-    { id: "join", label: "Join clips", config: JOIN_CLIPS_STUDIO },
-    { id: "colors", label: "Match colors", config: VIDEO_COLOR_MATCH_STUDIO },
-  ],
-} as const;
+const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
+  upscale: { image: UPSCALE_STUDIO, video: VIDEO_UPSCALE_STUDIO },
+  audio: {
+    speech: AUDIO_STUDIO,
+    dialogue: DIALOGUE_STUDIO,
+    "voice-change": VOICE_CHANGE_STUDIO,
+    translate: TRANSLATE_STUDIO,
+    sfx: SFX_STUDIO,
+    music: MUSIC_STUDIO,
+    video: FOLEY_STUDIO,
+  },
+  "video-tools": {
+    matte: VIDEO_MATTE_STUDIO,
+    relight: VIDEO_RELIGHT_STUDIO,
+    depth: VIDEO_DEPTH_STUDIO,
+    join: JOIN_CLIPS_STUDIO,
+    colors: VIDEO_COLOR_MATCH_STUDIO,
+  },
+};
+
+const HUB_TITLE: Record<HubKind, string> = { upscale: "Upscale", audio: "Audio", "video-tools": "Video tools" };
 
 /**
- * A hub of studios switched by `?mode=` (Audio, Video tools, Upscale). Server component: each
- * mode's models are picked here, so the page ships only those.
+ * A hub of studios with one path per mode (Audio → /audio/music, Video tools, Upscale). Server
+ * component: the page is prerendered with that mode's hero, tabs and composer, and ships only
+ * that mode's models. `mode` omitted = the first mode (the hub's own URL).
  */
-export function ModeSwitchStudio({ kind }: { kind: keyof typeof MODES }) {
-  const modes: Mode[] = MODES[kind].map((m) => ({ id: m.id, label: m.label, config: m.config, catalog: studioCatalog(m.config) }));
-  return <ModeStudio modes={modes} />;
+export function ModeSwitchStudio({ kind, mode }: { kind: HubKind; mode?: string }) {
+  const current = mode ?? HUB_MODES[kind][0].id;
+  const config = CONFIGS[kind][current];
+  if (!config) notFound();
+  const tabs = HUB_MODES[kind].map((m) => ({ id: m.id, label: m.label, href: modeHref(kind, m.id) }));
+  return <ModeStudio key={current} tabs={tabs} current={current} config={config} catalog={studioCatalog(config)} />;
+}
+
+/** `generateStaticParams` for /<hub>/[mode]: every mode is prerendered. */
+export function hubParams(kind: HubKind): { mode: string }[] {
+  return HUB_MODES[kind].map((m) => ({ mode: m.id }));
+}
+
+export function hubMetadata(kind: HubKind, mode: string): Metadata {
+  const m = HUB_MODES[kind].find((x) => x.id === mode);
+  return { title: !m || m.id === HUB_MODES[kind][0].id ? HUB_TITLE[kind] : `${m.label} · ${HUB_TITLE[kind]}` };
+}
+
+/** The /<hub>/[mode] page body. */
+export function HubModePage({ kind, params }: { kind: HubKind; params: Promise<{ mode: string }> }) {
+  return <Suspense fallback={null}>{params.then(({ mode }) => <ModeSwitchStudio kind={kind} mode={mode} />)}</Suspense>;
 }

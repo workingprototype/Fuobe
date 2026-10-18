@@ -98,6 +98,7 @@ export const LIPSYNC_STUDIO: StudioConfig = {
     { key: "video", label: "Video", accept: "video", hint: "To re-sync an existing clip" },
     { key: "audio", label: "Voice", accept: "audio", required: true },
   ],
+  anyOf: [["image", "video"]],
   defaultModels: { cloud: "kling-avatar-2", open: "oss-infinitetalk" },
   promptOptional: true,
 };

@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { Engine } from "@/lib/catalog/types";
 import { useEngineMode } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { radioKeys, radioTab } from "./radio-keys";
 
 const OPTIONS: { value: Engine; label: string; icon: typeof Cloud; tip: string }[] = [
   { value: "cloud", label: "Cloud", icon: Cloud, tip: "Frontier paid models via your fal.ai / Replicate key" },
@@ -56,6 +57,7 @@ export function EngineSwitch({
     <div
       role="radiogroup"
       aria-label="Engine"
+      onKeyDown={radioKeys}
       className={cn("relative inline-grid shrink-0 grid-cols-2 rounded-full bg-muted p-0.5", size === "sm" ? "h-8" : "h-8 sm:h-9")}
     >
       <span
@@ -67,8 +69,10 @@ export function EngineSwitch({
         <Tooltip key={o.value}>
           <TooltipTrigger asChild>
             <button
+              type="button"
               role="radio"
               aria-checked={value === o.value}
+              tabIndex={radioTab(value === o.value)}
               aria-label={o.label}
               onClick={() => onChange(o.value)}
               className={cn(

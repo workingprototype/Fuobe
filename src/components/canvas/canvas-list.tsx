@@ -3,7 +3,7 @@
 import { Cloud, Copy, Cpu, Loader2, MoreHorizontal, Pencil, Plus, Search, Trash2, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { PageShell } from "@/components/page-shell";
 import { useEngine } from "@/lib/api";
-import { getModel } from "@/lib/catalog";
-import { CANVAS_TEMPLATES, isGenerator, outline, type CanvasNodeType, type CanvasSummary, type CanvasTemplate, type Outline } from "@/lib/catalog/canvas";
+// Types only: the catalog (models, templates) stays on the server; the page passes slim template cards.
+import type { CanvasNodeType, CanvasSummary, Outline } from "@/lib/catalog/canvas";
 import type { Engine } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -130,13 +130,22 @@ function CanvasCard({ c, onRename, onDelete }: { c: CanvasSummary; onRename: () 
   );
 }
 
-function TemplateCard({ t, engine, onUse, busy }: { t: CanvasTemplate; engine: Engine; onUse: () => void; busy: boolean }) {
-  const graph = useMemo(() => t.build(engine), [t, engine]);
-  const models = [...new Set(graph.nodes.filter(isGenerator).map((n) => getModel(n.data.modelId ?? "")?.name).filter(Boolean))];
+/** A template as the list shows it, built on the server (app/(studio)/canvas/page.tsx): its board outline and model names per engine. */
+export interface TemplateCardData {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  hue: number;
+  byEngine: Record<Engine, { outline: Outline; models: string[] }>;
+}
+
+function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine: Engine; onUse: () => void; busy: boolean }) {
+  const { outline, models } = t.byEngine[engine];
   return (
     <article className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
       <div className="relative aspect-[16/9] bg-muted/50" style={{ background: `linear-gradient(135deg, oklch(0.62 0.12 ${t.hue} / 0.14), transparent 70%)` }}>
-        <Schematic outline={outline(graph)} className="p-4" />
+        <Schematic outline={outline} className="p-4" />
         <span className="absolute top-3 left-3 grid size-8 place-items-center rounded-lg bg-background/90 text-foreground shadow-soft">
           <NodeIcon name={t.icon} className="size-4" />
         </span>
@@ -158,7 +167,7 @@ function TemplateCard({ t, engine, onUse, busy }: { t: CanvasTemplate; engine: E
   );
 }
 
-function ListInner() {
+function ListInner({ templates }: { templates: TemplateCardData[] }) {
   const router = useRouter();
   const params = useSearchParams();
   const tab = params.get("tab") === "templates" ? "templates" : "mine";
@@ -270,7 +279,7 @@ function ListInner() {
         )
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {CANVAS_TEMPLATES.map((t) => (
+          {templates.map((t) => (
             <TemplateCard key={t.id} t={t} engine={engine} busy={creating === t.id} onUse={() => void start(t.id, { templateId: t.id, engine })} />
           ))}
         </div>
@@ -329,10 +338,10 @@ function ListInner() {
   );
 }
 
-export function CanvasList() {
+export function CanvasList({ templates }: { templates: TemplateCardData[] }) {
   return (
     <Suspense fallback={null}>
-      <ListInner />
+      <ListInner templates={templates} />
     </Suspense>
   );
 }

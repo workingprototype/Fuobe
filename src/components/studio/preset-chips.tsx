@@ -41,7 +41,7 @@ function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null;
       </div>
       <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
         {cat === "All" && (
-          <button onClick={() => onPick(undefined)} className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", !value && "ring-2")}>
+          <button type="button" aria-pressed={!value} onClick={() => onPick(undefined)} className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", !value && "ring-2")}>
             <span className="grid aspect-video w-full place-items-center rounded-md bg-muted text-muted-foreground">
               <Ban className="size-5" />
             </span>
@@ -55,6 +55,8 @@ function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null;
             return (
               <button
                 key={p.id}
+                type="button"
+                aria-pressed={value === p.id}
                 onClick={() => onPick(p.id)}
                 className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
               >
