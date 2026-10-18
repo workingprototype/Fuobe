@@ -1,5 +1,5 @@
 import "server-only";
-import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
+import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { ProviderError, type ProviderAdapter } from "./types";
@@ -74,7 +74,7 @@ export const replicateProvider: ProviderAdapter = {
     if (p.status === "succeeded") {
       // Object outputs (Scribe's {text, words}) are read as the result itself; URL lists keep their order (layers).
       const outputs = extractOutputs({ output: p.output }, route?.op);
-      if (!outputs.length) return { state: "failed", error: "No media in output" };
+      if (!outputs.length) return { state: "failed", error: noOutputsError({ output: p.output }) };
       return { state: "succeeded", outputs };
     }
     return { state: "failed", error: p.error ?? p.status };

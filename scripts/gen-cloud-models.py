@@ -48,12 +48,13 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None):
+          sliders=None, controls=None, api_defaults=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
-    numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra."""
+    numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
+    fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
-                  sliders=sliders or [], controls=controls or []))
+                  sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}))
 
 
 # ----- Image
@@ -140,14 +141,16 @@ model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal t
 model("recraft-4-1-pro", "Recraft V4.1 Pro", "Recraft", "recraft", "image",
       "Recraft's top tier — 2K design-grade images in your exact palette",
       [("t2i", "fal-ai/recraft/v4.1/pro/text-to-image")], badges=["pro"], defaults={"aspectRatio": "1:1"})
+# The style comes from 1-10 reference images (or a saved style_id): with neither the call fails, so these run as
+# edits only. A text-to-image route can come back once something in Fuobe saves style ids (a moodboard element).
 model("recraft-4-style", "Recraft V4 Styles", "Recraft", "recraft", "image",
-      "Generate in a saved Recraft style, or one made on the fly from up to 10 reference images",
-      [("t2i", "recraft/v4/style/text-to-image"), ("edit", "recraft/v4/style/text-to-image")],
+      "A new picture in the style of 1–10 reference images",
+      [("edit", "recraft/v4/style/text-to-image")],
       pricing=("image", 0.035, "+$0.005 when a new style is made from references"), defaults={"aspectRatio": "1:1"},
       controls=[("style_match", "Style match")])
 model("recraft-4-style-pro", "Recraft V4 Styles Pro", "Recraft", "recraft", "image",
-      "Recraft styles at Pro quality",
-      [("t2i", "recraft/v4/style/pro/text-to-image"), ("edit", "recraft/v4/style/pro/text-to-image")],
+      "Recraft styles from your references, at Pro quality",
+      [("edit", "recraft/v4/style/pro/text-to-image")],
       badges=["pro"], pricing=("image", 0.1, "+$0.005 when a new style is made from references"), defaults={"aspectRatio": "1:1"},
       controls=[("style_match", "Style match")])
 model("ideogram-3", "Ideogram 3.0", "Ideogram", "ideogram", "image",
@@ -185,9 +188,10 @@ model("fashn-tryon", "FASHN Try-On 1.6", "FASHN", "fashn", "image",
 model("google-try-on", "Google Virtual Try-On", "Google", "imagen", "image",
       "Google's try-on: a person photo and a product photo",
       [("edit", "google/virtual-try-on")], pricing=("image", 0.075))
+# garment_type is required and has no API default: tops unless the Garment control says otherwise.
 model("leffa-tryon", "Leffa Virtual Try-On", "Leffa", "leffa", "image",
       "Open-weights try-on for tops, bottoms and dresses",
-      [("edit", "fal-ai/leffa/virtual-tryon")], fixed={"garment_type": "upper_body"}, controls=[("garment_type", "Garment")])
+      [("edit", "fal-ai/leffa/virtual-tryon")], api_defaults={"garment_type": "upper_body"}, controls=[("garment_type", "Garment")])
 model("bria-product-shot", "Bria Product Shot", "Bria", "bria", "image",
       "Your product photo in a new scene — describe it or add a reference scene",
       [("edit", "fal-ai/bria/product-shot")], controls=[("placement_type", "Placement")])
@@ -209,7 +213,8 @@ model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
        ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
        ("finalize", "bytedance/seedance-2.5/draft/complete")],
       badges=["top", "audio", "new"], pricing=("second", 0.473, "720p"), defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
-      options={"multiShot": {"mode": "prompt", "maxShots": 6}})
+      # fal's schema gives no count for 2.5's reference clips; Higgsfield's and Replicate's 2.5 schemas say up to 10 (30 s in all).
+      options={"multiShot": {"mode": "prompt", "maxShots": 6}, "maxVideos": 10, "maxAudios": 10})
 model("seedance-2-0", "Seedance 2.0", "ByteDance", "seedance", "video",
       "Smooth multi-shot motion with audio",
       [("t2v", "bytedance/seedance-2.0/text-to-video"), ("i2v", "bytedance/seedance-2.0/image-to-video", "fal", "+flf2v"),
@@ -244,9 +249,11 @@ model("kling-o1", "Kling O1 Omni", "Kuaishou", "kling", "video",
       "Reference-driven video and natural-language video editing",
       [("i2v", "fal-ai/kling-video/o1/image-to-video", "fal", "+flf2v"), ("ref2v", "fal-ai/kling-video/o1/reference-to-video"),
        ("v2v", "fal-ai/kling-video/o1/video-to-video/edit")], defaults={"aspectRatio": "16:9", "duration": 5})
+# character_orientation is required with no default: follow the driving video (the API's advice for complex motion).
 model("kling-motion-control", "Kling 3.0 Motion Control", "Kuaishou", "kling", "video",
       "Copy the motion of a reference video onto your character",
-      [("motion-transfer", "fal-ai/kling-video/v3/pro/motion-control")], defaults={})
+      [("motion-transfer", "fal-ai/kling-video/v3/pro/motion-control")], defaults={},
+      api_defaults={"character_orientation": "video"}, controls=[("character_orientation", "Facing")])
 model("kling-2-6-pro", "Kling 2.6 Pro", "Kuaishou", "kling", "video",
       "Cinematic motion with native audio and dialogue",
       [("t2v", "fal-ai/kling-video/v2.6/pro/text-to-video"), ("i2v", "fal-ai/kling-video/v2.6/pro/image-to-video", "fal", "+flf2v")],
@@ -418,8 +425,10 @@ model("elevenlabs-dubbing", "ElevenLabs Dubbing", "ElevenLabs", "elevenlabs", "v
 model("mirelo-sfx-2", "Mirelo SFX 2.0", "Mirelo", "mirelo", "audio", "Higgsfield's sound-effects model — layered, cinematic SFX up to 10 minutes",
       [("sfx", "mirelo-ai/sfx2.0/text-to-audio")], badges=["top", "new"], defaults={"duration": 5}, options={"durations": [2, 5, 10, 30, 60]},
       pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
+# Sonilo answers in AAC unless asked: MP3 plays and downloads everywhere.
 model("sonilo-sfx", "Sonilo SFX 1.1", "Sonilo", "sonilo", "audio", "Fast, cheap sound effects up to 3 minutes",
-      [("sfx", "sonilo/v1.1/text-to-sound-effects")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 8, 15, 30]})
+      [("sfx", "sonilo/v1.1/text-to-sound-effects")], badges=["fast"], defaults={"duration": 5}, options={"durations": [2, 5, 8, 15, 30]},
+      fixed={"audio_format": "mp3"})
 model("stable-audio-3-sfx", "Stable Audio 3 SFX", "Stability AI", "stable-audio", "audio", "Stability's small SFX model — crisp one-shots and ambiences",
       [("sfx", "fal-ai/stable-audio-3/small/sfx/text-to-audio")], defaults={"duration": 10}, options={"durations": [5, 10, 30, 60]})
 model("cassette-sfx", "CassetteAI Sound Effects", "CassetteAI", "cassette", "audio", "One-cent sound effects up to 30 s",
@@ -432,13 +441,15 @@ model("lyria-3", "Lyria 3", "Google", "lyria", "audio", "Google DeepMind's music
       [("music", "fal-ai/lyria3"), ("music", "google/lyria-3", "replicate")])
 model("lyria-3-pro", "Lyria 3 Pro", "Google", "lyria", "audio", "Longer, richer Lyria 3 tracks",
       [("music", "fal-ai/lyria3/pro"), ("music", "google/lyria-3-pro", "replicate")], badges=["pro"])
-model("minimax-music-2-5", "MiniMax Music 2.5", "MiniMax", "minimax-music", "audio", "Songs with vocals, or instrumentals",
-      [("music", "fal-ai/minimax-music/v2.5")])
+# A prompt alone has no lyrics to sing: lyrics_optimizer writes them from the prompt.
+model("minimax-music-2-5", "MiniMax Music 2.5", "MiniMax", "minimax-music", "audio", "Songs with vocals, lyrics written from your prompt",
+      [("music", "fal-ai/minimax-music/v2.5")], fixed={"lyrics_optimizer": True})
 model("stable-audio-3-music", "Stable Audio 3 Music", "Stability AI", "stable-audio", "audio", "Quick, cheap loops and beds up to 2 minutes",
       [("music", "fal-ai/stable-audio-3/small/music/text-to-audio")], badges=["fast"], defaults={"duration": 30}, options={"durations": [10, 30, 60, 120]})
 model("mureka-song", "Mureka 9.5", "Mureka", "mureka", "audio", "Full songs with vocals in many genres",
       [("music", "mureka/api/generate/song")], pricing=("request", 0.75, "prompt-to-song on mureka-9.5; with lyrics $0.225"),
-      controls=[("model", "Version"), ("gender", "Voice")])
+      # Its vocal gender only applies to lyrics-to-song, which Fuobe doesn't send yet.
+      controls=[("model", "Version")])
 model("stable-audio-2-5", "Stable Audio 2.5", "Stability AI", "stable-audio", "audio", "Sound design and music beds up to 3 minutes",
       [("sfx", "fal-ai/stable-audio-25/text-to-audio"), ("music", "fal-ai/stable-audio-25/text-to-audio"),
        ("sfx", "stability-ai/stable-audio-2.5", "replicate"), ("music", "stability-ai/stable-audio-2.5", "replicate")],
@@ -460,8 +471,10 @@ model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight 
       options={"controls": [{"param": "relight_parameters.bg_source", "label": "Light from", "values": ["Left", "Right", "Top", "Bottom"], "default": "Left"}]})
 model("mmaudio-cloud", "MMAudio", "hkchengrex", "mmaudio", "video", "Add matching sound to a silent video",
       [("v2a", "fal-ai/mmaudio-v2")], pricing=("second", 0.001))
+# Its duration defaults to 10 s and is clamped to the video: ask for the maximum so the whole clip gets sound.
 model("mirelo-sfx-2-video", "Mirelo SFX 2.0 for video", "Mirelo", "mirelo", "video", "Sound effects in sync with your video, speech kept",
-      [("v2a", "mirelo-ai/sfx2.0/video-to-video")], badges=["top", "new"], pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"))
+      [("v2a", "mirelo-ai/sfx2.0/video-to-video")], badges=["top", "new"], pricing=("second", 0.01, "intro price until 2026-12-13, then $0.015"),
+      api_defaults={"duration": 600})
 
 # ----- Image tools: layers, text layers, cut-outs, vectors (research part 3; Higgsfield Layers)
 model("seedream-5-layers", "Seedream 5.0 Layers", "ByteDance", "seedream", "image",
@@ -469,7 +482,8 @@ model("seedream-5-layers", "Seedream 5.0 Layers", "ByteDance", "seedream", "imag
       [("layers", "bytedance/seedream/v5/pro/layerize")], badges=["top", "new"], defaults={"resolution": "auto"},
       pricing=("request", 0.17, "$0.034 per layer, ≈5 layers; double above 1536²"))
 model("seedream-5-flash-layers", "Seedream 5.0 Flash Layers", "ByteDance", "seedream", "image", "Faster, cheaper Seedream layer split",
-      [("layers", "bytedance/seedream/v5/flash/layerize")], badges=["fast"], defaults={"resolution": "auto"})
+      [("layers", "bytedance/seedream/v5/flash/layerize")], badges=["fast"], defaults={"resolution": "auto"},
+      pricing=("request", 0.135, "$0.027 per layer, ≈5 layers"))
 model("qwen-image-layered-cloud", "Qwen-Image Layered (hosted)", "Alibaba Qwen", "qwen-image", "image",
       "Open-weights layer split: 1–10 full-canvas RGBA layers",
       [("layers", "fal-ai/qwen-image-layered"), ("layers", "qwen/qwen-image-layered", "replicate")])
@@ -489,19 +503,23 @@ model("trim-video", "Trim video", "fal", "utility", "video", "Keep the part betw
       pricing=("request", 0.001, "billed per compute second"), hidden=True)
 model("merge-audio-video", "Add soundtrack", "fal", "utility", "video", "Replace a video's sound with an audio track",
       [("mux", "fal-ai/ffmpeg-api/merge-audio-video")], pricing=("second", 0.0002), hidden=True)
-model("auto-subtitle", "Auto Subtitle", "fal", "captions", "video", "Transcribes and burns in TikTok-style karaoke captions",
+# Auto Subtitle has no language detection (its language defaults to English): the spoken language is a picker.
+model("auto-subtitle", "Auto Subtitle", "fal", "captions", "video", "TikTok-style karaoke captions; English unless you pick the spoken language",
       [("captions", "fal-ai/workflow-utilities/auto-subtitle")], badges=["top"],
       sliders=[("words_per_subtitle", "Words per caption"), ("font_size", "Size")],
       controls=[("font_weight", "Weight"), ("font_color", "Colour"), ("highlight_color", "Highlight"), ("position", "Position")])
 model("veed-subtitles", "VEED Subtitles", "VEED", "veed", "video", "30 designed caption styles, with optional translation",
-      [("captions", "veed/subtitles", "fal", {"drop": ["language"]})], fixed={"preset": "simple"}, controls=[("preset", "Style")])
+      [("captions", "veed/subtitles")], fixed={"preset": "simple"}, controls=[("preset", "Style")],
+      pricing=("minute", 0.1, "basic styles; dynamic styles (glass, whisper, glide, fusion, terminal, handwritten, backdrop) and >1080p 2x; translation +$0.20/min"))
 model("scribe-v2", "ElevenLabs Scribe v2", "ElevenLabs", "elevenlabs", "text", "Word-timed transcripts with speakers and sound events",
       [("transcribe", "fal-ai/elevenlabs/speech-to-text/scribe-v2"), ("transcribe", "elevenlabs/scribe-v2", "replicate")], badges=["top"],
       pricing=("minute", 0.008, "+30% with key terms"))
-model("wizper", "Wizper (Whisper v3)", "fal", "whisper", "text", "Fast Whisper large-v3 transcripts in segments",
-      [("transcribe", "fal-ai/wizper")], badges=["fast"])
-model("whisper", "Whisper large-v3", "OpenAI", "whisper", "text", "Whisper with word timings and speaker labels",
-      [("transcribe", "fal-ai/whisper")])
+# Wizper's language defaults to English; null makes it detect the language (unless one is picked).
+model("wizper", "Wizper (Whisper v3)", "fal", "whisper", "text", "Fast Whisper large-v3 transcripts in segments, any language",
+      [("transcribe", "fal-ai/wizper")], badges=["fast"], api_defaults={"language": None})
+# Word-level chunks: the transcript's cues are built from word timings (segment chunks are the API default).
+model("whisper", "Whisper large-v3", "OpenAI", "whisper", "text", "Whisper large-v3 with word timings, any language",
+      [("transcribe", "fal-ai/whisper")], fixed={"chunk_level": "word"})
 model("demucs", "Demucs stem split", "Meta", "demucs", "audio", "Split a track into vocals, drums, bass and the rest",
       [("separate-audio", "fal-ai/demucs")], fixed={"model": "htdemucs"})
 
@@ -619,11 +637,35 @@ def add_slider(opts, param, label, spec):
                                            "default": spec.get("default", lo)})
 
 
-def add_control(opts, param, label, spec):
-    vals = [v for v in ((spec or {}).get("values") or []) if v != ""]
+def is_sentinel(v, default):
+    """An enum value that means "let the API decide": the composer's own Auto option already sends nothing."""
+    s = str(v).strip().lower()
+    return s == "auto" or (s == "none" and str(default).strip().lower() == "none")
+
+
+def add_control(opts, param, label, spec, fallback=None):
+    """fallback: what Fuobe sends when the control is left on Auto (a FieldMap default), shown as the control's default."""
+    default = fallback if fallback is not None else (spec or {}).get("default")
+    vals = [v for v in ((spec or {}).get("values") or []) if v != "" and not is_sentinel(v, default)]
     if not vals or any(c["param"] == param for c in opts.get("controls", [])):
         return
-    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": spec["default"]} if "default" in spec else {})})
+    keep = default is not None and not is_sentinel(default, default)
+    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": default} if keep else {})})
+
+
+def map_fields(fmap):
+    """Every top-level provider field a FieldMap can write (canonical keys, fixed and default fields)."""
+    out = []
+    for k, v in fmap.items():
+        if k in ("fixed", "defaults"):
+            out += list(v)
+        elif k in ("seedRange", "maskFormat"):
+            continue
+        elif isinstance(v, str):
+            out.append(v)
+        elif isinstance(v, dict):
+            out += [v[f] for f in ("key", "background", "shotType", "flag") if isinstance(v.get(f), str)]
+    return [f.split(".")[0] for f in out]
 
 
 def mask_format(ep):
@@ -646,13 +688,20 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         kf.pop(k, None)
     # Part 3 slot names that are the same canonical input: the person in a try-on is the main image,
     # style references are the reference images, a garment / scene / style image is the second image.
+    labels = [None, None]
     if "person" in kf and "image" not in kf:
         kf["image"] = kf.pop("person")
+        labels[0] = "person photo"
     if "styleImages" in kf and "images" not in kf and (inputs.get(kf["styleImages"]) or {}).get("type") == "array":
         kf["images"] = kf["styleImages"]
-    for k in ("garment", "sceneImage", "styleImage"):
+    for k, label in (("garment", "garment"), ("sceneImage", "scene reference"), ("styleImage", "style image")):
         if k in kf and "image2" not in kf and (inputs.get(kf[k]) or {}).get("type") != "array":
             kf["image2"] = kf[k]
+            labels[1] = label
+    # Two-image APIs whose second image is required (try-on garments) can't run on one picture.
+    if "image2" in kf and (inputs.get(kf["image2"]) or {}).get("required") and (inputs.get(kf.get("image", "")) or {}).get("required"):
+        opts["minImages"] = 2
+        opts["imageLabels"] = [labels[0] or "image", labels[1] or "second image"]
     # Transcription and stem splitting work from the audio; ignore any prompt-like hint field.
     if op in ("transcribe", "separate-audio"):
         kf.pop("prompt", None)
@@ -688,7 +737,7 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     for path, label in m.get("sliders") or []:
         add_slider(opts, path, label, spec_at(inputs, path))
     for path, label in m.get("controls") or []:
-        add_control(opts, path, label, spec_at(inputs, path))
+        add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path))
     for k, v in inputs.items():
         # Voice settings belong to speech models; a transcriber's "temperature" is not a voice's variety.
         if k in SLIDER_LABELS and isinstance(v, dict) and (op in ("tts", "voice-change", "dialogue") or k == "strength"):
@@ -697,12 +746,24 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Some APIs call their boolean sound switch "audio" (Wan 3.0); that's generateAudio, not an audio file.
     if "audio" in kf and (inputs.get(kf["audio"]) or {}).get("type") == "boolean":
         kf.setdefault("generateAudio", kf.pop("audio"))
+    # Part 3 names for clip lists (merge-videos' video_urls, Seed Audio's reference audio_urls).
+    for k in ("videos", "audios"):
+        if k in kf and (inputs.get(kf[k]) or {}).get("type") == "array":
+            kf.setdefault(k[:-1], kf.pop(k))
     for k in ["negativePrompt", "image", "images", "endImage", "mask", "video", "audio", "numOutputs", "seed", "generateAudio"]:
         if k in kf:
             if k in ("video", "audio", "image", "endImage", "mask") and (inputs.get(kf[k]) or {}).get("type") == "array":
                 if k == "video" and ropts.get("videoArray"):
                     fmap["videoArray"] = kf[k]
-                continue  # other array-of-media inputs (reference videos/audios) aren't wired yet
+                elif k in ("video", "audio"):
+                    # Lists of clips: reference videos / audio for reference-to-video (Seedance @Video1, @Audio1),
+                    # fed from inputs.videos / inputs.audios.
+                    fmap[k + "s"] = kf[k]
+                    spec = inputs.get(kf[k]) or {}
+                    cap = num(spec.get("maxItems")) or num((re.search(r"\bup to (\d+)", spec.get("desc") or "", re.I) or [None, None])[1]) or 3
+                    key = "maxVideos" if k == "video" else "maxAudios"
+                    opts[key] = max(opts.get(key, 0), cap)
+                continue
             fmap[k] = kf[k]
     # Multi-shot, draft mode and draft completion (research part 2 key fields).
     if "multiShot" in kf and op in ("t2v", "i2v", "ref2v") and (inputs.get(kf["multiShot"]) or {}).get("type") in ("array", "string"):
@@ -744,7 +805,11 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # The language of the speech: transcription, captions and dubbing take it as their "language".
     src_lang = kf.get("sourceLanguage") or (kf.get("language") if op in ("transcribe", "captions", "dub") else None)
     if src_lang:
-        fmap["sourceLanguage"] = src_lang
+        enum = [v for v in ((inputs.get(src_lang) or {}).get("values") or []) if isinstance(v, str) and v]
+        # An API with its own list (VEED's "es-ES", Wizper's "es") gets the matching entry; the picker offers ISO codes.
+        fmap["sourceLanguage"] = {"key": src_lang, "values": enum} if enum else src_lang
+        codes = union([], [v.split("-")[0].lower() for v in enum if re.fullmatch(r"[a-z]{2,3}", v.split("-")[0].lower())]) if enum else ISO_LANGUAGES
+        opts["sourceLanguages"] = union(opts.get("sourceLanguages", []), codes)
     # Transcribers take a video file in their audio field too.
     if op == "transcribe" and "audio" in kf and "video" not in kf:
         fmap["video"] = kf["audio"]
@@ -817,6 +882,23 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             warn(f"{m['id']}: fixed fields {missing} not in {ep} inputs")
         if not fmap["fixed"]:
             del fmap["fixed"]
+    if m.get("api_defaults"):
+        fmap["defaults"] = {k: v for k, v in m["api_defaults"].items() if k.split(".")[0] in inputs}
+        missing = [k for k in m["api_defaults"] if k.split(".")[0] not in inputs]
+        if missing:
+            warn(f"{m['id']}: default fields {missing} not in {ep} inputs")
+        if not fmap["defaults"]:
+            del fmap["defaults"]
+    # Inputs the API requires that no canonical field fills: send the API's own documented default
+    # (MiniMax H3 Max's prompt_expansion_mode), or warn when there is none to send.
+    sent = set(map_fields(fmap)) | ({"prompt"} if "prompt" not in fmap else set())
+    for k, spec in inputs.items():
+        if not isinstance(spec, dict) or not spec.get("required") or k in sent:
+            continue
+        if spec.get("default") is not None:
+            fmap.setdefault("defaults", {})[k] = spec["default"]
+        else:
+            warn(f"{m['id']}: {ep} requires {k}, which no field of this route fills")
     if "numOutputs" in fmap:
         mx = num((inputs.get(fmap["numOutputs"]) or {}).get("maximum")) or 4
         opts["maxOutputs"] = max(opts.get("maxOutputs", 1), min(4, mx))
@@ -880,6 +962,9 @@ for m in M:
     if not routes:
         warn(f"{m['id']}: no routes, skipping model")
         continue
+    # No route sends a prompt (try-on, 3D, transcription): planning and the composer don't ask for one.
+    if all(r["map"].get("prompt") is False for r in routes):
+        opts["promptless"] = True
     opts.update(m["options"])
     pricing = None
     if m["pricing"]:

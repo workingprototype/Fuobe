@@ -1,5 +1,5 @@
 import "server-only";
-import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
+import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import type { Operation } from "@/lib/catalog/types";
 import { getSetting } from "../settings";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
@@ -124,7 +124,7 @@ export const higgsfieldProvider: ProviderAdapter = {
         return { state: "running", message: "Generating" };
       case "completed": {
         const outputs = higgsfieldOutputs(s, route?.op);
-        return outputs.length ? { state: "succeeded", outputs } : { state: "failed", error: `No media in response: ${JSON.stringify(s).slice(0, 300)}` };
+        return outputs.length ? { state: "succeeded", outputs } : { state: "failed", error: noOutputsError(s) };
       }
       case "nsfw":
         return { state: "failed", error: "Higgsfield's moderation blocked this prompt or result (not charged)" };
