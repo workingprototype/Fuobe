@@ -38,6 +38,9 @@ import {
   Library,
   PersonStanding,
   Scissors,
+  Box,
+  Swords,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -119,6 +122,9 @@ const NAV: NavGroupDef[] = [
       { href: "/elements", label: "Elements", icon: AtSign },
       { href: "/upscale", label: "Upscale", icon: ZoomIn },
       { href: "/audio", label: "Audio", icon: AudioLines },
+      { href: "/katana", label: "Katana", icon: Swords },
+      { href: "/image-to-3d", label: "Image to 3D", icon: Box },
+      { href: "/virality", label: "Virality predictor", icon: TrendingUp },
     ],
     collapsible: true,
   },

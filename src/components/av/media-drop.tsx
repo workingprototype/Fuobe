@@ -110,7 +110,7 @@ export function MediaDrop({
           <Button variant="ghost" size="sm" className="rounded-full" onClick={() => input.current?.click()}>
             <RefreshCw className="size-3.5" /> Replace
           </Button>
-          <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={`Remove ${title.toLowerCase()}`} onClick={() => onChange(null)}>
+          <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={`Remove ${kind === "video" ? "the video" : "the photo"}`} onClick={() => onChange(null)}>
             <X className="size-4" />
           </Button>
         </div>
