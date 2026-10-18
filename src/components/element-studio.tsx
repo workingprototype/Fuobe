@@ -77,7 +77,13 @@ export function ElementStudio({ id }: { id: string }) {
         header={
           <>
             {el.kind !== "voice" && (
-              <Button variant={el.loras.length ? "ghost" : "secondary"} size="sm" onClick={() => setTraining(true)}>
+              <Button
+                variant={el.loras.length ? "ghost" : "secondary"}
+                size="sm"
+                onClick={() => setTraining(true)}
+                // The label is hidden on phones.
+                aria-label={el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}
+              >
                 {el.status === "training" ? <Loader2 className="animate-spin" /> : <GraduationCap />}
                 <span className="hidden sm:inline">{el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}</span>
               </Button>

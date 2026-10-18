@@ -12,6 +12,7 @@ import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { uploadFile } from "@/lib/api";
 import { applyPreset, CONTROLS, describeGrade, FRAGMENT, isNeutral, NEUTRAL, PRESETS, uniforms, VERTEX, type Grade } from "@/lib/grade";
 import { cn } from "@/lib/utils";
+import { loseContext as loseGlContext, releaseVideo } from "@/lib/media-release";
 
 type Source = HTMLImageElement | HTMLVideoElement;
 
@@ -97,7 +98,12 @@ function loadSource(url: string, kind: "image" | "video"): Promise<Source> {
       v.muted = true;
       v.playsInline = true;
       v.onloadeddata = () => resolve(v);
-      v.onerror = () => reject(new Error("Couldn't load the video"));
+      v.onerror = () => {
+        // A clip this browser can't decode (HEVC .mov, a broken file): let go of it right away.
+        v.onerror = null;
+        releaseVideo(v);
+        reject(new Error("Couldn't play that video here — try an MP4 (H.264) or WebM file"));
+      };
       return;
     }
     const img = new Image();
@@ -112,15 +118,12 @@ const dims = (s: Source) => (s instanceof HTMLVideoElement ? [s.videoWidth, s.vi
 
 /** Stop a detached video for good (it would keep decoding after the page or the clip changes). */
 function release(s: Source | null | undefined) {
-  if (!(s instanceof HTMLVideoElement)) return;
-  s.pause();
-  s.removeAttribute("src");
-  s.load();
+  if (s instanceof HTMLVideoElement) releaseVideo(s);
 }
 
 /** Free a WebGL context now instead of waiting for garbage collection (browsers cap live contexts). */
 function loseContext(r: GradeRenderer | null | undefined) {
-  r?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  loseGlContext(r?.gl);
 }
 
 /** Bundled still the looks are previewed on before anything is loaded. */
@@ -164,7 +167,13 @@ function Grader() {
         setSource(s);
         if (s instanceof HTMLVideoElement) void s.play().catch(() => {});
       },
-      (e) => !cancelled && toast.error((e as Error).message),
+      (e) => {
+        if (cancelled) return;
+        toast.error((e as Error).message);
+        // Back to the empty stage (upload slots, sample photo) instead of a spinner that never ends.
+        setSource(null);
+        setInput(null);
+      },
     );
     return () => {
       cancelled = true;

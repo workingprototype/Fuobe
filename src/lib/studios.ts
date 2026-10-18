@@ -231,13 +231,9 @@ export function appStudio(preset: Preset): StudioConfig {
     feature: `app:${preset.id}`,
     title: preset.name,
     hero: preset.description,
-    subtitle: [
-      preset.cloud ? `Cloud: ${getModel(preset.cloud.modelId)?.name}` : "No cloud version yet",
-      preset.open ? `Open source: ${getModel(preset.open.modelId)?.name}` : "No open-source version yet",
-      preset.parity,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    // Which model runs it on each engine lives in the preset header's Details popover (U23); the
+    // hero only says when an engine has no version, plus how the two versions differ.
+    subtitle: [!preset.cloud ? "Open source only for now" : !preset.open ? "Cloud only for now" : undefined, preset.parity].filter(Boolean).join(" · "),
     placeholder: preset.promptPlaceholder ?? "Add details (optional)",
     kind,
     ops,

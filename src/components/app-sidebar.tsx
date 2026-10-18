@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import { Suspense, useCallback, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   AtSign,
   MessageCircle,
@@ -53,7 +53,9 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarRail,
+  SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Kbd } from "@/components/ui/kbd";
 import { GlobalShortcuts } from "@/components/global-shortcuts";
@@ -255,8 +257,34 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Keeps data-more-below on a vertical scroller in sync, so a fade hints at items below the fold. */
+function useMoreBelow<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => el.toggleAttribute("data-more-below", el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    for (const child of el.children) ro.observe(child);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, []);
+  return ref;
+}
+
 export function AppSidebar() {
   const { resolvedTheme, setTheme } = useTheme();
+  const { isMobile, setOpenMobile } = useSidebar();
+  // On phones the sidebar is a drawer over the page: any link tapped in it closes it.
+  const closeOnLink = (e: React.MouseEvent) => {
+    if (isMobile && (e.target as Element).closest("a[href]")) setOpenMobile(false);
+  };
+  const content = useMoreBelow<HTMLDivElement>();
   const status = useStatus().data;
   const cloud = status && (status.providers.fal?.configured || status.providers.replicate?.configured || status.providers.higgsfield?.configured);
   const comfy = status?.providers.comfyui?.configured;
@@ -276,7 +304,7 @@ export function AppSidebar() {
   return (
     <>
       <Sidebar variant="inset" collapsible="icon">
-        <SidebarHeader className="pt-3">
+        <SidebarHeader className="pt-3" onClick={closeOnLink}>
           <div className="flex h-9 items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:justify-center">
             <Link href="/" className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
               <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground shadow-soft">
@@ -301,13 +329,23 @@ export function AppSidebar() {
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
-        <SidebarContent className="scrollbar-none">
-          {NAV.map((group) => {
+        <SidebarContent
+          ref={content}
+          onClick={closeOnLink}
+          className="scrollbar-none fade-bottom group-data-[collapsible=icon]:overflow-y-auto"
+        >
+          {NAV.map((group, i) => {
             const id = groupId(group.label);
-            return <NavGroup key={id} group={group} open={!group.collapsible || !closed.includes(id)} onToggle={() => toggle(id)} />;
+            return (
+              <Fragment key={id}>
+                {/* Icon mode hides the group labels: a hairline keeps the groups apart. */}
+                {i > 0 && <SidebarSeparator className="my-1 hidden group-data-[collapsible=icon]:block" />}
+                <NavGroup group={group} open={!group.collapsible || !closed.includes(id)} onToggle={() => toggle(id)} />
+              </Fragment>
+            );
           })}
         </SidebarContent>
-        <SidebarFooter className="gap-1 border-t border-sidebar-border">
+        <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
           <Link
             href="/settings"
             className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden"

@@ -11,7 +11,8 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps<"/apps/[id]">): Promise<Metadata> {
   const { id } = await params;
-  return { title: getPreset(id)?.name ?? "App" };
+  const preset = getPreset(id);
+  return { title: preset?.type === "app" ? preset.name : "Not found" };
 }
 
 async function AppStudio({ params }: { params: PageProps<"/apps/[id]">["params"] }) {

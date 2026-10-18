@@ -1,7 +1,8 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { framePrompt, heuristicScenes, MAX_FRAMES, parseScenes, SPLIT_SYSTEM, STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
-import type { Engine, Generation } from "@/lib/catalog/types";
+import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import { storyboardName } from "@/lib/storyboard-board";
 import { supportsOp } from "@/lib/catalog";
 import { filmModel, joinClips } from "./chains";
 import { llmText } from "./enhance";
@@ -33,6 +34,8 @@ export async function createStoryboard(r: StoryboardRequest): Promise<{ batchId:
   const refs = (r.references ?? []).slice(0, 4);
   const m = STORYBOARD_MODELS[r.engine];
   const batchId = nanoid(10);
+  // The board is named after the user's idea on every device (the Library's stack title too).
+  const batchTitle = storyboardName(r.scenes?.length ? undefined : r.story, scenes);
   const params = { aspectRatio: r.aspectRatio, resolution: r.resolution, numOutputs: 1 };
   const items: Generation[] = [];
   let previous: string | undefined;
@@ -40,18 +43,17 @@ export async function createStoryboard(r: StoryboardRequest): Promise<{ batchId:
     const first = i === 0;
     // The open next-scene workflow takes the previous panel plus one character reference.
     const frameRefs = first ? refs : m.chainFrom === "first" ? refs.slice(0, 1) : refs;
-    const [g] = createGenerations(
-      {
-        feature: "storyboard",
-        modelId: first ? (refs.length ? m.firstWithRefs : m.first) : m.next,
-        prompt: framePrompt(scene, i, { refs: frameRefs.length, chainFrom: m.chainFrom, style: r.style }),
-        inputs: frameRefs.length ? { images: frameRefs } : undefined,
-        params,
-        chainFrom: first ? undefined : m.chainFrom,
-        frame: { scene, index: i, of: scenes.length },
-      },
-      { batchId, dependsOn: previous },
-    );
+    const request: GenerationRequest & { batchTitle?: string } = {
+      feature: "storyboard",
+      modelId: first ? (refs.length ? m.firstWithRefs : m.first) : m.next,
+      prompt: framePrompt(scene, i, { refs: frameRefs.length, chainFrom: m.chainFrom, style: r.style }),
+      inputs: frameRefs.length ? { images: frameRefs } : undefined,
+      params,
+      chainFrom: first ? undefined : m.chainFrom,
+      frame: { scene, index: i, of: scenes.length },
+      batchTitle,
+    };
+    const [g] = createGenerations(request, { batchId, dependsOn: previous });
     items.push(g);
     previous = g.id;
   });
@@ -71,22 +73,23 @@ export function createStoryboardFilm(batchId: string, opts: { modelId?: string }
   const model = filmModel(frames[0].engine, opts.modelId);
   const flf = supportsOp(model, "flf2v");
   const filmBatch = `${batchId}-film`;
+  // Boards made before the server stored a name fall back to the first scene.
+  const batchTitle = (frames[0].request as { batchTitle?: string }).batchTitle?.trim() || frames[0].request.frame?.scene || "Storyboard film";
   const aspectRatio = frames[0].request.params?.aspectRatio;
   const n = frames.length;
   const clips = frames.map((f, i) => {
     const next = flf ? frames[i + 1] : undefined;
     const scene = f.request.frame?.scene ?? f.request.prompt ?? "";
-    return createGenerations(
-      {
-        feature: "storyboard-film",
-        modelId: model.id,
-        prompt: next ? `${scene}. The shot moves naturally toward the next moment: ${next.request.frame?.scene ?? ""}` : `${scene}. Natural, cinematic motion.`,
-        params: { aspectRatio, duration: model.defaults?.duration },
-        chain: next ? [{ slot: "images", position: "first" }, { slot: "endImage" }] : [{ slot: "images", position: "first" }],
-        step: { label: `Shot ${i + 1} of ${n}`, index: i, of: n },
-      },
-      { batchId: filmBatch, dependsOn: next ? [f.id, next.id] : f.id },
-    )[0];
+    const request: GenerationRequest & { batchTitle?: string } = {
+      feature: "storyboard-film",
+      modelId: model.id,
+      prompt: next ? `${scene}. The shot moves naturally toward the next moment: ${next.request.frame?.scene ?? ""}` : `${scene}. Natural, cinematic motion.`,
+      params: { aspectRatio, duration: model.defaults?.duration },
+      chain: next ? [{ slot: "images", position: "first" }, { slot: "endImage" }] : [{ slot: "images", position: "first" }],
+      step: { label: `Shot ${i + 1} of ${n}`, index: i, of: n },
+      batchTitle,
+    };
+    return createGenerations(request, { batchId: filmBatch, dependsOn: next ? [f.id, next.id] : f.id })[0];
   });
   const film = joinClips(
     clips.map((c) => c.id),
@@ -94,7 +97,7 @@ export function createStoryboardFilm(batchId: string, opts: { modelId?: string }
       engine: model.engine,
       feature: "storyboard-film",
       batchId: filmBatch,
-      title: frames[0].request.frame?.scene ?? "Storyboard film",
+      title: batchTitle,
       aspectRatio,
       resolution: model.defaults?.resolution,
       step: { label: `Film · ${n} shots`, index: n, of: n + 1 },

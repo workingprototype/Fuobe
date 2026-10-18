@@ -324,7 +324,16 @@
 
 /* Sidebar groups that remember being collapsed (app-sidebar.tsx). In icon mode every item shows. */
 [data-nav-group][data-open="false"] [data-nav-items] { display: none; }
+/* A collapsed group still shows the page you're on (only that item), so something is always lit. */
+[data-nav-group][data-open="false"]:has([data-active="true"]) [data-nav-items] { display: revert-layer; }
+[data-nav-group][data-open="false"] [data-nav-items] > li:not(:has([data-active="true"])) { display: none; }
 [data-collapsible="icon"] [data-nav-group] [data-nav-items] { display: flex; }
+[data-collapsible="icon"] [data-nav-group][data-open] [data-nav-items] > li { display: revert-layer; }
+
+/* A vertical scroller with more below the fold fades out at the bottom (app-sidebar.tsx). */
+.fade-bottom[data-more-below] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
 
 /* ---------------------------------------------------------------------------------------------
  * Procedural preset previews (preset-preview.tsx, src/lib/preset-cards.ts).
@@ -356,10 +365,28 @@
     scale(calc(1 + var(--pv-base, 0) + (var(--pv-zoom, 0) + var(--pv-dolly, 0) * var(--d)) * var(--pv-t)))
     rotate(calc(var(--pv-roll, 0) * var(--pv-t) * 1deg));
 }
+/* Each preset's own hue recolors the still (blend: color keeps its light and shade), so
+ * neighbouring cards on the same still read as different looks. */
 .pv-tint {
-  inset: 0; z-index: 6; mix-blend-mode: soft-light; opacity: 0.55;
-  background: linear-gradient(135deg, oklch(0.78 0.15 var(--pv-hue, 282)), oklch(0.5 0.2 calc(var(--pv-hue, 282) + 50)));
+  inset: 0; z-index: 1; mix-blend-mode: color; opacity: 0.42;
+  background: linear-gradient(135deg, oklch(0.72 0.16 var(--pv-hue, 282)), oklch(0.55 0.2 calc(var(--pv-hue, 282) + 50)));
 }
+.pv[data-flip] .pv-shake { scale: -1 1; }
+
+/* A camera move rests partway in (the still already shows the move's framing), and plays on from
+ * there; its line diagram (move-glyphs.ts) says which move it is until it plays. */
+.pv[data-profile] .pv-cam { --pv-t: 0.5; }
+.pv:is([data-profile="crash"], [data-profile="yoyo"], [data-profile="whip"]) .pv-cam { --pv-t: 0; }
+.pv[data-profile="crash-rev"] .pv-cam { --pv-t: 1; }
+.pv[data-profile="loop"] .pv-cam { --pv-t: 0.06; }
+.pv-glyph {
+  position: absolute; left: 50%; top: 50%; z-index: 7; width: 42%; translate: -50% -50%;
+  fill: none; stroke: #fff; stroke-width: 1.75px; stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 1px 1.5px oklch(0 0 0 / 0.55)); opacity: 0.92; transition: opacity 220ms ease;
+}
+.pv-glyph path { vector-effect: non-scaling-stroke; }
+.pv-glyph [data-dashed] { stroke-dasharray: 2.5 3; opacity: 0.75; }
+.pv[data-playing] .pv-glyph { opacity: 0; }
 .pv-fx { z-index: 5; }
 .pv[data-playing] .pv-layer, .pv[data-playing] .pv-cam { will-change: transform; }
 
@@ -373,6 +400,9 @@
 .pv[data-playing][data-profile="yoyo"] .pv-cam { animation: pv-t-yoyo var(--pv-dur, 3s) ease-in-out infinite; }
 .pv[data-playing][data-profile="whip"] .pv-cam { animation: pv-t-whip var(--pv-dur, 2.6s) ease-in-out infinite; }
 .pv[data-playing]:not([data-profile]) .pv-cam { animation: none; }
+/* Play on from the resting frame instead of jumping back to the start. */
+.pv[data-playing]:is([data-profile="ease"], [data-profile="ease-rev"], [data-profile="slow"]) .pv-cam { animation-delay: calc(var(--pv-dur, 3s) * -0.5); }
+.pv[data-playing][data-profile="loop"] .pv-cam { animation-delay: calc(var(--pv-dur, 3s) * -0.06); }
 @keyframes pv-t-up { from { --pv-t: 0; } to { --pv-t: 1; } }
 @keyframes pv-t-down { from { --pv-t: 1; } to { --pv-t: 0; } }
 @keyframes pv-t-crash {
@@ -483,8 +513,10 @@
 .pv[data-playing][data-fx="lightning"] .pv-flash, .pv[data-playing][data-fx="explode"] .pv-flash { animation: pv-strike 2.2s steps(1) infinite; }
 @keyframes pv-strike { 0%, 100% { opacity: 0; } 8% { opacity: 1; } 12% { opacity: 0; } 16% { opacity: 0.8; } 22% { opacity: 0; } }
 
+/* At rest the burst shows near its peak, placed by the preset's hue so neighbouring blasts differ. */
 .pv-burst {
-  left: 50%; top: 52%; width: 120%; aspect-ratio: 1; translate: -50% -50%; scale: 0.55; border-radius: 50%;
+  left: calc(50% + sin(var(--pv-hue, 0) * 1deg) * 22%); top: calc(50% + cos(var(--pv-hue, 0) * 3deg) * 12%);
+  width: 120%; aspect-ratio: 1; translate: -50% -50%; scale: 0.72; border-radius: 50%;
   background: radial-gradient(circle, #fffbe0 0, #ffd166 18%, #ff7b2e 36%, oklch(0.5 0.2 30 / 0.6) 52%, transparent 66%);
   mix-blend-mode: screen; opacity: 0.85;
 }
@@ -575,6 +607,14 @@
 .pv[data-playing] .pv-play { opacity: 0; transition: opacity 200ms; }
 .pv[data-playing][data-fx="play"] .pv-cam { animation: pv-push 3.2s ease-in-out infinite alternate; }
 @keyframes pv-progress { from { --p: 0%; } to { --p: 100%; } }
+
+/* Cracked glass: drawn at rest, the cracks race out from the impact when playing. */
+.pv-crack { position: absolute; inset: 0; width: 100%; height: 100%; fill: oklch(1 0 0 / 0.9); stroke: oklch(1 0 0 / 0.88); stroke-width: 1.3px; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 1px oklch(0 0 0 / 0.7)); }
+.pv-crack path { fill: none; vector-effect: non-scaling-stroke; stroke-dasharray: 220; stroke-dashoffset: 0; }
+.pv[data-playing] .pv-crack path { animation: pv-crack 2.2s cubic-bezier(0.2, 0.8, 0.3, 1) infinite; }
+.pv[data-playing][data-fx="crack"] .pv-flash { animation: pv-strike 2.2s steps(1) infinite; }
+.pv[data-playing][data-fx="crack"] .pv-shake { animation: pv-impact 2.2s linear infinite; }
+@keyframes pv-crack { 0%, 8% { stroke-dashoffset: 220; } 40%, 100% { stroke-dashoffset: 0; } }
 
 .pv[data-playing][data-fx="pop"] .pv-cam { animation: pv-pop 1.6s cubic-bezier(0.3, 1.4, 0.5, 1) infinite; }
 .pv[data-playing][data-fx="morph"] .pv-cam, .pv[data-playing][data-fx="glow"] .pv-cam { animation: pv-push 3s ease-in-out infinite alternate; }

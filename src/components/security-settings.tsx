@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 
 interface TokenInfo {
@@ -21,6 +22,12 @@ interface AuthStatus {
   enabled: boolean;
   fromEnv: boolean;
   tokens: TokenInfo[];
+}
+
+/** Copy and say whether it worked (plain-http LAN origins have no Clipboard API; copyText falls back). */
+async function copyWithToast(text: string) {
+  if (await copyText(text)) toast("Copied");
+  else toast.error("Couldn’t copy — select the text and copy it instead");
 }
 
 async function call<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -98,10 +105,8 @@ function McpSnippet({ token, needsToken }: { token: string | null; needsToken: b
       <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-2">
         <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap">{cmd}</code>
         <button
-          onClick={() => {
-            void navigator.clipboard.writeText(cmd);
-            toast("Copied");
-          }}
+          type="button"
+          onClick={() => void copyWithToast(cmd)}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
           aria-label="Copy command"
         >
@@ -140,15 +145,11 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
         <div className="rounded-xl border border-primary/40 bg-brand-faint p-3">
           <p className="text-[12px] font-medium">Copy this token now — it won&apos;t be shown again.</p>
           <div className="mt-2 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md bg-background px-2 py-1.5 font-mono text-[12px]">{fresh}</code>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                void navigator.clipboard.writeText(fresh);
-                toast("Copied");
-              }}
-            >
+            {/* The whole token, wrapped (a phone can't show it on one line); one tap selects it all. */}
+            <code aria-label="New API token" className="min-w-0 flex-1 rounded-md bg-background px-2 py-1.5 font-mono text-[12px] break-all select-all">
+              {fresh}
+            </code>
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={() => void copyWithToast(fresh)}>
               <Copy /> Copy
             </Button>
           </div>

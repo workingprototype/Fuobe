@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert, Cloud, Cpu, ExternalLink, Layers, Loader2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -218,6 +218,13 @@ export function SettingsForm() {
   });
   const get = (n: string) => settings.data?.find((s) => s.name === n);
   const set = (n: string) => (v: string) => save.mutate({ [n]: v });
+  // Deep links (/settings#comfyui) arrive while the form is still a skeleton, so the browser finds
+  // no anchor: scroll to it once the sections exist.
+  const loaded = !settings.isLoading;
+  useEffect(() => {
+    if (!loaded || !window.location.hash) return;
+    document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ block: "start" });
+  }, [loaded]);
 
   if (settings.isLoading)
     return (

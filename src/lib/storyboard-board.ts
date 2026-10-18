@@ -18,11 +18,20 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  */
 export function boardTitle(frames: Generation[], remembered?: string | null): string {
   const first = frames[0];
-  const own = (first?.request as { title?: string } | undefined)?.title?.trim();
+  const req = first?.request as { title?: string; batchTitle?: string } | undefined;
+  const own = req?.title?.trim() || req?.batchTitle?.trim();
   if (own) return cap(own);
   if (remembered?.trim()) return cap(remembered.trim());
   const scene = first?.request.frame?.scene;
   return cap(scene ? unwrapScene(scene) : (first?.request.prompt ?? "Storyboard"));
+}
+
+/**
+ * The name the server stores on a new board (every frame's `batchTitle`, the film's title): the
+ * user's idea, or their first scene when they wrote it scene by scene.
+ */
+export function storyboardName(story: string | undefined, scenes: string[]): string {
+  return (story?.trim() || scenes.find((s) => s.trim()) || "Storyboard").trim().replace(/\s+/g, " ").slice(0, 200);
 }
 
 /** A film needs every frame finished (and at least two of them). */

@@ -1,19 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, AudioLines, Film, ImageIcon, Mic2, ScanFace, Sparkles, Video, Wand2, ZoomIn } from "lucide-react";
+import {
+  ArrowRight,
+  AudioLines,
+  CircleAlert,
+  Clapperboard,
+  Film,
+  GalleryHorizontal,
+  ImageIcon,
+  Loader2,
+  Mic2,
+  Network,
+  ScanFace,
+  Sparkles,
+  Video,
+  Wand2,
+  ZoomIn,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { lazy, Suspense, useState } from "react";
 import { PageShell } from "@/components/page-shell";
 import { PresetCard } from "@/components/preset-gallery";
-import { Skeleton } from "@/components/ui/skeleton";
+import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
+import type { Generation } from "@/lib/catalog/types";
+import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
-// The feed (and the viewer behind it) is only needed once there is something recent to show.
-const Feed = lazy(() => import("@/components/studio/feed").then((m) => ({ default: m.Feed })));
+// The viewer is only needed once a recent result is opened.
+const Viewer = lazy(() => import("@/components/studio/viewer").then((m) => ({ default: m.Viewer })));
 
 const MODES = [
   { id: "image", label: "Image", icon: ImageIcon, href: "/image", placeholder: "Describe an image…" },
@@ -27,16 +45,72 @@ interface Counts {
   apps: number;
 }
 
-/** Tool tiles. Append one entry per new destination; the grid fits any count. */
+/** Tool tiles. Append one entry per new destination (the grid holds five per row on wide screens). */
 const tools = (c: Counts) => [
+  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard, hue: 330 },
   { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film, hue: 280 },
   { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles, hue: 20 },
   { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2, hue: 200 },
+  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal, hue: 100 },
+  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network, hue: 260 },
   { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2, hue: 150 },
   { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace, hue: 320 },
   { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn, hue: 240 },
   { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines, hue: 60 },
 ];
+
+/** The latest results as a compact strip of square thumbnails; a tap opens the viewer. */
+function RecentStrip({ items }: { items: Generation[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const viewable = items.filter((g) => g.status === "succeeded" && g.outputs[0]);
+  const pos = viewable.findIndex((g) => g.id === open);
+  return (
+    <>
+      <ul className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {items.map((g) => {
+          const title = userTitle(g);
+          const ok = g.status === "succeeded" && g.outputs[0];
+          const failed = g.status === "failed" || g.status === "canceled";
+          return (
+            <li key={g.id} className="min-w-0">
+              {ok ? (
+                <button
+                  type="button"
+                  onClick={() => setOpen(g.id)}
+                  title={title}
+                  aria-label={`Open “${title}”`}
+                  className="relative block aspect-square w-full cursor-zoom-in overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <MediaThumb output={g.outputs[0]} g={g} />
+                </button>
+              ) : (
+                <Link
+                  href="/library"
+                  title={title}
+                  aria-label={`${failed ? "Failed" : "In progress"}: “${title}” — open the Library`}
+                  className="grid aspect-square w-full place-items-center rounded-xl border border-dashed bg-muted/40 text-muted-foreground"
+                >
+                  {failed ? <CircleAlert className="size-5" /> : <Loader2 className="size-5 animate-spin" />}
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {pos >= 0 && (
+        <Suspense fallback={null}>
+          <Viewer
+            generation={viewable[pos]}
+            index={0}
+            onClose={() => setOpen(null)}
+            onPrev={pos > 0 ? () => setOpen(viewable[pos - 1].id) : undefined}
+            onNext={pos < viewable.length - 1 ? () => setOpen(viewable[pos + 1].id) : undefined}
+          />
+        </Suspense>
+      )}
+    </>
+  );
+}
 
 function Row({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
   return (
@@ -52,11 +126,11 @@ function Row({ title, href, children }: { title: string; href: string; children:
   );
 }
 
-function CardRow({ cards, href }: { cards: PresetCardData[]; href: (c: PresetCardData) => string }) {
+function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: PresetCardData) => string; engine?: "cloud" | "open" }) {
   return (
     <div className="grid grid-cols-2 gap-1 sm:grid-cols-4 lg:grid-cols-6">
       {cards.map((p) => (
-        <PresetCard key={p.id} preset={p} href={href(p)} compact />
+        <PresetCard key={p.id} preset={p} href={href(p)} compact engine={engine} />
       ))}
     </div>
   );
@@ -76,6 +150,8 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
   const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
   const comfyReady = !!status?.providers.comfyui?.configured;
   const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
+
+  const locked = engineMode === "both" ? undefined : engineMode;
 
   const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : ""}`);
 
@@ -145,7 +221,7 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
         )}
       </div>
 
-      <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-[repeat(auto-fit,minmax(128px,1fr))]">
+      <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {tools(counts).map((t) => (
           <Link key={t.href} href={t.href} className="group flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
             <span className="grid size-9 place-items-center rounded-lg text-white" style={{ background: `linear-gradient(135deg, oklch(0.75 0.15 ${t.hue}), oklch(0.55 0.2 ${t.hue + 40}))` }}>
@@ -162,26 +238,17 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
       <div className="mt-14 space-y-12">
         {!!recent.data?.length && (
           <Row title="Recent" href="/library">
-            <Suspense
-              fallback={
-                <div className="flex gap-2">
-                  <Skeleton className="h-56 w-56 rounded-xl" />
-                  <Skeleton className="h-56 w-56 rounded-xl" />
-                </div>
-              }
-            >
-              <Feed items={recent.data.slice(0, 3)} />
-            </Suspense>
+            <RecentStrip items={recent.data.slice(0, 6)} />
           </Row>
         )}
         <Row title="Camera motions" href="/motions">
-          <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} />
+          <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} engine={locked} />
         </Row>
         <Row title="Popular apps" href="/apps">
-          <CardRow cards={apps} href={(p) => `/apps/${p.id}`} />
+          <CardRow cards={apps} href={(p) => `/apps/${p.id}`} engine={locked} />
         </Row>
         <Row title="Effects" href="/effects">
-          <CardRow cards={effects} href={(p) => `/video?preset=${p.id}`} />
+          <CardRow cards={effects} href={(p) => `/video?preset=${p.id}`} engine={locked} />
         </Row>
       </div>
     </PageShell>
