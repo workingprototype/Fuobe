@@ -175,6 +175,29 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Layers projects: one source image, saved versions of its layer document, and the AI jobs its tools started.
+  `CREATE TABLE IF NOT EXISTS layer_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    cover_url TEXT,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    head_version_id TEXT,
+    jobs_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS layer_projects_updated ON layer_projects(updated_at DESC);
+  CREATE TABLE IF NOT EXISTS layer_versions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    doc_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS layer_versions_project ON layer_versions(project_id, created_at DESC);`,
 ];
 
 declare global {

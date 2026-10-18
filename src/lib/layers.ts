@@ -191,6 +191,41 @@ export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }>
   expand: { cloud: ["nano-banana-pro"], open: ["oss-flux-fill"] },
 };
 
+/** Relight looks (the Relight app's), as [label, prompt]. */
+export const RELIGHT_LIGHTS: [string, string][] = [
+  ["Golden hour", "warm golden hour sunlight"],
+  ["Neon night", "pink and blue neon lights at night"],
+  ["Studio softbox", "soft, even studio softbox lighting"],
+  ["Dramatic", "dramatic low-key lighting with a single hard light and deep shadows"],
+  ["Overcast", "soft overcast daylight"],
+  ["Candlelight", "warm flickering candlelight"],
+  ["Silhouette", "strong backlight that turns the subject into a near-silhouette"],
+  ["Window", "soft directional window light"],
+];
+
+export const RELIGHT_DIRECTIONS: [string, string][] = [
+  ["Auto", ""],
+  ["Left", "coming from the left"],
+  ["Right", "coming from the right"],
+  ["Front", "coming from the front"],
+  ["Above", "coming from above"],
+  ["Behind", "coming from behind the subject as a rim light"],
+];
+
+/** Camera angles (the Angles app's), as [label, prompt]. */
+export const ANGLES: [string, string][] = [
+  ["Left 45°", "rotated 45 degrees to the left around the subject"],
+  ["Right 45°", "rotated 45 degrees to the right around the subject"],
+  ["Left profile", "a full left side profile view"],
+  ["Right profile", "a full right side profile view"],
+  ["Back", "a view from directly behind"],
+  ["High angle", "a high-angle view looking down at the subject"],
+  ["Low angle", "a low-angle view looking up at the subject"],
+  ["Bird's eye", "a top-down bird's-eye view from directly above"],
+  ["Close-up", "a tight close-up"],
+  ["Wide", "a wide shot showing the full environment"],
+];
+
 /** Cuts the background back out after an edit model repaints a transparent layer. */
 export const CUTOUT_MODELS = { cloud: "birefnet-cloud", open: "oss-rmbg" } as const;
 
