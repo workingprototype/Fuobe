@@ -1,5 +1,5 @@
 import { getModel, getPreset } from "./index";
-import { composeShots, estimateCost, planGeneration } from "./plan";
+import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
 /*
@@ -1001,6 +1001,55 @@ export function withPlaceholders(step: CinemaStep): GenerationRequest {
   return { ...req, inputs };
 }
 
+type ClipKey = "videos" | "audios";
+const CLIP_WORDS: Record<ClipKey, string> = { videos: "reference videos", audios: "reference audio" };
+
+/**
+ * Whether `model` sends reference clips of this kind for `op`: every one of its routes for the
+ * operation has a field for inputs.videos / inputs.audios (so whichever provider runs it, they go).
+ */
+export function takesClips(model: ModelDef, op: Operation, key: ClipKey): boolean {
+  const routes = routesFor(model, op);
+  return routes.length > 0 && routes.every((r) => !!(r.map as Record<string, unknown> | undefined)?.[key]);
+}
+
+/** The most clips of a kind the model takes (the catalog's maxVideos / maxAudios, else the studio's limit). */
+function clipMax(model: ModelDef, key: ClipKey): number {
+  const o = model.options as { maxVideos?: number; maxAudios?: number };
+  return (key === "videos" ? o.maxVideos : o.maxAudios) ?? REFERENCE_LIMITS[key];
+}
+
+/**
+ * The reference clips a step sends: the ones the model's routes for `op` can take (up to its limit).
+ * The rest are left out with a note that says so, naming models in `others` that would take them.
+ */
+function clipInputs(model: ModelDef, op: Operation, input: CinemaGenerateInput, notes: string[], others: ModelDef[] = []): { videos?: string[]; audios?: string[] } {
+  const out: { videos?: string[]; audios?: string[] } = {};
+  const dropped: ClipKey[] = [];
+  for (const key of ["videos", "audios"] as const) {
+    const list = input[key] ?? [];
+    if (!list.length) continue;
+    if (!takesClips(model, op, key)) {
+      dropped.push(key);
+      continue;
+    }
+    const max = clipMax(model, key);
+    if (list.length > max) notes.push(`${model.name} takes up to ${max} ${CLIP_WORDS[key]}`);
+    out[key] = list.slice(0, max);
+  }
+  if (dropped.length) {
+    const words = dropped.map((k) => CLIP_WORDS[k]).join(" and ");
+    const can = others.filter((m) => m.id !== model.id && dropped.every((k) => takesClips(m, op, k))).map((m) => m.name);
+    const sent = !!(out.videos || out.audios);
+    notes.push(
+      can.length
+        ? `${model.name} doesn't take ${words} — ${can.join(" or ")} ${can.length > 1 ? "do" : "does"}`
+        : `${words.charAt(0).toUpperCase()}${words.slice(1)} aren't sent to ${model.name}${sent ? "" : " — only image references are used"}`,
+    );
+  }
+  return out;
+}
+
 function nearest<T extends number>(values: T[], want: number): T {
   return [...values].sort((a, b) => Math.abs(a - want) - Math.abs(b - want) || a - b)[0];
 }
@@ -1145,12 +1194,16 @@ function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
     notes.push(max === 1 ? `${model.name} uses the first image as the start frame` : `${model.name} takes up to ${max} reference images`);
     images = images.slice(0, max);
   }
-  if ((input.videos?.length || input.audios?.length) && input.action === "generate")
-    notes.push(`${model.name} reads image references; video and audio references are used by Extend and Edit`);
+  // Reference clips go to reference-to-video when the model's routes take them; otherwise a note says they're left out.
+  const others = CINEMA_MODELS.video[input.engine].filter((id) => ctx.higgsfield || !HIGGSFIELD_ONLY.has(id)).flatMap((id) => getModel(id) ?? []);
+  const clips = clipInputs(model, "ref2v", input, notes, others);
+  const withClips = !!(clips.videos?.length || clips.audios?.length);
+  if (withClips && images.length === 1) notes.push("With reference clips, the image is a reference rather than the start frame");
 
   const blocker = !input.prompt.trim() && !images.length ? "Describe your scene first" : undefined;
+  const inputs = images.length || withClips ? { ...(images.length ? { images } : {}), ...clips } : undefined;
   const steps: CinemaStep[] = [
-    { key: "main", request: { feature: "cinema", modelId: model.id, prompt, inputs: images.length ? { images } : undefined, params, loras } },
+    { key: "main", request: { feature: "cinema", modelId: model.id, ...(withClips ? { op: "ref2v" as const } : {}), prompt, inputs, params, loras } },
   ];
   const hex = paletteHex(input.settings.palette);
   if (open && hex && input.settings.paletteLock !== false) {
@@ -1175,6 +1228,8 @@ function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   return finish(model, steps, notes, blocker);
 }
 
+const STILL_CLIPS_NOTE = "Stills use image references — reference videos and audio are left out";
+
 function editModel(engine: Engine): ModelDef {
   return getModel(engine === "open" ? "oss-qwen-edit" : "nano-banana-pro")!;
 }
@@ -1188,6 +1243,7 @@ function planStill(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
     notes.push(`Stills with references run on ${instead.name}`);
     model = instead;
   }
+  if (input.videos?.length || input.audios?.length) notes.push(STILL_CLIPS_NOTE);
   const compiled = compileDirector({ prompt: input.prompt, settings: input.settings, brief: input.brief, mode: "image", target: "prompt" });
   const params = fitParams(model, { ...input, resolution: input.resolution ?? "1K" }, notes, "image");
   const blocker = stillCameraMissing(input.settings) ?? (!input.prompt.trim() ? "Describe your scene first" : undefined);
@@ -1230,6 +1286,7 @@ function planGrid(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
     const { rows, cols } = gridDims(size);
     Object.assign(extra, { rows, columns: cols });
   } else model = input.engine === "cloud" ? getModel("nano-banana-pro")! : pickModel("image", input, ctx, notes);
+  if (input.videos?.length || input.audios?.length) notes.push(STILL_CLIPS_NOTE);
   const compiled = compileDirector({ prompt: input.prompt, settings: input.settings, brief: input.brief, mode: "image", target: "prompt" });
   const params = fitParams(model, { ...input, batch: 1, resolution: input.resolution ?? "2K" }, notes, "image");
   if (Object.keys(extra).length) params.extra = extra;
@@ -1288,9 +1345,10 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
     const compiled = compileDirector({ prompt: scene, settings, moves, brief: input.brief, mode: "video", target: "prompt" });
     const params = fitParams(model, input, notes, "video");
     params.numOutputs = 1;
+    const clips = clipInputs(model, "extend", input, notes);
     return finish(
       model,
-      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "extend", prompt: compiled.prompt, inputs: src ? { video: src.url } : undefined, params, step: { label: "Extended · sequel", index: 0, of: 1 } } }],
+      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "extend", prompt: compiled.prompt, inputs: src ? { video: src.url, ...clips } : undefined, params, step: { label: "Extended · sequel", index: 0, of: 1 } } }],
       notes,
       src ? undefined : "Select a video take to extend",
     );
@@ -1309,6 +1367,7 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
         request: { feature: "cinema", modelId: "extract-frame", op: "frame", inputs: { video: src.url }, params: { extra: { frame_type: "first" } }, step: { label: "First frame", index: 0, of: 3 } },
       });
   }
+  if (input.videos?.length || input.audios?.length) notes.push("A prequel is made from the take's first frame — reference videos and audio aren't used");
   const scene = tidy(input.prompt) || "the moments right before this shot";
   const n = frame ? 2 : 3;
   steps.push({
@@ -1354,9 +1413,11 @@ function planEdit(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   if (input.engine === "cloud") {
     const model = getModel(ctx.higgsfield ? "seedance-2-5" : "kling-o3")!;
     const images = (input.images ?? []).slice(0, 4);
+    // Extra reference clips ride along when the edit model's routes take them.
+    const clips = clipInputs(model, "v2v", input, notes);
     return finish(
       model,
-      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "v2v", prompt, inputs: src ? { video: src.url, ...(images.length ? { images } : {}) } : undefined, params: { numOutputs: 1 }, step: { label: "Edited take", index: 0, of: 1 } } }],
+      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "v2v", prompt, inputs: src ? { video: src.url, ...(images.length ? { images } : {}), ...clips } : undefined, params: { numOutputs: 1 }, step: { label: "Edited take", index: 0, of: 1 } } }],
       notes,
       blocker,
     );
@@ -1365,11 +1426,12 @@ function planEdit(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   if (!restyle) return finish(editModel("open"), [], notes, blocker ?? "Open-source video edit needs the Wan 2.2 Fun VACE Restyle workflow — switch to Cloud for this one");
   if (src && !src.firstFrame) blocker ??= "Couldn't read this take's first frame — open it in a browser that can play it, then try again";
   const edit = editModel("open");
+  const clips = clipInputs(restyle, "v2v", input, notes);
   return finish(
     restyle,
     [
       { key: "frame-edit", request: { feature: "cinema", modelId: edit.id, op: "edit", prompt, inputs: src?.firstFrame ? { images: [src.firstFrame] } : undefined, params: { numOutputs: 1 }, step: { label: "Edited first frame", index: 0, of: 2 } } },
-      { key: "main", after: ["frame-edit"], request: { feature: "cinema", modelId: restyle.id, op: "v2v", prompt, inputs: src ? { video: src.url } : undefined, chain: [{ slot: "images", position: "first" }], step: { label: "Edited take", index: 1, of: 2 } } },
+      { key: "main", after: ["frame-edit"], request: { feature: "cinema", modelId: restyle.id, op: "v2v", prompt, inputs: src ? { video: src.url, ...clips } : undefined, chain: [{ slot: "images", position: "first" }], step: { label: "Edited take", index: 1, of: 2 } } },
     ],
     notes,
     blocker,
