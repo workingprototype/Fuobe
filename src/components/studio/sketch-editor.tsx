@@ -132,10 +132,17 @@ export function SketchEditor(props: {
 }) {
   // The canvas answers Escape first: it closes an open note instead of the whole editor.
   const escapeRef = useRef<() => boolean>(() => false);
+  const content = useRef<HTMLDivElement>(null);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
-        className="flex h-[min(92vh,880px)] w-[min(96vw,1100px)] max-w-none flex-col gap-3 sm:max-w-none"
+        ref={content}
+        className="flex h-[min(92vh,880px)] w-[min(96vw,1100px)] max-w-none flex-col gap-3 outline-none sm:max-w-none"
+        // Focus the editor itself, not the first tool: a tool's tooltip would open on focus and eat the first Escape.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          content.current?.focus();
+        }}
         onEscapeKeyDown={(e) => {
           if (escapeRef.current()) e.preventDefault();
         }}

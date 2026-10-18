@@ -1,9 +1,9 @@
 "use client";
 
 import { nanoid } from "nanoid";
-import { createContext, useCallback, useContext, useEffect, useMemo } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { placeAttachment, replaceAttachment } from "@/lib/composer";
+import { acceptedKinds, fitAttachments, noRoomMessage, onImageChange, placeAttachment, replaceAttachment } from "@/lib/composer";
 import type { InputSlot, MediaKind } from "@/lib/catalog/types";
 import { fileToSlot, kindOfFile, type SlotValue } from "./media-slot";
 import { useStudio, type Draft, type SlotKey } from "./studio-context";
@@ -30,13 +30,22 @@ export function useUploadReaper(draft: Pick<Draft, "slots" | "refs">) {
   }, [draft.slots, draft.refs]);
 }
 
+/** Paste / drop / "+" take at most this many files in one go. */
+const MAX_AT_ONCE = 8;
+
 /**
  * Attach files to the studio draft: paste, drop, the "+" menu and the slot tiles all go through
  * here. Each file is placed once with its local preview, then swapped for the uploaded asset by
- * id (never re-added if it was removed meanwhile).
+ * id (never re-added if it was removed meanwhile). A file with no room (references full, or a
+ * model that takes none) is never uploaded: the person is told why instead.
  */
 export function useAttach(slots: InputSlot[], refMax: number) {
-  const { config, setDraft } = useStudio();
+  const { config, draft, setDraft } = useStudio();
+  // The latest draft, to check for room before an upload starts (callbacks outlive renders).
+  const latest = useRef(draft);
+  useEffect(() => {
+    latest.current = draft;
+  });
 
   /** Upload a file: `place` runs once with the local preview, the result replaces it by id. */
   const start = useCallback(
@@ -55,7 +64,11 @@ export function useAttach(slots: InputSlot[], refMax: number) {
             return;
           }
           inflight.delete(id);
-          setDraft((d) => replaceAttachment(d, id, v) ?? {});
+          setDraft((d) => {
+            const r = replaceAttachment(d, id, v);
+            // An image whose upload failed takes its drawing with it.
+            return r?.slots ? { ...r, ...onImageChange(d, r.slots) } : (r ?? {});
+          });
         },
         kind,
         { signal: entry.ac.signal },
@@ -64,37 +77,59 @@ export function useAttach(slots: InputSlot[], refMax: number) {
     [setDraft],
   );
 
-  const kinds = useMemo(() => {
-    const k = new Set<MediaKind>(slots.filter((s) => s.key !== "mask" && s.key !== "sketch").map((s) => s.accept));
-    if (config.multiRef) k.add(config.multiRef.kind ?? "image");
-    return k;
-  }, [slots, config.multiRef]);
+  const kinds = useMemo(() => new Set<MediaKind>(acceptedKinds(slots, config.multiRef)), [slots, config.multiRef]);
 
-  /** Wherever it fits best: the first empty slot of its kind, else the references. */
-  const attach = useCallback((v: SlotValue) => setDraft((d) => placeAttachment(d, slots, config.multiRef, refMax, v) ?? {}), [setDraft, slots, config.multiRef, refMax]);
+  const noRoom = useCallback(() => toast(noRoomMessage(refMax, config.multiRef?.kind)), [refMax, config.multiRef]);
+
+  /** Put it wherever it fits best: the first empty slot of its kind, else the references. */
+  const place = useCallback(
+    (v: SlotValue) =>
+      setDraft((d) => {
+        const r = placeAttachment(d, slots, config.multiRef, refMax, v);
+        if (!r) return {};
+        // Pasting over a full image slot drops the drawing made on the old image.
+        return r.slots ? { ...r, ...onImageChange(d, r.slots) } : r;
+      }),
+    [setDraft, slots, config.multiRef, refMax],
+  );
+
+  /** A library pick (an attachment that needs no upload). */
+  const attach = useCallback(
+    (v: SlotValue) => {
+      if (!placeAttachment(latest.current, slots, config.multiRef, refMax, v)) return noRoom();
+      place(v);
+    },
+    [place, noRoom, slots, config.multiRef, refMax],
+  );
 
   const attachFiles = useCallback(
     (files: File[]) => {
       const usable = files.filter((f) => kinds.has(kindOfFile(f)));
       if (usable.length < files.length) toast(files.length - usable.length > 1 ? "This studio doesn't take those files" : "This studio doesn't take that kind of file");
-      for (const f of usable.slice(0, 8)) start(f, attach);
+      if (usable.length > MAX_AT_ONCE) toast(`Added the first ${MAX_AT_ONCE} — that's the most at once`);
+      const batch = usable.slice(0, MAX_AT_ONCE);
+      // Room first: a file with nowhere to go never uploads.
+      const { placed, rejected } = fitAttachments(latest.current, slots, config.multiRef, refMax, batch.map(kindOfFile));
+      if (rejected.length) noRoom();
+      for (const i of placed) start(batch[i], place);
     },
-    [kinds, start, attach],
+    [kinds, start, place, noRoom, slots, config.multiRef, refMax],
   );
 
-  /** A slot tile: replace its value (an upload it held is cancelled by the reaper). */
-  const setSlotValue = useCallback(
-    (key: SlotKey, v: SlotValue | null) =>
-      // A drawing belongs to the image it was made on.
-      setDraft((d) => ({ slots: { ...d.slots, [key]: v, ...(key === "image" && d.slots.image?.ref !== v?.ref && { mask: null, sketch: null }) } })),
-    [setDraft],
-  );
+  /** A slot tile: replace its value (an upload it held is cancelled by the reaper). A drawing belongs to the image it was made on. */
+  const setSlotValue = useCallback((key: SlotKey, v: SlotValue | null) => setDraft((d) => onImageChange(d, { ...d.slots, [key]: v })), [setDraft]);
 
   const uploadToSlot = useCallback((key: SlotKey, file: File, kind: MediaKind) => start(file, (v) => setSlotValue(key, v), kind), [start, setSlotValue]);
 
   const removeRef = useCallback((r: SlotValue) => setDraft((d) => ({ refs: d.refs.filter((x) => (r.id ? x.id !== r.id : x !== r)) })), [setDraft]);
 
-  const addRefFile = useCallback((file: File) => start(file, (v) => setDraft((d) => ({ refs: [...d.refs, v] })), config.multiRef?.kind), [start, setDraft, config.multiRef]);
+  const addRefFile = useCallback(
+    (file: File) => {
+      if (latest.current.refs.length >= refMax) return noRoom();
+      start(file, (v) => setDraft((d) => ({ refs: [...d.refs, v] })), config.multiRef?.kind);
+    },
+    [start, setDraft, config.multiRef, refMax, noRoom],
+  );
 
   return useMemo(() => ({ kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile }), [kinds, attach, attachFiles, setSlotValue, uploadToSlot, removeRef, addRefFile]);
 }

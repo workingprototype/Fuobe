@@ -34,7 +34,25 @@ export const ACCEPT: Record<MediaKind, string> = {
 
 const MAX_MB = 200;
 
-export const kindOfFile = (f: File): MediaKind => (f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : "image");
+const EXT_KIND: [RegExp, MediaKind][] = [
+  [/\.(mp4|webm|mov|m4v)$/i, "video"],
+  [/\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i, "audio"],
+  [/\.(txt|srt|vtt)$/i, "text"],
+  [/\.(glb|gltf)$/i, "model3d"],
+];
+
+/** What a file is, by its type (or its extension when the browser gives none). Anything else counts as an image. */
+export const kindOfFile = (f: File): MediaKind => {
+  if (f.type.startsWith("video/")) return "video";
+  if (f.type.startsWith("audio/")) return "audio";
+  if (f.type.startsWith("image/")) return "image";
+  if (f.type.startsWith("text/")) return "text";
+  return EXT_KIND.find(([re]) => re.test(f.name))?.[1] ?? "image";
+};
+
+/** "Image only — drop a photo here": a tile was given the wrong kind of file. */
+export const wrongKindMessage = (kind: MediaKind) =>
+  ({ image: "Image only — drop a photo here", video: "Video only — drop a clip here", audio: "Audio only — drop a sound file here", text: "Text only — drop a .txt or .srt file here", model3d: "3D only — drop a .glb file here" })[kind];
 
 async function upload(file: File, signal?: AbortSignal): Promise<Asset> {
   const form = new FormData();
@@ -63,6 +81,12 @@ export async function fileToSlot(file: File, onChange: (v: SlotValue | null) => 
   try {
     const asset = await upload(file, opts.signal);
     if (opts.signal?.aborted) return;
+    // The server knows best what the file is: a clip uploaded into an image slot doesn't stay there.
+    if (kind && asset.kind && asset.kind !== kind) {
+      onChange(null);
+      toast.error(wrongKindMessage(kind));
+      return;
+    }
     onChange({ ref: asset.url, preview: asset.url, kind: asset.kind, name: file.name });
   } catch (e) {
     if (opts.signal?.aborted || (e as Error).name === "AbortError") return;
@@ -211,7 +235,12 @@ export function MediaSlot({
   /** Marks the tile so the composer can point at it ("Add a start frame"). */
   slotKey?: string;
 }) {
-  const handleFile = (f: File) => (onFile ? onFile(f) : void fileToSlot(f, onChange, kind));
+  const handleFile = (f: File) => {
+    // A tile takes its own kind only (a clip dropped on the Image tile would land as a video there).
+    if (kindOfFile(f) !== kind) return void toast(wrongKindMessage(kind));
+    if (onFile) onFile(f);
+    else void fileToSlot(f, onChange, kind);
+  };
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const dim = size === "lg" ? "size-20" : "size-14";

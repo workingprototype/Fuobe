@@ -11,6 +11,7 @@ import { ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SliderControls } from "./audio-controls";
 import { Chip } from "./chip";
+import { radioKeys, radioTab } from "./radio-keys";
 import { ResponsivePanel } from "./responsive-panel";
 import { MultiShotControl } from "./shots-editor";
 
@@ -33,13 +34,17 @@ function Section({ label, children, id }: { label: string; children: React.React
 }
 
 function Segmented<T extends string | number>({ label, options, value, onChange, format = (v) => String(v) }: { label: string; options: T[]; value: T; onChange: (v: T) => void; format?: (v: T) => string }) {
+  // Nothing selected (an unexpected value): the first option takes the Tab stop.
+  const current = options.includes(value) ? value : options[0];
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-0.5 rounded-full bg-muted p-0.5">
+    <div role="radiogroup" aria-label={label} onKeyDown={radioKeys} className="flex flex-wrap gap-0.5 rounded-full bg-muted p-0.5">
       {options.map((o) => (
         <button
           key={String(o)}
+          type="button"
           role="radio"
           aria-checked={value === o}
+          tabIndex={radioTab(current === o)}
           onClick={() => onChange(o)}
           className={cn(
             "h-7 min-w-11 flex-1 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground tabular-nums transition outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -50,6 +55,34 @@ function Segmented<T extends string | number>({ label, options, value, onChange,
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The seed field keeps what you type (an empty field while you replace the number) and sends a
+ * whole number only; leaving it empty goes back to the last seed.
+ */
+function SeedInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(String(value));
+  const [prev, setPrev] = useState(value);
+  if (value !== prev) {
+    setPrev(value);
+    setText(String(value));
+  }
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      onChange={(e) => {
+        const t = e.target.value.replace(/[^\d]/g, "").slice(0, 10);
+        setText(t);
+        if (t) onChange(Number(t));
+      }}
+      onBlur={() => !text && setText(String(value))}
+      aria-label="Seed"
+      className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm tabular-nums outline-none focus:border-primary"
+    />
   );
 }
 
@@ -82,28 +115,43 @@ export interface SettingsPanelProps {
   enhancing: boolean;
   onRewrite: () => void;
   opNote?: string;
+  /** Classes for the chip (its place in the toolbar). */
+  className?: string;
+  /** Chips the toolbar has no room for on phones (voice, motion, style…): shown at the top of the sheet there. */
+  extras?: React.ReactNode;
 }
 
 /**
  * One summary chip ("16:9 · 720p · 5s · ×1") for every output setting, opening a popover (a
- * bottom sheet on phones) with segmented controls, the mode toggles and Advanced.
+ * bottom sheet on phones) with segmented controls, the mode toggles and Advanced. On phones the
+ * chip is just its icon (a dot when something differs from the defaults); the sheet's header
+ * spells the summary out.
  */
 export function SettingsChip(props: SettingsPanelProps) {
-  const { model, shape, params, negativePrompt } = props;
+  const { model, shape, params, negativePrompt, className } = props;
   const [open, setOpen] = useState(false);
   const parts = settingsSummary(shape, params, model);
   const extra = hiddenChanges(params, negativePrompt, model);
   const text = parts.length ? parts.join(" · ") : "Settings";
+  // Icon-only on phones: the dot then also says the summary differs from the model's defaults.
+  const changed = extra > 0 || parts.join() !== settingsSummary(shape, { ...model?.defaults }, model).join();
   return (
     <ResponsivePanel
       open={open}
       onOpenChange={setOpen}
       title="Settings"
+      description={parts.length ? text : undefined}
       className="w-[min(92vw,400px)] p-3.5"
       trigger={
-        <Chip icon={SlidersHorizontal} aria-label={`Settings: ${parts.join(", ") || "defaults"}${extra ? `, ${extra} more changed` : ""}`} className="tabular-nums">
-          {text}
-          {extra > 0 && <span aria-hidden className="-mr-0.5 size-1.5 rounded-full bg-primary" />}
+        <Chip
+          icon={SlidersHorizontal}
+          aria-label={`Settings: ${parts.join(", ") || "defaults"}${extra ? `, ${extra} more changed` : ""}`}
+          className={cn("relative tabular-nums max-sm:w-8 max-sm:justify-center max-sm:px-0", className)}
+        >
+          <span className="max-sm:hidden">{text}</span>
+          {(extra > 0 || changed) && (
+            <span aria-hidden className={cn("-mr-0.5 size-1.5 rounded-full bg-primary max-sm:absolute max-sm:top-1 max-sm:right-1 max-sm:mr-0", extra === 0 && "sm:hidden")} />
+          )}
         </Chip>
       }
     >
@@ -112,22 +160,25 @@ export function SettingsChip(props: SettingsPanelProps) {
   );
 }
 
-function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePrompt, setNegativePrompt, kind, enhancing, onRewrite, opNote }: SettingsPanelProps) {
+function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePrompt, setNegativePrompt, kind, enhancing, onRewrite, opNote, extras }: SettingsPanelProps) {
   const opts = model?.options ?? {};
   const d = model?.defaults ?? {};
   const [advanced, setAdvanced] = useState(p.seed !== undefined || !!negativePrompt);
   return (
     <div className="space-y-4">
+      {extras && <div className="flex flex-wrap gap-1.5 sm:hidden">{extras}</div>}
       {shape.aspect && (
         <Section label="Aspect ratio">
-          <div role="radiogroup" aria-label="Aspect ratio" className="grid grid-cols-4 gap-1 sm:grid-cols-5">
+          <div role="radiogroup" aria-label="Aspect ratio" onKeyDown={radioKeys} className="grid grid-cols-4 gap-1 sm:grid-cols-5">
             {shape.aspect.map((o) => {
               const sel = (p.aspectRatio ?? d.aspectRatio ?? shape.aspect![0]) === o;
               return (
                 <button
                   key={o}
+                  type="button"
                   role="radio"
                   aria-checked={sel}
+                  tabIndex={radioTab(sel)}
                   onClick={() => setP({ aspectRatio: o })}
                   className={cn(
                     "flex h-14 flex-col items-center justify-center gap-1.5 rounded-lg text-[11px] font-medium text-muted-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -207,13 +258,7 @@ function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePro
             </div>
             {p.seed !== undefined && (
               <div className="flex gap-1.5">
-                <input
-                  type="number"
-                  value={p.seed}
-                  onChange={(e) => setP({ seed: Number(e.target.value) })}
-                  aria-label="Seed"
-                  className="h-8 flex-1 rounded-md border bg-background px-2 text-sm tabular-nums outline-none focus:border-primary"
-                />
+                <SeedInput value={p.seed} onChange={(seed) => setP({ seed })} />
                 <Button variant="secondary" size="icon" className="size-8" onClick={() => setP({ seed: Math.floor(Math.random() * 1e9) })} aria-label="New random seed">
                   <Shuffle className="size-3.5" />
                 </Button>
