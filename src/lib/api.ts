@@ -529,15 +529,20 @@ export function useGenerationActions() {
   }, [qc]);
 }
 
-/** Files you uploaded (the Library's Uploads tab), newest first. */
+const UPLOADS_PAGE = 100;
+
+/** Files you uploaded (the Library's Uploads tab), newest first, paged like the Library ("Load more"). */
 export function useUploads(kind?: MediaKind) {
-  return useQuery({
-    queryKey: ["assets", "upload", kind, 200],
-    queryFn: async () => {
-      const qs = new URLSearchParams({ source: "upload", limit: "200" });
+  return useInfiniteQuery({
+    queryKey: ["assets", "upload", kind, "paged"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const qs = new URLSearchParams({ source: "upload", limit: String(UPLOADS_PAGE) });
       if (kind) qs.set("kind", kind);
+      if (pageParam) qs.set("before", pageParam);
       return (await json<{ items: Asset[] }>(await fetch(`/api/assets?${qs}`))).items;
     },
+    getNextPageParam: (last) => (last.length < UPLOADS_PAGE ? undefined : `${last.at(-1)!.createdAt}:${last.at(-1)!.id}`),
     placeholderData: keepPreviousData,
   });
 }

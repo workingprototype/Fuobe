@@ -14,7 +14,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const lib = await import("@/server/library");
-const { saveFile, absolutePath } = await import("@/server/storage");
+const { saveFile, absolutePath, listAssets } = await import("@/server/storage");
 const { zipStream, zipSize } = await import("@/server/zip");
 const { TOOLS } = await import("@/server/assist/tools");
 const { POST: bulk } = await import("@/app/api/generations/bulk/route");
@@ -189,6 +189,20 @@ describe("paging", () => {
     expect(seen.sort()).toEqual([...items].sort());
   });
 
+  it("pages uploads (the Uploads tab) the same way", () => {
+    const ups = Array.from({ length: 5 }, (_, i) => saveFile({ data: Buffer.concat([PNG, Buffer.from(`up ${i}`)]), contentType: "image/png", source: "upload" }).id);
+    db().prepare(`UPDATE assets SET created_at = 4321 WHERE id IN (${ups.map(() => "?").join(",")})`).run(...ups);
+    const seen: string[] = [];
+    let cursor: { before?: number; beforeId?: string } = { before: 4322 };
+    for (let i = 0; i < 5; i++) {
+      const page = listAssets({ source: "upload", limit: 2, ...cursor }).filter((a) => a.createdAt === 4321);
+      seen.push(...page.map((a) => a.id));
+      if (page.length < 2) break;
+      cursor = lib.cursorFrom(`${page[1].createdAt}:${page[1].id}`);
+    }
+    expect(seen.sort()).toEqual([...ups].sort());
+  });
+
   it("reads the cursor in both forms", () => {
     expect(lib.cursorFrom("1700000000000:Ab_c-9")).toEqual({ before: 1700000000000, beforeId: "Ab_c-9" });
     expect(lib.cursorFrom("1700000000000")).toEqual({ before: 1700000000000 });
@@ -318,6 +332,8 @@ describe("folders", () => {
     expect(lib.createFolder({ name: "Other", color: "nope" }).color).toBe("lime");
     const a = made("in folder a").g;
     const b = made("in folder b").g;
+    // The cover is the newest: make b clearly newer (both can land in the same millisecond).
+    db().prepare("UPDATE generations SET created_at = created_at + 1000 WHERE id = ?").run(b.id);
     expect(lib.moveToFolder([a.id, b.id], f.id)).toBe(2);
     expect(lib.getFolder(f.id)).toMatchObject({ count: 2 });
     expect(lib.getFolder(f.id)!.cover?.url).toBe(b.outputs[0].url);

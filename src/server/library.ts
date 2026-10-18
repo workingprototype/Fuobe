@@ -190,7 +190,7 @@ const FOLDER_SELECT = `SELECT f.*,
   (SELECT COUNT(*) FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
     WHERE i.folder_id = f.id AND t.generation_id IS NULL) AS count,
   (SELECT g.outputs_json FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
-    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC LIMIT 1) AS cover_json
+    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC, g.id DESC LIMIT 1) AS cover_json
   FROM folders f`;
 
 export function listFolders(): Folder[] {

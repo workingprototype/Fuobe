@@ -237,7 +237,7 @@ function Inner() {
   const items = useMemo(() => {
     if (!uploadsTab) return lib.data?.pages.flat() ?? [];
     // Uploads search by file name.
-    const all = (uploads.data ?? []).map(uploadAsGeneration);
+    const all = (uploads.data?.pages.flat() ?? []).map(uploadAsGeneration);
     return dq ? all.filter((g) => g.request.prompt?.toLowerCase().includes(dq.toLowerCase())) : all;
   }, [uploadsTab, uploads.data, lib.data, dq]);
   const built = useMemo(() => buildEntries(items, { stacks: prefs.stacks && !trash && !uploadsTab }), [items, prefs.stacks, trash, uploadsTab]);
@@ -341,14 +341,14 @@ function Inner() {
 
   // --- Paging ---------------------------------------------------------------------------------
   const sentinel = useRef<HTMLDivElement>(null);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = lib;
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = uploadsTab ? uploads : lib;
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || !hasNextPage || uploadsTab) return;
+    if (!el || !hasNextPage) return;
     const io = new IntersectionObserver((es) => es.some((x) => x.isIntersecting) && !isFetchingNextPage && void fetchNextPage(), { rootMargin: "600px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, uploadsTab]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const go = (params: Record<string, string | undefined>) => {
     const next = new URLSearchParams(sp.toString());
@@ -618,7 +618,7 @@ function Inner() {
             </section>
           ))}
           <div ref={sentinel} className="flex flex-col items-center gap-2 py-4">
-            {!uploadsTab && hasNextPage ? (
+            {hasNextPage ? (
               <button
                 onClick={() => void fetchNextPage()}
                 disabled={isFetchingNextPage}
