@@ -208,6 +208,8 @@ const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
   { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
   { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
   { table: "canvases", cols: ["graph_json"] },
+  { table: "shorts_sessions", cols: ["source_json", "look_json"] },
+  { table: "shorts_presets", cols: ["references_json"] },
 ];
 
 /** Whether anything still refers to this stored file (see ASSET_REFS). */
@@ -419,10 +421,17 @@ const STEM_ALIASES: Record<string, string[]> = {
   background: ["background", "accompaniment", "instrumental", "residual", "no_vocals"],
 };
 
+/**
+ * Soundtrack slots a video can fill: a step that made only a clip hands over the clip itself, and the
+ * mux reads its sound (ComfyUI's LoadAudio and fal's FFmpeg take a video file as the audio input).
+ * Shorts and Mixed Media put the trimmed source's own sound back under the restyled picture this way.
+ */
+const SOUNDTRACK_SLOTS = new Set<ChainSlot["slot"]>(["audio", "audio2"]);
+
 /** The dependency output a slot takes: the first of the slot's kind, or the one with the slot's `stem`. */
 export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | undefined {
   const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
-  if (!s.stem) return ofKind[0];
+  if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
   const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
   return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
 }

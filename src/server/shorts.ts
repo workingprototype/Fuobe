@@ -1,0 +1,518 @@
+import "server-only";
+import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
+import { maxRefsFor, reframes, resolutionFor } from "@/lib/catalog/shorts-models";
+import {
+  customPresetName,
+  getShortsPreset,
+  lookFromCustom,
+  lookFromPreset,
+  planShorts,
+  planStitch,
+  planTake,
+  rangeProblem,
+  sessionPlanInput,
+  SHORTS,
+  SHORTS_MODELS,
+  type PlanStep,
+  type ShortsCustomPreset,
+  type ShortsLook,
+  type ShortsPlanInput,
+  type ShortsRange,
+  type ShortsRatio,
+  type ShortsSession,
+  type ShortsSessionSegment,
+  type ShortsStitch,
+} from "@/lib/catalog/shorts";
+import type { Engine, Generation } from "@/lib/catalog/types";
+import { probeMedia, type MediaInfo } from "@/lib/media-probe";
+import { createPipeline } from "./chains";
+import { db } from "./db";
+import { getGeneration, previewChained } from "./generations";
+import { trashGenerations } from "./library";
+import { engineMode } from "./settings";
+import { readRef } from "./storage";
+
+/**
+ * Shorts Studio sessions: a clip cut into segments, each restyled (one or more takes, one of them
+ * primary) and stitched back together under the original sound. Every step is an ordinary
+ * generation made through createPipeline; a session only records which generation is which.
+ */
+
+export class ShortsError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400,
+  ) {
+    super(message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Models (what each restyle model takes: src/lib/catalog/shorts-models.ts)
+
+export { maxRefsFor, modelInfos, resolutionFor } from "@/lib/catalog/shorts-models";
+
+// ---------------------------------------------------------------------------
+// Source clips
+
+export interface SourceInfo {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+/** What the clip's header says (MP4 / MOV; other containers come back empty and the browser's numbers are used). */
+export async function probeSource(url: string): Promise<SourceInfo> {
+  if (!url.startsWith("/api/files/")) throw new ShortsError("Upload the clip first");
+  let info: MediaInfo | null = null;
+  try {
+    info = probeMedia((await readRef(url)).data);
+  } catch {
+    throw new ShortsError("That clip is gone — upload it again", 404);
+  }
+  if (!info) return {};
+  return {
+    duration: info.videoDuration ?? info.duration,
+    width: info.width,
+    height: info.height,
+    fps: info.fps,
+    hasAudio: info.hasAudio,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rows
+
+interface SessionRow {
+  id: string;
+  title: string;
+  engine: string;
+  batch_id: string;
+  look_json: string;
+  source_json: string;
+  range_json: string;
+  settings_json: string;
+  segments_json: string;
+  stitches_json: string;
+  created_at: number;
+  updated_at: number;
+}
+
+const toSession = (r: SessionRow): ShortsSession => ({
+  id: r.id,
+  title: r.title,
+  engine: r.engine as Engine,
+  batchId: r.batch_id,
+  look: JSON.parse(r.look_json),
+  source: JSON.parse(r.source_json),
+  range: JSON.parse(r.range_json),
+  settings: JSON.parse(r.settings_json),
+  segments: JSON.parse(r.segments_json),
+  stitches: JSON.parse(r.stitches_json),
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+function readSession(id: string): ShortsSession {
+  const r = db().prepare("SELECT * FROM shorts_sessions WHERE id = ?").get(id) as SessionRow | undefined;
+  if (!r) throw new ShortsError("This short no longer exists", 404);
+  return toSession(r);
+}
+
+function saveSession(s: ShortsSession): ShortsSession {
+  const now = Date.now();
+  db()
+    .prepare("UPDATE shorts_sessions SET segments_json = ?, stitches_json = ?, title = ?, updated_at = ? WHERE id = ?")
+    .run(JSON.stringify(s.segments), JSON.stringify(s.stitches), s.title, now, s.id);
+  return { ...s, updatedAt: now };
+}
+
+interface PresetRow {
+  id: string;
+  name: string;
+  description: string;
+  references_json: string;
+  created_at: number;
+  updated_at: number;
+}
+
+const toPreset = (r: PresetRow): ShortsCustomPreset => ({
+  id: r.id,
+  name: r.name,
+  description: r.description,
+  references: JSON.parse(r.references_json),
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
+
+// ---------------------------------------------------------------------------
+// Custom presets ("Create a preset from references")
+
+export function listCustomPresets(): ShortsCustomPreset[] {
+  return (db().prepare("SELECT * FROM shorts_presets ORDER BY created_at DESC").all() as PresetRow[]).map(toPreset);
+}
+
+export function getCustomPreset(id: string): ShortsCustomPreset | null {
+  const r = db().prepare("SELECT * FROM shorts_presets WHERE id = ?").get(id) as PresetRow | undefined;
+  return r ? toPreset(r) : null;
+}
+
+export function createCustomPreset(input: { name?: string; description?: string; references: string[] }): ShortsCustomPreset {
+  const refs = [...new Set(input.references)].slice(0, SHORTS.maxReferences);
+  if (!refs.length) throw new ShortsError("Add at least one reference image");
+  const count = (db().prepare("SELECT COUNT(*) AS n FROM shorts_presets").get() as { n: number }).n;
+  const description = (input.description ?? "").trim();
+  const name = input.name?.trim() || customPresetName(description, count);
+  const now = Date.now();
+  const id = `custom-${nanoid(10)}`;
+  db()
+    .prepare("INSERT INTO shorts_presets (id, name, description, references_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, name, description, JSON.stringify(refs), now, now);
+  return getCustomPreset(id)!;
+}
+
+export function updateCustomPreset(id: string, patch: { name?: string; description?: string; references?: string[] }): ShortsCustomPreset {
+  const cur = getCustomPreset(id);
+  if (!cur) throw new ShortsError("This preset no longer exists", 404);
+  const refs = patch.references ? [...new Set(patch.references)].slice(0, SHORTS.maxReferences) : cur.references;
+  if (!refs.length) throw new ShortsError("Keep at least one reference image");
+  db()
+    .prepare("UPDATE shorts_presets SET name = ?, description = ?, references_json = ?, updated_at = ? WHERE id = ?")
+    .run(patch.name?.trim() || cur.name, patch.description?.trim() ?? cur.description, JSON.stringify(refs), Date.now(), id);
+  return getCustomPreset(id)!;
+}
+
+export function deleteCustomPreset(id: string): boolean {
+  return db().prepare("DELETE FROM shorts_presets WHERE id = ?").run(id).changes > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Planning
+
+export interface ShortsBody {
+  engine: Engine;
+  presetId: string;
+  source: { url: string; name?: string; duration?: number };
+  range: ShortsRange;
+  aspectRatio: ShortsRatio;
+  language: string;
+  modelId?: string;
+}
+
+function lookFor(presetId: string): ShortsLook {
+  const built = getShortsPreset(presetId);
+  if (built) return lookFromPreset(built);
+  const custom = getCustomPreset(presetId);
+  if (custom) return lookFromCustom(custom);
+  throw new ShortsError("Pick a preset");
+}
+
+function checkEngine(engine: Engine) {
+  const mode = engineMode();
+  if (mode !== "both" && mode !== engine) {
+    throw new ShortsError(mode === "open" ? "This install runs open-source models only (Settings → Engine mode)" : "This install runs cloud models only (Settings → Engine mode)", 422);
+  }
+}
+
+const fileTitle = (name?: string) =>
+  (name ?? "")
+    .replace(/\.[a-z0-9]{2,4}$/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .slice(0, 40);
+
+/** The plan input for a request: model, look, clip facts (from its header when it has one). */
+async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ input: ShortsPlanInput; info: SourceInfo }> {
+  checkEngine(body.engine);
+  const modelId = body.modelId && SHORTS_MODELS[body.engine].includes(body.modelId) ? body.modelId : SHORTS_MODELS[body.engine][0];
+  const look = lookFor(body.presetId);
+  const info = opts.probe ? await probeSource(body.source.url) : {};
+  const duration = info.duration ?? body.source.duration;
+  const problem = rangeProblem(body.range, duration);
+  if (problem) throw new ShortsError(problem);
+  const name = fileTitle(body.source.name);
+  return {
+    info,
+    input: {
+      engine: body.engine,
+      title: name ? `${look.name} · ${name}` : `${look.name} short`,
+      // Unknown sound (a container the header reader doesn't know) is treated as present.
+      source: { url: body.source.url, duration, hasAudio: info.hasAudio ?? true },
+      range: body.range,
+      look,
+      aspectRatio: body.aspectRatio,
+      language: body.language || "auto",
+      modelId,
+      maxRefs: maxRefsFor(modelId),
+      resolution: resolutionFor(modelId),
+    },
+  };
+}
+
+const withChain = (s: PlanStep) => ({ ...s.request, ...(s.chain ? { chain: s.chain } : {}) });
+
+/** Price and run mode of some steps, as createPipeline would make them. */
+function priceSteps(steps: PlanStep[]): { costUsd: number | null; demo: boolean } {
+  let cost: number | null = 0;
+  let demo = false;
+  for (const s of steps) {
+    const p = previewChained(withChain(s), s.after?.length ?? 0);
+    demo ||= p.demo;
+    cost = cost === null || p.costUsd === null ? null : cost + p.costUsd;
+  }
+  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo };
+}
+
+export interface ShortsEstimate {
+  costUsd: number | null;
+  /** One segment's restyle (what Regenerate costs). */
+  perSegmentUsd: number | null;
+  demo: boolean;
+  segments: number;
+  seconds: number;
+  refsSent: number;
+  notes: string[];
+}
+
+function notesFor(input: ShortsPlanInput): string[] {
+  const notes: string[] = [];
+  const refs = input.look.references?.length ?? 0;
+  if (refs && input.engine === "cloud" && !input.maxRefs) notes.push(`${getModel(input.modelId)?.name ?? "This model"} restyles from words only — pick Kling O3 4K Edit or Happy Horse to use your reference images`);
+  if (refs > SHORTS.openReferences && input.engine === "open") notes.push(`The open engine uses your first ${SHORTS.openReferences} reference images`);
+  if (input.engine === "cloud") {
+    if (!reframes(input.modelId)) notes.push(`${getModel(input.modelId)?.name} keeps your clip's shape; the open engine crops to ${input.aspectRatio}`);
+  }
+  return notes;
+}
+
+/** What a session would cost and how it would run, without creating anything. */
+export async function estimateShorts(body: ShortsBody): Promise<ShortsEstimate> {
+  const { input } = await planInput(body, { probe: false });
+  const plan = planShorts(input);
+  const all = priceSteps(plan.steps);
+  const one = priceSteps(planTake(input, plan.segments[0], plan.segments.length).steps);
+  return {
+    ...all,
+    perSegmentUsd: one.costUsd,
+    segments: plan.segments.length,
+    seconds: Math.round((input.range.end - input.range.start) * 10) / 10,
+    refsSent: input.engine === "open" ? Math.min(SHORTS.openReferences, input.look.references?.length ?? 0) : Math.min(input.maxRefs, input.look.references?.length ?? 0),
+    notes: notesFor(input),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+
+export async function createSession(body: ShortsBody): Promise<ShortsSession> {
+  const { input, info } = await planInput(body, { probe: true });
+  const plan = planShorts(input);
+  const pipeline = (() => {
+    try {
+      return createPipeline(plan.steps);
+    } catch (e) {
+      throw new ShortsError((e as Error).message, 422);
+    }
+  })();
+  const id = (k: string) => pipeline.byKey[k].id;
+  const now = Date.now();
+  const segments: ShortsSessionSegment[] = plan.segments.map((s, i) => {
+    const t = plan.takes[i];
+    return { ...s, takes: [{ cut: id(t.cut), ...(t.frame ? { frame: id(t.frame) } : {}), look: id(t.look), createdAt: now }], primary: id(t.look) };
+  });
+  const takeKeys = new Set(plan.takes.flatMap((t) => [t.cut, t.look, ...(t.frame ? [t.frame] : [])]));
+  const stitch: ShortsStitch = {
+    ids: plan.steps.filter((s) => !takeKeys.has(s.key)).map((s) => id(s.key)),
+    final: id(plan.final!),
+    clips: segments.map((s) => s.primary),
+    createdAt: now,
+  };
+  const session: ShortsSession = {
+    id: nanoid(10),
+    title: input.title,
+    engine: input.engine,
+    batchId: pipeline.batchId,
+    look: input.look,
+    source: { url: input.source.url, name: body.source.name, duration: input.source.duration, hasAudio: input.source.hasAudio, width: info.width, height: info.height },
+    range: input.range,
+    settings: { aspectRatio: input.aspectRatio, language: input.language, modelId: input.modelId, resolution: input.resolution, maxRefs: input.maxRefs },
+    segments,
+    stitches: [stitch],
+    createdAt: now,
+    updatedAt: now,
+  };
+  db()
+    .prepare(
+      `INSERT INTO shorts_sessions (id, title, engine, batch_id, look_json, source_json, range_json, settings_json, segments_json, stitches_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      session.id,
+      session.title,
+      session.engine,
+      session.batchId,
+      JSON.stringify(session.look),
+      JSON.stringify(session.source),
+      JSON.stringify(session.range),
+      JSON.stringify(session.settings),
+      JSON.stringify(session.segments),
+      JSON.stringify(session.stitches),
+      now,
+      now,
+    );
+  return session;
+}
+
+/** Every generation a session made. */
+export function sessionIds(s: ShortsSession): string[] {
+  const ids = [...s.segments.flatMap((g) => g.takes.flatMap((t) => [t.cut, t.look, ...(t.frame ? [t.frame] : [])])), ...s.stitches.flatMap((x) => [...x.ids, x.final])];
+  return [...new Set(ids)];
+}
+
+export interface ShortsSessionView extends ShortsSession {
+  /** The session's generations by id (trashed or deleted ones are missing). */
+  generations: Record<string, Generation>;
+}
+
+export function getSession(id: string): ShortsSessionView {
+  const s = readSession(id);
+  const generations: Record<string, Generation> = {};
+  for (const gid of sessionIds(s)) {
+    const g = getGeneration(gid);
+    if (g) generations[gid] = g;
+  }
+  return { ...s, generations };
+}
+
+export interface ShortsSessionCard {
+  id: string;
+  title: string;
+  engine: Engine;
+  lookName: string;
+  segments: number;
+  seconds: number;
+  createdAt: number;
+  updatedAt: number;
+  /** The newest stitch's video, else the first segment's chosen take. */
+  cover: Generation | null;
+  status: "rendering" | "ready" | "failed";
+}
+
+export function listSessions(limit = 60): ShortsSessionCard[] {
+  const rows = db().prepare("SELECT * FROM shorts_sessions ORDER BY created_at DESC LIMIT ?").all(limit) as SessionRow[];
+  return rows.map((r) => {
+    const s = toSession(r);
+    const final = s.stitches.length ? getGeneration(s.stitches[s.stitches.length - 1].final) : null;
+    const looks = s.segments.map((g) => getGeneration(g.primary));
+    const active = [final, ...looks].some((g) => g && (g.status === "queued" || g.status === "running"));
+    const failed = [final, ...looks].some((g) => !g || g.status === "failed" || g.status === "canceled");
+    return {
+      id: s.id,
+      title: s.title,
+      engine: s.engine,
+      lookName: s.look.name,
+      segments: s.segments.length,
+      seconds: Math.round((s.range.end - s.range.start) * 10) / 10,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      cover: final?.status === "succeeded" ? final : (looks.find((g) => g?.status === "succeeded") ?? final ?? looks[0] ?? null),
+      status: active ? "rendering" : failed ? "failed" : "ready",
+    };
+  });
+}
+
+export function renameSession(id: string, title: string): ShortsSession {
+  const s = readSession(id);
+  return saveSession({ ...s, title: title.trim().slice(0, 120) || s.title });
+}
+
+/** Delete a session; its generations move to the Trash (restorable for 30 days) unless `keep`. */
+export function deleteSession(id: string, opts: { keep?: boolean } = {}): number {
+  const s = readSession(id);
+  const trashed = opts.keep ? 0 : trashGenerations(sessionIds(s));
+  db().prepare("DELETE FROM shorts_sessions WHERE id = ?").run(id);
+  return trashed;
+}
+
+const segmentAt = (s: ShortsSession, index: number) => {
+  const seg = s.segments[index];
+  if (!seg) throw new ShortsError("No such segment", 404);
+  return seg;
+};
+
+const usable = (id: string) => {
+  const g = getGeneration(id);
+  return !!g && g.status !== "failed" && g.status !== "canceled";
+};
+
+/** A new take of one segment (a fresh seed). It becomes the chosen take when the current one failed or is gone. */
+export function regenerateSegment(id: string, index: number): ShortsSessionView {
+  const s = readSession(id);
+  const seg = segmentAt(s, index);
+  checkEngine(s.engine);
+  const seed = Math.floor(Math.random() * 2 ** 31);
+  const take = planTake(sessionPlanInput(s, seed), seg, s.segments.length, `r${seg.takes.length}`);
+  let pipeline;
+  try {
+    pipeline = createPipeline(take.steps, { batchId: s.batchId });
+  } catch (e) {
+    throw new ShortsError((e as Error).message, 422);
+  }
+  const id_ = (k: string) => pipeline.byKey[k].id;
+  const next = { cut: id_(take.keys.cut), ...(take.keys.frame ? { frame: id_(take.keys.frame) } : {}), look: id_(take.keys.look), createdAt: Date.now() };
+  const segments = s.segments.map((g, i) => (i === index ? { ...g, takes: [...g.takes, next], primary: usable(g.primary) ? g.primary : next.look } : g));
+  saveSession({ ...s, segments });
+  return getSession(id);
+}
+
+/** Use another take of a segment in the stitch. */
+export function makePrimary(id: string, index: number, lookId: string): ShortsSessionView {
+  const s = readSession(id);
+  const seg = segmentAt(s, index);
+  if (!seg.takes.some((t) => t.look === lookId)) throw new ShortsError("That take isn't part of this segment");
+  saveSession({ ...s, segments: s.segments.map((g, i) => (i === index ? { ...g, primary: lookId } : g)) });
+  return getSession(id);
+}
+
+/** Join the chosen takes again (after a regenerate or a new choice) and put the sound back. */
+export function stitchSession(id: string): ShortsSessionView {
+  const s = readSession(id);
+  checkEngine(s.engine);
+  const clips = s.segments.map((seg, i) => {
+    const g = getGeneration(seg.primary);
+    if (!g) throw new ShortsError(`Segment ${i + 1}'s take was deleted — regenerate it first`, 409);
+    if (g.status === "queued" || g.status === "running") throw new ShortsError(`Segment ${i + 1} is still rendering`, 409);
+    const url = g.outputs.find((o) => o.kind === "video")?.url;
+    if (g.status !== "succeeded" || !url) throw new ShortsError(`Segment ${i + 1} didn't render — regenerate it first`, 409);
+    return { url };
+  });
+  const plan = planStitch(sessionPlanInput(s), clips, `-s${s.stitches.length}`);
+  const now = Date.now();
+  let stitch: ShortsStitch;
+  if (!plan.steps.length || !plan.final) {
+    // One silent segment: its take is the short.
+    stitch = { ids: [], final: s.segments[0].primary, clips: s.segments.map((g) => g.primary), createdAt: now };
+  } else {
+    let pipeline;
+    try {
+      pipeline = createPipeline(plan.steps, { batchId: s.batchId });
+    } catch (e) {
+      throw new ShortsError((e as Error).message, 422);
+    }
+    stitch = { ids: plan.steps.map((x) => pipeline.byKey[x.key].id), final: pipeline.byKey[plan.final].id, clips: s.segments.map((g) => g.primary), createdAt: now };
+  }
+  saveSession({ ...s, stitches: [...s.stitches, stitch] });
+  return getSession(id);
+}
+
+/** What one more take of a segment costs. */
+export function regenerateCost(s: ShortsSession): number | null {
+  try {
+    return priceSteps(planTake(sessionPlanInput(s, 1), s.segments[0], s.segments.length).steps).costUsd;
+  } catch {
+    return null;
+  }
+}

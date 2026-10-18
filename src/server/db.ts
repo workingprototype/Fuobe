@@ -175,6 +175,30 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Shorts Studio: sessions (a clip cut into segments, each with its takes and the chosen one, plus the stitches) and custom presets.
+  `CREATE TABLE IF NOT EXISTS shorts_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    look_json TEXT NOT NULL,
+    source_json TEXT NOT NULL,
+    range_json TEXT NOT NULL,
+    settings_json TEXT NOT NULL,
+    segments_json TEXT NOT NULL DEFAULT '[]',
+    stitches_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS shorts_sessions_updated ON shorts_sessions(updated_at DESC);
+  CREATE TABLE IF NOT EXISTS shorts_presets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    references_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );`,
 ];
 
 declare global {
