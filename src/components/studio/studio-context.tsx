@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { GenParams, InputSlot, MediaKind, Operation, Preset } from "@/lib/catalog/types";
 import type { FeedFilter } from "@/lib/api";
+import type { Signature } from "@/lib/catalog/palettes";
 import type { SlotValue } from "./media-slot";
 
 export type SlotKey = InputSlot["key"];
@@ -40,6 +41,10 @@ export interface StudioConfig {
   promptSuffix?: string;
   /** Optional slots of which one is needed (Lipsync: a portrait or a video): Generate names the group. */
   anyOf?: SlotKey[][];
+  /** Color signature + Moodboard chips (Image studio): a saved palette and a style, routed per model (src/lib/catalog/palettes.ts). */
+  signature?: boolean;
+  /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
+  extraModels?: string[];
 }
 
 export interface Draft {
@@ -54,6 +59,8 @@ export interface Draft {
   /** Motions/effects: strength of the preset, and an optional second one mixed in (Mix). */
   presetStrength?: number;
   mix?: { presetId: string; strength: number };
+  /** The Color signature and Moodboard picked in the composer (studios with `signature`). */
+  signature?: Signature;
 }
 
 interface Actions {

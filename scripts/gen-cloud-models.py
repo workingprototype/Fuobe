@@ -153,6 +153,12 @@ model("recraft-4-style-pro", "Recraft V4 Styles Pro", "Recraft", "recraft", "ima
       [("edit", "recraft/v4/style/pro/text-to-image")],
       badges=["pro"], pricing=("image", 0.1, "+$0.005 when a new style is made from references"), defaults={"aspectRatio": "1:1"},
       controls=[("style_match", "Style match")])
+# A moodboard's saved Recraft style (meta.styleId from a Recraft V4 Styles run) on its own: style_id, no references.
+# Hidden: only the Image studio's Moodboard chip routes here, and it always sends the style id.
+model("recraft-4-style-saved", "Recraft V4 Styles · saved style", "Recraft", "recraft", "image",
+      "A new picture in a style saved from your moodboard",
+      [("t2i", "recraft/v4/style/text-to-image", "fal", {"drop": ["images", "styleImages"]})],
+      pricing=("image", 0.035), defaults={"aspectRatio": "1:1"}, controls=[("style_match", "Style match")], hidden=True)
 model("ideogram-3", "Ideogram 3.0", "Ideogram", "ideogram", "image",
       "Posters and type in your exact brand colours, with 60+ style presets and style references",
       [("t2i", "fal-ai/ideogram/v3"),

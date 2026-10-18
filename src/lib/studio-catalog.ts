@@ -25,10 +25,10 @@ export function slimModel(m: ModelDef): ModelDef {
   };
 }
 
-export function studioCatalog(config: Pick<StudioConfig, "kind" | "ops" | "pickerOps" | "defaultModels" | "preset">): StudioCatalog {
+export function studioCatalog(config: Pick<StudioConfig, "kind" | "ops" | "pickerOps" | "defaultModels" | "preset" | "extraModels">): StudioCatalog {
   const list = modelsFor({ kind: config.kind, ops: config.pickerOps ?? config.ops });
   const ids = new Set(list.map((m) => m.id));
-  const extra = [config.defaultModels.cloud, config.defaultModels.open, config.preset?.cloud?.modelId, config.preset?.open?.modelId]
+  const extra = [config.defaultModels.cloud, config.defaultModels.open, config.preset?.cloud?.modelId, config.preset?.open?.modelId, ...(config.extraModels ?? [])]
     .filter((id): id is string => !!id && !ids.has(id))
     .map((id) => getModel(id))
     .filter((m): m is ModelDef => !!m);

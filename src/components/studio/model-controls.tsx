@@ -14,6 +14,41 @@ interface ProviderPreset {
   name: string;
   preview?: string;
   group?: string;
+  /** Soul presets: Higgsfield's picker categories and a one-line description (from the research list). */
+  categories?: string[];
+  description?: string;
+  /** Built-in list: a hue for the drawn preview (no images are hot-linked). */
+  hue?: number;
+}
+
+interface PresetList {
+  items: ProviderPreset[];
+  error?: string;
+  /** Category tabs (All is added in front). */
+  categories?: string[];
+  /** The built-in list stands in for Higgsfield's (no key, or the live list failed). */
+  fallback?: boolean;
+  note?: string;
+}
+
+/** A preset tile without a preview image: a soft gradient in the preset's hue with its initials. */
+function DrawnPreview({ name, hue }: { name: string; hue: number }) {
+  const initials = name
+    .replace(/[^\p{L}\p{N} ]/gu, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+  return (
+    <span
+      aria-hidden
+      className="grid size-full place-items-center font-heading text-[22px] text-white/90"
+      style={{ background: `linear-gradient(150deg, oklch(0.74 0.12 ${hue}), oklch(0.46 0.15 ${(hue + 50) % 360}))` }}
+    >
+      {initials}
+    </span>
+  );
 }
 
 const label = (v: string | number) =>
@@ -36,13 +71,24 @@ export function ProviderPresetChip({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState("All");
   const list = useQuery({
     queryKey: ["provider-presets", spec.source],
-    queryFn: async () => (await (await fetch(`/api/providers/higgsfield/presets?source=${spec.source}`)).json()) as { items: ProviderPreset[]; error?: string },
+    queryFn: async () => (await (await fetch(`/api/providers/higgsfield/presets?source=${spec.source}`)).json()) as PresetList,
     staleTime: 60 * 60 * 1000,
     enabled: open || !!value,
   });
-  const items = useMemo(() => (list.data?.items ?? []).filter((p) => !q || p.name.toLowerCase().includes(q.toLowerCase())), [list.data, q]);
+  const tabs = useMemo(() => {
+    const cats = list.data?.categories;
+    return cats?.length ? ["All", ...cats.filter((c) => list.data!.items.some((p) => p.categories?.includes(c)))] : [];
+  }, [list.data]);
+  const items = useMemo(
+    () =>
+      (list.data?.items ?? []).filter(
+        (p) => (!q || p.name.toLowerCase().includes(q.toLowerCase()) || p.description?.toLowerCase().includes(q.toLowerCase())) && (q || tab === "All" || p.categories?.includes(tab)),
+      ),
+    [list.data, q, tab],
+  );
   const selected = list.data?.items.find((p) => p.id === value);
   return (
     <ClearableChip active={!!value && !spec.required} onClear={() => onChange(undefined)} clearLabel={`Clear ${spec.label.toLowerCase()}`}>
@@ -60,6 +106,26 @@ export function ProviderPresetChip({
             aria-label={`Search ${spec.label.toLowerCase()}s`}
             className="mb-2 h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus:border-primary"
           />
+          {tabs.length > 0 && !q && (
+            <div role="tablist" aria-label={`${spec.label} categories`} className="scrollbar-none -mx-0.5 mb-2 flex gap-1 overflow-x-auto px-0.5">
+              {tabs.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    "h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                    tab === t ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
+          {list.data?.note && <p className="mb-2 px-0.5 text-[11.5px] text-muted-foreground">{list.data.note}</p>}
           {list.isLoading ? (
             <div className="grid h-40 place-items-center">
               <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -89,6 +155,7 @@ export function ProviderPresetChip({
                   key={p.id}
                   type="button"
                   aria-pressed={value === p.id}
+                  title={p.description}
                   onClick={() => {
                     onChange(p.id, p.name);
                     setOpen(false);
@@ -96,14 +163,17 @@ export function ProviderPresetChip({
                   className={cn("group flex flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
                 >
                   <span className="aspect-[3/4] w-full overflow-hidden rounded-md bg-muted">
-                    {p.preview && (
+                    {p.preview ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={p.preview} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                    )}
+                    ) : p.hue !== undefined ? (
+                      <DrawnPreview name={p.name} hue={p.hue} />
+                    ) : null}
                   </span>
                   <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
                 </button>
               ))}
+              {!items.length && q && <p className="col-span-3 py-8 text-center text-[13px] text-muted-foreground">No styles match “{q}”</p>}
             </div>
           )}
         </PopoverContent>

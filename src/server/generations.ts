@@ -208,6 +208,10 @@ const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
   { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
   { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
   { table: "canvases", cols: ["graph_json"] },
+  // Image studios: a palette's thumbnail, a moodboard's images, collages and cover, an Instadump pack's photos.
+  { table: "palettes", cols: ["thumb_url"] },
+  { table: "moodboards", cols: ["images_json", "collages_json", "cover_url"] },
+  { table: "photodump_packs", cols: ["refs_json"] },
 ];
 
 /** Whether anything still refers to this stored file (see ASSET_REFS). */

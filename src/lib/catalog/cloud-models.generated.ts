@@ -1966,6 +1966,77 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "recraft-4-style-saved",
+    "name": "Recraft V4 Styles \u00b7 saved style",
+    "vendor": "Recraft",
+    "family": "recraft",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "A new picture in a style saved from your moodboard",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "recraft/v4/style/text-to-image",
+        "map": {
+          "styleId": "style_id",
+          "palette": {
+            "key": "colors",
+            "format": "rgb-object",
+            "background": "background_color"
+          },
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "controls": [
+        {
+          "param": "style_match",
+          "label": "Style match",
+          "values": [
+            "precise",
+            "flexible"
+          ]
+        }
+      ],
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ]
+    },
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.035
+    },
+    "hidden": true
+  },
+  {
     "id": "ideogram-3",
     "name": "Ideogram 3.0",
     "vendor": "Ideogram",

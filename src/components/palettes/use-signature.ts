@@ -1,0 +1,35 @@
+"use client";
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { applySignature, type Signature, type SignedRequest } from "@/lib/catalog/palettes";
+import type { Generation, GenerationRequest } from "@/lib/catalog/types";
+import { useCatalog } from "@/components/studio/catalog";
+import { usePalettes } from "./hooks";
+
+/**
+ * The composer's hook for the style signature (Color signature + Moodboard chips): `apply` routes a
+ * request for the picked palette and moodboard (pure, src/lib/catalog/palettes.ts) — the composer
+ * plans and prices with it while you type and sends what it returns. `lock` sends a run whose
+ * images are recoloured afterwards (open engine) through POST /api/palettes/lock.
+ */
+export function useSignature(enabled: boolean, signature: Signature | undefined) {
+  const { getModel } = useCatalog();
+  // The palette list carries which models take a palette natively; the chip has usually loaded it already.
+  const { caps } = usePalettes(enabled && !!signature?.palette);
+  const apply = useCallback(
+    (req: GenerationRequest): SignedRequest => (enabled && signature ? applySignature(req, signature, { caps, getModel }) : { request: req, modelId: req.modelId, notes: [] }),
+    [enabled, signature, caps, getModel],
+  );
+  const qc = useQueryClient();
+  const lock = useMutation({
+    mutationFn: async (b: { request: GenerationRequest; colors: string[] }) => {
+      const res = await fetch("/api/palettes/lock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+      const body = (await res.json().catch(() => ({}))) as { items?: Generation[]; error?: string };
+      if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+      return body.items ?? [];
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["generations"] }),
+  });
+  return { apply, lock };
+}

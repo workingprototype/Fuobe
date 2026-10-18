@@ -1,0 +1,270 @@
+import "server-only";
+import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
+import { castPrompt, type CastValues } from "@/lib/catalog/cinema";
+import {
+  castSheetModel,
+  customPack,
+  fashionBaseRequest,
+  fashionOutfitRequest,
+  fashionPhotosetRequests,
+  getPack,
+  getTemplate,
+  MAX_PACK_REFS,
+  planPhotodump,
+  sheetFromReference,
+  type Pack,
+  type PhotoSubject,
+  type PlanCaps,
+} from "@/lib/catalog/packs";
+import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import { createPipeline } from "./chains";
+import { db } from "./db";
+import { getElement } from "./elements";
+import { createGenerations, previewGeneration } from "./generations";
+import { higgsfieldKey } from "./providers/higgsfield";
+import { engineMode } from "./settings";
+
+/**
+ * Photodump / Instadump, Fashion Factory and Character Sheet runs: plan with the pure pack logic
+ * (src/lib/catalog/packs.ts), validate every request, then create them as one batch so the feed and
+ * the Library stack them under the run's name.
+ */
+
+// ---------------------------------------------------------------------------
+// User packs (Instadump "Create pack")
+
+interface PackRow {
+  id: string;
+  name: string;
+  refs_json: string;
+  created_at: number;
+}
+
+export interface UserPack {
+  id: string;
+  name: string;
+  refs: string[];
+  createdAt: number;
+}
+
+const toPack = (r: PackRow): UserPack => ({ id: r.id, name: r.name, refs: JSON.parse(r.refs_json) as string[], createdAt: r.created_at });
+
+export function listUserPacks(): UserPack[] {
+  return (db().prepare("SELECT * FROM photodump_packs ORDER BY created_at DESC").all() as PackRow[]).map(toPack);
+}
+
+export function getUserPack(id: string): UserPack | null {
+  const r = db().prepare("SELECT * FROM photodump_packs WHERE id = ?").get(id) as PackRow | undefined;
+  return r ? toPack(r) : null;
+}
+
+export function createUserPack(input: { name: string; refs: string[] }): UserPack {
+  const name = input.name.trim();
+  if (!name) throw new Error("Give the pack a name");
+  if (name.length > 60) throw new Error("Keep the pack name under 60 characters");
+  const refs = [...new Set(input.refs)];
+  if (!refs.length) throw new Error("Upload your reference set up to 15 photos");
+  if (refs.length > MAX_PACK_REFS) throw new Error(`A pack holds up to ${MAX_PACK_REFS} photos`);
+  const row: PackRow = { id: `user-${nanoid(8)}`, name, refs_json: JSON.stringify(refs), created_at: Date.now() };
+  db().prepare("INSERT INTO photodump_packs (id, name, refs_json, created_at) VALUES (@id, @name, @refs_json, @created_at)").run(row);
+  return toPack(row);
+}
+
+export function deleteUserPack(id: string): boolean {
+  return db().prepare("DELETE FROM photodump_packs WHERE id = ?").run(id).changes > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Planning helpers
+
+/** What this install can do, for the pure planners. */
+export function planCaps(): PlanCaps {
+  return { higgsfield: !!higgsfieldKey() && engineMode() !== "open", has: (id) => !!getModel(id) };
+}
+
+/** The engine a run uses: the one asked for, unless Settings locks the other. */
+export function runEngine(asked: Engine): Engine {
+  const mode = engineMode();
+  return mode === "both" ? asked : mode;
+}
+
+export function subjectFor(input: { elementId?: string; selfie?: string }): PhotoSubject {
+  if (input.elementId) {
+    const el = getElement(input.elementId);
+    if (!el) throw new Error("That character no longer exists");
+    if (el.kind !== "character") throw new Error(`${el.name} isn't a character`);
+    return { kind: "element", handle: el.handle, name: el.name, references: el.references.filter((r) => !/\.(wav|mp3|ogg|flac|m4a|webm)$/i.test(r)), loras: el.loras };
+  }
+  if (input.selfie) return { kind: "selfie", url: input.selfie };
+  throw new Error("Pick a character or add a selfie");
+}
+
+export function packFor(id: string): Pack {
+  const builtIn = getPack(id);
+  if (builtIn) return builtIn;
+  const user = getUserPack(id);
+  if (user) return customPack(user);
+  throw new Error("That pack no longer exists");
+}
+
+/** The closest aspect ratio the model offers (by value), or the request's own when the model doesn't list any. */
+export function fitAspect(modelId: string, aspect: string | undefined): string | undefined {
+  const opts = getModel(modelId)?.options.aspectRatios;
+  if (!aspect || !opts?.length || opts.includes(aspect)) return aspect;
+  const val = (a: string) => {
+    const [w, h] = a.split(":").map(Number);
+    return w && h ? Math.log(w / h) : NaN;
+  };
+  const want = val(aspect);
+  const best = opts.filter((o) => Number.isFinite(val(o))).sort((a, b) => Math.abs(val(a) - want) - Math.abs(val(b) - want))[0];
+  return best ?? undefined;
+}
+
+const fitted = (r: GenerationRequest): GenerationRequest => ({ ...r, params: { ...r.params, aspectRatio: fitAspect(r.modelId, r.params?.aspectRatio) } });
+
+/** Price a set of requests without starting them (the first error is returned, not thrown). */
+export function previewRun(requests: GenerationRequest[], notes: string[] = []) {
+  try {
+    const previews = requests.map((r) => previewGeneration(fitted(r)));
+    const first = previews[0];
+    const costs = previews.map((p) => p.costUsd);
+    return {
+      modelId: first.model.id,
+      modelName: first.model.name,
+      count: previews.reduce((n, p) => n + p.outputs, 0),
+      costUsd: costs.some((c) => c === null) ? null : Math.round(costs.reduce((a, b) => a! + b!, 0)! * 1000) / 1000,
+      demo: previews.some((p) => p.demo),
+      notes,
+    };
+  } catch (e) {
+    return { error: (e as Error).message, notes };
+  }
+}
+
+/**
+ * Independent requests created as one batch (validated together first, so a bad one starts nothing,
+ * and a demo/real mix is refused), stacked in the Library under `title`.
+ */
+export function createBatch(requests: GenerationRequest[], title: string): { batchId: string; items: Generation[] } {
+  if (!requests.length) throw new Error("Nothing to make");
+  const { batchId, items } = createPipeline(requests.map((r, i) => ({ key: `p${i}`, request: { ...fitted(r), batchTitle: title } })));
+  return { batchId, items };
+}
+
+// ---------------------------------------------------------------------------
+// Photodump
+
+export interface PhotodumpRun {
+  packId: string;
+  engine: Engine;
+  elementId?: string;
+  selfie?: string;
+  aspectRatio?: string;
+  modelId?: string;
+}
+
+function photodumpPlan(input: PhotodumpRun) {
+  const pack = packFor(input.packId);
+  const subject = subjectFor(input);
+  return { pack, subject, plan: planPhotodump({ pack, subject, engine: runEngine(input.engine), aspectRatio: input.aspectRatio, modelId: input.modelId }, planCaps()) };
+}
+
+export function previewPhotodump(input: PhotodumpRun) {
+  try {
+    const { plan } = photodumpPlan(input);
+    return previewRun(plan.requests, plan.notes);
+  } catch (e) {
+    return { error: (e as Error).message, notes: [] };
+  }
+}
+
+export function createPhotodump(input: PhotodumpRun) {
+  const { pack, subject, plan } = photodumpPlan(input);
+  const who = subject.kind === "element" ? subject.name : "Selfie";
+  const { batchId, items } = createBatch(plan.requests, `${pack.name} · ${who}`);
+  return { batchId, items, notes: plan.notes, modelId: plan.modelId };
+}
+
+// ---------------------------------------------------------------------------
+// Fashion Factory
+
+export type FashionRun =
+  | { step: "base"; templateId: string; elementId: string; engine: Engine }
+  | { step: "outfit"; templateId: string; base: string; garment: string; engine: Engine; modelId?: string }
+  | { step: "photoset"; templateId: string; dressed: string; engine: Engine };
+
+function fashionRequests(input: FashionRun): { requests: GenerationRequest[]; title: string } {
+  const t = getTemplate(input.templateId);
+  if (!t) throw new Error("Template required");
+  const engine = runEngine(input.engine);
+  if (input.step === "base") {
+    const subject = subjectFor({ elementId: input.elementId });
+    if (subject.kind !== "element") throw new Error("Pick or create a character first");
+    return { requests: [fashionBaseRequest(t, subject, engine, planCaps())], title: `${t.name} · ${subject.name}` };
+  }
+  if (input.step === "outfit") return { requests: [fashionOutfitRequest(t, input.base, input.garment, engine, input.modelId)], title: `${t.name} · outfit` };
+  return { requests: fashionPhotosetRequests(t, input.dressed, engine), title: `${t.name} · photoset` };
+}
+
+export function previewFashion(input: FashionRun) {
+  try {
+    return previewRun(fashionRequests(input).requests);
+  } catch (e) {
+    return { error: (e as Error).message, notes: [] };
+  }
+}
+
+export function createFashion(input: FashionRun) {
+  const { requests, title } = fashionRequests(input);
+  if (requests.length === 1) {
+    // One request (base shots ×4, outfit ×2): the generations share a batch on their own.
+    const items = createGenerations({ ...fitted(requests[0]), batchTitle: title });
+    return { batchId: items[0]?.batchId ?? items[0]?.id, items };
+  }
+  return createBatch(requests, title);
+}
+
+// ---------------------------------------------------------------------------
+// Character Sheet
+
+export type SheetRun =
+  | { mode: "reference"; engine: Engine; images: string[]; details?: string }
+  | { mode: "cast"; engine: Engine; cast: CastValues; details?: string }
+  | { mode: "describe"; engine: Engine; prompt: string };
+
+function sheetRequest(input: SheetRun): { request: GenerationRequest; notes: string[] } {
+  const engine = runEngine(input.engine);
+  if (input.mode === "reference") return sheetFromReference(input.images, engine, input.details);
+  if (input.mode === "cast") {
+    const modelId = castSheetModel(engine, planCaps());
+    const m = getModel(modelId);
+    const aspect = m?.options.aspectRatios?.includes("16:9") ? "16:9" : undefined;
+    const resolution = m?.options.resolutions?.includes("2K") ? "2K" : m?.options.resolutions?.includes("1080p") ? "1080p" : undefined;
+    return {
+      request: { feature: "character-sheet", modelId, prompt: castPrompt(input.cast, input.details), params: { numOutputs: 1, ...(aspect && { aspectRatio: aspect }), ...(resolution && { resolution }) } },
+      notes: modelId === "nano-banana-pro" ? ["Soul 2.0 needs a Higgsfield key — Nano Banana Pro draws the sheet"] : [],
+    };
+  }
+  // A description: the AI Influencer app (Higgsfield's character-sheet model, or Z-Image Turbo).
+  if (!input.prompt.trim()) throw new Error("Describe your character first");
+  return {
+    request: { feature: "app:app-ai-influencer", presetId: "app-ai-influencer", modelId: engine === "open" ? "oss-z-image-turbo" : "ai-influencer", prompt: input.prompt.trim() },
+    notes: [],
+  };
+}
+
+export function previewSheet(input: SheetRun) {
+  try {
+    const { request, notes } = sheetRequest(input);
+    return previewRun([request], notes);
+  } catch (e) {
+    return { error: (e as Error).message, notes: [] };
+  }
+}
+
+export function createSheet(input: SheetRun) {
+  const { request, notes } = sheetRequest(input);
+  const items = createGenerations(fitted({ ...request, title: "Character sheet" }));
+  return { items, notes };
+}

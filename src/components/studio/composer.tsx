@@ -31,12 +31,18 @@ import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
 import { useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
+import { useSignature } from "../palettes/use-signature";
 
 const EMPTY: StudioElement[] = [];
 
 /** The motion / effect picker (and its preset icons) is its own chunk: only video studios load it. */
 const PresetChips = dynamic(() => import("./preset-chips"), {
   loading: () => <span aria-hidden className="h-8 w-32 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
+
+/** Color signature + Moodboard chips (studios with `signature`): their own chunk too. */
+const SignatureChips = dynamic(() => import("../palettes/signature-chips"), {
+  loading: () => <span aria-hidden className="h-8 w-40 shrink-0 animate-pulse rounded-full bg-secondary" />,
 });
 
 /** Two speakers to start a dialogue with. */
@@ -188,13 +194,17 @@ export function Composer({ docked }: { docked: boolean }) {
     };
   }, [bridgeRef, attach.attachFiles]);
 
+  // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
+  const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
-    const raw = buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind);
-    const mentions = model ? applyMentions(raw, model, elements) : { request: raw, mentioned: [], notes: [] };
-    const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
-    return { mentions, sketched, request: model ? stripMotionPaths(sketched.request, model) : sketched.request };
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind));
+    const raw = signed.request;
+    const m = catalog.getModel(raw.modelId) ?? model;
+    const mentions = m ? applyMentions(raw, m, elements) : { request: raw, mentioned: [], notes: [] };
+    const sketched = m ? applySketch(mentions.request, m) : { request: mentions.request };
+    return { mentions, sketched, signed, request: m ? stripMotionPaths(sketched.request, m) : sketched.request };
   };
-  const { mentions, sketched } = prepare(draft);
+  const { mentions, sketched, signed } = prepare(draft);
   const resolvesOnServer = mentions.mentioned.length > 0 || !!draft.slots.mask?.ref || !!draft.slots.sketch?.ref;
 
   // Plan with stand-ins for attachments that are missing or still uploading, so the cost and the
@@ -224,6 +234,7 @@ export function Composer({ docked }: { docked: boolean }) {
       planError = (e as Error).message;
     }
   }
+  if (signed.blocker) planError = signed.blocker;
   // Models that take no prompt (try-on, 3D, transcription, upscalers) never ask for one.
   const promptMissing =
     !config.promptOptional && !opts.promptless && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
@@ -238,7 +249,7 @@ export function Composer({ docked }: { docked: boolean }) {
   });
 
   const submit = () => {
-    if (blocker || create.isPending) {
+    if (blocker || create.isPending || signature.lock.isPending) {
       if (blocker) {
         // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
         toast(blocker.message, { id: "composer-blocker" });
@@ -252,7 +263,10 @@ export function Composer({ docked }: { docked: boolean }) {
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
-    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind), {
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind));
+    // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
+    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
+    create.mutate(sent.request, {
       onError: (e) => toast.error((e as Error).message),
     });
   };
@@ -356,6 +370,7 @@ export function Composer({ docked }: { docked: boolean }) {
           onMix={(patch) => setDraft(patch)}
         />
       )}
+      {config.signature && <SignatureChips value={draft.signature} onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))} engine={engine} />}
       {opts.presets && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
       {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
     </>
@@ -363,6 +378,7 @@ export function Composer({ docked }: { docked: boolean }) {
   const hasSecondary =
     (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
     !!config.presetPicker ||
+    !!config.signature ||
     preset?.type === "motion" ||
     preset?.type === "effect";
 
@@ -629,11 +645,11 @@ export function Composer({ docked }: { docked: boolean }) {
             <Button
               size="icon"
               onClick={submit}
-              disabled={create.isPending}
+              disabled={create.isPending || signature.lock.isPending}
               aria-label={blocker ? `Generate — ${blocker.message}` : "Generate"}
               className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
             >
-              {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+              {create.isPending || signature.lock.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -647,6 +663,7 @@ export function Composer({ docked }: { docked: boolean }) {
         </Tooltip>
       </div>
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
+      {signed.notes.length > 0 && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{signed.notes.join(" · ")}</p>}
       {model && op && model.options.endFrame === undefined && draft.slots.endImage?.ref && (
         <p className="px-2 pt-1 text-[12px] text-warning">{model.name} ignores the end frame — pick Kling 2.5, Veo 3.1, Seedance or Wan 2.2 to use it.</p>
       )}
