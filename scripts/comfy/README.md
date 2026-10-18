@@ -12,7 +12,8 @@ Full write-up (what is in the library, validation results, models, quirks for ap
 
 | file | purpose |
 |---|---|
-| `install-comfyui.sh` | reproducible CPU install of ComfyUI + the 15 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR, HunyuanVideo-Foley and Whisper for comfyui-oss-3) |
+| `install-comfyui.sh` | reproducible CPU install of ComfyUI + the 14 custom node packs (pinned commits; Chatterbox, IndexTTS2 and Video-Depth-Anything added for the comfyui-oss-2 workflows — IndexTTS2's runtime deps only with `INDEXTTS_RUNTIME=1`; MelBandRoFormer, QwenASR and HunyuanVideo-Foley for comfyui-oss-3). Non-commercial node code is opt-in: `NC_PACKS=1` adds ComfyUI-Whisper (CC-BY-NC-SA-4.0, only for `captions-whisper-burnin`) |
+| `install-isolated-worker.sh` | a second ComfyUI with its own code copy, base directory, `HOME` and virtualenv for LatentSync 1.6 and ThinkSound (below) |
 | `start-comfyui.sh` / `stop-comfyui.sh` | run ComfyUI in the background on 127.0.0.1:8188 (log: `$COMFYUI_DIR/logs/comfyui.log`) |
 | `export-templates.mjs` | Playwright: opens the ComfyUI frontend, `app.loadGraphData(ui)` → `app.graphToPrompt().output`, writes `build/raw/<key>.api.json` + `.meta.json` (embedded model URLs, missing node types) |
 | `library.spec.mjs` | the curated list: id, title, capability, source, transforms, bindings, outputs, limits, VRAM, notes |
@@ -77,9 +78,23 @@ node validate-workflows.mjs <ids>
   video. Binding names follow Fuobe's canonical inputs (`startTime`, `numLayers`, `sourceLanguage`, `paletteImage`…,
   documented in the header of `library.spec.mjs`). The TRELLIS.2 graph's pass-through `PreviewImage` nodes are linked
   around by the build (they would otherwise write 4096² textures to `temp/` on every run).
-- **`captions-burnin`** is Fuobe's own caption burn-in, core nodes only (`Trim Video` per cue, `Draw Text Overlay`,
-  `Batch Images`, `Create Video`). The library file holds a two-cue example; the provider rewrites it per request
-  (`expand: "captions"`, see `expandCaptionWorkflow()` in `src/lib/comfy.ts`).
+- **`captions-burnin`** is Fuobe's own caption burn-in, core nodes only, built so memory does not grow with the
+  clip: gaps between captions go to `Concatenate Video` as `Trim Video` windows (never decoded); captioned stretches
+  are cut into chunks of at most ~384 MB of frames, and each chunk is decoded, gets a `Draw Text Overlay` and is
+  encoded at once (`Create Video`, codec h264), so ComfyUI can drop its raw frames. `Concatenate Video` joins
+  everything with the clip's own soundtrack (`LoadAudio`, dropped for silent clips). The library file holds a
+  one-chunk + one-gap example; the provider rewrites it per request (`expand: "captions"`, `expandCaptionWorkflow()`
+  in `src/lib/comfy.ts`) from what the upload's MP4 header says (duration, fps, size, audio). Every window holds at
+  least 3 frames (`Concatenate Video` rejects a 2-frame clip followed by another one). Under RAM pressure
+  (`--cache-ram 11` on the CPU box) a 20 s 640x360 30 fps clip with 18 s of captions peaks at +0.50 GB RSS and a 40 s
+  one at +0.45 GB — the earlier one-batch graph needed +5.16 GB for the 20 s clip and grew with the length. Without
+  pressure ComfyUI's RAM cache simply keeps the finished chunks (+2.64 GB for 20 s) until memory runs low.
+- **`video-mux-audio` / `-replace`** put the new soundtrack on with `Concatenate Video` (`complete_audio`): the video
+  stream is copied packet by packet (bit-identical, no decode), only the AAC soundtrack is encoded. The two-track
+  graph mixes voice and background over `EmptyAudio` of the video's length (`AudioMerge` cuts its second track to
+  the first one's length). A 900-frame clip muxes in ~5 s at +0.02 GB RSS.
+- **`captions-whisper-burnin`** decodes the whole clip (VHS) and needs ComfyUI-Whisper (`NC_PACKS=1`); the provider
+  refuses clips that would need more than half the server's RAM and points to the chunked route.
 - **New entry fields**: `worker: "isolated"` (below), `expand`, and on outputs `stem` (`voice` | `background`) and
   `role` (`cues`, `transcript`, `language`, `sheet`, `tiles`, `layers`, `first-frame`, `turntable`).
 
@@ -87,26 +102,28 @@ node validate-workflows.mjs <ids>
 
 `lipsync-latentsync16` and `sfx-thinksound` are optional and never defaults. Their packs change process-wide state
 (LatentSync overrides `TMPDIR` and `folder_paths` temp handling at import, `rmtree()`s a `temp` folder next to the
-ComfyUI directory and pip-installs packages when its node is created) or pin old packages (ThinkSound's
-`requirements.txt` downgrades einops, PyWavelets, k-diffusion). Run them on a second ComfyUI with its own base
-directory and `HOME`, same commit and venv:
+ComfyUI directory and pip-installs packages into whatever interpreter runs it when its node is created) or pin old
+packages (ThinkSound's `requirements.txt` downgrades einops, PyWavelets, k-diffusion; LatentSync's runtime needs
+mediapipe, which pins `protobuf<5`). So the worker gets **its own code copy, base directory, `HOME` and
+virtualenv** — nothing is installed into the main ComfyUI's venv:
 
 ```bash
-cp -r /home/user/ComfyUI /srv/comfyui-isolated          # code only; or a fresh clone at the same commit
-cd /srv/comfyui-isolated/custom_nodes
-git clone https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper && git -C ComfyUI-LatentSyncWrapper checkout 360d5283d7276aee68b4237b1387e594e4ce640e
-git clone https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper && git -C ComfyUI-ThinkSound_Wrapper checkout 9a2fb40ae30cabbdb55fb6f6fe02b01c23ab1a3b
-# plus ComfyUI-VideoHelperSuite + ComfyUI-KJNodes (same commits as install-comfyui.sh)
-uv pip install --python /home/user/ComfyUI/.venv/bin/python "mediapipe>=0.10.8" face-alignment DeepCache ffmpeg-python pytorch_lightning  # LatentSync runtime
-cd /srv/comfyui-isolated && HOME=/srv/comfyui-isolated/home /home/user/ComfyUI/.venv/bin/python main.py --listen 127.0.0.1 --port 8189
+ISO_DIR=/srv/comfyui-isolated scripts/comfy/install-isolated-worker.sh
+#  - copies ComfyUI's *code* only (tar with models/, input/, output/, user/, custom_nodes/ and .venv excluded —
+#    never `cp -r` the whole install, models/ can be hundreds of GB)
+#  - creates $ISO_DIR/.venv (Python 3.11: ThinkSound pins PyWavelets 1.4.1, which has no newer wheels), installs torch
+#    (TORCH_INDEX=https://download.pytorch.org/whl/cu128 on a GPU server), ComfyUI's requirements, the two packs and
+#    VHS + KJNodes at the pinned commits, ThinkSound's requirements and LatentSync's runtime deps — into that venv
+#  - writes extra_model_paths.yaml so the worker reads the main install's model folders (shared, not copied)
+cd /srv/comfyui-isolated/ComfyUI && HOME=/srv/comfyui-isolated/home /srv/comfyui-isolated/.venv/bin/python main.py --listen 127.0.0.1 --port 8189
 ```
 
 Point a second Fuobe install (or Settings → ComfyUI URL while you use those models) at port 8189. Build and
-validate them against that server (`COMFYUI_DIR` = its directory, for the placeholder models):
+validate them against that server (placeholder models go into the shared main `models/` folder the worker reads):
 
 ```bash
 COMFYUI_URL=http://127.0.0.1:8189 npm run build -- lipsync-latentsync16 sfx-thinksound
-COMFYUI_URL=http://127.0.0.1:8189 COMFYUI_DIR=/srv/comfyui-isolated node validate-workflows.mjs lipsync-latentsync16 sfx-thinksound
+COMFYUI_URL=http://127.0.0.1:8189 COMFYUI_MODELS_DIR=/home/user/ComfyUI/models node validate-workflows.mjs lipsync-latentsync16 sfx-thinksound --shared
 node validate-workflows.mjs video-trim     # then once on the main server, so object_info.subset.json comes from it
 ```
 
