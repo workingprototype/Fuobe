@@ -71,7 +71,7 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
 function SaveBadge({ state }: { state: SaveState }) {
   const text = { saved: "Saved", saving: "Saving…", dirty: "Saving…", error: "Not saved — retrying", conflict: "Changed in another tab" }[state];
   return (
-    <span className={cn("hidden items-center gap-1 text-[12px] whitespace-nowrap lg:inline-flex", state === "error" || state === "conflict" ? "text-warning" : "text-subtle-foreground")} role="status" aria-live="polite">
+    <span className={cn("hidden items-center gap-1 text-[12px] whitespace-nowrap xl:inline-flex", state === "error" || state === "conflict" ? "text-warning" : "text-subtle-foreground")} role="status" aria-live="polite">
       {state === "saved" ? <Check className="size-3.5" /> : state === "error" || state === "conflict" ? <CloudOff className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
       {text}
     </span>
@@ -140,7 +140,7 @@ export function TopBar(p: {
             e.currentTarget.blur();
           }
         }}
-        className="h-8 w-[clamp(8rem,18vw,16rem)] min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 font-heading text-[19px] outline-none hover:border-border focus:border-primary focus:ring-4 focus:ring-brand-faint"
+        className="h-8 w-[clamp(6rem,16vw,16rem)] min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 font-heading text-[19px] outline-none hover:border-border focus:border-primary focus:ring-4 focus:ring-brand-faint"
       />
       <SaveBadge state={p.save} />
 
