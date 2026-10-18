@@ -5,6 +5,7 @@ import {
   cleanGraph,
   connectionError,
   convertEngine,
+  defaultModelForNode,
   describeNode,
   effectiveOp,
   graphEngine,
@@ -14,6 +15,7 @@ import {
   outputType,
   paletteItems,
   planCanvas,
+  promptPlaceholder,
   singleInput,
   topoOrder,
   withPlaceholders,
@@ -155,6 +157,41 @@ describe("canvas graph → plan", () => {
     const step = planCanvas(g).steps.find((s) => s.nodeId === "img")!;
     expect(step.request).toMatchObject({ prompt: "Poster:\n\n{text}", chain: [{ slot: "prompt" }] });
     expect(step.deps).toEqual(["w"]);
+  });
+
+  it("a new Text model node writes; picking a language makes it translate", () => {
+    const item = paletteItems().find((p) => p.id === "model-text")!;
+    const data = { ...item.data, modelId: defaultModelForNode({ type: item.type, data: item.data ?? {} }, "cloud")!.id, prompt: "Write a slogan for a lemonade stand" };
+    expect(data.modelId).toBe("text-llm");
+    const w = node("w", "model", 0, 0, data);
+    const g: CanvasGraph = { nodes: [w], edges: [] };
+    expect(effectiveOp(g, w)).toBe("write");
+    // The request says so (left out, the server would infer the catalog's first op: translate).
+    expect(planCanvas(g).steps[0].request).toMatchObject({ modelId: "text-llm", op: "write", prompt: "Write a slogan for a lemonade stand" });
+    expect(promptPlaceholder("write")).toMatch(/^What should it write/);
+    expect(promptPlaceholder("translate")).toMatch(/^Text to translate/);
+    expect(promptPlaceholder("tts")).toMatch(/^Text to speak/);
+
+    w.data.params = { targetLanguage: "French" };
+    expect(effectiveOp(g, w)).toBe("translate");
+    expect(planCanvas(g).steps[0].request).toMatchObject({ op: "translate", params: { targetLanguage: "French" } });
+    // Translate chosen by hand needs a language.
+    w.data.params = undefined;
+    w.data.op = "translate";
+    expect(describeNode(g, w).error).toBe("Pick a language to translate into");
+  });
+
+  it("joins elements with any handle into the prompt without building a regex from it", () => {
+    const g: CanvasGraph = {
+      nodes: [node("el", "element", 0, 0, { handle: "a(b", elementId: "x" }), node("img", "model", 300, 0, { modelId: "nano-banana-pro", prompt: "A portrait" })],
+      edges: [edge("el", "img", "elements")],
+    };
+    const d = describeNode(g, g.nodes[1]);
+    expect(d.request?.prompt).toBe("A portrait\n\nWith @a(b.");
+    // A handle already mentioned isn't added twice.
+    g.nodes[1].data.prompt = "A portrait of @Maya";
+    g.nodes[0].data.handle = "maya";
+    expect(describeNode(g, g.nodes[1]).request?.prompt).toBe("A portrait of @Maya");
   });
 
   it("reports validation errors on the node and blocks what depends on it", () => {
@@ -311,12 +348,46 @@ describe("canvas templates", () => {
   it("switches a whole board to open-source models", () => {
     const g = CANVAS_TEMPLATES.find((t) => t.id === "script-film")!.build("cloud");
     const { graph, changed, missing } = convertEngine(g, "open");
-    expect(changed).toBe(7);
+    expect(changed).toBe(10);
     expect(missing).toEqual([]);
     expect(graphEngine(graph)).toBe("open");
     expect(graph.nodes.find((n) => n.id === "film")!.data.modelId).toBe("oss-join-clips");
+    expect(graph.nodes.find((n) => n.id === "beat1")!.data).toMatchObject({ modelId: "oss-text-llm", op: "write" });
     expect(graph.nodes.find((n) => n.id === "shot1")!.data).toMatchObject({ modelId: "oss-wan22-14b-fast", op: "i2v" });
     expect(planCanvas(graph, { engineMode: "open" }).errors).toEqual([]);
+  });
+
+  it.each(["cloud", "open"] as const)("script → film (%s): the script reaches every frame and shot through a text model", (engine) => {
+    const g = CANVAS_TEMPLATES.find((t) => t.id === "script-film")!.build(engine);
+    const llm = engine === "open" ? "oss-text-llm" : "text-llm";
+    const plan = planCanvas(g, { engineMode: engine });
+    expect(plan.errors).toEqual([]);
+    const step = (id: string) => plan.steps.find((s) => s.nodeId === id)!;
+    for (const i of [1, 2, 3]) {
+      // The shot text is written from the script…
+      expect(step(`beat${i}`).request).toMatchObject({ modelId: llm, op: "write" });
+      expect(step(`beat${i}`).request.prompt).toContain(`shot ${i} of 3`);
+      expect(step(`beat${i}`).request.prompt).toContain("A paper boat sails down");
+      // …and becomes the frame's prompt and the shot's prompt (with the frame as its start).
+      expect(step(`frame${i}`)).toMatchObject({ deps: [`beat${i}`], request: { chain: [{ slot: "prompt" }] } });
+      expect(step(`frame${i}`).request.prompt).toContain("{text}");
+      expect(step(`shot${i}`).deps).toEqual([`beat${i}`, `frame${i}`]);
+      expect(step(`shot${i}`).request.chain).toEqual([{ slot: "prompt" }, { slot: "images", position: "first" }]);
+    }
+    // A new script changes what every shot is written from: no paper boat left anywhere.
+    g.nodes.find((n) => n.id === "script")!.data.text = "An astronaut plants a flower on Mars";
+    const again = planCanvas(g, { engineMode: engine });
+    const prompts = again.steps.map((s) => s.request.prompt ?? "").join("\n");
+    expect(prompts).toContain("An astronaut plants a flower on Mars");
+    expect(prompts).not.toMatch(/boat/i);
+  });
+
+  it("disables palette entries with no model on an install's only engine", () => {
+    expect(paletteItems("both").filter((p) => p.disabled)).toEqual([]);
+    const open = paletteItems("open");
+    expect(open.find((p) => p.id === "frame")?.disabled).toMatch(/^No open-source model for extract frame yet/);
+    expect(open.find((p) => p.id === "model-image")?.disabled).toBeUndefined();
+    expect(open.find((p) => p.id === "join")?.disabled).toBeUndefined();
   });
 
   it("offers palette entries for every node type the catalog can run", () => {

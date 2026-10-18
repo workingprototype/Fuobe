@@ -149,6 +149,9 @@ export interface CanvasSummary {
 
 export const EMPTY_GRAPH: CanvasGraph = { nodes: [], edges: [] };
 
+/** Longest text a prompt, script or note may hold (longer pastes are cut, never refused). */
+export const CANVAS_TEXT_MAX = 10_000;
+
 // ---------------------------------------------------------------------------
 // Node registry
 
@@ -194,6 +197,8 @@ export interface PaletteItem {
   icon: string;
   data?: CanvasNodeData;
   keywords?: string;
+  /** Why it can't be added on this install (no model for it on the only engine allowed). */
+  disabled?: string;
 }
 
 export const PALETTE: PaletteItem[] = [
@@ -221,9 +226,21 @@ function pick(type: CanvasNodeType): Omit<PaletteItem, "id"> {
   return { type, label: s.label, group: s.group, description: s.description, icon: s.icon };
 }
 
-/** Palette entries whose models exist in this catalog (no text models until an LLM model is installed). */
-export function paletteItems(): PaletteItem[] {
-  return PALETTE.filter((p) => p.id !== "model-text" || MODELS.some((m) => m.kind === "text" && !m.hidden));
+const paletteCache = new Map<string, PaletteItem[]>();
+
+/**
+ * Palette entries whose models exist in this catalog (no text models until an LLM model is
+ * installed). On an install locked to one engine, entries with no model there are disabled, with why.
+ */
+export function paletteItems(mode: "both" | "open" | "cloud" = "both"): PaletteItem[] {
+  const hit = paletteCache.get(mode);
+  if (hit) return hit;
+  const items = PALETTE.filter((p) => p.id !== "model-text" || MODELS.some((m) => m.kind === "text" && !m.hidden)).map((p): PaletteItem => {
+    if (mode === "both" || !isGenerator(p) || defaultModelForNode({ type: p.type, data: p.data ?? {} }, mode)) return p;
+    return { ...p, disabled: `No ${mode === "open" ? "open-source" : "cloud"} model for ${p.label.toLowerCase()} yet` };
+  });
+  paletteCache.set(mode, items);
+  return items;
 }
 
 export function nodeLabel(n: Pick<CanvasNode, "type" | "data">): string {
@@ -639,6 +656,34 @@ function sourceOf(s: CanvasNode): Source | { error: string } {
   return { error: `${nodeLabel(s)} has no output` };
 }
 
+/**
+ * A text model (LLM) on Auto writes, unless a language to translate into is set. (The catalog
+ * lists translate first, so leaving it to inferOperation would translate a "Write a slogan…" prompt.)
+ */
+function textOp(model: ModelDef, params: GenParams | undefined): Operation | undefined {
+  if (model.kind !== "text") return undefined;
+  if (params?.targetLanguage && supportsOp(model, "translate")) return "translate";
+  return supportsOp(model, "write") ? "write" : undefined;
+}
+
+/** What a generator node's own text box asks for, by the op it runs. */
+export function promptPlaceholder(op: Operation | undefined): string {
+  switch (op) {
+    case "write":
+      return "What should it write? Connected text joins in, or use {text}";
+    case "translate":
+      return "Text to translate, or connect a text";
+    case "tts":
+      return "Text to speak, or connect a text";
+    case "sfx":
+      return "Describe the sound, or connect a text";
+    case "music":
+      return "Describe the music: style, mood, instruments";
+    default:
+      return "Describe it — connected text joins in, or use {text}";
+  }
+}
+
 /** The operation a node runs: its own choice, the utility's op, or inferred from what's connected. */
 export function effectiveOp(graph: CanvasGraph, n: CanvasNode): Operation | undefined {
   const model = n.data.modelId ? getModel(n.data.modelId) : undefined;
@@ -646,6 +691,8 @@ export function effectiveOp(graph: CanvasGraph, n: CanvasNode): Operation | unde
   if (n.data.op && ops.includes(n.data.op)) return n.data.op;
   if (n.type !== "model") return ops[0];
   if (!model) return undefined;
+  const text = textOp(model, n.data.params);
+  if (text) return text;
   const built = buildRequest(graph, n, model);
   if ("error" in built) return undefined;
   let op = inferOperation(model, withPlaceholders(built.request));
@@ -664,12 +711,18 @@ function mentionLine(handles: string[]): string {
   return `With ${list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}` : list[0]}.`;
 }
 
+/** Handles already @mentioned in a text, lowercased (the same pattern as elements.ts: letters, digits, _ and -). */
+function mentionedIn(text: string): Set<string> {
+  return new Set([...text.matchAll(/@([\p{L}\p{N}_-]+)/gu)].map((m) => m[1].toLowerCase()));
+}
+
 function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
   const nodes = nodeMap(graph);
   const ports = inputPorts(n);
   const ops = nodeOps(n, model);
-  const op = n.data.op && ops.includes(n.data.op) ? n.data.op : n.type !== "model" ? ops[0] : undefined;
+  const op = n.data.op && ops.includes(n.data.op) ? n.data.op : n.type !== "model" ? ops[0] : textOp(model, n.data.params);
   if (n.type !== "model" && op && !supportsOp(model, op)) return { error: `${model.name} can't do ${OPERATION_LABELS[op].toLowerCase()} — pick another model` };
+  if (op === "translate" && !n.data.params?.targetLanguage) return { error: "Pick a language to translate into" };
 
   const inputs: NonNullable<GenerationRequest["inputs"]> = {};
   const chain: ChainSlot[] = [];
@@ -739,7 +792,8 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
   const own = (n.data.prompt ?? "").trim();
   const slot = own.includes("{text}");
   const parts = generatedText || !slot ? [own, ...texts].filter(Boolean) : [own.replaceAll("{text}", texts.join("\n\n")).trim()].filter(Boolean);
-  const mentions = mentionLine(handles.filter((h) => !new RegExp(`@${h}(?![\\p{L}\\p{N}_-])`, "iu").test(parts.join(" "))));
+  const already = mentionedIn(parts.join(" "));
+  const mentions = mentionLine(handles.filter((h) => !already.has(h.toLowerCase())));
   if (mentions) parts.push(mentions);
   if (generatedText && !slot) parts.push("{text}");
   const prompt = parts.join("\n\n");
@@ -1145,50 +1199,55 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
   {
     id: "script-film",
     name: "Script → storyboard → film",
-    description: "A short script becomes three frames, three shots and one film",
+    description: "A text model breaks a short script into three shots: three frames, three clips, one film",
     icon: "GalleryHorizontal",
     hue: 200,
     build: tpl(
       [
         { id: "script", type: "prompt", x: 0, y: ROW, data: { label: "Script", text: "A paper boat sails down a rain-soaked city gutter, rides a little waterfall into a storm drain and comes out on a sunny canal." } },
+        // The script reaches every shot through a text model: edit the script and all three shots follow.
         ...[0, 1, 2].map((i) => ({
-          id: `frame${i + 1}`,
+          id: `beat${i + 1}`,
           type: "model" as const,
           x: COL,
           y: i * ROW,
           data: {
-            mediaKind: "image" as const,
-            label: `Frame ${i + 1}`,
-            prompt: [
-              "Storyboard frame 1 of 3 — the opening moment of this story. Cinematic still, consistent look:",
-              "Storyboard frame 2 of 3 — the turning point of this story. Cinematic still, consistent look:",
-              "Storyboard frame 3 of 3 — the ending of this story. Cinematic still, consistent look:",
-            ][i],
-            params: { aspectRatio: "16:9" },
+            mediaKind: "text" as const,
+            label: `Shot ${i + 1} text`,
+            op: "write" as const,
+            prompt: `Describe shot ${i + 1} of 3 of this script (${["the opening moment", "the turning point", "the ending"][i]}) as one cinematic sentence. Reply with the sentence only.\n\n{text}`,
           },
+          models: { cloud: "text-llm", open: "oss-text-llm" },
+        })),
+        ...[0, 1, 2].map((i) => ({
+          id: `frame${i + 1}`,
+          type: "model" as const,
+          x: COL * 2,
+          y: i * ROW,
+          data: { mediaKind: "image" as const, label: `Frame ${i + 1}`, prompt: "Cinematic storyboard still, one consistent look across the film: {text}", params: { aspectRatio: "16:9" } },
           models: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
         })),
         ...[0, 1, 2].map((i) => ({
           id: `shot${i + 1}`,
           type: "model" as const,
-          x: COL * 2,
+          x: COL * 3,
           y: i * ROW,
-          data: {
-            mediaKind: "video" as const,
-            label: `Shot ${i + 1}`,
-            op: "i2v" as const,
-            prompt: ["The boat drifts forward, rain ripples the water, gentle tracking shot", "The boat tips over the edge and drops, the camera follows it down", "The boat glides into sunlight on the canal, the camera pulls back"][i],
-            params: { aspectRatio: "16:9", duration: 5 },
-          },
+          data: { mediaKind: "video" as const, label: `Shot ${i + 1}`, op: "i2v" as const, prompt: "Animate this moment, smooth cinematic camera move: {text}", params: { aspectRatio: "16:9", duration: 5 } },
           models: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" },
         })),
-        { id: "film", type: "join", x: COL * 3, y: ROW, data: { label: "Film" }, models: { cloud: "join-clips", open: "oss-join-clips" } },
-        { id: "out", type: "output", x: COL * 4, y: ROW, data: { label: "Film" } },
+        { id: "film", type: "join", x: COL * 4, y: ROW / 2, data: { label: "Film" }, models: { cloud: "join-clips", open: "oss-join-clips" } },
+        { id: "out", type: "output", x: COL * 4, y: ROW * 1.5, data: { label: "Film" } },
       ],
       [
-        ["script", "frame1", "prompt"],
-        ["script", "frame2", "prompt"],
-        ["script", "frame3", "prompt"],
+        ["script", "beat1", "prompt"],
+        ["script", "beat2", "prompt"],
+        ["script", "beat3", "prompt"],
+        ["beat1", "frame1", "prompt"],
+        ["beat2", "frame2", "prompt"],
+        ["beat3", "frame3", "prompt"],
+        ["beat1", "shot1", "prompt"],
+        ["beat2", "shot2", "prompt"],
+        ["beat3", "shot3", "prompt"],
         ["frame1", "shot1", "images"],
         ["frame2", "shot2", "images"],
         ["frame3", "shot3", "images"],
