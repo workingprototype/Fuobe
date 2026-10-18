@@ -244,8 +244,9 @@ const Job = z.object({
   images: z.array(ref).optional().describe("Input images: the image to edit, the start frame, or references, in order."),
   end_image: ref.optional().describe("End frame (first-and-last-frame video)."),
   video: ref.optional().describe("Input video (extend, edit, lipsync, upscale, trim, captions, transcribe…)."),
-  audio: ref.optional().describe("Input audio (lipsync, avatar, transcribe, separate-audio, mux)."),
-  voice_audio: ref.optional().describe("A recording of the voice to speak with (voice-cloning text to speech)."),
+  audio: ref.optional().describe("Input audio (lipsync, avatar, transcribe, separate-audio, mux; for voice-change the recording to re-voice)."),
+  background_audio: ref.optional().describe("Mux: a second track mixed under the audio — the background stem from separate-audio, or a music bed."),
+  voice_audio: ref.optional().describe("A recording of the voice to speak with (voice-cloning text to speech) or to change into (voice-change)."),
   aspect_ratio: z.string().optional().describe("e.g. 16:9, 9:16, 1:1 — one the model lists."),
   resolution: z.string().optional().describe("e.g. 1080p, 2K — one the model lists."),
   duration: z.number().optional().describe("Seconds, for video and music — one the model lists."),
@@ -264,7 +265,7 @@ const Job = z.object({
     .int()
     .optional()
     .describe(
-      "Index (0-based) of an earlier job in this same call whose result this job uses: it starts by itself when that job finishes. An image becomes the start frame or the image to edit, a video the input video, audio the soundtrack (or the voice to clone, for tts), text the prompt.",
+      "Index (0-based) of an earlier job in this same call whose result this job uses: it starts by itself when that job finishes. An image becomes the start frame or the image to edit, a video the input video, audio the soundtrack or the recording to re-voice (the voice to clone, for tts), text the prompt.",
     ),
   negative_prompt: z.string().optional(),
 });
@@ -292,6 +293,7 @@ function toRequest(j: JobInput): GenerationRequest {
     ...(j.end_image && { endImage: j.end_image }),
     ...(j.video && { video: j.video }),
     ...(j.audio && { audio: j.audio }),
+    ...(j.background_audio && { audio2: j.background_audio }),
     ...(j.voice_audio && { voiceAudio: j.voice_audio }),
   };
   const shots = j.shots && j.shots > 1 ? shotList(getModel(j.model_id), j.shots) : undefined;
@@ -324,7 +326,8 @@ function toRequest(j: JobInput): GenerationRequest {
 function slotFor(kind: MediaKind, op: Operation | undefined): ChainSlot {
   if (kind === "text") return { slot: "prompt" };
   if (kind === "video") return { slot: op === "concat" ? "videos" : "video" };
-  if (kind === "audio") return { slot: op === "tts" || op === "voice-change" ? "voiceAudio" : "audio" };
+  // tts clones the earlier audio's voice; voice-change re-voices the earlier audio (its target voice is voice_audio).
+  if (kind === "audio") return { slot: op === "tts" ? "voiceAudio" : "audio" };
   return { slot: "images", position: "first" };
 }
 
@@ -392,7 +395,9 @@ const generate = defineTool({
     "Start image, video, audio, text (transcribe, translate, write) or 3D generations, alone or chained with \"after\". The app shows the user the plan with its cost and runs it once they approve, so call this directly instead of asking for confirmation in text. Returns generation ids; their results appear in the chat by themselves.",
   schema: GenerateInput,
   gated: true,
-  strict: true,
+  // Not strict: the API allows 24 optional parameters across all strict tools in a request, and a
+  // job has more. Calls are validated with zod (validateInput / planFor / executeTool) instead, and
+  // a malformed one goes back to the model as an error it can fix.
   plan: ({ jobs }) => chainJobs(jobs.slice(0, 6)).map(plannedJob),
   async run({ jobs }) {
     const list = jobs.slice(0, 6);

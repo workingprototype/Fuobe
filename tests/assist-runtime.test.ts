@@ -78,7 +78,10 @@ describe("offline planner (U18)", () => {
     let v = agent.getThread(t.id)!;
     expect(v.thread.status).toBe("waiting");
     const said = v.thread.items.find((i) => i.role === "assistant") as { text: string };
-    expect(said.text).toContain(agent.OFFLINE_NOTE);
+    // A quiet line right under the plan card, not part of the reply.
+    expect(said.text).not.toContain(agent.OFFLINE_NOTE);
+    const at = v.thread.items.findIndex((i) => i.role === "approval");
+    expect(v.thread.items[at + 1]).toMatchObject({ role: "notice", tone: "info", text: agent.OFFLINE_NOTE });
     expect(agent.OFFLINE_NOTE).toBe("Offline planner — connect Claude or Ollama in Settings for better plans.");
     const card = v.thread.items.find((i) => i.role === "approval") as { jobs: { kind: string; op: string; error?: string }[] };
     expect(card.jobs.map((j) => [j.kind, j.op, j.error])).toEqual([
@@ -93,6 +96,20 @@ describe("offline planner (U18)", () => {
     expect(dependsOn(clip.id)).toBe(still.id);
     expect(clip.request.chain).toEqual([{ slot: "images", position: "first" }]);
     expect(clip.request.params?.shots).toHaveLength(3);
+    // The follow-up fits what ran: the chain ends in a video, which needs no animating.
+    const last = v.thread.items.filter((i) => i.role === "assistant").at(-1) as { text: string };
+    expect(last.text).toMatch(/another take/);
+    expect(last.text).not.toMatch(/animate/);
+  });
+
+  it("offers a text follow-up after a script, and notes itself under jobs it starts right away", async () => {
+    const t = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
+    agent.addMessage(t.id, "Write a 30-second voice-over script about cold brew");
+    await agent.run(t.id, agent.offline);
+    const v = agent.getThread(t.id)!;
+    const roles = v.thread.items.map((i) => i.role);
+    expect(roles.indexOf("notice")).toBe(roles.indexOf("generations") + 1);
+    expect((v.thread.items.at(-1) as { text: string }).text).toMatch(/shorter, in another tone, or voiced/);
   });
 });
 
@@ -177,6 +194,63 @@ describe("new kinds and operations in the tools", () => {
     const checked = await tools.executeTool("check_generations", { ids: [results[0].started[0]] }, { engine: "cloud" });
     const summary = JSON.parse((checked.content as { text: string }[])[0].text) as { outputs: { kind: string; text?: string; meta?: { demo?: boolean } }[] }[];
     expect(summary[0].outputs[0]).toMatchObject({ kind: "text", text: expect.stringMatching(/Demo/), meta: { demo: true } });
+  });
+
+  it("re-voices an earlier recording: voice-change takes it as the audio, tts clones it", () => {
+    const plan = tools.planFor(
+      "generate",
+      {
+        summary: "Voice-over, then another voice",
+        jobs: [
+          { model_id: "elevenlabs-v4", prompt: "Welcome to the studio" },
+          { model_id: "elevenlabs-voice-changer", op: "voice-change", prompt: "Same words, Roger's voice", voice: "CwhRBWXzGAHq8TQ4Fs17", after: 0 },
+          { model_id: "chatterbox-cloud", op: "tts", prompt: "And now in that voice", after: 0 },
+        ],
+      },
+      { engine: "cloud" },
+    );
+    expect(plan.jobs.map((j) => [j.op, j.error])).toEqual([
+      ["tts", undefined],
+      ["voice-change", undefined],
+      ["tts", undefined],
+    ]);
+  });
+
+  it("passes a background track to mux", async () => {
+    const out = await tools.executeTool(
+      "generate",
+      { summary: "Soundtrack", jobs: [{ model_id: "oss-mux", op: "mux", prompt: "Mix", video: "/api/files/a.mp4", audio: "/api/files/voice.wav", background_audio: "/api/files/bg.wav" }] },
+      { engine: "open" },
+    );
+    expect(out.isError, String(out.content)).toBeFalsy();
+    const [r] = JSON.parse(out.content as string) as { started: string[] }[];
+    expect(gens.getGeneration(r.started[0])!.request.inputs).toEqual({ video: "/api/files/a.mp4", audio: "/api/files/voice.wav", audio2: "/api/files/bg.wav" });
+  });
+
+  it("keeps strict tools within the API's limits for one request", () => {
+    // platform.claude.com structured outputs: ≤ 20 strict tools, ≤ 24 optional parameters and
+    // ≤ 16 union-typed parameters across all strict schemas in a request, nested ones included.
+    const strict = tools.apiTools().filter((t) => t.strict);
+    let optional = 0;
+    let unions = 0;
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node !== "object") return;
+      const n = node as { type?: unknown; properties?: Record<string, unknown>; required?: string[]; anyOf?: unknown; items?: unknown };
+      if (n.anyOf || Array.isArray(n.type)) unions++;
+      if (n.properties) {
+        optional += Object.keys(n.properties).filter((k) => !n.required?.includes(k)).length;
+        Object.values(n.properties).forEach(walk);
+      }
+      walk(n.items);
+      walk(n.anyOf);
+    };
+    strict.forEach((t) => walk(t.input_schema));
+    expect(strict.length).toBeLessThanOrEqual(20);
+    expect(optional).toBeLessThanOrEqual(24);
+    expect(unions).toBeLessThanOrEqual(16);
+    // generate is validated by zod instead (its jobs have more optional fields than the budget).
+    expect(strict.map((t) => t.name)).not.toContain("generate");
   });
 
   it("prices a chained plan and points out a bad 'after'", () => {

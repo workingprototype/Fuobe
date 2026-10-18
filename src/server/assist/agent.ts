@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, MUSIC_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import { type AssistItem, type AssistThread, type AssistThreadSummary, type AssistThreadView, threadTitle } from "@/lib/assist";
-import type { Engine, Generation } from "@/lib/catalog/types";
+import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { engineMode, getSetting } from "../settings";
@@ -391,18 +391,38 @@ export const offline: ModelCall = async ({ messages, ctx }) => {
   if (results.length && !said.trim()) {
     const body = results.map((r) => (typeof r.content === "string" ? r.content : "")).join(" ");
     if (results.some((r) => r.is_error)) return reply([text(/declined/i.test(body) ? "Okay, I won't run that. Tell me what to change." : `That didn't start: ${body.replace(/^.*"error":"([^"]+)".*$/, "$1")}`)], "end_turn");
-    return reply([text("On it — the results will appear here as they finish. Want variations, a different look, or to animate one?")], "end_turn");
+    return reply([text(`On it — the results will appear here as they finish. ${FOLLOW_UP[startedKind(body)]}`)], "end_turn");
   }
   const plan = offlinePlan(said, ctx.engine);
   if (!plan) return reply([text("Tell me what to make — an image, a video, a voice-over or a storyboard — and attach any photos to use.")], "end_turn");
+  // step() adds OFFLINE_NOTE as a quiet line under the plan card.
   return reply(
-    [text(`${plan.say}\n\n${OFFLINE_NOTE}`), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
+    [text(plan.say), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
     "tool_use",
   );
 };
 
 /** Under every offline plan: the rule-based planner is a fallback, not the assistant. */
 export const OFFLINE_NOTE = "Offline planner — connect Claude or Ollama in Settings for better plans.";
+
+/** What to offer next, by what was just started. */
+const FOLLOW_UP: Record<MediaKind, string> = {
+  image: "Want variations, a different look, or to animate one?",
+  video: "Want another take, a different camera move, or a longer cut?",
+  audio: "Want another voice, a different pace, or to put it on a video?",
+  text: "Want it shorter, in another tone, or voiced?",
+  model3d: "Want another take, or a model from a different photo?",
+};
+
+/** The kind of the last generation a tool result started (the end of a chain), image when unknown. */
+function startedKind(body: string): MediaKind {
+  const ids = [...body.matchAll(/"(?:started|id)":\s*\[?\s*"([\w-]+)"/g)].map((m) => m[1]);
+  for (const id of ids.reverse()) {
+    const g = getGeneration(id);
+    if (g) return g.kind;
+  }
+  return "image";
+}
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
 const NUM = "(\\d|one|two|three|four|five|six|seven|eight)";
@@ -567,6 +587,10 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
 
   const results: ToolResult[] = [];
   const gated: Pending["gated"] = [];
+  // The rule-based planner says so in a quiet line under its plan (or under the jobs it started).
+  const offlineNote = () => {
+    if (model === offline) push(s, { role: "notice", tone: "info", text: OFFLINE_NOTE });
+  };
   for (const u of uses) {
     if (getTool(u.name)?.gated && !s.thread.autoApprove) {
       // Malformed arguments (common from small local models) go straight back as an error the model can fix, not onto an approval card.
@@ -589,10 +613,12 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     const summaries = gated.map((g) => (g.input as { summary?: string }).summary).filter(Boolean);
     const total = plans.some((p) => p.total === null) ? null : plans.reduce((n, p) => n + (p.total ?? 0), 0);
     const item = push(s, { role: "approval", summary: summaries.join(" · ") || (gated[0].name === "create_storyboard" ? "Storyboard" : "Generate"), jobs, totalUsd: total, status: "pending" });
+    offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };
     s.thread.status = "waiting";
     return "stop";
   }
+  offlineNote();
   s.messages.push({ role: "user", content: ordered(results, order) });
   return "continue";
 }

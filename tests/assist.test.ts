@@ -40,7 +40,7 @@ const history = (id: string) => JSON.parse((db().prepare("SELECT messages_json F
 const job = { model_id: "nano-banana-pro", prompt: "a red fox in snow, golden hour" };
 
 describe("assist tools", () => {
-  it("sends closed, constraint-free schemas and strict gated tools", () => {
+  it("sends closed, constraint-free schemas, strict only where the API's strict budget allows", () => {
     const tools = apiTools();
     const json = JSON.stringify(tools);
     expect(json).not.toMatch(/"(maximum|minimum|maxItems|minLength|\$schema)"/);
@@ -54,7 +54,9 @@ describe("assist tools", () => {
     };
     tools.forEach((t) => walk(t.input_schema));
     expect(objects.every((o) => o.additionalProperties === false)).toBe(true);
-    expect(tools.find((t) => t.name === "generate")?.strict).toBe(true);
+    // generate has more optional fields than strict mode allows per request (zod validates it instead).
+    expect(tools.find((t) => t.name === "generate")?.strict).toBeUndefined();
+    expect(tools.find((t) => t.name === "create_storyboard")?.strict).toBe(true);
     expect(tools.find((t) => t.name === "search_models")?.strict).toBeUndefined();
   });
 });
