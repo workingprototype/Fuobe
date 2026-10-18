@@ -138,6 +138,44 @@ describe("round-3 open models", () => {
     expect(() => planGeneration({ feature: "captions", modelId: "oss-captions-burnin" }, getModel, getPreset)).toThrow(/video to caption/);
   });
 
+  it("asks for a model's own inputs before a job exists (style references, a named element, media to transcribe)", () => {
+    const plan = (r: Record<string, unknown>) => () => planGeneration({ feature: "image", ...r } as Parameters<typeof planGeneration>[0], getModel, getPreset);
+    for (const id of ["oss-style-qwen-edit", "oss-style-flux2-klein", "oss-style-krea2", "oss-style-uso"]) {
+      expect(plan({ modelId: id, prompt: "a lighthouse at dawn" }), id).toThrow(/style reference|moodboard/);
+      expect(plan({ modelId: id, prompt: "a lighthouse at dawn", inputs: { images: ["/board.png"] } })().op).toBe("t2i");
+    }
+    expect(plan({ modelId: "oss-qwen-layered-control", inputs: { images: ["/a.png"] } })).toThrow("Name the element to pull out, e.g. “the guitar”");
+    expect(plan({ modelId: "oss-qwen-layered-control", prompt: "the guitar", inputs: { images: ["/a.png"] } })().op).toBe("layers");
+    expect(plan({ modelId: "oss-qwen-layered", inputs: { images: ["/a.png"] } })().op).toBe("layers"); // the plain split needs no prompt
+    expect(plan({ modelId: "oss-qwen3-asr" })).toThrow("Add the video or audio to transcribe");
+    expect(plan({ modelId: "oss-qwen3-asr", inputs: { audio: "/a.wav" } })().op).toBe("transcribe");
+    expect(plan({ modelId: "oss-voice-separate" })).toThrow("Add the video or audio to separate");
+    expect(plan({ modelId: "oss-voice-separate", inputs: { video: "/v.mp4" } })().op).toBe("separate-audio");
+    expect(plan({ modelId: "oss-tryon-klein", prompt: "x", inputs: { images: ["/me.png"] } })).toThrow("Add a photo of the person, then the garment");
+  });
+
+  it("every open slider and control shows the value the workflow runs with when it is left alone", () => {
+    // Sliders and controls send params.extra only after a change, so their default must be the workflow's own.
+    const bound = (wid: string, key: string) => {
+      const t = workflowById.get(wid)?.bindings[key]?.[0];
+      if (!t) return undefined;
+      const graph = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui", workflowById.get(wid)!.file), "utf8"));
+      return graph[t.node]?.inputs[t.input];
+    };
+    const off: string[] = [];
+    for (const m of MODELS.filter((x) => x.engine === "open")) {
+      for (const r of m.routes.filter((x) => x.provider === "comfyui" && !x.endpoint.includes("{n}"))) {
+        const wf = workflowById.get(r.endpoint);
+        for (const c of [...(m.options.sliders ?? []), ...(m.options.controls ?? [])]) {
+          if (PROVIDER_PARAMS.has(c.param) || c.default === undefined || !wf?.bindings[c.param]) continue;
+          const runs = wf.defaults[c.param] ?? bound(r.endpoint, c.param);
+          if (runs !== undefined && String(runs) !== String(c.default)) off.push(`${m.id} ${c.param}: shows ${c.default}, runs ${runs}`);
+        }
+      }
+    }
+    expect(off).toEqual([]);
+  });
+
   it("runs Virtual Try-On on the try-on LoRA on the open engine", () => {
     const p = getPreset("app-virtual-try-on")!;
     expect(p.open).toMatchObject({ modelId: "oss-tryon-klein", op: "edit" });

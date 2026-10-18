@@ -286,6 +286,12 @@ export interface ModelOptions {
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
   /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
   controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /**
+   * What this model needs beyond its operation's own inputs, checked before a job is created (the
+   * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
+   * model whose operation is otherwise promptless.
+   */
+  requires?: { images?: number; prompt?: boolean; msg: string };
 }
 
 export interface Pricing {

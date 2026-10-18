@@ -182,6 +182,9 @@ export function planGeneration(
     throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
+  const requires = model.options.requires;
+  if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
+  if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (!prompt && !PROMPTLESS.has(op)) {
     throw new Error("Write a prompt first");
   }
@@ -198,7 +201,7 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
-const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; msg: string }>> = {
+const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; media?: boolean; msg: string }>> = {
   edit: { images: 1, msg: "Add an image to edit" },
   inpaint: { images: 1, mask: true, msg: "Add an image and paint the area to change" },
   outpaint: { images: 1, msg: "Add an image to extend" },
@@ -230,6 +233,9 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; video
   captions: { video: true, msg: "Add the video to caption" },
   layers: { images: 1, msg: "Add the image to split into layers" },
   "image-to-3d": { images: 1, msg: "Add a product or object photo" },
+  // media: a video or an audio track (speech tools read a video's soundtrack)
+  transcribe: { media: true, msg: "Add the video or audio to transcribe" },
+  "separate-audio": { media: true, msg: "Add the video or audio to separate" },
 };
 
 /** Human message for the first missing input of an operation, or null. */
@@ -243,6 +249,7 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   if (n.audio && !i.audio) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
   if (n.mask && !i.mask) return n.msg;
+  if (n.media && !i.video && !i.audio) return n.msg;
   return null;
 }
 

@@ -684,7 +684,7 @@ const open: ModelDef[] = [
     tagline: "Pulls the element you name (“the guitar”) onto its own layer · 24 GB GPU, 41 GB download · Apache-2.0",
     badges: ["new"],
     routes: [comfy("layers", "layers-qwen-image-layered-control", "prompt = the element to separate")],
-    options: { seed: true },
+    options: { seed: true, requires: { prompt: true, msg: "Name the element to pull out, e.g. “the guitar”" } },
   }),
   // Moodboards: generate in the look of reference images (op t2i with the references attached)
   o({
@@ -696,7 +696,7 @@ const open: ModelDef[] = [
     tagline: "A new image in the look of your moodboard (1–2 collages): palette, light, grain, mood · 24 GB GPU · Apache-2.0",
     badges: ["new", "top", "fast"],
     routes: [comfy("t2i", "style-ref-qwen-edit-2511", "Qwen-Image-Edit-2511 + Lightning, 4 steps")],
-    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true },
+    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true, requires: { images: 1, msg: "Add 1–2 moodboard images to take the style from" } },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
@@ -708,7 +708,7 @@ const open: ModelDef[] = [
     tagline: "Fast style transfer from up to 4 references, 4 steps · 10 GB GPU · Apache-2.0",
     badges: ["new", "fast"],
     routes: [comfy("t2i", "style-ref-flux2-klein-4b")],
-    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 4, seed: true },
+    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 4, seed: true, requires: { images: 1, msg: "Add 1–4 style reference images" } },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
@@ -720,7 +720,7 @@ const open: ModelDef[] = [
     tagline: "Trained for style reference (1–2 images) · 20 GB GPU · Krea 2 Community License: enterprise terms above its size limits",
     badges: ["new"],
     routes: [comfy("t2i", "style-ref-krea2", "Krea 2 Turbo + style_reference LoRA")],
-    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true },
+    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true, requires: { images: 1, msg: "Add 1–2 moodboard images to take the style from" } },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   o({
@@ -731,7 +731,7 @@ const open: ModelDef[] = [
     kind: "image",
     tagline: "Style-only reference on FLUX.1 [dev] · 20 GB GPU · non-commercial base model",
     routes: [comfy("t2i", "style-ref-uso-flux1")],
-    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true },
+    options: { aspectRatios: IMG_AR, resolutions: ["1K", "1.5K"], maxImages: 2, seed: true, requires: { images: 1, msg: "Add 1–2 moodboard images to take the style from" } },
     defaults: { aspectRatio: "1:1", resolution: "1K" },
   }),
   // Soul HEX: the palette in the prompt + a ColorTransfer lock to a swatch rendered from params.palette
@@ -896,7 +896,7 @@ const open: ModelDef[] = [
     vendor: "ComfyUI",
     family: "utility",
     kind: "video",
-    tagline: "Burns timed captions into the frames, keeping the sound · CPU or GPU, no model",
+    tagline: "Burns timed captions into the frames chunk by chunk, keeping the sound — any length in steady memory · CPU or GPU, no model",
     badges: ["new"],
     routes: [comfy("captions", "captions-burnin", "prompt = timed lines (“0.00-2.40: Hello”) or SRT, e.g. from Qwen3-ASR")],
     options: {
@@ -916,7 +916,7 @@ const open: ModelDef[] = [
     vendor: "OpenAI × yuvraj108c",
     family: "whisper",
     kind: "video",
-    tagline: "Transcribes and burns word-by-word captions in one job · 6 GB GPU · node pack is non-commercial",
+    tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack, installed only with NC_PACKS=1",
     routes: [comfy("captions", "captions-whisper-burnin", "Whisper large-v3-turbo + ComfyUI-Whisper (CC-BY-NC-SA code)")],
     options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }] },
   }),
@@ -948,11 +948,11 @@ const open: ModelDef[] = [
     vendor: "MeiGen",
     family: "infinitetalk",
     kind: "video",
-    tagline: "Re-syncs the lips (and head) of real footage to a new voice; camera and background stay · 24 GB GPU · Apache-2.0",
+    tagline: "Re-syncs the lips (and head) of real footage to a new voice, up to 40 s per job; camera and background stay · 24 GB GPU · Apache-2.0",
     badges: ["new"],
-    routes: [comfy("lipsync", "lipsync-v2v-infinitetalk", "video-to-video, 4 steps from step 2")],
-    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p"], seed: true, negativePrompt: true },
-    defaults: { aspectRatio: "16:9", resolution: "480p" },
+    routes: [comfy("lipsync", "lipsync-v2v-infinitetalk", "video-to-video, 4 steps from step 2; keeps the source's shape")],
+    options: { aspectRatios: ["auto", ...VID_AR], resolutions: ["480p", "720p"], seed: true, negativePrompt: true },
+    defaults: { aspectRatio: "auto", resolution: "480p" },
   }),
   o({
     id: "oss-latentsync",
@@ -971,7 +971,7 @@ const open: ModelDef[] = [
     vendor: "ComfyUI",
     family: "utility",
     kind: "video",
-    tagline: "Puts a new soundtrack on a video, optionally mixed over a background track · CPU",
+    tagline: "Puts a new soundtrack on a video, optionally mixed over a background track; the picture is copied untouched · CPU",
     routes: [comfy("mux", "video-mux-audio", "one track: video-mux-audio-replace; two: voice + background mix")],
     options: { sliders: [{ param: "backgroundVolumeDb", label: "Background level (dB)", min: -30, max: 6, step: 1, default: 0 }] },
   }),
@@ -1003,10 +1003,10 @@ const open: ModelDef[] = [
     vendor: "Black Forest Labs × xocialize",
     family: "flux",
     kind: "image",
-    tagline: "Dresses the person in image 1 in the top (image 2) and bottom (image 3) · 10 GB GPU · Apache-2.0",
+    tagline: "Dresses the person in image 1 in the garment in image 2 (a top, dress or outfit) and an optional bottom in image 3 · 10 GB GPU · Apache-2.0",
     badges: ["new", "fast"],
     routes: [comfy("edit", "tryon-flux2-klein-4b", "try-on LoRA; old outfit masked out first")],
-    options: { maxImages: 3, seed: true },
+    options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" } },
   }),
   // Cinema Studio grid and Soul Cast (used by those studios)
   o({
