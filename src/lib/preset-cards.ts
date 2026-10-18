@@ -167,6 +167,7 @@ export const FX = [
   "frame",
   "pop",
   "play",
+  "crack",
 ] as const;
 export type PreviewFx = (typeof FX)[number];
 
@@ -276,7 +277,10 @@ function keywordFx(n: string): PreviewFx | null {
   if (has(n, "freez", "frozen", "snow") || word(n, "ice")) return "ice";
   if (has(n, "air bending", "storm", "tornado", "smoke") || word(n, "wind", "air", "sand", "gas")) return "wind";
   if (has(n, "thunder", "lightning", "plasma", "atomic")) return "lightning";
-  if (has(n, "explo", "boom", "crush", "smash", "crack", "disintegrat", "head off", "boiling", "earth")) return "explode";
+  if (has(n, "crack", "shatter")) return "crack";
+  if (has(n, "disintegrat", "dissolv")) return "wind";
+  if (has(n, "head off")) return "glow";
+  if (has(n, "explo", "boom", "crush", "smash", "boiling", "earth")) return "explode";
   if (has(n, "glitch", "datamosh", "pixel", "censor", "x-ray", "visor", "lidar", "point cloud", "wireframe", "polygon")) return "glitch";
   if (has(n, "flare", "paparazzi", "flash")) return "flare";
   if (has(n, "bloom", "flower", "petal", "sakura", "garden", "floral") || word(n, "rose")) return "petals";
@@ -335,27 +339,44 @@ export function appFx(p: Pick<Preset, "id" | "name" | "category">): PreviewFx {
   return "pop";
 }
 
+/** A small stable hash (FNV-1a), for per-preset variety that is the same on the server and the client. */
+export function stableHash(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** One of `pool`, picked by the preset id: presets without telling words still differ from their neighbours. */
+function pick<T>(id: string | undefined, pool: readonly T[]): T {
+  return pool[id ? stableHash(id) % pool.length : 0];
+}
+
 /** Which bundled still a preset's preview runs on. */
-export function previewScene(p: Pick<Preset, "type" | "name" | "category">): PreviewScene {
+export function previewScene(p: Pick<Preset, "type" | "name" | "category"> & { id?: string }): PreviewScene {
   const n = p.name.toLowerCase();
   const c = p.category.toLowerCase();
   if (p.type === "motion") {
     if (has(n, "eyes", "mouth", "eating", "kiss", "snorricam", "head tracking", "rap flex", "selfie", "fisheye", "glam", "lazy susan", "intimate")) return "portrait";
     if (c.includes("drone") || has(n, "road", "car", "buckle", "robo", "hyperlapse")) return "city";
-    return "landscape";
+    if (has(n, "crane", "jib", "pedestal", "tilt", "aerial", "earth", "epic", "downhill")) return "landscape";
+    return pick(p.id, ["landscape", "city", "portrait", "product"] as const);
   }
   if (p.type === "app") {
     if (c === "product" || has(n, "product", "packshot", "ad ", "billboard", "unboxing")) return "product";
     if (has(n, "urban", "clipcut", "truck", "roller")) return "city";
     if (["identity", "fashion", "fun", "video"].includes(c) || has(n, "face", "portrait", "headshot", "hair", "makeup", "selfie")) return "portrait";
-    return "landscape";
+    return pick(p.id, ["landscape", "city", "portrait"] as const);
   }
   if (c === "commercial") return "product";
   if (has(n, "car", "building", "street", "city", "train", "helicopter", "road", "giant", "colossus", "concert", "tiny planet")) return "city";
   if (has(n, "fish", "ocean", "flood", "water", "sand", "earth", "nature", "garden", "northern", "timelapse", "planet")) return "landscape";
-  if (["destruction", "scale"].includes(c)) return "city";
-  if (["elements", "nature", "color grade", "transitions"].includes(c)) return "landscape";
-  return "portrait";
+  if (has(n, "head", "face", "eyes", "body", "hair", "skin", "tears", "mask")) return "portrait";
+  if (["destruction", "scale"].includes(c)) return pick(p.id, ["city", "landscape", "portrait"] as const);
+  if (["elements", "nature", "color grade", "transitions"].includes(c)) return pick(p.id, ["landscape", "city", "portrait"] as const);
+  return pick(p.id, ["portrait", "landscape", "city", "portrait"] as const);
 }
 
 export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
@@ -365,6 +386,15 @@ export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">)
     scene,
     ...(p.type === "motion" ? { move: motionMove(p) } : { fx: p.type === "effect" ? effectFx(p) : appFx(p) }),
   };
+}
+
+/**
+ * Whether a card shows its still mirrored, so neighbouring treatments on the same still differ.
+ * Never for camera moves (a pan left must still go left). Derived from the id on the client, so it
+ * costs nothing in the gallery payload.
+ */
+export function previewFlip(c: { id: string; preview: Pick<PresetPreview, "move"> }): boolean {
+  return !c.preview.move && ((stableHash(c.id) >>> 3) & 1) === 1;
 }
 
 /** The hue a preset's look was built from (`oklch(L C <hue>)`), for tinting its preview. */
@@ -394,6 +424,33 @@ export function toPresetCard(p: Preset): PresetCardData {
     open: !!p.open,
     preview: previewFor(p),
   };
+}
+
+/**
+ * A showcase row: one preset per category (its "top" one when it has one), in catalog order, so
+ * the row shows `n` different kinds of effect instead of the first category's six.
+ */
+export function homeEffects<T extends Pick<Preset, "category" | "badges">>(presets: T[], n: number): T[] {
+  const best = new Map<string, T>();
+  for (const p of presets) {
+    const cur = best.get(p.category);
+    if (!cur || (!cur.badges?.includes("top") && p.badges?.includes("top"))) best.set(p.category, p);
+  }
+  return [...best.values()].slice(0, n);
+}
+
+/**
+ * The "All" view of a gallery: categories taken in turn (first of each, then second of each…), so
+ * the first screen shows the range of the catalog instead of one category's near-identical cards.
+ * Stable: within a category the catalog order is kept.
+ */
+export function interleaveByCategory<T extends { category: string }>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) groups.set(it.category, [...(groups.get(it.category) ?? []), it]);
+  const lists = [...groups.values()];
+  const out: T[] = [];
+  for (let i = 0; out.length < items.length; i++) for (const l of lists) if (i < l.length) out.push(l[i]);
+  return out;
 }
 
 /** Lower-cased text a gallery search matches against. */

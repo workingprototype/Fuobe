@@ -1,7 +1,7 @@
 "use client";
 
 import { Cloud, Cpu, Info, Search } from "lucide-react";
-import { memo, useDeferredValue, useMemo, useState } from "react";
+import { memo, useDeferredValue, useMemo, useRef, useState } from "react";
 import { useProgressive } from "@/components/use-progressive";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngine } from "@/lib/api";
@@ -105,7 +105,8 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
     [index, engine, kind, term],
   );
   // 40 rows in the page's HTML, the rest as you scroll.
-  const { shown, hasMore, more, sentinel, left } = useProgressive(list.length, `${engine}|${kind}|${term}`, 40, 60);
+  const { shown, hasMore, moreFrom, sentinel, left } = useProgressive(list.length, `${engine}|${kind}|${term}`, 40, 60);
+  const rows = useRef<HTMLTableSectionElement>(null);
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -150,7 +151,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody ref={rows} className="divide-y">
             {list.slice(0, shown).map((m) => (
               <Row key={m.id} m={m} />
             ))}
@@ -161,7 +162,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
             <button
               ref={sentinel}
               type="button"
-              onClick={more}
+              onClick={(e) => moreFrom(e, rows.current)}
               className="h-9 rounded-full border bg-background px-4 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               Show more · {left} left

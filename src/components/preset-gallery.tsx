@@ -3,16 +3,13 @@
 import Link from "next/link";
 import { Cloud, Cpu, Lock, Search, Sparkles, X } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { PageHeader } from "@/components/page-shell";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import { GALLERY_GRID } from "@/components/skeletons";
 import { useProgressive } from "@/components/use-progressive";
 import { useEngineMode } from "@/lib/api";
-import { searchText, type PresetCardData } from "@/lib/preset-cards";
+import { interleaveByCategory, previewFlip, searchText, type PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
-
-export { PageHeader };
 
 /** A tiny label shown on hover/focus (CSS only: a gallery has hundreds of these). */
 function EngineChip({ engine }: { engine: "cloud" | "open" }) {
@@ -31,7 +28,18 @@ function EngineChip({ engine }: { engine: "cloud" | "open" }) {
   );
 }
 
-export const PresetCard = memo(function PresetCard({ preset, href, compact }: { preset: PresetCardData; href: string; compact?: boolean }) {
+export const PresetCard = memo(function PresetCard({
+  preset,
+  href,
+  compact,
+  engine,
+}: {
+  preset: PresetCardData;
+  href: string;
+  compact?: boolean;
+  /** Settings → Engine mode: with one engine locked in, the other's chip would suggest a route the user turned off. */
+  engine?: "cloud" | "open";
+}) {
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
   const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
   return (
@@ -42,14 +50,14 @@ export const PresetCard = memo(function PresetCard({ preset, href, compact }: { 
       className="group/card flex min-w-0 flex-col gap-2 rounded-xl p-1.5 transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-muted">
-        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} />
+        <PresetPreview preview={preset.preview} hue={preset.hue} playing={playing} flip={previewFlip(preset)} />
         <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
         <span className="pointer-events-none absolute bottom-1.5 left-1.5 grid size-6 place-items-center rounded-md bg-black/30 text-white">
           <Icon className="size-3.5" />
         </span>
         <span className="pointer-events-none absolute right-1.5 bottom-1.5 flex gap-1">
-          {preset.cloud && <EngineChip engine="cloud" />}
-          {preset.open && <EngineChip engine="open" />}
+          {preset.cloud && engine !== "open" && <EngineChip engine="cloud" />}
+          {preset.open && engine !== "cloud" && <EngineChip engine="open" />}
         </span>
         {preset.top && (
           <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-highlight px-1 text-[10px] font-semibold text-highlight-foreground">Popular</span>
@@ -171,16 +179,21 @@ export function PresetGallery({
   const query = useDeferredValue(q.trim().toLowerCase());
 
   const index = useMemo(() => presets.map((p) => [p, searchText(p)] as const), [presets]);
+  // Unfiltered, the categories take turns, so the first screen shows the range of the catalog.
+  const mixed = useMemo(() => interleaveByCategory(presets), [presets]);
   const cats = useMemo(() => ["All", ...new Set(presets.map((p) => p.category))], [presets]);
   const list = useMemo(
     () =>
-      index
-        .filter(([p, text]) => (cat === "All" || p.category === cat) && (!query || text.includes(query)) && (runsOn === "all" || p[runsOn]))
-        .map(([p]) => p),
-    [index, cat, query, runsOn],
+      cat === "All" && !query
+        ? mixed.filter((p) => runsOn === "all" || p[runsOn])
+        : index
+            .filter(([p, text]) => (cat === "All" || p.category === cat) && (!query || text.includes(query)) && (runsOn === "all" || p[runsOn]))
+            .map(([p]) => p),
+    [index, mixed, cat, query, runsOn],
   );
   // Cards render a page at a time; a new filter starts from the first page again.
-  const { shown, hasMore, more, sentinel, left } = useProgressive(list.length, `${cat}|${query}|${runsOn}`, FIRST_PAGE, PAGE);
+  const { shown, hasMore, moreFrom, sentinel, left } = useProgressive(list.length, `${cat}|${query}|${runsOn}`, FIRST_PAGE, PAGE);
+  const grid = useRef<HTMLDivElement>(null);
 
   const strip = useFadeEdges<HTMLDivElement>();
   const stale = q.trim().toLowerCase() !== query;
@@ -244,9 +257,9 @@ export function PresetGallery({
       </div>
       {list.length ? (
         <>
-          <div className={cn(GRID, "transition-opacity", stale && "opacity-70")}>
+          <div ref={grid} className={cn(GRID, "transition-opacity", stale && "opacity-70")}>
             {list.slice(0, shown).map((p) => (
-              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} />
+              <PresetCard key={p.id} preset={p} href={href.replace("{id}", p.id)} engine={locked} />
             ))}
           </div>
           {hasMore && (
@@ -254,7 +267,7 @@ export function PresetGallery({
               <button
                 ref={sentinel}
                 type="button"
-                onClick={more}
+                onClick={(e) => moreFrom(e, grid.current)}
                 className="h-9 rounded-full border bg-background px-4 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 Show more · {left} left

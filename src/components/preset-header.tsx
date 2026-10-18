@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 import { PresetPreview } from "@/components/preset-preview";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Preset } from "@/lib/catalog/types";
-import { presetHowTo, presetRouteLines, toPresetCard } from "@/lib/preset-cards";
+import { presetHowTo, presetRouteLines, previewFlip, toPresetCard } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
 
 const REDUCED = "(prefers-reduced-motion: reduce)";
@@ -49,7 +49,7 @@ export function PresetHeader({
   return (
     <div className={cn("mx-auto flex w-full max-w-[760px] items-center gap-3 rounded-2xl border bg-background p-2 pr-3 text-left shadow-soft", className)}>
       <div className="relative aspect-[4/3] w-24 shrink-0 overflow-hidden rounded-xl bg-muted sm:w-32">
-        <PresetPreview preview={card.preview} hue={card.hue} playing={!reduced} />
+        <PresetPreview preview={card.preview} hue={card.hue} playing={!reduced} flip={previewFlip(card)} />
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate font-heading text-[19px] leading-snug">{preset.name}</p>

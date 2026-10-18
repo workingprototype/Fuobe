@@ -14,78 +14,11 @@ import {
   type PreviewLayer,
   type PreviewScene,
 } from "@/lib/preset-cards";
+import { glyphFor } from "@/lib/move-glyphs";
+import { browserPlaybackEnv, createPlaybackStore } from "@/lib/preview-playback";
 
-/*
- * Which preview plays. One at a time everywhere: the hovered or focused card on devices that can
- * hover, otherwise the card nearest the middle of the screen while it's mostly in view (phones).
- * Nothing plays when the user prefers reduced motion.
- */
-type Listener = () => void;
-const listeners = new Set<Listener>();
-let active: string | null = null;
-const emit = () => listeners.forEach((l) => l());
-const subscribe = (l: Listener) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
-
-function setActive(id: string | null) {
-  if (active === id) return;
-  active = id;
-  emit();
-}
-
-const mq = (q: string) => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(q).matches;
-const canHover = () => mq("(hover: hover) and (pointer: fine)");
-const reducedMotion = () => mq("(prefers-reduced-motion: reduce)");
-
-/** Touch devices: the most visible card closest to the viewport's middle plays. */
-const watched = new Map<Element, string>();
-const ratios = new Map<Element, number>();
-let observer: IntersectionObserver | null = null;
-let raf = 0;
-
-function pickCentered() {
-  raf = 0;
-  const mid = window.innerHeight / 2;
-  let best: string | null = null;
-  let bestDist = Infinity;
-  for (const [el, ratio] of ratios) {
-    if (ratio < 0.6) continue;
-    const r = el.getBoundingClientRect();
-    const dist = Math.abs(r.top + r.height / 2 - mid);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = watched.get(el) ?? null;
-    }
-  }
-  setActive(best);
-}
-
-const onScroll = () => {
-  raf ||= requestAnimationFrame(pickCentered);
-};
-
-function watch(el: Element, id: string) {
-  if (typeof IntersectionObserver === "undefined") return () => {};
-  observer ??= new IntersectionObserver(
-    (entries) => {
-      for (const e of entries) ratios.set(e.target, e.isIntersecting ? e.intersectionRatio : 0);
-      raf ||= requestAnimationFrame(pickCentered);
-    },
-    { threshold: [0, 0.6, 0.85, 1] },
-  );
-  if (!watched.size) window.addEventListener("scroll", onScroll, { passive: true, capture: true });
-  watched.set(el, id);
-  observer.observe(el);
-  return () => {
-    observer?.unobserve(el);
-    watched.delete(el);
-    ratios.delete(el);
-    if (!watched.size) window.removeEventListener("scroll", onScroll, { capture: true });
-    if (active === id) setActive(null);
-  };
-}
+/** One preview plays at a time (rules in lib/preview-playback.ts). */
+const store = createPlaybackStore(browserPlaybackEnv);
 
 /**
  * Wire a card element to the playback store. Returns whether its preview should play and the
@@ -94,27 +27,18 @@ function watch(el: Element, id: string) {
 export function usePreviewPlayback<T extends HTMLElement>(id: string) {
   const ref = useRef<T | null>(null);
   const playing = useSyncExternalStore(
-    subscribe,
-    () => active === id,
+    store.subscribe,
+    () => store.isActive(id),
     () => false,
   );
   useEffect(() => {
     const el = ref.current;
-    if (!el || canHover() || reducedMotion()) return;
-    return watch(el, id);
+    if (!el || store.canHover() || store.reducedMotion()) return;
+    return store.watch(el, id);
   }, [id]);
-  useEffect(
-    () => () => {
-      if (active === id) setActive(null);
-    },
-    [id],
-  );
-  const on = () => {
-    if (!reducedMotion()) setActive(id);
-  };
-  const off = () => {
-    if (active === id) setActive(null);
-  };
+  useEffect(() => () => store.stop(id), [id]);
+  const on = () => store.play(id);
+  const off = () => store.stop(id);
   return {
     ref,
     playing,
@@ -302,6 +226,16 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
           <i className="pv-play" />
         </>
       );
+    case "crack":
+      return (
+        <>
+          <svg className="pv-crack" viewBox="0 0 100 75" preserveAspectRatio="none" aria-hidden>
+            <path d="M62 30 L69 22 L77 23 L86 10 L93 7 M62 30 L73 35 L86 33 L100 41 M62 30 L64 43 L58 54 L61 75 M62 30 L51 31 L41 25 L23 27 L0 19 M62 30 L53 41 L45 48 L31 62 L24 75 M62 30 L60 17 L54 7 L56 0 M77 23 L80 31 M51 31 L49 40 M58 54 L50 58" />
+            <circle cx="62" cy="30" r="2.2" />
+          </svg>
+          <i className="pv-flash" />
+        </>
+      );
     case "pop":
     default:
       return <Sparks n={6} />;
@@ -314,7 +248,18 @@ function Fx({ fx, scene }: { fx: NonNullable<Preview["fx"]>; scene: PreviewScene
  * At rest it shows the poster frame (and the treatment's still frame); `playing` runs it. The depth
  * layers a camera move needs are only mounted once the card first plays.
  */
-export const PresetPreview = memo(function PresetPreview({ preview, hue, playing }: { preview: Preview; hue: number; playing: boolean }) {
+export const PresetPreview = memo(function PresetPreview({
+  preview,
+  hue,
+  playing,
+  flip,
+}: {
+  preview: Preview;
+  hue: number;
+  playing: boolean;
+  /** Mirror the still (see previewFlip). */
+  flip?: boolean;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const [armed, setArmed] = useState(false);
   if (playing && !armed) setArmed(true);
@@ -344,6 +289,7 @@ export const PresetPreview = memo(function PresetPreview({ preview, hue, playing
     );
 
   const spec: MoveSpec | undefined = preview.move ? CAMERA_MOVES[preview.move] : undefined;
+  const glyph = preview.move ? glyphFor(preview.move) : undefined;
   const style = { "--pv-hue": hue, ...(spec ? moveVars(spec) : {}) } as React.CSSProperties;
   return (
     <div
@@ -354,18 +300,27 @@ export const PresetPreview = memo(function PresetPreview({ preview, hue, playing
       data-stage={spec?.stage}
       data-through={spec?.through || undefined}
       data-fx={preview.fx}
+      data-flip={flip || undefined}
       aria-hidden
     >
       <div className="pv-cam">
         <div className="pv-shake">
           {/* The poster stays underneath, so nothing flashes while the layers load. */}
-          <Dup src={preview.poster} className="pv-poster" />
+          {/* A camera move's poster rests partway into the move (the subject layer's transform). */}
+          {spec ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={preview.poster} alt="" draggable={false} decoding="async" className="pv-img pv-poster pv-layer" style={layerVars("subject")} />
+          ) : (
+            <Dup src={preview.poster} className="pv-poster" />
+          )}
           {spec &&
             armed &&
             PREVIEW_LAYERS.map((l) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img key={l} src={sceneLayer(preview.scene, l)} alt="" draggable={false} decoding="async" className={`pv-img pv-layer pv-l-${l}`} style={layerVars(l)} />
             ))}
+          {/* The preset's hue recolors the still only; the treatment keeps its own colors. */}
+          <i className="pv-tint" />
           {preview.fx && (
             <div className="pv-fx">
               <Fx fx={preview.fx} scene={preview.scene} />
@@ -373,7 +328,13 @@ export const PresetPreview = memo(function PresetPreview({ preview, hue, playing
           )}
         </div>
       </div>
-      <i className="pv-tint" />
+      {glyph && (
+        <svg className="pv-glyph" viewBox="0 0 48 36" aria-hidden>
+          {glyph.map((part, i) => (
+            <path key={i} d={part.d} data-dashed={part.dashed || undefined} />
+          ))}
+        </svg>
+      )}
     </div>
   );
 });
