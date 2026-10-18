@@ -37,7 +37,13 @@ function FromImages({ files, setFiles, onSaved }: { files: File[]; setFiles: (f:
   const [saving, setSaving] = useState(false);
   const { create } = usePaletteActions();
   const urls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
-  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  // Previews of a replaced list are released (not on unmount: React's dev double-mount would revoke the live ones).
+  const shown = useRef<string[]>([]);
+  useEffect(() => {
+    const old = shown.current;
+    shown.current = urls;
+    if (old !== urls) old.forEach((u) => URL.revokeObjectURL(u));
+  }, [urls]);
   useEffect(() => {
     if (!files.length) return;
     let live = true;

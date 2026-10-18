@@ -434,10 +434,10 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       const collages = mb.collages?.length ? mb.collages : refs.slice(0, 2);
       if (model.engine === "cloud") {
         if (model.family === "recraft" && mb.styleId) {
-          move(SIGNATURE_MODELS.recraftSaved, `Runs on {model} with “${mb.name}”'s saved Recraft style`);
+          move(SIGNATURE_MODELS.recraftSaved, `Runs on {model} with the saved “${mb.name}” Recraft style`);
           r = { ...r, params: { ...r.params, styleId: mb.styleId } };
         } else if (model.family === "recraft") {
-          move(SIGNATURE_MODELS.recraftStyle, `Runs on {model}, styled by “${mb.name}”'s images`);
+          move(SIGNATURE_MODELS.recraftStyle, `Runs on {model}, styled by the “${mb.name}” images`);
           r = { ...r, op: "edit", inputs: { ...r.inputs, images: refs.slice(0, 10) } };
         } else {
           let budget = Math.min(refBudget(model, existing), 6);
@@ -450,10 +450,10 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
           r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...(r.inputs?.images ?? []), ...take] }, prompt: join(r.prompt, styleLegend(existing + 1, existing + take.length)) };
         }
       } else if (mb.loraHandle && (model.id === SIGNATURE_MODELS.openTurbo || model.family !== "style-reference")) {
-        move(SIGNATURE_MODELS.openTurbo, `Runs on {model} with “${mb.name}”'s trained style LoRA`);
+        move(SIGNATURE_MODELS.openTurbo, `Runs on {model} with the trained “${mb.name}” style LoRA`);
         r = { ...r, prompt: join(r.prompt, `In the style of @${mb.loraHandle}.`) };
       } else {
-        if (model.family !== "style-reference") move(SIGNATURE_MODELS.openStyle, `Runs on {model} with “${mb.name}”'s collages`);
+        if (model.family !== "style-reference") move(SIGNATURE_MODELS.openStyle, `Runs on {model} with the “${mb.name}” collages`);
         const max = model.options.maxImages ?? 2;
         const pool = max >= 4 ? refs : collages;
         const take = pool.slice(0, Math.max(0, max - existing));

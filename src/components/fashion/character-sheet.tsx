@@ -141,7 +141,8 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
   const [over, setOver] = useState(false);
   const run = useRun<Record<string, unknown>>("/api/photodump/character");
   const { data } = useGenerations({ features: ["character-sheet", "app:app-ai-influencer"], limit: 60 });
-  const mine = useMemo(() => (data ?? []).filter((g) => ids.includes(g.id)), [data, ids]);
+  // This visit's sheets; after a reload, the most recent ones.
+  const mine = useMemo(() => (ids.length ? (data ?? []).filter((g) => ids.includes(g.id)) : (data ?? []).slice(0, 2)), [data, ids]);
   const latest = mine.find((g) => g.status === "succeeded");
 
   const uploading = photos.some((p) => p.uploading);
@@ -263,6 +264,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
         <section className="min-w-0 space-y-3" aria-label="Your sheets">
           {mine.length ? (
             <>
+              {!ids.length && <p className="text-[13px] font-medium text-muted-foreground">Recent sheets</p>}
               <ResultsGrid items={mine} ratio={16 / 9} className="sm:grid-cols-1 lg:grid-cols-1" />
               {latest && (
                 <SaveCharacter

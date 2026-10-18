@@ -245,7 +245,7 @@ export function FashionView() {
                 ))}
               </div>
             )}
-            <RunLine preview={outfitBody && !s.outfit ? preview.data : undefined} loading={preview.isFetching} />
+            <RunLine preview={outfitBody && !s.outfit ? preview.data : undefined} loading={!s.outfit && preview.isFetching} />
             <Button className="w-full" variant={s.outfitIds.length ? "outline" : "default"} onClick={startOutfit} disabled={outfit.isPending}>
               {outfit.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} {outfit.isPending ? "Generating..." : "Generate outfit"}
             </Button>

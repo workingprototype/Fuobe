@@ -23,8 +23,8 @@ export function StatusBadge({ status, className }: { status: MoodboardStatus; cl
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center gap-1 rounded-full px-2 text-[11px] font-medium",
-        status === "complete" ? "bg-success/15 text-success" : status === "failed" ? "bg-destructive/10 text-destructive" : "bg-background/90 text-foreground",
+        "inline-flex h-5 items-center gap-1 rounded-full bg-background/95 px-2 text-[11px] font-medium shadow-soft",
+        status === "complete" ? "text-success" : status === "failed" ? "text-destructive" : "text-foreground",
         className,
       )}
     >

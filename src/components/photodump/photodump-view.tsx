@@ -210,7 +210,7 @@ export function PhotodumpView() {
                 </button>
               ))}
             </div>
-            <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border bg-background px-3 focus-within:border-primary sm:max-w-xs">
+            <label className="flex h-9 w-full min-w-0 items-center gap-2 rounded-full border bg-background px-3 focus-within:border-primary sm:w-auto sm:max-w-xs sm:flex-1">
               <Search className="size-4 text-muted-foreground" />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search packs" aria-label="Search packs" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
             </label>
@@ -320,7 +320,7 @@ export function PhotodumpView() {
           </div>
           <aside className="space-y-5 rounded-2xl border p-4 lg:sticky lg:top-6 lg:self-start">
             <div className="flex items-center gap-3">
-              <PackCover id={pack.id} name="" count={pack.count} refs={pack.refs} className="size-14 shrink-0 rounded-lg" />
+              <PackCover id={pack.id} name={pack.name} count={pack.count} refs={pack.refs} bare className="size-14 shrink-0 rounded-lg" />
               <div className="min-w-0">
                 <p className="truncate text-[14px] font-medium">{pack.name}</p>
                 <p className="text-[12px] text-muted-foreground">{pack.count} photos</p>

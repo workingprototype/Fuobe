@@ -290,7 +290,7 @@ describe("Photodump packs and planning", () => {
   it("builds per-photo prompts: @mention for a character, image 1 for a selfie, the reference photo in user packs", () => {
     const pack = getPack("zen")!;
     expect(shotPrompt(pack, pack.shots[0], maya)).toMatch(/^A photo of @Maya, seated cross-legged/);
-    expect(shotPrompt(pack, pack.shots[0], selfie)).toMatch(/^A photo of The person in image 1, .*Keep their exact face/);
+    expect(shotPrompt(pack, pack.shots[0], selfie)).toMatch(/^A photo of the person in image 1, .*Keep their exact face/);
     const mine = customPack({ id: "user-1", name: "Mine", refs: ["/api/files/uploads/a.png", "/api/files/uploads/b.png"] });
     expect(mine.count).toBe(2);
     expect(shotPrompt(mine, mine.shots[0], selfie, 2)).toMatch(/^The person in image 1 recreated in image 2: .*Replace the person in image 2/);

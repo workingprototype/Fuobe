@@ -185,9 +185,9 @@ export function MoodboardsView() {
             </button>
           ))}
         </div>
-        <label className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-full border bg-background px-3 focus-within:border-primary sm:max-w-xs">
+        <label className="flex h-9 w-full min-w-0 items-center gap-2 rounded-full border bg-background px-3 focus-within:border-primary sm:w-auto sm:max-w-xs sm:flex-1">
           <Search className="size-4 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search presets..." aria-label="Search moodboards" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search moodboards..." aria-label="Search moodboards" className="min-w-0 flex-1 bg-transparent text-[13px] outline-none" />
         </label>
       </div>
 

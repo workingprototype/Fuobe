@@ -403,10 +403,11 @@ const KEEP_FACE = "Keep their exact face, identity, skin tone and hair; a new ph
 
 /** One photo's prompt for a subject: an @mention for saved characters, image 1 for a selfie. */
 export function shotPrompt(pack: Pick<Pack, "look" | "custom">, shot: string, subject: PhotoSubject, refIndex?: number): string {
-  const who = subject.kind === "element" ? `@${subject.handle}` : "The person in image 1";
+  const who = subject.kind === "element" ? `@${subject.handle}` : "the person in image 1";
   const look = pack.look ? ` ${pack.look}.` : "";
   if (pack.custom && refIndex) {
-    return `${who} recreated in image ${refIndex}: ${shot}. Replace the person in image ${refIndex} with them. ${KEEP_FACE}.${look}`.trim();
+    const lead = who.charAt(0).toUpperCase() + who.slice(1);
+    return `${lead} recreated in image ${refIndex}: ${shot}. Replace the person in image ${refIndex} with them. ${KEEP_FACE}.${look}`.trim();
   }
   return `A photo of ${who}, ${shot}.${look}${subject.kind === "selfie" ? ` ${KEEP_FACE}.` : ""}`;
 }
