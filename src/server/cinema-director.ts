@@ -195,7 +195,56 @@ function beats(text: string, want?: number): { beat: string; frame?: number }[] 
   return order.map((frame) => ({ beat: `${idea}, ${(ad ? AD_BEATS : STORY_BEATS)[frame]}`, frame }));
 }
 
+/** "Which lens should I use for a close-up?" — a question to answer, not an idea to storyboard. */
+export function isQuestion(text: string): boolean {
+  const t = text.trim();
+  if (t.includes("\n") || /\b(storyboard|shot list|break (it |this )?down|\d+[- ]?shots?)\b/i.test(t)) return false;
+  // Requests ("Can you write a script about…?") and ideas ("What if a cat ran a bakery?") get the breakdown.
+  if (/^(please\s+)?(can|could|would|will) you\s+(please\s+)?(write|make|create|generate|give|break|turn|draft|plan|storyboard|shoot|direct)\b/i.test(t) || /^(what if|how about)\b/i.test(t)) return false;
+  return /\?\s*$/.test(t) || /^(what|which|how|why|when|where|should|shall|can|could|would|is|are|does|do)\b/i.test(t);
+}
+
+const TIPS: { when: RegExp; tip: string }[] = [
+  {
+    when: /\b(lens|focal|mm\b|close[- ]?up|portrait|wide angle|telephoto)/i,
+    tip: "For a close-up, 85mm flatters faces and softens the background; 50mm feels natural, like the eye; 24–35mm keeps the room in frame for wides and movement. Pick it under Camera → Focal length — an anamorphic lens adds the oval bokeh and flares.",
+  },
+  {
+    when: /\b(light|lighting|lit|shadow|exposure|backlight|silhouette)/i,
+    tip: "Start from the story's mood: Window light for soft, honest drama; Practicals (lamps, neon, candles in frame) for night interiors; Contre-jour for a backlit, hopeful glow; Silhouette or hard top light for menace. Set it under Lighting, or build your own two-light rig.",
+  },
+  {
+    when: /\b(move|movement|camera move|dolly|pan|tilt|crane|tracking|handheld|orbit|zoom)/i,
+    tip: "Move with intent: a slow dolly-in builds tension or intimacy, tracking follows action, a crane reveals the world, a static shot lets the acting breathe. Type # in the prompt to add moves — chain two at most per shot.",
+  },
+  {
+    when: /\b(colou?r|palette|grade|tone|look)\b/i,
+    tip: "A palette carries the genre: teal and amber for modern thrillers, desaturated steel for war and horror, warm pastels for romance. Pick one under Palette (or pull one from a frame you like) — on the open engine, Palette lock grades every take to it.",
+  },
+  {
+    when: /\b(aperture|depth of field|bokeh|f\/?\d|blur)/i,
+    tip: "Open the aperture (f/1.4–f/2) to isolate a face against a soft background; stop down (f/8 and up) to keep a whole room sharp. Set it under Camera → Aperture.",
+  },
+  {
+    when: /\b(how long|duration|seconds|length|pacing|tempo|cut)/i,
+    tip: "Most shots land at 4–8 seconds: shorter for action and commercials, longer for dialogue and mood. Tempo in Film setup decides how fast the cuts come; Extend makes a take longer without losing continuity.",
+  },
+];
+
+/** A short, practical answer to a craft question, without a storyboard. */
+function answerQuestion(text: string): string {
+  const tip = TIPS.find((x) => x.when.test(text))?.tip;
+  return (
+    tip ??
+    "Tell me the scene and the feeling you're after and I'll suggest the camera, lens, light and palette — or ask for a storyboard (“break this into 6 shots”) and I'll write the shots for you."
+  );
+}
+
+/** "an action look", "a noir look". */
+const article = (word: string) => (/^[aeiou]/i.test(word) ? "an" : "a");
+
 export function offlineDirector(text: string, project: Pick<CinemaProject, "brief" | "director">): { reply: string; shots: DirectorShot[]; brief?: string } {
+  if (isQuestion(text)) return { reply: answerQuestion(text), shots: [] };
   const t = `${text} ${project.brief.body}`;
   if (/\bbrief\b/i.test(text) && !/\bshots?\b|storyboard|script/i.test(text)) {
     const look = guessLook(t, project.director);
@@ -230,10 +279,19 @@ export function offlineDirector(text: string, project: Pick<CinemaProject, "brie
       settings: { ...look, focal: project.director.focal ?? f.focal },
     };
   });
+  const genre = look.genre ? GENRES.find((g) => g.slug === look.genre)?.name.toLowerCase() : undefined;
   return {
-    reply: `Here's a ${shots.length}-shot breakdown${look.genre ? ` with a ${GENRES.find((g) => g.slug === look.genre)?.name.toLowerCase()} look` : ""}. Load a shot into the prompt bar to review it — nothing renders until you press Generate.`,
+    reply: `Here's a ${shots.length}-shot breakdown${genre ? ` with ${article(genre)} ${genre} look` : ""}. Load a shot into the prompt bar to review it — nothing renders until you press Generate.`,
     shots,
   };
+}
+
+/** An LLM's plain-text answer, without code fences, trimmed to a chat message. */
+export function prose(raw: string): string {
+  return raw
+    .replace(/```[a-z]*\n?/gi, "")
+    .trim()
+    .slice(0, 4000);
 }
 
 function settingsLine(s: DirectorSettings): string {
@@ -256,9 +314,15 @@ export async function askDirector(projectId: string, text: string): Promise<Dire
   ]
     .filter(Boolean)
     .join("\n\n");
-  const raw = await llmText(SYSTEM, context).catch(() => null);
+  const raw = (await llmText(SYSTEM, context).catch(() => null))?.trim() || null;
   const parsed = raw ? parseDirectorAnswer(raw) : null;
-  const answer = parsed && (parsed.reply || parsed.shots.length || parsed.brief) ? { ...parsed, source: "llm" as const } : { ...offlineDirector(user.text, project), source: "offline" as const };
+  const answer =
+    parsed && (parsed.reply || parsed.shots.length || parsed.brief)
+      ? { ...parsed, source: "llm" as const }
+      : raw && !parsed
+        ? // The model answered in prose (no JSON): that's still its answer.
+          { reply: prose(raw), shots: [], source: "llm" as const }
+        : { ...offlineDirector(user.text, project), source: "offline" as const };
   const reply: DirectorMessage = {
     id: nanoid(8),
     role: "assistant",

@@ -1,9 +1,11 @@
 import "server-only";
 import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
 import type { CinemaFolder, CinemaItem, CinemaProject, CinemaTakeInfo, CinemaTile, DirectorMessage, DirectorSettings } from "@/lib/catalog/cinema";
-import type { Generation } from "@/lib/catalog/types";
+import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { db } from "./db";
-import { createGenerations, deleteGeneration, getGeneration, listGenerations } from "./generations";
+import { createGenerations, getGeneration, listGenerations, previewChained, previewGeneration, toGeneration } from "./generations";
+import { trashGenerations } from "./library";
 
 /**
  * Cinema Studio projects: Director settings, brief and AI Director chat per project, nested folders
@@ -90,8 +92,20 @@ const toFolder = (r: FolderRow): CinemaFolder => ({
   updatedAt: r.updated_at,
 });
 
+/** What a project keeps per take besides its folder (cinema_items.meta_json). */
+interface ItemMeta {
+  tiles?: CinemaTile[];
+  take?: CinemaTakeInfo;
+  /** Estimated cost when the take was made: still counted once the generation is deleted for good. */
+  cost?: number;
+  /** A chained step's request before its inputs were filled in, so Retry can run it against its dependencies again. */
+  req?: GenerationRequest;
+  /** Taken out of the project: hidden, but kept so what it cost still counts toward the cap. */
+  removed?: boolean;
+}
+
 const toItem = (r: ItemRow): CinemaItem => {
-  const meta = parse<{ tiles?: CinemaTile[]; take?: CinemaTakeInfo }>(r.meta_json, {});
+  const meta = parse<ItemMeta>(r.meta_json, {});
   return {
     generationId: r.generation_id,
     folderId: r.folder_id,
@@ -100,6 +114,9 @@ const toItem = (r: ItemRow): CinemaItem => {
     ...(meta.take ? { take: meta.take } : {}),
   };
 };
+
+/** SQL: a membership row that wasn't taken out of its project. */
+const LISTED = "json_extract(i.meta_json, '$.removed') IS NULL";
 
 /** A generation that still exists (soft-deleted rows from the Trash, when there is one, are left out). */
 function liveGeneration(id: string): Generation | null {
@@ -125,25 +142,35 @@ function requireProject(id: string): CinemaProject {
   return p;
 }
 
-/** Estimated spend so far: the recorded cost of every take that didn't fail. */
+/**
+ * What the project's takes cost, summed in SQL: a generation's recorded cost unless it failed, and for
+ * one deleted for good (emptied from the Trash) the cost recorded when the take was made. Deleting
+ * or taking out takes never lowers it: that money is spent.
+ */
+const SPENT = `COALESCE(SUM(CASE
+    WHEN g.id IS NULL THEN COALESCE(json_extract(i.meta_json, '$.cost'), 0)
+    WHEN g.status IN ('failed', 'canceled') THEN 0
+    ELSE COALESCE(g.cost_usd, 0) END), 0)`;
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** Estimated spend so far: the cost of every take made in the project that didn't fail. */
 export function spentUsd(projectId: string): number {
-  const r = db()
-    .prepare(
-      `SELECT COALESCE(SUM(g.cost_usd), 0) AS s FROM cinema_items i JOIN generations g ON g.id = i.generation_id
-       WHERE i.project_id = ? AND g.status NOT IN ('failed', 'canceled')`,
-    )
-    .get(projectId) as { s: number };
-  return Math.round(r.s * 1000) / 1000;
+  const r = db().prepare(`SELECT ${SPENT} AS s FROM cinema_items i LEFT JOIN generations g ON g.id = i.generation_id WHERE i.project_id = ?`).get(projectId) as { s: number };
+  return round3(r.s);
 }
 
-/** Newest finished image (or video) of a project: the card cover when none was picked. */
+/** Newest finished image (or video) of a project: the card cover when none was picked. One query. */
 function autoCover(projectId: string): string | null {
-  const ids = db().prepare("SELECT generation_id FROM cinema_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 40").all(projectId) as { generation_id: string }[];
+  const rows = db()
+    .prepare(
+      `SELECT g.outputs_json FROM cinema_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
+       WHERE i.project_id = ? AND g.status = 'succeeded' AND t.deleted_at IS NULL AND ${LISTED} ORDER BY i.created_at DESC LIMIT 40`,
+    )
+    .all(projectId) as { outputs_json: string }[];
   let video: string | null = null;
-  for (const { generation_id } of ids) {
-    const g = db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(generation_id) as { status: string; outputs_json: string } | undefined;
-    if (g?.status !== "succeeded") continue;
-    const outs = parse<{ url: string; kind: string }[]>(g.outputs_json, []);
+  for (const r of rows) {
+    const outs = parse<{ url: string; kind: string }[]>(r.outputs_json, []);
     const img = outs.find((o) => o.kind === "image");
     if (img) return img.url;
     video ??= outs.find((o) => o.kind === "video")?.url ?? null;
@@ -153,10 +180,23 @@ function autoCover(projectId: string): string | null {
 
 export function listProjects(): CinemaProject[] {
   const rows = db().prepare("SELECT * FROM cinema_projects ORDER BY pinned DESC, updated_at DESC").all() as ProjectRow[];
-  return rows.map((r) => {
-    const items = (db().prepare("SELECT COUNT(*) AS n FROM cinema_items WHERE project_id = ?").get(r.id) as { n: number }).n;
-    return { ...toProject(r), stats: { items, spentUsd: spentUsd(r.id), cover: r.cover_url ?? autoCover(r.id) } };
-  });
+  // Counts and spend for every project in two grouped queries (not one per project).
+  const counts = new Map(
+    (
+      db()
+        .prepare(
+          `SELECT i.project_id AS p, COUNT(*) AS n FROM cinema_items i JOIN generations g ON g.id = i.generation_id
+           LEFT JOIN generation_trash t ON t.generation_id = g.id WHERE t.deleted_at IS NULL AND ${LISTED} GROUP BY i.project_id`,
+        )
+        .all() as { p: string; n: number }[]
+    ).map((r) => [r.p, r.n]),
+  );
+  const spent = new Map(
+    (db().prepare(`SELECT i.project_id AS p, ${SPENT} AS s FROM cinema_items i LEFT JOIN generations g ON g.id = i.generation_id GROUP BY i.project_id`).all() as { p: string; s: number }[]).map(
+      (r) => [r.p, round3(r.s)],
+    ),
+  );
+  return rows.map((r) => ({ ...toProject(r), stats: { items: counts.get(r.id) ?? 0, spentUsd: spent.get(r.id) ?? 0, cover: r.cover_url ?? autoCover(r.id) } }));
 }
 
 export function createProject(input: { name: string; description?: string | null; cover?: string | null; costCapUsd?: number | null }): CinemaProject {
@@ -278,6 +318,11 @@ export function descendants(projectId: string, folderId: string): Set<string> {
   return out;
 }
 
+/** Whether a folder (scene) of this project still exists: one deleted in another tab or the sidebar doesn't. */
+export function folderExists(projectId: string, folderId: string): boolean {
+  return folderRow(folderId)?.project_id === projectId;
+}
+
 function checkParent(projectId: string, parentId: string | null | undefined, self?: string): void {
   if (!parentId) return;
   const p = folderRow(parentId);
@@ -342,7 +387,13 @@ export function deleteFolder(projectId: string, id: string): void {
 // ---------------------------------------------------------------------------
 // Items: the project's generations
 
-export type CinemaGeneration = Generation & { folderId: string | null; tiles?: CinemaTile[]; take?: CinemaTakeInfo };
+export type CinemaGeneration = Generation & {
+  folderId: string | null;
+  tiles?: CinemaTile[];
+  take?: CinemaTakeInfo;
+  /** The project the take belongs to ("My Generations" lists every project's). */
+  projectId?: string | null;
+};
 
 export interface ItemQuery {
   /** A folder id; null = the project root only; undefined = everything in the project. */
@@ -352,97 +403,305 @@ export interface ItemQuery {
   favorites?: boolean;
 }
 
-export function listItems(projectId: string, q: ItemQuery = {}): CinemaGeneration[] {
-  requireProject(projectId);
-  let rows = db().prepare("SELECT * FROM cinema_items WHERE project_id = ? ORDER BY created_at DESC").all(projectId) as ItemRow[];
-  if (q.folderId === null) rows = rows.filter((r) => !r.folder_id);
-  else if (q.folderId) {
-    const set = q.nested ? descendants(projectId, q.folderId) : new Set([q.folderId]);
-    rows = rows.filter((r) => r.folder_id && set.has(r.folder_id));
-  }
-  const out: CinemaGeneration[] = [];
-  for (const r of rows) {
-    const g = liveGeneration(r.generation_id);
-    if (!g) continue;
-    if (q.favorites && !g.favorite) continue;
-    const item = toItem(r);
-    out.push({ ...g, folderId: item.folderId, ...(item.tiles ? { tiles: item.tiles } : {}), ...(item.take ? { take: item.take } : {}) });
-  }
-  return out.sort((a, b) => b.createdAt - a.createdAt);
+/** Library columns plus the membership row, as one JOIN (no query per take). */
+const ITEMS_FROM = `SELECT g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id, i.project_id AS c_project, i.folder_id AS c_folder, i.meta_json AS c_meta
+  FROM cinema_items i JOIN generations g ON g.id = i.generation_id
+  LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id
+  WHERE t.deleted_at IS NULL AND ${LISTED}`;
+
+type JoinedRow = Parameters<typeof toGeneration>[0] & { c_project: string; c_folder: string | null; c_meta: string | null };
+
+function toCinemaGeneration(r: JoinedRow): CinemaGeneration {
+  const meta = parse<ItemMeta>(r.c_meta, {});
+  return {
+    ...toGeneration(r),
+    folderId: r.c_folder,
+    projectId: r.c_project,
+    ...(meta.tiles?.length ? { tiles: meta.tiles } : {}),
+    ...(meta.take ? { take: meta.take } : {}),
+  };
 }
 
-/** Every Cinema Studio generation, whichever project it's in ("My Generations"). */
+const marks = (n: number) => Array.from({ length: n }, () => "?").join(", ");
+
+export function listItems(projectId: string, q: ItemQuery = {}): CinemaGeneration[] {
+  requireProject(projectId);
+  const where = ["i.project_id = ?"];
+  const args: unknown[] = [projectId];
+  if (q.folderId === null) where.push("i.folder_id IS NULL");
+  else if (q.folderId) {
+    const set = [...(q.nested ? descendants(projectId, q.folderId) : new Set([q.folderId]))];
+    where.push(`i.folder_id IN (${marks(set.length)})`);
+    args.push(...set);
+  }
+  if (q.favorites) where.push("g.favorite = 1");
+  const rows = db()
+    .prepare(`${ITEMS_FROM} AND ${where.join(" AND ")} ORDER BY g.created_at DESC, g.id DESC`)
+    .all(...args) as JoinedRow[];
+  return rows.map(toCinemaGeneration);
+}
+
+/** Every Cinema Studio generation, whichever project it's in ("My Generations"), with its project. */
 export function listStudioGenerations(): CinemaGeneration[] {
-  const folders = new Map(
-    (db().prepare("SELECT generation_id, folder_id FROM cinema_items").all() as { generation_id: string; folder_id: string | null }[]).map((r) => [r.generation_id, r.folder_id]),
+  const list = listGenerations({ features: ["cinema*"], limit: 200 }).filter((g) => !(g as Generation & { deletedAt?: number | null }).deletedAt);
+  if (!list.length) return [];
+  const rows = db()
+    .prepare(`SELECT i.generation_id, i.project_id, i.folder_id, i.meta_json FROM cinema_items i WHERE i.generation_id IN (${marks(list.length)}) AND ${LISTED}`)
+    .all(...list.map((g) => g.id)) as { generation_id: string; project_id: string; folder_id: string | null; meta_json: string | null }[];
+  const by = new Map(rows.map((r) => [r.generation_id, r]));
+  return list.map((g) => {
+    const r = by.get(g.id);
+    const meta = parse<ItemMeta>(r?.meta_json, {});
+    return { ...g, folderId: r?.folder_id ?? null, projectId: r?.project_id ?? null, ...(meta.tiles?.length ? { tiles: meta.tiles } : {}), ...(meta.take ? { take: meta.take } : {}) };
+  });
+}
+
+/**
+ * Write membership rows. Re-adding a take that was taken out brings it back; a take already listed
+ * in the project is left as it is.
+ */
+function insertItems(projectId: string, entries: { id: string; meta: ItemMeta }[], folderId: string | null): void {
+  const now = Date.now();
+  const ins = db().prepare(
+    `INSERT INTO cinema_items (project_id, generation_id, folder_id, meta_json, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, generation_id) DO UPDATE SET folder_id = excluded.folder_id, meta_json = excluded.meta_json, created_at = excluded.created_at
+     WHERE json_extract(cinema_items.meta_json, '$.removed') IS NOT NULL`,
   );
-  return listGenerations({ features: ["cinema*"], limit: 200 })
-    .filter((g) => !(g as Generation & { deletedAt?: number | null }).deletedAt)
-    .map((g) => ({ ...g, folderId: folders.get(g.id) ?? null }));
+  db().transaction(() => entries.forEach((e, i) => ins.run(projectId, e.id, folderId, Object.keys(e.meta).length ? JSON.stringify(e.meta) : null, now + i)))();
+  touch(projectId);
+}
+
+const dependsOf = (v: string | null | undefined): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
+
+/** What each generation waits for (generations.depends_on). */
+function dependencies(ids: string[]): Map<string, string[]> {
+  if (!ids.length) return new Map();
+  const rows = db().prepare(`SELECT id, depends_on FROM generations WHERE id IN (${marks(ids.length)})`).all(...ids) as { id: string; depends_on: string | null }[];
+  return new Map(rows.map((r) => [r.id, dependsOf(r.depends_on)]));
+}
+
+/** The meta a new take starts with: its estimated cost and, for a chained step, its request before the inputs were filled in. */
+function metaFor(g: Pick<Generation, "costUsd" | "request">, deps: string[] | undefined, take?: CinemaTakeInfo): ItemMeta {
+  return { ...(take ? { take } : {}), cost: g.costUsd ?? 0, ...(deps?.length ? { req: g.request } : {}) };
 }
 
 export function addItems(projectId: string, generationIds: string[], folderId: string | null = null, take?: CinemaTakeInfo): void {
   requireProject(projectId);
   if (folderId) checkParent(projectId, folderId);
-  const now = Date.now();
-  const meta = take ? JSON.stringify({ take }) : null;
-  const ins = db().prepare("INSERT OR IGNORE INTO cinema_items (project_id, generation_id, folder_id, meta_json, created_at) VALUES (?, ?, ?, ?, ?)");
-  db().transaction(() => generationIds.forEach((id, i) => ins.run(projectId, id, folderId, meta, now + i)))();
-  touch(projectId);
+  const deps = dependencies(generationIds);
+  const entries = generationIds.map((id) => {
+    const g = getGeneration(id, { includeDeleted: true });
+    return { id, meta: g ? metaFor(g, deps.get(id), take) : take ? { take } : {} };
+  });
+  insertItems(projectId, entries, folderId);
+}
+
+/** Record generations just made from the workspace (their requests are still the unfilled originals). */
+export function recordTakes(projectId: string, made: Generation[], folderId: string | null, take?: CinemaTakeInfo): void {
+  if (!made.length) return;
+  const deps = dependencies(made.map((g) => g.id));
+  insertItems(
+    projectId,
+    made.map((g) => ({ id: g.id, meta: metaFor(g, deps.get(g.id), take) })),
+    folderId,
+  );
+}
+
+/** The ids among `ids` that are listed in the project. */
+function memberIds(projectId: string, ids: string[]): string[] {
+  const list = [...new Set(ids)];
+  if (!list.length) return [];
+  return (
+    db()
+      .prepare(`SELECT generation_id FROM cinema_items i WHERE i.project_id = ? AND i.generation_id IN (${marks(list.length)}) AND ${LISTED}`)
+      .all(projectId, ...list) as { generation_id: string }[]
+  ).map((r) => r.generation_id);
 }
 
 export function moveItems(projectId: string, generationIds: string[], folderId: string | null): number {
   requireProject(projectId);
   if (folderId) checkParent(projectId, folderId);
   const up = db().prepare("UPDATE cinema_items SET folder_id = ? WHERE project_id = ? AND generation_id = ?");
-  let n = 0;
-  db().transaction(() => generationIds.forEach((id) => (n += up.run(folderId, projectId, id).changes)))();
+  const ids = memberIds(projectId, generationIds);
+  db().transaction(() => ids.forEach((id) => up.run(folderId, projectId, id)))();
   touch(projectId);
-  return n;
-}
-
-/** Remove takes from the project; with `deleteGenerations` they are deleted from the library too. */
-export function removeItems(projectId: string, generationIds: string[], opts: { deleteGenerations?: boolean } = {}): number {
-  requireProject(projectId);
-  const del = db().prepare("DELETE FROM cinema_items WHERE project_id = ? AND generation_id = ?");
-  let n = 0;
-  db().transaction(() => generationIds.forEach((id) => (n += del.run(projectId, id).changes)))();
-  if (opts.deleteGenerations) for (const id of generationIds) deleteGeneration(id);
-  touch(projectId);
-  return n;
-}
-
-export function setFavorites(projectId: string, generationIds: string[], favorite: boolean): void {
-  requireProject(projectId);
-  const up = db().prepare("UPDATE generations SET favorite = ?, updated_at = ? WHERE id = ? AND id IN (SELECT generation_id FROM cinema_items WHERE project_id = ?)");
-  db().transaction(() => generationIds.forEach((id) => up.run(favorite ? 1 : 0, Date.now(), id, projectId)))();
+  return ids.length;
 }
 
 /**
- * Run a failed or canceled take again, in the same folder. A chained step that already got its
- * inputs runs on its own; one whose earlier step failed needs that step retried first.
+ * Take takes out of the project. With `deleteGenerations` (the workspace's Delete) they move to the
+ * library's Trash and stay filed here, so Restore brings them back where they were; otherwise they're
+ * only taken out. The rows are kept either way (hidden), so what the takes cost still counts toward
+ * the cap. Only this project's takes are touched.
+ */
+export function removeItems(projectId: string, generationIds: string[], opts: { deleteGenerations?: boolean } = {}): number {
+  requireProject(projectId);
+  const ids = memberIds(projectId, generationIds);
+  if (!ids.length) return 0;
+  if (opts.deleteGenerations) trashGenerations(ids);
+  else {
+    // Snapshot what each take cost (nothing if it failed) before hiding it.
+    const out = db().prepare(
+      `UPDATE cinema_items SET meta_json = json_set(COALESCE(meta_json, '{}'), '$.removed', json('true'), '$.cost',
+         COALESCE((SELECT CASE WHEN g.status IN ('failed', 'canceled') THEN 0 ELSE COALESCE(g.cost_usd, 0) END FROM generations g WHERE g.id = cinema_items.generation_id), json_extract(meta_json, '$.cost'), 0))
+       WHERE project_id = ? AND generation_id = ?`,
+    );
+    db().transaction(() => ids.forEach((id) => out.run(projectId, id)))();
+  }
+  touch(projectId);
+  return ids.length;
+}
+
+export function setFavorites(projectId: string, generationIds: string[], favorite: boolean): number {
+  requireProject(projectId);
+  const ids = memberIds(projectId, generationIds);
+  const up = db().prepare("UPDATE generations SET favorite = ?, updated_at = ? WHERE id = ?");
+  db().transaction(() => ids.forEach((id) => up.run(favorite ? 1 : 0, Date.now(), id)))();
+  return ids.length;
+}
+
+// ---------------------------------------------------------------------------
+// Retry
+
+const BROKEN = new Set<Generation["status"]>(["failed", "canceled"]);
+
+function itemRow(projectId: string, generationId: string): ItemRow | undefined {
+  const r = db().prepare("SELECT * FROM cinema_items WHERE project_id = ? AND generation_id = ?").get(projectId, generationId) as ItemRow | undefined;
+  return r && !parse<ItemMeta>(r.meta_json, {}).removed ? r : undefined;
+}
+
+/** Generations that wait for `id`. */
+function dependentsOf(id: string): string[] {
+  return (
+    db()
+      .prepare("SELECT id FROM generations WHERE depends_on = ? OR (substr(depends_on, 1, 1) = '[' AND instr(depends_on, ?) > 0) ORDER BY created_at")
+      .all(id, `"${id}"`) as { id: string }[]
+  ).map((r) => r.id);
+}
+
+/** Queued behind a dependency that will never finish (the runner fails it on its next pass). */
+const waiting = (g: Generation, deps: string[]) => g.status === "queued" && deps.length > 0;
+
+interface RedoStep {
+  g: Generation;
+  deps: string[];
+  row: ItemRow;
+}
+
+/**
+ * The request a step runs again with, and what it waits for. A root step makes one job (one take of
+ * a batch of 4 is one take: the other three are still there).
+ */
+function redoRequest(s: RedoStep, launched: boolean): { req: GenerationRequest; deps: string[] } {
+  const meta = parse<ItemMeta>(s.row.meta_json, {});
+  if (s.deps.length && meta.req) return { req: structuredClone(meta.req), deps: s.deps };
+  const req = structuredClone(s.g.request);
+  if (s.deps.length && !launched) return { req, deps: s.deps };
+  // A root step, or (takes recorded before the unfilled request was kept) a step whose inputs were already filled in.
+  delete req.chain;
+  delete req.chainFrom;
+  const requested = req.params?.numOutputs ?? 1;
+  if (requested > 1) req.params = { ...req.params, numOutputs: Math.max(1, Math.min(requested, getModel(req.modelId)?.options.maxOutputs ?? 1)) };
+  return { req, deps: [] };
+}
+
+/**
+ * Run a failed or canceled take again, in the same folder. Chained takes retry as a unit: the failed
+ * steps it waits for and the steps that failed because of it are made again too, wired to the new
+ * ids, while steps that finished are reused rather than re-run. Every step is checked before any
+ * starts; the replaced failures move to the Trash so the new run takes their place in the feed.
  */
 export function retryItem(projectId: string, generationId: string): Generation[] {
-  const r = db().prepare("SELECT * FROM cinema_items WHERE project_id = ? AND generation_id = ?").get(projectId, generationId) as ItemRow | undefined;
-  const g = r ? liveGeneration(generationId) : null;
-  if (!r || !g) throw new CinemaError("That take isn't in this project", 404);
-  const req = { ...g.request };
-  if (req.chain?.length || req.chainFrom) {
-    const filled = req.chain?.every((c) => (c.slot === "images" || c.slot === "videos" ? (req.inputs?.[c.slot]?.length ?? 0) > 0 : c.slot === "prompt" ? !!req.prompt : !!req.inputs?.[c.slot]));
-    if (!filled) throw new CinemaError("An earlier step of this take didn't finish — retry that one first", 422);
-    delete req.chain;
-    delete req.chainFrom;
+  const start = itemRow(projectId, generationId);
+  const first = start ? liveGeneration(generationId) : null;
+  if (!start || !first) throw new CinemaError("That take isn't in this project", 404);
+  if (first.status === "queued" || first.status === "running") throw new CinemaError("That take is still rendering", 422);
+
+  const redo = new Map<string, RedoStep>([[generationId, { g: first, deps: dependencies([generationId]).get(generationId) ?? [], row: start }]]);
+  const consider = (id: string, upstream: boolean): boolean => {
+    if (redo.has(id)) return false;
+    const g = getGeneration(id, { includeDeleted: true });
+    if (!g) {
+      if (upstream) throw new CinemaError("An earlier step of this take was deleted — make the take again", 422);
+      return false;
+    }
+    const deps = dependencies([id]).get(id) ?? [];
+    // Upstream, a finished or still-running step is waited on as it is; downstream, only steps that failed (or will) are redone.
+    if (!BROKEN.has(g.status) && !(!upstream && waiting(g, deps))) return false;
+    const row = itemRow(projectId, id);
+    if (!row) {
+      if (upstream) throw new CinemaError("An earlier step of this take isn't in this project any more — make the take again", 422);
+      return false;
+    }
+    redo.set(id, { g, deps, row });
+    return true;
+  };
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const s of [...redo.values()]) {
+      for (const d of s.deps) grew = consider(d, true) || grew;
+      for (const c of dependentsOf(s.g.id)) grew = consider(c, false) || grew;
+    }
   }
-  const created = createGenerations(req, g.batchId ? { batchId: g.batchId } : {});
-  const item = toItem(r);
-  addItems(projectId, created.map((x) => x.id), item.folderId, item.take);
+
+  // Dependencies first.
+  const order: RedoStep[] = [];
+  const placed = new Set<string>();
+  while (order.length < redo.size) {
+    const next = [...redo.values()].filter((s) => !placed.has(s.g.id) && s.deps.every((d) => !redo.has(d) || placed.has(d)));
+    if (!next.length) throw new CinemaError("This take's steps wait for each other in a loop", 422);
+    for (const s of next.sort((a, b) => a.g.createdAt - b.g.createdAt)) {
+      order.push(s);
+      placed.add(s.g.id);
+    }
+  }
+  const launched = new Set(
+    (
+      db()
+        .prepare(`SELECT id FROM generations WHERE id IN (${marks(order.length)}) AND (external_id IS NOT NULL OR provider_input_json IS NOT NULL)`)
+        .all(...order.map((s) => s.g.id)) as { id: string }[]
+    ).map((r) => r.id),
+  );
+  const plans = order.map((s) => ({ s, ...redoRequest(s, launched.has(s.g.id)) }));
+  // Check every step before starting any: a refusal must not leave half a chain running.
+  for (const p of plans) {
+    try {
+      if (p.deps.length) previewChained(p.req, p.deps.length);
+      else previewGeneration(p.req);
+    } catch (e) {
+      throw new CinemaError((e as Error).message, 422);
+    }
+  }
+
+  const fresh = new Map<string, string>();
+  const created: Generation[] = [];
+  try {
+    for (const p of plans) {
+      const deps = p.deps.map((d) => fresh.get(d) ?? d);
+      const opts = p.s.g.batchId ? { batchId: p.s.g.batchId } : {};
+      const made = deps.length ? createGenerations(p.req, { ...opts, dependsOn: deps.length === 1 ? deps[0] : deps }) : createGenerations(p.req, opts);
+      // A joined film comes first: dependents wait for it.
+      fresh.set(p.s.g.id, made[0].id);
+      created.push(...made);
+      recordTakes(projectId, made, p.s.row.folder_id, parse<ItemMeta>(p.s.row.meta_json, {}).take);
+    }
+  } catch (e) {
+    throw new CinemaError((e as Error).message, 422);
+  }
+  const replaced = order.filter((s) => BROKEN.has(s.g.status) || waiting(s.g, s.deps)).map((s) => s.g.id);
+  if (replaced.length) {
+    trashGenerations(replaced);
+    // They cost nothing (they failed), even after the Trash is emptied.
+    const zero = db().prepare("UPDATE cinema_items SET meta_json = json_set(COALESCE(meta_json, '{}'), '$.cost', 0) WHERE project_id = ? AND generation_id = ?");
+    db().transaction(() => replaced.forEach((id) => zero.run(projectId, id)))();
+  }
   return created;
 }
 
 export function setTiles(projectId: string, generationId: string, tiles: CinemaTile[]): CinemaItem {
-  const r = db().prepare("SELECT * FROM cinema_items WHERE project_id = ? AND generation_id = ?").get(projectId, generationId) as ItemRow | undefined;
+  const r = itemRow(projectId, generationId);
   if (!r) throw new CinemaError("That take isn't in this project", 404);
-  const meta = { ...parse<Record<string, unknown>>(r.meta_json, {}), tiles: tiles.slice(0, 16) };
+  const meta = { ...parse<ItemMeta>(r.meta_json, {}), tiles: tiles.slice(0, 16) };
   db().prepare("UPDATE cinema_items SET meta_json = ? WHERE project_id = ? AND generation_id = ?").run(JSON.stringify(meta), projectId, generationId);
   return toItem({ ...r, meta_json: JSON.stringify(meta) });
 }

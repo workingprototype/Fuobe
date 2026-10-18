@@ -34,7 +34,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/cinema/pro
   });
 }
 
-/** Bulk: take out of the project; `deleteGenerations` also deletes them from the library. */
+/** Bulk: take out of the project; `deleteGenerations` moves them to the library's Trash (restorable, still filed here). Only this project's takes are touched. */
 export async function DELETE(request: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items">) {
   return handle(async () => {
     const { id } = await ctx.params;
