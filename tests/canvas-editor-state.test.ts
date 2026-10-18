@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildViews, EMPTY_RESULTS, foldResultsKeep, type NodeResults } from "@/components/canvas/canvas-context";
+import { buildViews, DescribeCache, EMPTY_RESULTS, foldResultsKeep, type NodeResults } from "@/components/canvas/canvas-context";
 import { describeNode, planCanvas, type CanvasGraph, type CanvasNode } from "@/lib/catalog/canvas";
 import type { Generation } from "@/lib/catalog/types";
 import { applyToCanvasView, type CanvasViewLike } from "@/lib/generation-stream";
@@ -95,6 +95,24 @@ describe("canvas node views", () => {
     expect(next.get("img")).toBe(first.get("img"));
     expect(next.get("vid")).not.toBe(first.get("vid"));
     expect(next.get("vid")).toMatchObject({ error: "Write a prompt first", runError: "Nope" });
+  });
+
+  it("describes again only the nodes whose own data or inputs changed", () => {
+    const cache = new DescribeCache();
+    const first = cache.run(graph, "both");
+    expect(first.get("img")).toMatchObject({ op: "t2i", d: { request: { prompt: "A red fox" } } });
+    expect(first.get("vid")?.op).toBe("i2v");
+    // Same graph: same objects.
+    const again = cache.run(graph, "both");
+    expect(again.get("img")).toBe(first.get("img"));
+    // Typing in the prompt touches the image (its input) and nothing downstream of it.
+    const typed: CanvasGraph = { ...graph, nodes: graph.nodes.map((x): CanvasNode => (x.id === "p" ? { ...x, data: { text: "A red fox in snow" } } : x)) };
+    const next = cache.run(typed, "both");
+    expect(next.get("img")).not.toBe(first.get("img"));
+    expect(next.get("img")?.d.request?.prompt).toBe("A red fox in snow");
+    expect(next.get("vid")).toBe(first.get("vid"));
+    // The engine mode changes every description.
+    expect(cache.run(typed, "open").get("vid")?.d.error).toMatch(/paid cloud model/);
   });
 
   it("folds a node's results once per change of its generations", () => {

@@ -520,19 +520,27 @@ function Results({ id, r, compact }: { id: string; r: NodeResults; compact?: boo
 // ---------------------------------------------------------------------------
 // Generator nodes (any model, and the utilities)
 
+/**
+ * A compact select. Its options mount only while it's open (a closed Radix Select still renders
+ * every item, which adds up to thousands on a big board); the trigger shows the value itself.
+ */
 function OptionSelect<T extends string | number>({ value, options, onChange, label, format }: { value: T | undefined; options: T[]; onChange: (v: T) => void; label: string; format?: (v: T) => string }) {
+  const [open, setOpen] = useState(false);
+  const text = (v: T) => (format ? format(v) : String(v));
   return (
-    <Select value={value === undefined ? undefined : String(value)} onValueChange={(v) => onChange((typeof options[0] === "number" ? Number(v) : v) as T)}>
+    <Select open={open} onOpenChange={setOpen} value={value === undefined ? undefined : String(value)} onValueChange={(v) => onChange((typeof options[0] === "number" ? Number(v) : v) as T)}>
       <SelectTrigger size="sm" aria-label={label} className={cn("h-7 gap-1 rounded-full border-0 bg-secondary px-2.5 text-[12px] font-medium shadow-none hover:bg-accent dark:bg-secondary", NO_DRAG)}>
-        <SelectValue placeholder={label} />
+        <SelectValue placeholder={label}>{value === undefined ? undefined : text(value)}</SelectValue>
       </SelectTrigger>
-      <SelectContent className="max-h-72">
-        {options.map((o) => (
-          <SelectItem key={String(o)} value={String(o)} className="text-[13px]">
-            {format ? format(o) : String(o)}
-          </SelectItem>
-        ))}
-      </SelectContent>
+      {open && (
+        <SelectContent className="max-h-72">
+          {options.map((o) => (
+            <SelectItem key={String(o)} value={String(o)} className="text-[13px]">
+              {text(o)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      )}
     </Select>
   );
 }

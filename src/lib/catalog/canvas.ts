@@ -914,6 +914,8 @@ export interface PlanOptions extends DescribeContext {
   runs?: CanvasRuns;
   /** Status of a generation this canvas made (undefined = gone). */
   status?: (generationId: string) => GenerationStatus | undefined;
+  /** describeNode, when the caller keeps its own cache of it (the editor re-plans on every keystroke). */
+  describe?: (n: CanvasNode) => NodeDescription;
 }
 
 const LIVE = new Set<GenerationStatus | undefined>(["queued", "running", "succeeded"]);
@@ -966,7 +968,7 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       }
       continue;
     }
-    const d = describeNode(graph, n, opts);
+    const d = opts.describe?.(n) ?? describeNode(graph, n, opts);
     if (d.error || !d.request || !d.deps) {
       state.set(id, { kind: "blocked" });
       errors.push({ nodeId: id, message: d.error ?? "Can't run this node" });

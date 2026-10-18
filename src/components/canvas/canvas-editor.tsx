@@ -67,7 +67,6 @@ import {
   type CanvasGraph,
   type CanvasNode,
   type CanvasNodeData,
-  type NodeDescription,
   type PaletteItem,
   type PortType,
 } from "@/lib/catalog/canvas";
@@ -76,6 +75,7 @@ import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   buildViews,
+  DescribeCache,
   EditorActionsContext,
   EditorStore,
   EditorStoreContext,
@@ -154,7 +154,7 @@ export function CanvasEditor({ id }: { id: string }) {
   }
   return (
     <ReactFlowProvider>
-      <Editor id={id} initial={view.data.canvas} view={view.data} />
+      <Editor key={id} id={id} initial={view.data.canvas} view={view.data} />
     </ReactFlowProvider>
   );
 }
@@ -227,12 +227,13 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const runs = view.canvas.runs;
   const gens = useMemo(() => new Map(view.generations.map((g) => [g.id, g])), [view.generations]);
   const statusOf = useCallback((gid: string) => gens.get(gid)?.status, [gens]);
-  const plan = useMemo(() => planCanvas(planned, { runs, status: statusOf, engineMode: mode }), [planned, runs, statusOf, mode]);
-  const descriptions = useMemo(() => {
-    const m = new Map<string, NodeDescription>();
-    for (const n of planned.nodes) if (isGenerator(n)) m.set(n.id, describeNode(planned, n, { engineMode: mode }));
-    return m;
-  }, [planned, mode]);
+  // Described again only where a node or its inputs changed (one keystroke touches one prompt's consumers).
+  const [describer] = useState(() => new DescribeCache());
+  const described = useMemo(() => describer.run(planned, mode), [describer, planned, mode]);
+  const plan = useMemo(
+    () => planCanvas(planned, { runs, status: statusOf, engineMode: mode, describe: (n) => described.get(n.id)?.d ?? describeNode(planned, n, { engineMode: mode }) }),
+    [planned, runs, statusOf, mode, described],
+  );
   const results = useMemo(() => {
     const m = new Map<string, NodeResults>();
     for (const [nodeId, r] of Object.entries(runs)) {
@@ -244,9 +245,18 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runs, gens]);
   const views = useMemo(
-    () => buildViews(prev?.views ?? null, planned, plan, (nid) => descriptions.get(nid), results, runErrors),
+    () =>
+      buildViews(
+        prev?.views ?? null,
+        planned,
+        plan,
+        (nid) => described.get(nid)?.d,
+        results,
+        runErrors,
+        (n) => described.get(n.id)?.op,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [planned, plan, descriptions, results, runErrors],
+    [planned, plan, described, results, runErrors],
   );
   const selected = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
   const busy = [...results.values()].filter((r) => r.state === "running" || r.state === "queued").length;

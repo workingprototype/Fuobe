@@ -22,7 +22,19 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
-import { effectiveOp, isGenerator, type CanvasGraph, type CanvasNode, type CanvasNodeData, type CanvasPlan, type Connection, type NodeDescription, type PortType, type RunReason } from "@/lib/catalog/canvas";
+import {
+  describeNode,
+  effectiveOp,
+  isGenerator,
+  type CanvasGraph,
+  type CanvasNode,
+  type CanvasNodeData,
+  type CanvasPlan,
+  type Connection,
+  type NodeDescription,
+  type PortType,
+  type RunReason,
+} from "@/lib/catalog/canvas";
 import type { Engine, Generation, GenerationStatus, ModelDef, Operation, OutputFile } from "@/lib/catalog/types";
 import type { EngineMode } from "@/lib/api";
 
@@ -156,6 +168,51 @@ const sameCounts = (a: Readonly<Record<string, number>>, b: Readonly<Record<stri
 const sameView = (a: NodeView, b: NodeView) =>
   a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
 
+/** What the planner knows about one generator node: its description and the op it runs. */
+export interface NodeInfo {
+  d: NodeDescription;
+  op?: Operation;
+}
+
+/**
+ * describeNode and effectiveOp per generator node, worked out again only for nodes whose own data
+ * or whose inputs (the nodes wired into them, their order on the board) changed. Typing in one
+ * prompt re-describes that prompt's consumers, not the whole board.
+ */
+export class DescribeCache {
+  private entries = new Map<string, { key: unknown[]; info: NodeInfo }>();
+  private mode: string | null = null;
+  run(graph: CanvasGraph, mode: EngineMode): Map<string, NodeInfo> {
+    if (mode !== this.mode) {
+      this.entries.clear();
+      this.mode = mode;
+    }
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const into = new Map<string, CanvasGraph["edges"]>();
+    for (const e of graph.edges) {
+      const list = into.get(e.target);
+      if (list) list.push(e);
+      else into.set(e.target, [e]);
+    }
+    const next = new Map<string, { key: unknown[]; info: NodeInfo }>();
+    const out = new Map<string, NodeInfo>();
+    for (const n of graph.nodes) {
+      if (!isGenerator(n)) continue;
+      const key: unknown[] = [n.type, n.data];
+      for (const e of into.get(n.id) ?? []) {
+        const s = byId.get(e.source);
+        key.push(e.source, e.targetHandle, s?.type, s?.data, s?.position.x, s?.position.y);
+      }
+      const old = this.entries.get(n.id);
+      const entry = old && old.key.length === key.length && old.key.every((k, i) => k === key[i]) ? old : { key, info: { d: describeNode(graph, n, { engineMode: mode }), op: effectiveOp(graph, n) } };
+      next.set(n.id, entry);
+      out.set(n.id, entry.info);
+    }
+    this.entries = next;
+    return out;
+  }
+}
+
 /**
  * One NodeView per generator node, keeping the previous object whenever nothing it shows changed
  * (so its memoized node doesn't re-render).
@@ -167,6 +224,7 @@ export function buildViews(
   describe: (id: string) => NodeDescription | undefined,
   results: ReadonlyMap<string, NodeResults>,
   runErrors: Record<string, string>,
+  opOf: (n: CanvasNode) => Operation | undefined = (n) => effectiveOp(graph, n),
 ): Map<string, NodeView> {
   const counts = new Map<string, Record<string, number>>();
   for (const e of graph.edges) {
@@ -182,7 +240,7 @@ export function buildViews(
     if (!isGenerator(n)) continue;
     const d = describe(n.id);
     const next: NodeView = {
-      op: effectiveOp(graph, n),
+      op: opOf(n),
       counts: counts.get(n.id) ?? EMPTY_VIEW.counts,
       error: d?.error,
       costUsd: d?.costUsd ?? null,
