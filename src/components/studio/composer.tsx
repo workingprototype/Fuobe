@@ -296,10 +296,10 @@ export function Composer({ docked }: { docked: boolean }) {
   // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
   const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
 
-  // A blocker toast goes away once the blocker does (a prompt typed, the photo attached).
+  // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
   const blocking = blocker?.message;
   useEffect(() => {
-    if (!blocking) toast.dismiss("composer-blocker");
+    toast.dismiss("composer-blocker");
   }, [blocking]);
 
   // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
