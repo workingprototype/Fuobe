@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import type { CinemaProject } from "@/lib/catalog/cinema";
-import { formatCost } from "@/lib/format";
+import { formatUsd } from "./money";
 import { useCreateProject, useDeleteProject, useUpdateProject } from "./hooks";
 
 const MAX_DESC = 140;
@@ -108,7 +108,7 @@ function ProjectForm({ project, spentUsd, onDone, onDeleted }: FormProps) {
             </div>
             <p className="text-[12px] leading-snug text-muted-foreground">
               An estimate guard: Generate stops before the project&apos;s estimated spend would pass it.
-              {project && spentUsd != null ? ` Spent so far ≈ ${formatCost(spentUsd) || "$0"}.` : ""}
+              {project && spentUsd != null ? ` Spent so far ≈ ${formatUsd(spentUsd)}.` : ""}
             </p>
           </div>
         </div>

@@ -402,6 +402,38 @@ const PRESET_LIGHT: Record<string, LightSource[]> = {
   "soft-cross": [{ direction: "front-left", color: "#fff6ea", brightness: 70, diffuse: 85 }, { direction: "right", color: "#dfe8ff", brightness: 45, diffuse: 85 }],
 };
 
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** A hex field that only hands on complete colours: "#ff" while typing stays local, and blur puts the last good one back. */
+function HexInput({ value, onChange, label }: { value: string; onChange: (hex: string) => void; label: string }) {
+  const [text, setText] = useState(value);
+  const [shown, setShown] = useState(value);
+  // The colour changed elsewhere (the picker, a preset): show it.
+  if (value !== shown) {
+    setShown(value);
+    setText(value);
+  }
+  return (
+    <Input
+      value={text}
+      onChange={(e) => {
+        const raw = e.target.value.trim().slice(0, 7);
+        const v = raw.startsWith("#") ? raw : `#${raw.slice(0, 6)}`;
+        setText(v);
+        if (HEX.test(v)) {
+          setShown(v.toLowerCase());
+          onChange(v.toLowerCase());
+        }
+      }}
+      onBlur={() => setText(value)}
+      spellCheck={false}
+      aria-invalid={!HEX.test(text) || undefined}
+      className="h-7 w-24 font-mono text-[12px]"
+      aria-label={label}
+    />
+  );
+}
+
 function LightEditor({ light, index, onChange, onRemove }: { light: LightSource; index: number; onChange: (l: LightSource) => void; onRemove?: () => void }) {
   return (
     <div className="space-y-2.5 rounded-xl border p-2.5">
@@ -444,15 +476,8 @@ function LightEditor({ light, index, onChange, onRemove }: { light: LightSource;
       </div>
       <div className="flex items-center gap-2">
         <input type="color" value={light.color} onChange={(e) => onChange({ ...light, color: e.target.value })} className="size-7 shrink-0 cursor-pointer rounded-md border bg-transparent p-0.5" aria-label={`Light ${index + 1} colour`} />
-        <Input
-          value={light.color}
-          onChange={(e) => {
-            const v = e.target.value.trim();
-            onChange({ ...light, color: v.startsWith("#") ? v.slice(0, 7) : `#${v.slice(0, 6)}` });
-          }}
-          className="h-7 w-24 font-mono text-[12px]"
-          aria-label={`Light ${index + 1} hex colour`}
-        />
+        <HexInput value={light.color} onChange={(color) => onChange({ ...light, color })} label={`Light ${index + 1} hex colour`} />
+
       </div>
       {(["brightness", "diffuse"] as const).map((k) => (
         <div key={k} className="space-y-1">

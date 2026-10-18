@@ -1,8 +1,18 @@
 "use client";
 
-import { ArrowDownAZ, AtSign, ChevronRight, Clock, Folder, FolderInput, FolderPlus, Heart, Home, Library, ListOrdered, MoreHorizontal, Pencil, Pin, PinOff, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowDownAZ, ArrowUp, AtSign, ChevronRight, Clock, Folder, FolderInput, FolderPlus, Heart, Home, Library, ListOrdered, MoreHorizontal, Pencil, Pin, PinOff, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -18,7 +28,8 @@ export const viewKey = (v: CinemaView) => (v.kind === "folder" ? `folder:${v.id}
 /** Folder swatches: the Emotion Wheel's mid tones, plus none. */
 export const FOLDER_COLORS = EMOTION_FAMILIES.map((f) => f.colors[1]);
 
-type Sort = "manual" | "name" | "recent";
+export type FolderSort = "manual" | "name" | "recent";
+type Sort = FolderSort;
 
 export interface FolderNode extends CinemaFolder {
   children: FolderNode[];
@@ -35,6 +46,24 @@ export function folderTree(folders: CinemaFolder[], sort: Sort = "manual"): Fold
     [...xs].sort((a, b) => Number(b.pinned) - Number(a.pinned) || (sort === "name" ? a.name.localeCompare(b.name) : sort === "recent" ? b.updatedAt - a.updatedAt : a.position - b.position));
   const build = (parent: string | null, depth: number): FolderNode[] => order(by.get(parent) ?? []).map((f) => ({ ...f, depth, children: build(f.id, depth + 1) }));
   return build(null, 0);
+}
+
+/**
+ * Positions after moving `id` one step up (-1) or down (+1) among its siblings with the same pin
+ * state (pinned folders always sort first). Only the folders whose position changes are returned;
+ * tied positions (older folders) are spread out so the new order sticks.
+ */
+export function reorderFolders(siblings: Pick<CinemaFolder, "id" | "pinned" | "position">[], id: string, dir: -1 | 1): { id: string; position: number }[] {
+  const me = siblings.find((s) => s.id === id);
+  if (!me) return [];
+  const group = siblings.filter((s) => s.pinned === me.pinned);
+  const i = group.findIndex((s) => s.id === id);
+  const j = i + dir;
+  if (j < 0 || j >= group.length) return [];
+  const order = group.map((s) => s.id);
+  [order[i], order[j]] = [order[j], order[i]];
+  const base = Math.min(...group.map((s) => s.position));
+  return order.map((x, k) => ({ id: x, position: base + k })).filter((c) => group.find((s) => s.id === c.id)!.position !== c.position);
 }
 
 export function flattenTree(nodes: FolderNode[]): FolderNode[] {
@@ -78,6 +107,8 @@ export function MoveToItems({ folders, onMove, exclude }: { folders: CinemaFolde
 
 function FolderRow({
   node,
+  siblings,
+  sort,
   folders,
   view,
   setView,
@@ -88,6 +119,9 @@ function FolderRow({
   onDropItems,
 }: {
   node: FolderNode;
+  /** The folders next to this one, in the order shown (Move up / Move down). */
+  siblings: FolderNode[];
+  sort: Sort;
   folders: CinemaFolder[];
   view: CinemaView;
   setView: (v: CinemaView) => void;
@@ -98,11 +132,17 @@ function FolderRow({
   onDropItems: (ids: string[], folderId: string) => void;
 }) {
   const actions = useFolderActions(projectId);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(node.name);
   const [over, setOver] = useState(false);
   const active = view.kind === "folder" && view.id === node.id;
   const expanded = open.has(node.id);
+  const group = siblings.filter((s) => s.pinned === node.pinned);
+  const at = group.findIndex((s) => s.id === node.id);
+  const reorder = (dir: -1 | 1) =>
+    void Promise.all(reorderFolders(siblings, node.id, dir).map((c) => actions.update(c.id, { position: c.position }))).catch((e) => toast.error((e as Error).message));
+  const parent = node.parentId ? folders.find((f) => f.id === node.parentId) : undefined;
   const commit = () => {
     setRenaming(false);
     if (name.trim() && name.trim() !== node.name) void actions.update(node.id, { name: name.trim() }).catch((e) => toast.error((e as Error).message));
@@ -182,6 +222,16 @@ function FolderRow({
             <DropdownMenuItem onClick={() => void actions.update(node.id, { pinned: !node.pinned })}>
               {node.pinned ? <PinOff /> : <Pin />} {node.pinned ? "Unpin" : "Pin"}
             </DropdownMenuItem>
+            {sort === "manual" && group.length > 1 && (
+              <>
+                <DropdownMenuItem disabled={at <= 0} onClick={() => reorder(-1)}>
+                  <ArrowUp /> Move up
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={at < 0 || at >= group.length - 1} onClick={() => reorder(1)}>
+                  <ArrowDown /> Move down
+                </DropdownMenuItem>
+              </>
+            )}
             <div className="flex flex-wrap gap-1 px-2 py-1.5" role="radiogroup" aria-label="Folder colour">
               <button type="button" onClick={() => void actions.update(node.id, { color: null })} className={cn("size-5 rounded-full border", !node.color && "ring-2 ring-primary ring-offset-1 ring-offset-popover")} aria-label="No colour" />
               {FOLDER_COLORS.map((c) => (
@@ -204,24 +254,43 @@ function FolderRow({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() =>
-                void actions.remove(node.id).then(() => {
-                  if (active) setView({ kind: "home" });
-                  toast("Folder deleted — its takes moved up a level");
-                })
-              }
-            >
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirmDelete(true)}>
               <Trash2 /> Delete folder
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete “{node.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its takes{node.children.length ? " and subfolders" : ""} move up to {parent ? `“${parent.name}”` : "Home"}. No take is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() =>
+                void actions
+                  .remove(node.id)
+                  .then(() => {
+                    if (active) setView(parent ? { kind: "folder", id: parent.id } : { kind: "home" });
+                    toast(`Folder deleted — its takes moved to ${parent ? parent.name : "Home"}`);
+                  })
+                  .catch((e) => toast.error((e as Error).message))
+              }
+            >
+              Delete folder
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {expanded && node.children.length > 0 && (
         <ul>
           {node.children.map((c) => (
-            <FolderRow key={c.id} node={c} folders={folders} view={view} setView={setView} open={open} toggle={toggle} counts={counts} projectId={projectId} onDropItems={onDropItems} />
+            <FolderRow key={c.id} node={c} siblings={node.children} sort={sort} folders={folders} view={view} setView={setView} open={open} toggle={toggle} counts={counts} projectId={projectId} onDropItems={onDropItems} />
           ))}
         </ul>
       )}
@@ -318,8 +387,22 @@ export function FolderSidebar({
         {folders.length ? (
           <ul className="space-y-0.5">
             {matches.map((n) => (
-              <FolderRow key={n.id} node={n} folders={folders} view={view} setView={setView} open={q ? new Set() : open} toggle={toggle} counts={counts.folders} projectId={projectId} onDropItems={onDropItems} />
+              <FolderRow
+                key={n.id}
+                node={n}
+                siblings={q ? [] : matches}
+                sort={sort}
+                folders={folders}
+                view={view}
+                setView={setView}
+                open={q ? new Set() : open}
+                toggle={toggle}
+                counts={counts.folders}
+                projectId={projectId}
+                onDropItems={onDropItems}
+              />
             ))}
+
             {q && !matches.length && <li className="px-2 py-2 text-[12px] text-muted-foreground">No folder with that name</li>}
           </ul>
         ) : (

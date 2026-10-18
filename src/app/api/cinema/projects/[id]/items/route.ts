@@ -28,9 +28,10 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/cinema/pro
   return handle(async () => {
     const { id } = await ctx.params;
     const b = await body(request, ItemsPatch, "Pick the takes to change");
-    if (b.folderId !== undefined) moveItems(id, b.ids, b.folderId);
-    if (b.favorite !== undefined) setFavorites(id, b.ids, b.favorite);
-    return Response.json({ ok: true });
+    // Only this project's takes change; the counts say how many did.
+    const moved = b.folderId !== undefined ? moveItems(id, b.ids, b.folderId) : 0;
+    const liked = b.favorite !== undefined ? setFavorites(id, b.ids, b.favorite) : 0;
+    return Response.json({ ok: true, moved, liked });
   });
 }
 

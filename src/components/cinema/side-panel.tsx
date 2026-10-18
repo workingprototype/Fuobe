@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { directorSummary, moveBySlug, type CinemaProject, type DirectorMessage, type DirectorSettings, type DirectorShot } from "@/lib/catalog/cinema";
 import { cn } from "@/lib/utils";
-import { useDirectorChat, useUpdateProject } from "./hooks";
+import { useAutosave, useDirectorChat, useUpdateProject } from "./hooks";
 
 const SUGGESTIONS = ["Write a script", "Generate an 8-shot storyboard for a sci-fi chase scene", "Create a 15-second cinematic perfume commercial"];
 
@@ -168,22 +168,25 @@ function DirectorChat({ projectId, onLoadShot, onBrief, promptText }: { projectI
   );
 }
 
-/** The production's rules: tone, references, do's and don'ts. Prepended to every compiled prompt. */
+/**
+ * The production's rules: tone, references, do's and don'ts. Prepended to every compiled prompt.
+ * Autosaves 0.7 s after typing stops, and at once when the panel closes, the tab switches to the
+ * AI Director or the page goes away, so the last words are never lost.
+ */
 function Brief({ project }: { project: CinemaProject }) {
   const update = useUpdateProject(project.id);
   const [title, setTitle] = useState(project.brief.title);
   const [body, setBody] = useState(project.brief.body);
   const [state, setState] = useState<"saved" | "saving" | "dirty">("saved");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saver = useAutosave<{ title: string; body: string }>((brief, { keepalive }) => {
+    setState("saving");
+    update.mutate({ brief, keepalive }, { onSuccess: () => setState("saved"), onError: (e) => (setState("dirty"), toast.error((e as Error).message)) });
+  }, 700);
   const save = (t: string, b: string) => {
-    if (timer.current) clearTimeout(timer.current);
     setState("dirty");
-    timer.current = setTimeout(() => {
-      setState("saving");
-      update.mutate({ brief: { title: t, body: b } }, { onSuccess: () => setState("saved"), onError: (e) => (setState("dirty"), toast.error((e as Error).message)) });
-    }, 700);
+    saver.schedule({ title: t, body: b });
   };
-  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
       <div className="flex items-center gap-2">

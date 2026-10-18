@@ -21,6 +21,7 @@ import {
   Maximize,
   Plus,
   RectangleHorizontal,
+  SlidersHorizontal,
   Sparkles,
   UserRoundPlus,
   Video,
@@ -30,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -40,6 +41,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PromptInput, ELEMENT_ICONS, type PromptInputHandle } from "@/components/studio/prompt-input";
 import { ShotsEditor } from "@/components/studio/shots-editor";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { uploadFile, useAssets, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
@@ -66,6 +68,7 @@ import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } fro
 import { draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
 import { useCinemaGenerate } from "./hooks";
 import { firstFrame, mediaDuration } from "./media";
+import { formatUsd } from "./money";
 
 const chip = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors";
 const chipIdle = "bg-secondary text-secondary-foreground hover:bg-accent";
@@ -204,6 +207,9 @@ function RefThumb({ r, index, startFrame, onRemove }: { r: RefItem; index: numbe
     </div>
   );
 }
+
+/** "⌘" on Apple keyboards, "Ctrl" elsewhere (only rendered inside tooltips, i.e. in the browser). */
+const modKey = () => (typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl");
 
 const kindOf = (f: File): MediaKind => (f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : "image");
 
@@ -358,7 +364,13 @@ export function PromptBar(props: PromptBarProps) {
   const uploading = draft.refs.some((r) => r.uploading);
   const blocker = uploading
     ? "Uploading…"
-    : refCheck ?? plan.blocker ?? (overCap ? `Over the project's ${formatCost(costCapUsd)} limit (≈ ${formatCost(spentUsd)} spent) — raise it in project settings` : undefined);
+    : refCheck ?? plan.blocker ?? (overCap ? `Over the project's ${formatUsd(costCapUsd)} limit (≈ ${formatUsd(spentUsd)} spent) — raise it in project settings` : undefined);
+  // An empty bar needs no warning line (the placeholder says it); everything else is spelled out under the bar.
+  const quietBlocker = !draft.prompt.trim() && !draft.refs.length && blocker === plan.blocker && /^Describe/.test(blocker ?? "");
+  const blockerId = useId();
+  const [directorRow, directorFade] = useEdgeFade<HTMLDivElement>();
+  // Reference clips make the take reference-to-video: the first image is then a reference, not the start frame.
+  const refMode = plan.steps.find((s) => s.key === "main")?.request.op === "ref2v";
   const video = draft.mode === "video";
   const action = input.action;
   const busy = generate.isPending || preparing;
@@ -380,7 +392,11 @@ export function PromptBar(props: PromptBarProps) {
     generate.mutate(
       { input: draftToInput(draft, engine, settings, frame), folderId },
       {
-        onSuccess: (r) => toast.success(r.items.length > 1 ? `${r.items.length} jobs queued` : "Queued", { duration: 1500 }),
+        onSuccess: (r) => {
+          toast.success(r.items.length > 1 ? `${r.items.length} jobs queued` : "Queued", { duration: 1500 });
+          // The scene was deleted meanwhile: say where the take went.
+          if (folderId && r.folderId === null) toast(r.plan.notes[0] ?? "That scene was deleted, so the take is in Home", { duration: 4000 });
+        },
         onError: (e) => toast.error((e as Error).message),
       },
     );
@@ -389,10 +405,12 @@ export function PromptBar(props: PromptBarProps) {
   useEffect(() => {
     submitRef.current = submit;
   });
-  // ⌘/Ctrl+Enter generates from anywhere in the workspace (the prompt's own Enter already does).
+  // ⌘/Ctrl+Enter generates from any field of the bar (onKeyDown below), and from the page when nothing
+  // else has focus — never from a dialog, a sheet or another text field (Soul Cast, the brief, settings).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+      if (e.defaultPrevented || e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.isComposing) return;
+      if (e.target !== document.body && e.target !== document.documentElement) return;
       e.preventDefault();
       void submitRef.current();
     };
@@ -427,9 +445,95 @@ export function PromptBar(props: PromptBarProps) {
       ? "Describe the scene – the whole grid shares it"
       : "Describe your still – use @ to add characters & locations";
 
+  // Secondary settings: inline on wide bars, in one Settings popover on narrow ones.
+  const settingsItems: { label: string; node: React.ReactNode }[] = [
+    {
+      label: "Aspect ratio",
+      node: <PickChip key="aspect" icon={RectangleHorizontal} label="Aspect ratio" value={draft.aspect[draft.mode]} options={video ? VIDEO_ASPECTS : IMAGE_ASPECTS} onChange={(v) => setDraft((d) => ({ aspect: { ...d.aspect, [d.mode]: v } }))} />,
+    },
+    ...(video && action !== "edit" ? [{ label: "Duration", node: <DurationChip key="duration" value={draft.duration} effective={effectiveDuration} onChange={(duration) => setDraft({ duration })} /> }] : []),
+    {
+      label: "Resolution",
+      node: (
+        <PickChip
+          key="resolution"
+          icon={Maximize}
+          label="Resolution"
+          value={draft.resolution[draft.mode]}
+          options={video ? VIDEO_RESOLUTIONS : IMAGE_RESOLUTIONS}
+          onChange={(v) => setDraft((d) => ({ resolution: { ...d.resolution, [d.mode]: v } }))}
+        />
+      ),
+    },
+    ...(action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid")
+      ? [
+          {
+            label: video ? "Takes" : "Images",
+            node: <PickChip key="batch" icon={CopyIcon} label={video ? "Takes" : "Images"} value={draft.batch} options={Array.from({ length: BATCH.max }, (_, i) => i + 1)} onChange={(batch) => setDraft({ batch })} format={(v) => `×${v}`} />,
+          },
+        ]
+      : []),
+    ...(video && model.options.audio === true
+      ? [
+          {
+            label: "Sound",
+            node: (
+              <Tooltip key="audio">
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={() => setDraft((d) => ({ audio: !d.audio }))} className={cn(chip, draft.audio ? chipOn : chipIdle)} aria-pressed={draft.audio} aria-label="Audio">
+                    {draft.audio ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />} Audio
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{draft.audio ? "This generation will include generated audio." : "Silent take"}</TooltipContent>
+              </Tooltip>
+            ),
+          },
+        ]
+      : []),
+    ...(video && action === "generate"
+      ? [
+          {
+            label: "Shots",
+            node: (
+              <PickChip
+                key="multishot"
+                icon={FileVideo}
+                label="Multi-shot"
+                value={draft.multiShot.mode}
+                options={["off", "auto", "manual"]}
+                onChange={(mode) => setDraft((d) => ({ multiShot: { mode, shots: mode === "manual" && !d.multiShot.shots.length ? [{ prompt: "", duration: 3 }, { prompt: "", duration: 3 }] : d.multiShot.shots } }))}
+                format={(v) => (v === "off" ? "Single shot" : v === "auto" ? "Multi-shot · Auto" : "Multi-shot · Manual")}
+              />
+            ),
+          },
+        ]
+      : []),
+  ];
+  const settingsSummary = [
+    draft.aspect[draft.mode],
+    video && action !== "edit" ? `${effectiveDuration ?? draft.duration}s` : null,
+    draft.resolution[draft.mode],
+    draft.batch > 1 && action === "generate" ? `×${draft.batch}` : null,
+    video && draft.multiShot.mode !== "off" && action === "generate" ? "Multi-shot" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  // The live cost sits next to Generate at every width (short on narrow bars).
+  const costShort = demo ? "Demo" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : "≈ ?";
+  const costLong = demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : "Price unknown";
+
   return (
+
     <div
       className="group/composer @container w-full rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+      onKeyDown={(e) => {
+        // Only the bar's own fields: React bubbles events from portals (the palette editor dialog, popovers) up here too.
+        if (!e.currentTarget.contains(e.target as Node)) return;
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.defaultPrevented && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          void submit();
+        }
+      }}
       onPaste={(e) => {
         const files = [...e.clipboardData.files];
         if (files.length) {
@@ -481,7 +585,7 @@ export function PromptBar(props: PromptBarProps) {
           const n: Record<string, number> = {};
           return draft.refs.map((r) => {
             const i = (n[r.kind] = (n[r.kind] ?? -1) + 1);
-            return <RefThumb key={r.id} r={r} index={i} startFrame={r.kind === "image" && i === 0 && video && action === "generate"} onRemove={() => setDraft((d) => ({ refs: d.refs.filter((x) => x.id !== r.id) }))} />;
+            return <RefThumb key={r.id} r={r} index={i} startFrame={r.kind === "image" && i === 0 && video && action === "generate" && !refMode} onRemove={() => setDraft((d) => ({ refs: d.refs.filter((x) => x.id !== r.id) }))} />;
           });
         })()}
         <AddRef onFiles={addRefs} onPick={(r) => setDraft((d) => ({ refs: [...d.refs, r] }))} />
@@ -524,7 +628,9 @@ export function PromptBar(props: PromptBarProps) {
       )}
 
       {/* Director's Panel */}
-      <div className="scrollbar-none flex items-center gap-1.5 overflow-x-auto px-0.5 pb-1.5 @min-[760px]:flex-wrap @min-[760px]:overflow-visible">
+      {/* Narrow bars scroll this row (with faded edges where more chips hide); wide ones wrap it. */}
+      <div ref={directorRow} style={directorFade} className="scrollbar-none -mx-0.5 flex items-center gap-1.5 overflow-x-auto px-1 pb-1.5 @min-[760px]:flex-wrap @min-[760px]:overflow-visible" role="group" aria-label="Director's Panel">
+
         <FilmSetupChip settings={settings} onChange={onSettings} mode={draft.mode} />
         <CameraChip
           settings={settings}
@@ -557,9 +663,10 @@ export function PromptBar(props: PromptBarProps) {
           </Tooltip>
       </div>
 
-      {/* Generation settings */}
+      {/* Generation settings. Narrow bars (phones, a bar squeezed by the side panel) wrap this row and
+          fold the secondary settings into one Settings popover, so nothing hides off-screen. */}
       <div className="flex items-end gap-2">
-        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto @min-[760px]:flex-wrap @min-[760px]:overflow-visible">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           <Segmented
             label="Mode"
             value={draft.mode}
@@ -648,49 +755,45 @@ export function PromptBar(props: PromptBarProps) {
             />
           )}
 
-          <PickChip icon={RectangleHorizontal} label="Aspect ratio" value={draft.aspect[draft.mode]} options={video ? VIDEO_ASPECTS : IMAGE_ASPECTS} onChange={(v) => setDraft((d) => ({ aspect: { ...d.aspect, [d.mode]: v } }))} />
-          {video && action !== "edit" && <DurationChip value={draft.duration} effective={effectiveDuration} onChange={(duration) => setDraft({ duration })} />}
-          <PickChip
-            icon={Maximize}
-            label="Resolution"
-            value={draft.resolution[draft.mode]}
-            options={video ? VIDEO_RESOLUTIONS : IMAGE_RESOLUTIONS}
-            onChange={(v) => setDraft((d) => ({ resolution: { ...d.resolution, [d.mode]: v } }))}
-          />
-          {action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid") && (
-            <PickChip icon={CopyIcon} label={video ? "Takes" : "Images"} value={draft.batch} options={Array.from({ length: BATCH.max }, (_, i) => i + 1)} onChange={(batch) => setDraft({ batch })} format={(v) => `×${v}`} />
-          )}
-          {video && model.options.audio === true && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button type="button" onClick={() => setDraft((d) => ({ audio: !d.audio }))} className={cn(chip, draft.audio ? chipOn : chipIdle)} aria-pressed={draft.audio} aria-label="Audio">
-                  {draft.audio ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />} Audio
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{draft.audio ? "This generation will include generated audio." : "Silent take"}</TooltipContent>
-            </Tooltip>
-          )}
-          {video && action === "generate" && (
-            <PickChip
-              icon={FileVideo}
-              label="Multi-shot"
-              value={draft.multiShot.mode}
-              options={["off", "auto", "manual"]}
-              onChange={(mode) => setDraft((d) => ({ multiShot: { mode, shots: mode === "manual" && !d.multiShot.shots.length ? [{ prompt: "", duration: 3 }, { prompt: "", duration: 3 }] : d.multiShot.shots } }))}
-              format={(v) => (v === "off" ? "Single shot" : v === "auto" ? "Multi-shot · Auto" : "Multi-shot · Manual")}
-            />
-          )}
+          <div className="hidden @min-[760px]:contents">{settingsItems.map((s) => s.node)}</div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button type="button" className={cn(chip, chipIdle, "max-w-full @min-[760px]:hidden")} aria-label={`Settings: ${settingsSummary}`}>
+                <SlidersHorizontal className="size-3.5 shrink-0" />
+                <span className="truncate">{settingsSummary}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[min(92vw,320px)] space-y-1 p-2" align="start" side="top" collisionPadding={12}>
+              <p className="px-1.5 pt-0.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Settings</p>
+              {settingsItems.map((s) => (
+                <div key={s.label} className="flex items-center justify-between gap-3 rounded-lg px-1.5 py-1">
+                  <span className="text-[13px] text-muted-foreground">{s.label}</span>
+                  {s.node}
+                </div>
+              ))}
+            </PopoverContent>
+          </Popover>
         </div>
-        <span className={cn("hidden shrink-0 font-mono text-[12px] sm:inline", overCap ? "text-destructive" : "text-muted-foreground")}>
-          {demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : ""}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={cn("mb-1.5 shrink-0 rounded-full px-2 py-0.5 font-mono text-[12px] tabular-nums", overCap ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
+              <span className="@min-[520px]:hidden">{costShort}</span>
+              <span className="hidden @min-[520px]:inline">{costLong}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {demo ? "Demo mode: no key connected for this model, so takes are free placeholders" : cost === 0 ? "Runs on your own GPU" : "Estimated cost of this run, billed by the provider to your key"}
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               size="icon"
               onClick={() => void submit()}
               disabled={busy}
-              aria-label="Generate"
+              aria-label={plan.outputs > 1 ? `Generate ${plan.outputs}` : "Generate"}
+              aria-disabled={!!blocker || undefined}
+              aria-describedby={blocker ? blockerId : undefined}
               className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
@@ -699,7 +802,7 @@ export function PromptBar(props: PromptBarProps) {
           <TooltipContent>
             {blocker ?? (
               <span className="flex items-center gap-1.5">
-                Generate{plan.outputs > 1 ? ` ${plan.outputs}` : ""} <Kbd>⌘</Kbd>
+                Generate{plan.outputs > 1 ? ` ${plan.outputs}` : ""} <Kbd>{modKey()}</Kbd>
                 <Kbd>↵</Kbd>
               </span>
             )}
@@ -711,7 +814,12 @@ export function PromptBar(props: PromptBarProps) {
           {preparing ? "Reading the take's first frame…" : plan.notes.slice(0, 3).join(" · ")}
         </p>
       )}
-      {(blocker && !uploading && (refCheck || overCap)) && <p className="px-2 pt-1 text-[11.5px] text-destructive">{blocker}</p>}
+      {/* Why Generate can't run, in words (touch screens never see the tooltip). */}
+      {blocker && (
+        <p id={blockerId} className={cn("px-2 pt-1 text-[11.5px] leading-snug", quietBlocker ? "sr-only" : refCheck || overCap ? "text-destructive" : "text-muted-foreground")}>
+          {blocker}
+        </p>
+      )}
       <span className="sr-only" aria-live="polite">
         {cost != null ? `Estimated cost ${demo ? "free in demo mode" : formatCost(cost)}` : ""}
       </span>
