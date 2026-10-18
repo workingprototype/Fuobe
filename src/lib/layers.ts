@@ -226,6 +226,17 @@ export const ANGLES: [string, string][] = [
   ["Wide", "a wide shot showing the full environment"],
 ];
 
+/** What the editor knows about a tool's model (built by its page, so the browser needs no catalog). */
+export interface LayerModelInfo {
+  id: string;
+  name: string;
+  engine: "cloud" | "open";
+  tagline: string;
+  pricing?: { unit: string; usd: number; note?: string };
+  /** Providers its routes run on (demo detection: none of them connected). */
+  providers: string[];
+}
+
 /** Cuts the background back out after an edit model repaints a transparent layer. */
 export const CUTOUT_MODELS = { cloud: "birefnet-cloud", open: "oss-rmbg" } as const;
 

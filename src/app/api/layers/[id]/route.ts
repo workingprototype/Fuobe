@@ -8,6 +8,8 @@ const Patch = z.object({
   doc: z.unknown().optional(),
   /** The head version the editor started from (a mismatch means another tab saved a version). */
   versionId: z.string().max(40).optional(),
+  /** The card's cover: a small JPEG/WebP data URL of the composite. */
+  cover: z.string().max(300_000).optional(),
 });
 
 /** The project, its versions, the head document and its tools' jobs (with their results). */
@@ -25,7 +27,7 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/layers/[id
   const doc = parsed.data.doc === undefined ? undefined : parseDoc(parsed.data.doc);
   if (doc === null) return Response.json({ error: "Those layers couldn't be saved" }, { status: 400 });
   try {
-    const p = updateProject(id, { name: parsed.data.name, doc, versionId: parsed.data.versionId });
+    const p = updateProject(id, { name: parsed.data.name, doc, versionId: parsed.data.versionId, cover: parsed.data.cover });
     return p ? Response.json(p) : Response.json({ error: "Not found" }, { status: 404 });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: e instanceof LayersError ? e.status : 422 });

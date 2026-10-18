@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getModel, supportsOp } from "@/lib/catalog";
 import type { Operation } from "@/lib/catalog/types";
+import { layersHref } from "@/lib/output-actions";
 import {
   addNodes,
   addRevision,
@@ -385,6 +386,18 @@ describe("edit text", () => {
       { text: "no box", box: null },
     ]);
     expect(textBlocksFrom(undefined)).toEqual([]);
+  });
+});
+
+describe("Open in Layers", () => {
+  it("opens an image result as a new project, and a layers result with its layers", () => {
+    const base = { feature: "image", modelId: "m" };
+    expect(layersHref({ id: "g1", op: "t2i", status: "succeeded", request: base }, "/api/files/o/a.png")).toBe("/layers?image=%2Fapi%2Ffiles%2Fo%2Fa.png");
+    expect(layersHref({ id: "g2", op: "layers", status: "succeeded", request: { ...base, inputs: { images: ["/api/files/u/src.png"] } } }, "/api/files/o/l1.png")).toBe(
+      "/layers?image=%2Fapi%2Ffiles%2Fu%2Fsrc.png&generation=g2",
+    );
+    // A layers result made from an image that isn't stored here opens just that layer.
+    expect(layersHref({ id: "g3", op: "layers", status: "succeeded", request: { ...base, inputs: { images: ["https://x.example/a.png"] } } }, "/api/files/o/l1.png")).toBe("/layers?image=%2Fapi%2Ffiles%2Fo%2Fl1.png");
   });
 });
 

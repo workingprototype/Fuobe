@@ -15,6 +15,7 @@ export type OutputActionId =
   | "upscale"
   | "reference"
   | "grade"
+  | "layers"
   | "save-character"
   | "extend"
   | "reframe"
@@ -83,6 +84,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("upscale", "Upscale", `/upscale?image=${q(o.url)}`);
       link("reference", "Use as reference", `/image?ref=${q(o.url)}`);
       link("grade", "Color grade", `/color-grade?image=${q(o.url)}`);
+      link("layers", "Open in Layers", layersHref(g, o.url));
       out.push({ id: "save-character", label: "Save as character", placement: "menu" });
       break;
     case "video":
@@ -121,6 +123,16 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });
   return out;
+}
+
+/**
+ * Open an image in the Layers editor (/layers?image=…). A layers result opens with its layers
+ * already split, on the picture it was made from.
+ */
+export function layersHref(g: Pick<Generation, "id" | "op" | "status" | "request">, url: string): string {
+  const source = g.request?.inputs?.images?.[0];
+  if (g.op === "layers" && g.status === "succeeded" && source?.startsWith("/api/files/")) return `/layers?image=${q(source)}&generation=${g.id}`;
+  return `/layers?image=${q(url)}`;
 }
 
 // ---------------------------------------------------------------------------

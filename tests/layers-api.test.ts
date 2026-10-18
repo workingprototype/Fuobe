@@ -263,6 +263,18 @@ describe("layers API", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/Describe your changes/);
   });
 
+  it("keeps a small cover of the composite for the card, and names projects after their image", async () => {
+    const cover = `data:image/jpeg;base64,${Buffer.from("not really a jpeg").toString("base64")}`;
+    let res = await one.PATCH(req("PATCH", { cover }), ctx({ id }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as LayerProject).coverUrl).toBe(cover);
+    res = await one.PATCH(req("PATCH", { cover: "javascript:alert(1)" }), ctx({ id }));
+    expect(res.status).toBe(400);
+    // No name given: the uploaded file's name ("poster.png").
+    res = await list.POST(req("POST", { source: upload(), width: 10, height: 10 }));
+    expect(((await res.json()) as LayerProjectView).project.name).toBe("Poster");
+  });
+
   it("restores an older version as a new head", async () => {
     const original = view.versions[view.versions.length - 1];
     const res = await versions.POST(req("POST", { from: original.id }), ctx({ id }));

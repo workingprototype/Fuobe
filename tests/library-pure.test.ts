@@ -48,6 +48,7 @@ describe("outputActions", () => {
       "menu:upscale",
       "menu:reference",
       "menu:grade",
+      "menu:layers",
       "menu:save-character",
       "menu:reuse",
       "menu:copy-prompt",

@@ -26,7 +26,8 @@ import {
 } from "@/lib/layers";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
-import { cancelGeneration, getGeneration } from "./generations";
+import { cancelGeneration, getGeneration, previewGeneration } from "./generations";
+import { getAsset } from "./storage";
 
 /**
  * Layers studio (Higgsfield Layers): projects, saved versions of their layer document, and the AI
@@ -439,6 +440,17 @@ function insertVersion(projectId: string, label: string, doc: LayerDoc, now: num
   return id;
 }
 
+/** A project's starting name: the result's title or prompt (first words), else the uploaded file's name. */
+function nameFor(source: string): string | undefined {
+  const assetId = /\/([A-Za-z0-9_-]{12})\.[a-z0-9]+$/i.exec(source)?.[1];
+  const asset = assetId ? getAsset(assetId) : null;
+  if (!asset) return undefined;
+  const g = asset.generationId ? getGeneration(asset.generationId, { includeDeleted: true }) : null;
+  const text = g?.request.title ?? g?.prompt ?? asset.name?.replace(/\.[^.]+$/, "");
+  const words = text?.replace(/\s+/g, " ").trim().split(" ").slice(0, 6).join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1, 80) : undefined;
+}
+
 /**
  * A new project on an image (an upload or a result): the image is its first layer. With
  * `generationId` (a finished layers result), its layers arrive like a decomposition that just finished.
@@ -455,7 +467,7 @@ export function createProject(input: { source: string; width: number; height: nu
     jobs.push({ id: nanoid(8), tool: "decompose", label: "Layers from your result", frame: [0, 0, width, height], generationIds: [g.id], state: "pending", createdAt: now });
   }
   const id = nanoid(10);
-  const name = input.name?.trim().slice(0, 80) || "Untitled project";
+  const name = input.name?.trim().slice(0, 80) || nameFor(input.source) || "Untitled project";
   db().transaction(() => {
     db()
       .prepare("INSERT INTO layer_projects (id, name, source_url, cover_url, width, height, head_version_id, jobs_json, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)")
@@ -467,12 +479,18 @@ export function createProject(input: { source: string; width: number; height: nu
 }
 
 /** Rename, and/or autosave the document into the head version (409 when another tab moved the head). */
-export function updateProject(id: string, patch: { name?: string; doc?: LayerDoc; versionId?: string }): LayerProject | null {
+/** The project card's cover: a small JPEG/WebP of the current composite, rendered by the editor (data URL). */
+export const COVER_MAX = 300_000;
+const isCover = (v: string) => /^data:image\/(jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length <= COVER_MAX;
+
+export function updateProject(id: string, patch: { name?: string; doc?: LayerDoc; versionId?: string; cover?: string }): LayerProject | null {
   const row = getRow(id);
   if (!row) return null;
   const now = Date.now();
+  if (patch.cover !== undefined && !isCover(patch.cover)) throw new LayersError("That cover isn't a small JPEG or WebP image", 400);
   db().transaction(() => {
     if (patch.name !== undefined) db().prepare("UPDATE layer_projects SET name = ?, updated_at = ? WHERE id = ?").run(patch.name.trim().slice(0, 80) || "Untitled project", now, id);
+    if (patch.cover !== undefined) db().prepare("UPDATE layer_projects SET cover_url = ? WHERE id = ?").run(patch.cover, id);
     if (patch.doc) {
       if (patch.versionId && patch.versionId !== row.head_version_id) throw new LayersError("This project changed in another tab. Reload to see the latest version.", 409);
       if (patch.doc.source !== row.source_url) throw new LayersError("That document belongs to another image", 400);
@@ -557,6 +575,16 @@ export function startJob(id: string, input: LayerJobInput): LayerJob {
     throw new LayersError("A generation is already running on this layer", 409);
   }
   const steps = jobSteps(input, { batchTitle: `Layers · ${row.name}` });
+  // Seedream's layer-count instruction means nothing to the demo provider, which would print it on its sample text layer.
+  if ((input.tool === "decompose" || input.tool === "split") && !input.prompt?.trim()) {
+    for (const s of steps) {
+      try {
+        if (s.request.op === "layers" && s.request.prompt && previewGeneration(s.request).demo) s.request = { ...s.request, prompt: undefined };
+      } catch {
+        // createPipeline below reports what's wrong with the request.
+      }
+    }
+  }
   let ids: string[];
   try {
     ids = createPipeline(steps, { batchId: `layers-${id}` }).items.map((g) => g.id);
@@ -570,7 +598,8 @@ export function startJob(id: string, input: LayerJobInput): LayerJob {
     label: input.label?.trim() || TOOL_LABELS[input.tool],
     ...(input.nodeId ? { nodeId: input.nodeId } : {}),
     frame: input.frame as Box,
-    settings: { ...(input.settings ?? {}), ...(input.prompt ? { prompt: input.prompt } : {}), ...(input.modelId ? { modelId: input.modelId } : {}) },
+    // The input too: a regional edit lays its result over the region as it was (Original / New).
+    settings: { ...(input.settings ?? {}), ...(input.prompt ? { prompt: input.prompt } : {}), ...(input.modelId ? { modelId: input.modelId } : {}), ...(input.image ? { image: input.image } : {}) },
     generationIds: ids,
     state: "pending",
     createdAt: Date.now(),
