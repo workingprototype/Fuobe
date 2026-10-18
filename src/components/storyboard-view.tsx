@@ -158,7 +158,7 @@ function Board({
   idea?: string;
   names: Record<string, string>;
 }) {
-  const { remove } = useGenerationActions();
+  const { trash } = useGenerationActions();
   const qc = useQueryClient();
   const first = frames[0];
   const done = frames.filter((f) => f.status === "succeeded").length;
@@ -207,10 +207,9 @@ function Board({
             variant="ghost"
             size="sm"
             className="text-muted-foreground hover:text-destructive"
-            onClick={() => {
-              [...frames, ...film].forEach((f) => void remove(f));
-              toast("Storyboard deleted");
-            }}
+            aria-label="Delete storyboard"
+            // One bulk call, and the shared toast with Undo (the frames go to the Trash).
+            onClick={() => void trash([...frames, ...film], "Storyboard moved to Trash")}
           >
             <Trash2 /> <span className="hidden sm:inline">Delete</span>
           </Button>
@@ -309,7 +308,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto w-full min-w-0 max-w-[1240px] flex-1 space-y-10 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full min-w-0 max-w-[1240px] flex-1 space-y-10 px-3 pb-16 sm:px-6">
         <div className="mx-auto max-w-[820px] pt-6 text-center">
           <h2 className="font-heading text-display text-balance">Tell it frame by frame</h2>
           <p className="mt-2 text-[13px] text-muted-foreground">
@@ -444,7 +443,7 @@ export function StoryboardView({ modelNames = {} }: { /** Display names of the s
             <p className="mt-2 text-[14px]">Your storyboards appear here.</p>
           </div>
         )}
-      </main>
+      </div>
       {open && pos >= 0 && (
         <Viewer
           generation={flat[pos]}
