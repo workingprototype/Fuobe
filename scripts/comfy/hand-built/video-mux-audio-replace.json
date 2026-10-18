@@ -1,11 +1,10 @@
 {
-  "1": { "class_type": "LoadVideo", "inputs": { "file": "input.mp4" }, "_meta": { "title": "Video" } },
-  "2": { "class_type": "GetVideoComponents", "inputs": { "video": ["1", 0] }, "_meta": { "title": "Frames + fps" } },
+  "1": { "class_type": "LoadVideo", "inputs": { "file": "input.mp4" }, "_meta": { "title": "Video (its picture is copied, never decoded)" } },
   "3": { "class_type": "LoadAudio", "inputs": { "audio": "soundtrack.wav" }, "_meta": { "title": "New soundtrack (audio)" } },
   "7": {
-    "class_type": "CreateVideo",
-    "inputs": { "images": ["2", 0], "fps": ["2", 2], "audio": ["3", 0], "bit_depth": "auto", "color_space": "sRGB", "codec": "none" },
-    "_meta": { "title": "Video with the new soundtrack" }
+    "class_type": "ConcatenateVideo",
+    "inputs": { "videos.video0": ["1", 0], "codec": "auto", "complete_audio": ["3", 0] },
+    "_meta": { "title": "Same picture, new soundtrack (stream copy)" }
   },
   "8": {
     "class_type": "SaveVideo",

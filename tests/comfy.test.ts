@@ -5,6 +5,8 @@ import {
   alphaBBox,
   applyBindings,
   asrLanguage,
+  bypassReference,
+  captionChunkSeconds,
   computeDimensions,
   computeFrames,
   expandCaptionWorkflow,
@@ -17,6 +19,7 @@ import {
   referencedModels,
   splitCueWords,
   swatchPixels,
+  whisperLanguage,
   type ComfyWorkflow,
 } from "@/lib/comfy";
 
@@ -121,32 +124,121 @@ describe("caption cues", () => {
 describe("caption burn-in graph", () => {
   const template = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/captions-burnin.json"), "utf8")) as ComfyWorkflow;
   const kinds = (wf: ComfyWorkflow, t: string) => Object.entries(wf).filter(([, n]) => n.class_type === t);
+  const windows = (wf: ComfyWorkflow) => kinds(wf, "Video Slice").map(([, n]) => [n.inputs.start_time, n.inputs.duration]);
+  const linksResolve = (wf: ComfyWorkflow) => Object.values(wf).every((n) => Object.values(n.inputs).every((v) => !Array.isArray(v) || typeof v[0] !== "string" || !!wf[v[0]]));
 
-  it("cuts the clip into gap and cue segments that tile the timeline; the last cue runs to the end", () => {
+  it("cuts the clip into gap and cue windows that tile the timeline; without a known length the last cue runs to the end", () => {
     const wf = expandCaptionWorkflow(template, [
       { start: 0.5, end: 1.5, text: "Hello" },
       { start: 1.5, end: 2.0, text: "world" },
       { start: 3.0, end: 4.0, text: "again" },
     ]);
-    const slices = kinds(wf, "Video Slice").map(([, n]) => [n.inputs.start_time, n.inputs.duration]);
-    expect(slices).toEqual([[0, 0.5], [0.5, 1], [1.5, 0.5], [2, 1], [3, 0]]);
+    expect(windows(wf)).toEqual([[0, 0.5], [0.5, 1], [1.5, 0.5], [2, 1], [3, 0]]);
     expect(kinds(wf, "TextOverlay").map(([, n]) => n.inputs.text)).toEqual(["Hello", "world", "again"]);
-    // style copied from the template's overlay; frames come from each segment
+    // style copied from the template's overlay; each captioned chunk is decoded, overlaid and encoded on its own
     for (const [, n] of kinds(wf, "TextOverlay")) expect(n.inputs).toMatchObject({ font_size: 6, position: "bottom", align: "center", outline: true });
-    // the batch keeps segment order, CreateVideo / SaveVideo are untouched
-    const batch = wf["90"];
-    expect(Object.keys(batch.inputs)).toEqual(["images.image0", "images.image1", "images.image2", "images.image3", "images.image4"]);
-    expect(wf["91"].inputs).toMatchObject({ images: ["90", 0], fps: ["2", 2], audio: ["2", 1] });
-    expect(Object.values(wf).every((n) => Object.values(n.inputs).every((v) => !Array.isArray(v) || !!wf[v[0] as string]))).toBe(true);
+    for (const [, n] of kinds(wf, "CreateVideo")) expect(n.inputs.codec).toBe("h264");
+    expect(kinds(wf, "GetVideoComponents")).toHaveLength(3); // gaps are never decoded
+    // the join keeps window order (encoded chunks and raw gaps); the soundtrack node is dropped when we don't know the clip has sound
+    const join = wf["90"].inputs;
+    expect(Object.keys(join).filter((k) => k.startsWith("videos."))).toEqual(["videos.video0", "videos.video1", "videos.video2", "videos.video3", "videos.video4"]);
+    expect(wf[(join["videos.video0"] as [string, number])[0]].class_type).toBe("Video Slice");
+    expect(wf[(join["videos.video1"] as [string, number])[0]].class_type).toBe("CreateVideo");
+    expect(join.complete_audio).toBeUndefined();
+    expect(kinds(wf, "LoadAudio")).toHaveLength(0);
+    expect(wf["92"].inputs.video).toEqual(["90", 0]);
+    expect(linksResolve(wf)).toBe(true);
   });
 
-  it("nests batches past 50 segments and refuses an empty cue list", () => {
-    const cues = Array.from({ length: 60 }, (_, i) => ({ start: i, end: i + 1, text: `cue ${i}` }));
+  it("uses what the MP4 header says: edges between frames, a gap after the last cue, cues past the end dropped, the clip's own soundtrack", () => {
+    const clip = { duration: 6, fps: 30, width: 640, height: 360, hasAudio: true };
+    const wf = expandCaptionWorkflow(template, [
+      { start: 0, end: 1, text: "First" },
+      { start: 1.2, end: 2, text: "Second" },
+      { start: 7, end: 8, text: "after the end" },
+    ], clip);
+    const half = 0.5 / 30;
+    const w = windows(wf).map(([s, d]) => [Number(s).toFixed(4), Number(d).toFixed(4)]);
+    expect(w).toEqual([
+      ["0.0000", (1 - half).toFixed(4)], // frames 0-29
+      [(1 - half).toFixed(4), "0.2000"], // gap, frames 30-35
+      [(1.2 - half).toFixed(4), "0.8000"], // frames 36-59
+      [(2 - half).toFixed(4), "0.0000"], // the rest of the clip, uncaptioned
+    ]);
+    expect(kinds(wf, "TextOverlay").map(([, n]) => n.inputs.text)).toEqual(["First", "Second"]);
+    expect(wf["90"].inputs.complete_audio).toEqual(["3", 0]);
+    expect(wf["3"]).toMatchObject({ class_type: "LoadAudio" });
+    expect(linksResolve(wf)).toBe(true);
+    expect(() => expandCaptionWorkflow(template, [{ start: 7, end: 8, text: "late" }], clip)).toThrow(/after the end of the clip/);
+  });
+
+  it("cuts long captioned stretches into chunks sized to the frame (one chunk of raw frames in memory at a time)", () => {
+    expect(captionChunkSeconds({})).toBe(1);
+    expect(captionChunkSeconds({ width: 1080, height: 1920, fps: 30 })).toBeCloseTo(0.54, 2);
+    expect(captionChunkSeconds({ width: 320, height: 240, fps: 8 })).toBe(5);
+    const clip = { duration: 10, fps: 30, width: 1080, height: 1920, hasAudio: false };
+    const wf = expandCaptionWorkflow(template, [{ start: 0, end: 4, text: "A long line" }], clip);
+    const overlays = kinds(wf, "TextOverlay");
+    expect(overlays.length).toBe(8); // 4 s in ~0.5 s chunks
+    expect(overlays.every(([, n]) => n.inputs.text === "A long line")).toBe(true);
+    // chunks tile the cue exactly, each starting half a frame before its first frame
+    const w = windows(wf);
+    const cue = w.slice(0, 8);
+    expect(cue[0][0]).toBe(0);
+    for (let i = 1; i < cue.length; i++) expect(Number(cue[i][0])).toBeCloseTo(Number(cue[i - 1][0]) + Number(cue[i - 1][1]), 6);
+    for (const [s] of cue.slice(1)) {
+      const frame = Number(s) * 30 + 0.5;
+      expect(Math.abs(frame - Math.round(frame))).toBeLessThan(1e-4); // windows are written to the microsecond
+    }
+    expect(Number(cue[7][0]) + Number(cue[7][1])).toBeCloseTo(4 - 0.5 / 30, 6);
+    expect(w[8]).toEqual([Number(cue[7][0]) + Number(cue[7][1]), 0]);
+  });
+
+  it("never writes a window shorter than three frames (Concatenate Video rejects a 2-frame clip followed by another)", () => {
+    const clip = { duration: 3, fps: 8, width: 320, height: 240, hasAudio: true };
+    const wf = expandCaptionWorkflow(template, [
+      { start: 0, end: 1, text: "Hello" },
+      { start: 1.2, end: 2.5, text: "Open captions" }, // 0.2 s pause = 2 frames at 8 fps: no gap window
+      { start: 2.6, end: 2.65, text: "blip" }, // shorter than a frame, near the end: runs to the end
+    ], clip);
+    const w = windows(wf).map(([s, d]) => [Number(s), Number(d)]);
+    expect(w).toEqual([[0, 0.9375], [0.9375, 1.5], [2.4375, 0]]);
+    expect(kinds(wf, "TextOverlay").map(([, n]) => n.inputs.text)).toEqual(["Hello", "Open captions", "blip"]);
+    // a lone very short caption in the middle is held for three frames
+    const held = windows(expandCaptionWorkflow(template, [{ start: 1, end: 1.05, text: "Hi" }], { ...clip, duration: 10 })).map(([s, d]) => [Number(s), Number(d)]);
+    expect(held).toEqual([[0, 0.9375], [0.9375, 0.375], [1.3125, 0]]);
+  });
+
+  it("nests joins past 100 clips and refuses an empty cue list", () => {
+    const cues = Array.from({ length: 120 }, (_, i) => ({ start: i, end: i + 1, text: `cue ${i}` }));
     const wf = expandCaptionWorkflow(template, cues);
-    const batches = kinds(wf, "BatchImagesNode");
-    expect(batches.length).toBe(3); // 60 segments: 50 + 10, then the top level
-    expect(Object.keys(wf["90"].inputs)).toEqual(["images.image0", "images.image1"]);
+    const joins = kinds(wf, "ConcatenateVideo");
+    expect(joins.length).toBe(3); // 120 clips: 100 + 20, then the top level
+    expect(Object.keys(wf["90"].inputs).filter((k) => k.startsWith("videos."))).toEqual(["videos.video0", "videos.video1"]);
+    expect(linksResolve(wf)).toBe(true);
     expect(() => expandCaptionWorkflow(template, [])).toThrow(/No captions/);
+  });
+});
+
+describe("reference slots", () => {
+  const load = (id: string) => JSON.parse(fs.readFileSync(path.join(process.cwd(), `workflows/comfyui/${id}.json`), "utf8")) as ComfyWorkflow;
+
+  it("leaves an image out of a FLUX.2 reference chain by bypassing its ReferenceLatent pair", () => {
+    const tryon = load("tryon-flux2-klein-4b");
+    const wf = bypassReference(tryon, "77")!; // the bottom garment
+    expect(wf).not.toBeNull();
+    for (const gone of ["77", "75:181", "75:191", "75:201", "75:211"]) expect(wf[gone]).toBeUndefined();
+    expect(wf["75:63"].inputs).toMatchObject({ positive: ["75:200", 0], negative: ["75:210", 0] });
+    expect(wf["81"]).toBeDefined(); // the top stays
+    // two left out in a row (style board with one image): the chain falls back to the first reference
+    const klein = load("style-ref-flux2-klein-4b");
+    const one = bypassReference(bypassReference(bypassReference(klein, "81")!, "77")!, "78")!;
+    expect(one["75:63"].inputs).toMatchObject({ positive: ["75:123", 0], negative: ["75:121", 0] });
+  });
+
+  it("refuses when the image is used another way", () => {
+    expect(bypassReference(load("palette-transfer-image"), "2")).toBeNull();
+    expect(bypassReference(load("relight-qwen-edit-2509-reference"), "1003")).toBeNull();
   });
 });
 
@@ -161,6 +253,20 @@ describe("languages, palettes, layers", () => {
     expect(languageName("Japanese (ja)")).toBe("Japanese");
     expect(languageName("he")).toBe("Hebrew");
     expect(languageName("Klingon")).toBe("Klingon");
+  });
+
+  it("maps languages to Whisper's own names, every one of them in ComfyUI-Whisper's combo", () => {
+    expect(whisperLanguage("tl")).toBe("Tagalog");
+    expect(whisperLanguage("fil")).toBe("Tagalog");
+    expect(whisperLanguage("Filipino")).toBe("Tagalog");
+    expect(whisperLanguage("he")).toBe("Hebrew");
+    expect(whisperLanguage("uk-UA")).toBe("Ukrainian");
+    expect(whisperLanguage("Swahili (sw)")).toBe("Swahili");
+    expect(whisperLanguage("ht")).toBe("Haitian creole");
+    expect(whisperLanguage("Klingon")).toBe("auto");
+    const subset = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/object_info.subset.json"), "utf8"));
+    const combo = new Set<string>(subset["Apply Whisper"].input.optional.language[0]);
+    for (const code of ["en", "tl", "he", "uk", "sw", "yue", "haw", "jw", "my", "ht", "nn", "zh", "pt"]) expect(combo.has(whisperLanguage(code)), code).toBe(true);
   });
 
   it("writes the palette sentence and a banded swatch", () => {

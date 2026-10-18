@@ -8,6 +8,7 @@ import {
   alphaBBox,
   applyBindings,
   asrLanguage,
+  bypassReference,
   computeDimensions,
   computeFrames,
   expandCaptionWorkflow,
@@ -19,6 +20,7 @@ import {
   randomSeed,
   splitCueWords,
   swatchPixels,
+  whisperLanguage,
   type BindingKey,
   type CaptionCue,
   type ComfyWorkflow,
@@ -28,6 +30,7 @@ import {
 } from "@/lib/comfy";
 import { guessKind } from "@/lib/catalog/payload";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
+import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { getSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
 import { readRef } from "../storage";
@@ -319,6 +322,36 @@ export function probeComfySync(timeoutMs = 1500): boolean {
 /** Loader classes whose input is an uploaded file, and which input holds it. */
 const MEDIA_LOADERS: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio" };
 
+// What we learned about each uploaded clip / track from its header (duration, size, fps, audio), by ComfyUI file name.
+declare global {
+  var __fuobeComfyMedia: Map<string, MediaInfo> | undefined;
+}
+const MEDIA_FILE = /^(video|audio)\//;
+const MEDIA_EXT = /\.(mp4|m4v|mov|m4a|wav|flac|mp3)$/i;
+
+function rememberMedia(name: string, info: MediaInfo) {
+  const seen = (globalThis.__fuobeComfyMedia ??= new Map());
+  seen.set(name, info);
+  if (seen.size > 256) seen.delete(seen.keys().next().value!);
+}
+
+/** The header facts of a file this server uploaded to ComfyUI (undefined for images and unreadable containers). */
+export function mediaInfoFor(name: unknown): MediaInfo | undefined {
+  return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
+}
+
+/** Inputs a workflow handles its own way (the manifest doesn't say). */
+const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string> }> = {
+  // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
+  "qwen-image-edit-2511-multi": { reuse: true },
+  "storyboard-qwen-edit-2509-next-scene": { reuse: true },
+  "tryon-flux2-klein-4b": { required: ["image2"], hints: { image: "Add a photo of the person", image2: "Add the garment to try on" } },
+  "palette-transfer-image": { hints: { image2: "Pick a palette or add a reference image" } },
+  "palette-transfer-video": { hints: { image: "Pick a palette or add a reference image" } },
+  "relight-qwen-edit-2509-reference": { hints: { image2: "Add the photo whose light to copy" } },
+  "face-swap-reactor": { hints: { image2: "Add the face to put in" } },
+};
+
 const MEDIA_HINT: Record<string, string> = {
   image: "Add an image",
   image2: "Add a second image",
@@ -349,6 +382,10 @@ export interface PrepareContext {
   op: Operation;
   /** Upload a file to ComfyUI's input folder; returns the name LoadImage/LoadAudio/LoadVideo take. */
   upload: (data: Buffer, contentType: string, name: string) => Promise<string>;
+  /** Header facts (duration, size, fps, audio track) of an uploaded clip or track, by its ComfyUI name. */
+  media?: (name: string) => MediaInfo | undefined;
+  /** The ComfyUI server's RAM in bytes, for graphs that hold a whole clip in memory. */
+  serverRam?: () => Promise<number | undefined>;
 }
 
 export interface PreparedPrompt {
@@ -365,11 +402,16 @@ function captionCues(input: GenInput, extra: Record<string, unknown>): CaptionCu
   return splitCueWords(given, Number(extra.wordsPerCaption ?? 0));
 }
 
+const seconds = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
+const GB = 2 ** 30;
+
 /**
  * Turn a canonical request into the exact ComfyUI prompt: picks the workflow variant, maps Fuobe's inputs
  * onto the workflow's bindings (sizes, frames, trim times, languages, palettes, layers…), uploads files the
  * provider makes itself (palette swatches, media refs in params.extra) and rewrites graphs that depend on the
- * request (caption cues). Pure apart from `ctx.upload` and reading the workflow files.
+ * request (caption cues, left-out references). What the uploads' headers say (`ctx.media`) sizes clips to
+ * their source, checks times against the clip's length and times lip re-sync by the voice. Pure apart from
+ * `ctx.upload` / `ctx.serverRam` and reading the workflow files.
  */
 export async function prepareWorkflow(endpointTemplate: string, input: GenInput, ctx: PrepareContext): Promise<PreparedPrompt> {
   // "video-concat-{n}": one workflow per clip count.
@@ -377,6 +419,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (endpointTemplate.includes("{n}") && clips.length > 4) throw new ProviderError("ComfyUI joins up to 4 clips at a time");
   let endpoint = endpointTemplate.replace("{n}", String(Math.max(2, Math.min(4, clips.length))));
   const extra: Record<string, unknown> = { ...(input.extra ?? {}) };
+  // The second audio track (mux background): the canonical input when the runtime sends it, else params.extra.audio2.
+  const given2 = (input as GenInput & { audio2?: unknown }).audio2;
+  const audio2 = typeof given2 === "string" && given2 ? given2 : undefined;
+  if (audio2) delete extra.audio2;
 
   // Media refs in params.extra (e.g. a background stem for "audio2") are uploaded like regular inputs.
   for (const [k, v] of Object.entries(extra)) {
@@ -385,11 +431,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     extra[k] = await ctx.upload(f.data, f.contentType, f.name);
   }
   // Soundtrack without a background stem: the single-track graph.
-  if (ctx.op === "mux" && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
+  if (ctx.op === "mux" && !audio2 && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
   const b = manifest.bindings;
+  const rules = SLOT_RULES[manifest.id] ?? {};
   const images = input.images ?? [];
   const values: Partial<Record<BindingKey, unknown>> = {
     prompt: input.prompt,
@@ -419,7 +466,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Speech workflows read the soundtrack with LoadAudio, which also takes a video upload.
   if ((ctx.op === "transcribe" || ctx.op === "separate-audio" || ctx.op === "translate") && b.audio && !b.video) values.audio = input.audio ?? input.video ?? clips[0];
   if (b.language && input.targetLanguage) values.language = input.targetLanguage;
-  if (b.sourceLanguage && input.sourceLanguage) values.sourceLanguage = asrLanguage(input.sourceLanguage);
+  if (b.sourceLanguage && input.sourceLanguage) {
+    const whisper = b.sourceLanguage.some((t) => workflow[t.node]?.class_type === "Apply Whisper");
+    values.sourceLanguage = whisper ? whisperLanguage(input.sourceLanguage) : asrLanguage(input.sourceLanguage);
+  }
   if (b.instruction) {
     const template = String(extra.instruction ?? d.instruction ?? "");
     delete extra.instruction;
@@ -427,11 +477,19 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.instruction = template.replaceAll("{language}", languageName(input.targetLanguage));
   }
 
+  // What the upload headers say about the clip (and the voice).
+  const clip = ctx.media?.(String(values.video ?? ""));
+  const clipLength = clip?.videoDuration ?? clip?.duration;
+
   // Frame rate (params.fps, or a model's fps control), trim window and frame counts.
   const fpsIn = input.fps ?? (typeof extra.fps === "number" && extra.fps > 0 ? extra.fps : undefined);
   if (b.fps && fpsIn) values.fps = fpsIn;
   const fps = Number(values.fps ?? d.fps ?? 16);
   const start = Math.max(0, input.startTime ?? 0);
+  if (b.startTime || b.startFrame) {
+    if (input.endTime !== undefined && input.endTime <= start) throw new ProviderError("The end time must be after the start time");
+    if (clipLength && start >= clipLength) throw new ProviderError(`The start time is past the end of the clip (it is ${seconds(clipLength)} s long)`);
+  }
   const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : input.duration;
   if (b.startTime && input.startTime !== undefined) values.startTime = start;
   if (b.startFrame && input.startTime !== undefined) values.startFrame = Math.round(start * fps);
@@ -442,14 +500,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   }
   if (b.width || b.height) {
     const multiple = Number(manifest.limits?.dimensionMultiple ?? 16);
-    // With motion paths the frame keeps the start image's shape, so the paths need no cropping.
+    // With motion paths the frame keeps the start image's shape, so the paths need no cropping;
+    // "auto" keeps the source clip's shape when its header told us.
     const srcAspect = (extra.motionPaths as MotionPaths | undefined)?.aspect;
-    const dims = computeDimensions(
-      srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? undefined : input.aspectRatio,
-      input.resolution,
-      { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) },
-      multiple,
-    );
+    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (clip?.width && clip.height ? `${clip.width}:${clip.height}` : undefined) : input.aspectRatio;
+    const dims = computeDimensions(shape, input.resolution, { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) }, multiple);
     // Respect the workflow's size limits while keeping the aspect ratio.
     const maxW = Number(manifest.limits?.maxWidth ?? Infinity);
     const maxH = Number(manifest.limits?.maxHeight ?? Infinity);
@@ -458,6 +513,17 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
   }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
+  // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
+  const voiceLength = ctx.op === "lipsync" && b.frames && !span ? ctx.media?.(String(values.audio ?? ""))?.duration : undefined;
+  if (voiceLength) {
+    const step = Number(d.frameStep ?? 4);
+    const frames = Math.ceil((voiceLength * fps) / step) * step + 1;
+    const cap = Number(manifest.limits?.maxFrames ?? 0);
+    if (cap && frames > cap) {
+      throw new ProviderError(`Lip re-sync on the open engine takes up to ${seconds(cap / fps)} s of speech per job (this voice is ${seconds(voiceLength)} s) — split it into shorter parts`);
+    }
+    values.frames = frames;
+  }
   // Drawn motion paths (normalised to the start frame) → one pixel point per output frame (Wan-Move).
   const paths = extra.motionPaths as MotionPaths | undefined;
   delete extra.motionPaths;
@@ -501,22 +567,53 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   delete extra.cues;
   delete extra.wordsPerCaption;
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
+  if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
+  // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
+  if (ctx.op === "mux" && b.duration) {
+    const tracks = [values.audio, values.audio2].map((n) => ctx.media?.(String(n ?? ""))?.duration ?? 0);
+    values.duration = Math.round((clipLength ?? (Math.max(...tracks) || 600)) * 100) / 100 + 0.5; // the mux trims it to the picture
+  }
 
-  // Reference slots the user left empty reuse the previous image (style references want all four; a dress
-  // is both the top and the bottom of a try-on).
+  // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
+  // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
+  let graph = workflow;
+  const left: string[] = [];
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
-    if (b[k] && values[k] === undefined && values[prev] !== undefined) values[k] = values[prev];
+    if (!b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
+    if (values[prev] === undefined && !left.includes(prev)) continue;
+    const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
+    if (bypassed) {
+      graph = bypassed;
+      left.push(k);
+    } else if ((rules.reuse || manifest.capability === "style-reference") && values[prev] !== undefined) values[k] = values[prev];
   }
   for (const k of mediaKeys(manifest, workflow)) {
-    if (values[k] === undefined || values[k] === "") throw new ProviderError(MEDIA_HINT[k] ?? `Add the ${k} input`);
+    if (left.includes(k)) continue;
+    if (values[k] === undefined || values[k] === "") throw new ProviderError(rules.hints?.[k] ?? MEDIA_HINT[k] ?? `Add the ${k} input`);
   }
 
-  const bound = applyBindings(workflow, b, values);
+  // Whisper captions hold the whole clip in RAM (decoded + subtitled copy): refuse what the server can't hold.
+  if (manifest.capability === "captions" && !manifest.expand && clip?.width && clip.height && clipLength) {
+    const need = clip.width * clip.height * 12 * (clip.frames ?? clipLength * (clip.fps ?? 30)) * 2.5;
+    const budget = ((await ctx.serverRam?.()) ?? 16 * GB) / 2;
+    if (need > budget) {
+      throw new ProviderError(
+        `Whisper captions hold the whole clip in memory: this one needs about ${Math.ceil(need / GB)} GB of RAM and this ComfyUI can spare ${Math.floor(budget / GB)} GB. ` +
+          "Use Qwen3-ASR + Caption burn-in for long clips, or trim it first",
+      );
+    }
+  }
+
+  const bound = applyBindings(graph, b, Object.fromEntries(Object.entries(values).filter(([k]) => !left.includes(k))));
   if (bound.missing.length) throw new ProviderError(`Workflow ${manifest.id} bindings point at missing nodes: ${bound.missing.join(", ")}`);
   let wf = bound.workflow;
   if (manifest.expand === "captions") {
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
-    wf = expandCaptionWorkflow(wf, cues);
+    try {
+      wf = expandCaptionWorkflow(wf, cues, clip ? { duration: clipLength, fps: clip.fps, width: clip.width, height: clip.height, hasAudio: clip.hasAudio } : {});
+    } catch (e) {
+      throw new ProviderError((e as Error).message);
+    }
   }
   if (input.loras?.length) wf = injectLoras(wf, input.loras);
   const metaBatch = Object.values(wf).some((n) => n.class_type === "VHS_BatchManager");
@@ -531,12 +628,14 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
 function explainExecutionError(err: { exception_message?: string; node_type?: string } | undefined, manifest?: ManifestWorkflow): string {
   if (!err) return "Execution error";
   const msg = (err.exception_message ?? "").trim();
-  if (manifest?.expand === "captions" && /division by zero|failed to slice video|no frames exist/i.test(msg)) {
-    return "A caption starts after the end of the video — check the cue times";
-  }
+  const outOfClip = /division by zero|failed to slice video|failed to trim video|no frames exist/i.test(msg);
+  if (manifest?.expand === "captions" && outOfClip) return "A caption starts after the end of the video — check the cue times";
+  if (manifest?.capability === "trim" && outOfClip) return "The start time is past the end of the clip";
   if (/no audio stream/i.test(msg)) return "That file has no sound to work with";
   return `${err.node_type}: ${msg}`;
 }
+
+const executionError = (entry: HistoryEntry) => entry.status?.messages?.find(([t]) => t === "execution_error")?.[1] as { exception_message?: string; node_type?: string } | undefined;
 
 const promptHasPrefix = (prompt: unknown, prefix: string) =>
   !!prompt && typeof prompt === "object" && Object.values(prompt as ComfyWorkflow).some((n) => n?.inputs?.filename_prefix === prefix);
@@ -545,13 +644,16 @@ const promptHasPrefix = (prompt: unknown, prefix: string) =>
  * VHS meta-batching re-queues the prompt (new prompt ids) until every frame is done; only the last pass
  * saves the video. Follow the passes by their shared filename prefix.
  */
-async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | undefined): Promise<ComfyOutput[] | "running" | null> {
+async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | undefined): Promise<ComfyOutput[] | "running" | { error: string } | null> {
   const queue = await comfyJson<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");
   if ([...(queue.queue_running ?? []), ...(queue.queue_pending ?? [])].some((q) => promptHasPrefix(q[2], prefix))) return "running";
   const hist = await comfyJson<Record<string, HistoryEntry>>("/history?max_items=64");
   const passes = Object.values(hist)
     .filter((e) => promptHasPrefix(e.prompt?.[2], prefix))
     .sort((a, c) => Number(c.prompt?.[0] ?? 0) - Number(a.prompt?.[0] ?? 0));
+  // A pass that failed (out of memory, a node exception) ends the job: say why instead of "no output".
+  const failed = passes.find((e) => e.status?.status_str === "error");
+  if (failed) return { error: explainExecutionError(executionError(failed), manifest) };
   for (const e of passes) {
     const files = collectOutputs(e, manifest, baseUrl(), authHeaders());
     if (files.length) return files;
@@ -579,7 +681,13 @@ export const comfyProvider: ProviderAdapter = {
     const res = await comfyFetch("/upload/image", { method: "POST", body: form });
     if (!res.ok) throw new ProviderError(`ComfyUI upload failed: ${res.status} ${await res.text()}`);
     const j = (await res.json()) as { name: string; subfolder?: string };
-    return j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+    const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+    // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
+    if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name)) {
+      const info = probeMedia(data);
+      if (info) rememberMedia(uploaded, info);
+    }
+    return uploaded;
   },
 
   async submit({ route, input, generationId }) {
@@ -587,6 +695,8 @@ export const comfyProvider: ProviderAdapter = {
       generationId,
       op: route.op,
       upload: (data, contentType, name) => comfyProvider.prepareFile(data, contentType, name),
+      media: mediaInfoFor,
+      serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats").catch(() => undefined))?.system?.ram_total,
     });
     const { clientId } = ensureSocket();
     const res = await comfyFetch("/prompt", {
@@ -594,9 +704,13 @@ export const comfyProvider: ProviderAdapter = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: wf, client_id: clientId }),
     });
-    const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { message?: string }; node_errors?: unknown };
+    const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { type?: string; message?: string }; node_errors?: unknown };
     if (!res.ok || !body.prompt_id) {
-      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : body.error?.message;
+      // A node class the server doesn't have: name the pack to install (opt-in packs like ComfyUI-Whisper).
+      const packs = manifest.customNodes.map((c) => c.name);
+      const missingPack =
+        body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on your ComfyUI (see scripts/comfy/README.md)` : undefined;
+      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
     return { externalId: body.prompt_id, meta, payload: wf };
@@ -610,13 +724,16 @@ export const comfyProvider: ProviderAdapter = {
     const finished = async (entry: HistoryEntry) => {
       if (entry.status?.status_str === "error") {
         forget(externalId);
-        const err = entry.status.messages?.find(([t]) => t === "execution_error")?.[1] as { exception_message?: string; node_type?: string } | undefined;
-        return { state: "failed" as const, error: explainExecutionError(err, manifest) };
+        return { state: "failed" as const, error: explainExecutionError(executionError(entry), manifest) };
       }
       let outputs = collectOutputs(entry, manifest, baseUrl(), authHeaders());
       if (!outputs.length && meta.metaBatch && typeof meta.prefix === "string") {
         const next = await followMetaBatch(meta.prefix, manifest);
         if (next === "running") return { state: "running" as const, message: "Rendering the next batch of frames" };
+        if (next && "error" in next) {
+          forget(externalId);
+          return { state: "failed" as const, error: next.error };
+        }
         outputs = next ?? [];
       }
       forget(externalId);

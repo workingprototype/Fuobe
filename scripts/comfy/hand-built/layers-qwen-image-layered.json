@@ -252,7 +252,7 @@
         "83:78",
         1
       ],
-      "layers": 2,
+      "layers": 4,
       "batch_size": 1
     },
     "class_type": "EmptyQwenImageLayeredLatentImage",

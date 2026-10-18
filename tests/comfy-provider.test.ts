@@ -5,6 +5,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ManifestWorkflow } from "@/lib/comfy";
+import type { MediaInfo } from "@/lib/media-probe";
 import type { ModelDef, ModelRoute } from "@/lib/catalog/types";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-comfy-provider-"));
@@ -12,7 +13,7 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://comfy.test:8188";
 
 const { setSetting } = await import("@/server/settings");
-const { comfyProvider, collectOutputs, getWorkflow, loadManifest, prepareWorkflow } = await import("@/server/providers/comfyui");
+const { comfyProvider, collectOutputs, getWorkflow, loadManifest, mediaInfoFor, prepareWorkflow } = await import("@/server/providers/comfyui");
 const { MODELS } = await import("@/lib/catalog");
 const { computeFrames } = await import("@/lib/comfy");
 
@@ -293,6 +294,28 @@ describe("ComfyUI output mapping", () => {
     expect(res).toMatchObject({ state: "succeeded", outputs: [{ kind: "video", url: expect.stringContaining("gen-mm_00001.mp4") }] });
   });
 
+  it("reports a meta-batch pass that failed instead of 'no output'", async () => {
+    const prefix = "fuobe/gen-mm-fail";
+    const graph = { "22": { class_type: "VHS_VideoCombine", inputs: { filename_prefix: prefix } } };
+    handler = (url) => {
+      if (url.includes("/history/p-mmf")) return json({ "p-mmf": { prompt: [1, "p-mmf", graph], ...done({}) } });
+      if (url.endsWith("/queue")) return json({ queue_running: [], queue_pending: [] });
+      if (url.includes("/history?max_items"))
+        return json({
+          "p-mmf": { prompt: [1, "p-mmf", graph], ...done({}) },
+          "pass-2": { prompt: [2, "pass-2", graph], status: { status_str: "error", messages: [["execution_error", { node_type: "KSampler", exception_message: "CUDA out of memory" }]] }, outputs: {} },
+        });
+      return json({});
+    };
+    const meta = { workflowId: "mixed-media-zimage-frames", nodeCount: 17, prefix, metaBatch: true };
+    expect(await comfyProvider.poll(pollCtx("p-mmf", meta))).toEqual({ state: "failed", error: "KSampler: CUDA out of memory" });
+  });
+
+  it("explains a trim that starts past the end of the clip", async () => {
+    handler = () => json({ "p-trim": { status: { status_str: "error", messages: [["execution_error", { node_type: "SaveVideo", exception_message: "No frames exist for start_time 9.0" }]] }, outputs: {} } });
+    expect(await comfyProvider.poll(pollCtx("p-trim", { workflowId: "video-trim", nodeCount: 3 }))).toEqual({ state: "failed", error: "The start time is past the end of the clip" });
+  });
+
   it("explains a caption that starts after the end of the clip", async () => {
     handler = () =>
       json({
@@ -305,6 +328,48 @@ describe("ComfyUI output mapping", () => {
       state: "failed",
       error: "A caption starts after the end of the video — check the cue times",
     });
+  });
+});
+
+describe("ComfyUI uploads and submit", () => {
+  /** A minimal MP4: ftyp + moov with mvhd and one video trak (tkhd 1280x720, mdhd, hdlr vide, stts 50 frames). */
+  function tinyMp4(): Buffer {
+    const box = (type: string, ...parts: Buffer[]) => {
+      const body = Buffer.concat(parts);
+      const head = Buffer.alloc(8);
+      head.writeUInt32BE(8 + body.length);
+      head.write(type, 4);
+      return Buffer.concat([head, body]);
+    };
+    const u32 = (...v: number[]) => Buffer.concat(v.map((n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n >>> 0); return b; }));
+    const mvhd = box("mvhd", u32(0, 0, 0, 1000, 2000), Buffer.alloc(80));
+    const matrix = u32(0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000);
+    const tkhd = box("tkhd", u32(0, 0, 0, 1, 0, 2000), Buffer.alloc(8), Buffer.alloc(8), matrix, u32(1280 << 16, 720 << 16));
+    const mdhd = box("mdhd", u32(0, 0, 0, 25, 50), Buffer.alloc(4));
+    const hdlr = box("hdlr", u32(0, 0), Buffer.from("vide"), Buffer.alloc(12));
+    const stts = box("stts", u32(0, 1, 50, 1));
+    const trak = box("trak", tkhd, box("mdia", mdhd, hdlr, box("minf", box("stbl", stts))));
+    return Buffer.concat([box("ftyp", Buffer.from("isom"), u32(0)), box("moov", mvhd, trak)]);
+  }
+
+  it("remembers what an uploaded clip's header says, for the next prompt", async () => {
+    handler = (url) => (url.endsWith("/upload/image") ? json({ name: "fuobe_abc.mp4", subfolder: "" }) : json({}));
+    const name = await comfyProvider.prepareFile(tinyMp4(), "video/mp4", "clip.mp4");
+    expect(name).toBe("fuobe_abc.mp4");
+    expect(mediaInfoFor(name)).toMatchObject({ container: "mp4", hasVideo: true, hasAudio: false, width: 1280, height: 720, frames: 50, fps: 25, duration: 2, videoDuration: 2 });
+    handler = (url) => (url.endsWith("/upload/image") ? json({ name: "fuobe_img.png", subfolder: "" }) : json({}));
+    expect(mediaInfoFor(await comfyProvider.prepareFile(Buffer.from("\x89PNG...."), "image/png", "a.png"))).toBeUndefined();
+  });
+
+  it("names the node pack to install when ComfyUI lacks a node class", async () => {
+    handler = (url) =>
+      url.endsWith("/prompt")
+        ? json({ error: { type: "missing_node_type", message: "Node 'Apply Whisper' not found. The custom node may not be installed." }, node_errors: {} }, 400)
+        : json({});
+    const whisperRoute: ModelRoute = { op: "captions", provider: "comfyui", endpoint: "captions-whisper-burnin" };
+    await expect(
+      comfyProvider.submit({ generationId: "g-np", model, route: whisperRoute, input: { video: "clip.mp4", prompt: "" } }),
+    ).rejects.toThrow("This workflow needs the ComfyUI-VideoHelperSuite + ComfyUI-Whisper node packs on your ComfyUI (see scripts/comfy/README.md)");
   });
 });
 
@@ -324,7 +389,8 @@ const CUES = "0.00-1.00: Hello there\n1.20-2.00: Second line";
 const GIVEN = new Set(["img1.png", "img2.png", "clip.mp4", "voice.wav", "bg.wav", "up_palette_swatch.png"]);
 const opFor = (id: string) => MODELS.flatMap((m) => m.routes).find((r) => r.provider === "comfyui" && r.endpoint === id)?.op ?? (id.startsWith("video-mux") ? "mux" : "t2i");
 
-async function prepare(id: string, over: Record<string, unknown> = {}, op = opFor(id)) {
+type Facts = { media?: Record<string, MediaInfo>; ram?: number };
+async function prepare(id: string, over: Record<string, unknown> = {}, op = opFor(id), facts: Facts = {}) {
   const input = {
     prompt: CUES,
     negativePrompt: "blurry",
@@ -350,9 +416,13 @@ async function prepare(id: string, over: Record<string, unknown> = {}, op = opFo
       uploads.push(name);
       return `up_${name}`;
     },
+    media: (name) => facts.media?.[name],
+    serverRam: async () => facts.ram,
   });
   return { ...res, uploads };
 }
+const mp4 = (over: Partial<MediaInfo> = {}): MediaInfo => ({ container: "mp4", hasVideo: true, hasAudio: true, duration: 6, videoDuration: 6, width: 640, height: 360, fps: 30, frames: 180, ...over });
+const wavOf = (duration: number): MediaInfo => ({ container: "wav", hasVideo: false, hasAudio: true, duration });
 const at = (wf: Record<string, { inputs: Record<string, unknown> }>, m: ManifestWorkflow, key: string) => (m.bindings[key] ?? []).map((t) => wf[t.node].inputs[t.input]);
 
 describe("round-3 workflow bindings", () => {
@@ -417,25 +487,105 @@ describe("round-3 workflow bindings", () => {
   });
 
   it("fills reference slots, trigger words and grid framing", async () => {
+    // FLUX.2 reference chains: references not given are left out (their ReferenceLatent pair bypassed), not repeated
     const klein = await prepare("style-ref-flux2-klein-4b");
-    expect(at(klein.workflow, klein.manifest, "image3")).toEqual(["img2.png"]);
-    expect(at(klein.workflow, klein.manifest, "image4")).toEqual(["img2.png"]);
+    expect(klein.workflow["77"]).toBeUndefined();
+    expect(klein.workflow["78"]).toBeUndefined();
+    expect(klein.workflow["75:63"].inputs.positive).toEqual(["75:200", 0]);
     const tryon = await prepare("tryon-flux2-klein-4b", { prompt: "wear these" });
     expect(tryon.workflow["75:74"].inputs.text).toBe("TRYON wear these");
-    expect(tryon.workflow["77"].inputs.image).toBe("img2.png"); // a dress is both top and bottom
+    expect(tryon.workflow["81"].inputs.image).toBe("img2.png"); // the garment
+    expect(tryon.workflow["77"]).toBeUndefined(); // no bottom given: one garment reference, not the top twice
     const grid = await prepare("grid-zimage-contact-sheet", { prompt: "a heist", extra: { columns: 2, rows: 2 } });
     expect(grid.workflow["20"].inputs.string_a).toMatch(/^A 2x2 grid contact sheet of 4 film stills/);
     expect(grid.workflow["27"].inputs).toMatchObject({ columns: 2, rows: 2 });
     await expect(prepare("style-ref-qwen-edit-2511", { images: [] })).rejects.toThrow(/Add an image/);
   });
 
+  it("repeats a reference only where that is harmless, and otherwise asks for the missing image", async () => {
+    // style boards (TextEncodeQwenImageEditPlus): one collage passed twice
+    const board = await prepare("style-ref-qwen-edit-2511", { images: ["img1.png"] });
+    expect(at(board.workflow, board.manifest, "image2")).toEqual(["img1.png"]);
+    // a photo is not its own palette, lighting reference or garment
+    await expect(prepare("palette-transfer-image", { images: ["img1.png"], palette: [] }, "color-match")).rejects.toThrow("Pick a palette or add a reference image");
+    await expect(prepare("relight-qwen-edit-2509-reference", { images: ["img1.png"] }, "edit")).rejects.toThrow("Add the photo whose light to copy");
+    await expect(prepare("tryon-flux2-klein-4b", { images: ["img1.png"], prompt: "x" })).rejects.toThrow("Add the garment to try on");
+    // with a palette the swatch fills the reference slot
+    const swatch = await prepare("palette-transfer-image", { images: ["img1.png"] }, "color-match");
+    expect(swatch.workflow["2"].inputs.image).toBe("up_palette_swatch.png");
+  });
+
+  it("checks trim times against each other and the clip's length", async () => {
+    await expect(prepare("video-trim", { startTime: 3, endTime: 2 })).rejects.toThrow("The end time must be after the start time");
+    await expect(prepare("video-segment-resample", { startTime: 2, endTime: 2 })).rejects.toThrow("The end time must be after the start time");
+    await expect(prepare("video-trim", { startTime: 7, endTime: 9 }, "trim", { media: { "clip.mp4": mp4() } })).rejects.toThrow("The start time is past the end of the clip (it is 6 s long)");
+    const ok = await prepare("video-trim", { startTime: 1, endTime: 3 }, "trim", { media: { "clip.mp4": mp4() } });
+    expect(ok.workflow["2"].inputs).toMatchObject({ start_time: 1, duration: 2 });
+  });
+
+  it("takes the source clip's shape for 'auto' and times lip re-sync by the voice, refusing more than the frame cap", async () => {
+    const portrait = mp4({ width: 1080, height: 1920 });
+    const lip = await prepare("lipsync-v2v-infinitetalk", { aspectRatio: "auto", resolution: "480p", startTime: undefined, endTime: undefined }, "lipsync", {
+      media: { "clip.mp4": portrait, "voice.wav": wavOf(12.3) },
+    });
+    const { workflow: wf, manifest } = lip;
+    expect(at(wf, manifest, "width")).toEqual([480]);
+    expect(at(wf, manifest, "height")).toEqual([848]); // 9:16 at 480p, multiple of 16: no squashing into 16:9
+    expect(wf["228"].inputs.custom_height).toBe(0); // VHS keeps the proportions, ImageResizeKJv2 crops
+    expect(at(wf, manifest, "frames")).toEqual([309, 309]); // ceil(12.3 s × 25 fps / 4) × 4 + 1, also VHS frame_load_cap
+    await expect(
+      prepare("lipsync-v2v-infinitetalk", { aspectRatio: "auto", startTime: undefined, endTime: undefined }, "lipsync", { media: { "voice.wav": wavOf(55) } }),
+    ).rejects.toThrow(/up to 40 s of speech per job \(this voice is 55 s\)/);
+    // without header facts: the old 16:9 default, the 1000-frame cap
+    const blind = await prepare("lipsync-v2v-infinitetalk", { aspectRatio: "auto", startTime: undefined, endTime: undefined }, "lipsync");
+    expect(at(blind.workflow, blind.manifest, "frames")).toEqual([1000, 1000]);
+  });
+
+  it("maps the source language to Whisper's names and refuses clips Whisper can't hold in RAM", async () => {
+    const tl = await prepare("captions-whisper-burnin", { sourceLanguage: "tl" }, "captions");
+    expect(tl.workflow["3"].inputs.language).toBe("Tagalog");
+    const he = await prepare("captions-whisper-burnin", { sourceLanguage: "he" }, "captions");
+    expect(he.workflow["3"].inputs.language).toBe("Hebrew");
+    const short = { "clip.mp4": mp4() };
+    await expect(prepare("captions-whisper-burnin", {}, "captions", { media: short, ram: 16 * 2 ** 30 })).resolves.toBeTruthy();
+    const long = { "clip.mp4": mp4({ width: 1080, height: 1920, duration: 30, videoDuration: 30, frames: 900 }) };
+    await expect(prepare("captions-whisper-burnin", {}, "captions", { media: long, ram: 16 * 2 ** 30 })).rejects.toThrow(/needs about 53 GB of RAM and this ComfyUI can spare 8 GB/);
+  });
+
   it("uses the one-track soundtrack graph without a background stem", async () => {
     const mix = await prepare("video-mux-audio");
     expect(mix.manifest.id).toBe("video-mux-audio");
     expect(mix.workflow["4"].inputs.audio).toBe("bg.wav");
+    expect(mix.workflow["7"]).toMatchObject({ class_type: "ConcatenateVideo", inputs: { "videos.video0": ["1", 0], complete_audio: ["6", 0] } });
     const one = await prepare("video-mux-audio", { extra: {} });
     expect(one.manifest.id).toBe("video-mux-audio-replace");
     expect(one.workflow["3"].inputs.audio).toBe("voice.wav");
+  });
+
+  it("takes the background from inputs.audio2 when the runtime sends it, and mixes over a bed as long as the video", async () => {
+    const canonical = await prepare("video-mux-audio", { audio2: "stem_bg.wav", extra: { audio2: "bg.wav" } }, "mux", { media: { "clip.mp4": mp4({ videoDuration: 61.2, duration: 61.25 }) } });
+    expect(canonical.manifest.id).toBe("video-mux-audio");
+    expect(canonical.workflow["4"].inputs.audio).toBe("stem_bg.wav");
+    expect(canonical.workflow["9"].inputs.duration).toBe(61.7); // the video's length (+0.5 s; the mux trims to the picture)
+    const onlyCanonical = await prepare("video-mux-audio", { audio2: "stem_bg.wav", extra: {} });
+    expect(onlyCanonical.manifest.id).toBe("video-mux-audio");
+    // no video header: the longer of the two tracks
+    const blind = await prepare("video-mux-audio", {}, "mux", { media: { "voice.wav": wavOf(5), "bg.wav": wavOf(8.04) } });
+    expect(blind.workflow["9"].inputs.duration).toBe(8.54);
+  });
+
+  it("burns captions with the clip's facts: a gap after the last cue and the clip's own soundtrack", async () => {
+    const { workflow } = await prepare("captions-burnin", {}, "captions", { media: { "clip.mp4": mp4() } });
+    const joins = Object.values(workflow).filter((n) => n.class_type === "ConcatenateVideo");
+    expect(joins).toHaveLength(1);
+    expect(joins[0].inputs.complete_audio).toEqual(["3", 0]);
+    expect(workflow["3"].inputs.audio).toBe("clip.mp4");
+    const slices = Object.values(workflow).filter((n) => n.class_type === "Video Slice");
+    expect(slices.at(-1)!.inputs.duration).toBe(0); // the uncaptioned rest of the clip
+    expect(slices).toHaveLength(4); // cue, gap, cue, rest
+    const silent = await prepare("captions-burnin", {}, "captions", { media: { "clip.mp4": mp4({ hasAudio: false }) } });
+    expect(Object.values(silent.workflow).some((n) => n.class_type === "LoadAudio")).toBe(false);
+    await expect(prepare("captions-burnin", { prompt: "9.00-10.00: too late" }, "captions", { media: { "clip.mp4": mp4() } })).rejects.toThrow(/after the end of the clip/);
   });
 
   it("writes one segment per caption cue with the chosen style", async () => {

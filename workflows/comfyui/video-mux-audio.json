@@ -5,19 +5,7 @@
       "file": "input.mp4"
     },
     "_meta": {
-      "title": "LoadVideo"
-    }
-  },
-  "2": {
-    "class_type": "GetVideoComponents",
-    "inputs": {
-      "video": [
-        "1",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "GetVideoComponents"
+      "title": "Video (its picture is copied, never decoded)"
     }
   },
   "3": {
@@ -26,7 +14,7 @@
       "audio": "dub_voice.mp3"
     },
     "_meta": {
-      "title": "LoadAudio"
+      "title": "New voice (audio)"
     }
   },
   "4": {
@@ -35,7 +23,7 @@
       "audio": "background.mp3"
     },
     "_meta": {
-      "title": "LoadAudio"
+      "title": "Background stem or music bed (audio2)"
     }
   },
   "5": {
@@ -48,47 +36,41 @@
       "volume": 0
     },
     "_meta": {
-      "title": "AudioAdjustVolume"
+      "title": "Background level (dB)"
     }
   },
   "6": {
     "class_type": "AudioMerge",
     "inputs": {
       "audio1": [
-        "3",
+        "10",
         0
       ],
       "audio2": [
-        "5",
+        "3",
         0
       ],
       "merge_method": "add"
     },
     "_meta": {
-      "title": "AudioMerge"
+      "title": "Voice over the background"
     }
   },
   "7": {
-    "class_type": "CreateVideo",
+    "class_type": "ConcatenateVideo",
     "inputs": {
-      "images": [
-        "2",
+      "videos.video0": [
+        "1",
         0
       ],
-      "fps": [
-        "2",
-        2
-      ],
-      "audio": [
+      "codec": "auto",
+      "complete_audio": [
         "6",
         0
-      ],
-      "bit_depth": "auto",
-      "color_space": "sRGB",
-      "codec": "none"
+      ]
     },
     "_meta": {
-      "title": "CreateVideo"
+      "title": "Same picture, new soundtrack (stream copy)"
     }
   },
   "8": {
@@ -104,7 +86,35 @@
       "codec": "auto"
     },
     "_meta": {
-      "title": "SaveVideo"
+      "title": "Save video"
+    }
+  },
+  "9": {
+    "class_type": "EmptyAudio",
+    "inputs": {
+      "duration": 60,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "_meta": {
+      "title": "Soundtrack length (the video's)"
+    }
+  },
+  "10": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "9",
+        0
+      ],
+      "audio2": [
+        "5",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Background over silence"
     }
   }
 }

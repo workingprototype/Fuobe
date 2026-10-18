@@ -1755,7 +1755,7 @@ export const SPEC = [
     license: 'Apache-2.0 (Qwen-Image-Layered weights and the Comfy-Org repack)',
     notes:
       'Template image_qwen_image_layered with the fp8mixed weights (bf16 is 40.9 GB). The input is scaled so its longest side = maxSize (640 is the trained bucket; 1024 works, slower). ' +
-      'numLayers = how many RGBA layers come out (1-10; the latent holds numLayers+1 slices and slice 0, the reconstructed composite, is cut off by LatentCut). prompt = optional caption of the whole image. ' +
+      'numLayers = how many RGBA layers come out (1-10, default 4 like the model card; the latent holds numLayers+1 slices and slice 0, the reconstructed composite, is cut off by LatentCut). prompt = optional caption of the whole image. ' +
       'SaveImage writes one full-canvas RGBA PNG per layer, back to front: the provider reports them in that order with meta {name, z, bbox} (bbox from the alpha channel). "Separate layer" = run again on one layer.',
   },
   {
@@ -1809,8 +1809,8 @@ export const SPEC = [
     vramGb: 10,
     license: 'Apache-2.0 (FLUX.2 [klein] 4B)',
     notes:
-      'Template image_flux2_klein_image_edit_4b_distilled with two extra ReferenceLatent references and an explicit output size. All four references are required: ' +
-      'the provider repeats the last image when fewer are given. Fast (4 steps, 8-10 GB). Weaker than Qwen-Image-Edit-2511 on complex prompts.',
+      'Template image_flux2_klein_image_edit_4b_distilled with two extra ReferenceLatent references and an explicit output size. 1-4 references: ' +
+      'the provider bypasses the ReferenceLatent pair of each reference not given (bypassReference). Fast (4 steps, 8-10 GB). Weaker than Qwen-Image-Edit-2511 on complex prompts.',
   },
   {
     id: 'style-ref-krea2',
@@ -2056,15 +2056,16 @@ export const SPEC = [
     notes:
       'Default caption source for Faceless / Shorts. Changed from the research graph: LoadAudio instead of LoadVideo + GetVideoComponents (audio or video input). ' +
       'maxChars 32 + split_by_punctuation_or_pause_or_length gives short vertical-video lines. The text output is one "start-end: text" line per cue; the provider parses it into meta.cues. ' +
+      'output_format none: the node writes no file of its own (concurrent jobs would race on one captions.srt); SaveText returns the cues. ' +
       'Burn the cues in with captions-burnin (chain: transcript text -> prompt).',
   },
   {
     id: 'captions-burnin',
-    title: 'Burn captions into a video (core Draw Text Overlay, one segment per cue)',
+    title: 'Burn captions into a video (core Draw Text Overlay, chunk by chunk)',
     capability: 'captions',
     handBuilt: 'hand-built/captions-burnin.json',
     bindings: {
-      video: [b('1', 'file')], fontSize: [b('12', 'font_size')], fontColor: [b('12', 'color')], captionPosition: [b('12', 'position')],
+      video: [b('1', 'file'), b('3', 'audio')], fontSize: [b('12', 'font_size')], fontColor: [b('12', 'color')], captionPosition: [b('12', 'position')],
     },
     outputs: [{ node: '92', kind: 'video' }],
     defaults: { fontColor: '#ffffff', captionPosition: 'bottom' },
@@ -2072,10 +2073,14 @@ export const SPEC = [
     vramGb: 0,
     license: 'no model (ComfyUI core TextOverlay, GPL-3.0 like ComfyUI; Pillow\'s bundled Aileron font, OFL)',
     notes:
-      'Fuobe\'s open caption burn-in, all inside ComfyUI with core nodes. The provider rewrites the graph per request: the cues (prompt lines "start-end: text" or SRT, e.g. from captions-qwen3-asr) become ' +
-      'one Trim Video segment per cue and per gap, each cue segment gets a TextOverlay with the style of node 12 (fontSize = % of the frame height, fontColor, captionPosition top | bottom, outlined), ' +
-      'BatchImagesNode joins the segments in order and CreateVideo restores the source fps and soundtrack. The last cue stays up to the end of the clip (a segment may not start after the end). ' +
-      'Holds the clip\'s frames in memory about three times (fine for Shorts up to a minute at 720p). Runs on CPU (verified end to end through Fuobe).',
+      'Fuobe\'s open caption burn-in, all inside ComfyUI with core nodes. The provider rewrites the graph per request (expandCaptionWorkflow): the cues (prompt lines "start-end: text" or SRT, e.g. from captions-qwen3-asr) ' +
+      'cut the clip into Trim Video windows. Gaps go straight to Concatenate Video (never decoded). A cue window is cut into chunks of at most ~384 MB of frames (about 0.5 s of 1080x1920 at 30 fps, 5 s at 360p); ' +
+      'each chunk is decoded (GetVideoComponents), gets a TextOverlay in the style of node 12 (fontSize = % of the frame height, fontColor, captionPosition top | bottom, outlined) and is encoded at once (CreateVideo codec h264), ' +
+      'so ComfyUI only needs one chunk of raw frames at a time and can evict finished chunks under memory pressure. Concatenate Video joins chunks and gaps in order and lays the clip\'s own soundtrack (LoadAudio, node 3) ' +
+      'under the result; for a silent clip node 3 is dropped. The provider reads the upload\'s MP4 header for duration, fps, size and audio: window edges sit between frames, cues past the end are dropped and the rest of the clip after the last cue stays uncaptioned. ' +
+      'Windows hold at least 3 frames (Concatenate Video rejects a 2-frame clip followed by another): a shorter pause between cues gets no gap, a shorter caption is held for 3 frames. ' +
+      'Measured on the CPU server under RAM pressure (--cache-ram 11): a 20 s 640x360 30 fps clip with 18 s of captions peaks at +0.50 GB RSS and a 40 s one at +0.45 GB (the old one-batch graph: +5.16 GB for the 20 s clip); ' +
+      'without pressure ComfyUI\'s RAM cache keeps finished chunks (+2.64 GB for 20 s) until memory runs low. Runs on CPU (verified end to end through Fuobe).',
   },
   {
     id: 'captions-whisper-burnin',
@@ -2092,7 +2097,9 @@ export const SPEC = [
     autoDownloads: ['Apply Whisper downloads large-v3-turbo.pt (1.62 GB) into models/stt/whisper on first run'],
     notes:
       'All-ComfyUI alternative that transcribes and burns in one job (word-by-word captions from words_alignment). One style per run (font, size, colour, border, centred). ' +
-      'Because of the NC code licence the default open route is captions-qwen3-asr + captions-burnin. Save SRT (not an output node) is dropped; the transcript text is kept.',
+      'Because of the NC code licence the default open route is captions-qwen3-asr + captions-burnin, and install-comfyui.sh only installs ComfyUI-Whisper with NC_PACKS=1. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
+      'VHS_LoadVideo decodes the whole clip and Add Subtitles To Frames copies it (about 2.5 copies of the frames in RAM): the provider refuses clips that would need more than half of the ComfyUI server\'s RAM and points to the chunked route. ' +
+      'sourceLanguage takes Whisper\'s own names (the provider maps ISO codes: tl/fil -> Tagalog, he -> Hebrew).',
   },
   {
     id: 'translate-qwen35-textgen',
@@ -2134,17 +2141,20 @@ export const SPEC = [
     handBuilt: 'hand-built/lipsync-v2v-infinitetalk.json',
     bindings: {
       video: [b('228', 'video')], audio: [b('125', 'audio')], prompt: [b('241', 'positive_prompt')], negativePrompt: [b('241', 'negative_prompt')],
-      width: [b('245', 'value')], height: [b('246', 'value')], frames: [b('270', 'value')], seed: [b('128', 'seed')], steps: [b('128', 'steps')],
+      width: [b('245', 'value')], height: [b('246', 'value')], frames: [b('270', 'value'), b('228', 'frame_load_cap')], seed: [b('128', 'seed')], steps: [b('128', 'steps')],
       startStep: [b('128', 'start_step')], audioScale: [b('194', 'audio_scale')],
     },
     outputs: [{ node: '131', kind: 'video' }],
-    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16 },
+    defaults: { fps: 25 },
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 1000 },
     vramGb: 24,
     license: 'Apache-2.0 (Wan 2.1, InfiniteTalk, lightx2v)',
     autoDownloads: ['DownloadAndLoadWav2VecModel fetches TencentGameMate/chinese-wav2vec2-base (0.38 GB) on first run'],
     notes:
       'Same model files as infinitetalk-wanwrapper (no new download). The source frames are VAE-encoded and only the last steps are re-denoised (steps 4, startStep 2), so camera, background and body stay; ' +
-      'mouth, head and upper body follow the new audio. 81-frame windows until the audio ends (frames = cap @25 fps). Pass the clean dubbed voice, then mux the background with video-mux-audio.',
+      'mouth, head and upper body follow the new audio. 81-frame windows until the audio ends. Changed from the research graph: VHS_LoadVideo gets only custom_width (height 0 keeps the source\'s proportions, no squashing) ' +
+      'and ImageResizeKJv2 crops to width x height, which the provider takes from the source\'s own shape (aspect ratio "auto", read from the MP4 header) at the chosen resolution; ' +
+      'frames (num_frames and VHS frame_load_cap) = the voice\'s length at 25 fps, at most 1000 (40 s): the provider refuses a longer voice instead of cutting it. Pass the clean dubbed voice, then mux the background with video-mux-audio.',
   },
   {
     id: 'lipsync-latentsync16',
@@ -2166,16 +2176,20 @@ export const SPEC = [
   },
   {
     id: 'video-mux-audio',
-    title: 'Add a soundtrack: new voice + background stem mixed onto a video',
+    title: 'Add a soundtrack: new voice + background stem mixed onto a video (picture stream-copied)',
     capability: 'mux',
     handBuilt: 'hand-built/video-mux-audio.json',
-    bindings: { video: [b('1', 'file')], audio: [b('3', 'audio')], audio2: [b('4', 'audio')], backgroundVolumeDb: [b('5', 'volume')] },
+    bindings: {
+      video: [b('1', 'file')], audio: [b('3', 'audio')], audio2: [b('4', 'audio')], backgroundVolumeDb: [b('5', 'volume')], duration: [b('9', 'duration')],
+    },
     outputs: [{ node: '8', kind: 'video' }],
     vramGb: 0,
     license: 'n/a (no model)',
     notes:
       'audio = the new voice (Chatterbox dub, narration), audio2 = the background stem of dub-prepare-separate-transcribe or a music bed (backgroundVolumeDb, e.g. -12 under narration). ' +
-      'AudioMerge resamples to the higher rate and pads the shorter clip. Video length is unchanged. Without audio2 the provider uses video-mux-audio-replace. Runs on CPU (verified end to end through Fuobe).',
+      'Both are mixed over EmptyAudio of the video\'s length (duration: the provider reads it from the MP4 header), because AudioMerge cuts audio2 to audio1\'s length. ' +
+      'Concatenate Video with complete_audio copies the video stream packet by packet (no decode, no re-encode: lossless, constant memory) and encodes only the new AAC soundtrack. ' +
+      'Video length is unchanged. Without audio2 the provider uses video-mux-audio-replace. Runs on CPU (verified end to end through Fuobe; +0.02 GB RAM for a 900-frame clip).',
   },
   {
     id: 'video-mux-audio-replace',
@@ -2186,7 +2200,9 @@ export const SPEC = [
     outputs: [{ node: '8', kind: 'video' }],
     vramGb: 0,
     license: 'n/a (no model)',
-    notes: 'LoadVideo -> GetVideoComponents (frames, fps) + LoadAudio -> CreateVideo -> SaveVideo. The single-track variant of video-mux-audio (voice-over, narration, music). Runs on CPU (verified end to end through Fuobe).',
+    notes:
+      'LoadVideo + LoadAudio -> Concatenate Video (complete_audio) -> SaveVideo: the picture is stream-copied, only the new soundtrack is encoded. The single-track variant of video-mux-audio (voice-over, narration, music). ' +
+      'A soundtrack longer than the video is cut at the video\'s end. Runs on CPU (verified end to end through Fuobe).',
   },
 
   // ---- Product 3D, try-on --------------------------------------------------------
@@ -2231,7 +2247,8 @@ export const SPEC = [
     license: 'Apache-2.0 (FLUX.2 [klein] 4B, try-on LoRA by xocialize); segformer_b2_clothes MIT; ComfyUI-RMBG code GPL-3.0',
     autoDownloads: ['ClothesSegment (ComfyUI-RMBG) downloads segformer_b2_clothes (0.11 GB) into models/RMBG/segformer_clothes on first run'],
     notes:
-      'Reference order is load-bearing (LoRA card): image = person, image2 = top, image3 = bottom; for a dress the provider passes image2 again as image3. The LoRA was trained on clothing-agnostic inputs, ' +
+      'Reference order is load-bearing (LoRA card): image = person, image2 = top (or a dress / whole outfit), image3 = bottom. image2 is required; without image3 the provider bypasses the bottom\'s ReferenceLatent pair ' +
+      '(one garment reference) instead of passing the top as the bottom. The LoRA was trained on clothing-agnostic inputs, ' +
       'so ClothesSegment greys the old outfit out first. Trigger word TRYON (defaults.promptPrefix: the provider puts it at the start of the prompt). Output size = the person image (~1 MP).',
   },
 
