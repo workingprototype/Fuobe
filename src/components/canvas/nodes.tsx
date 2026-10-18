@@ -19,6 +19,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  SlidersHorizontal,
   Square,
   Trash2,
   Upload,
@@ -31,7 +32,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { LanguageChip, SlidersChip } from "@/components/studio/audio-controls";
+import { LanguageChip, SliderControls } from "@/components/studio/audio-controls";
 import { downloadName } from "@/components/studio/feed";
 import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ControlsChip } from "@/components/studio/model-controls";
@@ -382,6 +383,23 @@ function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: 
   if (o.controls?.length) items.push(<div key="controls" className={NO_DRAG}><ControlsChip controls={o.controls} values={extra} onChange={setExtra} /></div>);
   if (!items.length) return null;
   return <div className="flex flex-wrap gap-1 [&_button]:h-7 [&_button]:text-[12px]">{items}</div>;
+}
+
+/** A model's numeric settings behind one chip (the studio composer shows them in its settings panel). */
+function SlidersChip({ model, values, onChange }: { model: ModelDef; values: Record<string, unknown>; onChange: (param: string, v?: number) => void }) {
+  const changed = (model.options.sliders ?? []).filter((s) => typeof values[s.param] === "number" && values[s.param] !== s.default).length;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" className={cn(chip, changed > 0 && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover")}>
+          <SlidersHorizontal className="size-3" /> {changed ? `Settings · ${changed}` : "Settings"}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-3" align="start" side="top">
+        <SliderControls model={model} values={values} onChange={onChange} />
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function EngineBadge({ model }: { model?: ModelDef }) {
