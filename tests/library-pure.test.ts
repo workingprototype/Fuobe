@@ -296,6 +296,10 @@ describe("round-3 fixes", () => {
     expect(userTitle(gen({ op: "transcribe", modelName: "Whisper", prompt: null, request: { feature: "transcribe", modelId: "w" } }))).toBe("Transcribe · Whisper");
     expect(userTitle(gen({ op: "image-to-3d", modelName: "Hunyuan3D", prompt: "image-to-3d", request: { feature: "3d", modelId: "h" } }))).toMatch(/ · Hunyuan3D$/);
     expect(userTitle(gen({ request: { feature: "image", modelId: "m", prompt: "a fox", title: "Fox poster" } }))).toBe("Fox poster");
+    // A chained translation got a transcript's cue list as its prompt: that's data, not a title.
+    const cuesIn = gen({ id: "tr0000000001", op: "translate", modelName: "Claude", prompt: '[{"start":0,"end":1,"text":"Hi"}]', request: { feature: "dub", modelId: "text-llm", prompt: '[{"start":0,"end":1,"text":"Hi"}]', params: { targetLanguage: "Spanish" } } });
+    expect(userTitle(cuesIn)).toBe("Translate into Spanish · Claude");
+    expect(downloadName(cuesIn, { url: "/x/a.srt", kind: "text" }, 0)).toBe("Translate-into-Spanish-Claude-tr0000.srt");
   });
 
   it("titles an Assist plan's stack with its summary and labels mixed results", () => {

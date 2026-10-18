@@ -27,8 +27,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,7 +52,8 @@ import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib
 import { ELEMENT_KINDS, type ElementKind } from "@/lib/catalog/elements";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { downloadName } from "@/lib/library";
-import { cuesOf, cuesToSrt, outputActions, textOf, type ActionContext, type OutputAction, type OutputActionId } from "@/lib/output-actions";
+import { toSrt, toVtt } from "@/lib/cues";
+import { cuesOf, outputActions, textOf, type ActionContext, type OutputAction, type OutputActionId } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
@@ -62,6 +73,7 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   download: Download,
   "download-txt": FileDown,
   "download-srt": FileDown,
+  "download-vtt": FileDown,
   "download-all": FolderDown,
   favorite: Heart,
   finalize: Sparkles,
@@ -111,10 +123,56 @@ export interface RunnerOptions {
   onDeleted?: () => void;
 }
 
+// ---------------------------------------------------------------------------
+// Delete forever always asks first, for one item or many (the Trash's cards, viewer and bulk bar).
+
+type ConfirmForever = (gs: Generation[], after?: () => void) => void;
+const ForeverCtx = createContext<ConfirmForever | null>(null);
+
+/** Asks before anything is deleted for good. Wrap views that show the Trash. */
+export function ForeverConfirmProvider({ children }: { children: React.ReactNode }) {
+  const actions = useGenerationActions();
+  const [pending, setPending] = useState<{ gs: Generation[]; after?: () => void } | null>(null);
+  const ask = useCallback<ConfirmForever>((gs, after) => {
+    if (gs.length) setPending({ gs, after });
+  }, []);
+  const n = pending?.gs.length ?? 0;
+  return (
+    <ForeverCtx.Provider value={ask}>
+      {children}
+      <AlertDialog open={!!pending} onOpenChange={(v) => !v && setPending(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {n === 1 ? "this for good" : `${n} items for good`}?</AlertDialogTitle>
+            <AlertDialogDescription>{n === 1 ? "It's" : "They're"} removed with the files and can&apos;t be recovered.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (!pending) return;
+                void actions.deleteForever(pending.gs).then((done) => done && toast(done === 1 ? "Deleted for good" : `Deleted ${done} for good`));
+                pending.after?.();
+              }}
+            >
+              Delete forever
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </ForeverCtx.Provider>
+  );
+}
+
+/** The Trash's confirm step (null outside a ForeverConfirmProvider). */
+export const useConfirmForever = () => useContext(ForeverCtx);
+
 /** Handlers for the actions that aren't plain links. "save-character" is handled by the caller's popover. */
 export function useActionRunner(opts: RunnerOptions = {}) {
   const actions = useGenerationActions();
   const create = useCreateGeneration();
+  const confirmForever = useConfirmForever();
   return (a: OutputAction, g: Generation, index: number) => {
     const o = g.outputs[index];
     switch (a.id) {
@@ -129,7 +187,9 @@ export function useActionRunner(opts: RunnerOptions = {}) {
       case "download-txt":
         return saveBlob(textOf(o), downloadName(g, o, index, "txt"), "text/plain");
       case "download-srt":
-        return saveBlob(cuesToSrt(cuesOf(o)), downloadName(g, o, index, "srt"), "application/x-subrip");
+        return saveBlob(toSrt(cuesOf(o)), downloadName(g, o, index, "srt"), "application/x-subrip");
+      case "download-vtt":
+        return saveBlob(toVtt(cuesOf(o)), downloadName(g, o, index, "vtt"), "text/vtt");
       case "finalize":
         return create.mutate(
           { feature: g.feature, modelId: g.modelId, op: "finalize", prompt: g.request.prompt, params: { draftId: o.draftId, resolution: "1080p", duration: g.request.params?.duration } },
@@ -148,8 +208,9 @@ export function useActionRunner(opts: RunnerOptions = {}) {
         void actions.restore([g]);
         return void toast("Restored");
       case "delete-forever":
-        void actions.deleteForever([g]);
-        toast("Deleted for good");
+        if (confirmForever) return confirmForever([g], opts.onDeleted);
+        if (!window.confirm("Delete this for good? It's removed with its files and can't be recovered.")) return;
+        void actions.deleteForever([g]).then((done) => done && toast("Deleted for good"));
         return opts.onDeleted?.();
     }
   };
@@ -243,12 +304,18 @@ export function useCanHover(): boolean {
 }
 
 const TILE_ICON = "grid size-8 place-items-center rounded-lg text-white/90 transition-colors hover:bg-white/20 hover:text-white focus-visible:bg-white/20 outline-none";
+/** On a light surface (audio tiles): the same buttons in the brand colour. */
+const SURFACE_ICON = "grid size-8 place-items-center rounded-lg text-brand-text transition-colors hover:bg-background/80 focus-visible:bg-background/80 outline-none";
+
+/** Below this strip width (content box) Download and Favorite go into the ⋯ menu, so ⋯ always fits. */
+const NARROW_STRIP = 160;
 
 /**
  * The action strip on a result tile: a labelled primary pill, Download and Favorite icons, and a ⋯
  * menu with the rest. Tiles mount it lazily (on first hover or focus), so long feeds don't mount
- * thousands of tooltips, menus and mutation observers. `menuOnly` (touch screens): just the ⋯ menu
- * with every action, opened right away.
+ * thousands of tooltips, menus and mutation observers. It fits small cards: under 220 px the pill
+ * loses its label, under 160 px Download and Favorite move into the menu. `menuOnly` (touch
+ * screens): just the ⋯ menu with every action, opened right away.
  */
 export function TileActions({
   g,
@@ -258,6 +325,7 @@ export function TileActions({
   menuOnly,
   className,
   triggerClassName,
+  tone = "media",
 }: {
   g: Generation;
   index: number;
@@ -267,10 +335,21 @@ export function TileActions({
   className?: string;
   /** menuOnly: the ⋯ button's look (default: white on a dark chip, for media). */
   triggerClassName?: string;
+  /** "media": white on a dark gradient; "surface": on a light card (audio). */
+  tone?: "media" | "surface";
 }) {
   const run = useActionRunner(opts);
   const list = useMemo(() => outputActions(g, index, ctx), [g, index, ctx]);
   const [saving, setSaving] = useState(false);
+  const strip = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < NARROW_STRIP));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const popover = saving && (
     <Popover open onOpenChange={(v) => !v && setSaving(false)}>
       <PopoverAnchor className="absolute right-2 bottom-2" />
@@ -290,35 +369,45 @@ export function TileActions({
   }
   const primary = list.find((a) => a.placement === "primary");
   const bar = list.filter((a) => a.placement === "bar");
-  const icon = TILE_ICON;
-  const pill = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/90 px-3 text-[12px] font-medium text-black shadow-soft transition-colors hover:bg-white outline-none focus-visible:ring-2 focus-visible:ring-white";
+  const menu = list.filter((a) => a.placement === "menu");
+  const icon = tone === "surface" ? SURFACE_ICON : TILE_ICON;
+  const pill = cn(
+    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium shadow-soft transition-colors outline-none @min-[220px]:px-3",
+    tone === "surface" ? "bg-background text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" : "bg-white/90 text-black hover:bg-white focus-visible:ring-2 focus-visible:ring-white",
+  );
   const PrimaryIcon = primary ? ACTION_ICONS[primary.id] : null;
+  const pillBody = primary && PrimaryIcon && (
+    <>
+      <PrimaryIcon className="size-3.5" /> <span className="hidden @min-[220px]:inline">{primary.label}</span>
+    </>
+  );
   return (
-    <div className={cn("flex items-center gap-0.5", className)} onClick={stop} onKeyDown={stop}>
+    <div ref={strip} className={cn("@container flex items-center gap-0.5", className)} onClick={stop} onKeyDown={stop}>
       {primary &&
-        PrimaryIcon &&
+        pillBody &&
         (primary.href ? (
-          <Link href={primary.href} prefetch={false} className={pill}>
-            <PrimaryIcon className="size-3.5" /> {primary.label}
+          <Link href={primary.href} prefetch={false} className={pill} aria-label={primary.label}>
+            {pillBody}
           </Link>
         ) : (
-          <button className={pill} onClick={() => run(primary, g, index)}>
-            <PrimaryIcon className="size-3.5" /> {primary.label}
+          <button className={pill} aria-label={primary.label} onClick={() => run(primary, g, index)}>
+            {pillBody}
           </button>
         ))}
       <span className="flex-1" />
       {bar.map((a) => {
         const Icon = ACTION_ICONS[a.id];
         const body = <Icon className={cn("size-4", a.id === "favorite" && g.favorite && "fill-current")} />;
+        const cls = cn(icon, "hidden @min-[160px]:grid");
         return (
           <Tooltip key={a.id}>
             <TooltipTrigger asChild>
               {a.download !== undefined ? (
-                <a href={a.href} download={a.download} className={icon} aria-label={a.label}>
+                <a href={a.href} download={a.download} className={cls} aria-label={a.label}>
                   {body}
                 </a>
               ) : (
-                <button className={icon} aria-label={a.label} aria-pressed={a.id === "favorite" ? g.favorite : undefined} onClick={() => run(a, g, index)}>
+                <button className={cls} aria-label={a.label} aria-pressed={a.id === "favorite" ? g.favorite : undefined} onClick={() => run(a, g, index)}>
                   {body}
                 </button>
               )}
@@ -327,7 +416,7 @@ export function TileActions({
           </Tooltip>
         );
       })}
-      <ActionMenu g={g} index={index} list={list.filter((a) => a.placement === "menu")} run={run} onSave={() => setSaving(true)} triggerClassName={icon} />
+      <ActionMenu g={g} index={index} list={narrow ? [...bar, ...menu] : menu} run={run} onSave={() => setSaving(true)} triggerClassName={icon} />
       {popover}
     </div>
   );
@@ -355,6 +444,8 @@ export function ActionMenu({
 }) {
   const destructive = list.filter((a) => a.destructive);
   const rest = list.filter((a) => !a.destructive);
+  // Focus goes back to ⋯ when the menu closes, except when it hands over to the Save-as-element popover.
+  const handingOff = useRef(false);
   const item = (a: OutputAction) => {
     const Icon = ACTION_ICONS[a.id];
     if (a.href && a.download !== undefined) {
@@ -376,7 +467,15 @@ export function ActionMenu({
       );
     }
     return (
-      <DropdownMenuItem key={a.id} variant={a.destructive ? "destructive" : "default"} onSelect={() => (a.id === "save-character" ? onSave() : run(a, g, index))}>
+      <DropdownMenuItem
+        key={a.id}
+        variant={a.destructive ? "destructive" : "default"}
+        onSelect={() => {
+          if (a.id !== "save-character") return run(a, g, index);
+          handingOff.current = true;
+          onSave();
+        }}
+      >
         <Icon className={cn(a.id === "favorite" && g.favorite && "fill-current")} /> {a.id === "save-character" ? "Save as element…" : a.label}
       </DropdownMenuItem>
     );
@@ -388,7 +487,17 @@ export function ActionMenu({
           <MoreHorizontal className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" collisionPadding={12} className="min-w-48" onClick={stop} onCloseAutoFocus={(e) => e.preventDefault()}>
+      <DropdownMenuContent
+        align="end"
+        collisionPadding={12}
+        className="min-w-48"
+        onClick={stop}
+        onCloseAutoFocus={(e) => {
+          if (!handingOff.current) return;
+          e.preventDefault();
+          handingOff.current = false;
+        }}
+      >
         {rest.map(item)}
         {destructive.length > 0 && <DropdownMenuSeparator />}
         {destructive.map(item)}

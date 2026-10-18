@@ -131,8 +131,13 @@ export function extensionOf(o: Pick<OutputFile, "url" | "kind">): string {
   return m ? m[1].toLowerCase() : EXT_BY_KIND[o.kind];
 }
 
-export function downloadName(g: Pick<Generation, "id" | "prompt" | "modelId" | "request">, o: Pick<OutputFile, "url" | "kind">, i: number, ext = extensionOf(o)): string {
-  const base = (g.request.prompt || g.prompt || g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
+export function downloadName(
+  g: Pick<Generation, "id" | "prompt" | "modelId" | "request" | "op" | "presetName" | "modelName">,
+  o: Pick<OutputFile, "url" | "kind">,
+  i: number,
+  ext = extensionOf(o),
+): string {
+  const base = userTitle(g).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
   return `${base}-${g.id.slice(0, 6)}${i ? `-${i + 1}` : ""}.${ext}`;
 }
 
@@ -192,9 +197,20 @@ export function userTitle(g: Pick<Generation, "request" | "presetName" | "prompt
   if (own) return own;
   if (g.request.frame) return unwrapScene(g.request.frame.scene);
   const words = g.request.prompt?.trim() || g.presetName || g.prompt?.trim();
-  if (words && words !== g.op) return words;
+  if (words && words !== g.op && !isData(words)) return words;
   const what = OPERATION_LABELS[g.op];
-  return what ? `${what}${g.modelName ? ` · ${g.modelName}` : ""}` : (g.modelName ?? "Untitled");
+  const into = g.op === "translate" && g.request.params?.targetLanguage ? ` into ${g.request.params.targetLanguage}` : "";
+  return what ? `${what}${into}${g.modelName ? ` · ${g.modelName}` : ""}` : (g.modelName ?? "Untitled");
+}
+
+/** A chained step's prompt that is data, not words (a translation fed a transcript's cue list). */
+function isData(s: string): boolean {
+  if (!/^[[{]/.test(s)) return false;
+  try {
+    return typeof JSON.parse(s) === "object";
+  } catch {
+    return false;
+  }
 }
 
 const order = (g: Generation) => g.request.step?.index ?? g.request.frame?.index ?? 0;
