@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronLeft, Folder as FolderIcon, FolderPlus, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -61,6 +61,7 @@ export function FolderDialog({ folder, open, onOpenChange, onSaved }: { folder?:
   const [name, setName] = useState(folder?.name ?? "");
   const [color, setColor] = useState(folder?.color ?? DEFAULT_FOLDER_COLOR);
   const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   const save = async () => {
     setBusy(true);
     try {
@@ -76,7 +77,15 @@ export function FolderDialog({ folder, open, onOpenChange, onSaved }: { folder?:
   };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(92vw,400px)] gap-4">
+      <DialogContent
+        className="w-[min(92vw,400px)] gap-4"
+        // Straight into the name field, also when opened from a menu that was still handing focus back.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          input.current?.focus();
+          input.current?.select();
+        }}
+      >
         <DialogTitle className="font-heading text-[22px] font-normal">{folder ? "Edit folder" : "New folder"}</DialogTitle>
         <DialogDescription className="sr-only">Name and colour</DialogDescription>
         <form
@@ -87,7 +96,7 @@ export function FolderDialog({ folder, open, onOpenChange, onSaved }: { folder?:
           }}
         >
           <input
-            autoFocus
+            ref={input}
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={60}
@@ -195,11 +204,12 @@ export function FolderHeader({ folder, onBack, onMoveOut }: { folder: Folder; on
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
-          <DropdownMenuItem onSelect={() => setEditing(true)}>
+          {/* Open dialogs once the menu has closed and handed focus back, so the dialog keeps it. */}
+          <DropdownMenuItem onSelect={() => setTimeout(() => setEditing(true), 0)}>
             <Pencil /> Rename or recolour
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(true)}>
+          <DropdownMenuItem variant="destructive" onSelect={() => setTimeout(() => setDeleting(true), 0)}>
             <Trash2 /> Delete folder
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -244,7 +254,8 @@ export function MoveMenuItems({ folders, current, onMove, onNew }: { folders: Fo
         </DropdownMenuItem>
       )}
       {folders.length > 0 && <DropdownMenuSeparator />}
-      <DropdownMenuItem onSelect={onNew}>
+      {/* After the menu has closed and handed focus back, so the dialog keeps it. */}
+      <DropdownMenuItem onSelect={() => setTimeout(onNew, 0)}>
         <FolderPlus /> New folder…
       </DropdownMenuItem>
     </>

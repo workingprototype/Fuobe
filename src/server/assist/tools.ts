@@ -1,5 +1,6 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
+import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
@@ -399,14 +400,16 @@ const generate = defineTool({
   // job has more. Calls are validated with zod (validateInput / planFor / executeTool) instead, and
   // a malformed one goes back to the model as an error it can fix.
   plan: ({ jobs }) => chainJobs(jobs.slice(0, 6)).map(plannedJob),
-  async run({ jobs }) {
+  async run({ summary, jobs }) {
     const list = jobs.slice(0, 6);
+    // The plan's jobs share a batch, so the Library stacks them under the plan's summary.
+    const batchTitle = summary.trim().slice(0, 200) || undefined;
     if (list.some((j) => j.after !== undefined)) {
       // Chained jobs: one pipeline, created only if every step is valid.
       const chained = chainJobs(list);
       const bad = chained.findIndex((c) => c.error);
       if (bad >= 0) return { content: JSON.stringify({ error: `Job ${bad}: ${chained[bad].error}` }), isError: true };
-      const p = createPipeline(chained.map((c, i) => ({ key: `job${i}`, request: c.req, ...(c.after !== undefined && { after: `job${c.after}` }) })));
+      const p = createPipeline(chained.map((c, i) => ({ key: `job${i}`, request: { ...c.req, batchTitle }, ...(c.after !== undefined && { after: `job${c.after}` }) })));
       const results = chained.map((c, i) => {
         const g = p.byKey[`job${i}`];
         return { model: c.job.model_id, started: [g.id], ...(c.after !== undefined && { waitsFor: p.byKey[`job${c.after}`].id }), demo: g.provider === "mock" || undefined, costUsd: g.costUsd || undefined };
@@ -418,9 +421,10 @@ const generate = defineTool({
     }
     const ids: string[] = [];
     const results: unknown[] = [];
+    const batch = list.length > 1 ? { batchId: nanoid(10) } : {};
     for (const j of list) {
       try {
-        const gens = createGenerations(toRequest(j));
+        const gens = createGenerations({ ...toRequest(j), batchTitle }, batch);
         ids.push(...gens.map((g) => g.id));
         results.push({ model: j.model_id, started: gens.map((g) => g.id), demo: gens.some((g) => g.provider === "mock") || undefined, costUsd: gens.reduce((s, g) => s + (g.costUsd ?? 0), 0) || undefined });
       } catch (e) {

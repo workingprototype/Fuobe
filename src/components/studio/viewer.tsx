@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Kbd } from "@/components/ui/kbd";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
+import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
 import { trashDaysLeft, userTitle } from "@/lib/library";
 import { isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
@@ -39,6 +39,12 @@ function ignoreKey(e: KeyboardEvent): boolean {
   return !!t.closest("video,audio,model-viewer") && (e.key.startsWith("Arrow") || e.key === " ");
 }
 
+/** A text field of an output's meta (a stem's name, a transcript's language), capitalised. */
+function metaText(o: OutputFile | undefined, key: string): string | undefined {
+  const v = o?.meta?.[key];
+  return typeof v === "string" && v ? v[0].toUpperCase() + v.slice(1) : undefined;
+}
+
 function Details({ g, index }: { g: Generation; index: number }) {
   const p = g.request.params ?? {};
   const title = userTitle(g);
@@ -58,7 +64,7 @@ function Details({ g, index }: { g: Generation; index: number }) {
     <div className="space-y-4">
       <div>
         <p className="font-heading text-[20px] leading-snug">{title}</p>
-        {g.prompt && g.prompt !== title && <p className="mt-1 text-[12px] leading-relaxed break-words text-muted-foreground">Sent to the model: {g.prompt}</p>}
+        {g.prompt && g.prompt !== title && <p className="mt-1 line-clamp-6 text-[12px] leading-relaxed break-words text-muted-foreground">Sent to the model: {g.prompt}</p>}
         {g.prompt && (
           <button
             onClick={() => {
@@ -78,6 +84,8 @@ function Details({ g, index }: { g: Generation; index: number }) {
         <Row label="Preset" value={g.presetName} />
         <Row label="Step" value={g.request.step?.label} />
         {isLayered(g) && <Row label="Layer" value={`${layerInfo(g.outputs[index], index).name} · ${index + 1} of ${g.outputs.length}`} />}
+        <Row label="Stem" value={metaText(g.outputs[index], "stem")} />
+        <Row label="Language" value={metaText(g.outputs[index], "language") ?? p.targetLanguage} />
         <Row label="Aspect ratio" value={p.aspectRatio ?? g.aspectRatio} />
         <Row label="Quality" value={p.resolution} />
         <Row label="Duration" value={p.duration ? `${p.duration}s` : undefined} />

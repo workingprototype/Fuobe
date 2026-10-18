@@ -60,7 +60,8 @@ const RequestSchema = z.object({
 /**
  * List generations, newest first. Filters: kind / kinds, features (`x*` = prefix), models, statuses,
  * favorites=1, folder=<id>, q, since / until (createdAt ms), trash=1 (the Trash, newest deletion first),
- * paging with before=<createdAt> (<deletedAt> in the Trash) and limit (≤ 200).
+ * paging with before=<createdAt>:<id> of the last row (<deletedAt>:<id> in the Trash; a bare
+ * timestamp still works) and limit (≤ 200).
  */
 export async function GET(request: Request) {
   await connection();

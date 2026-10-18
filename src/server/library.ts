@@ -21,6 +21,13 @@ const MAX_IDS = 500;
 const STATUSES = new Set(["queued", "running", "succeeded", "failed", "canceled"]);
 const KINDS = new Set(["image", "video", "audio", "text", "model3d"]);
 
+/** `before=<ts>` or `before=<ts>:<id>` (the last row of the previous page) → the paging cursor. */
+export function cursorFrom(v: string | null): Pick<ListOptions, "before" | "beforeId"> {
+  const m = /^(\d+)(?::([\w-]{1,40}))?$/.exec(v?.trim() ?? "");
+  if (!m || !Number(m[1])) return {};
+  return { before: Number(m[1]), ...(m[2] && { beforeId: m[2] }) };
+}
+
 /** GET /api/generations query → listGenerations options (unknown values are ignored). */
 export function listOptionsFrom(sp: URLSearchParams): ListOptions {
   const list = (k: string) => sp.get(k)?.split(",").map((s) => s.trim()).filter(Boolean);
@@ -40,7 +47,7 @@ export function listOptionsFrom(sp: URLSearchParams): ListOptions {
     folderId: sp.get("folder") ?? undefined,
     trashed: sp.get("trash") === "1",
     q: sp.get("q") ?? undefined,
-    before: num("before"),
+    ...cursorFrom(sp.get("before")),
     since: num("since"),
     until: num("until"),
     limit: num("limit"),
@@ -64,7 +71,10 @@ function touch(list: string[]): void {
 // ---------------------------------------------------------------------------
 // Trash
 
-/** Move to the Trash. Running jobs keep running (cancel them from their tile); Restore brings them back as they are. */
+/**
+ * Move to the Trash. Jobs still queued or rendering are canceled (in the background), so a deleted
+ * job doesn't keep running and billing out of sight; Restore brings them back as canceled, with Retry.
+ */
 export function trashGenerations(list: string[], now = Date.now()): number {
   const found = existing(ids(list));
   const insert = db().prepare("INSERT OR IGNORE INTO generation_trash (generation_id, deleted_at) VALUES (?, ?)");
@@ -73,7 +83,14 @@ export function trashGenerations(list: string[], now = Date.now()): number {
     for (const id of found) n += insert.run(id, now).changes;
     touch(found);
   })();
+  for (const id of activeIds(found)) void cancelGeneration(id).catch(() => {});
   return n;
+}
+
+/** The ones among `list` still queued or rendering. */
+function activeIds(list: string[]): string[] {
+  if (!list.length) return [];
+  return (db().prepare(`SELECT id FROM generations WHERE status IN ('queued', 'running') AND id IN (${placeholders(list.length)})`).all(...list) as { id: string }[]).map((r) => r.id);
 }
 
 export function restoreGenerations(list: string[]): number {
@@ -92,9 +109,9 @@ export function restoreGenerations(list: string[]): number {
 /** Delete for good; jobs still running are canceled first. */
 export async function deleteForever(list: string[]): Promise<number> {
   const found = existing(ids(list));
+  const active = new Set(activeIds(found));
   for (const id of found) {
-    const g = getGeneration(id, { includeDeleted: true });
-    if (g && (g.status === "queued" || g.status === "running")) await cancelGeneration(id).catch(() => {});
+    if (active.has(id)) await cancelGeneration(id).catch(() => {});
     deleteGeneration(id);
   }
   return found.length;
@@ -173,7 +190,7 @@ const FOLDER_SELECT = `SELECT f.*,
   (SELECT COUNT(*) FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
     WHERE i.folder_id = f.id AND t.generation_id IS NULL) AS count,
   (SELECT g.outputs_json FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
-    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC LIMIT 1) AS cover_json
+    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC, g.id DESC LIMIT 1) AS cover_json
   FROM folders f`;
 
 export function listFolders(): Folder[] {

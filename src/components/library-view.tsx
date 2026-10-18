@@ -10,7 +10,8 @@ import { FilterBar, filterFields, hasFilters, NO_FILTERS, type Filters } from "@
 import { FolderDialog, FolderHeader, FolderStrip, MoveMenuItems } from "@/components/library/folders";
 import { useViewPrefs, ViewOptions, type ViewPrefs } from "@/components/library/view-options";
 import { PageShell } from "@/components/page-shell";
-import { downloadUrl } from "@/components/studio/result-actions";
+import { downloadUrl, ForeverConfirmProvider, useConfirmForever } from "@/components/studio/result-actions";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { Viewer } from "@/components/studio/viewer";
 import {
   AlertDialog,
@@ -25,10 +26,10 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
+import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind } from "@/lib/catalog/types";
 import { buildEntries, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
-import { isLayered } from "@/lib/output-actions";
+import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 type TabId = "all" | "images" | "videos" | "audio" | "text" | "3d" | "favorites" | "uploads" | "trash";
@@ -236,7 +237,7 @@ function Inner() {
   const items = useMemo(() => {
     if (!uploadsTab) return lib.data?.pages.flat() ?? [];
     // Uploads search by file name.
-    const all = (uploads.data ?? []).map(uploadAsGeneration);
+    const all = (uploads.data?.pages.flat() ?? []).map(uploadAsGeneration);
     return dq ? all.filter((g) => g.request.prompt?.toLowerCase().includes(dq.toLowerCase())) : all;
   }, [uploadsTab, uploads.data, lib.data, dq]);
   const built = useMemo(() => buildEntries(items, { stacks: prefs.stacks && !trash && !uploadsTab }), [items, prefs.stacks, trash, uploadsTab]);
@@ -274,7 +275,11 @@ function Inner() {
   // --- Viewer --------------------------------------------------------------------------------
   const [open, setOpen] = useState<{ id: string; index: number } | null>(null);
   const flat = useMemo(
-    () => order.flatMap((e) => members(e)).filter((g, i, all) => g.status === "succeeded" && g.outputs.length && all.findIndex((x) => x.id === g.id) === i).flatMap((g) => (isLayered(g) ? [{ g, i: 0 }] : g.outputs.map((_, i) => ({ g, i })))),
+    () =>
+      order
+        .flatMap((e) => members(e))
+        .filter((g, i, all) => g.status === "succeeded" && g.outputs.length && all.findIndex((x) => x.id === g.id) === i)
+        .flatMap((g) => (isLayered(g) ? [{ g, i: 0 }] : shownOutputs(g).map((i) => ({ g, i })))),
     [order],
   );
   const pos = open ? flat.findIndex((f) => f.g.id === open.id && (f.i === open.index || isLayered(f.g))) : -1;
@@ -336,14 +341,14 @@ function Inner() {
 
   // --- Paging ---------------------------------------------------------------------------------
   const sentinel = useRef<HTMLDivElement>(null);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = lib;
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = uploadsTab ? uploads : lib;
   useEffect(() => {
     const el = sentinel.current;
-    if (!el || !hasNextPage || uploadsTab) return;
+    if (!el || !hasNextPage) return;
     const io = new IntersectionObserver((es) => es.some((x) => x.isIntersecting) && !isFetchingNextPage && void fetchNextPage(), { rootMargin: "600px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, uploadsTab]);
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const go = (params: Record<string, string | undefined>) => {
     const next = new URLSearchParams(sp.toString());
@@ -365,8 +370,23 @@ function Inner() {
   };
 
   const [newFolderFor, setNewFolderFor] = useState<string[] | null>(null);
-  const [confirmForever, setConfirmForever] = useState<Generation[] | null>(null);
+  const confirmForever = useConfirmForever();
   const [confirmEmpty, setConfirmEmpty] = useState(false);
+  // A folder link whose folder is gone (deleted, or a stale link); while folders load, we don't know yet.
+  const foldersLoading = !!folderId && !folders.data;
+  const missingFolder = !!folderId && !!folders.data && !folder && !trash;
+
+  // The tab strip scrolls sideways on phones: fade the hidden edge and keep the active tab in view.
+  const [tabsRef, tabsFade] = useEdgeFade<HTMLDivElement>();
+  const activeTab = useRef<HTMLButtonElement>(null);
+  const focusTab = useRef(false);
+  // Again once the counts load: tabs for kinds you have (Text, 3D) appear and shift the rest.
+  const tabsReady = !!facets.data;
+  useEffect(() => {
+    activeTab.current?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    if (focusTab.current) activeTab.current?.focus();
+    focusTab.current = false;
+  }, [tab.id, tabsReady]);
 
   const loading = uploadsTab ? uploads.isLoading : lib.isLoading;
   const refreshing = !uploadsTab && lib.isPlaceholderData;
@@ -420,6 +440,11 @@ function Inner() {
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-5">
         {folder ? (
           <FolderHeader folder={folder} onBack={() => go({ folder: undefined })} onMoveOut={(list) => void moveTo(list, null, "Library")} />
+        ) : foldersLoading ? (
+          <div className="flex h-[52px] min-w-0 items-center gap-2" aria-busy="true" aria-label="Loading folder">
+            <Skeleton className="h-8 w-24 rounded-full" />
+            <Skeleton className="h-7 w-48 rounded-lg" />
+          </div>
         ) : (
           <div className="min-w-0">
             <h1 className="font-heading text-[34px] leading-tight">Library</h1>
@@ -463,34 +488,58 @@ function Inner() {
         </div>
       </div>
 
-      {!folder && (
-        <div className="scrollbar-none mb-4 flex gap-4 overflow-x-auto border-b">
+      {!folder && !foldersLoading && !missingFolder && (
+        <div
+          ref={tabsRef}
+          style={tabsFade}
+          role="tablist"
+          aria-label="Library sections"
+          className="scrollbar-none mb-4 flex gap-4 overflow-x-auto border-b"
+          onKeyDown={(e) => {
+            // Arrow keys move between tabs (and open them), as in any tab strip.
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            const at = visibleTabs.findIndex((t) => t.id === tab.id);
+            const next = visibleTabs[(at + (e.key === "ArrowRight" ? 1 : -1) + visibleTabs.length) % visibleTabs.length];
+            e.preventDefault();
+            focusTab.current = true;
+            go({ tab: next.id === "all" ? undefined : next.id, folder: undefined });
+          }}
+        >
           {visibleTabs.map((t) => {
             const n = count(t);
+            const on = tab.id === t.id;
             return (
               <button
                 key={t.id}
+                ref={on ? activeTab : undefined}
+                role="tab"
+                aria-selected={on}
+                tabIndex={on ? 0 : -1}
                 onClick={() => go({ tab: t.id === "all" ? undefined : t.id, folder: undefined })}
                 className={cn(
-                  "-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-1 pb-2 text-[14px] whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
-                  tab.id === t.id && "border-foreground font-medium text-foreground",
+                  "-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 border-transparent px-1 pb-2 text-[14px] whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+                  on && "border-foreground font-medium text-foreground",
                 )}
               >
                 {t.label}
-                {n ? <span className="font-mono text-[11px] text-muted-foreground">{n}</span> : null}
+                {n ? (
+                  <span className="font-mono text-[11px] text-muted-foreground" aria-label={`${n} items`}>
+                    {n}
+                  </span>
+                ) : null}
               </button>
             );
           })}
         </div>
       )}
 
-      {tab.id === "all" && !folder && (folders.data?.length || !loading) ? (
+      {tab.id === "all" && !folderId && (folders.data?.length || !loading) ? (
         <div className="mb-4">
           <FolderStrip folders={folders.data ?? []} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
         </div>
       ) : null}
 
-      {!uploadsTab && (
+      {!uploadsTab && !missingFolder && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <FilterBar value={filters} onChange={setFilters} facets={facets.data} />
           {trash && (
@@ -506,7 +555,14 @@ function Inner() {
         </div>
       )}
 
-      {loading && !items.length ? (
+      {missingFolder ? (
+        <Empty title="This folder no longer exists">
+          It may have been deleted; what was in it is back in your Library.{" "}
+          <button onClick={() => go({ folder: undefined })} className="text-brand-text hover:underline">
+            Back to Library
+          </button>
+        </Empty>
+      ) : loading && !items.length ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(min(200px,calc(50vw-22px)),1fr))] gap-2">
           {Array.from({ length: 8 }, (_, i) => (
             <Skeleton key={i} className="aspect-square rounded-xl" />
@@ -562,7 +618,7 @@ function Inner() {
             </section>
           ))}
           <div ref={sentinel} className="flex flex-col items-center gap-2 py-4">
-            {!uploadsTab && hasNextPage ? (
+            {hasNextPage ? (
               <button
                 onClick={() => void fetchNextPage()}
                 disabled={isFetchingNextPage}
@@ -584,7 +640,7 @@ function Inner() {
             {trash ? (
               <>
                 <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
-                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selected.size} onClick={() => setConfirmForever(selectedGens)} />
+                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selected.size} onClick={() => confirmForever?.(selectedGens, clear)} />
               </>
             ) : (
               <>
@@ -592,7 +648,11 @@ function Inner() {
                   icon={Download}
                   label="Download"
                   disabled={!selectedGens.some((g) => g.status === "succeeded")}
-                  onClick={() => downloadUrl(`/api/generations/zip?ids=${[...selected].slice(0, 500).join(",")}`)}
+                  onClick={() => {
+                    const done = selectedGens.filter((g) => g.status === "succeeded").map((g) => g.id);
+                    downloadUrl(`/api/generations/zip?ids=${done.slice(0, BULK_MAX).join(",")}`);
+                    if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
+                  }}
                 />
                 <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selected.size} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
                 <DropdownMenu modal={false}>
@@ -636,26 +696,6 @@ function Inner() {
         />
       )}
 
-      <AlertDialog open={!!confirmForever} onOpenChange={(v) => !v && setConfirmForever(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {confirmForever?.length === 1 ? "this for good" : `${confirmForever?.length} items for good`}?</AlertDialogTitle>
-            <AlertDialogDescription>They&apos;ll be removed with their files and can&apos;t be recovered.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (confirmForever) void actions.deleteForever(confirmForever).then((n) => n && toast(`Deleted ${n} for good`));
-                clear();
-              }}
-            >
-              Delete forever
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <AlertDialog open={confirmEmpty} onOpenChange={setConfirmEmpty}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -665,6 +705,7 @@ function Inner() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => {
                 void actions.emptyTrash().then(() => toast("Trash emptied"));
               }}
@@ -702,7 +743,9 @@ function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon
 export function LibraryView() {
   return (
     <Suspense fallback={null}>
-      <Inner />
+      <ForeverConfirmProvider>
+        <Inner />
+      </ForeverConfirmProvider>
     </Suspense>
   );
 }

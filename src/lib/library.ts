@@ -2,7 +2,7 @@
  * Library (Assets) logic shared by the browser and the server: feed filters, folders, the Trash,
  * download names, date sections and batch stacks. Pure: no React, no database.
  */
-import type { Generation, GenerationStatus, MediaKind, OutputFile } from "./catalog/types";
+import { OPERATION_LABELS, type Generation, type GenerationStatus, type MediaKind, type OutputFile } from "./catalog/types";
 
 // ---------------------------------------------------------------------------
 // Filters (GET /api/generations query ⇄ client-side matching for live cache updates)
@@ -24,7 +24,13 @@ export interface FeedFilter {
   trashed?: boolean;
 }
 
-export function filterToSearch(f: FeedFilter, before?: number): URLSearchParams {
+/** The paging cursor for the page after `last`: its timestamp (deletedAt in the Trash) and id, so equal timestamps aren't skipped. */
+export function cursorAfter(last: Generation, trashed?: boolean): string | undefined {
+  const ts = trashed ? last.deletedAt : last.createdAt;
+  return ts ? `${ts}:${last.id}` : undefined;
+}
+
+export function filterToSearch(f: FeedFilter, before?: string | number): URLSearchParams {
   const qs = new URLSearchParams();
   if (f.kind) qs.set("kind", f.kind);
   if (f.kinds?.length) qs.set("kinds", f.kinds.join(","));
@@ -61,9 +67,16 @@ export function matchesFilter(g: Generation, f: FeedFilter): boolean {
   return true;
 }
 
+const byIdDesc = (a: Generation, b: Generation) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+
 /** Newest first, as the server orders lists (ties: id descending). */
 export function byNewest(a: Generation, b: Generation): number {
-  return b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+  return b.createdAt - a.createdAt || byIdDesc(a, b);
+}
+
+/** The Trash's order: most recently deleted first (ties: id descending, like the server). */
+export function byDeleted(a: Generation, b: Generation): number {
+  return (b.deletedAt ?? 0) - (a.deletedAt ?? 0) || byIdDesc(a, b);
 }
 
 // ---------------------------------------------------------------------------
@@ -118,8 +131,13 @@ export function extensionOf(o: Pick<OutputFile, "url" | "kind">): string {
   return m ? m[1].toLowerCase() : EXT_BY_KIND[o.kind];
 }
 
-export function downloadName(g: Pick<Generation, "id" | "prompt" | "modelId" | "request">, o: Pick<OutputFile, "url" | "kind">, i: number, ext = extensionOf(o)): string {
-  const base = (g.request.prompt || g.prompt || g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
+export function downloadName(
+  g: Pick<Generation, "id" | "prompt" | "modelId" | "request" | "op" | "presetName" | "modelName">,
+  o: Pick<OutputFile, "url" | "kind">,
+  i: number,
+  ext = extensionOf(o),
+): string {
+  const base = userTitle(g).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
   return `${base}-${g.id.slice(0, 6)}${i ? `-${i + 1}` : ""}.${ext}`;
 }
 
@@ -170,19 +188,39 @@ function unwrapScene(scene: string): string {
   return /^[^:]{2,40}:\s*(.+?)\s+—\s+beat \d+ of \d+$/.exec(scene.trim())?.[1] ?? scene.trim();
 }
 
-/** What the user asked for, never the internal chain prompt. */
-export function userTitle(g: Generation): string {
-  const own = (g.request as { title?: string }).title?.trim();
+/**
+ * What the user asked for, never the internal chain prompt. Results made without words (transcribe,
+ * image to 3D, upscale, trim…) are named by what was done: "Transcribe · Whisper".
+ */
+export function userTitle(g: Pick<Generation, "request" | "presetName" | "prompt" | "op" | "modelName">): string {
+  const own = g.request.title?.trim();
   if (own) return own;
   if (g.request.frame) return unwrapScene(g.request.frame.scene);
-  return g.request.prompt?.trim() || g.presetName || g.prompt || "Untitled";
+  const words = g.request.prompt?.trim() || g.presetName || g.prompt?.trim();
+  if (words && words !== g.op && !isData(words)) return words;
+  const what = OPERATION_LABELS[g.op];
+  const into = g.op === "translate" && g.request.params?.targetLanguage ? ` into ${g.request.params.targetLanguage}` : "";
+  return what ? `${what}${into}${g.modelName ? ` · ${g.modelName}` : ""}` : (g.modelName ?? "Untitled");
+}
+
+/** A chained step's prompt that is data, not words (a translation fed a transcript's cue list). */
+function isData(s: string): boolean {
+  if (!/^[[{]/.test(s)) return false;
+  try {
+    return typeof JSON.parse(s) === "object";
+  } catch {
+    return false;
+  }
 }
 
 const order = (g: Generation) => g.request.step?.index ?? g.request.frame?.index ?? 0;
 
 export function stackTitle(items: Generation[]): string {
-  const titled = items.find((g) => (g.request as { title?: string }).title?.trim());
+  const titled = items.find((g) => g.request.title?.trim());
   if (titled) return userTitle(titled);
+  // An Assist plan: its summary.
+  const plan = items.find((g) => g.request.batchTitle?.trim())?.request.batchTitle?.trim();
+  if (plan) return plan;
   const frames = items.filter((g) => g.request.frame).sort((a, b) => order(a) - order(b));
   if (frames.length) return unwrapScene(frames[0].request.frame!.scene);
   const film = items.find((g) => g.op === "concat" && g.prompt?.trim());
@@ -197,8 +235,9 @@ export function stackLabel(items: Generation[]): string {
   const shots = items.filter((g) => /^Shot \d+/.test(g.request.step?.label ?? "")).length;
   if (frames) return `Storyboard · ${frames} frame${frames === 1 ? "" : "s"}${films ? " + film" : ""}`;
   if (films && shots) return `Film · ${shots} shots`;
-  if (items.every((g) => !g.request.step && g.request.prompt === items[0].request.prompt)) return `${items.length} takes`;
-  return `${items.length} steps`;
+  if (items.some((g) => g.request.step)) return `${items.length} steps`;
+  if (items.every((g) => g.request.prompt === items[0].request.prompt && g.modelId === items[0].modelId)) return `${items.length} takes`;
+  return `${items.length} results`;
 }
 
 /** Group a newest-first list into cards: generations sharing a batch become one stack, placed where its newest member is. */

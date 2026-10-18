@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
-import { applyToList, applyToPages, applyToThread, backoff, parseSse, shareById, sharePagesById, toStreamEvent } from "@/lib/generation-stream";
-import { buildEntries, dayLabel, downloadName, matchesFilter, splitByDate, trashDaysLeft } from "@/lib/library";
-import { cuesToSrt, cueTime, layerInfo, modelPreview, outputActions, textOf } from "@/lib/output-actions";
+import { applyToList, applyToPages, applyToThread, backoff, needsCatchUp, parseSse, shareById, sharePagesById, streamResponse, toChannelMessage, toStreamEvent } from "@/lib/generation-stream";
+import { buildEntries, byDeleted, byNewest, cursorAfter, dayLabel, downloadName, filterToSearch, matchesFilter, splitByDate, trashDaysLeft, userTitle } from "@/lib/library";
+import { toSrt, toVtt } from "@/lib/cues";
+import { cueTime, layerInfo, modelPreview, outputActions, shownOutputs, textOf } from "@/lib/output-actions";
 
 let n = 0;
 function gen(p: Partial<Generation> = {}): Generation {
@@ -82,12 +83,16 @@ describe("outputActions", () => {
 });
 
 describe("text, layer and 3D outputs", () => {
-  it("formats cues for the viewer and as SRT", () => {
+  it("formats cues for the viewer and as SRT / VTT (one writer, src/lib/cues.ts)", () => {
     expect(cueTime(75.5)).toBe("1:15.5");
-    expect(cueTime(3725.04, true)).toBe("01:02:05,040");
-    expect(cuesToSrt([{ start: 0, end: 1.25, text: " Hello " }, { start: 1.25, end: 3, text: "there" }])).toBe(
-      "1\n00:00:00,000 --> 00:00:01,250\nHello\n\n2\n00:00:01,250 --> 00:00:03,000\nthere\n",
-    );
+    expect(cueTime(3725.04)).toBe("1:02:05");
+    const cues = [{ start: 0, end: 1.25, text: " Hello " }, { start: 1.25, end: 3, text: "there" }];
+    expect(toSrt(cues)).toBe("1\n00:00:00,000 --> 00:00:01,250\nHello\n\n2\n00:00:01,250 --> 00:00:03,000\nthere\n");
+    expect(toVtt(cues).startsWith("WEBVTT\n\n00:00:00.000 --> 00:00:01.250\nHello\n")).toBe(true);
+    // A transcript saved as .srt offers .txt and .vtt; one saved as text offers .srt and .vtt.
+    const srt = gen({ kind: "text", op: "transcribe", outputs: [{ url: "/t.srt", kind: "text", text: "Hello\nthere", meta: { cues } }] });
+    expect(outputActions(srt, 0).map((a) => a.id)).toEqual(expect.arrayContaining(["download-txt", "download-vtt"]));
+    expect(outputActions(srt, 0).map((a) => a.id)).not.toContain("download-srt");
     expect(textOf({ meta: { cues: [{ start: 0, end: 1, text: "a" }, { start: 1, end: 2, text: "b" }] } })).toBe("a\nb");
   });
 
@@ -239,5 +244,79 @@ describe("library helpers", () => {
     const t = buildEntries(takes)[0];
     expect(t.type === "stack" && [t.title, t.label]).toEqual(["a fox", "2 takes"]);
     expect(buildEntries(takes, { stacks: false })).toHaveLength(2);
+  });
+});
+
+describe("round-3 fixes", () => {
+  it("pages with a timestamp + id cursor and orders the Trash like the server", () => {
+    const g = gen({ id: "abc123", createdAt: 500, deletedAt: 900 });
+    expect(cursorAfter(g)).toBe("500:abc123");
+    expect(cursorAfter(g, true)).toBe("900:abc123");
+    expect(cursorAfter(gen({ deletedAt: null }), true)).toBeUndefined();
+    expect(filterToSearch({ limit: 60 }, "500:abc123").get("before")).toBe("500:abc123");
+    // Same deletion time (one bulk trash): id descending, as the server's ORDER BY.
+    const a = gen({ id: "a", deletedAt: 5, createdAt: 9 });
+    const b = gen({ id: "b", deletedAt: 5, createdAt: 1 });
+    expect([a, b].sort(byDeleted).map((x) => x.id)).toEqual(["b", "a"]);
+    expect([a, b].sort(byNewest).map((x) => x.id)).toEqual(["a", "b"]);
+  });
+
+  it("decides what to do with the stream's answer and when to catch up", () => {
+    const sse = { ok: true, status: 200, contentType: "text/event-stream; charset=utf-8", hasBody: true };
+    expect(streamResponse(sse, 3)).toEqual({ open: true });
+    // No stream on this server: poll, look again in 5 minutes.
+    expect(streamResponse({ ...sse, ok: false, status: 404 }, 0)).toEqual({ open: false, retryIn: 300_000 });
+    expect(streamResponse({ ...sse, contentType: "text/html" }, 0)).toEqual({ open: false, retryIn: 300_000 });
+    // A server error backs off.
+    expect(streamResponse({ ...sse, ok: false, status: 502 }, 2)).toEqual({ open: false, retryIn: 4000 });
+    expect(needsCatchUp(false, true, false)).toBe(false); // first connection: the lists just loaded
+    expect(needsCatchUp(false, true, true)).toBe(true); // back after a drop or a hand-over
+    expect(needsCatchUp(true, true, true)).toBe(false);
+    expect(needsCatchUp(true, false, true)).toBe(false);
+  });
+
+  it("only passes on well-formed messages between tabs", () => {
+    const g = gen();
+    expect(toChannelMessage({ type: "event", ev: { type: "generation", generation: g } })).toEqual({ type: "event", ev: { type: "generation", generation: g } });
+    expect(toChannelMessage({ type: "event", ev: { type: "deleted", id: "x" } })).toEqual({ type: "event", ev: { type: "deleted", id: "x" } });
+    expect(toChannelMessage({ type: "state", connected: true })).toEqual({ type: "state", connected: true });
+    expect(toChannelMessage({ type: "hello" })).toEqual({ type: "hello" });
+    for (const bad of [null, "x", { type: "state" }, { type: "event", ev: { type: "generation", generation: { id: 1 } } }, { type: "nope" }]) expect(toChannelMessage(bad)).toBeNull();
+  });
+
+  it("lets a server event replace a local edit (no browser clock in updatedAt)", () => {
+    // A favorite applied locally keeps the server's updatedAt, so the server's next event (same or later) wins.
+    const g = gen({ updatedAt: 1000 });
+    const local = { ...g, favorite: true };
+    const server = { ...g, favorite: true, status: "succeeded" as const, updatedAt: 1000 };
+    expect(applyToList([local], {}, { type: "generation", generation: server })![0]).toBe(server);
+  });
+
+  it("names results made without words by what was done", () => {
+    expect(userTitle(gen({ op: "transcribe", modelName: "Whisper", prompt: null, request: { feature: "transcribe", modelId: "w" } }))).toBe("Transcribe · Whisper");
+    expect(userTitle(gen({ op: "image-to-3d", modelName: "Hunyuan3D", prompt: "image-to-3d", request: { feature: "3d", modelId: "h" } }))).toMatch(/ · Hunyuan3D$/);
+    expect(userTitle(gen({ request: { feature: "image", modelId: "m", prompt: "a fox", title: "Fox poster" } }))).toBe("Fox poster");
+    // A chained translation got a transcript's cue list as its prompt: that's data, not a title.
+    const cuesIn = gen({ id: "tr0000000001", op: "translate", modelName: "Claude", prompt: '[{"start":0,"end":1,"text":"Hi"}]', request: { feature: "dub", modelId: "text-llm", prompt: '[{"start":0,"end":1,"text":"Hi"}]', params: { targetLanguage: "Spanish" } } });
+    expect(userTitle(cuesIn)).toBe("Translate into Spanish · Claude");
+    expect(downloadName(cuesIn, { url: "/x/a.srt", kind: "text" }, 0)).toBe("Translate-into-Spanish-Claude-tr0000.srt");
+  });
+
+  it("titles an Assist plan's stack with its summary and labels mixed results", () => {
+    const plan = [
+      gen({ batchId: "p", prompt: "a fox", request: { feature: "assist", modelId: "m", prompt: "a fox", batchTitle: "Three animal posters" } }),
+      gen({ batchId: "p", prompt: "an owl", request: { feature: "assist", modelId: "m", prompt: "an owl", batchTitle: "Three animal posters" } }),
+    ];
+    const e = buildEntries(plan)[0];
+    expect(e.type === "stack" && [e.title, e.label]).toEqual(["Three animal posters", "2 results"]);
+    // Each card keeps its own words.
+    expect(userTitle(plan[1])).toBe("an owl");
+  });
+
+  it("shows a 3D model's turntable as its preview, not as a second result", () => {
+    const glb = gen({ kind: "model3d", op: "image-to-3d", outputs: [{ url: "/m.glb", kind: "model3d" }, { url: "/t.mp4", kind: "video" }] });
+    expect(shownOutputs(glb)).toEqual([0]);
+    expect(shownOutputs(gen({ outputs: [{ url: "/1.png", kind: "image" }, { url: "/2.png", kind: "image" }] }))).toEqual([0, 1]);
+    expect(modelPreview(glb, glb.outputs[0]).video).toBe("/t.mp4");
   });
 });

@@ -6,6 +6,7 @@
  * (Download, Favorite), "menu" = the ⋯ menu. The viewer shows them all as labelled buttons.
  */
 import type { Generation, OutputFile } from "./catalog/types";
+import { cueText, type Cue } from "./cues";
 import { downloadHref, downloadName, extensionOf } from "./library";
 
 export type OutputActionId =
@@ -25,6 +26,7 @@ export type OutputActionId =
   | "download"
   | "download-txt"
   | "download-srt"
+  | "download-vtt"
   | "download-all"
   | "favorite"
   | "finalize"
@@ -100,7 +102,10 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
     case "text":
       out.push({ id: "copy-text", label: "Copy", placement: "primary" }, file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       if (ext !== "txt" && o.text) out.push({ id: "download-txt", label: "Download .txt", placement: "menu" });
-      if (ext !== "srt" && cuesOf(o).length) out.push({ id: "download-srt", label: "Download .srt", placement: "menu" });
+      if (cuesOf(o).length) {
+        if (ext !== "srt") out.push({ id: "download-srt", label: "Download .srt", placement: "menu" });
+        if (ext !== "vtt") out.push({ id: "download-vtt", label: "Download .vtt", placement: "menu" });
+      }
       break;
     case "model3d":
       if (!ctx.inViewer) out.push({ id: "view-3d", label: "View in 3D", placement: "primary" });
@@ -121,39 +126,38 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
 // ---------------------------------------------------------------------------
 // Text, layers and 3D outputs
 
-export interface Cue {
-  start: number;
-  end: number;
-  text: string;
-}
-
-/** Timed lines of a transcript (OutputFile.meta.cues, seconds). */
+/** Timed lines of a transcript (OutputFile.meta.cues, seconds; SRT / VTT writers in src/lib/cues.ts). */
 export function cuesOf(o: Pick<OutputFile, "meta">): Cue[] {
   const cues = o.meta?.cues;
   if (!Array.isArray(cues)) return [];
   return cues.filter((c): c is Cue => !!c && typeof c === "object" && typeof c.start === "number" && typeof c.end === "number" && typeof c.text === "string");
 }
 
-/** 75.5 → "1:15.5" (viewer), or "00:01:15,500" (SRT). */
-export function cueTime(s: number, srt = false): string {
+/** 75.5 → "1:15.5": the viewer's short timing (files use the SRT / VTT stamps). */
+export function cueTime(s: number): string {
   const ms = Math.max(0, Math.round(s * 1000));
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   const sec = Math.floor((ms % 60_000) / 1000);
-  const frac = ms % 1000;
-  const p = (n: number, w = 2) => String(n).padStart(w, "0");
-  if (srt) return `${p(h)}:${p(m)}:${p(sec)},${p(frac, 3)}`;
-  const tenths = Math.floor(frac / 100);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const tenths = Math.floor((ms % 1000) / 100);
   return `${h ? `${h}:${p(m)}` : m}:${p(sec)}${tenths ? `.${tenths}` : ""}`;
-}
-
-export function cuesToSrt(cues: Cue[]): string {
-  return cues.map((c, i) => `${i + 1}\n${cueTime(c.start, true)} --> ${cueTime(c.end, true)}\n${c.text.trim()}\n`).join("\n");
 }
 
 /** The text of a text output: OutputFile.text, else the cues joined. */
 export function textOf(o: Pick<OutputFile, "text" | "meta">): string {
-  return o.text ?? cuesOf(o).map((c) => c.text.trim()).join("\n");
+  return o.text ?? cueText(cuesOf(o));
+}
+
+/**
+ * The outputs a result shows as tiles (and the viewer browses): a 3D model's turntable video is
+ * its preview, not a result of its own.
+ */
+export function shownOutputs(g: Pick<Generation, "kind" | "outputs">): number[] {
+  const all = g.outputs.map((_, i) => i);
+  if (g.kind !== "model3d") return all;
+  const own = all.filter((i) => g.outputs[i].kind === "model3d");
+  return own.length ? own : all;
 }
 
 /** A layer's name and stacking order (meta.name / meta.z, or meta.layer.{name,z}). */

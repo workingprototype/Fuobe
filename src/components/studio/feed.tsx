@@ -1,6 +1,6 @@
 "use client";
 
-import { Cloud, Copy, Cpu, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -14,8 +14,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { useCreateGeneration, useGenerationActions } from "@/lib/api";
 import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
-import { userTitle } from "@/lib/library";
-import { isLayered } from "@/lib/output-actions";
+import { downloadHref, downloadName, userTitle } from "@/lib/library";
+import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { TileActions, useCanHover, type RunnerOptions } from "./result-actions";
 import { LayersStack, MediaThumb } from "./result-media";
@@ -135,40 +135,47 @@ function DraftButton({ g, draftId }: { g: Generation; draftId: string }) {
   );
 }
 
-const OutputTile = memo(function OutputTile({ g, index, ratio, layered }: { g: Generation; index: number; ratio: number; layered?: boolean }) {
+const SHOW_ON_HOVER = "opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100";
+
+const OutputTile = memo(function OutputTile({ g, index, ratio, layered, count }: { g: Generation; index: number; ratio: number; layered?: boolean; count: number }) {
   const feed = useFeed();
   const canHover = useCanHover();
   // Actions mount on first hover / focus / tap: a long feed shouldn't hold thousands of menus and tooltips.
   const [hot, setHot] = useState<false | "bar" | "menu">(false);
   const o = g.outputs[index];
+  const audio = o.kind === "audio";
   const ctx = useMemo(() => ({ reuse: !!feed.reuse }), [feed.reuse]);
   return (
+    // The tile opens on click; keyboards and screen readers use the Open button over it (a sibling of
+    // the action buttons, so no button sits inside another).
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Open ${o.kind === "text" ? "text" : o.kind}${g.outputs.length > 1 && !layered ? ` ${index + 1} of ${g.outputs.length}` : ""}`}
       onClick={() => feed.open(g, index)}
-      onKeyDown={(e) => {
-        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
-          e.preventDefault();
-          feed.open(g, index);
-        }
-      }}
       onPointerEnter={(e) => e.pointerType === "mouse" && !hot && setHot("bar")}
       onFocus={() => canHover && !hot && setHot("bar")}
-      className="group/tile relative h-56 max-w-full animate-fade-up cursor-zoom-in overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-64"
-      style={{ aspectRatio: o.kind === "audio" ? 1.6 : layered ? Math.max(ratio, 0.8) : ratio }}
+      className="group/tile relative h-56 max-w-full animate-fade-up cursor-zoom-in overflow-hidden rounded-xl bg-muted sm:h-64"
+      style={{ aspectRatio: audio ? 1.6 : layered ? Math.max(ratio, 0.8) : ratio }}
     >
       {layered ? <LayersStack g={g} /> : <MediaThumb output={o} g={g} />}
+      <button
+        type="button"
+        aria-label={`Open “${userTitle(g)}”${count > 1 ? ` · ${index + 1} of ${count}` : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          feed.open(g, index);
+        }}
+        className="pointer-events-none absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      />
       {o.draftId && <DraftButton g={g} draftId={o.draftId} />}
-      {g.favorite && <Heart className="absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow" />}
-      {o.kind !== "audio" && canHover && hot === "bar" && (
+      {g.favorite && <Heart className={cn("absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow", audio && canHover && "group-focus-within/tile:opacity-0 group-hover/tile:opacity-0")} />}
+      {canHover && hot === "bar" && (
         <TileActions
           g={g}
           index={index}
           ctx={ctx}
           opts={feed.runner}
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100"
+          // Audio keeps its player at the bottom: its actions go along the top.
+          tone={audio ? "surface" : "media"}
+          className={cn(audio ? "absolute inset-x-0 top-0 p-2" : "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8", SHOW_ON_HOVER)}
         />
       )}
       {!canHover &&
@@ -198,6 +205,9 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
   const active = g.status === "queued" || g.status === "running";
   const placeholders = Math.max(1, g.request.params?.numOutputs ?? 1);
   const layered = g.status === "succeeded" && isLayered(g);
+  const shown = shownOutputs(g);
+  const single = g.status === "succeeded" && shown.length === 1 ? g.outputs[shown[0]] : null;
+  const singleName = single ? downloadName(g, single, shown[0]) : "";
   const p = g.request.params ?? {};
   const meta = [
     g.request.step?.label,
@@ -261,6 +271,13 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
               <DropdownMenuItem onSelect={() => void favorite(g)}>
                 <Heart /> {g.favorite ? "Remove from favorites" : "Add to favorites"}
               </DropdownMenuItem>
+              {single && !layered && (
+                <DropdownMenuItem asChild>
+                  <a href={downloadHref(single.url, singleName)} download={singleName}>
+                    <Download /> Download
+                  </a>
+                </DropdownMenuItem>
+              )}
               {g.status === "succeeded" && g.outputs.length > 1 && (
                 <DropdownMenuItem asChild>
                   <a href={`/api/generations/zip?ids=${g.id}`} download>
@@ -289,7 +306,11 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
           </div>
         )}
         {g.status === "succeeded" &&
-          (layered ? <OutputTile g={g} index={0} ratio={ratio} layered /> : g.outputs.map((o, i) => <OutputTile key={o.url} g={g} index={i} ratio={ratio} />))}
+          (layered ? (
+            <OutputTile g={g} index={0} ratio={ratio} layered count={1} />
+          ) : (
+            shown.map((i) => <OutputTile key={g.outputs[i].url} g={g} index={i} ratio={ratio} count={shown.length} />)
+          ))}
       </div>
     </section>
   );
@@ -325,7 +346,7 @@ export function Feed({
     [openAt, hasReuse],
   );
   if (!items.length) return <>{empty}</>;
-  const flat = items.flatMap((g) => (g.status === "succeeded" ? (isLayered(g) ? [{ g, i: 0 }] : g.outputs.map((_, i) => ({ g, i }))) : []));
+  const flat = items.flatMap((g) => (g.status === "succeeded" ? (isLayered(g) ? [{ g, i: 0 }] : shownOutputs(g).map((i) => ({ g, i }))) : []));
   const pos = open ? flat.findIndex((f) => f.g.id === open.id && (f.i === open.index || isLayered(f.g))) : -1;
   return (
     <FeedCtx.Provider value={api}>

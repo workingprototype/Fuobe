@@ -434,6 +434,10 @@ export interface GenerationRequest {
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
+  /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
+  title?: string;
+  /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
+  batchTitle?: string;
 }
 
 export interface ChainSlot {

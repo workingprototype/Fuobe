@@ -215,19 +215,19 @@ export function Composer({ docked }: { docked: boolean }) {
   const submit = () => {
     if (blocker || create.isPending) {
       if (blocker) {
-        toast(blocker.message);
+        // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
+        toast(blocker.message, { id: "composer-blocker" });
         // Point at the tile to fill: the missing slot, or the clip list of a tool that only takes clips.
         const target = blocker.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
         if (target) pulseSlot(root.current, target);
       }
       return;
     }
+    toast.dismiss("composer-blocker");
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
+    // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
     create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind), {
-      onSuccess: (items) => {
-        toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
-      },
       onError: (e) => toast.error((e as Error).message),
     });
   };

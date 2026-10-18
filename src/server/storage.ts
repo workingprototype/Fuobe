@@ -155,7 +155,8 @@ export function getAsset(id: string): Asset | null {
   return row ? toAsset(row) : null;
 }
 
-export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number }): Asset[] {
+/** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. */
+export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string }): Asset[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.source) {
@@ -166,7 +167,11 @@ export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; l
     where.push("kind = ?");
     args.push(opts.kind);
   }
-  const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT ?`;
+  if (opts.before) {
+    where.push(opts.beforeId ? "(created_at < ? OR (created_at = ? AND id < ?))" : "created_at < ?");
+    args.push(...(opts.beforeId ? [opts.before, opts.before, opts.beforeId] : [opts.before]));
+  }
+  const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT ?`;
   return (db().prepare(sql).all(...args, opts.limit ?? 100) as AssetRow[]).map(toAsset);
 }
 

@@ -8,7 +8,7 @@ import { LayersStack, MediaThumb, SmallThumb } from "@/components/studio/result-
 import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { elapsed, timeAgo } from "@/lib/format";
 import { coverOf, trashDaysLeft, userTitle, type LibraryEntry } from "@/lib/library";
-import { isLayered } from "@/lib/output-actions";
+import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { DRAG_TYPE } from "./folders";
 import type { Layout } from "./view-options";
@@ -126,20 +126,30 @@ export const AssetCard = memo(function AssetCard({
     else if (stack) api.expand(entry.key);
     else if (done) api.open(g, 0);
   };
-  const common = {
-    role: "button" as const,
-    tabIndex: 0,
-    "aria-label": stack ? `${title} — ${stack.label}` : title,
-    "aria-pressed": selecting ? selected : undefined,
-    "aria-expanded": stack ? !!expanded : undefined,
-    onClick: (e: React.MouseEvent) => activate(e.shiftKey),
-    onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.target !== e.currentTarget) return;
-      if (e.key === "Enter" || (e.key === " " && selecting)) {
-        e.preventDefault();
+  // The card handles mouse clicks; keyboards and screen readers use this button over it, a sibling of
+  // the card's other buttons (none sits inside another). It lets the pointer through to the media.
+  const target = (
+    <button
+      type="button"
+      aria-label={stack ? `${title} — ${stack.label}` : selecting ? `Select “${title}”` : done ? `Open “${title}”` : title}
+      aria-pressed={selecting ? selected : undefined}
+      aria-expanded={stack && !selecting ? !!expanded : undefined}
+      onClick={(e) => {
+        e.stopPropagation();
         activate(e.shiftKey);
-      }
-    },
+      }}
+      onKeyDown={(e) => {
+        // Shift+Enter extends a selection like a shift-click.
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        activate(e.shiftKey);
+      }}
+      className="pointer-events-none absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+    />
+  );
+  const common = {
+    onClick: (e: React.MouseEvent) => activate(e.shiftKey),
     draggable: canHover && !trashed,
     onDragStart: (e: React.DragEvent) => {
       const dragged = api.dragIds(ids);
@@ -150,33 +160,16 @@ export const AssetCard = memo(function AssetCard({
     onPointerEnter: (e: React.PointerEvent) => e.pointerType === "mouse" && !hot && setHot("bar"),
     onFocus: () => canHover && !hot && setHot("bar"),
   };
-  const showActions = !selecting && !stack && done && g.outputs[0].kind !== "audio";
-  const badges = (
-    <>
-      {g.favorite && !stack && <Heart className="absolute top-2.5 right-2.5 size-4 fill-highlight text-highlight drop-shadow" />}
-      {!stack && g.outputs.length > 1 && !isLayered(g) && (
-        <span className="absolute top-2 right-8 rounded-full bg-black/55 px-1.5 py-0.5 font-mono text-[11px] text-white backdrop-blur">×{g.outputs.length}</span>
-      )}
-      {trashed && (
-        <span className="absolute bottom-2 left-2 rounded-full bg-background/85 px-2 py-0.5 text-[11px] font-medium backdrop-blur">
-          {trashDaysLeft(g.deletedAt!)} days left
-        </span>
-      )}
-    </>
-  );
-  const actions =
+  const showActions = !selecting && !stack && done;
+  // Audio keeps its player at the bottom of the card: its actions go along the top.
+  const audio = done && !stack && g.outputs[0].kind === "audio";
+  const count = shownOutputs(g).length;
+  // Touch screens: just a ⋯ button that opens every action (at the top for audio, by the badges).
+  const touchMenu =
     showActions &&
-    (canHover ? (
-      hot === "bar" && (
-        <TileActions
-          g={g}
-          index={0}
-          opts={api.runner}
-          className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity duration-100 group-focus-within/card:opacity-100 group-hover/card:opacity-100"
-        />
-      )
-    ) : hot === "menu" ? (
-      <TileActions g={g} index={0} opts={api.runner} menuOnly className="absolute right-2 bottom-2" />
+    !canHover &&
+    (hot === "menu" ? (
+      <TileActions g={g} index={0} opts={api.runner} menuOnly className={audio ? undefined : "absolute right-2 bottom-2"} />
     ) : (
       <button
         aria-label="More actions"
@@ -184,21 +177,49 @@ export const AssetCard = memo(function AssetCard({
           e.stopPropagation();
           setHot("menu");
         }}
-        className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-lg bg-black/45 text-white backdrop-blur"
+        className={cn("grid size-8 place-items-center rounded-lg bg-black/45 text-white backdrop-blur", !audio && "absolute right-2 bottom-2")}
       >
         <MoreHorizontal className="size-4" />
       </button>
     ));
+  const badges = (
+    <>
+      <div className={cn("absolute top-2 right-2 flex items-center gap-1.5", audio && canHover && "group-focus-within/card:opacity-0 group-hover/card:opacity-0")}>
+        {!stack && count > 1 && !isLayered(g) && <span className="rounded-full bg-black/55 px-1.5 py-0.5 font-mono text-[11px] text-white backdrop-blur">×{count}</span>}
+        {g.favorite && !stack && <Heart className="m-0.5 size-4 fill-highlight text-highlight drop-shadow" />}
+        {audio && touchMenu}
+      </div>
+      {trashed && (
+        <span className="absolute bottom-2 left-2 rounded-full bg-background/85 px-2 py-0.5 text-[11px] font-medium backdrop-blur">
+          {trashDaysLeft(g.deletedAt!)} days left
+        </span>
+      )}
+    </>
+  );
+  const actions = canHover
+    ? showActions &&
+      hot === "bar" && (
+        <TileActions
+          g={g}
+          index={0}
+          opts={api.runner}
+          tone={audio ? "surface" : "media"}
+          className={cn(
+            // Audio: clear of the select dot in the corner.
+            audio ? "absolute inset-x-0 top-0 p-2 pl-10" : "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8",
+            "opacity-0 transition-opacity duration-100 group-focus-within/card:opacity-100 group-hover/card:opacity-100",
+          )}
+        />
+      )
+    : !audio && touchMenu;
 
   if (layout === "list") {
     return (
       <div
         {...common}
-        className={cn(
-          "group/card relative flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-          selected && "bg-brand-faint hover:bg-brand-faint-hover",
-        )}
+        className={cn("group/card relative flex min-h-16 cursor-pointer items-center gap-3 rounded-xl px-2 py-2 hover:bg-accent", selected && "bg-brand-faint hover:bg-brand-faint-hover")}
       >
+        {target}
         <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
           {stack ? cover ? <SmallThumb output={cover.o} g={cover.g} /> : <StatusCover g={g} /> : done ? <SmallThumb output={g.outputs[0]} g={g} /> : <StatusCover g={g} />}
           <SelectDot selected={selected} visible={selecting} onToggle={(s) => api.toggle(entry.key, ids, s)} label={`Select ${title}`} />
@@ -255,7 +276,7 @@ export const AssetCard = memo(function AssetCard({
       <div
         {...common}
         className={cn(
-          "relative w-full cursor-pointer overflow-hidden rounded-xl bg-muted outline-none transition-[box-shadow] focus-visible:ring-2 focus-visible:ring-ring",
+          "relative w-full cursor-pointer overflow-hidden rounded-xl bg-muted transition-[box-shadow]",
           !selecting && done && !stack && "cursor-zoom-in",
           selected && "ring-3 ring-primary",
           expanded && "ring-2 ring-border-strong",
@@ -263,6 +284,7 @@ export const AssetCard = memo(function AssetCard({
         style={{ aspectRatio: ratio }}
       >
         {stack ? cover ? <MediaThumb output={cover.o} g={cover.g} fit={fit} /> : <StatusCover g={g} /> : <Cover g={g} fit={fit} />}
+        {target}
         {selected && <div className="pointer-events-none absolute inset-0 bg-primary/15" />}
         {stack && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent p-3 pt-10 text-white">

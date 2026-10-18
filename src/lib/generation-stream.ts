@@ -8,10 +8,9 @@
  */
 import { replaceEqualDeep } from "@tanstack/react-query";
 import type { Generation } from "./catalog/types";
-import { byNewest, matchesFilter, type FeedFilter } from "./library";
+import { byDeleted, byNewest, matchesFilter, type FeedFilter } from "./library";
 
 /** Lists are newest first; the Trash is most recently deleted first. */
-const byDeleted = (a: Generation, b: Generation) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0) || byNewest(a, b);
 const orderFor = (f: FeedFilter) => (f.trashed ? byDeleted : byNewest);
 
 export type StreamEvent = { type: "generation"; generation: Generation } | { type: "deleted"; id: string };
@@ -161,4 +160,41 @@ export function sharePagesById(prev: unknown, next: unknown): unknown {
 /** Reconnect delays: 1 s, 2 s, 4 s … capped at 30 s (5 min once the endpoint said it doesn't exist). */
 export function backoff(attempt: number, missing = false): number {
   return missing ? 300_000 : Math.min(30_000, 1000 * 2 ** Math.max(0, attempt));
+}
+
+/**
+ * What to do with the stream endpoint's answer: read it, or try again later. A 404, or a page that
+ * isn't an event stream, means this server has no stream: polling carries on, and it looks again in
+ * 5 minutes. Other failures back off from 1 s.
+ */
+export function streamResponse(res: { ok: boolean; status: number; contentType: string | null; hasBody: boolean }, attempt: number): { open: true } | { open: false; retryIn: number } {
+  if (res.ok && res.hasBody && res.contentType?.includes("text/event-stream")) return { open: true };
+  return { open: false, retryIn: backoff(attempt, res.status === 404 || res.ok) };
+}
+
+/**
+ * Whether going live needs a catch-up refetch: on every (re)connection but the first, since events
+ * may have been missed while the stream was down (a drop, a hand-over between tabs, a hidden tab).
+ */
+export function needsCatchUp(was: boolean, now: boolean, everConnected: boolean): boolean {
+  return now && !was && everConnected;
+}
+
+/**
+ * What tabs say to each other on the BroadcastChannel. One tab (the leader) reads the stream and
+ * passes on every event and its connection state; a tab that joins says hello to get the state.
+ */
+export type ChannelMessage = { type: "event"; ev: StreamEvent } | { type: "state"; connected: boolean } | { type: "hello" };
+
+export function toChannelMessage(data: unknown): ChannelMessage | null {
+  if (!data || typeof data !== "object") return null;
+  const m = data as Record<string, unknown>;
+  if (m.type === "hello") return { type: "hello" };
+  if (m.type === "state" && typeof m.connected === "boolean") return { type: "state", connected: m.connected };
+  if (m.type !== "event" || !m.ev || typeof m.ev !== "object") return null;
+  const ev = m.ev as Record<string, unknown>;
+  if (ev.type === "deleted" && typeof ev.id === "string") return { type: "event", ev: { type: "deleted", id: ev.id } };
+  const g = ev.generation as Record<string, unknown> | undefined;
+  if (ev.type === "generation" && g && typeof g.id === "string" && typeof g.createdAt === "number") return { type: "event", ev: { type: "generation", generation: g as unknown as Generation } };
+  return null;
 }

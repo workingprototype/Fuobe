@@ -2,6 +2,7 @@
 
 import { Calendar, Check, ChevronDown, CircleDot, Cpu, X } from "lucide-react";
 import { useState } from "react";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { LibraryFacets } from "@/lib/api";
 import type { GenerationStatus } from "@/lib/catalog/types";
@@ -56,15 +57,18 @@ function Chip({ active, children, ...props }: { active: boolean; children: React
   );
 }
 
-function Option({ checked, onClick, children }: { checked: boolean; onClick: () => void; children: React.ReactNode }) {
+/** One choice in a filter popover: a checkbox (models, several at once) or a radio (date, status). */
+function Option({ checked, onClick, children, kind = "checkbox" }: { checked: boolean; onClick: () => void; children: React.ReactNode; kind?: "checkbox" | "radio" }) {
   return (
     <button
-      role="menuitemcheckbox"
+      role={kind}
       aria-checked={checked}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-accent"
     >
-      <span className={cn("grid size-4 shrink-0 place-items-center rounded border", checked && "border-primary bg-primary text-primary-foreground")}>{checked && <Check className="size-3" />}</span>
+      <span className={cn("grid size-4 shrink-0 place-items-center border", kind === "radio" ? "rounded-full" : "rounded", checked && "border-primary bg-primary text-primary-foreground")}>
+        {checked && <Check className="size-3" />}
+      </span>
       <span className="min-w-0 flex-1 truncate">{children}</span>
     </button>
   );
@@ -91,15 +95,17 @@ export function FilterBar({ value, onChange, facets }: { value: Filters; onChang
   const modelLabel = value.models.length === 0 ? "Any model" : value.models.length === 1 ? (models.find((m) => m.id === value.models[0])?.name ?? "1 model") : `${value.models.length} models`;
   const d = value.date;
   const dateLabel = d.id === "custom" ? [d.from, d.to].filter(Boolean).join(" → ") || "Custom range" : DATES.find((x) => x.id === d.id)!.label;
+  // The chips scroll sideways on phones: fade the edge where more hide.
+  const [rowRef, fade] = useEdgeFade<HTMLDivElement>();
   return (
-    <div className="scrollbar-none -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 py-0.5">
+    <div ref={rowRef} style={fade} className="scrollbar-none -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 py-0.5">
       <Popover>
         <PopoverTrigger asChild>
           <Chip active={value.models.length > 0}>
             <Cpu className="size-3.5" /> {modelLabel} <ChevronDown className="size-3.5 opacity-60" />
           </Chip>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={12} className="max-h-80 w-[min(92vw,280px)] overflow-y-auto p-1.5">
+        <PopoverContent align="start" collisionPadding={12} className="max-h-80 w-[min(92vw,280px)] overflow-y-auto p-1.5" role="group" aria-label="Models">
           {models.length === 0 && <p className="px-2 py-1.5 text-[13px] text-muted-foreground">Nothing made yet</p>}
           {models.map((m) => (
             <Option
@@ -119,9 +125,9 @@ export function FilterBar({ value, onChange, facets }: { value: Filters; onChang
           </Chip>
         </PopoverTrigger>
         <PopoverContent align="start" collisionPadding={12} className="w-[min(92vw,280px)] space-y-2 p-1.5">
-          <div>
+          <div role="radiogroup" aria-label="Date">
             {DATES.map((x) => (
-              <Option key={x.id} checked={d.id === x.id} onClick={() => onChange({ ...value, date: { id: x.id } })}>
+              <Option key={x.id} kind="radio" checked={d.id === x.id} onClick={() => onChange({ ...value, date: { id: x.id } })}>
                 {x.label}
               </Option>
             ))}
@@ -156,9 +162,9 @@ export function FilterBar({ value, onChange, facets }: { value: Filters; onChang
             <ChevronDown className="size-3.5 opacity-60" />
           </Chip>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={12} className="w-[min(92vw,220px)] p-1.5">
+        <PopoverContent align="start" collisionPadding={12} className="w-[min(92vw,220px)] p-1.5" role="radiogroup" aria-label="Status">
           {STATUSES.map((s) => (
-            <Option key={s.id} checked={value.status === s.id} onClick={() => onChange({ ...value, status: s.id })}>
+            <Option key={s.id} kind="radio" checked={value.status === s.id} onClick={() => onChange({ ...value, status: s.id })}>
               {s.label}
             </Option>
           ))}
