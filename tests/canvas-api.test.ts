@@ -14,6 +14,7 @@ process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
 const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
+const lib = await import("@/server/library");
 const { db } = await import("@/server/db");
 const list = await import("@/app/api/canvases/route");
 const one = await import("@/app/api/canvases/[id]/route");
@@ -138,6 +139,63 @@ describe("canvas API", () => {
     expect(body.ran).toEqual(["img"]);
     expect(body.canvas.graph.nodes[0].data.text).toBe("A grey wolf in fresh snow");
     await settle(body.items[0].id);
+  }, 60_000);
+
+  it("treats a result moved to the Trash as gone: Run all makes it again", async () => {
+    // Bring the whole board up to date (the last test re-ran only the image).
+    let res = await run.POST(req("POST", {}), ctx(id));
+    for (const g of ((await res.json()) as { items: Generation[] }).items) await settle(g.id);
+    expect((await run.POST(req("POST", {}), ctx(id))).status).toBe(200);
+    let view = (await (await one.GET(req("GET"), ctx(id))).json()) as { canvas: Canvas; generations: Generation[] };
+    const imgId = view.canvas.runs.img.ids[0];
+    expect(gens.getGeneration(imgId)?.status).toBe("succeeded");
+
+    lib.trashGenerations([imgId]);
+    view = (await (await one.GET(req("GET"), ctx(id))).json()) as typeof view;
+    expect(view.generations.map((g) => g.id)).not.toContain(imgId);
+    // The card's preview no longer shows the trashed image.
+    const card = ((await (await list.GET()).json()) as { items: CanvasSummary[] }).items.find((c) => c.id === id)!;
+    expect(card.preview?.url).not.toBe(gens.getGeneration(imgId, { includeDeleted: true })!.outputs[0].url);
+
+    res = await run.POST(req("POST", {}), ctx(id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ran: string[]; reused: { nodeId: string }[]; items: Generation[] };
+    expect(body.ran).toEqual(["img", "vid"]);
+    expect(body.reused).toEqual([]);
+    await settle(body.items[1].id);
+  }, 60_000);
+
+  it("clamps over-long text instead of refusing the board, and names the node it can't save", async () => {
+    const long = structuredClone(board);
+    long.nodes[0].data.text = "x".repeat(10_001);
+    long.nodes[2].data.prompt = "y".repeat(12_000);
+    long.nodes[1].data.label = "L".repeat(200);
+    let res = await one.PATCH(req("PATCH", { graph: long }), ctx(id));
+    expect(res.status).toBe(200);
+    const saved = (await res.json()) as Canvas;
+    expect(saved.graph.nodes[0].data.text).toHaveLength(10_000);
+    expect(saved.graph.nodes[2].data.prompt).toHaveLength(10_000);
+    expect(saved.graph.nodes[1].data.label).toHaveLength(80);
+
+    // Element handles keep letters, digits, _ and - only (they end up in prompts as @handle).
+    const odd = structuredClone(board);
+    odd.nodes.push({ id: "el", type: "element", position: { x: 0, y: 300 }, data: { handle: "a(b", elementId: "x" } });
+    odd.edges.push({ id: "e4", source: "el", sourceHandle: "out", target: "img", targetHandle: "elements" });
+    res = await one.PATCH(req("PATCH", { graph: odd }), ctx(id));
+    expect(((await res.json()) as Canvas).graph.nodes.find((n) => n.id === "el")!.data.handle).toBe("ab");
+    // Planning a board with an odd handle never throws (it used to build a RegExp from it).
+    res = await run.POST(req("POST", { graph: odd, targets: ["out"] }), ctx(id));
+    expect(res.status).toBeLessThan(500);
+    for (const g of ((await res.json()) as { items?: Generation[] }).items ?? []) await gens.cancelGeneration(g.id);
+
+    // What can't be clamped is refused with the node's name.
+    const bad = structuredClone(board);
+    bad.nodes[1].data.label = "Hero shot";
+    bad.nodes[1].data.preview = "http://evil.example/a.png";
+    res = await one.PATCH(req("PATCH", { graph: bad }), ctx(id));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("“Hero shot” couldn't be saved (its preview): change it or remove the node");
+    await one.PATCH(req("PATCH", { graph: board }), ctx(id));
   }, 60_000);
 
   it("says what to fix when nothing can start", async () => {
