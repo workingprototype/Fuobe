@@ -156,10 +156,22 @@ function Workspace({ engine, models }: { engine: Engine; models: RestyleModelInf
   }, []);
 
   const select = (id: string) => {
+    const p = MIXED_PRESETS.find((x) => x.id === id);
+    if (!p) return;
     setPresetId(id);
-    const p = MIXED_PRESETS.find((x) => x.id === id)!;
     setValues(loadSaved(p) ?? defaultValues(p));
   };
+  // Hand-off: /mixed-media?preset=mixed-sketch.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("preset");
+    if (!id) return;
+    const p = MIXED_PRESETS.find((x) => x.id === id);
+    if (!p) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- read once after hydration */
+    setPresetId(id);
+    setValues(loadSaved(p) ?? defaultValues(p));
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   return (
     <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start">
@@ -241,6 +253,13 @@ function Editor({
 }) {
   const source = useSourceClip(MIXED.maxBytes);
   const { clip } = source;
+  // Hand-off: /mixed-media?video=/api/files/… (a result or a Library clip).
+  useEffect(() => {
+    const video = new URLSearchParams(window.location.search).get("video");
+    if (video?.startsWith("/api/files/")) source.adopt(video, video.split("/").pop());
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const trimmer = useRef<VideoTrimmerHandle>(null);
   const [range, setRange] = useState<TrimRange | null>(null);
   const [fpsChoice, setFpsChoice] = useState<FpsChoice>(MIXED.defaultFps as number);
