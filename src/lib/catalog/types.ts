@@ -472,6 +472,15 @@ export interface Generation {
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
+  /** Display names resolved on the server, so result views need no catalog in the browser. */
+  modelName?: string;
+  presetName?: string | null;
+  /** The aspect ratio it was made at (the request's, else the model's default), for tile shapes. */
+  aspectRatio?: string | null;
+  /** Moved to the Trash at (soft delete; purged after 30 days). */
+  deletedAt?: number | null;
+  /** Library folder it's in. */
+  folderId?: string | null;
 }
 
 /** Input slot a preset asks the user for. */

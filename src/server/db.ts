@@ -107,6 +107,25 @@ const MIGRATIONS: string[] = [
     submitted_at INTEGER NOT NULL,
     started_at INTEGER
   );`,
+  // Library: Trash (soft delete, purged after 30 days) and folders (one folder per generation).
+  `CREATE TABLE IF NOT EXISTS generation_trash (
+    generation_id TEXT PRIMARY KEY,
+    deleted_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS generation_trash_deleted ON generation_trash(deleted_at);
+  CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS folder_items (
+    generation_id TEXT PRIMARY KEY,
+    folder_id TEXT NOT NULL,
+    added_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS folder_items_folder ON folder_items(folder_id);`,
 ];
 
 declare global {

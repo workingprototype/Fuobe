@@ -52,21 +52,35 @@ export interface Draft {
   mix?: { presetId: string; strength: number };
 }
 
-interface Ctx {
+interface Actions {
   config: StudioConfig;
-  draft: Draft;
   setDraft: (patch: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => void;
   setSlot: (key: SlotKey, v: SlotValue | null) => void;
   /** Put an image somewhere sensible (first empty image slot, else references). */
   addImage: (v: SlotValue) => void;
 }
 
-const StudioCtx = createContext<Ctx | null>(null);
+interface Ctx extends Actions {
+  draft: Draft;
+}
 
-export function useStudio(): Ctx {
-  const c = useContext(StudioCtx);
-  if (!c) throw new Error("useStudio outside StudioProvider");
+// Two contexts: the draft changes on every keystroke, the config and actions never do, so the
+// page shell and the feed (which only need actions) don't re-render while you type.
+const ActionsCtx = createContext<Actions | null>(null);
+const DraftCtx = createContext<Draft | null>(null);
+
+/** Config and stable actions only: use this where the draft isn't needed (no re-render per keystroke). */
+export function useStudioActions(): Actions {
+  const c = useContext(ActionsCtx);
+  if (!c) throw new Error("useStudioActions outside StudioProvider");
   return c;
+}
+
+/** Everything, including the draft (re-renders on every draft change). */
+export function useStudio(): Ctx {
+  const actions = useStudioActions();
+  const draft = useContext(DraftCtx)!;
+  return useMemo(() => ({ ...actions, draft }), [actions, draft]);
 }
 
 export function StudioProvider({
@@ -98,11 +112,15 @@ export function StudioProvider({
     },
     [config],
   );
-  const value = useMemo(() => ({ config, draft, setDraft, setSlot, addImage }), [config, draft, setDraft, setSlot, addImage]);
-  return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
+  const actions = useMemo(() => ({ config, setDraft, setSlot, addImage }), [config, setDraft, setSlot, addImage]);
+  return (
+    <ActionsCtx.Provider value={actions}>
+      <DraftCtx.Provider value={draft}>{children}</DraftCtx.Provider>
+    </ActionsCtx.Provider>
+  );
 }
 
 /** Replace a slot value by key, updating only when it's the same upload (async upload callbacks). */
-export function slotUpdater(setSlot: Ctx["setSlot"], key: SlotKey) {
+export function slotUpdater(setSlot: Actions["setSlot"], key: SlotKey) {
   return (v: SlotValue | null) => setSlot(key, v);
 }

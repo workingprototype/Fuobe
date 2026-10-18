@@ -1,8 +1,8 @@
 "use client";
 
-import { Upload } from "lucide-react";
+import { ArrowUp, Loader2, Upload } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -16,7 +16,7 @@ import { Composer } from "./composer";
 import { EngineSwitch } from "./engine-switch";
 import { Feed } from "./feed";
 import type { SlotValue } from "./media-slot";
-import { StudioProvider, useStudio, type Draft, type StudioConfig } from "./studio-context";
+import { StudioProvider, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
 function kindOfUrl(url: string): MediaKind {
   if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
@@ -91,6 +91,66 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
   };
 }
 
+/**
+ * New results land at the top of the feed while the composer is docked at the bottom: when one
+ * arrives off-screen (you scrolled down into your history), a pill above the composer jumps to it (U4).
+ */
+function useOffscreenResults(items: Generation[] | undefined) {
+  const since = useRef(0);
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<string[]>([]);
+  useEffect(() => {
+    since.current = Date.now() - 2000;
+  }, []);
+  useEffect(() => {
+    if (!items) return;
+    if (!seen.current) {
+      seen.current = new Set(items.map((g) => g.id));
+      return;
+    }
+    const known = seen.current;
+    const added = items.filter((g) => !known.has(g.id) && g.createdAt >= since.current);
+    items.forEach((g) => known.add(g.id));
+    if (!added.length) return;
+    const raf = requestAnimationFrame(() => {
+      const off = added.filter((g) => !inView(g.id)).map((g) => g.id);
+      if (off.length) setFresh((f) => [...new Set([...off, ...f])]);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [items]);
+  // Clear the ones you scrolled to.
+  const pending = fresh.length > 0;
+  useEffect(() => {
+    if (!pending) return;
+    let raf = 0;
+    const check = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setFresh((f) => (f.some(inView) ? f.filter((id) => !inView(id)) : f)));
+    };
+    window.addEventListener("scroll", check, { passive: true, capture: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", check, { capture: true });
+    };
+  }, [pending]);
+  const present = fresh.filter((id) => items?.some((g) => g.id === id));
+  const working = present.filter((id) => items?.some((g) => g.id === id && (g.status === "queued" || g.status === "running"))).length;
+  const jump = () => {
+    document.querySelector(`[data-gen-id="${present[0]}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setFresh([]);
+  };
+  return { count: present.length, working, jump };
+}
+
+function inView(id: string): boolean {
+  const el = document.querySelector(`[data-gen-id="${id}"]`);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.bottom > 56 && r.top < window.innerHeight - 160;
+}
+
+const EMPTY: Generation[] = [];
+
 /** Sticky page header (title + engine), with an optional row of mode tabs under it. */
 function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
   const [engine, setEngine] = useEngine();
@@ -110,21 +170,26 @@ function StudioHeader({ title, header, tabs }: { title: string; header?: React.R
 }
 
 function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.ReactNode }) {
-  const { config, setDraft } = useStudio();
+  // Config and actions only: the draft lives in the composer, so typing doesn't re-render the page or the feed.
+  const { config, setDraft } = useStudioActions();
   const [engine, setEngine] = useEngine();
   const feed = useGenerations(config.feed);
   const bridge = useComposerBridge();
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
-  const items = feed.data ?? [];
+  const items = feed.data ?? EMPTY;
   // While the feed loads (and in the prerendered shell) the page shows the hero and the composer, never a blank area.
   const hasItems = items.length > 0;
+  const offscreen = useOffscreenResults(feed.data);
 
-  const reuse = (g: Generation) => {
-    setDraft(draftFromGeneration(g, config));
-    if (g.engine !== engine) setEngine(g.engine);
-    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
-  };
+  const reuse = useCallback(
+    (g: Generation) => {
+      setDraft(draftFromGeneration(g, config));
+      if (g.engine !== engine) setEngine(g.engine);
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
+    },
+    [config, engine, setDraft, setEngine],
+  );
 
   return (
     <div
@@ -172,6 +237,18 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
             : "px-3 pt-10 sm:px-6",
         )}
       >
+          {hasItems && offscreen.count > 0 && (
+            <div className="pointer-events-none absolute inset-x-0 -top-2 flex justify-center">
+              <button
+                onClick={offscreen.jump}
+                className="pointer-events-auto inline-flex h-8 animate-pop-in items-center gap-1.5 rounded-full bg-foreground px-3.5 text-[13px] font-medium text-background shadow-strong transition hover:opacity-90"
+              >
+                {offscreen.working ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {offscreen.working ? `${offscreen.working} generating` : `${offscreen.count} new result${offscreen.count === 1 ? "" : "s"}`}
+                <ArrowUp className="size-3.5" />
+              </button>
+            </div>
+          )}
         <div data-composer className={cn("mx-auto w-full", hasItems ? "max-w-[800px]" : "max-w-[760px]")}>
           <Composer docked={hasItems} />
         </div>
