@@ -115,6 +115,94 @@ describe("createPipeline on the demo provider", () => {
   });
 });
 
+describe("stems and the second audio track", () => {
+  const clip = () => saveFile({ data: fs.readFileSync(path.join(process.cwd(), "public/samples/demo-landscape.mp4")), contentType: "video/mp4", source: "upload" }).url;
+  const providerInput = (id: string) => JSON.parse((db().prepare("SELECT provider_input_json FROM generations WHERE id = ?").get(id) as { provider_input_json: string }).provider_input_json) as Record<string, unknown>;
+
+  it("separates once, clones the voice stem and mixes the new voice over the background stem", async () => {
+    const video = clip();
+    const p = createPipeline([
+      { key: "stems", request: { feature: "dub", modelId: "oss-voice-separate", op: "separate-audio", inputs: { video } } },
+      { key: "voice", request: { feature: "dub", modelId: "oss-chatterbox", op: "tts", prompt: "Hola a todos, bienvenidos." }, after: "stems", chain: [{ slot: "voiceAudio", stem: "voice" }] },
+      {
+        key: "film",
+        request: { feature: "dub", modelId: "oss-mux", op: "mux", inputs: { video } },
+        after: ["voice", "stems"],
+        chain: [{ slot: "audio" }, { slot: "audio2", stem: "background" }],
+      },
+    ]);
+    expect(p.items.map((g) => g.op)).toEqual(["separate-audio", "tts", "mux"]);
+    expect(dependsOn(p.byKey.film.id)).toEqual([p.byKey.voice.id, p.byKey.stems.id]);
+
+    const film = await settle(p.byKey.film.id);
+    expect(film.status, film.error ?? "").toBe("succeeded");
+    const stems = gens.getGeneration(p.byKey.stems.id)!;
+    const voice = gens.getGeneration(p.byKey.voice.id)!;
+    const stem = (name: string) => stems.outputs.find((o) => o.meta?.stem === name)!.url;
+    expect(stems.outputs.map((o) => o.meta?.stem)).toEqual(["voice", "background"]);
+    // The voice stem is cloned; the background stem (not the first audio output) goes under the new voice.
+    expect(voice.request.inputs?.voiceAudio).toBe(stem("voice"));
+    expect(film.request.inputs).toEqual({ video, audio: voice.outputs[0].url, audio2: stem("background") });
+    // …and reaches the provider as the canonical second track.
+    const sent = providerInput(film.id);
+    expect(sent.audio).toEqual(expect.stringMatching(/^data:audio\/wav/));
+    expect(sent.audio2).toEqual(expect.stringMatching(/^data:audio\/wav/));
+  });
+
+  it("accepts audio2 on POST /api/generations", async () => {
+    const { POST } = await import("@/app/api/generations/route");
+    const res = await POST(
+      new Request("http://localhost/api/generations", {
+        method: "POST",
+        body: JSON.stringify({ feature: "edit", modelId: "oss-mux", op: "mux", inputs: { video: "/api/files/a.mp4", audio: "/api/files/v.wav", audio2: "/api/files/bg.wav" } }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { items } = (await res.json()) as { items: Generation[] };
+    expect(items[0].request.inputs?.audio2).toBe("/api/files/bg.wav");
+    await gens.cancelGeneration(items[0].id);
+  });
+
+  it("fails a step whose stem the earlier step didn't make, and refuses a stem on a non-audio slot", async () => {
+    expect(() =>
+      createPipeline([step("a", "oss-voice-separate", { op: "separate-audio", inputs: { video: "/api/files/a.mp4" } }), { ...step("b", "oss-mux", { op: "mux", inputs: { audio: "/api/files/v.wav" } }), after: "a", chain: [{ slot: "video", stem: "voice" }] }]),
+    ).toThrow(/Step “b”: a stem \(“voice”\) only goes into an audio slot, not “video”/);
+    const p = createPipeline([
+      step("a", "oss-voice-separate", { op: "separate-audio", inputs: { video: clip() } }),
+      { ...step("b", "oss-chatterbox", { op: "tts" }), after: "a", chain: [{ slot: "voiceAudio", stem: "drums" }] },
+    ]);
+    const b = await settle(p.byKey.b.id);
+    expect(b.status).toBe("failed");
+    expect(b.error).toBe("An earlier step has no drums stem to use");
+  });
+
+  it("picks stems by the names other providers use (Demucs: vocals)", () => {
+    const outs = [
+      { url: "/api/files/drums.wav", kind: "audio" as const, meta: { stem: "drums" } },
+      { url: "/api/files/vocals.wav", kind: "audio" as const, meta: { stem: "vocals" } },
+      { url: "/api/files/rest.wav", kind: "audio" as const, meta: { stem: "accompaniment" } },
+    ];
+    expect(gens.pickOutput(outs, { slot: "voiceAudio", stem: "voice" })?.url).toBe("/api/files/vocals.wav");
+    expect(gens.pickOutput(outs, { slot: "audio2", stem: "Background" })?.url).toBe("/api/files/rest.wav");
+    expect(gens.pickOutput(outs, { slot: "audio", stem: "drums" })?.url).toBe("/api/files/drums.wav");
+    expect(gens.pickOutput(outs, { slot: "audio" })?.url).toBe("/api/files/drums.wav");
+  });
+
+  it("gives a translate step the cue list even when its op was left to be inferred", async () => {
+    const p = createPipeline([
+      step("words", "test-transcribe", { op: "transcribe", inputs: { video: clip() } }),
+      // No op: text-llm's first route (translate) is planned, and the cues must still go in.
+      { key: "es", request: { feature: "dub", modelId: "text-llm", params: { targetLanguage: "Spanish" } }, after: "words", chain: [{ slot: "prompt" }] },
+    ]);
+    expect(p.byKey.es.op).toBe("translate");
+    const es = await settle(p.byKey.es.id);
+    expect(es.status, es.error ?? "").toBe("succeeded");
+    const words = gens.getGeneration(p.byKey.words.id)!;
+    expect(JSON.parse(es.request.prompt!)).toEqual(words.outputs[0].meta!.cues);
+    expect((es.outputs[0].meta!.cues as unknown[]).length).toBe((words.outputs[0].meta!.cues as unknown[]).length);
+  });
+});
+
 describe("one mode per chain at launch (S9)", () => {
   const insertDone = (id: string, providerId: string, outputs: unknown[]) =>
     db()

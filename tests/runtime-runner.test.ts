@@ -49,11 +49,21 @@ describe("timeouts (S3)", () => {
     expect(done.status).toBe("succeeded");
   });
 
+  /** Make the demo provider report `state` for one job (by its external id) until restored. */
+  const holdAt = (externalId: () => string | null, state: "queued" | "running") => {
+    const poll = mockProvider.poll;
+    mockProvider.poll = async (ctx) => (ctx.externalId === externalId() ? { state, message: `held ${state}` } : poll(ctx));
+    return () => {
+      mockProvider.poll = poll;
+    };
+  };
+
   it("time out a job that has run too long, and stop it at the provider", async () => {
     const cancel = vi.fn(async () => {});
     mockProvider.cancel = cancel;
+    const g = image("runs forever");
+    const restore = holdAt(() => row(g.id).external_id, "running");
     try {
-      const g = image("runs forever");
       await until(() => row(g.id).external_id);
       db().prepare("UPDATE generation_runs SET started_at = ? WHERE id = ?").run(Date.now() - 46 * 60_000, g.id);
       const done = await settle(g.id);
@@ -61,16 +71,57 @@ describe("timeouts (S3)", () => {
       expect(done.error).toMatch(/Timed out after 45 minutes/);
       expect(cancel).toHaveBeenCalledWith(expect.objectContaining({ externalId: row(g.id).external_id }));
     } finally {
+      restore();
+      delete mockProvider.cancel;
+    }
+  });
+
+  it("collect a job that finished at the provider while the server was away, however late", async () => {
+    const cancel = vi.fn(async () => {});
+    mockProvider.cancel = cancel;
+    try {
+      const g = image("finished while the laptop slept");
+      await until(() => row(g.id).external_id);
+      // An hour later: the provider has long finished it (the demo job "started" an hour ago too).
+      const hourAgo = Date.now() - 60 * 60_000;
+      const meta = JSON.parse((db().prepare("SELECT external_meta_json FROM generations WHERE id = ?").get(g.id) as { external_meta_json: string }).external_meta_json);
+      db().prepare("UPDATE generations SET external_meta_json = ? WHERE id = ?").run(JSON.stringify({ ...meta, startedAt: hourAgo }), g.id);
+      db().prepare("UPDATE generation_runs SET submitted_at = ?, started_at = ? WHERE id = ?").run(hourAgo, hourAgo, g.id);
+      const done = await settle(g.id);
+      expect(done.status, done.error ?? "").toBe("succeeded");
+      expect(done.outputs[0]).toMatchObject({ kind: "image", url: expect.stringMatching(/^\/api\/files\//) });
+      expect(cancel).not.toHaveBeenCalled();
+    } finally {
       delete mockProvider.cancel;
     }
   });
 
   it("give a job that never left the queue a longer, separate limit", async () => {
     const g = image("stuck in the queue");
+    const restore = holdAt(() => row(g.id).external_id, "queued");
+    try {
+      await until(() => row(g.id).external_id);
+      db().prepare("UPDATE generation_runs SET submitted_at = ?, started_at = NULL WHERE id = ?").run(Date.now() - 5 * 3_600_000, g.id);
+      const done = await settle(g.id);
+      expect(done.error).toMatch(/waiting 4 hours in the provider's queue/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("give a job that leaves the queue late its full running time", async () => {
+    const g = image("finally on the GPU");
     await until(() => row(g.id).external_id);
+    // Waited 5 hours in the queue, but the provider has just started it: it runs to the end.
     db().prepare("UPDATE generation_runs SET submitted_at = ?, started_at = NULL WHERE id = ?").run(Date.now() - 5 * 3_600_000, g.id);
-    const done = await settle(g.id);
-    expect(done.error).toMatch(/waiting 4 hours in the provider's queue/);
+    const restore = holdAt(() => row(g.id).external_id, "running");
+    try {
+      await until(() => (db().prepare("SELECT started_at FROM generation_runs WHERE id = ?").get(g.id) as { started_at: number | null }).started_at);
+      expect(gens.getGeneration(g.id)!.status).toBe("running");
+    } finally {
+      restore();
+    }
+    expect((await settle(g.id)).status).toBe("succeeded");
   });
 });
 

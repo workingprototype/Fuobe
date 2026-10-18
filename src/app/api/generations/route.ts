@@ -18,6 +18,7 @@ const RequestSchema = z.object({
       sketch: z.string().optional(),
       video: z.string().optional(),
       audio: z.string().optional(),
+      audio2: z.string().optional(),
       voiceAudio: z.string().optional(),
       voiceAudio2: z.string().optional(),
       videos: z.array(z.string()).max(24).optional(),

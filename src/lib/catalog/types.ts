@@ -378,6 +378,8 @@ export interface GenerationRequest {
     sketch?: string;
     video?: string;
     audio?: string;
+    /** Second audio track: the background stem (or a music bed) mixed under `audio` (mux). */
+    audio2?: string;
     /** Reference recording of the voice to speak with / convert into. */
     voiceAudio?: string;
     /** Second speaker's reference voice (open-source dialogue). */
@@ -409,10 +411,17 @@ export interface ChainSlot {
    * "prompt" takes the dependency's text output (OutputFile.text): it replaces "{text}" in the
    * request's prompt, or becomes the prompt when there is no placeholder.
    * "voiceAudio" clones the voice of the dependency's audio output.
+   * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
+  /**
+   * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
+   * "voice" and "background"; "voice" also matches vocals/speech/target, "background" also
+   * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
+   */
+  stem?: string;
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
@@ -424,6 +433,8 @@ export interface GenInput extends GenParams {
   mask?: string;
   video?: string;
   audio?: string;
+  /** Second audio track (mux: the background mixed under `audio`). */
+  audio2?: string;
   voiceAudio?: string;
   voiceAudio2?: string;
   videos?: string[];

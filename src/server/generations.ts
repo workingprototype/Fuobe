@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
+import { cueText, type Cue } from "@/lib/cues";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   LAST_FRAME_CHAIN,
@@ -27,7 +28,7 @@ import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { probeComfy } from "./providers/comfyui";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
-import type { PollContext, RemoteOutput } from "./providers/types";
+import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
 import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
@@ -373,8 +374,25 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   videos: "video",
   audio: "audio",
   voiceAudio: "audio",
+  audio2: "audio",
   prompt: "text",
 };
+
+/** Names providers give the same stem (ComfyUI: voice/background; Demucs: vocals…; SAM Audio: target/residual). */
+const STEM_ALIASES: Record<string, string[]> = {
+  voice: ["voice", "vocals", "speech", "target"],
+  background: ["background", "accompaniment", "instrumental", "residual", "no_vocals"],
+};
+
+/** The dependency output a slot takes: the first of the slot's kind, or the one with the slot's `stem`. */
+export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | undefined {
+  const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
+  if (!s.stem) return ofKind[0];
+  const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
+  return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
+}
+
+const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : SLOT_KIND[s.slot]);
 
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
@@ -385,13 +403,16 @@ function placeholderFor(s: ChainSlot): string {
 /**
  * What a chained step takes from a dependency's output: the file URL, or the text for "prompt".
  * A translation of timed text gets the cue list (so the timing survives); text saved only as a
- * file is read back from it.
+ * file, or cut short inline (meta.truncated), is read back from it.
  */
 async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: Generation["op"]): Promise<string | undefined> {
   if (!o) return undefined;
   if (s.slot !== "prompt") return o.url;
-  if (op === "translate" && Array.isArray(o.meta?.cues) && o.meta.cues.length) return JSON.stringify(o.meta.cues);
-  if (typeof o.text === "string") return o.text;
+  const cues = Array.isArray(o.meta?.cues) && o.meta.cues.length ? (o.meta.cues as Cue[]) : null;
+  if (op === "translate" && cues) return JSON.stringify(cues);
+  if (typeof o.text === "string" && !o.meta?.truncated) return o.text;
+  // Timed text is saved as subtitles: its words come from the cues, not the .srt file.
+  if (cues) return cueText(cues);
   if (!o.url) return undefined;
   return readRef(o.url)
     .then((f) => f.data.toString("utf8"))
@@ -463,12 +484,11 @@ async function advanceDependents(): Promise<void> {
     submitting().add(r.id);
     let handedOff = false;
     try {
-      const values = await Promise.all(
-        deps.map((d, i) => chainValue((JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot]), slots[i], request.op)),
-      );
+      // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
+      const values = await Promise.all(deps.map((d, i) => chainValue(pickOutput(JSON.parse(d!.outputs_json) as OutputFile[], slots[i]), slots[i], r.op)));
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
-        update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[missing].slot]} to use`, message: null, completed_at: Date.now() });
+        update(r.id, { status: "failed", error: `${earlier} has no ${slotNoun(slots[missing])} to use`, message: null, completed_at: Date.now() });
         continue;
       }
       // Routing reads cached reachability: make sure it's fresh for local engines.
@@ -547,6 +567,7 @@ async function submit(
       mask: await prepMask(req.inputs?.mask),
       video: await prep(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
+      audio2: await prep(req.inputs?.audio2),
       voiceAudio: await prep(req.inputs?.voiceAudio),
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
       videos: (await Promise.all((req.inputs?.videos ?? []).map(prep))).filter(Boolean) as string[],
@@ -729,24 +750,34 @@ async function pollOne(r: Row): Promise<void> {
     recordSubmission(r.id, now);
     run = { submitted_at: now, started_at: null };
   }
-  const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : now - run.submitted_at > QUEUE_TIMEOUT_MS;
   const ctx = pollContext(r, model);
-  if (overdue) {
-    // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
-    await provider(r.provider)
-      .cancel?.(ctx)
-      .catch(() => {});
-    update(r.id, {
-      status: "failed",
-      error: run.started_at ? `Timed out after ${TIMEOUT_MS / 60_000} minutes` : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
-      completed_at: now,
-      message: null,
-    });
-    return;
+  // Poll first: a job that finished while the server was asleep or down is collected, not timed out.
+  let res: PollResult | undefined;
+  let pollError: unknown;
+  try {
+    res = await provider(r.provider).poll(ctx);
+  } catch (e) {
+    pollError = e;
   }
-  const res = await provider(r.provider).poll(ctx);
-  if (res.state === "queued" || res.state === "running") {
-    if (res.state === "running" && !run.started_at) db().prepare("UPDATE generation_runs SET started_at = ? WHERE id = ?").run(Date.now(), r.id);
+  if (!res || res.state === "queued" || res.state === "running") {
+    // A job that has just left the queue gets its full running time from now.
+    const startsNow = res?.state === "running" && !run.started_at;
+    const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > QUEUE_TIMEOUT_MS;
+    if (overdue) {
+      // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
+      await provider(r.provider)
+        .cancel?.(ctx)
+        .catch(() => {});
+      update(r.id, {
+        status: "failed",
+        error: run.started_at ? `Timed out after ${TIMEOUT_MS / 60_000} minutes` : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
+        completed_at: now,
+        message: null,
+      });
+      return;
+    }
+    if (!res) throw pollError;
+    if (startsNow) db().prepare("UPDATE generation_runs SET started_at = ? WHERE id = ?").run(Date.now(), r.id);
     update(r.id, { status: res.state, progress: res.progress ?? r.progress, message: res.message ?? null });
     return;
   }
@@ -761,7 +792,7 @@ async function pollOne(r: Row): Promise<void> {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {
-      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...(o.text !== undefined && { text: o.text }), ...(o.meta && { meta: o.meta }), ...(o.draftId ? { draftId: o.draftId } : {}) });
+      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...inlineText(o.text, o.meta), ...(o.draftId ? { draftId: o.draftId } : {}) });
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
@@ -777,8 +808,17 @@ async function pollOne(r: Row): Promise<void> {
 /** Outputs may carry text (transcripts, translations, scripts) and structured extras (layer boxes, cues, stems). */
 type RichOutput = RemoteOutput & { text?: string; meta?: Record<string, unknown> };
 
-/** Text kept inline on the generation; longer text stays in its file. */
-const MAX_INLINE_TEXT = 1_000_000;
+/**
+ * Text kept inline on the generation. Every list page and live event carries it, so longer text
+ * (long transcripts, scripts) is cut there, marked `meta.truncated`, and read in full from its file.
+ */
+export const MAX_INLINE_TEXT = 64_000;
+
+function inlineText(text: string | undefined, meta: Record<string, unknown> | undefined): Pick<OutputFile, "text" | "meta"> {
+  if (text === undefined) return meta ? { meta } : {};
+  if (text.length <= MAX_INLINE_TEXT) return { text, ...(meta && { meta }) };
+  return { text: text.slice(0, MAX_INLINE_TEXT), meta: { ...meta, truncated: true } };
+}
 
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
   let data: Buffer;
@@ -803,14 +843,13 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
   // A text file's words travel with the generation, so feeds and the next chained step can use them.
-  const text = o.text ?? (asset.kind === "text" && data.length <= MAX_INLINE_TEXT ? data.toString("utf8") : undefined);
+  const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
   return {
     url: asset.url,
     kind: asset.kind,
     contentType: asset.contentType,
     assetId: asset.id,
-    ...(text !== undefined && { text }),
-    ...(o.meta && { meta: o.meta }),
+    ...inlineText(text, o.meta),
     ...(o.draftId ? { draftId: o.draftId } : {}),
   };
 }

@@ -216,7 +216,7 @@ export interface PipelineStep {
   /** Unique name of the step within the pipeline (used by `after` and in `byKey`). */
   key: string;
   request: GenerationRequest;
-  /** Steps whose first output this one takes, in the order of its chain slots. */
+  /** Steps whose output this one takes (the first of the slot's kind, or the slot's stem), in the order of its chain slots. */
   after?: string | string[];
   /** Where each `after` step's output goes (defaults to `request.chain`, else the images). */
   chain?: ChainSlot[];
@@ -236,6 +236,9 @@ export interface Pipeline {
 }
 
 const asList = (a: string | string[] | undefined) => (a === undefined ? [] : Array.isArray(a) ? a : [a]);
+
+/** Chain slots that take an audio output (and so may pick a stem). */
+const AUDIO_SLOTS = new Set<ChainSlot["slot"]>(["audio", "voiceAudio", "audio2"]);
 
 /** Kahn's algorithm: steps in an order where every `after` comes first; throws on a cycle. */
 function topoOrder(steps: PipelineStep[]): PipelineStep[] {
@@ -266,20 +269,28 @@ function topoOrder(steps: PipelineStep[]): PipelineStep[] {
  * demo and real steps — before a single row is created; then the rows are created in
  * dependency order and the runner launches each step when the steps it waits for succeed.
  *
- * @example Dub a clip into Spanish with the speaker's own voice
+ * A chain slot takes the first output of its kind from the step it names, or with `stem` the
+ * audio output whose `meta.stem` matches — that's how one separate-audio step feeds both the voice
+ * to clone and the background to mix back in.
+ *
+ * @example Dub a clip into Spanish in the speaker's own voice, over the original music and effects
  * ```ts
  * const video = "/api/files/uploads/2026-10-17/clip.mp4";
  * const { batchId, byKey } = createPipeline([
- *   // Voice and background stems; the voice stem (the first audio output) is what we clone.
- *   { key: "stems", request: { feature: "dub", modelId: "…separate-audio model", op: "separate-audio", inputs: { video } } },
- *   { key: "words", request: { feature: "dub", modelId: "…transcribe model", op: "transcribe" }, after: "stems", chain: [{ slot: "audio" }] },
+ *   // Two stems: meta.stem "voice" and "background".
+ *   { key: "stems", request: { feature: "dub", modelId: "oss-voice-separate", op: "separate-audio", inputs: { video } } },
+ *   { key: "words", request: { feature: "dub", modelId: "oss-qwen3-asr", op: "transcribe" }, after: "stems", chain: [{ slot: "audio", stem: "voice" }] },
  *   // A transcript's cues go in as a cue list, so the translation keeps the timing.
- *   { key: "spanish", request: { feature: "dub", modelId: "text-llm", op: "translate", params: { targetLanguage: "Spanish" } }, after: "words", chain: [{ slot: "prompt" }] },
- *   { key: "voice", request: { feature: "dub", modelId: "chatterbox-cloud", op: "tts" }, after: ["spanish", "stems"], chain: [{ slot: "prompt" }, { slot: "voiceAudio" }] },
- *   { key: "lips", request: { feature: "dub", modelId: "sync-lipsync-3", op: "lipsync", inputs: { video } }, after: "voice", chain: [{ slot: "audio" }] },
- *   { key: "film", request: { feature: "dub", modelId: "…mux model", op: "mux" }, after: ["lips", "voice"], chain: [{ slot: "video" }, { slot: "audio" }] },
+ *   { key: "spanish", request: { feature: "dub", modelId: "oss-text-llm", op: "translate", params: { targetLanguage: "Spanish" } }, after: "words", chain: [{ slot: "prompt" }] },
+ *   // Speak the translation, cloning the voice stem.
+ *   { key: "voice", request: { feature: "dub", modelId: "oss-chatterbox", op: "tts" }, after: ["spanish", "stems"], chain: [{ slot: "prompt" }, { slot: "voiceAudio", stem: "voice" }] },
+ *   { key: "lips", request: { feature: "dub", modelId: "oss-infinitetalk-v2v", op: "lipsync", inputs: { video } }, after: "voice", chain: [{ slot: "audio" }] },
+ *   // The new voice over the background stem (inputs.audio2).
+ *   { key: "film", request: { feature: "dub", modelId: "oss-mux", op: "mux" }, after: ["lips", "voice", "stems"], chain: [{ slot: "video" }, { slot: "audio" }, { slot: "audio2", stem: "background" }] },
  * ]);
  * // byKey.film is the finished video; every step shares batchId and shows "Step n of 6".
+ * // Paid route: demucs ("vocals" counts as "voice"), scribe-v2, text-llm, chatterbox-cloud, sync-lipsync-3;
+ * // its soundtrack model (merge-audio-video) takes one track, so it ends at "lips" or muxes the voice alone.
  * ```
  */
 export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}): Pipeline {
@@ -299,6 +310,8 @@ export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}
     if (new Set(after).size !== after.length) throw new Error(`Step “${s.key}” lists the same step twice`);
     const chain = s.chain ?? s.request.chain;
     if (chain && chain.length !== after.length) throw new Error(`Step “${s.key}” has ${chain.length} chain slot${chain.length === 1 ? "" : "s"} for ${after.length} earlier step${after.length === 1 ? "" : "s"}`);
+    const stray = chain?.find((c) => c.stem && !AUDIO_SLOTS.has(c.slot));
+    if (stray) throw new Error(`Step “${s.key}”: a stem (“${stray.stem}”) only goes into an audio slot, not “${stray.slot}”`);
   }
   const ordered = topoOrder(steps);
   const n = steps.length;
