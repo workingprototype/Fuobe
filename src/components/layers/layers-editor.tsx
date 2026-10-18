@@ -35,6 +35,9 @@ import { TopBar, type SaveState } from "./top-bar";
 import { LayersRequestError, saveCover, saveDoc, useLayerActions, useLayerProject } from "./use-layers";
 
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+/** Focus is on a control that uses the arrow keys itself. */
+const widget = (t: EventTarget | null) =>
+  t instanceof HTMLElement && !!t.closest('[role="radio"],[role="slider"],[role="menuitem"],[role="menu"],[role="tab"],[role="option"],[role="dialog"],[data-reorder]');
 
 /** The document is still just the image it was opened on (models can take the original file as is). */
 function pristine(doc: LayerDoc): boolean {
@@ -135,14 +138,28 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
 
   // ---- Autosave into the head version (debounced; flushed with keepalive when leaving).
   const pending = useRef<LayerDoc | null>(null);
+  /** The save in flight: a tool's version waits for it, so the two never cross. */
+  const saving = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     if (doc === savedRef.current) return;
     pending.current = doc;
     setSave("dirty");
     const t = setTimeout(async () => {
       setSave("saving");
+      const put = async (): Promise<void> => {
+        const sentHead = headRef.current;
+        try {
+          await saveDoc(id, doc, sentHead);
+        } catch (e) {
+          // A tool's result became the head meanwhile (this tab): save onto the new head.
+          if (e instanceof LayersRequestError && e.status === 409 && headRef.current !== sentHead) return put();
+          throw e;
+        }
+      };
+      const p = put();
+      saving.current = p.catch(() => {});
       try {
-        await saveDoc(id, doc, headRef.current);
+        await p;
         savedRef.current = doc;
         if (pending.current === doc) pending.current = null;
         setSave("saved");
@@ -250,6 +267,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
       applying.current.add(j.id);
       queue.current = queue.current.then(async () => {
         try {
+          await saving.current;
           const res = await applyJob(docRef.current, j, () => nanoid(8));
           const v = await actions.version(id, { doc: res.doc, label: j.label, jobId: j.id });
           setHead(v.headVersionId);
@@ -387,7 +405,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
         }
         return;
       }
-      if (sel && e.key.startsWith("Arrow")) {
+      // Arrow keys belong to the control that has focus (segmented controls, sliders, menus, the reorder handle).
+      if (sel && e.key.startsWith("Arrow") && !widget(e.target)) {
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;

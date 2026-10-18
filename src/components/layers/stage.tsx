@@ -173,7 +173,8 @@ export function Stage(p: StageProps) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.code === "Space" && !e.repeat) {
+      // Space presses a focused button; it pans only from the canvas or the page.
+      if (e.code === "Space" && !e.repeat && !(e.target instanceof HTMLElement && e.target.closest("button, a, [role]"))) {
         setSpace(true);
         e.preventDefault();
       } else if (e.key === "+" || e.key === "=") zoomBy(1.25);

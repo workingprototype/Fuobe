@@ -1,7 +1,7 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef } from "react";
 import { useGenerationEvents } from "@/lib/api";
 import type { LayerDoc, LayerJob, LayerJobInput, LayerProject, LayerProjectView } from "@/lib/layers";
 
@@ -74,6 +74,10 @@ export function useLayerProject(id: string) {
 
 export function useLayerActions() {
   const qc = useQueryClient();
+  return useMemo(() => layerActions(qc), [qc]);
+}
+
+function layerActions(qc: QueryClient) {
   const refreshList = () => void qc.invalidateQueries({ queryKey: ["layers"], exact: true });
   return {
     create: async (body: { source: string; width: number; height: number; name?: string; generationId?: string }) => {

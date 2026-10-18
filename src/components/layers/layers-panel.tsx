@@ -336,6 +336,7 @@ function LayerRow({
         <button
           type="button"
           className="grid h-10 w-5 shrink-0 cursor-grab touch-none place-items-center rounded text-subtle-foreground hover:text-foreground active:cursor-grabbing"
+          data-reorder
           aria-label={`Reorder ${node.name}. Use the up and down arrow keys to move it.`}
           onPointerDown={(e) => onDragHandle(e, node.id)}
           onKeyDown={(e) => {
