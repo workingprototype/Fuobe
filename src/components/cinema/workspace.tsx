@@ -1,0 +1,503 @@
+"use client";
+
+import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, Heart, Library, MoreHorizontal, PanelLeft, Pin, PinOff, Settings2, Upload } from "lucide-react";
+import { nanoid } from "nanoid";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { EngineSwitch } from "@/components/studio/engine-switch";
+import type { PromptInputHandle } from "@/components/studio/prompt-input";
+import { useElements, useEngine, useSaveElement } from "@/lib/api";
+import type { CinemaFolder, DirectorSettings, DirectorShot } from "@/lib/catalog/cinema";
+import type { StudioElement } from "@/lib/catalog/elements";
+import type { OutputFile } from "@/lib/catalog/types";
+import { formatCost } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { CinemaFeed, type FeedHandlers } from "./cinema-feed";
+import { initialDraft, type CinemaDraft } from "./draft";
+import { ElementsPanel } from "./elements-panel";
+import { FolderSidebar, subtree, viewKey, type CinemaView } from "./folder-sidebar";
+import { useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
+import { cutGrid } from "./media";
+import { ProjectDialog } from "./project-settings";
+import { PromptBar, useAddRefs } from "./prompt-bar";
+import { SidePanel } from "./side-panel";
+import { SoulCastDialog, SoulLocationDialog } from "./soul-builders";
+
+function useMedia(query: string): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const m = window.matchMedia(query);
+      m.addEventListener("change", cb);
+      return () => m.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
+/** Grid contact sheets are cut into tiles in the browser once, then saved with the take. */
+const cutting = new Set<string>();
+function useGridTiles(projectId: string, items: CinemaGeneration[]) {
+  const actions = useItemActions(projectId);
+  useEffect(() => {
+    for (const g of items) {
+      const sheet = g.outputs[0];
+      if (g.feature !== "cinema-grid" || g.status !== "succeeded" || g.tiles?.length || g.outputs.length !== 1 || sheet?.kind !== "image" || cutting.has(g.id)) continue;
+      cutting.add(g.id);
+      const m = /(\d)×(\d) grid/.exec(g.prompt ?? "");
+      const size = g.take?.grid?.size ?? (m ? `${m[1]}x${m[2]}` : "2x2");
+      const n = Number(size[0]) || 2;
+      void cutGrid(sheet.url, n, n)
+        .then((tiles) => actions.saveTiles(g.id, tiles))
+        .catch(() => toast.error("Couldn't cut the grid into tiles — open the sheet to use it whole"));
+    }
+  }, [items, actions]);
+}
+
+/** A name to start from when a still is saved as an element ("Rainy Rooftop Bar"). */
+function nameFrom(prompt: string | undefined, fallback: string): string {
+  const words = (prompt ?? "").replace(/@\S+/g, "").replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(the|and|with|from|who|shot|wide|close|establishing|film|location)$/i.test(w));
+  return words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || fallback;
+}
+
+const DRAFT_KEY = (id: string) => `fuobe.cinema.draft.${id}`;
+const KEPT = ["mode", "imageTool", "prompt", "moves", "models", "duration", "resolution", "aspect", "batch", "audio", "multiShot", "grid"] as const;
+
+function restoreDraft(id: string): CinemaDraft {
+  const base = initialDraft();
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(id));
+    if (!raw) return base;
+    const saved = JSON.parse(raw) as Partial<CinemaDraft>;
+    const kept = Object.fromEntries(KEPT.filter((k) => saved[k] !== undefined).map((k) => [k, saved[k]]));
+    return { ...base, ...kept };
+  } catch {
+    return base;
+  }
+}
+
+function saveDraft(id: string, d: CinemaDraft) {
+  try {
+    localStorage.setItem(DRAFT_KEY(id), JSON.stringify(Object.fromEntries(KEPT.map((k) => [k, d[k]]))));
+  } catch {}
+}
+
+function folderPath(folders: CinemaFolder[], id: string): CinemaFolder[] {
+  const out: CinemaFolder[] = [];
+  let cur = folders.find((f) => f.id === id);
+  while (cur && out.length < 12) {
+    out.unshift(cur);
+    cur = cur.parentId ? folders.find((f) => f.id === cur!.parentId) : undefined;
+  }
+  return out;
+}
+
+function Empty({ icon: Icon, title, text }: { icon: typeof Clapperboard; title: string; text: string }) {
+  return (
+    <div className="mx-auto flex max-w-md flex-col items-center py-[10vh] text-center">
+      <div className="grid size-12 place-items-center rounded-2xl bg-brand-faint text-brand-text">
+        <Icon className="size-5" />
+      </div>
+      <p className="mt-4 font-heading text-[22px] leading-tight">{title}</p>
+      <p className="mt-1 text-[13.5px] text-muted-foreground">{text}</p>
+    </div>
+  );
+}
+
+export function CinemaWorkspace({ id }: { id: string }) {
+  const project = useCinemaProject(id);
+  const items = useCinemaItems(id);
+  if (project.isLoading)
+    return (
+      <div className="flex h-svh flex-col">
+        <div className="flex h-14 items-center gap-3 border-b px-4">
+          <Skeleton className="h-6 w-48" />
+        </div>
+        <div className="flex flex-1">
+          <div className="hidden w-60 space-y-2 border-r p-3 lg:block">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Skeleton key={i} className="h-7" />
+            ))}
+          </div>
+          <div className="grid flex-1 grid-cols-2 content-start gap-3 p-6 sm:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className="aspect-square rounded-xl" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  if (!project.data)
+    return (
+      <div className="flex h-svh flex-col">
+        <div className="flex h-14 items-center px-3 md:hidden">
+          <SidebarTrigger />
+        </div>
+        <div className="mx-auto max-w-sm pt-[18vh] text-center">
+          <p className="font-heading text-[26px]">This project doesn&apos;t exist</p>
+          <p className="mt-1 text-[14px] text-muted-foreground">It may have been deleted.</p>
+          <Button asChild className="mt-5">
+            <Link href="/cinema">All projects</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  return <Workspace data={project.data} items={items.data ?? []} loading={items.isLoading} />;
+}
+
+function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaGeneration[]; loading: boolean }) {
+  const { project, folders, spentUsd, context } = data;
+  const id = project.id;
+  const router = useRouter();
+  const [engine, setEngine] = useEngine();
+  const [view, setView] = useState<CinemaView>({ kind: "home" });
+  const [nested, setNested] = useState(true);
+  const [draft, setDraftState] = useState<CinemaDraft>(() => restoreDraft(id));
+  // The unsent prompt and its settings survive a reload (this browser only).
+  useEffect(() => {
+    const t = setTimeout(() => saveDraft(id, draft), 400);
+    return () => clearTimeout(t);
+  }, [id, draft]);
+  const setDraft = (patch: Partial<CinemaDraft> | ((d: CinemaDraft) => Partial<CinemaDraft>)) => setDraftState((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }));
+  const [settings, setSettings] = useState<DirectorSettings>(project.director);
+  const update = useUpdateProject(id);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onSettings = (patch: Partial<DirectorSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    // Persist per project, a moment after the last change.
+    saveTimer.current = setTimeout(() => update.mutate({ director: next }, { onError: (e) => toast.error((e as Error).message) }), 500);
+  };
+  useEffect(() => () => void (saveTimer.current && clearTimeout(saveTimer.current)), []);
+  const elements = useElements().data ?? [];
+  const xl = useMedia("(min-width: 1280px)");
+  const [panel, setPanel] = useState<"director" | "brief" | null>(null);
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  const [castOpen, setCastOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const promptRef = useRef<PromptInputHandle>(null);
+  const studio = useStudioGenerations(id, view.kind === "studio");
+  const actions = useItemActions(id);
+  const saveElement = useSaveElement();
+  const addRefs = useAddRefs((fn) => setDraft(fn));
+  useGridTiles(id, items);
+
+  const currentView: CinemaView = useMemo(() => (view.kind === "folder" && !folders.some((f) => f.id === view.id) ? { kind: "home" } : view), [view, folders]);
+  const folderId = currentView.kind === "folder" ? currentView.id : null;
+  const shown = useMemo(() => {
+    switch (currentView.kind) {
+      case "favorites":
+        return items.filter((g) => g.favorite);
+      case "studio":
+        return studio.data ?? [];
+      case "folder": {
+        const set = nested ? subtree(folders, currentView.id) : new Set([currentView.id]);
+        return items.filter((g) => g.folderId && set.has(g.folderId));
+      }
+      default:
+        return items;
+    }
+  }, [currentView, items, studio.data, folders, nested]);
+  const counts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const g of items) if (g.folderId) m.set(g.folderId, (m.get(g.folderId) ?? 0) + 1);
+    return { home: items.length, favorites: items.filter((g) => g.favorite).length, folders: m };
+  }, [items]);
+
+  const focusPrompt = () => requestAnimationFrame(() => promptRef.current?.focus());
+  const handlers: FeedHandlers = {
+    onLoad: (g) => {
+      const t = g.take;
+      setDraft((d) => ({
+        mode: t?.mode ?? (g.kind === "image" ? "image" : "video"),
+        imageTool: t?.action === "grid" ? "grid" : "still",
+        prompt: t?.prompt ?? g.request.prompt ?? "",
+        moves: t?.moves ?? [],
+        grid: t?.grid ?? d.grid,
+        source: null,
+        action: "generate",
+      }));
+      toast("Loaded into the prompt bar", { duration: 1500 });
+      focusPrompt();
+    },
+    onUseTake: (g, o: OutputFile) => {
+      setDraft({ mode: "video", source: { generationId: g.id, url: o.url, kind: "video", label: g.take?.prompt || g.request.prompt || "Take" }, action: "extend-forward" });
+      focusPrompt();
+    },
+    onAnimate: (url) => {
+      setDraft((d) => ({ mode: "video", source: null, action: "generate", refs: [{ id: nanoid(6), ref: url, preview: url, kind: "image" }, ...d.refs.filter((r) => r.ref !== url)] }));
+      toast("Start frame set", { duration: 1500 });
+      focusPrompt();
+    },
+    onReference: (url, kind) => {
+      setDraft((d) => (d.refs.some((r) => r.ref === url) ? {} : { refs: [...d.refs, { id: nanoid(6), ref: url, preview: url, kind }] }));
+      toast("Added to references", { duration: 1500 });
+    },
+    onSaveElement: (g, url, kind) =>
+      saveElement.mutate(
+        { name: nameFrom(g.take?.prompt ?? g.request.prompt, kind === "character" ? "New character" : "New location"), kind, references: [url] },
+        {
+          onSuccess: (el) => toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } }),
+          onError: (e) => toast.error((e as Error).message),
+        },
+      ),
+  };
+  const onLoadShot = (shot: DirectorShot) => {
+    setDraft({ mode: "video", prompt: shot.prompt, moves: shot.moves, duration: shot.duration, source: null, action: "generate", multiShot: { mode: "off", shots: [] } });
+    if (Object.keys(shot.settings).length) onSettings(shot.settings);
+    toast("Shot loaded — review it, then press Generate", { duration: 2500 });
+    if (!xl) setPanel(null);
+    focusPrompt();
+  };
+  const mention = (el: StudioElement) => {
+    setDraft((d) => ({ prompt: `${d.prompt.trim()}${d.prompt.trim() ? " " : ""}@${el.handle} ` }));
+    focusPrompt();
+  };
+
+  const path = currentView.kind === "folder" ? folderPath(folders, currentView.id) : [];
+  const title = (
+    <div className="flex min-w-0 items-baseline gap-2">
+      <h2 className="flex min-w-0 items-center gap-1.5 truncate font-heading text-[24px] leading-none">
+        {currentView.kind === "folder" ? (
+          path.map((f, i) => (
+            <span key={f.id} className="flex min-w-0 items-center gap-1.5">
+              {i > 0 && <span className="text-muted-foreground">/</span>}
+              {i === path.length - 1 && <span className="size-2.5 shrink-0 rounded-full border" style={f.color ? { background: f.color, borderColor: f.color } : undefined} />}
+              <button type="button" onClick={() => setView({ kind: "folder", id: f.id })} className={cn("truncate", i < path.length - 1 && "text-muted-foreground hover:text-foreground")}>
+                {f.name}
+              </button>
+            </span>
+          ))
+        ) : currentView.kind === "studio" ? (
+          "My Generations"
+        ) : currentView.kind === "favorites" ? (
+          "My Favorites"
+        ) : (
+          "Home"
+        )}
+      </h2>
+      <span className="shrink-0 font-mono text-[12px] text-muted-foreground">{shown.length}</span>
+    </div>
+  );
+  const empty =
+    currentView.kind === "favorites" ? (
+      <Empty icon={Heart} title="No favorites yet" text="Like your generations and they will appear here." />
+    ) : currentView.kind === "studio" ? (
+      <Empty icon={Library} title="No generations yet" text="Everything you make in Cinema Studio, in any project, shows up here." />
+    ) : currentView.kind === "folder" ? (
+      <Empty icon={FolderOpen} title="An empty scene" text="Describe a scene below and hit Generate — new takes land in this folder." />
+    ) : (
+      <Empty icon={Clapperboard} title="Your first shot" text="Start by describing a scene and pressing “Generate”. Set the genre, camera, palette and light in the Director's Panel." />
+    );
+
+  const sidebar = (
+    <FolderSidebar
+      projectId={id}
+      folders={folders}
+      view={currentView}
+      setView={(v) => {
+        setView(v);
+        setFoldersOpen(false);
+      }}
+      counts={counts}
+      onDropItems={(ids, f) => void actions.move(ids, f).then(() => toast(`Moved ${ids.length} take${ids.length > 1 ? "s" : ""}`, { duration: 1500 }))}
+      className="h-full"
+    />
+  );
+  const sidePanel = panel && (
+    <SidePanel project={project} tab={panel} setTab={setPanel} onClose={() => setPanel(null)} onLoadShot={onLoadShot} promptText={draft.prompt} />
+  );
+  const builderProps = { projectId: id, folderId, engine, settings, context, brief: project.brief.body };
+
+  return (
+    <div className="flex h-svh min-w-0 flex-col md:h-[calc(100svh-0.5rem)]">
+      <header className="flex h-14 shrink-0 items-center gap-1.5 border-b px-2 sm:gap-2 sm:px-4">
+        <SidebarTrigger className="md:hidden" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link href="/cinema" className="hidden size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground sm:grid" aria-label="All projects">
+              <ChevronLeft className="size-4" />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent>All projects</TooltipContent>
+        </Tooltip>
+        <button type="button" onClick={() => setFoldersOpen(true)} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground lg:hidden" aria-label="Folders">
+          <PanelLeft className="size-4" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate font-heading text-[20px] leading-tight sm:text-[22px]">{project.name}</h1>
+          <p className="hidden truncate text-[11.5px] text-muted-foreground sm:block">
+            Cinema Studio
+            {project.description ? ` · ${project.description}` : ""}
+            {spentUsd > 0 || project.costCapUsd != null ? ` · ≈ ${spentUsd > 0 ? formatCost(spentUsd) : "$0"} spent` : ""}
+            {project.costCapUsd != null ? ` of ${project.costCapUsd > 0 ? formatCost(project.costCapUsd) : "$0"}` : ""}
+          </p>
+        </div>
+        <EngineSwitch value={engine} onChange={setEngine} size="sm" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={panel === "director" ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setPanel((p) => (p === "director" ? null : "director"))}
+              aria-pressed={panel === "director"}
+              aria-label="AI Director"
+              className="shrink-0 max-sm:size-8 max-sm:px-0"
+            >
+              <Bot /> <span className="hidden sm:inline">AI Director</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Break a script into shots, pick the camera, write prompts</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant={panel === "brief" ? "secondary" : "ghost"} size="icon-sm" onClick={() => setPanel((p) => (p === "brief" ? null : "brief"))} aria-pressed={panel === "brief"} aria-label="Project brief" className="shrink-0 max-sm:hidden">
+              <FileText />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Project brief — prepended to every prompt</TooltipContent>
+        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="Project menu" className="shrink-0">
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+              <Settings2 /> Project settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setPanel("brief")}>
+              <FileText /> Project brief
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => update.mutate({ pinned: !project.pinned })}>
+              {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "Unpin project" : "Pin project"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                void navigator.clipboard.writeText(window.location.href);
+                toast("Link copied");
+              }}
+            >
+              <Copy /> Copy link
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/cinema">
+                <Folder /> All projects
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-60 shrink-0 border-r bg-sidebar/40 lg:block">{sidebar}</aside>
+        <main
+          className="relative flex min-w-0 flex-1 flex-col"
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDropping(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget === e.target) setDropping(false);
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            setDropping(false);
+            addRefs(e.dataTransfer.files);
+          }}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-4 pb-6 sm:px-6">
+            {currentView.kind === "elements" ? (
+              <ElementsPanel onMention={mention} onCast={() => setCastOpen(true)} onLocation={() => setLocationOpen(true)} />
+            ) : loading ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <Skeleton key={i} className="aspect-square rounded-xl" />
+                ))}
+              </div>
+            ) : (
+              <CinemaFeed
+                key={viewKey(currentView)}
+                projectId={id}
+                items={shown}
+                folders={folders}
+                title={title}
+                empty={empty}
+                handlers={handlers}
+                nested={nested}
+                onNested={currentView.kind === "folder" ? setNested : undefined}
+              />
+            )}
+          </div>
+          <div className="shrink-0 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-4">
+            <div className="mx-auto max-w-[940px]">
+              <PromptBar
+                projectId={id}
+                folderId={folderId}
+                engine={engine}
+                draft={draft}
+                setDraft={setDraft}
+                settings={settings}
+                onSettings={onSettings}
+                palettes={project.palettes}
+                onPalettes={(palettes) => update.mutate({ palettes })}
+                context={context}
+                brief={project.brief.body}
+                spentUsd={spentUsd}
+                costCapUsd={project.costCapUsd}
+                elements={elements}
+                promptRef={promptRef}
+                onCast={() => setCastOpen(true)}
+                onLocation={() => setLocationOpen(true)}
+              />
+            </div>
+          </div>
+          {dropping && (
+            <div className="pointer-events-none absolute inset-2 z-30 grid place-items-center rounded-2xl border-2 border-dashed border-primary bg-brand-faint/80 backdrop-blur-sm">
+              <p className="flex items-center gap-2 text-[15px] font-medium text-brand-text">
+                <Upload className="size-5" /> Drop files here to add them as references
+              </p>
+            </div>
+          )}
+        </main>
+        {xl && panel && <aside className="w-[380px] shrink-0 border-l bg-sidebar/40">{sidePanel}</aside>}
+      </div>
+
+      <Sheet open={foldersOpen} onOpenChange={setFoldersOpen}>
+        <SheetContent side="left" className="w-[min(86vw,320px)] gap-0 p-0">
+          <SheetHeader className="border-b px-4 py-3">
+            <SheetTitle className="font-heading text-[20px] font-normal">{project.name}</SheetTitle>
+            <SheetDescription className="sr-only">Folders and sections of this project</SheetDescription>
+          </SheetHeader>
+          {sidebar}
+        </SheetContent>
+      </Sheet>
+      <Sheet open={!xl && !!panel} onOpenChange={(o) => !o && setPanel(null)}>
+        <SheetContent side="right" className="w-[min(100vw,420px)] gap-0 p-0 sm:max-w-[420px] [&>button]:hidden">
+          <SheetTitle className="sr-only">{panel === "brief" ? "Project brief" : "AI Director"}</SheetTitle>
+          <SheetDescription className="sr-only">Side panel</SheetDescription>
+          {sidePanel}
+        </SheetContent>
+      </Sheet>
+
+      <SoulCastDialog open={castOpen} onOpenChange={setCastOpen} {...builderProps} />
+      <SoulLocationDialog open={locationOpen} onOpenChange={setLocationOpen} {...builderProps} />
+      <ProjectDialog open={settingsOpen} onOpenChange={setSettingsOpen} project={project} spentUsd={spentUsd} onDone={() => setSettingsOpen(false)} onDeleted={() => router.push("/cinema")} />
+    </div>
+  );
+}

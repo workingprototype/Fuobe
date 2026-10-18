@@ -1,0 +1,44 @@
+import { connection } from "next/server";
+import { listItems, listStudioGenerations, moveItems, removeItems, setFavorites } from "@/server/cinema";
+import { ItemsDelete, ItemsPatch, body, handle } from "@/server/cinema-schemas";
+
+/**
+ * The project's generations. `?folder=<id>` one folder (`&nested=1` with its subfolders),
+ * `?folder=root` the takes outside any folder, `?favorites=1` liked takes, `?scope=studio` every
+ * Cinema Studio generation in every project ("My Generations"). Default: the whole project.
+ */
+export async function GET(request: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items">) {
+  await connection();
+  return handle(async () => {
+    const { id } = await ctx.params;
+    const qs = new URL(request.url).searchParams;
+    if (qs.get("scope") === "studio") return Response.json({ items: listStudioGenerations() });
+    const folder = qs.get("folder");
+    const items = listItems(id, {
+      folderId: folder === "root" ? null : folder || undefined,
+      nested: qs.get("nested") === "1",
+      favorites: qs.get("favorites") === "1",
+    });
+    return Response.json({ items });
+  });
+}
+
+/** Bulk: move to a folder (`folderId`, null = project root) and/or like / unlike. */
+export async function PATCH(request: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items">) {
+  return handle(async () => {
+    const { id } = await ctx.params;
+    const b = await body(request, ItemsPatch, "Pick the takes to change");
+    if (b.folderId !== undefined) moveItems(id, b.ids, b.folderId);
+    if (b.favorite !== undefined) setFavorites(id, b.ids, b.favorite);
+    return Response.json({ ok: true });
+  });
+}
+
+/** Bulk: take out of the project; `deleteGenerations` also deletes them from the library. */
+export async function DELETE(request: Request, ctx: RouteContext<"/api/cinema/projects/[id]/items">) {
+  return handle(async () => {
+    const { id } = await ctx.params;
+    const b = await body(request, ItemsDelete, "Pick the takes to delete");
+    return Response.json({ removed: removeItems(id, b.ids, { deleteGenerations: b.deleteGenerations }) });
+  });
+}
