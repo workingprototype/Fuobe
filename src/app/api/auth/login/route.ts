@@ -14,7 +14,13 @@ export async function POST(request: Request) {
   const key = LoginGuard.clientKey(request.headers);
   const wait = guard.blockedFor(key);
   if (wait > 0) {
-    return Response.json({ error: "Too many attempts. Wait a minute and try again." }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait / 1000)) } });
+    const secs = Math.ceil(wait / 1000);
+    // Without a trusted proxy every visitor shares one limit (the hint is for whoever runs the server).
+    const hint = key === LoginGuard.DIRECT ? " Behind a reverse proxy? Set FUOBE_TRUST_PROXY=1 so each visitor gets their own limit." : "";
+    return Response.json(
+      { error: `Too many wrong passwords. Try again in ${secs} second${secs === 1 ? "" : "s"}.${hint}` },
+      { status: 429, headers: { "Retry-After": String(secs) } },
+    );
   }
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success || !checkPassword(parsed.data.password)) {

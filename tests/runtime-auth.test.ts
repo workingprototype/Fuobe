@@ -42,6 +42,49 @@ describe("cross-site requests (S8)", () => {
   });
 });
 
+describe("DNS rebinding", () => {
+  const ok = (r: Response) => r.headers.get("x-middleware-next") === "1";
+  const at = (host: string, init: { method?: string; headers?: Record<string, string> } = {}) =>
+    proxy(new NextRequest(`http://${host}/api/generations`, { method: init.method ?? "GET", headers: { host, ...init.headers }, ...(init.method === "POST" && { body: "{}" }) }));
+
+  it("refuses a name that was re-pointed at this machine, reads included, while no password is set", async () => {
+    expect(auth.authEnabled()).toBe(false);
+    // The attacker's page and its requests share one origin, so the Origin check alone lets them through.
+    const read = at("rebind.attacker.example:3000");
+    expect(read.status).toBe(403);
+    expect((await read.json()).error).toMatch(/FUOBE_ALLOWED_ORIGINS/);
+    expect(at("rebind.attacker.example:3000", { method: "POST", headers: { origin: "http://rebind.attacker.example:3000" } }).status).toBe(403);
+    // A forwarded host is no way around it (the page can set that header itself).
+    expect(at("rebind.attacker.example", { headers: { "x-forwarded-host": "localhost:3000" } }).status).toBe(403);
+  });
+
+  it("lets local addresses, LAN names, this machine and allow-listed names through", () => {
+    for (const host of ["localhost:3000", "127.0.0.1:3000", "[::1]:3000", "192.168.1.5:3000", "studio.localhost", "nas:3000", "studio.local", "box.lan:3000", "fuobe.home.arpa", `${os.hostname()}:3000`]) {
+      expect(ok(at(host)), host).toBe(true);
+    }
+    process.env.FUOBE_ALLOWED_ORIGINS = "https://fuobe.example.com,studio.example.org:8443";
+    try {
+      expect(ok(at("fuobe.example.com"))).toBe(true);
+      expect(ok(at("studio.example.org:8443"))).toBe(true);
+      expect(at("studio.example.org:9999").status).toBe(403);
+      expect(at("rebind.attacker.example").status).toBe(403);
+    } finally {
+      delete process.env.FUOBE_ALLOWED_ORIGINS;
+    }
+    expect(auth.hostAllowed(null)).toBe(true);
+  });
+
+  it("leaves it to the sign-in check once a password is set", () => {
+    auth.setPassword("correct horse battery");
+    try {
+      // Signed out: sent to sign in (the rebound page has no session cookie for its name).
+      expect(at("fuobe.example.com").status).toBe(401);
+    } finally {
+      auth.setPassword(null);
+    }
+  });
+});
+
 describe("sign-in lockout (S10)", () => {
   it("ignores spoofed X-Forwarded-For unless a trusted proxy sets it", () => {
     const h = (xff: string) => new Headers({ "x-forwarded-for": xff });
@@ -49,22 +92,44 @@ describe("sign-in lockout (S10)", () => {
     expect(auth.LoginGuard.clientKey(h("6.6.6.6, 1.2.3.4"), true)).toBe("1.2.3.4");
   });
 
-  it("locks a client after 5 misses, and everyone after too many misses overall", () => {
-    const g = new auth.LoginGuard({ perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, maxClients: 5000 });
+  const limits = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 };
+
+  it("locks a client of its own after 5 misses, and slows everyone down after too many misses overall", () => {
+    const g = new auth.LoginGuard(limits);
     const t = 1_000_000;
     for (let i = 0; i < 4; i++) g.fail("a", t + i);
     expect(g.blockedFor("a", t + 5)).toBe(0);
     g.fail("a", t + 5);
     expect(g.blockedFor("a", t + 6)).toBeGreaterThan(50_000);
     expect(g.blockedFor("b", t + 6)).toBe(0);
-    // Rotating the key doesn't help: the global budget runs out.
+    // Rotating the key doesn't help: past the global budget everyone gets one try every few seconds.
     for (let i = 0; i < 15; i++) g.fail(`spoof-${i}`, t + 10 + i);
     expect(g.blockedFor("fresh", t + 30)).toBeGreaterThan(0);
+    expect(g.blockedFor("fresh", t + 30)).toBeLessThanOrEqual(4_000);
+    expect(g.blockedFor("fresh", t + 24 + 4_000)).toBe(0);
     expect(g.blockedFor("fresh", t + 120_000)).toBe(0);
   });
 
+  it("never locks the shared key: the owner still gets in within seconds while guesses stay capped", () => {
+    const g = new auth.LoginGuard(limits);
+    const key = auth.LoginGuard.DIRECT;
+    const t = 2_000_000;
+    // An attacker hammering the login page for a minute, as fast as it's allowed.
+    let tries = 0;
+    for (let now = t; now < t + 60_000; now += 100) {
+      if (g.blockedFor(key, now) > 0) continue;
+      g.fail(key, now);
+      tries++;
+    }
+    expect(tries).toBeLessThanOrEqual(20);
+    // The owner waits at most one throttle step, never a full lock.
+    const wait = g.blockedFor(key, t + 60_000);
+    expect(wait).toBeLessThanOrEqual(4_000);
+    expect(g.blockedFor(key, t + 60_000 + wait)).toBe(0);
+  });
+
   it("keeps its memory bounded", () => {
-    const g = new auth.LoginGuard({ perClient: 5, global: 1e9, windowMs: 60_000, lockMs: 60_000, maxClients: 100 });
+    const g = new auth.LoginGuard({ ...limits, global: 1e9, maxClients: 100 });
     for (let i = 0; i < 5000; i++) g.fail(`k${i}`, 1_000_000 + i);
     expect(g.size).toBeLessThanOrEqual(101);
   });

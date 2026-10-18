@@ -8,6 +8,8 @@
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
+import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 
 const DATA_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.FUOBE_DATA_DIR ?? path.join(process.cwd(), "data"));
@@ -126,7 +128,7 @@ export function validSession(value: string | undefined): boolean {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Extra addresses this studio is reached at (FUOBE_ALLOWED_ORIGINS="https://fuobe.example.com,studio.lan:3000"). */
+/** Extra addresses this studio is reached at (FUOBE_ALLOWED_ORIGINS="https://fuobe.example.com,studio.lan:3000", or "*" for any). */
 function allowedHosts(): string[] {
   return (process.env.FUOBE_ALLOWED_ORIGINS ?? "")
     .split(",")
@@ -163,27 +165,65 @@ export function crossSite(request: Request, ownHost: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// DNS rebinding
+
+/** Host header → lower-case name without port or trailing dot ("[::1]:3000" → "::1"). */
+function hostName(host: string): string {
+  const h = host.trim().toLowerCase();
+  if (h.startsWith("[")) return h.slice(1, h.indexOf("]") >>> 0);
+  const colon = h.indexOf(":");
+  return (colon >= 0 && colon === h.lastIndexOf(":") ? h.slice(0, colon) : h).replace(/\.$/, "");
+}
+
+/** Names nobody on the internet can point at this machine: this machine, the LAN, reserved suffixes. */
+const LOCAL_SUFFIXES = [".localhost", ".local", ".lan", ".home.arpa", ".internal", ".localdomain"];
+
+/**
+ * Is this a name the studio may be reached at without a password? A page on attacker.example can
+ * re-point its own DNS name at 127.0.0.1 (DNS rebinding); the browser then treats the local studio
+ * as attacker.example and lets the page read and change it. Such a request carries the attacker's
+ * name in Host, so only addresses that can't be rebound pass: IP literals, localhost, single-label
+ * and LAN names (.local, .lan, .home.arpa, .internal), this machine's hostname, and
+ * FUOBE_ALLOWED_ORIGINS. X-Forwarded-Host is not trusted here: a rebound page can set it.
+ */
+export function hostAllowed(host: string | null): boolean {
+  if (!host) return true; // HTTP/1.0 clients and tools; browsers always send Host
+  const name = hostName(host);
+  if (!name || net.isIP(name) || !name.includes(".") || LOCAL_SUFFIXES.some((s) => name.endsWith(s))) return true;
+  const self = os.hostname().toLowerCase();
+  if (name === self || name === self.split(".")[0]) return true;
+  return allowedHosts().some((a) => {
+    const entry = a.toLowerCase();
+    return entry === "*" || entry === host.trim().toLowerCase() || (!entry.includes(":") && entry === name);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sign-in attempts
 
 /**
- * Wrong-password lockout. Route handlers can't see the socket address, and Next keeps any
+ * Wrong-password limits. Route handlers can't see the socket address, and Next keeps any
  * X-Forwarded-For a client sends, so that header only identifies a client behind a reverse proxy
- * you trust (FUOBE_TRUST_PROXY=1; the proxy's own entry is the last one). Otherwise every client
- * shares one budget. A global budget caps guesses even when the per-client key is spoofed.
+ * you trust (FUOBE_TRUST_PROXY=1; the proxy's own entry is the last one): such a client is locked
+ * out for a minute after 5 misses. Otherwise every client shares the "direct" key, and a lock
+ * would let anyone keep the owner out, so a spent budget slows sign-in down to one attempt every
+ * few seconds instead (about 15 guesses a minute). Past the global budget the same throttle
+ * applies to everyone, however the key is spoofed.
  */
 export class LoginGuard {
+  static readonly DIRECT = "direct";
   private failures = new Map<string, { n: number; first: number; until: number }>();
   private recent: number[] = [];
 
   constructor(
-    private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, maxClients: 5000 },
+    private readonly o = { perClient: 5, global: 20, windowMs: 60_000, lockMs: 60_000, throttleMs: 4_000, maxClients: 5000 },
   ) {}
 
   /** Who is signing in: the last X-Forwarded-For hop when a trusted proxy sets it, else one shared key. */
   static clientKey(headers: Headers, trustProxy = process.env.FUOBE_TRUST_PROXY === "1"): string {
-    if (!trustProxy) return "direct";
+    if (!trustProxy) return LoginGuard.DIRECT;
     const hops = (headers.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    return hops.at(-1) ?? "direct";
+    return hops.at(-1) ?? LoginGuard.DIRECT;
   }
 
   /** Milliseconds until this client may try again (0 = now). */
@@ -191,8 +231,10 @@ export class LoginGuard {
     this.recent = this.recent.filter((t) => now - t < this.o.windowMs);
     const f = this.failures.get(key);
     const own = f && f.until > now ? f.until - now : 0;
-    const global = this.recent.length >= this.o.global ? this.o.windowMs - (now - this.recent[0]) : 0;
-    return Math.max(own, global);
+    const shared = key === LoginGuard.DIRECT && !!f && now - f.first <= this.o.windowMs && f.n >= this.o.perClient;
+    const last = this.recent.at(-1);
+    const throttle = (shared || this.recent.length >= this.o.global) && last !== undefined ? Math.max(0, last + this.o.throttleMs - now) : 0;
+    return Math.max(own, throttle);
   }
 
   fail(key: string, now = Date.now()): void {
@@ -201,7 +243,9 @@ export class LoginGuard {
     const fresh = !f || now - f.first > this.o.windowMs;
     const n = fresh ? 1 : f.n + 1;
     this.failures.delete(key);
-    this.failures.set(key, { n, first: fresh ? now : f.first, until: n >= this.o.perClient ? now + this.o.lockMs : 0 });
+    // The shared key is throttled (blockedFor), never locked.
+    const locks = key !== LoginGuard.DIRECT && n >= this.o.perClient;
+    this.failures.set(key, { n, first: fresh ? now : f.first, until: locks ? now + this.o.lockMs : 0 });
     // Forget old entries; never let the map grow without bound.
     for (const [k, v] of this.failures) {
       if (this.failures.size <= this.o.maxClients && now - v.first < this.o.windowMs * 10) break;
