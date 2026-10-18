@@ -324,7 +324,16 @@
 
 /* Sidebar groups that remember being collapsed (app-sidebar.tsx). In icon mode every item shows. */
 [data-nav-group][data-open="false"] [data-nav-items] { display: none; }
+/* A collapsed group still shows the page you're on (only that item), so something is always lit. */
+[data-nav-group][data-open="false"]:has([data-active="true"]) [data-nav-items] { display: revert-layer; }
+[data-nav-group][data-open="false"] [data-nav-items] > li:not(:has([data-active="true"])) { display: none; }
 [data-collapsible="icon"] [data-nav-group] [data-nav-items] { display: flex; }
+[data-collapsible="icon"] [data-nav-group][data-open] [data-nav-items] > li { display: revert-layer; }
+
+/* A vertical scroller with more below the fold fades out at the bottom (app-sidebar.tsx). */
+.fade-bottom[data-more-below] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+}
 
 /* ---------------------------------------------------------------------------------------------
  * Procedural preset previews (preset-preview.tsx, src/lib/preset-cards.ts).
