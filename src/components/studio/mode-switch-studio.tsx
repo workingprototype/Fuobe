@@ -19,7 +19,10 @@ import {
 } from "@/lib/studios";
 import { studioCatalog } from "@/lib/studio-catalog";
 import { HUB_MODES, modeHref, type HubKind } from "@/lib/hubs";
-import { ModeStudio } from "./mode-studio";
+import { CaptionsStudio } from "@/components/captions/captions-studio";
+import { DubStudio } from "@/components/dub/dub-studio";
+import { TrimTool } from "@/components/av/trim-tool";
+import { ModeStudio, ModeTabs } from "./mode-studio";
 import type { StudioConfig } from "./studio-context";
 
 const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
@@ -42,6 +45,12 @@ const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
   },
 };
 
+/** Modes that are their own tool rather than a composer studio (Translate & dub, Captions, Trim). */
+const TOOLS: Partial<Record<HubKind, Record<string, (p: { tabs: React.ReactNode }) => React.ReactNode>>> = {
+  audio: { translate: ({ tabs }) => <DubStudio tabs={tabs} /> },
+  "video-tools": { captions: ({ tabs }) => <CaptionsStudio tabs={tabs} />, trim: ({ tabs }) => <TrimTool tabs={tabs} /> },
+};
+
 const HUB_TITLE: Record<HubKind, string> = { upscale: "Upscale", audio: "Audio", "video-tools": "Video tools" };
 
 /**
@@ -51,9 +60,11 @@ const HUB_TITLE: Record<HubKind, string> = { upscale: "Upscale", audio: "Audio",
  */
 export function ModeSwitchStudio({ kind, mode }: { kind: HubKind; mode?: string }) {
   const current = mode ?? HUB_MODES[kind][0].id;
+  const tabs = HUB_MODES[kind].map((m) => ({ id: m.id, label: m.label, href: modeHref(kind, m.id) }));
+  const Tool = TOOLS[kind]?.[current];
+  if (Tool) return <Tool tabs={<ModeTabs tabs={tabs} current={current} />} />;
   const config = CONFIGS[kind][current];
   if (!config) notFound();
-  const tabs = HUB_MODES[kind].map((m) => ({ id: m.id, label: m.label, href: modeHref(kind, m.id) }));
   return <ModeStudio key={current} tabs={tabs} current={current} config={config} catalog={studioCatalog(config)} />;
 }
 
