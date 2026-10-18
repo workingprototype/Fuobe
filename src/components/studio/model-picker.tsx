@@ -111,27 +111,46 @@ function ModelRow({
   );
 }
 
-/**
- * Model picker on cmdk: Recent, Starred and "Best for this studio" above the full list for the
- * current engine; typing searches both engines at once (each row says which). A popover on
- * desktop, a bottom sheet on phones.
- */
-export function ModelPicker({
-  models,
-  value,
-  onChange,
-  engine,
-  onEngineChange,
-  defaultModels,
-}: {
+interface PickerProps {
   models: ModelDef[];
   value: ModelDef | undefined;
   onChange: (m: ModelDef) => void;
   engine: Engine;
   onEngineChange: (e: Engine) => void;
   defaultModels?: { cloud: string; open: string };
-}) {
+}
+
+/**
+ * Model picker on cmdk: Recent, Starred and "Best for this studio" above the full list for the
+ * current engine; typing searches both engines at once (each row says which). A popover on
+ * desktop, a bottom sheet on phones. The list is built only while the panel is open (a canvas
+ * board shows dozens of closed pickers).
+ */
+export function ModelPicker(props: PickerProps) {
   const [open, setOpen] = useState(false);
+  const { value } = props;
+  return (
+    <ResponsivePanel
+      open={open}
+      onOpenChange={setOpen}
+      title="Choose a model"
+      className="w-[min(92vw,440px)] p-0 shadow-strong"
+      sheetClassName="h-[80svh]"
+      trigger={
+        <Button variant="secondary" size="sm" className="h-8 shrink-0 gap-1.5 rounded-full px-3 text-[13px] font-medium" aria-label={`Model: ${value?.name ?? "none"}. Change model`}>
+          {value?.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
+          <span className="max-w-32 truncate sm:max-w-44">{value?.name ?? "Choose model"}</span>
+          <ChevronDown className="size-3.5 opacity-60" />
+        </Button>
+      }
+    >
+      <PickerList {...props} onPicked={() => setOpen(false)} />
+    </ResponsivePanel>
+  );
+}
+
+/** The searchable list (mounted by the popover / sheet only while it shows). */
+function PickerList({ models, value, onChange, engine, onEngineChange, defaultModels, onPicked }: PickerProps & { onPicked: () => void }) {
   const [q, setQ] = useState("");
   const status = useStatus().data;
   const mode = useEngineMode();
@@ -149,89 +168,70 @@ export function ModelPicker({
 
   const pick = (m: ModelDef) => {
     onChange(m);
-    setOpen(false);
-    setQ("");
+    onPicked();
   };
 
   return (
-    <ResponsivePanel
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setQ("");
-      }}
-      title="Choose a model"
-      className="w-[min(92vw,440px)] p-0 shadow-strong"
-      sheetClassName="h-[80svh]"
-      trigger={
-        <Button variant="secondary" size="sm" className="h-8 shrink-0 gap-1.5 rounded-full px-3 text-[13px] font-medium" aria-label={`Model: ${value?.name ?? "none"}. Change model`}>
-          {value?.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
-          <span className="max-w-32 truncate sm:max-w-44">{value?.name ?? "Choose model"}</span>
-          <ChevronDown className="size-3.5 opacity-60" />
-        </Button>
-      }
-    >
-      <Command shouldFilter={false} loop label="Models" className="rounded-none! bg-transparent p-0">
-        <div className="flex items-center gap-2 p-1 sm:p-2 sm:pb-1">
-          <div className="min-w-0 flex-1 [&_[data-slot=command-input-wrapper]]:p-0">
-            <CommandInput value={q} onValueChange={setQ} placeholder={mode === "both" ? "Search all models" : "Search models"} aria-label="Search models" autoFocus={!mobile} />
-          </div>
-          <EngineSwitch value={engine} onChange={onEngineChange} size="sm" />
+    <Command shouldFilter={false} loop label="Models" className="rounded-none! bg-transparent p-0">
+      <div className="flex items-center gap-2 p-1 sm:p-2 sm:pb-1">
+        <div className="min-w-0 flex-1 [&_[data-slot=command-input-wrapper]]:p-0">
+          <CommandInput value={q} onValueChange={setQ} placeholder={mode === "both" ? "Search all models" : "Search models"} aria-label="Search models" autoFocus={!mobile} />
         </div>
-        <div className="flex items-baseline gap-x-2 px-3 pb-1.5 leading-snug text-[11px] text-muted-foreground sm:px-3.5">
-          <span className="shrink-0 whitespace-nowrap tabular-nums">{q ? `${count} result${count === 1 ? "" : "s"}` : `${count} ${engine === "open" ? "open-source" : "cloud"} model${count === 1 ? "" : "s"}`}</span>
-          {demo && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="min-w-0">
-                Demo — no key connected, outputs are placeholders.{" "}
-                <Link href="/settings" className="text-brand-text hover:underline">
-                  Connect
-                </Link>
-              </span>
-            </>
-          )}
-        </div>
-        <CommandList className="max-h-[min(52vh,420px)] border-t sm:max-h-[min(56vh,440px)]">
-          {groups.map((g) => (
-            <CommandGroup key={g.id} heading={g.label}>
-              {g.models.map((m) => (
-                <CommandItem
-                  key={`${g.id}:${m.id}`}
-                  value={`${g.id}:${m.id}`}
-                  onSelect={() => pick(m)}
-                  data-checked={value?.id === m.id}
-                  className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
-                >
-                  <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
-          {!groups.length && (
-            <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-              <SearchX className="size-5 text-subtle-foreground" />
-              {noneForEngine ? (
-                <>
-                  <p className="text-[13px] text-muted-foreground">No {engine === "open" ? "open-source" : "cloud"} models for this yet.</p>
-                  {engines.includes(otherEngine) && (
-                    <Button variant="secondary" size="sm" onClick={() => onEngineChange(otherEngine)}>
-                      Show {otherEngine === "open" ? "open-source" : "cloud"} models
-                    </Button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-[13px] text-muted-foreground">No models match “{q}”</p>
-                  <Button variant="secondary" size="sm" onClick={() => setQ("")}>
-                    Clear search
+        <EngineSwitch value={engine} onChange={onEngineChange} size="sm" />
+      </div>
+      <div className="flex items-baseline gap-x-2 px-3 pb-1.5 leading-snug text-[11px] text-muted-foreground sm:px-3.5">
+        <span className="shrink-0 whitespace-nowrap tabular-nums">{q ? `${count} result${count === 1 ? "" : "s"}` : `${count} ${engine === "open" ? "open-source" : "cloud"} model${count === 1 ? "" : "s"}`}</span>
+        {demo && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="min-w-0">
+              Demo — no key connected, outputs are placeholders.{" "}
+              <Link href="/settings" className="text-brand-text hover:underline">
+                Connect
+              </Link>
+            </span>
+          </>
+        )}
+      </div>
+      <CommandList className="max-h-[min(52vh,420px)] border-t sm:max-h-[min(56vh,440px)]">
+        {groups.map((g) => (
+          <CommandGroup key={g.id} heading={g.label}>
+            {g.models.map((m) => (
+              <CommandItem
+                key={`${g.id}:${m.id}`}
+                value={`${g.id}:${m.id}`}
+                onSelect={() => pick(m)}
+                data-checked={value?.id === m.id}
+                className={cn("gap-2.5 rounded-lg px-2 py-1.5 [&>svg:last-child]:hidden", value?.id === m.id && "bg-brand-faint data-selected:bg-brand-faint-hover")}
+              >
+                <ModelRow m={m} selected={value?.id === m.id} starred={starred.includes(m.id)} showEngine={!!q || m.engine !== engine} onStar={() => setStarred((s) => toggleIn(s, m.id))} />
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
+        {!groups.length && (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <SearchX className="size-5 text-subtle-foreground" />
+            {noneForEngine ? (
+              <>
+                <p className="text-[13px] text-muted-foreground">No {engine === "open" ? "open-source" : "cloud"} models for this yet.</p>
+                {engines.includes(otherEngine) && (
+                  <Button variant="secondary" size="sm" onClick={() => onEngineChange(otherEngine)}>
+                    Show {otherEngine === "open" ? "open-source" : "cloud"} models
                   </Button>
-                </>
-              )}
-            </div>
-          )}
-        </CommandList>
-      </Command>
-    </ResponsivePanel>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-[13px] text-muted-foreground">No models match “{q}”</p>
+                <Button variant="secondary" size="sm" onClick={() => setQ("")}>
+                  Clear search
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </CommandList>
+    </Command>
   );
 }

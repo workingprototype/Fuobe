@@ -5,6 +5,7 @@ import {
   AlertCircle,
   AudioLines,
   Box,
+  Cable,
   Check,
   Cloud,
   Copy,
@@ -14,6 +15,7 @@ import {
   Library,
   Loader2,
   MoreHorizontal,
+  Pencil,
   Pin,
   PinOff,
   Play,
@@ -22,13 +24,34 @@ import {
   SlidersHorizontal,
   Square,
   Trash2,
+  Unplug,
   Upload,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -37,11 +60,14 @@ import { downloadName } from "@/components/studio/feed";
 import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ControlsChip } from "@/components/studio/model-controls";
 import { ModelPicker } from "@/components/studio/model-picker";
+import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { useAssets, useElements } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
+  CANVAS_TEXT_MAX,
+  connectionError,
   defaultModelFor,
-  effectiveOp,
+  EMPTY_GRAPH,
   inputPorts,
   isGenerator,
   modelChoices,
@@ -52,17 +78,21 @@ import {
   outputType,
   PORT_TYPE_LABEL,
   PREVIEW_IN,
+  promptPlaceholder,
   sanitizeParams,
+  type CanvasEdge,
+  type CanvasGraph,
   type CanvasNode,
   type CanvasNodeData,
   type CanvasNodeType,
+  type Connection,
   type PortDef,
   type PortType,
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { NodeIcon, PORT_COLOR, useEditor, type NodeResults } from "./canvas-context";
+import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
 export type FlowNode = Node<CanvasNodeData, CanvasNodeType>;
 
@@ -73,6 +103,12 @@ const chip = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-sec
 function asNode(id: string, type: CanvasNodeType, data: CanvasNodeData): CanvasNode {
   return { id, type, data, position: { x: 0, y: 0 } };
 }
+
+/**
+ * Nodes re-render when their own data or selection changes, not on every drag frame or size
+ * measurement (what they show from the rest of the board comes from the editor store).
+ */
+const sameNodeProps = (a: NodeProps<FlowNode>, b: NodeProps<FlowNode>) => a.id === b.id && a.type === b.type && a.data === b.data && a.selected === b.selected;
 
 // ---------------------------------------------------------------------------
 // Handles
@@ -109,7 +145,7 @@ function OutPort({ type }: { type: PortType }) {
 }
 
 // ---------------------------------------------------------------------------
-// Shell: header (icon, title, badges, menu), body, footer
+// Menus: the ⋯ button and right-click show the same items (keyboard users get Rename, Connect and Disconnect)
 
 interface MenuItem {
   label: string;
@@ -120,15 +156,161 @@ interface MenuItem {
   separatorBefore?: boolean;
 }
 
-function EditableTitle({ value, placeholder, onChange, readOnly }: { value?: string; placeholder: string; onChange: (v: string | undefined) => void; readOnly: boolean }) {
-  const [editing, setEditing] = useState(false);
+interface MenuKit {
+  Item: typeof DropdownMenuItem;
+  Separator: typeof DropdownMenuSeparator;
+  Shortcut: typeof DropdownMenuShortcut;
+  Sub: typeof DropdownMenuSub;
+  SubTrigger: typeof DropdownMenuSubTrigger;
+  SubContent: typeof DropdownMenuSubContent;
+}
+
+const DROPDOWN: MenuKit = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator, Shortcut: DropdownMenuShortcut, Sub: DropdownMenuSub, SubTrigger: DropdownMenuSubTrigger, SubContent: DropdownMenuSubContent };
+const CONTEXT = {
+  Item: ContextMenuItem,
+  Separator: ContextMenuSeparator,
+  Shortcut: ContextMenuShortcut,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+} as unknown as MenuKit;
+
+const byBoardPosition = (a: CanvasNode, b: CanvasNode) => a.position.x - b.position.x || a.position.y - b.position.y;
+
+function portLabel(n: CanvasNode | undefined, handle: string | null | undefined): string {
+  if (!n) return "";
+  if (n.type === "output") return "Preview";
+  return inputPorts(n).find((p) => p.id === handle)?.label ?? handle ?? "";
+}
+
+/** "Connect output to…": every input on the board this node's output may go into. */
+function ConnectItems({ id, kit }: { id: string; kit: MenuKit }) {
+  const actions = useEditorActions();
+  const graph = actions.getGraph();
+  const options: { key: string; label: string; c: Connection }[] = [];
+  for (const t of [...graph.nodes].sort(byBoardPosition)) {
+    if (t.id === id || t.type === "note") continue;
+    const handles = t.type === "output" ? [PREVIEW_IN] : inputPorts(t).map((p) => p.id);
+    for (const h of handles) {
+      const c: Connection = { source: id, sourceHandle: OUT, target: t.id, targetHandle: h };
+      if (graph.edges.some((e) => e.source === id && e.target === t.id && e.targetHandle === h) || connectionError(graph, c)) continue;
+      options.push({ key: `${t.id}:${h}`, label: `${nodeLabel(t)} · ${portLabel(t, h)}`, c });
+    }
+  }
+  if (!options.length) return <kit.Item disabled>Nothing on the board takes this output</kit.Item>;
+  return (
+    <>
+      {options.map((o) => (
+        <kit.Item key={o.key} onSelect={() => actions.connect(o.c)}>
+          {o.label}
+        </kit.Item>
+      ))}
+    </>
+  );
+}
+
+/** "Disconnect": this node's connections, in and out. */
+function DisconnectItems({ id, kit }: { id: string; kit: MenuKit }) {
+  const actions = useEditorActions();
+  const graph: CanvasGraph = actions.getGraph();
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const self = byId.get(id);
+  const edges: CanvasEdge[] = graph.edges.filter((e) => e.source === id || e.target === id);
+  if (!edges.length) return <kit.Item disabled>No connections yet</kit.Item>;
+  return (
+    <>
+      {edges.map((e) => {
+        const incoming = e.target === id;
+        const other = byId.get(incoming ? e.source : e.target);
+        const label = incoming ? `${portLabel(self, e.targetHandle)} ← ${other ? nodeLabel(other) : "?"}` : `→ ${other ? nodeLabel(other) : "?"} · ${portLabel(other, e.targetHandle)}`;
+        return (
+          <kit.Item key={e.id} onSelect={() => actions.disconnect(e.id)}>
+            {label}
+          </kit.Item>
+        );
+      })}
+    </>
+  );
+}
+
+function MenuItems({ id, kit, items, canConnect, onRename }: { id: string; kit: MenuKit; items: MenuItem[]; canConnect: boolean; onRename: () => void }) {
+  const actions = useEditorActions();
+  const entry = (m: MenuItem) => (
+    <div key={m.label}>
+      {m.separatorBefore && <kit.Separator />}
+      <kit.Item onSelect={m.onSelect} variant={m.destructive ? "destructive" : "default"}>
+        <m.icon className="size-4" />
+        {m.label}
+        {m.shortcut && <kit.Shortcut>{m.shortcut}</kit.Shortcut>}
+      </kit.Item>
+    </div>
+  );
+  return (
+    <>
+      {items.map(entry)}
+      {items.length > 0 && <kit.Separator />}
+      <kit.Item onSelect={onRename}>
+        <Pencil className="size-4" />
+        Rename
+      </kit.Item>
+      {canConnect && (
+        <kit.Sub>
+          <kit.SubTrigger>
+            <Cable className="size-4" />
+            Connect output to…
+          </kit.SubTrigger>
+          <kit.SubContent className="max-h-80 w-64 overflow-y-auto">
+            <ConnectItems id={id} kit={kit} />
+          </kit.SubContent>
+        </kit.Sub>
+      )}
+      <kit.Sub>
+        <kit.SubTrigger>
+          <Unplug className="size-4" />
+          Disconnect
+        </kit.SubTrigger>
+        <kit.SubContent className="max-h-80 w-64 overflow-y-auto">
+          <DisconnectItems id={id} kit={kit} />
+        </kit.SubContent>
+      </kit.Sub>
+      {entry({ label: "Duplicate", icon: Copy, onSelect: () => actions.duplicate(id), shortcut: "⌘D", separatorBefore: true })}
+      {entry({ label: "Delete", icon: Trash2, onSelect: () => actions.remove(id), shortcut: "⌫", destructive: true })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shell: header (icon, title, badges, menu), body, footer
+
+function EditableTitle({
+  value,
+  placeholder,
+  onChange,
+  readOnly,
+  editing,
+  setEditing,
+}: {
+  value?: string;
+  placeholder: string;
+  onChange: (v: string | undefined) => void;
+  readOnly: boolean;
+  editing: boolean;
+  setEditing: (v: boolean) => void;
+}) {
   const [draft, setDraft] = useState("");
+  const [wasEditing, setWasEditing] = useState(false);
+  // Opening the editor (double-click or the menu's Rename) starts from the current name.
+  if (editing !== wasEditing) {
+    setWasEditing(editing);
+    if (editing) setDraft(value ?? placeholder);
+  }
   if (editing) {
     return (
       <input
         autoFocus
         value={draft}
         maxLength={80}
+        onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           setEditing(false);
@@ -150,7 +332,6 @@ function EditableTitle({ value, placeholder, onChange, readOnly }: { value?: str
       onDoubleClick={(e) => {
         if (readOnly) return;
         e.stopPropagation();
-        setDraft(value ?? placeholder);
         setEditing(true);
       }}
       title={readOnly ? undefined : "Double-click to rename"}
@@ -167,7 +348,7 @@ function NodeShell({
   selected,
   out,
   badge,
-  menu,
+  menu = [],
   footer,
   children,
   width = 300,
@@ -179,27 +360,32 @@ function NodeShell({
   selected: boolean;
   out?: PortType | null;
   badge?: React.ReactNode;
-  menu: MenuItem[];
+  menu?: MenuItem[];
   footer?: React.ReactNode;
   children?: React.ReactNode;
   width?: number;
   tone?: "running" | "failed" | "note";
 }) {
-  const ed = useEditor();
-  const items =(Item: typeof DropdownMenuItem | typeof ContextMenuItem, Sep: typeof DropdownMenuSeparator, Short: typeof DropdownMenuShortcut) =>
-    menu.map((m) => (
-      <div key={m.label}>
-        {m.separatorBefore && <Sep />}
-        <Item onSelect={m.onSelect} variant={m.destructive ? "destructive" : "default"}>
-          <m.icon className="size-4" />
-          {m.label}
-          {m.shortcut && <Short>{m.shortcut}</Short>}
-        </Item>
-      </div>
-    ));
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
+  const [renaming, setRenaming] = useState(false);
+  // Rename opens the title field once the menu has closed (an open menu keeps the focus), and the
+  // menu doesn't hand the focus back to its trigger then.
+  const wantRename = useRef(false);
+  const rename = () => {
+    wantRename.current = true;
+  };
+  const keepFocus = (e: Event) => {
+    if (!wantRename.current) return;
+    wantRename.current = false;
+    e.preventDefault();
+    setRenaming(true);
+  };
+  const placeholder = nodeLabel({ type, data: { ...data, label: undefined } });
+  const label = data.label || placeholder;
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild disabled={ed.readOnly}>
+      <ContextMenuTrigger asChild disabled={readOnly}>
         <div
           className={cn(
             "group/node rounded-xl border bg-card text-card-foreground shadow-soft transition-[box-shadow,border-color]",
@@ -213,17 +399,17 @@ function NodeShell({
         >
           <div className="relative flex h-10 items-center gap-2 border-b px-3">
             <NodeIcon name={NODE_SPECS[type].icon} className="size-4 shrink-0 text-muted-foreground" />
-            <EditableTitle value={data.label} placeholder={nodeLabel({ type, data: { ...data, label: undefined } })} onChange={(label) => ed.update(id, { label })} readOnly={ed.readOnly} />
+            <EditableTitle value={data.label} placeholder={placeholder} onChange={(l) => actions.update(id, { label: l })} readOnly={readOnly} editing={renaming} setEditing={setRenaming} />
             {badge}
-            {!ed.readOnly && (
+            {!readOnly && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className={cn("-mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label="Node actions">
+                  <button className={cn("-mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label={`Actions for ${label}`}>
                     <MoreHorizontal className="size-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  {items(DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut)}
+                <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={keepFocus}>
+                  <MenuItems id={id} kit={DROPDOWN} items={menu} canConnect={!!out} onRename={rename} />
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -233,16 +419,13 @@ function NodeShell({
           {footer}
         </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">{items(ContextMenuItem, ContextMenuSeparator as typeof DropdownMenuSeparator, ContextMenuShortcut as typeof DropdownMenuShortcut)}</ContextMenuContent>
+      {!readOnly && (
+        <ContextMenuContent className="w-56" onCloseAutoFocus={keepFocus}>
+          <MenuItems id={id} kit={CONTEXT} items={menu} canConnect={!!out} onRename={rename} />
+        </ContextMenuContent>
+      )}
     </ContextMenu>
   );
-}
-
-function baseMenu(ed: ReturnType<typeof useEditor>, id: string): MenuItem[] {
-  return [
-    { label: "Duplicate", icon: Copy, onSelect: () => ed.duplicate(id), shortcut: "⌘D", separatorBefore: true },
-    { label: "Delete", icon: Trash2, onSelect: () => ed.remove(id), shortcut: "⌫", destructive: true },
-  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -294,7 +477,8 @@ function OutputThumb({ o, onOpen, className, large }: { o: OutputFile; onOpen: (
 }
 
 function Results({ id, r, compact }: { id: string; r: NodeResults; compact?: boolean }) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
   if (r.state === "queued" || r.state === "running") {
     const pct = r.progress != null ? Math.round(r.progress * 100) : null;
     return (
@@ -313,8 +497,8 @@ function Results({ id, r, compact }: { id: string; r: NodeResults; compact?: boo
       <div className="rounded-lg border border-dashed p-2.5">
         <p className="text-[12px] font-medium">{r.state === "canceled" ? "Canceled" : "Couldn't generate this"}</p>
         {r.error && <p className="mt-0.5 line-clamp-4 text-[12px] leading-snug break-words text-muted-foreground">{r.error}</p>}
-        {!ed.readOnly && (
-          <button onClick={() => ed.run([id], true)} className={cn(chip, "mt-2")}>
+        {!readOnly && (
+          <button onClick={() => actions.run([id], true)} className={cn(chip, "mt-2")}>
             <RotateCcw className="size-3" /> Retry
           </button>
         )}
@@ -326,7 +510,7 @@ function Results({ id, r, compact }: { id: string; r: NodeResults; compact?: boo
   return (
     <div className={cn("grid gap-1.5", shown.length > 1 ? "grid-cols-[repeat(2,minmax(0,1fr))]" : "grid-cols-[minmax(0,1fr)]")}>
       {shown.map((x, k) => (
-        <OutputThumb key={`${x.g.id}-${x.i}`} o={x.o} onOpen={() => ed.open(id, k)} />
+        <OutputThumb key={`${x.g.id}-${x.i}`} o={x.o} onOpen={() => actions.open(id, k)} />
       ))}
       {r.outputs.length > 4 && <p className="col-span-2 text-[11px] text-muted-foreground">+{r.outputs.length - 4} more — open to see them all</p>}
     </div>
@@ -354,11 +538,11 @@ function OptionSelect<T extends string | number>({ value, options, onChange, lab
 }
 
 function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: CanvasNodeData }) {
-  const ed = useEditor();
+  const actions = useEditorActions();
   const p = data.params ?? {};
   const o = model.options;
   const d = model.defaults ?? {};
-  const set = (patch: Partial<NonNullable<CanvasNodeData["params"]>>) => ed.update(id, { params: { ...p, ...patch } });
+  const set = (patch: Partial<NonNullable<CanvasNodeData["params"]>>) => actions.update(id, { params: { ...p, ...patch } });
   const extra = (p.extra ?? {}) as Record<string, unknown>;
   const setExtra = (param: string, v?: string | number) => {
     const next = { ...extra };
@@ -366,13 +550,23 @@ function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: 
     else next[param] = v;
     set({ extra: Object.keys(next).length ? (next as Record<string, string | number>) : undefined });
   };
+  const text = model.kind === "text";
   const items: React.ReactNode[] = [];
   if (o.aspectRatios?.length) items.push(<OptionSelect key="ar" label="Aspect ratio" value={p.aspectRatio ?? d.aspectRatio} options={o.aspectRatios} onChange={(v) => set({ aspectRatio: v })} />);
   if (o.durations?.length && o.durations.length > 1) items.push(<OptionSelect key="dur" label="Duration" value={p.duration ?? d.duration} options={o.durations} onChange={(v) => set({ duration: v })} format={(v) => `${v}s`} />);
   if (o.resolutions?.length && o.resolutions.length > 1) items.push(<OptionSelect key="res" label="Quality" value={p.resolution ?? d.resolution} options={o.resolutions} onChange={(v) => set({ resolution: v })} />);
   if ((o.maxOutputs ?? 1) > 1) items.push(<OptionSelect key="n" label="Count" value={p.numOutputs ?? 1} options={Array.from({ length: Math.min(4, o.maxOutputs!) }, (_, i) => i + 1)} onChange={(v) => set({ numOutputs: v })} format={(v) => `×${v}`} />);
   if (o.voices?.length) items.push(<OptionSelect key="voice" label="Voice" value={p.voice ?? d.voice ?? o.voices[0].id} options={o.voices.map((v) => v.id)} onChange={(v) => set({ voice: v })} format={(v) => o.voices!.find((x) => x.id === v)?.name ?? v} />);
-  if (o.languages?.length) items.push(<LanguageChip key="lang" languages={o.languages} value={p.targetLanguage} onChange={(v) => set({ targetLanguage: v })} label="Language" />);
+  // A text model writes; picking a language makes it translate (Auto), and "Don't translate" goes back to writing.
+  if (o.languages?.length && !(text && data.op === "write")) {
+    items.push(<LanguageChip key="lang" languages={o.languages} value={p.targetLanguage} onChange={(v) => set({ targetLanguage: v })} label={text ? "Translate to…" : "Language"} />);
+    if (text && p.targetLanguage && data.op !== "translate")
+      items.push(
+        <button key="lang-x" className={chip} onClick={() => set({ targetLanguage: undefined })}>
+          <X className="size-3" /> Don&apos;t translate
+        </button>,
+      );
+  }
   if (o.audio === true)
     items.push(
       <button key="audio" onClick={() => set({ generateAudio: !(p.generateAudio ?? d.generateAudio ?? false) })} className={cn(chip, (p.generateAudio ?? d.generateAudio) && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover")} aria-pressed={!!(p.generateAudio ?? d.generateAudio)}>
@@ -382,7 +576,7 @@ function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: 
   if (o.sliders?.length) items.push(<div key="sliders" className={NO_DRAG}><SlidersChip model={model} values={extra} onChange={setExtra} /></div>);
   if (o.controls?.length) items.push(<div key="controls" className={NO_DRAG}><ControlsChip controls={o.controls} values={extra} onChange={setExtra} /></div>);
   if (!items.length) return null;
-  return <div className="flex flex-wrap gap-1 [&_button]:h-7 [&_button]:text-[12px]">{items}</div>;
+  return <div className={cn("flex flex-wrap gap-1 [&_button]:h-7 [&_button]:text-[12px]", NO_DRAG)}>{items}</div>;
 }
 
 /** A model's numeric settings behind one chip (the studio composer shows them in its settings panel). */
@@ -413,46 +607,43 @@ function EngineBadge({ model }: { model?: ModelDef }) {
   );
 }
 
-function costLabel(ed: ReturnType<typeof useEditor>, model: ModelDef | undefined, cost: number | null): string {
+function costLabel(isDemo: (m: ModelDef) => boolean, model: ModelDef | undefined, cost: number | null): string {
   if (!model) return "";
-  if (ed.isDemo(model)) return "Demo · free";
+  if (isDemo(model)) return "Demo · free";
   if (model.engine === "open") return "Free · your GPU";
   return cost == null ? "Price unknown" : cost === 0 ? "Free" : `≈ ${formatCost(cost)}`;
 }
 
 const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const g = useEditorGlobals();
+  const v = useNodeView(id);
   const node = useMemo(() => asNode(id, type, data), [id, type, data]);
   const model = data.modelId ? getModel(data.modelId) : undefined;
-  const ports = inputPorts(node);
-  const out = outputType(ed.graph, node);
-  const desc = ed.describe(id);
-  const r = ed.results(id);
-  const ops = nodeOps(node, model);
+  const ports = useMemo(() => inputPorts(node), [node]);
+  const out = outputType(EMPTY_GRAPH, node);
+  const r = v.results;
+  const ops = useMemo(() => nodeOps(node, model), [node, model]);
   const auto = type === "model" && ops.length > 1;
-  const inferred = auto ? effectiveOp(ed.graph, ed.graph.nodes.find((n) => n.id === id) ?? node) : undefined;
   // The picker opens on the node's own engine (or the install's only one); its switch browses the other.
   const [browseEngine, setBrowseEngine] = useState<Engine | null>(null);
-  const pickerEngine: Engine = ed.mode !== "both" ? ed.mode : (browseEngine ?? model?.engine ?? ed.engine);
+  const pickerEngine: Engine = g.mode !== "both" ? g.mode : (browseEngine ?? model?.engine ?? g.engine);
   const choices = useMemo(() => modelChoices(node), [node]);
-  const step = ed.plan.steps.find((s) => s.nodeId === id);
-  const reused = ed.plan.reused.find((s) => s.nodeId === id);
-  const error = ed.runErrors[id] ?? desc?.error;
+  const error = v.runError ?? v.error;
 
-  // Handles change with the model and op: tell React Flow to re-measure them.
+  // Handles change with the model and op: tell React Flow to re-measure them (React Flow measures new nodes itself).
   const updateInternals = useUpdateNodeInternals();
   const portKey = `${ports.map((p) => p.id).join(",")}|${out}`;
-  useEffect(() => updateInternals(id), [id, portKey, updateInternals]);
-
-  const counts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of ed.graph.edges) if (e.target === id && e.targetHandle) m.set(e.targetHandle, (m.get(e.targetHandle) ?? 0) + 1);
-    return m;
-  }, [ed.graph.edges, id]);
+  const measuredKey = useRef(portKey);
+  useEffect(() => {
+    if (measuredKey.current === portKey) return;
+    measuredKey.current = portKey;
+    updateInternals(id);
+  }, [id, portKey, updateInternals]);
 
   const pickModel = (m: ModelDef) => {
     const keepOp = data.op && m.routes.some((x) => x.op === data.op) ? data.op : undefined;
-    ed.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params) });
+    actions.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params) });
     setBrowseEngine(null);
   };
 
@@ -460,8 +651,9 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   const variants = NODE_SPECS[type].ops && NODE_SPECS[type].ops!.length === 2 ? NODE_SPECS[type].ops! : null;
   const setVariant = (kind: MediaKind) => {
     const op = variants![kind === "video" ? 1 : 0];
-    const m = defaultModelFor(op, model?.engine ?? ed.engine, { hidden: true }) ?? defaultModelFor(op, model?.engine === "open" ? "cloud" : "open", { hidden: true });
-    ed.update(id, { mediaKind: kind, modelId: m?.id, op: undefined, params: undefined });
+    const engine = model?.engine ?? g.engine;
+    const m = defaultModelFor(op, engine, { hidden: true }) ?? (g.mode === "both" ? defaultModelFor(op, engine === "open" ? "cloud" : "open", { hidden: true }) : undefined);
+    actions.update(id, { mediaKind: kind, modelId: m?.id, op: undefined, params: undefined });
   };
 
   const running = r.state === "running" || r.state === "queued";
@@ -470,33 +662,49 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
     ...(data.pinned
       ? []
       : [
-          { label: "Run node", icon: Play, onSelect: () => ed.run([id]) },
-          { label: "Re-run", icon: RotateCcw, onSelect: () => ed.run([id], true) },
+          { label: "Run node", icon: Play, onSelect: () => actions.run([id]) },
+          { label: "Re-run", icon: RotateCcw, onSelect: () => actions.run([id], true) },
         ]),
-    ...(running ? [{ label: "Cancel", icon: Square, onSelect: () => ed.cancel(id) }] : []),
-    { label: data.pinned ? "Unpin result" : "Pin result", icon: data.pinned ? PinOff : Pin, onSelect: () => ed.update(id, { pinned: !data.pinned }), separatorBefore: !data.pinned },
-    ...(r.outputs.some((x) => ["image", "video", "audio"].includes(x.o.kind)) ? [{ label: "Use result as an input", icon: ImagePlus, onSelect: () => ed.toInput(id) }] : []),
+    ...(running ? [{ label: "Cancel", icon: Square, onSelect: () => actions.cancel(id) }] : []),
+    { label: data.pinned ? "Unpin result" : "Pin result", icon: data.pinned ? PinOff : Pin, onSelect: () => actions.update(id, { pinned: !data.pinned }), separatorBefore: !data.pinned },
+    ...(r.outputs.some((x) => ["image", "video", "audio"].includes(x.o.kind)) ? [{ label: "Use result as an input", icon: ImagePlus, onSelect: () => actions.toInput(id) }] : []),
     ...(r.outputs.length
       ? [
           {
             label: r.outputs.length > 1 ? "Download first result" : "Download result",
             icon: Download,
             onSelect: () => {
-              const { g, o, i } = r.outputs[0];
+              const { g: gen, o, i } = r.outputs[0];
               const a = document.createElement("a");
-              a.href = `${o.url}?download=${encodeURIComponent(downloadName(g, o, i))}`;
+              a.href = `${o.url}?download=${encodeURIComponent(downloadName(gen, o, i))}`;
               a.click();
             },
           },
         ]
       : []),
-    ...baseMenu(ed, id),
   ];
   const promptPort = ports.find((p) => p.id === "prompt");
   // With text wired in, the node's own words are optional: keep the box folded until wanted.
   const [addWords, setAddWords] = useState(false);
-  const showPrompt = !!promptPort && (!counts.get("prompt") || !!data.prompt || addWords);
-  const stateHint = data.pinned ? "Pinned" : running ? "Running" : step ? (r.state === "idle" ? "Not run yet" : "Changed") : reused ? "Up to date" : "";
+  const showPrompt = !!promptPort && (!v.counts.prompt || !!data.prompt || addWords);
+  const step = v.step;
+  const stateHint = data.pinned
+    ? "Pinned"
+    : running
+      ? "Running"
+      : step === "changed"
+        ? "Changed"
+        : r.state === "failed"
+          ? "Failed"
+          : r.state === "canceled"
+            ? "Canceled"
+            : step === "upstream"
+              ? "Inputs changed"
+              : step
+                ? "Not run yet"
+                : v.reused
+                  ? "Up to date"
+                  : "";
 
   return (
     <NodeShell
@@ -523,14 +731,14 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
       footer={
         <div className="flex h-10 items-center gap-2 border-t px-3">
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
-            {[stateHint, step || r.state === "idle" ? costLabel(ed, model, desc?.costUsd ?? null) : ""].filter(Boolean).join(" · ")}
+            {[stateHint, step || r.state === "idle" ? costLabel(g.isDemo, model, v.costUsd) : ""].filter(Boolean).join(" · ")}
           </span>
-          {!ed.readOnly && (
+          {!g.readOnly && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => (running ? ed.cancel(id) : data.pinned ? ed.update(id, { pinned: false }) : ed.run([id], !step && !!reused))}
-                  disabled={ed.running && !running}
+                  onClick={() => (running ? actions.cancel(id) : data.pinned ? actions.update(id, { pinned: false }) : actions.run([id], !step && v.reused))}
+                  disabled={g.running && !running}
                   className={cn(
                     "grid size-7 shrink-0 place-items-center rounded-full transition-colors disabled:opacity-50",
                     running || data.pinned ? "bg-muted text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -547,18 +755,18 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
         </div>
       }
     >
-      {ports.length > 0 && <div className="border-b py-1">{ports.map((p) => <InPort key={p.id} port={p} count={counts.get(p.id) ?? 0} />)}</div>}
+      {ports.length > 0 && <div className="border-b py-1">{ports.map((p) => <InPort key={p.id} port={p} count={v.counts[p.id] ?? 0} />)}</div>}
       <div className="space-y-2 p-3">
         {variants && (
           <div className={cn("inline-grid h-7 grid-cols-2 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label="Image or video">
             {(["image", "video"] as const).map((k) => (
-              <button key={k} role="radio" aria-checked={(data.mediaKind ?? "image") === k} disabled={ed.readOnly} onClick={() => setVariant(k)} className={cn("rounded-full px-2.5 capitalize", (data.mediaKind ?? "image") === k ? "bg-background shadow-soft" : "text-muted-foreground")}>
+              <button key={k} role="radio" aria-checked={(data.mediaKind ?? "image") === k} disabled={g.readOnly} onClick={() => setVariant(k)} className={cn("rounded-full px-2.5 capitalize", (data.mediaKind ?? "image") === k ? "bg-background shadow-soft" : "text-muted-foreground")}>
                 {k}
               </button>
             ))}
           </div>
         )}
-        <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", ed.readOnly && "pointer-events-none")}>
+        <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", g.readOnly && "pointer-events-none")}>
           {choices.length ? (
             <div className={NO_DRAG}>
               <ModelPicker models={choices} value={model} onChange={pickModel} engine={pickerEngine} onEngineChange={setBrowseEngine} />
@@ -571,12 +779,12 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
               label="Operation"
               value={data.op ?? "__auto"}
               options={["__auto", ...ops]}
-              onChange={(v) => ed.update(id, { op: v === "__auto" ? undefined : (v as typeof ops[number]) })}
-              format={(v) => (v === "__auto" ? `Auto${inferred ? ` · ${OPERATION_LABELS[inferred]}` : ""}` : OPERATION_LABELS[v as keyof typeof OPERATION_LABELS])}
+              onChange={(o) => actions.update(id, { op: o === "__auto" ? undefined : (o as (typeof ops)[number]) })}
+              format={(o) => (o === "__auto" ? `Auto${v.op ? ` · ${OPERATION_LABELS[v.op]}` : ""}` : OPERATION_LABELS[o as keyof typeof OPERATION_LABELS])}
             />
           )}
         </div>
-        {promptPort && !showPrompt && !ed.readOnly && (
+        {promptPort && !showPrompt && !g.readOnly && (
           <button className={chip} onClick={() => setAddWords(true)}>
             <Plus className="size-3" /> Add your own words
           </button>
@@ -584,20 +792,21 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
         {showPrompt && (
           <textarea
             value={data.prompt ?? ""}
-            onChange={(e) => ed.update(id, { prompt: e.target.value })}
+            onChange={(e) => actions.update(id, { prompt: e.target.value })}
             onBlur={() => !data.prompt && setAddWords(false)}
             autoFocus={addWords && !data.prompt}
-            readOnly={ed.readOnly}
+            readOnly={g.readOnly}
             rows={2}
-            placeholder={promptPort.label === "Text" ? "Text to speak, or connect a text" : "Describe it — connected text joins in, or use {text}"}
-            aria-label={promptPort.label}
+            maxLength={CANVAS_TEXT_MAX}
+            placeholder={promptPlaceholder(v.op ?? ops[0])}
+            aria-label={`${promptPort.label} for ${data.label || nodeLabel(node)}`}
             className={cn("field-sizing-content max-h-36 min-h-14 w-full resize-none rounded-lg bg-muted px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint", NO_DRAG)}
           />
         )}
-        {model && !ed.readOnly && <ModelOptions id={id} model={model} data={data} />}
+        {model && !g.readOnly && <ModelOptions id={id} model={model} data={data} />}
         <Results id={id} r={r} />
         {error && r.state !== "failed" && (
-          <p className={cn("flex items-start gap-1.5 text-[12px] leading-snug", ed.runErrors[id] ? "text-destructive" : "text-warning")}>
+          <p className={cn("flex items-start gap-1.5 text-[12px] leading-snug", v.runError ? "text-destructive" : "text-warning")}>
             <AlertCircle className="mt-px size-3.5 shrink-0" />
             {error}
           </p>
@@ -605,76 +814,88 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
 
 // ---------------------------------------------------------------------------
 // Inputs
 
 const PromptNode = memo(function PromptNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out="text" menu={baseMenu(ed, id)} width={280}>
+    <NodeShell id={id} type={type} data={data} selected={!!selected} out="text" width={280}>
       <div className="p-3">
         <textarea
           value={data.text ?? ""}
-          onChange={(e) => ed.update(id, { text: e.target.value })}
-          readOnly={ed.readOnly}
+          onChange={(e) => actions.update(id, { text: e.target.value })}
+          readOnly={readOnly}
           rows={3}
+          maxLength={CANVAS_TEXT_MAX}
           placeholder="e.g. “a lighthouse on a cliff at golden hour, cinematic”"
-          aria-label="Text"
+          aria-label={`Text of ${data.label || "Text prompt"}`}
           className={cn("field-sizing-content max-h-60 min-h-20 w-full resize-none rounded-lg bg-muted px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint", NO_DRAG)}
         />
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
 
 const KIND_OF: Partial<Record<CanvasNodeType, "image" | "video" | "audio">> = { "image-input": "image", "video-input": "video", "audio-input": "audio" };
 
-function LibraryButton({ kind, onPick }: { kind: MediaKind; onPick: (url: string, name?: string) => void }) {
-  const [open, setOpen] = useState(false);
+function LibraryGrid({ kind, onPick }: { kind: MediaKind; onPick: (url: string, name?: string) => void }) {
   const assets = useAssets(undefined, kind);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button className={chip}>
+    <>
+      <p className="px-1 pb-2 text-[13px] font-medium max-md:hidden">From your library</p>
+      {assets.isLoading ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+      ) : assets.data?.length ? (
+        <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto max-md:max-h-none">
+          {assets.data.map((a) => (
+            <button key={a.id} className="aspect-square overflow-hidden rounded-md bg-muted ring-primary transition hover:ring-2" onClick={() => onPick(a.url, a.name ?? undefined)} aria-label={a.name ?? "Library item"}>
+              {a.kind === "video" ? (
+                <video src={`${a.url}#t=0.1`} muted preload="metadata" className="size-full object-cover" />
+              ) : a.kind === "audio" ? (
+                <span className="grid size-full place-items-center bg-brand-faint text-brand-text">
+                  <AudioLines className="size-4" />
+                </span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={a.url} alt="" loading="lazy" className="size-full object-cover" />
+              )}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="px-1 py-6 text-center text-sm text-muted-foreground">Nothing here yet.</p>
+      )}
+    </>
+  );
+}
+
+/** Pick an image, video or audio file from the library: a popover on the board, a sheet on phones. */
+export function LibraryButton({ kind, onPick, className }: { kind: MediaKind; onPick: (url: string, name?: string) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <ResponsivePanel
+      open={open}
+      onOpenChange={setOpen}
+      title="From your library"
+      className="w-80 p-2"
+      trigger={
+        <button className={className ?? chip}>
           <Library className="size-3" /> Library
         </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-80 p-2" align="start" collisionPadding={12}>
-        <p className="px-1 pb-2 text-[13px] font-medium">From your library</p>
-        {assets.isLoading ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
-        ) : assets.data?.length ? (
-          <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto">
-            {assets.data.map((a) => (
-              <button
-                key={a.id}
-                className="aspect-square overflow-hidden rounded-md bg-muted ring-primary transition hover:ring-2"
-                onClick={() => {
-                  onPick(a.url, a.name ?? undefined);
-                  setOpen(false);
-                }}
-                aria-label={a.name ?? "Library item"}
-              >
-                {a.kind === "video" ? (
-                  <video src={`${a.url}#t=0.1`} muted preload="metadata" className="size-full object-cover" />
-                ) : a.kind === "audio" ? (
-                  <span className="grid size-full place-items-center bg-brand-faint text-brand-text">
-                    <AudioLines className="size-4" />
-                  </span>
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={a.url} alt="" loading="lazy" className="size-full object-cover" />
-                )}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="px-1 py-6 text-center text-sm text-muted-foreground">Nothing here yet.</p>
-        )}
-      </PopoverContent>
-    </Popover>
+      }
+    >
+      <LibraryGrid
+        kind={kind}
+        onPick={(url, name) => {
+          onPick(url, name);
+          setOpen(false);
+        }}
+      />
+    </ResponsivePanel>
   );
 }
 
@@ -692,7 +913,8 @@ function MediaPreview({ kind, url }: { kind: MediaKind; url: string }) {
 }
 
 const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
   const kind = KIND_OF[type]!;
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<SlotValue | null>(null);
@@ -704,17 +926,17 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
         if (!v) return setPending(null);
         if (v.uploading) return setPending(v);
         setPending(null);
-        ed.update(id, { url: v.ref, name: v.name });
+        actions.update(id, { url: v.ref, name: v.name });
       },
       kind,
     );
   const accept = kind === "image" ? "image/png,image/jpeg,image/webp,image/gif" : kind === "video" ? "video/mp4,video/webm,video/quicktime" : "audio/*";
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out={kind} menu={baseMenu(ed, id)} width={260}>
+    <NodeShell id={id} type={type} data={data} selected={!!selected} out={kind} width={260}>
       <div
         className="space-y-2 p-3"
         onDragOver={(e) => {
-          if (ed.readOnly || !e.dataTransfer.types.includes("Files")) return;
+          if (readOnly || !e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
           e.stopPropagation();
           setOver(true);
@@ -722,7 +944,7 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
         onDragLeave={() => setOver(false)}
         onDrop={(e) => {
           const f = e.dataTransfer.files?.[0];
-          if (!f || ed.readOnly) return;
+          if (!f || readOnly) return;
           e.preventDefault();
           e.stopPropagation();
           setOver(false);
@@ -741,7 +963,7 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
         ) : (
           <button
             onClick={() => input.current?.click()}
-            disabled={ed.readOnly}
+            disabled={readOnly}
             className={cn(
               "flex h-28 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-strong text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text",
               over && "border-primary bg-brand-faint text-brand-text",
@@ -752,16 +974,16 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
             <span className="text-[12px] font-medium">Drop {kind === "audio" ? "an audio file" : `a${kind === "image" ? "n" : ""} ${kind}`} or click to upload</span>
           </button>
         )}
-        {!ed.readOnly && (
+        {!readOnly && (
           <div className="flex flex-wrap gap-1">
             {data.url && (
               <button className={chip} onClick={() => input.current?.click()}>
                 <Upload className="size-3" /> Replace
               </button>
             )}
-            <LibraryButton kind={kind} onPick={(url, name) => ed.update(id, { url, name })} />
+            <LibraryButton kind={kind} onPick={(url, name) => actions.update(id, { url, name })} />
             {data.url && (
-              <button className={chip} onClick={() => ed.update(id, { url: undefined, name: undefined })} aria-label="Remove file">
+              <button className={chip} onClick={() => actions.update(id, { url: undefined, name: undefined })} aria-label="Remove file">
                 <X className="size-3" /> Remove
               </button>
             )}
@@ -781,94 +1003,115 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
+
+/** Pick an @character, location, prop or style from Elements (a popover on the board, a sheet on phones). */
+export function ElementPicker({ data, onPick, className }: { data: CanvasNodeData; onPick: (patch: Partial<CanvasNodeData>) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <ResponsivePanel open={open} onOpenChange={setOpen} title="Pick an element" className="w-72 p-1.5" trigger={<button className={className ?? chip}>{data.handle ? "Change" : "Pick an element"}</button>}>
+      <ElementList
+        current={data.elementId}
+        onPick={(patch) => {
+          onPick(patch);
+          setOpen(false);
+        }}
+      />
+    </ResponsivePanel>
+  );
+}
+
+function ElementList({ current, onPick }: { current?: string; onPick: (patch: Partial<CanvasNodeData>) => void }) {
+  const elements = useElements();
+  const visual = (elements.data ?? []).filter((e) => e.kind !== "voice");
+  if (elements.isLoading) return <p className="p-3 text-[13px] text-muted-foreground">Loading…</p>;
+  if (!visual.length) {
+    return (
+      <p className="p-3 text-[13px] text-muted-foreground">
+        No elements yet.{" "}
+        <Link href="/elements" className="text-brand-text underline-offset-4 hover:underline">
+          Create one
+        </Link>
+      </p>
+    );
+  }
+  return (
+    <div className="max-h-72 overflow-y-auto max-md:max-h-none">
+      {visual.map((e) => (
+        <button
+          key={e.id}
+          onClick={() => onPick({ elementId: e.id, handle: e.handle, name: e.name, preview: e.references[0] })}
+          className={cn("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-accent", e.id === current && "bg-brand-faint")}
+        >
+          <span className="size-8 shrink-0 overflow-hidden rounded-md bg-muted">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {e.references[0] && <img src={e.references[0]} alt="" className="size-full object-cover" />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">{e.name}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">
+              @{e.handle} · {e.kind}
+            </span>
+          </span>
+          {e.id === current && <Check className="size-3.5 text-brand-text" />}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const ElementNode = memo(function ElementNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
-  const elements = useElements();
-  const [open, setOpen] = useState(false);
-  const visual = (elements.data ?? []).filter((e) => e.kind !== "voice");
-  const el = visual.find((e) => e.id === data.elementId);
-  const preview = el?.references[0] ?? data.preview;
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out="element" menu={baseMenu(ed, id)} width={240}>
+    <NodeShell id={id} type={type} data={data} selected={!!selected} out="element" width={240}>
       <div className="space-y-2 p-3">
         {data.handle ? (
           <div className="flex items-center gap-2.5">
             <span className="size-12 shrink-0 overflow-hidden rounded-lg bg-muted">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              {preview && <img src={preview} alt="" className="size-full object-cover" />}
+              {data.preview && <img src={data.preview} alt="" className="size-full object-cover" />}
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-[13px] font-medium">{el?.name ?? data.name ?? data.handle}</span>
+              <span className="block truncate text-[13px] font-medium">{data.name ?? data.handle}</span>
               <span className="block truncate font-mono text-[12px] text-brand-text">@{data.handle}</span>
             </span>
           </div>
         ) : (
           <p className="text-[12px] text-muted-foreground">Adds an @character, location, prop or style to the models it connects to.</p>
         )}
-        {!ed.readOnly && (
-          <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-              <button className={chip}>{data.handle ? "Change" : "Pick an element"}</button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-1.5" align="start" collisionPadding={12}>
-              {visual.length ? (
-                <div className="max-h-72 overflow-y-auto">
-                  {visual.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => {
-                        ed.update(id, { elementId: e.id, handle: e.handle, name: e.name, preview: e.references[0], label: data.label });
-                        setOpen(false);
-                      }}
-                      className={cn("flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-accent", e.id === data.elementId && "bg-brand-faint")}
-                    >
-                      <span className="size-8 shrink-0 overflow-hidden rounded-md bg-muted">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        {e.references[0] && <img src={e.references[0]} alt="" className="size-full object-cover" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium">{e.name}</span>
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          @{e.handle} · {e.kind}
-                        </span>
-                      </span>
-                      {e.id === data.elementId && <Check className="size-3.5 text-brand-text" />}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="p-3 text-[13px] text-muted-foreground">
-                  No elements yet.{" "}
-                  <Link href="/elements" className="text-brand-text underline-offset-4 hover:underline">
-                    Create one
-                  </Link>
-                </p>
-              )}
-            </PopoverContent>
-          </Popover>
-        )}
+        {!readOnly && <ElementPicker data={data} onPick={(patch) => actions.update(id, patch)} />}
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
 
 // ---------------------------------------------------------------------------
 // Output preview and notes
 
-const OutputNode = memo(function OutputNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
-  const nodes = useMemo(() => new Map(ed.graph.nodes.map((n) => [n.id, n])), [ed.graph.nodes]);
-  // The saved width (templates set one), not React Flow's measured width (that would feed back).
-  const width = nodes.get(id)?.width;
-  const sources = ed.graph.edges
+type Source = Pick<CanvasNode, "id" | "type" | "data">;
+
+const sameSources = (a: Source[], b: Source[]) => a.length === b.length && a.every((s, i) => s.id === b[i].id && s.type === b[i].type && s.data === b[i].data);
+
+/** What feeds an Output node, top to bottom. */
+const selectSources = (s: EditorSnapshot, id: string): Source[] =>
+  s.graph.edges
     .filter((e) => e.target === id)
-    .map((e) => nodes.get(e.source))
+    .map((e) => s.byId.get(e.source))
     .filter((n): n is CanvasNode => !!n)
-    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+    .map((n) => ({ id: n.id, type: n.type, data: n.data }));
+
+/** The saved width (templates set one), not React Flow's measured width (that would feed back). */
+const selectWidth = (s: EditorSnapshot, id: string) => s.byId.get(id)?.width;
+
+const OutputNode = memo(function OutputNode({ id, type, data, selected }: NodeProps<FlowNode>) {
+  const actions = useEditorActions();
+  // Re-renders only when that list or one of those nodes changes.
+  const sources = useEditorSelector(selectSources, id, sameSources);
+  const width = useEditorSelector(selectWidth, id);
   const w = width ?? (sources.length > 1 ? 560 : 320);
-  const menu: MenuItem[] = [{ label: "Run what feeds this", icon: Play, onSelect: () => ed.run([id]) }, ...baseMenu(ed, id)];
+  const menu: MenuItem[] = [{ label: "Run what feeds this", icon: Play, onSelect: () => actions.run([id]) }];
   return (
     <NodeShell id={id} type={type} data={data} selected={!!selected} menu={menu} width={w}>
       <div className="relative p-3">
@@ -888,13 +1131,13 @@ const OutputNode = memo(function OutputNode({ id, type, data, selected }: NodePr
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
 
-function SourcePreview({ node }: { node: CanvasNode }) {
-  const ed = useEditor();
+function SourcePreview({ node }: { node: Source }) {
+  const actions = useEditorActions();
+  const r = useNodeResults(node.id);
   if (isGenerator(node)) {
-    const r = ed.results(node.id);
-    if (r.outputs.length) return <OutputThumb o={r.outputs[0].o} onOpen={() => ed.open(node.id, 0)} large />;
+    if (r.outputs.length) return <OutputThumb o={r.outputs[0].o} onOpen={() => actions.open(node.id, 0)} large />;
     if (r.state !== "idle") return <Results id={node.id} r={r} compact />;
     return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-subtle-foreground">Not run yet</div>;
   }
@@ -905,15 +1148,17 @@ function SourcePreview({ node }: { node: CanvasNode }) {
 }
 
 const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<FlowNode>) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} menu={baseMenu(ed, id)} width={240} tone="note">
+    <NodeShell id={id} type={type} data={data} selected={!!selected} width={240} tone="note">
       <div className="p-3">
         <textarea
           value={data.text ?? ""}
-          onChange={(e) => ed.update(id, { text: e.target.value })}
-          readOnly={ed.readOnly}
+          onChange={(e) => actions.update(id, { text: e.target.value })}
+          readOnly={readOnly}
           rows={3}
+          maxLength={CANVAS_TEXT_MAX}
           placeholder="A note for this board"
           aria-label="Note"
           className={cn("field-sizing-content max-h-72 min-h-16 w-full resize-none bg-transparent text-[13px] leading-snug outline-none placeholder:text-muted-foreground", NO_DRAG)}
@@ -921,7 +1166,7 @@ const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<
       </div>
     </NodeShell>
   );
-});
+}, sameNodeProps);
 
 export const NODE_TYPES = {
   prompt: PromptNode,

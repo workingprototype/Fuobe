@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useGenerationStream } from "@/lib/api";
 import type { Canvas, CanvasGraph, CanvasPlan, CanvasSummary } from "@/lib/catalog/canvas";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
@@ -9,7 +9,7 @@ import type { Engine, Generation } from "@/lib/catalog/types";
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw Object.assign(new Error(body.error ?? `Request failed (${res.status})`), { body });
+  if (!res.ok) throw Object.assign(new Error(body.error ?? `Request failed (${res.status})`), { body, status: res.status });
   return body;
 }
 
@@ -31,10 +31,12 @@ export function useCanvases() {
 }
 
 /**
- * One canvas with its nodes' generations. Polls while something renders (slower when the live
- * stream delivers updates).
+ * One canvas with its nodes' generations. The app's shared live stream (src/lib/api.ts) patches
+ * the generations as jobs move, are trashed or restored; polling is the fallback while something
+ * renders (a slow safety net when the stream is connected).
  */
-export function useCanvasView(id: string, live: boolean) {
+export function useCanvasView(id: string) {
+  const live = useGenerationStream();
   return useQuery({
     queryKey: ["canvases", id],
     queryFn: async () => json<CanvasView>(await fetch(`/api/canvases/${id}`)),
@@ -108,44 +110,4 @@ export function useRunCanvas(id: string) {
       void qc.invalidateQueries({ queryKey: ["canvases"], exact: true });
     },
   });
-}
-
-/**
- * Live generation updates from GET /api/generations/stream (when this install has it): patches the
- * canvas view as soon as a node's job moves. Returns whether the stream is connected; without it
- * the view falls back to polling.
- */
-export function useLiveGenerations(id: string): boolean {
-  const qc = useQueryClient();
-  const [live, setLive] = useState(false);
-  const failed = useRef(false);
-  useEffect(() => {
-    if (failed.current || typeof EventSource === "undefined") return;
-    const es = new EventSource("/api/generations/stream");
-    es.onopen = () => setLive(true);
-    es.onerror = () => {
-      // A missing endpoint (404) or a dropped connection: poll instead; don't hammer the server.
-      if (es.readyState === EventSource.CLOSED) {
-        failed.current = true;
-        setLive(false);
-      }
-    };
-    es.addEventListener("generation", (e) => {
-      let g: Generation;
-      try {
-        g = JSON.parse((e as MessageEvent<string>).data) as Generation;
-      } catch {
-        return;
-      }
-      qc.setQueryData<CanvasView>(["canvases", id], (old) => {
-        if (!old || !old.generations.some((x) => x.id === g.id)) return old;
-        return { ...old, generations: old.generations.map((x) => (x.id === g.id ? g : x)) };
-      });
-    });
-    return () => {
-      es.close();
-      setLive(false);
-    };
-  }, [id, qc]);
-  return live;
 }

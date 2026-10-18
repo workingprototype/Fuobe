@@ -1,7 +1,7 @@
 "use client";
 
 import { PanelLeftClose, Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { NodeGroup, PaletteItem } from "@/lib/catalog/canvas";
@@ -14,7 +14,7 @@ const GROUPS: NodeGroup[] = ["Inputs", "Generate", "Utilities", "Output"];
 const matches = (p: PaletteItem, q: string) => !q || `${p.label} ${p.description} ${p.keywords ?? ""}`.toLowerCase().includes(q.toLowerCase());
 
 /** The left-hand node palette (desktop): search, drag onto the board or click to add in the middle. */
-export function Palette({ items, onAdd, onClose }: { items: PaletteItem[]; onAdd: (p: PaletteItem) => void; onClose: () => void }) {
+export const Palette = memo(function Palette({ items, onAdd, onClose }: { items: PaletteItem[]; onAdd: (p: PaletteItem) => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const shown = useMemo(() => items.filter((p) => matches(p, q)), [items, q]);
   return (
@@ -47,6 +47,20 @@ export function Palette({ items, onAdd, onClose }: { items: PaletteItem[]; onAdd
             <div key={group}>
               <p className="px-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group}</p>
               {list.map((p) => {
+                // An entry with no model on the only engine this install allows: shown, with why, but not addable.
+                if (p.disabled) {
+                  return (
+                    <div key={p.id} className="flex w-full cursor-not-allowed items-start gap-2.5 rounded-lg px-1.5 py-1.5 text-left opacity-60" title={p.disabled} aria-disabled="true">
+                      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+                        <NodeIcon name={p.icon} className="size-3.5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-medium">{p.label}</span>
+                        <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">{p.disabled}</span>
+                      </span>
+                    </div>
+                  );
+                }
                 return (
                   <button
                     key={p.id}
@@ -76,7 +90,7 @@ export function Palette({ items, onAdd, onClose }: { items: PaletteItem[]; onAdd
       </div>
     </aside>
   );
-}
+});
 
 export function PaletteToggle({ onOpen }: { onOpen: () => void }) {
   return (
@@ -123,9 +137,10 @@ export function AddMenu({ x, y, items, title, onPick, onClose }: { x: number; y:
               <CommandGroup key={group} heading={group}>
                 {list.map((p) => {
                   return (
-                    <CommandItem key={p.id} value={`${p.label} ${p.keywords ?? ""}`} onSelect={() => onPick(p)} className="gap-2">
+                    <CommandItem key={p.id} value={`${p.label} ${p.keywords ?? ""}`} onSelect={() => onPick(p)} disabled={!!p.disabled} title={p.disabled} className="gap-2">
                       <NodeIcon name={p.icon} className="size-4 text-muted-foreground" />
                       <span className="truncate text-[13px]">{p.label}</span>
+                      {p.disabled && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">not on this engine</span>}
                     </CommandItem>
                   );
                 })}

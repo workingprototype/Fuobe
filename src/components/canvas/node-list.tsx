@@ -1,30 +1,45 @@
 "use client";
 
-import { AlertCircle, PinOff, Play, RotateCcw, Square, Upload } from "lucide-react";
+import { AlertCircle, PinOff, Play, RotateCcw, Sparkles, Square, Upload } from "lucide-react";
+import Link from "next/link";
 import { useRef } from "react";
+import { Button } from "@/components/ui/button";
 import { getModel } from "@/lib/catalog";
-import { isGenerator, NODE_SPECS, nodeLabel, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
+import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, promptPlaceholder, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
 import type { MediaKind } from "@/lib/catalog/types";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { cn } from "@/lib/utils";
-import { NodeIcon, useEditor } from "./canvas-context";
-import { costLabel, EngineBadge, MediaPreview, OutputThumb, Results } from "./nodes";
+import { EMPTY_VIEW, NodeIcon, useEditorActions, useEditorSnapshot } from "./canvas-context";
+import { costLabel, ElementPicker, EngineBadge, LibraryButton, MediaPreview, OutputThumb, Results } from "./nodes";
 
 const KIND: Partial<Record<CanvasNode["type"], MediaKind>> = { "image-input": "image", "video-input": "video", "audio-input": "audio" };
 
 const field = "field-sizing-content max-h-40 min-h-12 w-full resize-none rounded-lg bg-muted px-3 py-2 text-[15px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint";
+const pill = "inline-flex h-9 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium";
 
 /**
- * The phone view of a canvas: every node in run order as a card, with its text, files, results
- * and a Run button. Wiring stays on the board (pan and zoom it on the Board tab).
+ * The phone view of a canvas: every node in run order as a card, with its text, files (upload or
+ * library), elements, results and a Run button. Wiring stays on the board (pan and zoom it on the Board tab).
  */
-export function NodeList() {
-  const ed = useEditor();
-  const byId = new Map(ed.graph.nodes.map((n) => [n.id, n]));
-  const { order, cyclic } = topoOrder(ed.graph);
+export function NodeList({ onQuickStart }: { onQuickStart: () => void }) {
+  const { graph } = useEditorSnapshot();
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const { order, cyclic } = topoOrder(graph);
   const nodes = [...order, ...cyclic].map((id) => byId.get(id)!).filter((n) => n && n.type !== "note");
   if (!nodes.length) {
-    return <p className="px-6 py-16 text-center text-[15px] text-muted-foreground">This canvas is empty. Add nodes on a larger screen, or start from a template.</p>;
+    return (
+      <div className="px-6 py-16 text-center">
+        <p className="text-[15px] text-muted-foreground">This canvas is empty. Start with a ready-made chain, or pick a template.</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button className="rounded-full" onClick={onQuickStart}>
+            <Sparkles /> Start with Text → Image
+          </Button>
+          <Button variant="secondary" className="rounded-full" asChild>
+            <Link href="/canvas?tab=templates">Browse templates</Link>
+          </Button>
+        </div>
+      </div>
+    );
   }
   return (
     <ol className="space-y-3 px-4 pt-3 pb-24" aria-label="Nodes in run order">
@@ -38,17 +53,18 @@ export function NodeList() {
 }
 
 function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
-  const ed = useEditor();
+  const actions = useEditorActions();
+  const { graph, views, globals } = useEditorSnapshot();
   const model = node.data.modelId ? getModel(node.data.modelId) : undefined;
   const kind = KIND[node.type];
   const file = useRef<HTMLInputElement>(null);
   const gen = isGenerator(node);
-  const r = ed.results(node.id);
-  const desc = gen ? ed.describe(node.id) : undefined;
-  const step = ed.plan.steps.find((s) => s.nodeId === node.id);
+  const v = views.get(node.id) ?? EMPTY_VIEW;
+  const r = v.results;
+  const step = v.step;
   const running = r.state === "running" || r.state === "queued";
-  const error = ed.runErrors[node.id] ?? desc?.error;
-  const sources = node.type === "output" ? ed.graph.edges.filter((e) => e.target === node.id).map((e) => ed.graph.nodes.find((x) => x.id === e.source)).filter((x): x is CanvasNode => !!x) : [];
+  const error = v.runError ?? v.error;
+  const sources = node.type === "output" ? graph.edges.filter((e) => e.target === node.id).map((e) => graph.nodes.find((x) => x.id === e.source)).filter((x): x is CanvasNode => !!x) : [];
   return (
     <article className="rounded-xl border bg-card p-3 shadow-soft" data-testid={`canvas-card-${node.id}`}>
       <header className="flex items-center gap-2">
@@ -58,22 +74,27 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
         <EngineBadge model={model} />
         {gen && (
           <button
-            onClick={() => (running ? ed.cancel(node.id) : node.data.pinned ? ed.update(node.id, { pinned: false }) : ed.run([node.id], !step))}
+            onClick={() => (running ? actions.cancel(node.id) : node.data.pinned ? actions.update(node.id, { pinned: false }) : actions.run([node.id], !step))}
             className={cn("grid size-9 shrink-0 place-items-center rounded-full", running || node.data.pinned ? "bg-muted" : "bg-primary text-primary-foreground")}
-            aria-label={running ? "Cancel" : node.data.pinned ? "Unpin result" : step ? "Run node" : "Run it again"}
+            aria-label={running ? `Cancel ${nodeLabel(node)}` : node.data.pinned ? `Unpin ${nodeLabel(node)}` : step ? `Run ${nodeLabel(node)}` : `Run ${nodeLabel(node)} again`}
           >
             {running ? <Square className="size-3.5" /> : node.data.pinned ? <PinOff className="size-4" /> : step ? <Play className="size-4" /> : <RotateCcw className="size-4" />}
           </button>
         )}
       </header>
       <div className="mt-2.5 space-y-2.5">
-        {node.type === "prompt" && <textarea value={node.data.text ?? ""} onChange={(e) => ed.update(node.id, { text: e.target.value })} className={field} aria-label="Text" placeholder="Write the text" />}
+        {node.type === "prompt" && (
+          <textarea value={node.data.text ?? ""} onChange={(e) => actions.update(node.id, { text: e.target.value })} maxLength={CANVAS_TEXT_MAX} className={field} aria-label={`Text of ${nodeLabel(node)}`} placeholder="Write the text" />
+        )}
         {kind && (
           <>
             {node.data.url ? <MediaPreview kind={kind} url={node.data.url} /> : <p className="text-[13px] text-muted-foreground">No file yet.</p>}
-            <button onClick={() => file.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium">
-              <Upload className="size-4" /> {node.data.url ? "Replace" : "Upload"}
-            </button>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => file.current?.click()} className={pill}>
+                <Upload className="size-4" /> {node.data.url ? "Replace" : "Upload"}
+              </button>
+              <LibraryButton kind={kind} className={pill} onPick={(url, name) => actions.update(node.id, { url, name })} />
+            </div>
             <input
               ref={file}
               type="file"
@@ -81,20 +102,32 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
               accept={`${kind}/*`}
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) void fileToSlot(f, (v) => v && !v.uploading && ed.update(node.id, { url: v.ref, name: v.name }), kind);
+                if (f) void fileToSlot(f, (s) => s && !s.uploading && actions.update(node.id, { url: s.ref, name: s.name }), kind);
                 e.target.value = "";
               }}
             />
           </>
         )}
-        {node.type === "element" && <p className="font-mono text-[13px] text-brand-text">{node.data.handle ? `@${node.data.handle}` : "No element picked"}</p>}
+        {node.type === "element" && (
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 flex-1 truncate font-mono text-[13px] text-brand-text">{node.data.handle ? `@${node.data.handle}` : "No element picked"}</p>
+            <ElementPicker data={node.data} className={pill} onPick={(patch) => actions.update(node.id, patch)} />
+          </div>
+        )}
         {gen && (
           <>
             <p className="text-[12px] text-muted-foreground">
-              {model?.name ?? "No model"} · {costLabel(ed, model, desc?.costUsd ?? null)}
+              {model?.name ?? "No model"} · {costLabel(globals.isDemo, model, v.costUsd)}
             </p>
             {node.data.prompt !== undefined || node.type === "model" ? (
-              <textarea value={node.data.prompt ?? ""} onChange={(e) => ed.update(node.id, { prompt: e.target.value })} className={field} aria-label="Prompt" placeholder="Prompt (connected text joins in)" />
+              <textarea
+                value={node.data.prompt ?? ""}
+                onChange={(e) => actions.update(node.id, { prompt: e.target.value })}
+                maxLength={CANVAS_TEXT_MAX}
+                className={field}
+                aria-label={`Prompt for ${nodeLabel(node)}`}
+                placeholder={promptPlaceholder(v.op)}
+              />
             ) : null}
             <Results id={node.id} r={r} />
           </>
@@ -103,15 +136,15 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
           (sources.length ? (
             <div className="grid grid-cols-2 gap-2">
               {sources.flatMap((s) => {
-                const out = ed.results(s.id).outputs[0];
-                return out ? [<OutputThumb key={s.id} o={out.o} onOpen={() => ed.open(s.id, 0)} />] : [];
+                const out = views.get(s.id)?.results.outputs[0];
+                return out ? [<OutputThumb key={s.id} o={out.o} onOpen={() => actions.open(s.id, 0)} />] : [];
               })}
             </div>
           ) : (
             <p className="text-[13px] text-muted-foreground">Nothing connected.</p>
           ))}
         {error && r.state !== "failed" && (
-          <p className={cn("flex items-start gap-1.5 text-[13px] leading-snug", ed.runErrors[node.id] ? "text-destructive" : "text-warning")}>
+          <p className={cn("flex items-start gap-1.5 text-[13px] leading-snug", v.runError ? "text-destructive" : "text-warning")}>
             <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
             {error}
           </p>

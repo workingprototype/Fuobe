@@ -21,9 +21,9 @@ import {
   ZoomIn,
   type LucideIcon,
 } from "lucide-react";
-import { createContext, useContext } from "react";
-import type { CanvasGraph, CanvasNodeData, CanvasPlan, NodeDescription, PortType } from "@/lib/catalog/canvas";
-import type { Engine, Generation, GenerationStatus, ModelDef, OutputFile } from "@/lib/catalog/types";
+import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+import { effectiveOp, isGenerator, type CanvasGraph, type CanvasNode, type CanvasNodeData, type CanvasPlan, type Connection, type NodeDescription, type PortType, type RunReason } from "@/lib/catalog/canvas";
+import type { Engine, Generation, GenerationStatus, ModelDef, Operation, OutputFile } from "@/lib/catalog/types";
 import type { EngineMode } from "@/lib/api";
 
 export const ICONS: Record<string, LucideIcon> = {
@@ -94,21 +94,138 @@ export function foldResults(gens: Generation[]): NodeResults {
   };
 }
 
-export interface EditorApi {
+/** The same results object when the node's generations are the very same objects (memoized nodes skip a render). */
+export function foldResultsKeep(prev: NodeResults | undefined, gens: Generation[]): NodeResults {
+  if (prev && prev.gens.length === gens.length && prev.gens.every((g, i) => g === gens[i])) return prev;
+  return foldResults(gens);
+}
+
+// ---------------------------------------------------------------------------
+// The editor's state, as nodes read it.
+//
+// Every node subscribes to the slice it shows (its own NodeView, a few globals) instead of one
+// context object that changes on every keystroke: editing node A re-renders A, not the board.
+
+/** Everything a generator node shows that depends on the rest of the board. */
+export interface NodeView {
+  /** The op it runs (an Auto model node's inferred op, a utility's fixed op). */
+  op?: Operation;
+  /** Edges into each input handle, e.g. { prompt: 1, images: 2 }. */
+  counts: Readonly<Record<string, number>>;
+  /** What to fix before it can run (pick a model, add an image…). */
+  error?: string;
+  /** One run's estimate (null = unknown). */
+  costUsd: number | null;
+  /** Why Run all would run it; null when its result is reused (or it can't run). */
+  step: RunReason | null;
+  reused: boolean;
+  /** The server's error for this node from the last run. */
+  runError?: string;
+  results: NodeResults;
+}
+
+export const EMPTY_VIEW: NodeView = { counts: {}, costUsd: null, step: null, reused: false, results: EMPTY_RESULTS };
+
+/** Board-wide settings the nodes read (they change rarely). */
+export interface EditorGlobals {
   canvasId: string;
-  graph: CanvasGraph;
-  plan: CanvasPlan;
-  describe: (id: string) => NodeDescription | undefined;
-  results: (id: string) => NodeResults;
-  /** Errors the server gave the last run, per node. */
-  runErrors: Record<string, string>;
   engine: Engine;
   mode: EngineMode;
   /** Phone: pan, zoom and tap only. */
   readOnly: boolean;
+  /** A run request is in flight. */
   running: boolean;
   /** True when this model would run on the demo provider (no key / no ComfyUI). */
   isDemo: (m: ModelDef) => boolean;
+}
+
+export interface EditorSnapshot {
+  /** The board as it is now. */
+  graph: CanvasGraph;
+  byId: ReadonlyMap<string, CanvasNode>;
+  plan: CanvasPlan;
+  views: ReadonlyMap<string, NodeView>;
+  globals: EditorGlobals;
+}
+
+const sameCounts = (a: Readonly<Record<string, number>>, b: Readonly<Record<string, number>>) => {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+};
+
+const sameView = (a: NodeView, b: NodeView) =>
+  a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
+
+/**
+ * One NodeView per generator node, keeping the previous object whenever nothing it shows changed
+ * (so its memoized node doesn't re-render).
+ */
+export function buildViews(
+  prev: ReadonlyMap<string, NodeView> | null,
+  graph: CanvasGraph,
+  plan: CanvasPlan,
+  describe: (id: string) => NodeDescription | undefined,
+  results: ReadonlyMap<string, NodeResults>,
+  runErrors: Record<string, string>,
+): Map<string, NodeView> {
+  const counts = new Map<string, Record<string, number>>();
+  for (const e of graph.edges) {
+    if (!e.targetHandle) continue;
+    const c = counts.get(e.target) ?? {};
+    c[e.targetHandle] = (c[e.targetHandle] ?? 0) + 1;
+    counts.set(e.target, c);
+  }
+  const steps = new Map(plan.steps.map((s) => [s.nodeId, s.reason]));
+  const reused = new Set(plan.reused.map((r) => r.nodeId));
+  const out = new Map<string, NodeView>();
+  for (const n of graph.nodes) {
+    if (!isGenerator(n)) continue;
+    const d = describe(n.id);
+    const next: NodeView = {
+      op: effectiveOp(graph, n),
+      counts: counts.get(n.id) ?? EMPTY_VIEW.counts,
+      error: d?.error,
+      costUsd: d?.costUsd ?? null,
+      step: steps.get(n.id) ?? null,
+      reused: reused.has(n.id),
+      runError: runErrors[n.id],
+      results: results.get(n.id) ?? EMPTY_RESULTS,
+    };
+    const old = prev?.get(n.id);
+    out.set(n.id, old && sameView(old, next) ? old : next);
+  }
+  return out;
+}
+
+/**
+ * A tiny external store: the editor publishes a snapshot after each commit, nodes select from it.
+ * The editor also peeks at the last snapshot to keep unchanged NodeViews (and results) identical.
+ */
+export class EditorStore {
+  private snap: EditorSnapshot | null = null;
+  private listeners = new Set<() => void>();
+  get = (): EditorSnapshot => this.snap!;
+  /** The last published snapshot (null before the first render). */
+  peek(): EditorSnapshot | null {
+    return this.snap;
+  }
+  /** The first render's snapshot, so the nodes' first render reads real values (nobody listens yet). */
+  prime(first: EditorSnapshot) {
+    if (!this.snap) this.snap = first;
+  }
+  set(next: EditorSnapshot) {
+    if (next === this.snap) return;
+    this.snap = next;
+    this.listeners.forEach((l) => l());
+  }
+  subscribe = (l: () => void) => {
+    this.listeners.add(l);
+    return () => void this.listeners.delete(l);
+  };
+}
+
+/** What nodes can do to the board. The object never changes, so it never re-renders a node. */
+export interface EditorActions {
   update: (id: string, patch: Partial<CanvasNodeData>) => void;
   remove: (id: string) => void;
   duplicate: (id: string) => void;
@@ -117,12 +234,71 @@ export interface EditorApi {
   open: (id: string, index?: number) => void;
   /** Add an input node holding this node's first output, wired nowhere yet. */
   toInput: (id: string) => void;
+  /** Draw an edge (the keyboard's "Connect output to…"). */
+  connect: (c: Connection) => void;
+  /** Remove an edge (the keyboard's "Disconnect"). */
+  disconnect: (edgeId: string) => void;
+  /** The board right now, read in event handlers and menus (not a subscription). */
+  getGraph: () => CanvasGraph;
 }
 
-export const EditorContext = createContext<EditorApi | null>(null);
+export const EditorStoreContext = createContext<EditorStore | null>(null);
+export const EditorActionsContext = createContext<EditorActions | null>(null);
 
-export function useEditor(): EditorApi {
-  const v = useContext(EditorContext);
-  if (!v) throw new Error("useEditor outside the canvas editor");
-  return v;
+function useStore(): EditorStore {
+  const s = useContext(EditorStoreContext);
+  if (!s) throw new Error("Canvas node outside the editor");
+  return s;
+}
+
+export function useEditorActions(): EditorActions {
+  const a = useContext(EditorActionsContext);
+  if (!a) throw new Error("Canvas node outside the editor");
+  return a;
+}
+
+/**
+ * Select a slice of the editor's state. The component re-renders only when the slice changes
+ * (by `isEqual`). `key` is the selector's only input besides the snapshot (a node id).
+ */
+export function useEditorSelector<T>(selector: (s: EditorSnapshot, key: string) => T, key: string, isEqual: (a: T, b: T) => boolean = Object.is): T {
+  const store = useStore();
+  // The selector and isEqual are module-level functions in practice; what changes is the key.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const getSnapshot = useMemo(() => cachedSelector(store, selector, key, isEqual), [store, key]);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
+}
+
+/** getSnapshot for useSyncExternalStore: the same value until the slice really changes. */
+function cachedSelector<T>(store: EditorStore, selector: (s: EditorSnapshot, key: string) => T, key: string, isEqual: (a: T, b: T) => boolean): () => T {
+  let last: { snap: EditorSnapshot; value: T } | null = null;
+  return () => {
+    const snap = store.get();
+    if (last && last.snap === snap) return last.value;
+    const value = selector(snap, key);
+    last = { snap, value: last && isEqual(last.value, value) ? last.value : value };
+    return last.value;
+  };
+}
+
+const selectView = (s: EditorSnapshot, id: string) => s.views.get(id) ?? EMPTY_VIEW;
+const selectResults = (s: EditorSnapshot, id: string) => s.views.get(id)?.results ?? EMPTY_RESULTS;
+const selectGlobals = (s: EditorSnapshot) => s.globals;
+const selectAll = (s: EditorSnapshot) => s;
+
+export function useNodeView(id: string): NodeView {
+  return useEditorSelector(selectView, id);
+}
+
+export function useNodeResults(id: string): NodeResults {
+  return useEditorSelector(selectResults, id);
+}
+
+export function useEditorGlobals(): EditorGlobals {
+  return useEditorSelector(selectGlobals, "");
+}
+
+/** The whole snapshot (the phone's node list, which shows everything anyway). */
+export function useEditorSnapshot(): EditorSnapshot {
+  return useEditorSelector(selectAll, "");
 }

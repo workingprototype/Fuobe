@@ -27,7 +27,7 @@ import {
 import { ChevronDown, ChevronLeft, Check, Cloud, Cpu, LayoutGrid, List, Loader2, Play, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -40,15 +40,17 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useEngine, useStatus } from "@/lib/api";
+import { useEngine, useStatus, type EngineMode } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
   acceptsType,
   cleanGraph,
   connectionError,
   convertEngine,
+  counterpart,
   defaultModelForNode,
   describeNode,
+  EMPTY_GRAPH,
   graphEngine,
   inputPorts,
   isGenerator,
@@ -72,14 +74,30 @@ import {
 import type { Engine, MediaKind, ModelDef } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { EditorContext, EMPTY_RESULTS, foldResults, PORT_COLOR, type EditorApi, type NodeResults } from "./canvas-context";
+import {
+  buildViews,
+  EditorActionsContext,
+  EditorStore,
+  EditorStoreContext,
+  foldResultsKeep,
+  PORT_COLOR,
+  type EditorActions,
+  type EditorGlobals,
+  type EditorSnapshot,
+  type NodeResults,
+} from "./canvas-context";
 import { NodeList } from "./node-list";
 import { NODE_TYPES, type FlowNode } from "./nodes";
 import { AddMenu, DRAG_TYPE, Palette, PaletteToggle } from "./palette";
-import { saveCanvas, useCanvasView, useLiveGenerations, useRunCanvas, type CanvasView } from "./use-canvas";
+import { saveCanvas, useCanvasView, useRunCanvas, type CanvasView } from "./use-canvas";
 
 const GRID: [number, number] = [16, 16];
 const snap = (p: { x: number; y: number }) => ({ x: Math.round(p.x / GRID[0]) * GRID[0], y: Math.round(p.y / GRID[1]) * GRID[1] });
+
+/** Palette width plus its margin: the board's fit leaves this side free while the palette is open. */
+const PALETTE_SPACE = 292;
+/** Below this zoom a board's text is too small to read with the palette open: the first fit hides the palette instead. */
+const READABLE_ZOOM = 0.5;
 
 const toFlowNode = (n: CanvasNode): FlowNode => ({ id: n.id, type: n.type, position: n.position, data: n.data, ...(n.type === "output" && n.width ? { width: n.width } : {}) });
 const toFlowEdge = (e: CanvasEdge): Edge => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? OUT, targetHandle: e.targetHandle ?? null });
@@ -104,13 +122,15 @@ function pruneEdges(nodes: FlowNode[], edges: Edge[]): Edge[] {
   return edges.filter((e) => keep.has(e.id));
 }
 
+/** What a node's output handle carries (no graph walk: the node alone decides). */
+const typeOfNode = (n: Pick<FlowNode, "id" | "type" | "data">): PortType | null => outputType(EMPTY_GRAPH, { id: n.id, type: n.type as CanvasNode["type"], data: n.data, position: { x: 0, y: 0 } });
+
 const KIND_INPUT: Record<string, CanvasNode["type"]> = { image: "image-input", video: "video-input", audio: "audio-input" };
 
 // ---------------------------------------------------------------------------
 
 export function CanvasEditor({ id }: { id: string }) {
-  const live = useLiveGenerations(id);
-  const view = useCanvasView(id, live);
+  const view = useCanvasView(id);
   if (view.isLoading) return <EditorSkeleton />;
   if (!view.data) {
     return (
@@ -171,6 +191,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const [engine, setEngine, mode] = useEngine();
   const status = useStatus().data;
   const runM = useRunCanvas(id);
+  const runMutate = runM.mutate;
 
   const [nodes, setNodes] = useState<FlowNode[]>(() => initial.graph.nodes.map(toFlowNode));
   const [edges, setEdges] = useState<Edge[]>(() => initial.graph.edges.map(toFlowEdge));
@@ -181,21 +202,27 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const [viewer, setViewer] = useState<{ nodeId: string; index: number } | null>(null);
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  /** A save the server refused (a 4xx): retrying won't help, the next edit tries again. */
+  const [saveRefused, setSaveRefused] = useState(false);
   const [rev, setRev] = useState(0);
   const wrapper = useRef<HTMLDivElement>(null);
   const viewport = useRef<Viewport | undefined>(initial.graph.viewport);
   const savedRev = useRef(0);
+  const savedName = useRef(initial.name);
 
-  // Latest state for event handlers (synced right after each commit).
-  const latest = useRef({ nodes, edges });
+  // Latest state for event handlers and the save on leave (synced right after each commit).
+  const latest = useRef({ nodes, edges, rev });
   useLayoutEffect(() => {
-    latest.current = { nodes, edges };
-  }, [nodes, edges]);
+    latest.current = { nodes, edges, rev };
+  }, [nodes, edges, rev]);
 
   const touch = useCallback(() => setRev((r) => r + 1), []);
 
-  // ---- derived: graph, plan, results
+  // ---- derived: graph, plan, results, and the per-node views the nodes subscribe to
+  const [store] = useState(() => new EditorStore());
+  const prev = store.peek();
   const graph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
+  const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const planned = useDeferredValue(graph);
   const runs = view.canvas.runs;
   const gens = useMemo(() => new Map(view.generations.map((g) => [g.id, g])), [view.generations]);
@@ -208,28 +235,22 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   }, [planned, mode]);
   const results = useMemo(() => {
     const m = new Map<string, NodeResults>();
-    for (const [nodeId, r] of Object.entries(runs)) m.set(nodeId, foldResults(r.ids.map((g) => gens.get(g)).filter((g): g is NonNullable<typeof g> => !!g)));
+    for (const [nodeId, r] of Object.entries(runs)) {
+      const list = r.ids.map((g) => gens.get(g)).filter((g): g is NonNullable<typeof g> => !!g);
+      m.set(nodeId, foldResultsKeep(prev?.views.get(nodeId)?.results, list));
+    }
     return m;
+    // `prev` only lends unchanged objects (identity), it isn't an input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runs, gens]);
+  const views = useMemo(
+    () => buildViews(prev?.views ?? null, planned, plan, (nid) => descriptions.get(nid), results, runErrors),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [planned, plan, descriptions, results, runErrors],
+  );
   const selected = useMemo(() => nodes.filter((n) => n.selected).map((n) => n.id), [nodes]);
   const busy = [...results.values()].filter((r) => r.state === "running" || r.state === "queued").length;
   const generators = graph.nodes.filter(isGenerator);
-
-  // Fit around the nodes, leaving the palette's side free.
-  const fitOptions = useMemo<FitViewOptions<FlowNode>>(
-    () => ({ padding: { top: "56px", right: "56px", bottom: "56px", left: paletteOpen && !isMobile ? "292px" : isMobile ? "16px" : "56px" }, maxZoom: 1, minZoom: isMobile ? 0.3 : 0.5 }),
-    [paletteOpen, isMobile],
-  );
-  // Phones always start fitted (a viewport saved on a big screen would show an empty board).
-  const savedViewport = isMobile ? undefined : initial.graph.viewport;
-  // Fit once every node has its size (React Flow's own fitView can run after the first few only).
-  const initialized = useNodesInitialized();
-  const fitted = useRef(false);
-  useEffect(() => {
-    if (!initialized || fitted.current) return;
-    fitted.current = true;
-    if (!savedViewport && latest.current.nodes.length) void rf.fitView(fitOptions);
-  }, [initialized, savedViewport, rf, fitOptions]);
 
   const isDemo = useCallback(
     (m: ModelDef) => {
@@ -240,56 +261,116 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     },
     [status],
   );
+  const globals = useMemo<EditorGlobals>(() => ({ canvasId: id, engine, mode, readOnly: isMobile, running: runM.isPending, isDemo }), [id, engine, mode, isMobile, runM.isPending, isDemo]);
+  const snapshot = useMemo<EditorSnapshot>(() => ({ graph, byId, plan, views, globals }), [graph, byId, plan, views, globals]);
+  store.prime(snapshot);
+  useLayoutEffect(() => store.set(snapshot), [store, snapshot]);
+
+  // Fit around the nodes, leaving the palette's side free.
+  const fitFor = useCallback(
+    (withPalette: boolean): FitViewOptions<FlowNode> => ({
+      padding: { top: "56px", right: "56px", bottom: "56px", left: withPalette && !isMobile ? `${PALETTE_SPACE}px` : isMobile ? "16px" : "56px" },
+      maxZoom: 1,
+      minZoom: isMobile ? 0.3 : 0.5,
+    }),
+    [isMobile],
+  );
+  const fitOptions = useMemo(() => fitFor(paletteOpen), [fitFor, paletteOpen]);
+  // Phones always start fitted (a viewport saved on a big screen would show an empty board).
+  const savedViewport = isMobile ? undefined : initial.graph.viewport;
+  // The first fit, once every node has its size: a big board may zoom further out than later fits,
+  // and when it would be too small to read beside the palette, the palette folds away instead.
+  const initialized = useNodesInitialized();
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (!initialized || fitted.current) return;
+    fitted.current = true;
+    if (savedViewport || !latest.current.nodes.length) return;
+    const frame = requestAnimationFrame(() => {
+      const rect = wrapper.current?.getBoundingClientRect();
+      let withPalette = paletteOpen && !isMobile;
+      if (withPalette && rect) {
+        const b = rf.getNodesBounds(latest.current.nodes);
+        const zoom = Math.min((rect.width - PALETTE_SPACE - 56) / Math.max(1, b.width), (rect.height - 112) / Math.max(1, b.height));
+        if (zoom < READABLE_ZOOM) {
+          withPalette = false;
+          setPaletteOpen(false);
+        }
+      }
+      void rf.fitView({ ...fitFor(withPalette), minZoom: isMobile ? 0.15 : 0.3 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialized, savedViewport, rf, fitFor, paletteOpen, isMobile]);
 
   // ---- autosave
   const save = useCallback(
     async (keepalive = false) => {
-      const at = rev;
+      const at = latest.current.rev;
       if (at === savedRev.current) return;
       setSaveState("saving");
       try {
         await saveCanvas(id, { graph: toGraph(latest.current.nodes, latest.current.edges, viewport.current) }, keepalive);
         savedRev.current = Math.max(savedRev.current, at);
         setSaveState("saved");
+        setSaveRefused(false);
         void qc.invalidateQueries({ queryKey: ["canvases"], exact: true });
-      } catch {
+      } catch (e) {
         setSaveState("error");
+        const code = (e as { status?: number }).status;
+        if (code && code >= 400 && code < 500) {
+          // Retrying the same board won't help: say what's wrong (the server names the node).
+          setSaveRefused(true);
+          toast.error((e as Error).message, { id: `canvas-save-${id}` });
+        }
       }
     },
-    [id, rev, qc],
+    [id, qc],
   );
   useEffect(() => {
     if (rev === 0) return;
     const t = setTimeout(() => void save(), 700);
     return () => clearTimeout(t);
   }, [rev, save]);
-  // Retry a failed save, and flush when the tab is hidden or closed.
+  // Retry a failed save (a network blip, a restart), and flush when the tab is hidden or closed.
   useEffect(() => {
-    if (saveState !== "error") return;
+    if (saveState !== "error" || saveRefused) return;
     const t = setTimeout(() => void save(), 4000);
     return () => clearTimeout(t);
-  }, [saveState, save]);
+  }, [saveState, saveRefused, save]);
   useEffect(() => {
     const flush = () => {
       if (document.visibilityState === "hidden") void save(true);
     };
     // Leaving with unsaved edits: send them with keepalive (no "leave site?" prompt).
-    const leave = () => {
-      if (rev !== savedRev.current) void save(true);
-    };
+    const leave = () => void save(true);
     document.addEventListener("visibilitychange", flush);
     window.addEventListener("beforeunload", leave);
     return () => {
       document.removeEventListener("visibilitychange", flush);
       window.removeEventListener("beforeunload", leave);
     };
-  }, [save, rev]);
+  }, [save]);
+  // Leaving through an in-app link (the page unmounts, or Next hides it): send what the debounce still holds.
+  const flushOnLeave = useCallback(() => {
+    const at = latest.current.rev;
+    if (at === savedRev.current) return;
+    savedRev.current = at;
+    void saveCanvas(id, { graph: toGraph(latest.current.nodes, latest.current.edges, viewport.current) }, true)
+      .then(() => qc.invalidateQueries({ queryKey: ["canvases"], exact: true }))
+      .catch(() => {
+        // Not saved after all: the next edit (or the next visit) saves again.
+        savedRev.current = -1;
+      });
+  }, [id, qc]);
+  useEffect(() => flushOnLeave, [flushOnLeave]);
 
   const rename = async (next: string) => {
     const v = next.trim();
-    if (!v || v === initial.name) return setName(v || initial.name);
+    if (!v) return setName(savedName.current);
+    if (v === savedName.current) return;
     try {
       await saveCanvas(id, { name: v });
+      savedName.current = v;
       void qc.invalidateQueries({ queryKey: ["canvases"], exact: true });
     } catch (e) {
       toast.error((e as Error).message);
@@ -341,14 +422,24 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     [touch, offerUndo],
   );
 
+  /** Copies of the nodes, wired to each other the way the originals are. */
   const duplicate = useCallback(
     (ids: string | string[]) => {
       const list = new Set(Array.isArray(ids) ? ids : [ids]);
+      const map = new Map<string, string>();
       const copies = latest.current.nodes
         .filter((n) => list.has(n.id))
-        .map((n) => ({ ...n, id: newId(n.type ?? "node"), position: { x: n.position.x + 48, y: n.position.y + 48 }, data: { ...n.data, pinned: undefined }, selected: true }));
+        .map((n) => {
+          const nid = newId(n.type ?? "node");
+          map.set(n.id, nid);
+          return { ...n, id: nid, position: { x: n.position.x + 48, y: n.position.y + 48 }, data: { ...n.data, pinned: undefined }, selected: true };
+        });
       if (!copies.length) return;
+      const wires = latest.current.edges
+        .filter((e) => map.has(e.source) && map.has(e.target))
+        .map((e) => ({ ...e, id: newId("e"), source: map.get(e.source)!, target: map.get(e.target)!, selected: false }));
       setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), ...copies]);
+      if (wires.length) setEdges((es) => [...es, ...wires]);
       touch();
     },
     [touch],
@@ -356,9 +447,11 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
 
   const addNode = useCallback(
     (item: PaletteItem, at: { x: number; y: number }, connect?: MenuState["connect"]) => {
+      if (item.disabled) return void toast(item.disabled);
       const data: CanvasNodeData = { ...item.data };
       if (isGenerator({ type: item.type })) {
-        const m = defaultModelForNode({ type: item.type, data }, engine) ?? defaultModelForNode({ type: item.type, data }, engine === "open" ? "cloud" : "open");
+        // An install locked to one engine never gets a node on the other.
+        const m = defaultModelForNode({ type: item.type, data }, engine) ?? (mode === "both" ? defaultModelForNode({ type: item.type, data }, engine === "open" ? "cloud" : "open") : undefined);
         if (m) data.modelId = m.id;
       }
       const node: FlowNode = { id: newId(item.type), type: item.type, position: snap(at), data, selected: true };
@@ -376,7 +469,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       touch();
       return node.id;
     },
-    [engine, touch],
+    [engine, mode, touch],
   );
 
   const onNodesChange = useCallback(
@@ -404,6 +497,13 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       if (err) return void toast.error(err);
       // A single input (start frame, video, audio…) takes the new edge instead of the old one.
       setEdges((es) => [...(singleInput(g, c.target, c.targetHandle) ? es.filter((e) => !(e.target === c.target && e.targetHandle === c.targetHandle)) : es), { id: newId("e"), ...c }]);
+      touch();
+    },
+    [touch],
+  );
+  const disconnect = useCallback(
+    (edgeId: string) => {
+      setEdges((es) => es.filter((e) => e.id !== edgeId));
       touch();
     },
     [touch],
@@ -436,11 +536,11 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     [openMenuAt],
   );
 
+  const palette = useMemo(() => paletteItems(mode), [mode]);
   const menuItems = useMemo(() => {
-    const all = paletteItems();
     const c = menu?.connect;
-    if (!c) return all;
-    return all.filter((p) => {
+    if (!c) return palette;
+    return palette.filter((p) => {
       const data: CanvasNodeData = { ...p.data };
       const m = isGenerator({ type: p.type }) ? defaultModelForNode({ type: p.type, data }, engine) : undefined;
       if (m) data.modelId = m.id;
@@ -448,19 +548,20 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       if (c.from === "source") return p.type === "output" ? c.type !== "element" : inputPorts(n).some((port) => acceptsType(port, c.type));
       return outputType({ nodes: [n], edges: [] }, n) === c.type;
     });
-  }, [menu, engine]);
+  }, [menu, engine, palette]);
 
   // ---- running
   const run = useCallback(
     (targets?: string[], force?: boolean) => {
-      const go = (t?: string[], f?: boolean) =>
-        runM.mutate(
+      const go = (t?: string[], f?: boolean) => {
+        const at = latest.current.rev;
+        runMutate(
           { targets: t, force: f, graph: toGraph(latest.current.nodes, latest.current.edges, viewport.current) },
           {
             onSuccess: (r) => {
               // The run saved the board too.
-              savedRev.current = rev;
-              setSaveState("saved");
+              savedRev.current = Math.max(savedRev.current, at);
+              if (latest.current.rev === savedRev.current) setSaveState("saved");
               setRunErrors(Object.fromEntries((r.errors ?? []).map((e) => [e.nodeId, e.message])));
               if (!r.ok) return void toast.error(r.error ?? "Couldn't run this");
               const issues = r.errors?.length ? `${r.errors.length} node${r.errors.length > 1 ? "s" : ""} need${r.errors.length > 1 ? "" : "s"} attention` : undefined;
@@ -470,9 +571,10 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
             onError: (e) => toast.error((e as Error).message),
           },
         );
+      };
       go(targets, force);
     },
-    [runM, rev],
+    [runMutate],
   );
 
   const cancel = useCallback(
@@ -487,31 +589,28 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     [runs, gens, qc, id],
   );
 
-  const toInput = useCallback(
-    (nodeId: string) => {
-      const src = latest.current.nodes.find((n) => n.id === nodeId);
-      const out = results.get(nodeId)?.outputs.find((x) => KIND_INPUT[x.o.kind]);
-      if (!src || !out) return;
-      const nid = newId("input");
-      setNodes((ns) => [
-        ...ns.map((n) => ({ ...n, selected: false })),
-        { id: nid, type: KIND_INPUT[out.o.kind], position: snap({ x: src.position.x, y: src.position.y + (src.measured?.height ?? 360) + 48 }), data: { url: out.o.url, label: `From ${nodeLabel(toGraph([src], []).nodes[0])}` }, selected: true },
-      ]);
-      touch();
-      toast("Added as an input — connect it anywhere");
-    },
-    [results, touch],
-  );
+  const toInput = (nodeId: string) => {
+    const src = latest.current.nodes.find((n) => n.id === nodeId);
+    const out = results.get(nodeId)?.outputs.find((x) => KIND_INPUT[x.o.kind]);
+    if (!src || !out) return;
+    const nid = newId("input");
+    setNodes((ns) => [
+      ...ns.map((n) => ({ ...n, selected: false })),
+      { id: nid, type: KIND_INPUT[out.o.kind], position: snap({ x: src.position.x, y: src.position.y + (src.measured?.height ?? 360) + 48 }), data: { url: out.o.url, label: `From ${nodeLabel(toGraph([src], []).nodes[0])}` }, selected: true },
+    ]);
+    touch();
+    toast("Added as an input — connect it anywhere");
+  };
 
   // ---- engine
   const boardEngine = graphEngine(graph) ?? engine;
   const switchEngine = (e: Engine) => {
     setEngine(e);
-    const before = latest.current.nodes;
-    const { graph: next, changed, missing } = convertEngine(toGraph(before, latest.current.edges), e);
+    const before = latest.current;
+    const { graph: next, changed, missing } = convertEngine(toGraph(before.nodes, before.edges), e);
     if (changed) {
-      const byId = new Map(next.nodes.map((n) => [n.id, n]));
-      const after = before.map((n) => ({ ...n, data: byId.get(n.id)?.data ?? n.data }));
+      const byNode = new Map(next.nodes.map((n) => [n.id, n]));
+      const after = before.nodes.map((n) => ({ ...n, data: byNode.get(n.id)?.data ?? n.data }));
       setNodes(after);
       setEdges((es) => pruneEdges(after, es));
       touch();
@@ -519,7 +618,9 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
         action: {
           label: "Undo",
           onClick: () => {
-            setNodes(before);
+            // The switch may have dropped edges into inputs the new models don't have: they come back too.
+            setNodes(before.nodes);
+            setEdges(before.edges);
             touch();
           },
         },
@@ -527,10 +628,47 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     }
     if (missing.length) toast(`${missing.length} node${missing.length > 1 ? "s have" : " has"} no ${e === "open" ? "open-source" : "cloud"} version yet`);
   };
-  const offEngine = mode === "both" ? [] : generators.filter((n) => {
-    const m = n.data.modelId ? getModel(n.data.modelId) : undefined;
-    return m && m.engine !== mode;
+  const offEngine =
+    mode === "both"
+      ? []
+      : generators.filter((n) => {
+          const m = n.data.modelId ? getModel(n.data.modelId) : undefined;
+          return m && m.engine !== mode;
+        });
+  const stuck = offEngine.filter((n) => !counterpart(graph, n, mode as Engine));
+  const switchable = offEngine.length - stuck.length;
+
+  // ---- the actions nodes call: one object for the editor's lifetime, always reaching the latest handlers
+  const handlers = useRef<EditorActions | null>(null);
+  useLayoutEffect(() => {
+    handlers.current = {
+      update,
+      remove,
+      duplicate,
+      run,
+      cancel: (nid) => void cancel(nid),
+      open: (nid, index = 0) => setViewer({ nodeId: nid, index }),
+      toInput,
+      connect: (c) => onConnect({ source: c.source, target: c.target, sourceHandle: c.sourceHandle ?? OUT, targetHandle: c.targetHandle ?? null }),
+      disconnect,
+      getGraph: () => toGraph(latest.current.nodes, latest.current.edges),
+    };
   });
+  const actions = useMemo<EditorActions>(
+    () => ({
+      update: (...a) => handlers.current!.update(...a),
+      remove: (...a) => handlers.current!.remove(...a),
+      duplicate: (...a) => handlers.current!.duplicate(...a),
+      run: (...a) => handlers.current!.run(...a),
+      cancel: (...a) => handlers.current!.cancel(...a),
+      open: (...a) => handlers.current!.open(...a),
+      toInput: (...a) => handlers.current!.toInput(...a),
+      connect: (...a) => handlers.current!.connect(...a),
+      disconnect: (...a) => handlers.current!.disconnect(...a),
+      getGraph: () => handlers.current!.getGraph(),
+    }),
+    [],
+  );
 
   // ---- keyboard: ⌘↵ runs (the selection, else everything), ⌘D duplicates
   useEffect(() => {
@@ -540,7 +678,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       if (e.key === "Enter") {
         e.preventDefault();
         const sel = latest.current.nodes.filter((n) => n.selected).map((n) => n.id);
-        run(sel.length ? sel : undefined, e.shiftKey);
+        actions.run(sel.length ? sel : undefined, e.shiftKey);
       } else if (e.key.toLowerCase() === "d" && !(e.target as HTMLElement)?.closest("input,textarea,[contenteditable]")) {
         const sel = latest.current.nodes.filter((n) => n.selected).map((n) => n.id);
         if (!sel.length) return;
@@ -550,7 +688,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, duplicate]);
+  }, [actions, duplicate]);
 
   // ---- drop from the palette, or files from the desktop
   const onDragOver = (e: React.DragEvent) => {
@@ -565,7 +703,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     if (itemId) {
       e.preventDefault();
-      const item = paletteItems().find((p) => p.id === itemId);
+      const item = palette.find((p) => p.id === itemId);
       if (item) addNode(item, at);
       return;
     }
@@ -575,9 +713,9 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     files.slice(0, 8).forEach((f, i) => {
       const kind: MediaKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
       if (!kind) return void toast.error(`${f.name} isn't an image, video or audio file`);
-      const item = paletteItems().find((p) => p.type === KIND_INPUT[kind])!;
+      const item = palette.find((p) => p.type === KIND_INPUT[kind])!;
       const nid = addNode(item, { x: at.x + i * 32, y: at.y + i * 32 });
-      void fileToSlot(f, (v) => v && !v.uploading && update(nid, { url: v.ref, name: v.name }), kind);
+      if (nid) void fileToSlot(f, (v) => v && !v.uploading && update(nid, { url: v.ref, name: v.name }), kind);
     });
   };
 
@@ -587,50 +725,46 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     addNode(item, at);
   };
 
+  /** Text prompt → image model → Output, wired (no dragging needed, so phones get it too). */
   const quickStart = () => {
     const rect = wrapper.current?.getBoundingClientRect();
     // Right of the palette, a little below the top.
-    const at = rf.screenToFlowPosition({ x: (rect?.left ?? 0) + (paletteOpen ? 300 : 80), y: (rect?.top ?? 0) + 160 });
+    const at = rf.screenToFlowPosition({ x: (rect?.left ?? 0) + (isMobile ? 16 : paletteOpen ? 300 : 80), y: (rect?.top ?? 0) + 160 });
     const items = paletteItems();
     const p = addNode(items.find((i) => i.id === "prompt")!, at);
     const m = addNode(items.find((i) => i.id === "model-image")!, { x: at.x + 360, y: at.y - 40 });
     const o = addNode(items.find((i) => i.id === "output")!, { x: at.x + 720, y: at.y });
+    if (!p || !m || !o) return;
     setEdges((es) => [...es, { id: newId("e"), source: p, sourceHandle: OUT, target: m, targetHandle: "prompt" }, { id: newId("e"), source: m, sourceHandle: OUT, target: o, targetHandle: PREVIEW_IN }]);
     setTimeout(() => void rf.fitView({ ...fitOptions, duration: 300 }), 60);
   };
 
-  // ---- edges: coloured by what they carry, animated into running nodes
-  const flowEdges = useMemo(() => {
-    const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-    return edges.map((e) => {
+  // ---- edges: coloured by what they carry, animated into running nodes. Rebuilt only when that
+  // look changes (not on every keystroke), so React Flow doesn't re-render every edge.
+  const edgeLook = edges
+    .map((e) => {
       const src = byId.get(e.source);
-      const t = src ? outputType(graph, src) : null;
       const r = results.get(e.target);
-      const live = r?.state === "running" || r?.state === "queued";
-      return { ...e, animated: live, style: { stroke: t ? PORT_COLOR[t] : undefined, strokeWidth: e.selected ? 3 : 2 } };
-    });
-  }, [edges, graph, results]);
-
-  const api: EditorApi = {
-    canvasId: id,
-    graph,
-    plan,
-    describe: (nid) => descriptions.get(nid),
-    results: (nid) => results.get(nid) ?? EMPTY_RESULTS,
-    runErrors,
-    engine,
-    mode,
-    readOnly: isMobile,
-    running: runM.isPending,
-    isDemo,
-    update,
-    remove,
-    duplicate,
-    run,
-    cancel: (nid) => void cancel(nid),
-    open: (nid, index = 0) => setViewer({ nodeId: nid, index }),
-    toInput,
-  };
+      return `${e.id}:${src ? typeOfNode(src) : ""}:${r?.state === "running" || r?.state === "queued" ? 1 : 0}`;
+    })
+    .join("|");
+  const flowEdges = useMemo(
+    () =>
+      edges.map((e) => {
+        const src = byId.get(e.source);
+        const t = src ? typeOfNode(src) : null;
+        const r = results.get(e.target);
+        const live = r?.state === "running" || r?.state === "queued";
+        return { ...e, animated: live, style: { stroke: t ? PORT_COLOR[t] : undefined, strokeWidth: e.selected ? 3 : 2 } };
+      }),
+    // byId and results are read through edgeLook (what the edges show of them).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edges, edgeLook],
+  );
+  const miniColor = useCallback((n: FlowNode) => {
+    const t = typeOfNode(n);
+    return t ? PORT_COLOR[t] : "var(--muted-foreground)";
+  }, []);
 
   const viewerEntries = viewer ? (results.get(viewer.nodeId)?.outputs ?? []) : [];
   const entry = viewer ? viewerEntries[viewer.index] : undefined;
@@ -650,243 +784,324 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     .filter(Boolean)
     .join(" · ");
 
+  // ---- what the header and the palette call: stable, so they skip the re-render a keystroke causes
+  const uiHandlers = useRef<{ run: typeof run; switchEngine: typeof switchEngine; rename: typeof rename; addAtCenter: typeof addAtCenter } | null>(null);
+  useLayoutEffect(() => {
+    uiHandlers.current = { run, switchEngine, rename, addAtCenter };
+  });
+  const ui = useMemo<HeaderUi>(
+    () => ({
+      run: (targets, force) => uiHandlers.current!.run(targets, force),
+      runSelected: (force) => uiHandlers.current!.run(latest.current.nodes.filter((n) => n.selected).map((n) => n.id), force),
+      switchEngine: (e) => uiHandlers.current!.switchEngine(e),
+      rename: (v) => void uiHandlers.current!.rename(v),
+      addAtCenter: (p) => uiHandlers.current!.addAtCenter(p),
+    }),
+    [],
+  );
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+
+  const otherEngineName = mode === "open" ? "cloud" : "open-source";
+  const stuckNames = stuck.map((n) => `“${nodeLabel(n)}”`);
+
   return (
-    <EditorContext.Provider value={api}>
-      <div className="fuobe-canvas flex h-svh min-w-0 flex-col md:h-[calc(100svh-0.5rem)]">
-        <header className="z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
-          <SidebarTrigger className="md:hidden" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Link href="/canvas" className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="All canvases">
-                <ChevronLeft className="size-4" />
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent>All canvases</TooltipContent>
-          </Tooltip>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={(e) => void rename(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            maxLength={80}
-            aria-label="Canvas name"
-            className="h-9 w-0 min-w-0 flex-1 truncate rounded-md bg-transparent px-1.5 font-heading text-[20px] leading-none outline-none hover:bg-accent focus:bg-muted sm:max-w-[320px] sm:flex-none sm:w-[min(320px,30vw)]"
+    <EditorStoreContext.Provider value={store}>
+      <EditorActionsContext.Provider value={actions}>
+        <div className="fuobe-canvas flex h-svh min-w-0 flex-col md:h-[calc(100svh-0.5rem)]">
+          <EditorHeader
+            name={name}
+            setName={setName}
+            saveState={saveState}
+            saveRefused={saveRefused}
+            busy={busy}
+            summary={summary}
+            boardEngine={boardEngine}
+            selectedCount={isMobile ? 0 : selected.length}
+            running={runM.isPending}
+            canRun={generators.length > 0}
+            mode={mode}
+            ui={ui}
           />
-          <span className="hidden shrink-0 items-center gap-1 text-[12px] text-muted-foreground sm:inline-flex" aria-live="polite">
-            {saveState === "saving" ? <Loader2 className="size-3 animate-spin" /> : saveState === "error" ? <TriangleAlert className="size-3 text-warning" /> : <Check className="size-3" />}
-            {saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved — retrying" : "Saved"}
-          </span>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
-            {busy > 0 && (
-              <span className="hidden items-center gap-1.5 text-[12px] font-medium text-brand-text lg:inline-flex">
-                <Loader2 className="size-3.5 animate-spin" /> {busy} running
+
+          {isMobile && (
+            <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+              <div className="inline-grid h-9 grid-cols-2 rounded-full bg-muted p-0.5 text-[13px] font-medium" role="tablist" aria-label="View">
+                {(["board", "list"] as const).map((t) => (
+                  <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("inline-flex items-center gap-1.5 rounded-full px-3.5", tab === t ? "bg-background shadow-soft" : "text-muted-foreground")}>
+                    {t === "board" ? <LayoutGrid className="size-3.5" /> : <List className="size-3.5" />}
+                    {t === "board" ? "Board" : "Nodes"}
+                  </button>
+                ))}
+              </div>
+              <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{busy ? `${busy} running` : summary}</span>
+            </div>
+          )}
+
+          {offEngine.length > 0 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-highlight/20 px-4 py-2 text-[13px]">
+              <TriangleAlert className="size-4 shrink-0 text-warning" />
+              <span className="min-w-0 flex-1">
+                {offEngine.length} node{offEngine.length > 1 ? "s use" : " uses"} {otherEngineName} models, but this install is set to {mode === "open" ? "open source only" : "cloud only"}.
+                {stuck.length > 0 && (
+                  <>
+                    {" "}
+                    {stuckNames.join(", ")} {stuck.length > 1 ? "have" : "has"} no {mode === "open" ? "open-source" : "cloud"} version yet: remove {stuck.length > 1 ? "them" : "it"}, or change Settings → Engine mode.
+                  </>
+                )}
               </span>
-            )}
-            {summary && <span className="hidden font-mono text-[12px] text-muted-foreground lg:inline">{summary}</span>}
-            <div className="hidden md:block">
-              <EngineSwitch value={boardEngine} onChange={switchEngine} size="sm" />
+              {switchable > 0 && (
+                <Button size="sm" variant="secondary" className="h-7 rounded-full" onClick={() => switchEngine(mode as Engine)}>
+                  Switch {switchable > 1 ? `${switchable} nodes` : stuck.length ? "the other" : "it"}
+                </Button>
+              )}
             </div>
-            {selected.length > 0 && !isMobile && (
-              <Button variant="secondary" size="sm" className="h-8 rounded-full px-3" onClick={() => run(selected)} disabled={runM.isPending}>
-                <Play /> Run selected <span className="font-mono text-muted-foreground">{selected.length}</span>
-              </Button>
-            )}
-            <div className="flex items-center">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" className="h-8 rounded-l-full rounded-r-none pr-2.5 pl-3.5" onClick={() => run()} disabled={runM.isPending || !generators.length}>
-                    {runM.isPending ? <Loader2 className="animate-spin" /> : <Play />} Run all
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Run every node that changed <Kbd>⌘</Kbd>
-                  <Kbd>↵</Kbd>
-                </TooltipContent>
-              </Tooltip>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" className="h-8 rounded-l-none rounded-r-full border-l border-primary-foreground/20 px-2" aria-label="More run options" disabled={!generators.length}>
-                    <ChevronDown />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-60">
-                  <DropdownMenuItem onSelect={() => run()}>
-                    <Play /> Run all <span className="ml-auto text-[11px] text-muted-foreground">changed nodes</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => run(undefined, true)}>
-                    <RotateCcw /> Re-run everything
-                  </DropdownMenuItem>
-                  {selected.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={() => run(selected)}>
-                        <Play /> Run selected ({selected.length})
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => run(selected, true)}>
-                        <RotateCcw /> Re-run selected
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem disabled={mode === "cloud"} onSelect={() => switchEngine("open")}>
-                    <Cpu /> Switch all to open source
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={mode === "open"} onSelect={() => switchEngine("cloud")}>
-                    <Cloud /> Switch all to cloud
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+          )}
+
+          {isMobile && tab === "list" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <NodeList
+                onQuickStart={() => {
+                  setTab("board");
+                  setTimeout(quickStart, 0);
+                }}
+              />
             </div>
-          </div>
-        </header>
-
-        {isMobile && (
-          <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-            <div className="inline-grid h-9 grid-cols-2 rounded-full bg-muted p-0.5 text-[13px] font-medium" role="tablist" aria-label="View">
-              {(["board", "list"] as const).map((t) => (
-                <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("inline-flex items-center gap-1.5 rounded-full px-3.5", tab === t ? "bg-background shadow-soft" : "text-muted-foreground")}>
-                  {t === "board" ? <LayoutGrid className="size-3.5" /> : <List className="size-3.5" />}
-                  {t === "board" ? "Board" : "Nodes"}
-                </button>
-              ))}
-            </div>
-            <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{busy ? `${busy} running` : summary}</span>
-          </div>
-        )}
-
-        {offEngine.length > 0 && (
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-highlight/20 px-4 py-2 text-[13px]">
-            <TriangleAlert className="size-4 shrink-0 text-warning" />
-            <span className="min-w-0 flex-1">
-              {offEngine.length} node{offEngine.length > 1 ? "s use" : " uses"} {mode === "open" ? "cloud" : "open-source"} models, but this install is set to {mode === "open" ? "open source only" : "cloud only"}.
-            </span>
-            <Button size="sm" variant="secondary" className="h-7 rounded-full" onClick={() => switchEngine(mode as Engine)}>
-              Switch {offEngine.length > 1 ? "them" : "it"}
-            </Button>
-          </div>
-        )}
-
-        {isMobile && tab === "list" ? (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <NodeList />
-          </div>
-        ) : (
-          <div
-            ref={wrapper}
-            className="relative min-h-0 flex-1"
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            onDoubleClick={(e) => {
-              if (isMobile || !(e.target as HTMLElement).classList.contains("react-flow__pane")) return;
-              openMenuAt(e.clientX, e.clientY);
-            }}
-          >
-            <ReactFlow<FlowNode, Edge>
-              nodes={nodes}
-              edges={flowEdges}
-              nodeTypes={NODE_TYPES}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onConnectEnd={onConnectEnd}
-              isValidConnection={isValidConnection}
-              onPaneContextMenu={(e) => {
-                e.preventDefault();
-                if (!isMobile) openMenuAt(e.clientX, e.clientY);
+          ) : (
+            <div
+              ref={wrapper}
+              className="relative min-h-0 flex-1"
+              onDragOver={onDragOver}
+              onDrop={onDrop}
+              onDoubleClick={(e) => {
+                if (isMobile || !(e.target as HTMLElement).classList.contains("react-flow__pane")) return;
+                openMenuAt(e.clientX, e.clientY);
               }}
-              onPaneClick={() => setMenu(null)}
-              onMoveEnd={(_, vp) => {
-                // The phone's fitted view isn't saved over the desktop one.
-                if (isMobile) return;
-                viewport.current = vp;
-                touch();
-              }}
-              defaultViewport={savedViewport}
-              fitViewOptions={fitOptions}
-              minZoom={0.15}
-              maxZoom={2}
-              snapToGrid
-              snapGrid={GRID}
-              zoomOnDoubleClick={false}
-              deleteKeyCode={isMobile ? null : ["Backspace", "Delete"]}
-              multiSelectionKeyCode={["Meta", "Shift", "Control"]}
-              nodesDraggable={!isMobile}
-              nodesConnectable={!isMobile}
-              connectionRadius={28}
-              colorMode={resolvedTheme === "dark" ? "dark" : "light"}
-              attributionPosition="top-right"
-              aria-label="Canvas board"
             >
-              <Background variant={BackgroundVariant.Dots} gap={GRID[0] * 1.5} size={1.4} />
-              <Controls position="bottom-left" showInteractive={false} className="canvas-controls" />
-              {!isMobile && (
-                <MiniMap
-                  position="bottom-right"
-                  pannable
-                  zoomable
-                  ariaLabel="Mini map"
-                  nodeBorderRadius={6}
-                  nodeColor={(n) => {
-                    const g = graph.nodes.find((x) => x.id === n.id);
-                    const t = g ? outputType(graph, g) : null;
-                    return t ? PORT_COLOR[t] : "var(--muted-foreground)";
-                  }}
-                />
-              )}
-              {!isMobile && (
-                <Panel position="top-left" className="m-3! flex max-h-[calc(100%-7rem)] flex-col">
-                  {paletteOpen ? <Palette items={paletteItems()} onAdd={addAtCenter} onClose={() => setPaletteOpen(false)} /> : <PaletteToggle onOpen={() => setPaletteOpen(true)} />}
-                </Panel>
-              )}
-            </ReactFlow>
+              <ReactFlow<FlowNode, Edge>
+                nodes={nodes}
+                edges={flowEdges}
+                nodeTypes={NODE_TYPES}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onConnectEnd={onConnectEnd}
+                isValidConnection={isValidConnection}
+                onPaneContextMenu={(e) => {
+                  e.preventDefault();
+                  if (!isMobile) openMenuAt(e.clientX, e.clientY);
+                }}
+                onPaneClick={() => setMenu(null)}
+                onMoveEnd={(_, vp) => {
+                  // The phone's fitted view isn't saved over the desktop one.
+                  if (isMobile) return;
+                  viewport.current = vp;
+                  touch();
+                }}
+                defaultViewport={savedViewport}
+                fitViewOptions={fitOptions}
+                minZoom={0.15}
+                maxZoom={2}
+                snapToGrid
+                snapGrid={GRID}
+                zoomOnDoubleClick={false}
+                deleteKeyCode={isMobile ? null : ["Backspace", "Delete"]}
+                multiSelectionKeyCode={["Meta", "Shift", "Control"]}
+                nodesDraggable={!isMobile}
+                nodesConnectable={!isMobile}
+                // Tab goes node to node (each node's menu connects and disconnects from the keyboard).
+                edgesFocusable={false}
+                connectionRadius={28}
+                colorMode={resolvedTheme === "dark" ? "dark" : "light"}
+                attributionPosition="top-right"
+                aria-label="Canvas board"
+              >
+                <Background variant={BackgroundVariant.Dots} gap={GRID[0] * 1.5} size={1.4} />
+                <Controls position="bottom-left" showInteractive={false} className="canvas-controls" fitViewOptions={fitOptions} />
+                {!isMobile && <MiniMap position="bottom-right" pannable zoomable ariaLabel="Mini map" nodeBorderRadius={6} nodeColor={miniColor} />}
+                {!isMobile && (
+                  <Panel position="top-left" className="m-3! flex max-h-[calc(100%-7rem)] flex-col">
+                    {paletteOpen ? <Palette items={palette} onAdd={ui.addAtCenter} onClose={closePalette} /> : <PaletteToggle onOpen={() => setPaletteOpen(true)} />}
+                  </Panel>
+                )}
+              </ReactFlow>
 
-            {nodes.length === 0 && (
-              <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
-                <div className="pointer-events-auto max-w-md text-center">
-                  <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">Build freely. Automate visually.</p>
-                  <h2 className="mt-2 font-heading text-[28px] leading-tight text-balance">Wire models together, run them in order</h2>
-                  <p className="mt-2 text-[14px] text-muted-foreground">
-                    {isMobile ? "Open this canvas on a larger screen to add nodes, or start from a template." : "Double-click or right-click anywhere to add a node, or drag one in from the palette."}
-                  </p>
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
-                    {!isMobile && (
+              {nodes.length === 0 && (
+                <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+                  <div className="pointer-events-auto max-w-md text-center">
+                    <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">Build freely. Automate visually.</p>
+                    <h2 className="mt-2 font-heading text-[28px] leading-tight text-balance">Wire models together, run them in order</h2>
+                    <p className="mt-2 text-[14px] text-muted-foreground">
+                      {isMobile
+                        ? "Start with a ready-made chain or a template, then edit each node from the Nodes tab. Wiring new nodes takes a larger screen."
+                        : "Double-click or right-click anywhere to add a node, or drag one in from the palette."}
+                    </p>
+                    <div className="mt-5 flex flex-wrap justify-center gap-2">
                       <Button className="rounded-full" onClick={quickStart}>
                         <Sparkles /> Start with Text → Image
                       </Button>
-                    )}
-                    <Button variant="secondary" className="rounded-full" asChild>
-                      <Link href="/canvas?tab=templates">Browse templates</Link>
-                    </Button>
+                      <Button variant="secondary" className="rounded-full" asChild>
+                        <Link href="/canvas?tab=templates">Browse templates</Link>
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {menu && (
-              <AddMenu
-                x={menu.x}
-                y={menu.y}
-                items={menuItems}
-                title={menu.connect ? (menu.connect.from === "source" ? `Send this ${menu.connect.type} to…` : `Make the ${menu.connect.type} with…`) : undefined}
-                onPick={(p) => {
-                  addNode(p, menu.flow, menu.connect);
-                  setMenu(null);
-                }}
-                onClose={() => setMenu(null)}
-              />
-            )}
-          </div>
+              {menu && (
+                <AddMenu
+                  x={menu.x}
+                  y={menu.y}
+                  items={menuItems}
+                  title={menu.connect ? (menu.connect.from === "source" ? `Send this ${menu.connect.type} to…` : `Make the ${menu.connect.type} with…`) : undefined}
+                  onPick={(p) => {
+                    addNode(p, menu.flow, menu.connect);
+                    setMenu(null);
+                  }}
+                  onClose={() => setMenu(null)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+        {entry && (
+          <Viewer
+            generation={entry.g}
+            index={entry.i}
+            onClose={() => setViewer(null)}
+            onPrev={viewer!.index > 0 ? () => setViewer({ ...viewer!, index: viewer!.index - 1 }) : undefined}
+            onNext={viewer!.index < viewerEntries.length - 1 ? () => setViewer({ ...viewer!, index: viewer!.index + 1 }) : undefined}
+          />
         )}
-      </div>
-      {entry && (
-        <Viewer
-          generation={entry.g}
-          index={entry.i}
-          onClose={() => setViewer(null)}
-          onPrev={viewer!.index > 0 ? () => setViewer({ ...viewer!, index: viewer!.index - 1 }) : undefined}
-          onNext={viewer!.index < viewerEntries.length - 1 ? () => setViewer({ ...viewer!, index: viewer!.index + 1 }) : undefined}
-        />
-      )}
-    </EditorContext.Provider>
+      </EditorActionsContext.Provider>
+    </EditorStoreContext.Provider>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Header: name, save state, plan summary, engine, Run. Memoized with stable handlers, so typing on
+// the board doesn't re-render its menus and tooltips.
+
+interface HeaderUi {
+  run: (targets?: string[], force?: boolean) => void;
+  runSelected: (force?: boolean) => void;
+  switchEngine: (e: Engine) => void;
+  rename: (name: string) => void;
+  addAtCenter: (p: PaletteItem) => void;
+}
+
+const EditorHeader = memo(function EditorHeader({
+  name,
+  setName,
+  saveState,
+  saveRefused,
+  busy,
+  summary,
+  boardEngine,
+  selectedCount,
+  running,
+  canRun,
+  mode,
+  ui,
+}: {
+  name: string;
+  setName: (v: string) => void;
+  saveState: SaveState;
+  saveRefused: boolean;
+  busy: number;
+  summary: string;
+  boardEngine: Engine;
+  selectedCount: number;
+  running: boolean;
+  canRun: boolean;
+  mode: EngineMode;
+  ui: HeaderUi;
+}) {
+  return (
+    <header className="z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
+      <SidebarTrigger className="md:hidden" />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link href="/canvas" className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="All canvases">
+            <ChevronLeft className="size-4" />
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>All canvases</TooltipContent>
+      </Tooltip>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={(e) => ui.rename(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        maxLength={80}
+        aria-label="Canvas name"
+        className="h-9 w-0 min-w-0 flex-1 truncate rounded-md bg-transparent px-1.5 font-heading text-[20px] leading-none outline-none hover:bg-accent focus:bg-muted sm:max-w-[320px] sm:flex-none sm:w-[min(320px,30vw)]"
+      />
+      <span className={cn("shrink-0 items-center gap-1 text-[12px] text-muted-foreground", saveState === "error" ? "inline-flex" : "hidden sm:inline-flex")} aria-live="polite">
+        {saveState === "saving" ? <Loader2 className="size-3 animate-spin" /> : saveState === "error" ? <TriangleAlert className="size-3 text-warning" /> : <Check className="size-3" />}
+        <span className={cn(saveState === "error" && "max-sm:sr-only")}>{saveState === "saving" ? "Saving…" : saveState === "error" ? (saveRefused ? "Not saved" : "Not saved — retrying") : "Saved"}</span>
+      </span>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {busy > 0 && (
+          <span className="hidden items-center gap-1.5 text-[12px] font-medium text-brand-text lg:inline-flex">
+            <Loader2 className="size-3.5 animate-spin" /> {busy} running
+          </span>
+        )}
+        {summary && <span className="hidden font-mono text-[12px] text-muted-foreground lg:inline">{summary}</span>}
+        <div className="hidden md:block">
+          <EngineSwitch value={boardEngine} onChange={ui.switchEngine} size="sm" />
+        </div>
+        {selectedCount > 0 && (
+          <Button variant="secondary" size="sm" className="h-8 rounded-full px-3" onClick={() => ui.runSelected()} disabled={running}>
+            <Play /> Run selected <span className="font-mono text-muted-foreground">{selectedCount}</span>
+          </Button>
+        )}
+        <div className="flex items-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button size="sm" className="h-8 rounded-l-full rounded-r-none pr-2.5 pl-3.5" onClick={() => ui.run()} disabled={running || !canRun}>
+                {running ? <Loader2 className="animate-spin" /> : <Play />} Run all
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Run every node that changed <Kbd>⌘</Kbd>
+              <Kbd>↵</Kbd>
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="h-8 rounded-l-none rounded-r-full border-l border-primary-foreground/20 px-2" aria-label="More run options" disabled={!canRun}>
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuItem onSelect={() => ui.run()}>
+                <Play /> Run all <span className="ml-auto text-[11px] text-muted-foreground">changed nodes</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => ui.run(undefined, true)}>
+                <RotateCcw /> Re-run everything
+              </DropdownMenuItem>
+              {selectedCount > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => ui.runSelected()}>
+                    <Play /> Run selected ({selectedCount})
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => ui.runSelected(true)}>
+                    <RotateCcw /> Re-run selected
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={mode === "cloud"} onSelect={() => ui.switchEngine("open")}>
+                <Cpu /> Switch all to open source
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={mode === "open"} onSelect={() => ui.switchEngine("cloud")}>
+                <Cloud /> Switch all to cloud
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </header>
+  );
+});

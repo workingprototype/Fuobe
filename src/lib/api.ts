@@ -6,7 +6,20 @@ import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
-import { applyToList, applyToPages, applyToThread, backoff, parseSse, shareById, sharePagesById, toStreamEvent, type Pages, type StreamEvent } from "./generation-stream";
+import {
+  applyToCanvasView,
+  applyToList,
+  applyToPages,
+  applyToThread,
+  backoff,
+  parseSse,
+  shareById,
+  sharePagesById,
+  toStreamEvent,
+  type CanvasViewLike,
+  type Pages,
+  type StreamEvent,
+} from "./generation-stream";
 import { filterToSearch, type FeedFilter, type Folder } from "./library";
 
 export interface Asset {
@@ -58,6 +71,13 @@ function applyEvent(qc: QueryClient, ev: StreamEvent): void {
     const next = applyToThread(data, ev);
     if (next !== data) qc.setQueryData(q.queryKey, next);
   }
+  // Canvas boards (["canvases", id]): a result trashed in the Viewer or the Library leaves its node.
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["canvases"] })) {
+    if (q.queryKey.length !== 2 || typeof q.queryKey[1] !== "string") continue;
+    const data = q.state.data as CanvasViewLike | undefined;
+    const next = applyToCanvasView(data, ev);
+    if (next !== data) qc.setQueryData(q.queryKey, next);
+  }
 }
 
 /** The freshest copy of a generation in any cache (a viewer may hold an older object). */
@@ -69,6 +89,7 @@ function cached(qc: QueryClient, id: string): Generation | undefined {
   for (const q of qc.getQueryCache().findAll({ queryKey: ["generations"] })) (q.state.data as Generation[] | undefined)?.forEach(consider);
   for (const q of qc.getQueryCache().findAll({ queryKey: ["library"] })) (q.state.data as Pages | undefined)?.pages?.forEach((p) => p.forEach(consider));
   for (const q of qc.getQueryCache().findAll({ queryKey: ["assist"] })) (q.state.data as AssistThreadView | undefined)?.generations?.forEach(consider);
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["canvases"] })) if (q.queryKey.length === 2) (q.state.data as CanvasViewLike | undefined)?.generations?.forEach(consider);
   return best;
 }
 
@@ -117,6 +138,7 @@ async function connect() {
     if (live.everConnected) {
       void live.client.invalidateQueries({ queryKey: ["generations"] });
       void live.client.invalidateQueries({ queryKey: ["library"] });
+      void live.client.invalidateQueries({ queryKey: ["canvases"] });
     }
     live.everConnected = true;
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -137,8 +159,8 @@ async function connect() {
   if (live.abort === ctrl) scheduleReconnect(false);
 }
 
-/** Share one stream between every list on the page; returns whether it's connected. */
-function useGenerationStream(): boolean {
+/** Share one stream between every list on the page (and canvas boards); returns whether it's connected. */
+export function useGenerationStream(): boolean {
   const qc = useQueryClient();
   useEffect(() => {
     live.client = qc;
