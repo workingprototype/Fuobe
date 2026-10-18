@@ -6,7 +6,7 @@ import type { Engine, Generation, MediaKind, Operation } from "./catalog/types";
 
 /** One job the agent wants to run, priced before the user approves it. */
 export interface PlannedJob {
-  tool: "generate" | "create_storyboard";
+  tool: "generate" | "create_storyboard" | "katana";
   modelId: string;
   modelName: string;
   kind: MediaKind;
