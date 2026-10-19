@@ -1,0 +1,181 @@
+"use client";
+
+import { Loader2, Minus, Plus, Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { AddFromLink, ProductCard, ProductDialog, UploadProductButton } from "@/components/brand/products";
+import { AD_RATIOS, MAX_ADS_PER_PRODUCT, MAX_PRODUCTS_PER_RUN, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { formatCost } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { useCreativeActions, useEstimate, useProductActions, useStatusFlags } from "@/components/marketing/hooks";
+
+interface BatchEstimate {
+  route: "fuobe" | "higgsfield";
+  modelName: string;
+  total: number;
+  costUsd: number | null;
+  perAd: number | null;
+  demo: boolean;
+  copyBy: "llm" | "rules";
+  blocker?: string;
+}
+
+function Stepper({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-full bg-muted p-0.5" role="group" aria-label={label}>
+      <button type="button" onClick={() => onChange(Math.max(1, value - 1))} disabled={value <= 1} className="grid size-7 place-items-center rounded-full hover:bg-background disabled:opacity-40" aria-label={`Fewer ads for ${label}`}>
+        <Minus className="size-3.5" />
+      </button>
+      <input
+        value={value}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10);
+          if (Number.isFinite(n)) onChange(Math.min(MAX_ADS_PER_PRODUCT, Math.max(1, n)));
+        }}
+        inputMode="numeric"
+        aria-label={`Ads for ${label}`}
+        className="h-7 w-9 bg-transparent text-center font-mono text-[13px] tabular-nums outline-none"
+      />
+      <button type="button" onClick={() => onChange(Math.min(MAX_ADS_PER_PRODUCT, value + 1))} disabled={value >= MAX_ADS_PER_PRODUCT} className="grid size-7 place-items-center rounded-full hover:bg-background disabled:opacity-40" aria-label={`More ads for ${label}`}>
+        <Plus className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Select products (≤10) → "How many ads to create?" (≤20 each, total price first) → Create. */
+export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit; products: Product[]; engine: "cloud" | "open"; onCreated: (batchId: string) => void }) {
+  const { createBatch } = useCreativeActions(brand.id);
+  const { remove } = useProductActions();
+  const { higgsfield } = useStatusFlags();
+  const [selected, setSelected] = useState<string[]>(() => products.slice(0, MAX_PRODUCTS_PER_RUN).map((p) => p.id));
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [route, setRoute] = useState<"fuobe" | "higgsfield">(higgsfield && engine === "cloud" ? "higgsfield" : "fuobe");
+  const [ratio, setRatio] = useState<string>("4:5");
+  const effectiveRoute = engine === "open" || !higgsfield ? "fuobe" : route;
+  const items = selected.filter((id) => products.some((p) => p.id === id)).map((productId) => ({ productId, count: counts[productId] ?? 4 }));
+  const total = items.reduce((n, i) => n + i.count, 0);
+  const body = useMemo(() => (items.length ? { brandId: brand.id, engine, route: effectiveRoute, items, ratio: effectiveRoute === "higgsfield" ? ratio : undefined } : null), [brand.id, engine, effectiveRoute, items, ratio]);
+  const est = useEstimate<BatchEstimate>("/api/ads/estimate", body);
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      if (s.includes(id)) return s.filter((x) => x !== id);
+      if (s.length >= MAX_PRODUCTS_PER_RUN) {
+        toast(`Up to ${MAX_PRODUCTS_PER_RUN} products per run`);
+        return s;
+      }
+      return [...s, id];
+    });
+  const create = () => {
+    if (!body) return void toast("Select at least one product");
+    if (est.data?.blocker) return void toast(est.data.blocker);
+    createBatch.mutate(body, {
+      onSuccess: (r) => {
+        toast.success(`Generating ${r.creatives.length} ads`, { duration: 1800 });
+        onCreated(r.batchId);
+      },
+      onError: (e) => toast.error((e as Error).message),
+    });
+  };
+  const price = est.data ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "price unknown" : `≈ ${formatCost(est.data.costUsd)}`) : "";
+  return (
+    <div className="space-y-6">
+      <section className="rounded-2xl border bg-background p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[16px] font-semibold">Select products to create ads</h3>
+            <p className="text-[13px] text-muted-foreground">
+              {products.length} product{products.length === 1 ? "" : "s"} found · up to {MAX_PRODUCTS_PER_RUN} per run. Product details may contain mistakes — check them before you continue.
+            </p>
+          </div>
+          <div className="flex gap-1.5">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(selected.length ? [] : products.slice(0, MAX_PRODUCTS_PER_RUN).map((p) => p.id))}>
+              {selected.length ? "Deselect all" : "Select all"}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <AddFromLink brandId={brand.id} limit={5} className="flex-1" placeholder="Add product from link" onAdded={(ps) => setSelected((s) => [...new Set([...s, ...ps.map((p) => p.id)])].slice(0, MAX_PRODUCTS_PER_RUN))} />
+          <UploadProductButton brandId={brand.id} onSaved={(p) => setSelected((s) => [...new Set([...s, p.id])].slice(0, MAX_PRODUCTS_PER_RUN))} />
+        </div>
+        {products.length ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {products.map((p) => (
+              <ProductCard key={p.id} product={p} selected={selected.includes(p.id)} onToggle={() => toggle(p.id)} disabled={selected.length >= MAX_PRODUCTS_PER_RUN} onEdit={() => setEditing(p)} onDelete={() => remove.mutate(p.id)} />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-xl bg-muted/60 px-4 py-6 text-center text-[13px] text-muted-foreground">No products yet. Paste a product link or upload one to start making ads.</p>
+        )}
+      </section>
+
+      {items.length > 0 && (
+        <section className="rounded-2xl border bg-background p-4 sm:p-5">
+          <h3 className="text-[16px] font-semibold">How many ads to create?</h3>
+          <p className="text-[13px] text-muted-foreground">Each ad comes in 1:1, 4:5 and 9:16, with a headline, copy and a call to action.</p>
+          <ul className="mt-4 divide-y">
+            {items.map((i) => {
+              const p = products.find((x) => x.id === i.productId)!;
+              return (
+                <li key={i.productId} className="flex items-center gap-3 py-2.5">
+                  <span className="size-10 shrink-0 overflow-hidden rounded-lg bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {p.images[0] && <img src={p.images[0]} alt="" className="size-full object-cover" />}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{p.name}</span>
+                  <Stepper value={i.count} onChange={(n) => setCounts((c) => ({ ...c, [i.productId]: n }))} label={p.name} />
+                </li>
+              );
+            })}
+          </ul>
+          {engine === "cloud" && higgsfield && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-medium text-muted-foreground">Made by</span>
+              <div role="radiogroup" aria-label="Route" className="inline-flex rounded-full bg-muted p-0.5">
+                {(["higgsfield", "fuobe"] as const).map((r) => (
+                  <button key={r} role="radio" aria-checked={route === r} onClick={() => setRoute(r)} className={cn("h-7 rounded-full px-3 text-[12px] font-medium text-muted-foreground", route === r && "bg-background text-foreground shadow-soft")}>
+                    {r === "higgsfield" ? "Higgsfield Ads Studio" : "Fuobe (your fonts, editable words)"}
+                  </button>
+                ))}
+              </div>
+              {route === "higgsfield" && (
+                <div role="radiogroup" aria-label="Format" className="inline-flex rounded-full bg-muted p-0.5">
+                  {AD_RATIOS.map((r) => (
+                    <button key={r} role="radio" aria-checked={ratio === r} onClick={() => setRatio(r)} className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", ratio === r && "bg-background text-foreground shadow-soft")}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/60 px-4 py-3">
+            <div className="min-w-0 text-[13px]">
+              <p className="font-medium">
+                Create {total} ad{total === 1 ? "" : "s"} for{" "}
+                {items.slice(0, 3).map((i) => (
+                  <span key={i.productId} className="mx-0.5 inline-block max-w-40 truncate rounded-full bg-background px-2 align-bottom text-[12px]">
+                    {products.find((p) => p.id === i.productId)?.name}
+                  </span>
+                ))}
+                {items.length > 3 && ` +${items.length - 3}`} and the brand
+              </p>
+              <p className="text-[12px] text-muted-foreground">
+                {est.data?.blocker ?? (est.data ? `${est.data.modelName}${est.data.perAd != null && !est.data.demo ? ` · ${formatCost(est.data.perAd)} per ad` : ""}${effectiveRoute === "fuobe" ? ` · copy by ${est.data.copyBy === "llm" ? "your LLM" : "Fuobe's rules"}` : ""}` : "Pricing…")}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-[14px] font-medium tabular-nums">{est.isFetching && !est.data ? "…" : price}</span>
+              <Button size="lg" onClick={create} disabled={createBatch.isPending || !!est.data?.blocker}>
+                {createBatch.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Create {total} ads
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+      <ProductDialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)} product={editing} brandId={brand.id} />
+    </div>
+  );
+}

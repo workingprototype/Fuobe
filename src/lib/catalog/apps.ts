@@ -497,10 +497,13 @@ export const APPS: Preset[] = [
     prompt:
       "Create a bold, high-end social media advertisement featuring the product from the image, dynamic composition, premium lighting, props that match the product. {prompt}. Keep the product exact.",
   }),
+  // Click to Ad and Link to Video Ad open the Click to Ad flow (/marketing/click-to-ad, redirected in
+  // next.config.ts): a product link → product kit → a 9:16 ad with voiceover and captions. The
+  // entries stay so the gallery keeps its cards.
   app({
     name: "Click to Ad",
     category: "Product",
-    description: "Product photo → UGC or studio ad creative",
+    description: "Product link → 9:16 video ad with voiceover and captions",
     icon: "MousePointerClick",
     hue: 30,
     inputs: [product],
@@ -516,12 +519,11 @@ export const APPS: Preset[] = [
     ],
     prompt:
       "Create an ad image: {option:format}. {prompt}. The product from the image must keep its exact shape, colors, label and logo. Leave clean space for a headline.",
-    parity: "Higgsfield scrapes a product URL and builds a whole ad set; Fuobe needs a product photo and makes one creative per run",
   }),
   app({
     name: "Link to Video Ad",
     category: "Product",
-    description: "Product photo → short video ad",
+    description: "Paste a product link, get a short video ad",
     icon: "Link",
     hue: 45,
     inputs: [product],
@@ -531,7 +533,6 @@ export const APPS: Preset[] = [
       "A short commercial for the product in the image: the camera glides in from a wide hero angle, the product rotates slightly as light sweeps across its surface, then the shot settles on a crisp close-up of the logo. {prompt}. Premium studio lighting, the product's design and label stay exactly the same.",
     cloud: VIDEO_CLOUD,
     open: VIDEO_OPEN,
-    parity: "Higgsfield builds the ad from a product URL with scripts and voiceover; Fuobe animates one product photo",
   }),
   app({
     name: "Unboxing Video",

@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
     return [
       { source: "/characters", destination: "/elements", permanent: true },
       { source: "/characters/:id", destination: "/elements/:id", permanent: true },
+      // The product-link ad apps open the Click to Ad flow (src/lib/catalog/apps.ts).
+      { source: "/apps/:id(app-click-to-ad|app-link-to-video-ad)", destination: "/marketing/click-to-ad", permanent: false },
       // Studio hubs have one path per mode (src/lib/hubs.ts): old `?mode=` links, and a clip handed
       // to Upscale or Audio without a mode, open that mode's own page (prerendered with the right studio).
       ...["audio", "video-tools", "upscale"].map((hub) => ({
