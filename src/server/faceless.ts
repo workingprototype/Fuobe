@@ -341,7 +341,7 @@ export async function suggestTopics(input: { idea: string; genre: FacelessGenre;
   const answer = await askLlm(input.engine, topicsSystem, topicsBrief({ idea: input.idea, genre, count, avoid: input.avoid, reference: input.reference }));
   const topics = answer ? parseTopics(answer).slice(0, count) : [];
   if (topics.length >= 3) return { topics, offline: false };
-  return { topics: offlineTopics(input.idea, genre.id, count, (input.round ?? 0) * count), offline: true };
+  return { topics: offlineTopics(input.idea, genre.id, count, input.round ?? 0), offline: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +733,10 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
     }
   }
   const graph = buildGraph(ep, blocks, stillEdits);
-  return { graph, blocks, stillEdits, plan: planRerun(graph, changedKeys(graph, ids, c.part)), ids };
+  // Steps that failed earlier are redone with the change, so the new version can finish.
+  const status = statusMap(ep.plan.ids);
+  const broken = graph.filter((s) => !status[s.key] || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
+  return { graph, blocks, stillEdits, plan: planRerun(graph, [...changedKeys(graph, ids, c.part), ...broken]), ids };
 }
 
 export function previewChange(id: string, c: ChangeInput): ChangePreview {

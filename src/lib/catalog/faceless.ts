@@ -1249,15 +1249,15 @@ const OFFLINE_TOPICS: Record<FacelessGenre, [string, string][]> = {
 
 const fill = (t: string, s: string) => t.replaceAll("{S}", capital(s)).replaceAll("{s}", s);
 
-/** Topic suggestions without an LLM: templates per genre around the channel's subject. */
-export function offlineTopics(idea: string, genre: FacelessGenre, count = 5, skip = 0): TopicIdea[] {
+/** Topic suggestions without an LLM: templates per genre around the channel's subject; each round starts one further. */
+export function offlineTopics(idea: string, genre: FacelessGenre, count = 5, round = 0): TopicIdea[] {
   const s = subjectOf(idea);
   // "The rise and fall of {s}" for a channel about the rise and fall of empires would say it twice.
   const lead = (t: string) => t.split("{")[0].replace(/^the\s+/i, "").trim().toLowerCase();
   const all = OFFLINE_TOPICS[genre] ?? OFFLINE_TOPICS.education;
   const list = all.filter(([t]) => !lead(t) || !s.toLowerCase().includes(lead(t)));
   return Array.from({ length: Math.min(count, list.length) }, (_, i) => {
-    const [title, hook] = list[(i + skip) % list.length];
+    const [title, hook] = list[(i + round) % list.length];
     return { title: fill(title, s), hook };
   });
 }
