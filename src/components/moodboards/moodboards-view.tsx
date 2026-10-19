@@ -27,9 +27,7 @@ import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
 import { useMoodboardActions, useMoodboards } from "./hooks";
-import { COPY, MOODBOARD_LIMITS, type Moodboard } from "./logic";
-
-const CURATED_TABS = ["All presets", "Mood", "Styles", "Camera"];
+import { COPY, CURATED_TABS, MOODBOARD_LIMITS, type Moodboard } from "./logic";
 
 /** ?create=1 opens the Create dialog (links from the Image studio and Home). */
 function CreateFromUrl({ onOpen }: { onOpen: () => void }) {
@@ -44,6 +42,8 @@ function CreateFromUrl({ onOpen }: { onOpen: () => void }) {
 function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => void; onDelete: () => void }) {
   const { retry, train } = useMoodboardActions();
   const router = useRouter();
+  // Settings can lock one engine: then there's no other engine to rebuild for, and no open-source LoRA on cloud only.
+  const [, , mode] = useEngine();
   const ready = m.status === "complete";
   return (
     <div className="group/board min-w-0">
@@ -82,7 +82,7 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
             <DropdownMenuItem onSelect={() => setTimeout(onRename)}>
               <Pencil /> Rename
             </DropdownMenuItem>
-            {(m.status === "failed" || m.status === "complete") && (
+            {(m.status === "failed" || (m.status === "complete" && mode === "both")) && (
               <DropdownMenuItem
                 onSelect={() =>
                   retry.mutate(
@@ -94,17 +94,19 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
                 <RotateCcw /> {m.status === "failed" ? "Retry" : `Rebuild for ${m.engine === "cloud" ? "open source" : "cloud"}`}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem
-              disabled={!ready || m.lora?.status === "training"}
-              onSelect={() =>
-                train.mutate(m.id, {
-                  onSuccess: () => toast.success("Training a style LoRA on your GPU"),
-                  onError: (e) => toast.error((e as Error).message, { action: /Settings/.test((e as Error).message) ? { label: "Settings", onClick: () => router.push("/settings#training") } : undefined }),
-                })
-              }
-            >
-              <GraduationCap /> {m.lora?.status === "ready" ? "Retrain style LoRA" : "Train a style LoRA"}
-            </DropdownMenuItem>
+            {mode !== "cloud" && (
+              <DropdownMenuItem
+                disabled={!ready || m.lora?.status === "training"}
+                onSelect={() =>
+                  train.mutate(m.id, {
+                    onSuccess: () => toast.success("Training a style LoRA on your GPU"),
+                    onError: (e) => toast.error((e as Error).message, { action: /Settings/.test((e as Error).message) ? { label: "Settings", onClick: () => router.push("/settings#training") } : undefined }),
+                  })
+                }
+              >
+                <GraduationCap /> {m.lora?.status === "ready" ? "Retrain style LoRA" : "Train a style LoRA"}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => setTimeout(onDelete)}>
               <Trash2 /> Delete
@@ -233,7 +235,7 @@ export function MoodboardsView() {
         <>
           {!needle && (
             <div className="scrollbar-none mb-4 flex gap-1.5 overflow-x-auto">
-              {CURATED_TABS.map((c) => (
+              {CURATED_TABS["soul-v2"].map((c) => (
                 <button
                   key={c}
                   type="button"
