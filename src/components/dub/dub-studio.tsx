@@ -321,7 +321,7 @@ function SessionView({ s, onBack }: { s: DubSessionView; onBack: () => void }) {
         <div className="min-w-0 space-y-3">
           {s.mode === "oneshot" ? (
             <Panel title={`Dub into ${languageByCode(lang)?.name ?? lang}`} aside={<StageBadge stage={stage} />}>
-              <StepList steps={[{ key: "dub", label: ONE_SHOT[s.model ?? "heygen-translate"].name, g: s.generations[s.oneshot?.[lang] ?? ""] }]} />
+              <StepList steps={[{ key: "dub", label: "Translated and voiced in one go", g: s.generations[s.oneshot?.[lang] ?? ""] }]} />
             </Panel>
           ) : (
             <>
