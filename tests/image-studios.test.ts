@@ -40,6 +40,7 @@ import {
   randomPalettes,
   rng,
   samplePixels,
+  SIGNATURE_MODELS,
   suggestName,
   type MoodboardPick,
   type PalettePick,
@@ -49,6 +50,8 @@ import {
 import { buildPayload } from "@/lib/catalog/payload";
 import { planGeneration } from "@/lib/catalog/plan";
 import type { GenerationRequest } from "@/lib/catalog/types";
+import { studioCatalog } from "@/lib/studio-catalog";
+import { IMAGE_STUDIO } from "@/lib/studios";
 import { collageGroups, colorFeature, coverCrop, imageProblem, moodboardError, moodboardStatus, representativeOrder } from "@/components/moodboards/logic";
 
 // The caps GET /api/palettes sends (src/server/palettes.ts signatureCaps, checked against the catalog in image-studios-api.test.ts).
@@ -119,6 +122,16 @@ describe("palettes: k-means extraction", () => {
 });
 
 describe("palettes: routing per model", () => {
+  it("the Image studio can look up every model a signature routes to, without listing them in its picker", () => {
+    const slice = studioCatalog(IMAGE_STUDIO);
+    const listed = slice.models.map((m) => m.id);
+    const known = new Set([...listed, ...(slice.lookup ?? []).map((m) => m.id)]);
+    for (const id of Object.values(SIGNATURE_MODELS)) expect(known.has(id), id).toBe(true);
+    // Edit-only routing targets stay out of the picker list; their field maps stay on the server.
+    for (const id of ["recraft-4-style", "oss-style-qwen-edit", "recraft-4-style-saved"]) expect(listed, id).not.toContain(id);
+    expect((slice.lookup ?? []).every((m) => m.routes.every((r) => !r.map))).toBe(true);
+  });
+
   const req = (modelId: string, extra: Partial<GenerationRequest> = {}): GenerationRequest => ({ feature: "image", modelId, prompt: "a lighthouse at dusk", params: { numOutputs: 1 }, ...extra });
 
   it("sends the palette field to Recraft (≤10 colours, background in its own field) and Ideogram", () => {

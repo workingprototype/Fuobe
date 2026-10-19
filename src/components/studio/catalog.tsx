@@ -73,7 +73,7 @@ export function CatalogProvider({ catalog, config, children }: { catalog?: Studi
   const slice = catalog ?? lazy;
   const value = useMemo<CatalogApi>(() => {
     const models = slice?.models ?? [];
-    const index = new Map(models.map((m) => [m.id, m]));
+    const index = new Map([...models, ...(slice?.lookup ?? [])].map((m) => [m.id, m]));
     return {
       ready: !!slice,
       models,

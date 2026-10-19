@@ -11,6 +11,8 @@ import type { StudioConfig } from "@/components/studio/studio-context";
 export interface StudioCatalog {
   /** Models the composer can use or look up (picker list + defaults + the preset's own models). */
   models: ModelDef[];
+  /** Models the composer only looks up, never lists (where a Color signature or Moodboard may route a request). */
+  lookup?: ModelDef[];
 }
 
 /** A model without its provider field maps (server-only detail). */
@@ -28,9 +30,15 @@ export function slimModel(m: ModelDef): ModelDef {
 export function studioCatalog(config: Pick<StudioConfig, "kind" | "ops" | "pickerOps" | "defaultModels" | "preset" | "extraModels">): StudioCatalog {
   const list = modelsFor({ kind: config.kind, ops: config.pickerOps ?? config.ops });
   const ids = new Set(list.map((m) => m.id));
-  const extra = [config.defaultModels.cloud, config.defaultModels.open, config.preset?.cloud?.modelId, config.preset?.open?.modelId, ...(config.extraModels ?? [])]
+  const extra = [config.defaultModels.cloud, config.defaultModels.open, config.preset?.cloud?.modelId, config.preset?.open?.modelId]
     .filter((id): id is string => !!id && !ids.has(id))
     .map((id) => getModel(id))
     .filter((m): m is ModelDef => !!m);
-  return { models: [...list, ...new Map(extra.map((m) => [m.id, m])).values()].map(slimModel) };
+  const models = [...list, ...new Map(extra.map((m) => [m.id, m])).values()];
+  const known = new Set(models.map((m) => m.id));
+  const lookup = [...new Set(config.extraModels ?? [])]
+    .filter((id) => !known.has(id))
+    .map((id) => getModel(id))
+    .filter((m): m is ModelDef => !!m);
+  return { models: models.map(slimModel), ...(lookup.length ? { lookup: lookup.map(slimModel) } : {}) };
 }
