@@ -12,14 +12,18 @@
  *   palette's slug as `color_palette`; every other model: the hex list written into the prompt. Open
  *   engine: Z-Image Turbo becomes Z-Image Turbo · Palette (hex in the prompt + a ColorTransfer lock to
  *   a swatch); other open models can add a palette-transfer post-step (oss-palette-image, chained).
- * - Moodboard → curated: the Soul preset's `style_id` on its own model (Soul 2.0's 33 looks on soul-2,
- *   Soul's 106 styles on soul-1), its description as words on every other model (the open route).
+ * - Moodboard → curated: the Soul preset's `style_id` on a model whose own preset picker is that list
+ *   (options.presets.source: Soul 2.0's 33 looks on soul-2, Soul's 106 styles on soul-1), its
+ *   description as words on every other model (the open route; Soul Cinema ignores style ids).
  *   Personal: cloud = the board's Recraft style id (Recraft models) or its most representative images
  *   as style references (Nano Banana Pro and other multi-reference models); open = the board's collages
  *   on Qwen-Image-Edit Style Reference (or the style-reference model picked), or its trained style LoRA
  *   on Z-Image Turbo.
+ * Sentences (the palette's hex list, a look described in words, a reference legend) never go into
+ * `request.prompt`: they ride in `request.signature.words`, which the server adds when it plans the
+ * run, so feeds, Library titles and Reuse keep the user's own words.
  */
-import type { GenerationRequest, ModelDef } from "./types";
+import type { GenerationRequest, GenParams, ModelDef, Operation } from "./types";
 
 export type RGB = [number, number, number];
 
@@ -81,6 +85,19 @@ export function cardStrip(p: Pick<Palette, "colors" | "background">): string[] {
     if (h && !out.includes(h)) out.push(h);
   }
   return out;
+}
+
+/**
+ * "Use as background" in the manual editor: `color` becomes (or stops being) the background, and the
+ * colour that loses the flag stays in the palette as an ordinary colour (within the 12-colour limit)
+ * instead of disappearing with it.
+ */
+export function withBackground<P extends { colors: string[]; background: string | null }>(p: P, color: string, on: boolean): P {
+  const has = (c: string) => p.colors.some((x) => x.toUpperCase() === c.toUpperCase());
+  const keep = (c: string | null) => (c && !has(c) && p.colors.length < MAX_COLORS ? [...p.colors, c] : p.colors);
+  if (on) return { ...p, colors: p.background && p.background.toUpperCase() !== color.toUpperCase() ? keep(p.background) : p.colors, background: color };
+  if (p.background?.toUpperCase() !== color.toUpperCase()) return p;
+  return { ...p, colors: keep(color), background: null };
 }
 
 /** The colours sent to a model: the palette's own, then the background when it isn't one of them. */
@@ -331,6 +348,17 @@ export interface Signature {
   moodboard?: MoodboardPick;
 }
 
+/**
+ * What a signed request carries (GenerationRequest.signature): the picks (Reuse puts them back on the
+ * chips), the sentences the server adds to the prompt (the look and the palette in words, so the
+ * user's own words stay in `prompt` for titles and Reuse), and the request before the signature
+ * routed it (its model, operation, settings and how many images were the user's own).
+ */
+export interface SignatureRecord extends Signature {
+  words?: string;
+  from?: { modelId: string; op?: Operation; params?: GenParams; images: number };
+}
+
 export interface SignatureCaps {
   /** Models whose routes take a palette field: how many colours and the background colour's field. */
   native: Record<string, { max: number; background?: string }>;
@@ -408,15 +436,40 @@ function swap(request: GenerationRequest, to: ModelDef, from: ModelDef): Generat
 
 const setExtra = (r: GenerationRequest, key: string, value: unknown): GenerationRequest => ({ ...r, params: { ...r.params, extra: { ...r.params?.extra, [key]: value } } });
 
+/** The prompt as the model gets it: the user's words, then the signature's sentences (added once). */
+export function withSignatureWords(req: GenerationRequest): GenerationRequest {
+  const words = req.signature?.words?.trim();
+  return words ? { ...req, prompt: join(req.prompt, words) } : req;
+}
+
+/**
+ * Reuse of a signed run (Image studio): the request as it was before the signature routed it — its
+ * own model, settings and images — with the picks back on the chips, so nothing hidden comes along
+ * (a moved model, a palette field, a style id, the board's images). Null when it carries no signature.
+ */
+export function reuseSignature(req: GenerationRequest): { modelId: string; params: GenParams; images: string[]; signature: Signature } | null {
+  const s = req.signature;
+  if (!s || (!s.palette && !s.moodboard)) return null;
+  const images = req.inputs?.images ?? [];
+  return {
+    modelId: s.from?.modelId ?? req.modelId,
+    params: { ...(s.from?.params ?? req.params) },
+    images: images.slice(0, s.from?.images ?? images.length),
+    signature: { ...(s.palette && { palette: s.palette }), ...(s.moodboard && { moodboard: s.moodboard }) },
+  };
+}
+
 /**
  * Apply the composer's palette and moodboard to a request. Pure: the same call prices the run while
- * you type and builds what's sent.
+ * you type and builds what's sent. Native fields (style_id, palette, color_palette) and a model move
+ * go on the request; sentences go to `signature.words`, which the server adds to the prompt.
  */
 export function applySignature(req: GenerationRequest, sig: Signature | undefined, ctx: SignatureContext): SignedRequest {
   let model = ctx.getModel(req.modelId);
   if (!model || (!sig?.palette && !sig?.moodboard)) return { request: req, modelId: req.modelId, notes: [] };
   let r: GenerationRequest = req;
   const notes: string[] = [];
+  const words: string[] = [];
   const move = (id: string, why: string) => {
     const to = ctx.getModel(id);
     if (!to || !model || to.id === model.id) return false;
@@ -431,18 +484,24 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   if (mb) {
     if (mb.kind === "personal" && mb.status !== "complete") return { request: req, modelId: req.modelId, notes: [], blocker: mb.status === "failed" ? "This moodboard failed to build — retry it on the Moodboards page" : NOT_READY };
     if (mb.kind === "curated") {
-      const soul1 = mb.source === "soul-v1";
-      if (model.id === (soul1 ? SIGNATURE_MODELS.soul1 : SIGNATURE_MODELS.soul2)) r = setExtra(r, "style_id", mb.id);
+      const source = mb.source ?? "soul-v2";
+      // Native wherever the model's own preset picker is this preset's list (Soul's styles, Soul 2.0's looks).
+      const presets = model.options.presets;
+      if (presets?.source === source) r = setExtra(r, presets.param, mb.id);
       else {
-        r = { ...r, prompt: join(r.prompt, styleWords(mb)) };
-        notes.push(`${mb.name} is a ${soul1 ? "Soul" : "Soul 2.0"} preset — described in words on ${model.name}`);
+        words.push(styleWords(mb));
+        notes.push(
+          model.family === "soul" && !presets
+            ? `${model.name} has one fixed look and no presets — ${mb.name} is described in words`
+            : `${mb.name} is a ${source === "soul-v1" ? "Soul" : "Soul 2.0"} preset — described in words on ${model.name}`,
+        );
       }
       styled = true;
     } else {
       const existing = r.inputs?.images?.length ?? 0;
       const refs = mb.refs ?? [];
       const collages = mb.collages?.length ? mb.collages : refs.slice(0, 2);
-      // A reused run already carries the board's images and their legend: nothing to add.
+      // A request that already carries the board's images (Run again of an older run): nothing to add.
       const carried = [...refs, ...collages].some((u) => r.inputs?.images?.includes(u));
       if (carried) {
         // Leave the request as it is.
@@ -452,7 +511,11 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
           r = { ...r, params: { ...r.params, styleId: mb.styleId } };
         } else if (model.family === "recraft") {
           move(SIGNATURE_MODELS.recraftStyle, `Runs on {model}, styled by the “${mb.name}” images`);
-          r = { ...r, op: "edit", inputs: { ...r.inputs, images: refs.slice(0, 10) } };
+          // Recraft V4 Styles reads every image as a style reference: yours first, then the board's, 10 in all.
+          const own = r.inputs?.images ?? [];
+          const max = model.options.maxImages ?? 10;
+          if (own.length) notes.push(`Your ${own.length === 1 ? "image is" : "images are"} used as style references too on ${model.name}`);
+          r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...own, ...refs.filter((u) => !own.includes(u))].slice(0, max) } };
         } else {
           let budget = Math.min(refBudget(model, existing), 6);
           if (!budget && model.id !== SIGNATURE_MODELS.cloudRefs) {
@@ -461,11 +524,12 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
           }
           const take = refs.slice(0, budget);
           if (!take.length) return { request: req, modelId: req.modelId, notes, blocker: "Remove a reference image to make room for the moodboard" };
-          r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...(r.inputs?.images ?? []), ...take] }, prompt: join(r.prompt, styleLegend(existing + 1, existing + take.length)) };
+          r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...(r.inputs?.images ?? []), ...take] } };
+          words.push(styleLegend(existing + 1, existing + take.length));
         }
       } else if (mb.loraHandle && (model.id === SIGNATURE_MODELS.openTurbo || model.family !== "style-reference")) {
         move(SIGNATURE_MODELS.openTurbo, `Runs on {model} with the trained “${mb.name}” style LoRA`);
-        r = { ...r, prompt: join(r.prompt, `In the style of @${mb.loraHandle}.`) };
+        words.push(`In the style of @${mb.loraHandle}.`);
       } else {
         if (model.family !== "style-reference") move(SIGNATURE_MODELS.openStyle, `Runs on {model} with the “${mb.name}” collages`);
         const max = model.options.maxImages ?? 2;
@@ -497,12 +561,21 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
     } else if (model.id === SIGNATURE_MODELS.cinema && pal.slug) {
       r = setExtra(r, "color_palette", pal.slug);
     } else {
-      r = { ...r, prompt: join(r.prompt, palettePrompt(pal)), params: { ...r.params, palette: all.slice(0, 16) } };
+      words.push(palettePrompt(pal));
+      r = { ...r, params: { ...r.params, palette: all.slice(0, 16) } };
       if (model.engine === "open" && pal.lock) {
         lock = { colors: all };
         notes.push(`Then recoloured to “${pal.name}” by a palette-transfer step`);
       }
     }
   }
-  return { request: r, modelId: model.id, notes, ...(lock && { lock }) };
+  // Sentences an older run already kept in its prompt aren't added twice.
+  const sentence = words.filter((w) => !tidy(r.prompt).includes(tidy(w))).join(" ");
+  const record: SignatureRecord = {
+    ...(sig.palette && { palette: sig.palette }),
+    ...(sig.moodboard && { moodboard: sig.moodboard }),
+    ...(sentence && { words: sentence }),
+    from: { modelId: req.modelId, ...(req.op && { op: req.op }), ...(req.params && { params: req.params }), images: req.inputs?.images?.length ?? 0 },
+  };
+  return { request: { ...r, signature: record }, modelId: model.id, notes, ...(lock && { lock }) };
 }

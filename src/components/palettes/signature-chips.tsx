@@ -7,10 +7,9 @@ import { Chip, ClearableChip } from "@/components/studio/chip";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { CuratedCover } from "@/components/moodboards/cards";
 import { useMoodboards } from "@/components/moodboards/hooks";
-import { curatedPick, soulPick, toPick } from "@/components/moodboards/logic";
+import { curatedLook, curatedPick, soulPick, toPick } from "@/components/moodboards/logic";
 import { MoodboardPanel } from "@/components/moodboards/moodboard-panel";
 import { cardStrip, type MoodboardPick, type Signature } from "@/lib/catalog/palettes";
-import { hueOf } from "@/lib/catalog/packs";
 import type { Engine } from "@/lib/catalog/types";
 import { ColorSignaturePanel, toPalettePick } from "./color-signature-panel";
 import { usePalettes } from "./hooks";
@@ -54,15 +53,15 @@ export default function SignatureChips({
   value,
   onChange,
   engine,
-  modelId,
+  presetSource,
   styleId,
   onStyleIdTaken,
 }: {
   value: Signature | undefined;
   onChange: (update: (s: Signature | undefined) => Signature) => void;
   engine: Engine;
-  /** The composer's model (the Moodboard panel opens on Soul's styles for Soul). */
-  modelId?: string;
+  /** The model's own preset list (options.presets.source): the Moodboard panel opens on it ("soul-v1" = Soul's styles). */
+  presetSource?: string;
   /** A Soul `style_id` in the draft's settings (a reused Soul run): shown and kept as the Moodboard pick. */
   styleId?: string;
   onStyleIdTaken?: () => void;
@@ -75,10 +74,10 @@ export default function SignatureChips({
   useEffect(() => {
     if (!styleId) return;
     // A live Higgsfield style the built-in list doesn't know still shows (and clears) as one.
-    const pick: MoodboardPick = soulPick(styleId) ?? { id: styleId, kind: "curated", name: "Soul style", status: "complete", ...(modelId === "soul-1" && { source: "soul-v1" as const }) };
+    const pick: MoodboardPick = soulPick(styleId) ?? { id: styleId, kind: "curated", name: "Soul style", status: "complete", ...(presetSource === "soul-v1" && { source: "soul-v1" as const }) };
     onChange((s) => (s?.moodboard ? { ...s } : { ...s, moodboard: pick }));
     onStyleIdTaken?.();
-  }, [styleId, modelId, onChange, onStyleIdTaken]);
+  }, [styleId, presetSource, onChange, onStyleIdTaken]);
   return (
     <>
       <Suspense fallback={null}>
@@ -120,7 +119,7 @@ export default function SignatureChips({
             <Chip icon={mb ? undefined : Images} active={!!mb} aria-label={mb ? `Moodboard: ${mb.name}` : "Moodboard"}>
               {mb &&
                 (mb.kind === "curated" ? (
-                  <CuratedCover m={{ name: "", hue: hueOf(mb.id) }} className="size-4 rounded-full" />
+                  <CuratedCover m={{ name: "", ...curatedLook(mb.id) }} className="size-4 rounded-full" />
                 ) : mb.cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={mb.cover} alt="" className="size-4 rounded-full object-cover" />
@@ -131,7 +130,7 @@ export default function SignatureChips({
         >
           <MoodboardPanel
             value={mb}
-            modelId={modelId}
+            presetSource={presetSource}
             onPick={(m) => {
               onChange((s) => ({ ...s, moodboard: m }));
               setBoardOpen(false);

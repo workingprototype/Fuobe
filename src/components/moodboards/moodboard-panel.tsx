@@ -21,12 +21,12 @@ type CuratedSet = (typeof SETS)[number][0];
 
 /**
  * The composer's Moodboard panel: Curated (Soul 2.0's 33 looks, and Soul's 106 styles) and My
- * moodboards, search, Create moodboard. It opens on Soul's styles when Soul is the model.
+ * moodboards, search, Create moodboard. It opens on the model's own preset list (Soul's styles on Soul).
  */
-export function MoodboardPanel({ value, onPick, modelId }: { value?: MoodboardPick; onPick: (m?: MoodboardPick) => void; modelId?: string }) {
+export function MoodboardPanel({ value, onPick, presetSource }: { value?: MoodboardPick; onPick: (m?: MoodboardPick) => void; presetSource?: string }) {
   const { data, isLoading } = useMoodboards();
   const [tab, setTab] = useState<"curated" | "mine">(value?.kind === "personal" ? "mine" : "curated");
-  const [set, setSet] = useState<CuratedSet>(value?.kind === "curated" ? (value.source ?? "soul-v2") : modelId === "soul-1" ? "soul-v1" : "soul-v2");
+  const [set, setSet] = useState<CuratedSet>(value?.kind === "curated" ? (value.source ?? "soul-v2") : presetSource === "soul-v1" ? "soul-v1" : "soul-v2");
   const [cat, setCat] = useState("All presets");
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);

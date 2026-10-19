@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { MANUAL_DEFAULT, MAX_COLORS, MAX_COLORS_RECRAFT, NAME_MAX, paletteError, randomPalettes, suggestName } from "@/lib/catalog/palettes";
+import { MANUAL_DEFAULT, MAX_COLORS, MAX_COLORS_RECRAFT, NAME_MAX, paletteError, randomPalettes, suggestName, withBackground } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
 import { ColorPicker } from "./color-picker";
 
@@ -79,7 +79,7 @@ export function PaletteEditor({ value, onChange, onSave, saving }: { value: Pale
                   value={c}
                   onChange={(hex) => replace(i, hex)}
                   background={c === value.background}
-                  onBackground={(on) => set({ background: on ? c : null })}
+                  onBackground={(on) => onChange(withBackground(value, c, on))}
                 />
               </PopoverContent>
             </Popover>

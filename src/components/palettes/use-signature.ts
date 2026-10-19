@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { applySignature, type Signature, type SignedRequest } from "@/lib/catalog/palettes";
+import { applySignature, withSignatureWords, type Signature, type SignedRequest } from "@/lib/catalog/palettes";
 import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { useCatalog } from "@/components/studio/catalog";
 import { usePalettes } from "./hooks";
@@ -18,7 +18,11 @@ export function useSignature(enabled: boolean, signature: Signature | undefined)
   // The palette list carries which models take a palette natively; the chip has usually loaded it already.
   const { caps } = usePalettes(enabled && !!signature?.palette);
   const apply = useCallback(
-    (req: GenerationRequest): SignedRequest => (enabled && signature ? applySignature(req, signature, { caps, getModel }) : { request: req, modelId: req.modelId, notes: [] }),
+    (req: GenerationRequest): SignedRequest & { worded: GenerationRequest } => {
+      const signed = enabled && signature ? applySignature(req, signature, { caps, getModel }) : { request: req, modelId: req.modelId, notes: [] };
+      // `request` is what's sent (the user's words in `prompt`); `worded` is how it runs, for planning and pricing.
+      return { ...signed, worded: withSignatureWords(signed.request) };
+    },
     [enabled, signature, caps, getModel],
   );
   const qc = useQueryClient();

@@ -4,8 +4,49 @@ import { MODELS } from "@/lib/catalog";
 import { PALETTES as CINEMA_PALETTES } from "@/lib/catalog/cinema";
 import { MAX_COLORS_RECRAFT, MAX_COLORS, normalizeHex, paletteError, type Palette, type PaletteSource, type SignatureCaps } from "@/lib/catalog/palettes";
 import type { GenerationRequest } from "@/lib/catalog/types";
+import { z } from "zod";
 import { createPipeline } from "./chains";
 import { db } from "./db";
+
+const Hex = z.string().regex(/^#?[0-9a-fA-F]{6}$/);
+const Url = z.string().max(2000);
+
+/**
+ * GenerationRequest.signature as the Image studio sends it (POST /api/generations, /api/palettes/lock):
+ * the picks, the sentences added to the prompt, and the request before the signature routed it.
+ */
+export const SignatureSchema = z
+  .object({
+    palette: z
+      .object({
+        id: z.string().max(120),
+        name: z.string().max(120),
+        colors: z.array(Hex).max(16),
+        background: Hex.nullable(),
+        slug: z.string().max(120).nullable(),
+        thumb: Url.nullable().optional(),
+        lock: z.boolean().optional(),
+      })
+      .optional(),
+    moodboard: z
+      .object({
+        id: z.string().max(120),
+        kind: z.enum(["curated", "personal"]),
+        name: z.string().max(120),
+        description: z.string().max(2000).optional(),
+        source: z.enum(["soul-v1", "soul-v2"]).optional(),
+        status: z.enum(["queued", "running", "cover", "complete", "failed"]),
+        cover: Url.nullable().optional(),
+        refs: z.array(Url).max(10).optional(),
+        collages: z.array(Url).max(2).optional(),
+        styleId: z.string().max(200).nullable().optional(),
+        loraHandle: z.string().max(120).nullable().optional(),
+      })
+      .optional(),
+    words: z.string().max(6000).optional(),
+    from: z.object({ modelId: z.string().max(120), op: z.string().max(40).optional(), params: z.record(z.string(), z.unknown()).optional(), images: z.number().int().min(0).max(14) }).optional(),
+  })
+  .optional();
 
 /**
  * Colour signatures: the user's palettes plus the 50 Cinema Studio 4.0 palettes (seeded once, so the
@@ -143,21 +184,24 @@ export function createLockedRun(request: GenerationRequest, colors: string[], st
   if (!hex.length) throw new Error("Pick a palette first");
   const n = Math.max(1, Math.min(4, request.params?.numOutputs ?? 1));
   const batchId = nanoid(10);
+  // The recoloured image is the result: it carries the user's words; the first step says it's the before.
+  const words = request.prompt?.trim() || "Palette lock";
   const items = [];
   for (let i = 0; i < n; i++) {
-    const step = n > 1 ? { label: `Image ${i + 1} of ${n}`, index: i, of: n } : undefined;
+    const of = n > 1 ? ` ${i + 1} of ${n}` : "";
     const { items: made } = createPipeline(
       [
-        { key: "image", request: { ...request, params: { ...request.params, numOutputs: 1 }, ...(step && { step }) } },
+        { key: "image", request: { ...request, params: { ...request.params, numOutputs: 1 }, step: { label: `Before palette lock${of}`, index: i, of: n } } },
         {
           key: "lock",
           request: {
             feature: request.feature,
             modelId: "oss-palette-image",
             op: "color-match",
-            prompt: "Palette lock",
+            prompt: words,
+            title: words,
             params: { palette: hex, extra: { strength } },
-            step: { label: n > 1 ? `Palette lock ${i + 1} of ${n}` : "Palette lock", index: i, of: n },
+            step: { label: `Palette lock${of}`, index: i, of: n },
           },
           after: "image",
           chain: [{ slot: "images", position: "first" }],

@@ -198,7 +198,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
     const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind));
-    const raw = signed.request;
+    // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
+    const raw = signed.worded;
     const m = catalog.getModel(raw.modelId) ?? model;
     const mentions = m ? applyMentions(raw, m, elements) : { request: raw, mentioned: [], notes: [] };
     const sketched = m ? applySketch(mentions.request, m) : { request: mentions.request };
@@ -377,7 +378,7 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.signature}
           onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
           engine={engine}
-          modelId={draft.modelId}
+          presetSource={opts.presets?.source}
           styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
           onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}
         />

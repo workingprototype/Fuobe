@@ -2,6 +2,7 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { createGenerations, listGenerations } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
+import { SignatureSchema } from "@/server/palettes";
 
 const RequestSchema = z.object({
   feature: z.string().min(1),
@@ -55,6 +56,8 @@ const RequestSchema = z.object({
   presetOptions: z.record(z.string(), z.string()).optional(),
   presetStrength: z.number().min(0).max(1).optional(),
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
+  // Image studio: the Color signature / Moodboard picks (its sentences join the prompt on the server).
+  signature: SignatureSchema,
 });
 
 /**
