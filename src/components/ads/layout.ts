@@ -13,6 +13,13 @@ export const AD_SIZE: Record<AdRatio, { w: number; h: number }> = {
   "9:16": { w: 1080, h: 1920 },
 };
 
+/** Canvas size for any "w:h" ratio, 1080 px wide (Ads Studio's three formats, or a poster's own shape). */
+export function sizeFor(ratio: string): { w: number; h: number } {
+  if (ratio in AD_SIZE) return AD_SIZE[ratio as AdRatio];
+  const [a, b] = ratio.split(":").map(Number);
+  return a > 0 && b > 0 ? { w: 1080, h: Math.round((1080 * b) / a) } : AD_SIZE["1:1"];
+}
+
 export type AdLayout = "overlay" | "panel" | "band" | "frame";
 
 export const AD_LAYOUTS: { id: AdLayout; name: string; hint: string }[] = [
@@ -23,7 +30,7 @@ export const AD_LAYOUTS: { id: AdLayout; name: string; hint: string }[] = [
 ];
 
 /** A sensible layout per format when the creative hasn't picked one. */
-export const defaultLayout = (ratio: AdRatio, seed = 0): AdLayout => (ratio === "9:16" ? (seed % 3 === 2 ? "frame" : "panel") : (["overlay", "overlay", "band", "frame"] as AdLayout[])[seed % 4]);
+export const defaultLayout = (ratio: string, seed = 0): AdLayout => (sizeFor(ratio).h / sizeFor(ratio).w > 1.5 ? (seed % 3 === 2 ? "frame" : "panel") : (["overlay", "overlay", "band", "frame"] as AdLayout[])[seed % 4]);
 
 /** Width of `text` set in `font` (a CSS font string), in px. The canvas provides it in the browser. */
 export type Measure = (text: string, font: string) => number;
@@ -224,7 +231,8 @@ const heightOf = (b: TextBox | undefined) => (b ? b.lines.length * b.lineHeight 
 // The plan
 
 export interface PlanInput {
-  ratio: AdRatio;
+  /** "1:1", "4:5", "9:16" (or any w:h). */
+  ratio: AdRatio | string;
   layout: AdLayout;
   content: AdContent;
   theme: AdTheme;
@@ -236,9 +244,10 @@ export interface PlanInput {
 
 /** Lay out one creative. Every box stays inside the canvas; text shrinks before it overflows. */
 export function planAd(p: PlanInput): AdPlan {
-  const { w: W, h: H } = AD_SIZE[p.ratio];
+  const { w: W, h: H } = sizeFor(p.ratio);
   const m = Math.round(W * 0.07);
-  const tall = p.ratio === "9:16";
+  const tall = H / W > 1.5;
+  const portrait = H / W > 1.15;
   const t = p.theme;
   const inner = W - 2 * m;
 
@@ -246,12 +255,12 @@ export function planAd(p: PlanInput): AdPlan {
   const headlineMax = W * (tall ? 0.1 : 0.088);
   const fitHeadline = (width: number, lines: number, max = headlineMax) => fitText(p.content.headline || " ", width, lines, t.heading, 800, max, W * 0.042, p.measure);
   const fitBody = (width: number) => (p.content.body?.trim() ? fitText(p.content.body, width, tall ? 4 : 3, t.body, 400, W * 0.034, W * 0.026, p.measure) : null);
-  const ctaBox = (x: number, bottom: number, color: string, onColor: string, align: "left" | "center"): AdPlan["cta"] => {
+  const ctaBox = (x: number, bottom: number, color: string, onColor: string, align: "left" | "center", maxW = inner): AdPlan["cta"] => {
     if (!p.content.cta?.trim()) return undefined;
     const size = W * 0.032;
-    const label = fitText(p.content.cta.trim(), inner - size * 2.4, 1, t.body, 700, size, W * 0.024, p.measure);
+    const label = fitText(p.content.cta.trim(), maxW - size * 2.4, 1, t.body, 700, size, W * 0.024, p.measure);
     const tw = p.measure(label.lines[0], fontString(t.body, label.size, 700));
-    const bw = Math.min(inner, tw + label.size * 2.4);
+    const bw = Math.min(maxW, tw + label.size * 2.4);
     const bh = label.size * 2.3;
     const bx = align === "center" ? (W - bw) / 2 : x;
     return {
@@ -264,22 +273,65 @@ export function planAd(p: PlanInput): AdPlan {
       text: textBox(label, bx + bw / 2, bottom - bh + (bh - label.size * 1.12) / 2, t.body, 700, onColor, "center", bw),
     };
   };
+  /** The CTA pill: brand colour (frame, overlay), or paper on the brand-colour panel. */
+  const panelCta = (onPaper: boolean, x: number, bottom: number, maxW = inner) =>
+    onPaper ? ctaBox(x, bottom, t.accent, t.onAccent, "left", maxW) : ctaBox(x, bottom, t.paper, readableOn(t.paper) === "#ffffff" ? "#ffffff" : t.ink, "left", maxW);
   const logoRect = (x: number, y: number, maxW: number, maxH: number, align: "left" | "center" = "left"): Rect | undefined =>
     p.logo ? containIn(p.logo.w, p.logo.h, { x, y, w: maxW, h: maxH }, align) : undefined;
   const brandText = (x: number, y: number, color: string, align: "left" | "center"): TextBox | undefined =>
     !p.logo && p.content.brand?.trim() ? textBox(fitText(p.content.brand.trim().toUpperCase(), inner * 0.6, 1, t.body, 700, W * 0.03, W * 0.022, p.measure), x, y, t.body, 700, color, align, inner * 0.6, 1.1) : undefined;
   const image = (r: Rect, radius = 0): AdPlan["image"] => (p.image ? { ...r, ...coverCrop(p.image.w, p.image.h, r.w, r.h), radius } : null);
 
+  // Landscape (a 16:9 poster): the words get a column beside the picture, not the strip under it.
+  if (W / H > 1.3 && p.layout !== "band") {
+    const framed = p.layout === "frame";
+    const overlay = p.layout === "overlay";
+    const half = Math.round(W * 0.5);
+    const colW = overlay ? Math.round(W * 0.6) - m : half - Math.round(m * 1.5);
+    const bg = overlay ? t.ink : framed ? t.paper : t.accent;
+    const ink = overlay ? "#ffffff" : framed ? (readableOn(bg) === "#ffffff" ? "#ffffff" : t.ink) : t.onAccent;
+    const imgRect = overlay ? { x: 0, y: 0, w: W, h: H } : framed ? { x: half, y: m, w: W - half - m, h: H - 2 * m } : { x: half, y: 0, w: W - half, h: H };
+    const top = m * 1.7;
+    const bottom = H - m;
+    const cta = panelCta(framed || overlay, m, bottom, colW);
+    const gap = m * 0.35;
+    let body = fitBody(colW);
+    const room = () => (cta ? cta.y - gap : bottom) - top - (body ? body.lines.length * body.size * 1.32 + gap : 0);
+    let head = fitHeadline(colW, 4);
+    while (head.lines.length * head.size * 1.08 > room() && head.size > W * 0.042) head = fitHeadline(colW, 4, head.size * 0.92);
+    // Still too tall at the smallest headline: the body steps aside.
+    if (body && head.lines.length * head.size * 1.08 > room()) body = null;
+    const headH = head.lines.length * head.size * 1.08;
+    const bodyH = body ? body.lines.length * body.size * 1.32 + gap : 0;
+    // Overlay: the words sit just above the CTA; panel and frame: from the top of the column.
+    const headY = overlay ? Math.max(top, (cta ? cta.y - gap : bottom) - bodyH - headH) : top;
+    const headline = textBox(head, m, headY, t.heading, 800, ink, "left", colW, 1.08);
+    const bodyBox = body ? textBox(body, m, headY + heightOf(headline) + gap, t.body, overlay ? 500 : 400, overlay ? "rgba(255,255,255,0.9)" : ink, "left", colW, 1.32) : undefined;
+    return {
+      w: W,
+      h: H,
+      bg,
+      image: image(imgRect, framed ? W * 0.02 : 0),
+      panel: overlay || framed ? undefined : { x: 0, y: 0, w: half, h: H, color: bg },
+      scrim: overlay ? { x: 0, y: H * 0.2, w: W, h: H * 0.8, from: "rgba(0,0,0,0)", to: "rgba(0,0,0,0.74)" } : undefined,
+      logo: logoRect(m, m * 0.5, W * 0.22, m * 0.85),
+      brand: brandText(m, m * 0.65, ink, "left"),
+      headline,
+      body: bodyBox,
+      cta,
+    };
+  }
+
   if (p.layout === "panel" || p.layout === "frame") {
     const framed = p.layout === "frame";
     // Frame: the picture on the brand's paper; panel: the words on a brand-colour panel.
     const bg = framed ? t.paper : t.accent;
     const ink = framed ? (readableOn(bg) === "#ffffff" ? "#ffffff" : t.ink) : t.onAccent;
-    const imgH = Math.round(H * (tall ? 0.56 : p.ratio === "4:5" ? 0.58 : 0.54));
+    const imgH = Math.round(H * (tall ? 0.56 : portrait ? 0.58 : 0.54));
     const imgRect = framed ? { x: m, y: m * 1.9, w: W - 2 * m, h: imgH - m * 1.4 } : { x: 0, y: 0, w: W, h: imgH };
     const top = imgRect.y + imgRect.h + m * 0.8;
     const bottom = H - m;
-    const cta = framed ? ctaBox(m, bottom, t.accent, t.onAccent, "left") : ctaBox(m, bottom, t.paper, readableOn(t.paper) === "#ffffff" ? "#ffffff" : t.ink, "left");
+    const cta = panelCta(framed, m, bottom);
     const body = fitBody(inner);
     const gap = m * 0.4;
     let head = fitHeadline(inner, tall ? 3 : 2);
@@ -303,7 +355,8 @@ export function planAd(p: PlanInput): AdPlan {
 
   if (p.layout === "band") {
     const bandH = Math.round(H * (tall ? 0.24 : 0.27));
-    const head = fitHeadline(inner, 2, W * 0.08);
+    // A short (landscape) band takes a smaller headline so two lines still fit in it.
+    const head = fitHeadline(inner, 2, Math.min(W * 0.08, bandH * 0.4));
     const headline = textBox(head, W / 2, (bandH - head.lines.length * head.size * 1.08) / 2 + m * 0.25, t.heading, 800, t.onAccent, "center", inner, 1.08);
     const bottom = H - m;
     const cta = ctaBox(m, bottom, t.paper, readableOn(t.paper) === "#ffffff" ? "#ffffff" : t.ink, "center");
@@ -355,7 +408,7 @@ export function planRects(plan: AdPlan): Rect[] {
 }
 
 /** File name for an exported creative: "acme-serum-4x5-3.png". */
-export function exportName(brand: string, product: string | undefined, ratio: AdRatio, n: number): string {
+export function exportName(brand: string, product: string | undefined, ratio: string, n: number): string {
   const slug = (s: string) =>
     s
       .toLowerCase()

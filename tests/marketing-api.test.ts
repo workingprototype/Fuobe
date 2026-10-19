@@ -35,6 +35,9 @@ const readRoute = await import("@/app/api/products/read/route");
 const runsRoute = await import("@/app/api/marketing/runs/route");
 const estimateRoute = await import("@/app/api/marketing/estimate/route");
 const multiplierEstimate = await import("@/app/api/ads/multiplier/estimate/route");
+const multiplierRoute = await import("@/app/api/ads/multiplier/route");
+const againRoute = await import("@/app/api/marketing/runs/[id]/again/route");
+const composeRoute = await import("@/app/api/marketing/runs/[id]/compose/route");
 const adsEstimate = await import("@/app/api/ads/estimate/route");
 const creativesRoute = await import("@/app/api/ads/creatives/route");
 const creativeRoute = await import("@/app/api/ads/creatives/[id]/route");
@@ -360,6 +363,31 @@ describe("Ad Multiplier", () => {
     expect(est).toMatchObject({ runs: 2, demo: true, steps: [{ modelId: "kling-o3" }] });
     const bad = await (await multiplierEstimate.POST(json("POST", { engine: "cloud", video: video(), duration: 45, mode: "prompt", quality: "720p" }))).json();
     expect(bad.blocker).toBe("Video duration: 4-30 seconds");
+  });
+
+  it("makes versions in demo mode, runs them again with the same input, and saves a composed still", async () => {
+    const res = await multiplierRoute.POST(json("POST", { engine: "cloud", video: video(), duration: 10, mode: "prompt", prompt: "Recreate this ad.", quality: "720p", versions: 2 }));
+    expect(res.status).toBe(201);
+    const { runs } = await res.json();
+    expect(runs).toHaveLength(2);
+    expect(runs[0].meta.input).toMatchObject({ mode: "prompt", versions: 1 });
+    const again = await againRoute.POST(json("POST"), params({ id: runs[0].id }));
+    expect(again.status).toBe(201);
+    const next = (await again.json()).runs;
+    expect(next).toHaveLength(1);
+    expect(next[0].id).not.toBe(runs[0].id);
+    expect(next[0].title).toBe(runs[0].title);
+    expect((await againRoute.POST(json("POST"), params({ id: "nope" }))).status).toBe(404);
+    const list = await (await runsRoute.GET(json("GET", undefined, "http://x/api/marketing/runs?feature=ad-multiplier"))).json();
+    expect(list.items.map((r: { id: string }) => r.id)).toEqual(expect.arrayContaining([runs[0].id, runs[1].id, next[0].id]));
+
+    const png = upload("composed.png");
+    const saved = await composeRoute.POST(json("POST", { url: png, ratio: "9:16", text: "New headline · Shop now" }), params({ id: runs[0].id }));
+    expect(saved.status).toBe(201);
+    const g = await saved.json();
+    expect(g).toMatchObject({ status: "succeeded", modelId: "local-ad-compose", prompt: "New headline · Shop now" });
+    expect(g.outputs[0].url).toBe(png);
+    expect((await composeRoute.POST(json("POST", { url: "https://x.example/a.png", ratio: "9:16" }), params({ id: runs[0].id }))).status).toBe(400);
   });
 });
 

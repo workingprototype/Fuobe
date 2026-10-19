@@ -27,7 +27,7 @@ import {
   type FormatId,
 } from "@/lib/catalog/marketing";
 import type { Generation } from "@/lib/catalog/types";
-import { AD_LAYOUTS, AD_SIZE, contrast, coverCrop, exportName, fitText, planAd, planRects, readableOn, themeFrom, wrapText, type Measure } from "@/components/ads/layout";
+import { AD_LAYOUTS, contrast, coverCrop, exportName, fitText, planAd, planRects, readableOn, sizeFor, themeFrom, wrapText, type Measure } from "@/components/ads/layout";
 
 describe("marketing catalog", () => {
   it("ships Fuobe's own templates for every category, with unique ids and valid formats", () => {
@@ -193,13 +193,15 @@ describe("ad compositing layout", () => {
     expect(huge.lines[1].endsWith("…")).toBe(true);
   });
 
-  it("keeps every box inside the canvas for each format and layout", () => {
+  it("keeps every box inside the canvas for each format and layout (and a generated poster's own ratio)", () => {
     const content = { headline: "Granola that tastes like a slow Sunday morning", body: "Organic oats, maple and sea salt, roasted in small batches in Portland.", cta: "Shop now", brand: "Ember & Oat" };
-    for (const ratio of ["1:1", "4:5", "9:16"] as const) {
+    expect(sizeFor("3:4")).toEqual({ w: 1080, h: 1440 });
+    expect(sizeFor("nonsense")).toEqual(sizeFor("1:1"));
+    for (const ratio of ["1:1", "4:5", "9:16", "3:4", "2:3", "4:3", "3:2", "16:9"]) {
       for (const layout of AD_LAYOUTS.map((l) => l.id)) {
         for (const logo of [null, { w: 400, h: 120 }]) {
           const plan = planAd({ ratio, layout, content, theme, image: { w: 1024, h: 1280 }, logo, measure });
-          const { w, h } = AD_SIZE[ratio];
+          const { w, h } = sizeFor(ratio);
           expect(plan.w).toBe(w);
           for (const r of planRects(plan)) {
             expect(r.x, `${ratio} ${layout}`).toBeGreaterThanOrEqual(-0.5);
@@ -209,7 +211,7 @@ describe("ad compositing layout", () => {
           }
           // The headline never runs into the CTA.
           if (plan.cta && layout !== "band") expect(plan.headline.y + plan.headline.lines.length * plan.headline.lineHeight).toBeLessThanOrEqual(plan.cta.y + 0.5);
-          expect(plan.headline.lines.join(" ")).toBe(content.headline);
+          expect(plan.headline.lines.join(" "), `${ratio} ${layout}`).toBe(content.headline);
           if (logo) expect(plan.brand).toBeUndefined();
         }
       }

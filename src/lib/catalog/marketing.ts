@@ -626,6 +626,37 @@ export function creativeStatusText(s: CreativeStatus, error?: string | null): st
 
 export const MULTIPLIER = { minSeconds: 4, maxSeconds: 30, maxImages: 20, maxChars: 4000, defaultPrompt: "Recreate this ad.", qualities: ["480p", "720p", "1080p"] as const } as const;
 
+/** The part of the reference clip that's used (seconds). */
+export interface ClipRange {
+  start: number;
+  end: number;
+}
+
+const tenth = (n: number) => Math.round(n * 10) / 10;
+
+/** The first usable part of a fresh clip: all of it, or its first 30 s. */
+export const initialClip = (duration: number): ClipRange => ({ start: 0, end: tenth(Math.min(duration, MULTIPLIER.maxSeconds)) });
+
+/**
+ * Keep an in/out range inside the clip and within 4–30 s where the clip allows: the point that
+ * moved stays put and the other one follows (a clip shorter than 4 s stays as it is).
+ */
+export function clampClip(r: ClipRange, duration: number, moved: "start" | "end"): ClipRange {
+  const { minSeconds: min, maxSeconds: max } = MULTIPLIER;
+  let start = Math.min(Math.max(0, r.start), duration);
+  let end = Math.min(Math.max(0, r.end), duration);
+  if (moved === "start") {
+    if (end - start > max) end = Math.min(duration, start + max);
+    if (end - start < min) end = Math.min(duration, start + min);
+    if (end - start < min) start = Math.max(0, end - min);
+  } else {
+    if (end - start > max) start = Math.max(0, end - max);
+    if (end - start < min) start = Math.max(0, end - min);
+    if (end - start < min) end = Math.min(duration, start + min);
+  }
+  return { start: tenth(start), end: tenth(end) };
+}
+
 export interface MultiplierParts {
   mode: "prompt" | "sections";
   prompt?: string;
@@ -826,6 +857,8 @@ export interface MarketingRunMeta {
   script?: string;
   mode?: "prompt" | "sections";
   notes?: string[];
+  /** What the run was made from, so "Run again" can repeat it. */
+  input?: Record<string, unknown>;
 }
 
 export interface MarketingRun {

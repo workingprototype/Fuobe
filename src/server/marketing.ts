@@ -42,7 +42,7 @@ import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
 import { llmText } from "./enhance";
-import { createGenerations, listGenerations, previewChained } from "./generations";
+import { createGenerations, listGenerations, previewChained, recordLocalGeneration } from "./generations";
 import { provider } from "./providers";
 import { engineMode } from "./settings";
 
@@ -828,7 +828,7 @@ interface RunRow {
 }
 
 /** Create the run's generations (one request, or a pipeline) and record the run. */
-export function launch(plan: RunPlan): MarketingRun {
+export function launch(plan: RunPlan, input?: object): MarketingRun {
   const engine = engineMode();
   if (engine !== "both" && engine !== plan.engine) throw new PlanError(engine === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   const batchId = nanoid(10);
@@ -843,7 +843,7 @@ export function launch(plan: RunPlan): MarketingRun {
     byKey = Object.fromEntries(Object.entries(made.byKey).map(([k, g]) => [k, [g]]));
   }
   const finalIds = plan.finals.flatMap((k) => byKey[k]?.map((g) => g.id) ?? []);
-  const row: RunRow = { id: nanoid(10), feature: plan.feature, batch_id: batchId, final_ids_json: JSON.stringify(finalIds), engine: plan.engine, title: plan.title, meta_json: JSON.stringify({ ...plan.meta, notes: plan.notes }), created_at: Date.now() };
+  const row: RunRow = { id: nanoid(10), feature: plan.feature, batch_id: batchId, final_ids_json: JSON.stringify(finalIds), engine: plan.engine, title: plan.title, meta_json: JSON.stringify({ ...plan.meta, notes: plan.notes, ...(input && { input }) }), created_at: Date.now() };
   db().prepare("INSERT INTO marketing_runs (id, feature, batch_id, final_ids_json, engine, title, meta_json, created_at) VALUES (@id, @feature, @batch_id, @final_ids_json, @engine, @title, @meta_json, @created_at)").run(row);
   return toRun(row);
 }
@@ -904,7 +904,7 @@ export async function runMarketing(input: MarketingInput): Promise<{ runs: Marke
   const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
   // Check the whole plan (prices, models, engine mode, demo/real) before creating anything.
   estimatePlan(plan);
-  return { runs: Array.from({ length: runs }, () => launch(plan)), script };
+  return { runs: Array.from({ length: runs }, () => launch(plan, { ...input, batch: 1 })), script };
 }
 
 export function estimateClickToAd(input: ClickToAdInput): RunEstimate {
@@ -930,7 +930,7 @@ export async function runClickToAd(input: ClickToAdInput): Promise<{ run: Market
   const script = input.script?.trim() ? fitScript(input.script, seconds) : (await clickToAdScript(input)).script;
   const plan = planClickToAd(input, { product: ctx.product, brand: ctx.brand, script });
   estimatePlan(plan);
-  return { run: launch(plan), script };
+  return { run: launch(plan, { ...input, script }), script };
 }
 
 export function estimateMultiplier(input: MultiplierInput): RunEstimate {
@@ -941,7 +941,34 @@ export function estimateMultiplier(input: MultiplierInput): RunEstimate {
 export function runMultiplier(input: MultiplierInput): MarketingRun[] {
   const plan = planMultiplier(input, { higgsfield: higgsfieldReady() });
   estimatePlan(plan);
-  return Array.from({ length: input.versions ?? 1 }, () => launch(plan));
+  return Array.from({ length: input.versions ?? 1 }, () => launch(plan, { ...input, versions: 1 }));
+}
+
+/** "Run again": the same input as a new run (a UGC script is written afresh unless it was given). */
+export async function rerun(id: string): Promise<MarketingRun[]> {
+  const r = getRun(id);
+  if (!r) throw new PlanError("Not found");
+  const input = r.meta.input;
+  if (!input) throw new PlanError("This run can't be repeated — start it again from the form");
+  if (r.feature === "click-to-ad") return [(await runClickToAd(ClickToAdBody.parse(input))).run];
+  if (r.feature === "ad-multiplier") return runMultiplier(MultiplierBody.parse(input));
+  return (await runMarketing(MarketingBody.parse(input))).runs;
+}
+
+/** An open-engine poster/ad with its words set in the browser (an uploaded PNG), recorded in the Library. */
+export function saveRunComposite(id: string, input: { url: string; ratio: string; text: string }) {
+  const r = getRun(id);
+  if (!r) throw new PlanError("Not found");
+  const source = r.generations.find((g) => r.finalIds.includes(g.id))?.outputs.find((o) => o.kind === "image")?.url;
+  return recordLocalGeneration({
+    feature: r.feature,
+    modelId: "local-ad-compose",
+    op: "edit",
+    prompt: input.text.slice(0, 500) || r.title,
+    inputs: source ? { images: [source] } : {},
+    params: { aspectRatio: input.ratio },
+    output: { url: input.url, kind: "image", contentType: "image/png" },
+  });
 }
 
 // ---------------------------------------------------------------------------
