@@ -7,9 +7,9 @@ import { Chip, ClearableChip } from "@/components/studio/chip";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { CuratedCover } from "@/components/moodboards/cards";
 import { useMoodboards } from "@/components/moodboards/hooks";
-import { curatedPick, toPick } from "@/components/moodboards/logic";
+import { curatedPick, soulPick, toPick } from "@/components/moodboards/logic";
 import { MoodboardPanel } from "@/components/moodboards/moodboard-panel";
-import { cardStrip, type Signature } from "@/lib/catalog/palettes";
+import { cardStrip, type MoodboardPick, type Signature } from "@/lib/catalog/palettes";
 import { hueOf } from "@/lib/catalog/packs";
 import type { Engine } from "@/lib/catalog/types";
 import { ColorSignaturePanel, toPalettePick } from "./color-signature-panel";
@@ -32,7 +32,7 @@ function UrlSignature({ onChange }: { onChange: (update: (s: Signature | undefin
       done.current.mb = true;
       const curated = boards.data.curated.find((c) => c.id === mb.replace(/^curated:/, ""));
       const mine = boards.data.items.find((m) => m.id === mb);
-      const pick = mine ? toPick(mine) : curated ? curatedPick(curated) : undefined;
+      const pick = mine ? toPick(mine) : curated ? curatedPick(curated) : mb.startsWith("curated:") ? soulPick(mb.slice(8)) : undefined;
       if (pick) onChange((s) => ({ ...s, moodboard: pick }));
     }
   }, [mb, boards.data, onChange]);
@@ -54,15 +54,31 @@ export default function SignatureChips({
   value,
   onChange,
   engine,
+  modelId,
+  styleId,
+  onStyleIdTaken,
 }: {
   value: Signature | undefined;
   onChange: (update: (s: Signature | undefined) => Signature) => void;
   engine: Engine;
+  /** The composer's model (the Moodboard panel opens on Soul's styles for Soul). */
+  modelId?: string;
+  /** A Soul `style_id` in the draft's settings (a reused Soul run): shown and kept as the Moodboard pick. */
+  styleId?: string;
+  onStyleIdTaken?: () => void;
 }) {
   const [colorOpen, setColorOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const pal = value?.palette;
   const mb = value?.moodboard;
+  // Soul's style picker is this chip: a style id restored by Reuse becomes the curated pick (a picked moodboard wins).
+  useEffect(() => {
+    if (!styleId) return;
+    // A live Higgsfield style the built-in list doesn't know still shows (and clears) as one.
+    const pick: MoodboardPick = soulPick(styleId) ?? { id: styleId, kind: "curated", name: "Soul style", status: "complete", ...(modelId === "soul-1" && { source: "soul-v1" as const }) };
+    onChange((s) => (s?.moodboard ? { ...s } : { ...s, moodboard: pick }));
+    onStyleIdTaken?.();
+  }, [styleId, modelId, onChange, onStyleIdTaken]);
   return (
     <>
       <Suspense fallback={null}>
@@ -115,6 +131,7 @@ export default function SignatureChips({
         >
           <MoodboardPanel
             value={mb}
+            modelId={modelId}
             onPick={(m) => {
               onChange((s) => ({ ...s, moodboard: m }));
               setBoardOpen(false);

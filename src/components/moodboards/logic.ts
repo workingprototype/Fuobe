@@ -3,6 +3,8 @@
  * Higgsfield's limits and exact copy, the status a board shows while its cover job runs, which
  * images best represent a board, and the 2×2 collages open-source style models take.
  */
+import { SOUL_CATEGORIES, SOUL_PRESETS, type SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
+import { getSoulPreset, hueOf } from "@/lib/catalog/packs";
 import { kmeans, suggestName, type MoodboardPick, type MoodboardStatus, type RGB } from "@/lib/catalog/palettes";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
@@ -33,6 +35,38 @@ export interface CuratedMoodboard {
   category: string;
   description: string;
   hue: number;
+  /** Soul's styles: every category the preset is in (Soul 2.0's looks have one). */
+  categories?: string[];
+  /** Whose preset: Soul 2.0's looks (the default) or Soul's styles. */
+  source?: SoulPresetModel;
+}
+
+/**
+ * Soul's 106 styles, the Moodboard panel's second curated set: `style_id` on Soul, the description
+ * as words on every other model (the open route's prompt template).
+ */
+export const SOUL_STYLES: CuratedMoodboard[] = SOUL_PRESETS.filter((p) => p.model === "soul-v1").map((p) => ({
+  id: p.id,
+  name: p.name,
+  category: p.categories[0] ?? "All presets",
+  categories: p.categories,
+  description: p.description,
+  hue: hueOf(p.id),
+  source: "soul-v1",
+}));
+
+/** The category pills of each curated set ("All presets" first). */
+export const CURATED_TABS: Record<SoulPresetModel, string[]> = {
+  "soul-v2": ["All presets", ...SOUL_CATEGORIES["soul-v2"]],
+  "soul-v1": ["All presets", ...SOUL_CATEGORIES["soul-v1"]],
+};
+
+export const inCuratedTab = (c: Pick<CuratedMoodboard, "category" | "categories">, tab: string) => tab === "All presets" || (c.categories ?? [c.category]).includes(tab);
+
+/** Any Soul preset (either model) as a curated pick, by Higgsfield's style id (a reused run's `style_id`). */
+export function soulPick(id: string): MoodboardPick | undefined {
+  const p = getSoulPreset(id);
+  return p && { id: p.id, kind: "curated", name: p.name, description: p.description, status: "complete", ...(p.model === "soul-v1" && { source: p.model }) };
 }
 
 export const MOODBOARD_LIMITS = { min: 5, max: 80, minPx: 256, nameMax: 100, refs: 10, collages: 2 } as const;
@@ -179,5 +213,5 @@ export function toPick(m: Moodboard): MoodboardPick {
 }
 
 export function curatedPick(c: CuratedMoodboard): MoodboardPick {
-  return { id: c.id, kind: "curated", name: c.name, description: c.description, status: "complete" };
+  return { id: c.id, kind: "curated", name: c.name, description: c.description, status: "complete", ...(c.source === "soul-v1" && { source: c.source }) };
 }

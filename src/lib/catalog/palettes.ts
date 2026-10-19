@@ -12,7 +12,8 @@
  *   palette's slug as `color_palette`; every other model: the hex list written into the prompt. Open
  *   engine: Z-Image Turbo becomes Z-Image Turbo · Palette (hex in the prompt + a ColorTransfer lock to
  *   a swatch); other open models can add a palette-transfer post-step (oss-palette-image, chained).
- * - Moodboard → curated: Soul 2.0's `style_id` on soul-2, the preset's description as words elsewhere.
+ * - Moodboard → curated: the Soul preset's `style_id` on its own model (Soul 2.0's 33 looks on soul-2,
+ *   Soul's 106 styles on soul-1), its description as words on every other model (the open route).
  *   Personal: cloud = the board's Recraft style id (Recraft models) or its most representative images
  *   as style references (Nano Banana Pro and other multi-reference models); open = the board's collages
  *   on Qwen-Image-Edit Style Reference (or the style-reference model picked), or its trained style LoRA
@@ -311,6 +312,8 @@ export interface MoodboardPick {
   kind: "curated" | "personal";
   name: string;
   description?: string;
+  /** Curated: whose preset it is — Soul 2.0's looks (the default) or Soul's styles ("soul-v1"). */
+  source?: "soul-v1" | "soul-v2";
   status: MoodboardStatus;
   cover?: string | null;
   /** Personal: the most representative images, best first (≤10). */
@@ -360,6 +363,7 @@ export const SIGNATURE_MODELS = {
   openTurbo: "oss-z-image-turbo",
   paletteLock: "oss-palette-image",
   soul2: "soul-2",
+  soul1: "soul-1",
   cinema: "cinema-studio-4",
 } as const;
 
@@ -369,7 +373,12 @@ const hasOp = (m: ModelDef, op: string) => m.routes.some((r) => r.op === op);
 /** Room for style references beyond the user's own images (multi-reference edit models; a one-image edit would just edit the reference). */
 const refBudget = (m: ModelDef, existing: number) => (hasOp(m, "edit") && (m.options.maxImages ?? 1) >= 2 ? Math.max(0, (m.options.maxImages ?? 1) - existing) : 0);
 const tidy = (s: string | undefined) => (s ?? "").trim().replace(/[.\s]+$/, "");
-const join = (prompt: string | undefined, sentence: string) => (tidy(prompt) ? `${tidy(prompt)}. ${sentence}` : sentence);
+/** The prompt with a sentence added once (a reused run already carries it). */
+const join = (prompt: string | undefined, sentence: string) => {
+  const p = tidy(prompt);
+  if (!p) return sentence;
+  return p.includes(tidy(sentence)) ? (prompt ?? "") : `${p}. ${sentence}`;
+};
 
 /** "In the style of “Retro BW”: grainy black-and-white film portrait." */
 export function styleWords(m: Pick<MoodboardPick, "name" | "description">): string {
@@ -422,17 +431,22 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   if (mb) {
     if (mb.kind === "personal" && mb.status !== "complete") return { request: req, modelId: req.modelId, notes: [], blocker: mb.status === "failed" ? "This moodboard failed to build — retry it on the Moodboards page" : NOT_READY };
     if (mb.kind === "curated") {
-      if (model.id === SIGNATURE_MODELS.soul2) r = setExtra(r, "style_id", mb.id);
+      const soul1 = mb.source === "soul-v1";
+      if (model.id === (soul1 ? SIGNATURE_MODELS.soul1 : SIGNATURE_MODELS.soul2)) r = setExtra(r, "style_id", mb.id);
       else {
         r = { ...r, prompt: join(r.prompt, styleWords(mb)) };
-        notes.push(`${mb.name} is a Soul 2.0 preset — described in words on ${model.name}`);
+        notes.push(`${mb.name} is a ${soul1 ? "Soul" : "Soul 2.0"} preset — described in words on ${model.name}`);
       }
       styled = true;
     } else {
       const existing = r.inputs?.images?.length ?? 0;
       const refs = mb.refs ?? [];
       const collages = mb.collages?.length ? mb.collages : refs.slice(0, 2);
-      if (model.engine === "cloud") {
+      // A reused run already carries the board's images and their legend: nothing to add.
+      const carried = [...refs, ...collages].some((u) => r.inputs?.images?.includes(u));
+      if (carried) {
+        // Leave the request as it is.
+      } else if (model.engine === "cloud") {
         if (model.family === "recraft" && mb.styleId) {
           move(SIGNATURE_MODELS.recraftSaved, `Runs on {model} with the saved “${mb.name}” Recraft style`);
           r = { ...r, params: { ...r.params, styleId: mb.styleId } };
@@ -484,7 +498,10 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       r = setExtra(r, "color_palette", pal.slug);
     } else {
       r = { ...r, prompt: join(r.prompt, palettePrompt(pal)), params: { ...r.params, palette: all.slice(0, 16) } };
-      if (model.engine === "open" && pal.lock) lock = { colors: all };
+      if (model.engine === "open" && pal.lock) {
+        lock = { colors: all };
+        notes.push(`Then recoloured to “${pal.name}” by a palette-transfer step`);
+      }
     }
   }
   return { request: r, modelId: model.id, notes, ...(lock && { lock }) };

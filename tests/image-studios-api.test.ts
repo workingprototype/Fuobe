@@ -129,6 +129,9 @@ describe("moodboards", () => {
     expect(list.items.map((x) => x.id)).toContain(m.id);
     expect(list.curated).toHaveLength(33);
     expect(new Set(list.curated.map((c) => c.category))).toEqual(new Set(["All presets", "Mood", "Styles", "Camera"]));
+    // A style LoRA needs AI-Toolkit: without its URL the board says where to set it up and makes no element.
+    expect(() => moodboards.trainMoodboard(m.id)).toThrow(/AI-Toolkit URL/);
+    expect(moodboards.getMoodboard(m.id)!.lora).toBeNull();
   }, 45_000);
 
   it("prepares cloud boards on Recraft V4 Styles with the 10 most representative images", () => {

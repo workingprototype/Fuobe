@@ -301,6 +301,8 @@ export function Composer({ docked }: { docked: boolean }) {
       else extra[key] = v;
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
+  // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
+  const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
   const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
   const effectiveOp = studioOp ?? op;
@@ -370,8 +372,17 @@ export function Composer({ docked }: { docked: boolean }) {
           onMix={(patch) => setDraft(patch)}
         />
       )}
-      {config.signature && <SignatureChips value={draft.signature} onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))} engine={engine} />}
-      {opts.presets && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
+      {config.signature && (
+        <SignatureChips
+          value={draft.signature}
+          onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
+          engine={engine}
+          modelId={draft.modelId}
+          styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
+          onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}
+        />
+      )}
+      {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
       {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
     </>
   );

@@ -52,7 +52,20 @@ import { planGeneration } from "@/lib/catalog/plan";
 import type { GenerationRequest } from "@/lib/catalog/types";
 import { studioCatalog } from "@/lib/studio-catalog";
 import { IMAGE_STUDIO } from "@/lib/studios";
-import { collageGroups, colorFeature, coverCrop, imageProblem, moodboardError, moodboardStatus, representativeOrder } from "@/components/moodboards/logic";
+import {
+  collageGroups,
+  colorFeature,
+  coverCrop,
+  CURATED_TABS,
+  curatedPick,
+  imageProblem,
+  inCuratedTab,
+  moodboardError,
+  moodboardStatus,
+  representativeOrder,
+  SOUL_STYLES,
+  soulPick,
+} from "@/components/moodboards/logic";
 
 // The caps GET /api/palettes sends (src/server/palettes.ts signatureCaps, checked against the catalog in image-studios-api.test.ts).
 const CAPS: SignatureCaps = {
@@ -184,6 +197,7 @@ describe("palettes: routing per model", () => {
     expect(free.request.prompt).toMatch(/Color palette/);
     const locked = applySignature(req("oss-qwen-image"), { palette: { ...PAL, lock: true } }, ctx);
     expect(locked.lock?.colors).toEqual([...PAL.colors, "#264653"]);
+    expect(locked.notes).toEqual(["Then recoloured to “Teal Dusk” by a palette-transfer step"]);
   });
 
   it("leaves requests alone without a signature or an unknown model", () => {
@@ -248,6 +262,38 @@ describe("moodboards: routing per model", () => {
     const lora = applySignature(req("oss-z-image-turbo"), { moodboard: { ...board, loraHandle: "Neon_Haze" } }, ctx);
     expect(lora.modelId).toBe("oss-z-image-turbo");
     expect(lora.request.prompt).toBe("a rooftop party. In the style of @Neon_Haze.");
+  });
+
+  it("Soul's 106 styles are curated picks too: style_id on soul-1, words on Soul 2.0 and everything else", () => {
+    expect(SOUL_STYLES).toHaveLength(106);
+    expect(CURATED_TABS["soul-v1"]).toEqual(["All presets", "New", "TikTok Core", "Instagram Aesthetics", "Camera Presets", "Beauty", "Mood", "Surreal", "Graphic Art"]);
+    // Soul's presets sit in several categories at once.
+    const sunset = SOUL_STYLES.find((s) => s.name === "Sunset beach")!;
+    expect(["New", "Camera Presets", "Beauty"].every((c) => inCuratedTab(sunset, c))).toBe(true);
+    const pick = curatedPick(sunset);
+    expect(pick.source).toBe("soul-v1");
+    expect(soulPick(sunset.id)).toEqual(pick);
+    expect(soulPick(CURATED_MOODBOARDS[0].id)?.source).toBeUndefined();
+    expect(soulPick("not-a-preset")).toBeUndefined();
+
+    const soul1 = applySignature(req("soul-1"), { moodboard: pick }, ctx);
+    expect(soul1.request.params?.extra?.style_id).toBe(sunset.id);
+    expect(soul1.notes).toEqual([]);
+    const soul2 = applySignature(req("soul-2"), { moodboard: pick }, ctx);
+    expect(soul2.request.params?.extra?.style_id).toBeUndefined();
+    expect(soul2.notes[0]).toBe("Sunset beach is a Soul preset — described in words on Higgsfield Soul 2.0");
+    const turbo = applySignature(req("oss-z-image-turbo"), { moodboard: pick }, ctx);
+    expect(turbo.request.prompt).toBe(presetPrompt(sunset, "a rooftop party"));
+  });
+
+  it("a reused run isn't styled twice (Reuse keeps the composer's chips)", () => {
+    const once = applySignature(req("oss-z-image-turbo"), { moodboard: curated, palette: PAL }, ctx);
+    const twice = applySignature({ ...req(once.modelId), prompt: once.request.prompt, inputs: once.request.inputs }, { moodboard: curated, palette: PAL }, ctx);
+    expect(twice.request.prompt).toBe(once.request.prompt);
+    const nano = applySignature(req("nano-banana-pro"), { moodboard: board }, ctx);
+    const again = applySignature({ ...nano.request, op: undefined }, { moodboard: board }, ctx);
+    expect(again.request.inputs?.images).toEqual(nano.request.inputs?.images);
+    expect(again.request.prompt).toBe(nano.request.prompt);
   });
 
   it("a board that isn't ready blocks with Higgsfield's copy; palette + moodboard combine", () => {

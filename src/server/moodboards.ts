@@ -1,13 +1,14 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { CURATED_MOODBOARDS, hueOf } from "@/lib/catalog/packs";
+import { getTrainingTarget } from "@/lib/catalog/training";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { COVER_PROMPT, MOODBOARD_LIMITS, moodboardStatus, moodboardError, type Moodboard } from "@/components/moodboards/logic";
 import { db } from "./db";
 import { createElement, getElement } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
 import { engineMode } from "./settings";
-import { startTraining } from "./training";
+import { startTraining, trainingBlocker } from "./training";
 
 /**
  * Moodboards (Soul 2.0's "presets evolved"): a named set of 5–80 reference images in one style.
@@ -180,6 +181,9 @@ export function deleteMoodboard(id: string): boolean {
   return db().prepare("DELETE FROM moodboards WHERE id = ?").run(id).changes > 0;
 }
 
+/** A board's persistent open-source style: a Z-Image Turbo LoRA trained on AI-Toolkit. */
+const STYLE_TARGET = "aitk-z-image";
+
 /**
  * Train a persistent open-source style: a style element with the board's 20 most representative
  * images, trained as a Z-Image Turbo LoRA on AI-Toolkit (the same path as character LoRAs).
@@ -188,15 +192,15 @@ export function trainMoodboard(id: string): Moodboard {
   const m = getMoodboard(id);
   if (!m) throw new Error("Moodboard not found");
   if (m.status !== "complete") throw new Error("This moodboard is still training. Try again once it is ready.");
+  // Say what's missing (an AI-Toolkit URL) before making the style element, so a refusal leaves nothing behind.
+  const target = getTrainingTarget(STYLE_TARGET);
+  const blocker = target && trainingBlocker(target);
+  if (blocker) throw new Error(blocker);
   let el = m.lora ? getElement(m.lora.elementId) : null;
   if (!el) {
     el = createElement({ name: m.name.slice(0, 60), kind: "style", description: `the visual style of the “${m.name}” moodboard`, references: m.images.slice(0, 20) });
     update(id, { element_id: el.id });
   }
-  try {
-    startTraining(el.id, "aitk-z-image");
-  } catch (e) {
-    throw new Error((e as Error).message);
-  }
+  startTraining(el.id, STYLE_TARGET);
   return getMoodboard(id)!;
 }

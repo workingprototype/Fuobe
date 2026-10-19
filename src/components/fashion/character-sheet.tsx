@@ -166,10 +166,8 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
     if (mode === "reference" && !photos.length) return toast("Upload at least 1 image");
     if (!body) return toast(mode === "describe" ? "Describe your character first" : "Wait for the uploads to finish");
     run.mutate(body, {
-      onSuccess: (r) => {
-        setIds((xs) => [...r.items.map((g) => g.id), ...xs]);
-        r.notes?.forEach((n) => toast(n));
-      },
+      // The run line already says which model runs and why (its notes), so no toast here.
+      onSuccess: (r) => setIds((xs) => [...r.items.map((g) => g.id), ...xs]),
       onError: (e) => toast.error((e as Error).message || "Failed to create character sheet"),
     });
   };

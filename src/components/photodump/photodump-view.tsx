@@ -93,8 +93,8 @@ function CreatePack({ open, onOpenChange, onCreated }: { open: boolean; onOpenCh
               create.mutate(
                 { name: name.trim(), refs: refs.map((r) => r.ref).filter(Boolean) },
                 {
+                  // The new pack shows up selected under My packs: no toast needed.
                   onSuccess: (p) => {
-                    toast.success("Pack created");
                     setName("");
                     setRefs([]);
                     onOpenChange(false);
@@ -182,9 +182,9 @@ export function PhotodumpView() {
   const generate = () => {
     if (!body) return toast(subjectMode === "selfie" ? "Add your photo first" : "Pick a character first");
     run.mutate(body, {
+      // The run line showed the model and its notes before Generate: no toast.
       onSuccess: (res) => {
         setBatchId(res.batchId ?? res.items[0]?.batchId ?? undefined);
-        res.notes?.forEach((n) => toast(n));
         go(2);
       },
       onError: (e) => toast.error((e as Error).message || "Cannot start photodump generation, please try again"),
