@@ -3,7 +3,7 @@
  * Higgsfield's limits and exact copy, the status a board shows while its cover job runs, which
  * images best represent a board, and the 2×2 collages open-source style models take.
  */
-import { SOUL_CATEGORIES, SOUL_PRESETS, type SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
+import { SOUL_CATEGORIES, SOUL_PRESETS, type SoulPreset, type SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
 import { getSoulPreset, hueOf } from "@/lib/catalog/packs";
 import { kmeans, suggestName, type MoodboardPick, type MoodboardStatus, type RGB } from "@/lib/catalog/palettes";
 import type { Engine, Generation } from "@/lib/catalog/types";
@@ -39,21 +39,52 @@ export interface CuratedMoodboard {
   categories?: string[];
   /** Whose preset: Soul 2.0's looks (the default) or Soul's styles. */
   source?: SoulPresetModel;
+  /** Higgsfield's preview image (only when a Higgsfield key is set; otherwise the cover is drawn). */
+  preview?: string;
 }
 
-/**
- * Soul's 106 styles, the Moodboard panel's second curated set: `style_id` on Soul, the description
- * as words on every other model (the open route's prompt template).
- */
-export const SOUL_STYLES: CuratedMoodboard[] = SOUL_PRESETS.filter((p) => p.model === "soul-v1").map((p) => ({
+const toCurated = (p: SoulPreset): CuratedMoodboard => ({
   id: p.id,
   name: p.name,
   category: p.categories[0] ?? "All presets",
   categories: p.categories,
   description: p.description,
   hue: hueOf(p.id),
-  source: "soul-v1",
-}));
+  ...(p.model === "soul-v1" && { source: p.model }),
+});
+
+/**
+ * The curated sets of the Moodboard panel, from the built-in list: Soul 2.0's 33 looks, and Soul's
+ * 106 styles. Each is `style_id` on its own model and its description as words on every other model
+ * (the open route's prompt template).
+ */
+export const CURATED_SETS: Record<SoulPresetModel, CuratedMoodboard[]> = {
+  "soul-v2": SOUL_PRESETS.filter((p) => p.model === "soul-v2").map(toCurated),
+  "soul-v1": SOUL_PRESETS.filter((p) => p.model === "soul-v1").map(toCurated),
+};
+export const SOUL_STYLES = CURATED_SETS["soul-v1"];
+
+/** What GET /api/providers/higgsfield/presets returns (Higgsfield's live list, or the built-in one as `fallback`). */
+export interface LivePresets {
+  items?: { id: string; name: string; preview?: string }[];
+  fallback?: boolean;
+}
+
+/**
+ * A curated set with Higgsfield's live list on top (a Higgsfield key is set and the list loaded):
+ * its preview images, and any preset it has that the built-in list doesn't, at the end.
+ */
+export function withLive(base: CuratedMoodboard[], live: LivePresets | undefined, source: SoulPresetModel): CuratedMoodboard[] {
+  if (!live?.items?.length || live.fallback) return base;
+  const byId = new Map(live.items.map((p) => [p.id, p]));
+  const known = new Set(base.map((b) => b.id));
+  return [
+    ...base.map((b) => (byId.get(b.id)?.preview ? { ...b, preview: byId.get(b.id)!.preview } : b)),
+    ...live.items
+      .filter((p) => !known.has(p.id))
+      .map((p) => ({ id: p.id, name: p.name, category: "All presets", categories: [], description: "", hue: hueOf(p.id), preview: p.preview, ...(source === "soul-v1" && { source }) })),
+  ];
+}
 
 /** The category pills of each curated set ("All presets" first). */
 export const CURATED_TABS: Record<SoulPresetModel, string[]> = {

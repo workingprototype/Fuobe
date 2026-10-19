@@ -10,8 +10,8 @@ import type { MoodboardPick } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
-import { useMoodboards } from "./hooks";
-import { COPY, CURATED_TABS, curatedPick, inCuratedTab, SOUL_STYLES, toPick } from "./logic";
+import { useCuratedSet, useMoodboards } from "./hooks";
+import { COPY, CURATED_TABS, curatedPick, inCuratedTab, toPick } from "./logic";
 
 const SETS = [
   ["soul-v2", "Soul 2.0"],
@@ -31,14 +31,11 @@ export function MoodboardPanel({ value, onPick, modelId }: { value?: MoodboardPi
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
   const needle = q.trim().toLowerCase();
+  const looks = useCuratedSet(set, tab === "curated");
   const curated = useMemo(
-    () =>
-      (set === "soul-v1" ? SOUL_STYLES : (data?.curated ?? [])).filter((c) =>
-        needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat),
-      ),
-    [data, needle, cat, set],
+    () => looks.filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat))),
+    [looks, needle, cat],
   );
-  const loadingCurated = isLoading && set === "soul-v2";
   const mine = useMemo(() => (data?.items ?? []).filter((m) => !needle || m.name.toLowerCase().includes(needle)), [data, needle]);
   const card = "group block w-full min-w-0 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
@@ -111,14 +108,20 @@ export function MoodboardPanel({ value, onPick, modelId }: { value?: MoodboardPi
             )}
           </div>
           <div className="grid max-h-[46svh] grid-cols-3 gap-1.5 overflow-y-auto sm:max-h-[320px]">
-            {loadingCurated
-              ? Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="aspect-[3/4]" />)
-              : curated.map((c) => (
-                  <button key={c.id} type="button" title={c.description} aria-pressed={value?.id === c.id} onClick={() => onPick(value?.id === c.id ? undefined : curatedPick(c))} className={card}>
-                    <CuratedCover m={c} className={cn("aspect-[3/4] rounded-lg ring-offset-2 ring-offset-background", value?.id === c.id && "ring-2 ring-primary")} />
-                  </button>
-                ))}
-            {!loadingCurated && !curated.length && <p className="col-span-3 py-6 text-center text-[13px] text-muted-foreground">No presets match “{q}”</p>}
+            {curated.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                title={c.description || c.name}
+                aria-label={c.name}
+                aria-pressed={value?.id === c.id}
+                onClick={() => onPick(value?.id === c.id ? undefined : curatedPick(c))}
+                className={card}
+              >
+                <CuratedCover m={c} className={cn("aspect-[3/4] rounded-lg ring-offset-2 ring-offset-background", value?.id === c.id && "ring-2 ring-primary")} />
+              </button>
+            ))}
+            {!curated.length && <p className="col-span-3 py-6 text-center text-[13px] text-muted-foreground">No presets match “{q}”</p>}
           </div>
         </>
       ) : (

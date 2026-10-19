@@ -5,15 +5,25 @@ import type { MoodboardStatus } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
 import { STATUS_LABEL, type CuratedMoodboard, type Moodboard } from "./logic";
 
-/** A drawn cover for a curated look (no Higgsfield images are hot-linked): its hue, its name. */
-export function CuratedCover({ m, className }: { m: Pick<CuratedMoodboard, "name" | "hue">; className?: string }) {
+/**
+ * A curated look's cover: Higgsfield's preview when its live list loaded (a key is set), otherwise
+ * drawn from the look's hue (no Higgsfield images are hot-linked without a key); its name on top.
+ */
+export function CuratedCover({ m, className }: { m: Pick<CuratedMoodboard, "name" | "hue" | "preview">; className?: string }) {
   return (
     <span
       aria-hidden
       className={cn("relative block overflow-hidden", className)}
       style={{ background: `radial-gradient(120% 90% at 20% 15%, oklch(0.86 0.09 ${m.hue}), transparent 60%), linear-gradient(160deg, oklch(0.62 0.14 ${(m.hue + 30) % 360}), oklch(0.32 0.08 ${(m.hue + 70) % 360}))` }}
     >
-      <span className="absolute inset-x-2 bottom-2 font-heading text-[19px] leading-tight text-white drop-shadow-sm">{m.name}</span>
+      {m.preview && (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={m.preview} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />
+          <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/60 to-transparent" />
+        </>
+      )}
+      {m.name && <span className="absolute inset-x-2 bottom-2 font-heading text-[19px] leading-tight text-white drop-shadow-sm">{m.name}</span>}
     </span>
   );
 }

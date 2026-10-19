@@ -26,8 +26,8 @@ import { useEngine } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
-import { useMoodboardActions, useMoodboards } from "./hooks";
-import { COPY, CURATED_TABS, MOODBOARD_LIMITS, type Moodboard } from "./logic";
+import { useCuratedSet, useMoodboardActions, useMoodboards } from "./hooks";
+import { COPY, CURATED_TABS, inCuratedTab, MOODBOARD_LIMITS, type Moodboard } from "./logic";
 
 /** ?create=1 opens the Create dialog (links from the Image studio and Home). */
 function CreateFromUrl({ onOpen }: { onOpen: () => void }) {
@@ -149,9 +149,10 @@ export function MoodboardsView() {
   const [deleting, setDeleting] = useState<Moodboard | null>(null);
   const needle = q.trim().toLowerCase();
   const mine = useMemo(() => (data?.items ?? []).filter((m) => !needle || m.name.toLowerCase().includes(needle)), [data, needle]);
+  const looks = useCuratedSet("soul-v2", tab === "curated");
   const curated = useMemo(
-    () => (data?.curated ?? []).filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : cat === "All presets" || c.category === cat)),
-    [data, needle, cat],
+    () => looks.filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat))),
+    [looks, needle, cat],
   );
 
   return (
@@ -249,17 +250,20 @@ export function MoodboardsView() {
             </div>
           )}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-            {isLoading
-              ? Array.from({ length: 10 }, (_, i) => <Skeleton key={i} className="aspect-[3/4] rounded-xl" />)
-              : curated.map((c) => (
-                  <Link key={c.id} href={`/image?moodboard=curated:${c.id}`} className="group/cur min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-                    <CuratedCover m={c} className="aspect-[3/4] rounded-xl transition-transform duration-300 group-hover/cur:scale-[1.02]" />
-                    <p className="mt-1.5 px-0.5 text-[12px] text-muted-foreground">{c.category}</p>
-                    <p className="line-clamp-2 px-0.5 text-[12.5px]">{c.description}</p>
-                  </Link>
-                ))}
+            {curated.map((c) => (
+              <Link
+                key={c.id}
+                href={`/image?moodboard=curated:${c.id}`}
+                aria-label={`Use ${c.name} in the Image studio${c.description ? ` — ${c.description}` : ""}`}
+                className="group/cur min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                <CuratedCover m={c} className="aspect-[3/4] rounded-xl transition-transform duration-300 group-hover/cur:scale-[1.02]" />
+                <p className="mt-1.5 px-0.5 text-[12px] text-muted-foreground">{c.category}</p>
+                <p className="line-clamp-2 px-0.5 text-[12.5px]">{c.description}</p>
+              </Link>
+            ))}
           </div>
-          {!isLoading && !curated.length && <p className="py-16 text-center text-[14px] text-muted-foreground">No presets match “{q}”</p>}
+          {!curated.length && <p className="py-16 text-center text-[14px] text-muted-foreground">No presets match “{q}”</p>}
           <p className="mt-6 text-[12.5px] text-muted-foreground">
             Curated looks are Soul 2.0 presets: Higgsfield Soul 2.0 takes them as its style; other models, including the open-source ones, get each look as a prompt.
           </p>

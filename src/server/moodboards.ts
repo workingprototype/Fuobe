@@ -1,9 +1,8 @@
 import "server-only";
 import { nanoid } from "nanoid";
-import { CURATED_MOODBOARDS, hueOf } from "@/lib/catalog/packs";
 import { getTrainingTarget } from "@/lib/catalog/training";
 import type { Engine, Generation } from "@/lib/catalog/types";
-import { COVER_PROMPT, MOODBOARD_LIMITS, moodboardStatus, moodboardError, type Moodboard } from "@/components/moodboards/logic";
+import { COVER_PROMPT, CURATED_SETS, MOODBOARD_LIMITS, moodboardStatus, moodboardError, type CuratedMoodboard, type Moodboard } from "@/components/moodboards/logic";
 import { db } from "./db";
 import { createElement, getElement } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
@@ -102,8 +101,8 @@ export function getMoodboard(id: string): Moodboard | null {
 }
 
 /** Soul 2.0's 33 built-in looks, for the Curated tab. */
-export function curatedMoodboards() {
-  return CURATED_MOODBOARDS.map((p) => ({ id: p.id, name: p.name, category: p.categories[0] ?? "All presets", description: p.description, hue: hueOf(p.id) }));
+export function curatedMoodboards(): CuratedMoodboard[] {
+  return CURATED_SETS["soul-v2"];
 }
 
 /** The engine a board is prepared on: the one asked for, unless Settings locks the other. */

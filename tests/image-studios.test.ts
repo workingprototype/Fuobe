@@ -56,6 +56,7 @@ import {
   collageGroups,
   colorFeature,
   coverCrop,
+  CURATED_SETS,
   CURATED_TABS,
   curatedPick,
   imageProblem,
@@ -65,6 +66,7 @@ import {
   representativeOrder,
   SOUL_STYLES,
   soulPick,
+  withLive,
 } from "@/components/moodboards/logic";
 
 // The caps GET /api/palettes sends (src/server/palettes.ts signatureCaps, checked against the catalog in image-studios-api.test.ts).
@@ -284,6 +286,19 @@ describe("moodboards: routing per model", () => {
     expect(soul2.notes[0]).toBe("Sunset beach is a Soul preset — described in words on Higgsfield Soul 2.0");
     const turbo = applySignature(req("oss-z-image-turbo"), { moodboard: pick }, ctx);
     expect(turbo.request.prompt).toBe(presetPrompt(sunset, "a rooftop party"));
+  });
+
+  it("curated sets come from the built-in list, with Higgsfield's live previews (and newer presets) on top", () => {
+    expect(CURATED_SETS["soul-v2"].map((c) => c.id)).toEqual(CURATED_MOODBOARDS.map((p) => p.id));
+    const base = CURATED_SETS["soul-v2"];
+    // No key: the route answers with the built-in list as a fallback — nothing changes.
+    expect(withLive(base, { items: [{ id: base[0].id, name: "General", preview: "https://x/p.jpg" }], fallback: true }, "soul-v2")).toBe(base);
+    const live = withLive(base, { items: [{ id: base[1].id, name: base[1].name, preview: "https://x/1.jpg" }, { id: "new-look", name: "Brand new" }] }, "soul-v2");
+    expect(live).toHaveLength(base.length + 1);
+    expect(live[1].preview).toBe("https://x/1.jpg");
+    expect(live[0].preview).toBeUndefined();
+    expect(live.at(-1)).toMatchObject({ id: "new-look", name: "Brand new", category: "All presets" });
+    expect(curatedPick(withLive(CURATED_SETS["soul-v1"], { items: [{ id: "v1-new", name: "New one" }] }, "soul-v1").at(-1)!).source).toBe("soul-v1");
   });
 
   it("a reused run isn't styled twice (Reuse keeps the composer's chips)", () => {

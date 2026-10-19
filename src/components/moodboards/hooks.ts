@@ -2,8 +2,24 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
+import type { SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
 import type { Engine } from "@/lib/catalog/types";
-import type { CuratedMoodboard, Moodboard } from "./logic";
+import { CURATED_SETS, withLive, type CuratedMoodboard, type LivePresets, type Moodboard } from "./logic";
+
+/**
+ * A curated set (Soul 2.0's looks or Soul's styles): the built-in list at once, with Higgsfield's
+ * preview images (and newer presets) once its live list loads with a key. Shares the style
+ * picker's cache (the same request).
+ */
+export function useCuratedSet(source: SoulPresetModel, enabled = true): CuratedMoodboard[] {
+  const live = useQuery({
+    queryKey: ["provider-presets", source],
+    queryFn: async () => (await (await fetch(`/api/providers/higgsfield/presets?source=${source}`)).json()) as LivePresets,
+    staleTime: 60 * 60 * 1000,
+    enabled,
+  });
+  return useMemo(() => withLive(CURATED_SETS[source], live.data, source), [source, live.data]);
+}
 
 async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
