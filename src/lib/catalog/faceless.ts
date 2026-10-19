@@ -1447,6 +1447,23 @@ export function defaultSettings(engine: Engine, genre: GenreInfo, o: { explainer
   };
 }
 
+/** Narrator voices and video model choices for the browser (built on the server, so the client needs no catalog). */
+export interface PickerData {
+  voices: { id: string; name: string; hint?: string }[];
+  videoModels: { id: string; name: string; engine: Engine; resolutions: string[] }[];
+}
+
+export function pickerData(lookup: ModelLookup): PickerData {
+  const voices = lookup(ENGINE_MODELS.cloud.narration)?.options.voices ?? [];
+  const videoModels = (["cloud", "open"] as const).flatMap((engine) =>
+    ENGINE_MODELS[engine].videoChoices.flatMap((id) => {
+      const m = lookup(id);
+      return m ? [{ id, name: m.name, engine, resolutions: m.options.resolutions ?? [] }] : [];
+    }),
+  );
+  return { voices: voices.map((v) => ({ id: v.id, name: v.name, ...(v.hint && { hint: v.hint }) })), videoModels };
+}
+
 /** A short line the narrator reads for a voice preview. */
 export const previewLine = (name: string) => `Hi, I'm ${name}. I'll be narrating your episode — here's how I sound.`;
 

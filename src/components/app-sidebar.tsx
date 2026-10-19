@@ -38,6 +38,8 @@ import {
   Library,
   PersonStanding,
   Scissors,
+  Tv,
+  Presentation,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -110,6 +112,8 @@ const NAV: NavGroupDef[] = [
     label: "Studios",
     items: [
       { href: "/cinema", label: "Cinema Studio", icon: Clapperboard },
+      { href: "/faceless", label: "Faceless Studio", icon: Tv },
+      { href: "/explainer", label: "Explainer", icon: Presentation },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },
