@@ -29,9 +29,9 @@ import Link from "next/link";
 import { useTheme } from "next-themes";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ErrorState, NotFoundState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Kbd } from "@/components/ui/kbd";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -133,24 +133,9 @@ export function CanvasEditor({ id }: { id: string }) {
   const view = useCanvasView(id);
   if (view.isLoading) return <EditorSkeleton />;
   if (!view.data) {
-    return (
-      <div className="flex min-h-svh flex-col">
-        <div className="flex h-14 items-center px-3 md:hidden">
-          <SidebarTrigger />
-        </div>
-        <Empty className="flex-1">
-          <EmptyHeader>
-            <EmptyTitle className="text-[22px]">This canvas isn&apos;t here</EmptyTitle>
-            <EmptyDescription>It may have been deleted. Your results are still in the library.</EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>
-            <Button asChild variant="secondary">
-              <Link href="/canvas">All canvases</Link>
-            </Button>
-          </EmptyContent>
-        </Empty>
-      </div>
-    );
+    // A canvas that isn't there gets the shared 404 state; a request that failed otherwise can be retried.
+    if (view.error && (view.error as { status?: number }).status !== 404) return <ErrorState error={view.error} retry={() => void view.refetch()} />;
+    return <NotFoundState title="This canvas isn’t here">It may have been deleted. Its results are still in your library.</NotFoundState>;
   }
   return (
     <ReactFlowProvider>

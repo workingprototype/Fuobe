@@ -1,8 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { APPS } from "@/lib/catalog/apps";
 import { authEnabled, crossSite, hostAllowed, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
 
 /** Paths that work signed out: the login page and its API. */
 const OPEN = new Set(["/login", "/api/auth/login"]);
+
+const APP_IDS = new Set(APPS.map((a) => a.id));
+
+/**
+ * Let the request through — except /apps/<id> for an app that doesn't exist, which gets a real 404.
+ * The page can't send one itself: the studio's loading.tsx streams the shell (with a 200) before
+ * the page knows the id is unknown.
+ */
+function pass(request: NextRequest): NextResponse {
+  const app = /^\/apps\/([^/]+)\/?$/.exec(request.nextUrl.pathname)?.[1];
+  if (app && !APP_IDS.has(safeDecode(app))) return NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+  return NextResponse.next();
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
 
 export function proxy(request: NextRequest) {
   // DNS rebinding: a page whose own name now points at this machine. Every method, reads too. With a
@@ -18,10 +40,10 @@ export function proxy(request: NextRequest) {
   if (crossSite(request, request.nextUrl.host)) {
     return NextResponse.json({ error: "Blocked a request from another website. Use Fuobe from its own address (or add it to FUOBE_ALLOWED_ORIGINS)." }, { status: 403 });
   }
-  if (!authEnabled()) return NextResponse.next();
+  if (!authEnabled()) return pass(request);
   const { pathname, search } = request.nextUrl;
   if (OPEN.has(pathname)) return NextResponse.next();
-  if (validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"))) return NextResponse.next();
+  if (validSession(request.cookies.get(SESSION_COOKIE)?.value) || validToken(request.headers.get("authorization"))) return pass(request);
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" }, { status: 401, headers: { "WWW-Authenticate": 'Bearer realm="fuobe"' } });
   }

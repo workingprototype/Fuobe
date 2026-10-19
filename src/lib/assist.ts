@@ -443,7 +443,7 @@ export function parseMemoryImport(text: string): { category: MemoryCategory; tex
     const l = line.trim();
     if (!l) continue;
     const h = /^(?:#{1,6}\s+|\*\*)?([A-Za-z ]{3,24}?)(?:\*\*)?\s*:?\s*$/.exec(l);
-    if (h && toCategory(h[1]) && !/^[-*•]/.test(l)) {
+    if (h && toCategory(h[1]) && !/^[-*•]\s/.test(l)) {
       heading = toCategory(h[1]);
       continue;
     }
