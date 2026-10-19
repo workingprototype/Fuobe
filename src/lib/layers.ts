@@ -500,13 +500,20 @@ export function layerDensity(node: Pick<LayerNode, "w" | "crop" | "natural">): n
   return src && node.w > 0 && src[2] > 0 ? src[2] / node.w : 1;
 }
 
+/** The share of the canvas a layer covers (its rotation-aware box inside the document), 0–1. */
+export function coverage(node: Pick<LayerNode, "x" | "y" | "w" | "h" | "rotation">, doc: Pick<LayerDoc, "width" | "height">): number {
+  const b = intersect(rotatedBounds(node.x, node.y, node.w, node.h, node.rotation), [0, 0, doc.width, doc.height]);
+  return b ? (b[2] * b[3]) / (doc.width * doc.height) : 0;
+}
+
 /**
- * The scale an export renders at so no visible layer loses detail (an upscaled layer makes the
- * whole picture bigger): the densest layer's, never below 1, kept to `max` px on the long side.
+ * The scale a full-detail export renders at: the densest of the visible layers that cover at least
+ * half of the canvas (a whole-picture upscale makes the export bigger; a small layer a model
+ * returned at 2K doesn't blow up the picture around it), never below 1, kept to `max` px on the long side.
  */
 export function exportScale(doc: Pick<LayerDoc, "width" | "height" | "nodes">, max = EXPORT_MAX_PX): number {
   let d = 1;
-  for (const n of doc.nodes) if (!n.hidden) d = Math.max(d, layerDensity(n));
+  for (const n of doc.nodes) if (!n.hidden && coverage(n, doc) >= 0.5) d = Math.max(d, layerDensity(n));
   return Math.max(1, Math.min(d, max / Math.max(doc.width, doc.height)));
 }
 

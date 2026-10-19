@@ -440,36 +440,36 @@ function EditTextTool() {
   const { busy, go } = useRun();
   const [rows, setRows] = useState<{ from: string; to: string; box: Box | null }[]>([]);
   const [restored, setRestored] = useState(false);
-  const loadedFor = useRef<string | null>(null);
+  /** The detection whose rows are in the list (set once they've loaded). */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
-  // Rows from the newest finished detection (boxes measured on its image, placed in its frame).
+  // Rows from the newest finished detection (boxes measured on its image, placed in its frame). A
+  // refetch (or React's strict-mode re-run) mid-load just loads it again.
   useEffect(() => {
-    if (!detect || detect.result?.status !== "succeeded" || loadedFor.current === detect.id) return;
-    loadedFor.current = detect.id;
+    if (!detect || detect.result?.status !== "succeeded" || loadedFor === detect.id) return;
     const out = detect.result.outputs[0];
-    if (!out) return;
     let gone = false;
-    void loadImage(out.url)
-      .then((img) => sizeOf(img))
+    void (out ? loadImage(out.url).then((img) => sizeOf(img)) : Promise.reject(new Error("no output")))
       .catch(() => undefined)
       .then((natural) => {
         if (gone) return;
-        const blocks: TextBlock[] = textBlocksFrom(out.meta, natural);
+        const blocks: TextBlock[] = out ? textBlocksFrom(out.meta, natural) : [];
         const f = detect.frame;
         setRows(blocks.map((b) => ({ from: b.text, to: b.text, box: b.box ? [f[0] + b.box[0] * f[2], f[1] + b.box[1] * f[3], b.box[2] * f[2], b.box[3] * f[3]] : null })));
         setRestored(detect.state === "applied");
+        setLoadedFor(detect.id);
         if (detect.state === "pending") endJob(detect.id, "applied");
       });
     return () => {
       gone = true;
     };
-  }, [detect, endJob]);
+  }, [detect, endJob, loadedFor]);
   useEffect(() => () => setHighlight(null), [setHighlight]);
 
   const changes = textChanges(rows);
   const detecting = detect && isRunning(detect);
   const startDetect = () => {
-    loadedFor.current = null;
+    setLoadedFor(null);
     setRestored(false);
     void go({ tool: "text-detect", target, label: "Detect text" });
   };
@@ -487,7 +487,7 @@ function EditTextTool() {
               {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
             </Button>
             <p className="text-center font-mono text-[11px] text-subtle-foreground">{costLabel(detectModel, isDemo(detectModel))}</p>
-            {detect?.result?.status === "succeeded" && !rows.length && <p className="text-center text-[12px] text-muted-foreground">No text was found on this image.</p>}
+            {detect?.result?.status === "succeeded" && loadedFor === detect.id && !rows.length && <p className="text-center text-[12px] text-muted-foreground">No text was found on this image.</p>}
             {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={startDetect} />}
           </div>
         )

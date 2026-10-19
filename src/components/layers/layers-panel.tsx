@@ -15,6 +15,8 @@ import {
   Library,
   Loader2,
   MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Plus,
   RotateCcw,
@@ -29,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -40,6 +42,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { LibraryGrid } from "@/components/studio/media-slot";
 import { uploadFile } from "@/lib/api";
 import {
@@ -695,11 +698,70 @@ function Geometry({ node }: { node: LayerNode }) {
   );
 }
 
+const NARROW = "(max-width: 1023px)";
+const useNarrow = () =>
+  useSyncExternalStore(
+    (cb) => {
+      const mql = window.matchMedia(NARROW);
+      mql.addEventListener("change", cb);
+      return () => mql.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(NARROW).matches,
+    () => false,
+  );
+
+/**
+ * Below 1024 px, while a tool's form is open, the panel folds to a strip of thumbnails (pick the
+ * layer the tool works on; the button on top unfolds it), so the canvas keeps its room.
+ */
+function LayerStrip({ rows, onExpand }: { rows: LayerNode[]; onExpand: () => void }) {
+  const { selected, select, busyJob, failedJob } = useEditor();
+  return (
+    <aside className="flex min-h-0 w-[56px] shrink-0 flex-col items-center border-l bg-background" aria-label="Layers panel">
+      <div className="flex h-12 shrink-0 items-center">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label={`Show the Layers panel (${rows.length} layers)`} onClick={onExpand}>
+              <PanelRightOpen />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="left">Layers · {rows.length}</TooltipContent>
+        </Tooltip>
+      </div>
+      <ul className="min-h-0 w-full flex-1 space-y-1 overflow-x-hidden overflow-y-auto overscroll-contain px-1.5 pb-2" aria-label="Layers, front to back">
+        {rows.map((n) => (
+          <li key={n.id} className="relative">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-pressed={selected?.id === n.id}
+                  aria-label={`Select layer ${n.name}`}
+                  onClick={() => select(n.id)}
+                  className={cn("grid w-full place-items-center rounded-lg p-0.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50", selected?.id === n.id ? "bg-brand-faint ring-2 ring-primary" : "hover:bg-accent", n.hidden && "opacity-50")}
+                >
+                  <LayerThumb node={n} className="size-9" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{n.name}</TooltipContent>
+            </Tooltip>
+            {busyJob(n.id) ? <Loader2 className="pointer-events-none absolute -top-0.5 -right-0.5 size-3.5 animate-spin rounded-full bg-background text-brand-text" aria-hidden /> : failedJob(n.id) ? <TriangleAlert className="pointer-events-none absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-background text-destructive" aria-hidden /> : null}
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+
 export function LayersPanel() {
-  const { doc, commit, selected, busyJob } = useEditor();
+  const { doc, commit, selected, busyJob, tool } = useEditor();
   const rows = useMemo(() => [...doc.nodes].sort((a, b) => b.z - a.z), [doc.nodes]);
   const list = useRef<HTMLUListElement>(null);
   const [dragging, setDragging] = useState<{ id: string; before: number } | null>(null);
+  const narrow = useNarrow();
+  /** The tool the panel was unfolded for (a new tool folds it again). */
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const strip = narrow && !!tool && openFor !== tool;
 
   // Drag a row by its handle: drop it between two rows (top of the list = front).
   const onDragHandle = (e: React.PointerEvent, id: string) => {
@@ -738,9 +800,16 @@ export function LayersPanel() {
     target.addEventListener("pointercancel", up);
   };
 
+  if (strip) return <LayerStrip rows={rows} onExpand={() => setOpenFor(tool)} />;
+
   return (
     <aside className="flex min-h-0 w-[232px] shrink-0 flex-col border-l bg-background lg:w-[264px] xl:w-[300px]" aria-label="Layers panel">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
+        {narrow && tool && (
+          <Button size="icon-xs" variant="ghost" className="-ml-1" aria-label="Fold the Layers panel" onClick={() => setOpenFor(null)}>
+            <PanelRightClose />
+          </Button>
+        )}
         <h2 className="text-[13px] font-semibold">Layers</h2>
         <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>
         <div className="ml-auto">

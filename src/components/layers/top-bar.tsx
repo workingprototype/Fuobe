@@ -113,11 +113,15 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
 /** The autosave state: an icon at every width, its words from 1280 px (and in its tooltip). A failed save can be retried now. */
 function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
   const text = { saved: "Saved", saving: "Saving…", dirty: "Saving…", error: "Not saved — retrying", conflict: "Changed in another tab" }[state];
+  const short = { error: "Not saved", conflict: "Changed elsewhere" }[state as "error" | "conflict"] ?? text;
   const bad = state === "error" || state === "conflict";
   const body = (
     <>
       {state === "saved" ? <Check className="size-3.5 shrink-0" /> : bad ? <CloudOff className="size-3.5 shrink-0" /> : <Loader2 className="size-3.5 shrink-0 animate-spin" />}
-      <span className="sr-only xl:not-sr-only">{text}</span>
+      <span className="sr-only">{text}</span>
+      <span className="hidden xl:inline" aria-hidden>
+        {short}
+      </span>
     </>
   );
   const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-subtle-foreground");
@@ -202,11 +206,12 @@ export function TopBar(p: {
             e.currentTarget.blur();
           }
         }}
-        className="h-8 w-[clamp(6rem,16vw,16rem)] min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 font-heading text-[19px] outline-none hover:border-border focus:border-primary focus:ring-4 focus:ring-brand-faint"
+        className="h-8 w-[clamp(6rem,14vw,15rem)] min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 font-heading text-[19px] outline-none hover:border-border focus:border-primary focus:ring-4 focus:ring-brand-faint"
       />
       <SaveBadge state={p.save} onRetry={p.onRetrySave} />
 
-      <div className="ml-auto flex items-center gap-1">
+      {/* The actions keep their size; the project name gives way when room is short. */}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!p.canUndo} onClick={p.onUndo}>
@@ -233,7 +238,7 @@ export function TopBar(p: {
         <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setHistoryOpen(true)} aria-label="Edit history">
           <History /> <span className="hidden xl:inline">Edit history</span>
         </Button>
-        <Button variant={p.compare ? "default" : "ghost"} size="sm" className="rounded-full" aria-pressed={p.compare} onClick={() => p.onCompare(!p.compare)}>
+        <Button variant={p.compare ? "default" : "ghost"} size="sm" className="rounded-full" aria-label="Compare" aria-pressed={p.compare} onClick={() => p.onCompare(!p.compare)}>
           <Columns2 /> <span className="hidden xl:inline">Compare</span>
         </Button>
         <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
@@ -241,7 +246,7 @@ export function TopBar(p: {
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <Button variant="ghost" size="sm" className="rounded-full" disabled={!p.doc.nodes.length} onClick={() => void copyJson()}>
+              <Button variant="ghost" size="sm" className="rounded-full" aria-label="Copy JSON" disabled={!p.doc.nodes.length} onClick={() => void copyJson()}>
                 <Braces /> <span className="hidden xl:inline">Copy JSON</span>
               </Button>
             </span>

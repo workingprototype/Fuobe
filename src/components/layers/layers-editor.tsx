@@ -102,8 +102,8 @@ export function LayersEditor({ id, models }: { id: string; models: Record<string
 }
 
 /**
- * Below 1280 px the app's sidebar folds to icons while the editor is open, so the canvas keeps its
- * room next to a tool's form and the Layers panel; it opens again when you leave.
+ * Below 1440 px the app's sidebar folds to icons while the editor is open, so the canvas keeps its
+ * room next to a tool's form and the Layers panel (and the top bar its labels); it opens again when you leave.
  */
 function useRoomyCanvas() {
   const sidebar = useSidebar();
@@ -113,7 +113,7 @@ function useRoomyCanvas() {
   });
   useEffect(() => {
     const s = ref.current;
-    if (s.isMobile || !s.open || window.innerWidth >= 1280) return;
+    if (s.isMobile || !s.open || window.innerWidth >= 1440) return;
     s.setOpen(false);
     return () => ref.current.setOpen(true);
   }, []);

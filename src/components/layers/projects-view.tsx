@@ -109,13 +109,13 @@ function ProjectCard({ p, onRename, onDelete }: { p: LayerProject; onRename: () 
               )}
             >
               {p.status === "processing" ? <Loader2 className="size-3 shrink-0 animate-spin" /> : p.status === "unopened" ? <Layers className="size-3 shrink-0" /> : null}
-              <span className="truncate">{p.status === "processing" ? "Processing…" : p.status === "unopened" ? "Layers ready — open to see them" : "Couldn't be processed"}</span>
+              <span className="truncate">{p.status === "processing" ? "Processing…" : p.status === "unopened" ? "Layers ready" : "Couldn't be processed"}</span>
             </span>
           )}
         </div>
         <h3 className="mt-2 truncate pr-9 text-[14px] font-medium">{p.name}</h3>
-        <p className="text-[12px] text-muted-foreground">
-          {timeAgo(p.updatedAt)} · {p.status === "unopened" && p.pendingLayers ? `${p.pendingLayers} layers ready` : `${p.layers} layer${p.layers === 1 ? "" : "s"}`}
+        <p className={cn("truncate pr-9 text-[12px]", p.status === "unopened" ? "text-brand-text" : "text-muted-foreground")}>
+          {timeAgo(p.updatedAt)} · {p.status === "unopened" ? `${p.pendingLayers ? `${p.pendingLayers} layers` : "Layers"} ready — open to see them` : `${p.layers} layer${p.layers === 1 ? "" : "s"}`}
         </p>
       </Link>
       <DropdownMenu>

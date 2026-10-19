@@ -42,6 +42,7 @@ import {
   toLocal,
   TOOL_MODELS,
   zipPlan,
+  coverage,
   defaultLayers,
   exportScale,
   layerDensity,
@@ -510,6 +511,10 @@ describe("exports keep every layer's detail", () => {
     expect(scaledSize(960, 720, exportScale(up))).toEqual([3840, 2880]);
     // Hidden layers don't count; a crop counts its own pixels.
     expect(exportScale(updateNode(up, "up", { hidden: true }))).toBe(1);
+    // Nor do small layers: a model's 2K answer for a corner of the picture keeps the picture's size.
+    expect(exportScale(addNodes(d, [node("corner", 0, { x: 0, y: 0, w: 400, h: 300, natural: [2048, 1536] })]))).toBe(1);
+    expect(coverage(node("half", 0, { x: 0, y: 0, w: 960, h: 360 }), d)).toBeCloseTo(0.5);
+    expect(coverage(node("off", 0, { x: 2000, y: 0 }), d)).toBe(0);
     expect(layerDensity(node("c", 0, { w: 100, crop: [0, 0, 300, 150], natural: [1000, 1000] }))).toBe(3);
     // Enlarged past its pixels: the document's own size, never smaller.
     expect(exportScale(doc([node("big", 0, { w: 400, natural: [100, 50] })]))).toBe(1);
