@@ -127,8 +127,10 @@ describe("palettes: routing per model", () => {
     const listed = slice.models.map((m) => m.id);
     const known = new Set([...listed, ...(slice.lookup ?? []).map((m) => m.id)]);
     for (const id of Object.values(SIGNATURE_MODELS)) expect(known.has(id), id).toBe(true);
-    // Edit-only routing targets stay out of the picker list; their field maps stay on the server.
-    for (const id of ["recraft-4-style", "oss-style-qwen-edit", "recraft-4-style-saved"]) expect(listed, id).not.toContain(id);
+    // Edit-only and hidden routing targets stay out of the picker list (Qwen-Image-Edit Style Reference is a
+    // text-to-image model, listed already); their field maps stay on the server.
+    for (const id of ["recraft-4-style", "recraft-4-style-saved", "oss-palette-image"]) expect(listed, id).not.toContain(id);
+    expect(listed).toContain("oss-style-qwen-edit");
     expect((slice.lookup ?? []).every((m) => m.routes.every((r) => !r.map))).toBe(true);
   });
 
