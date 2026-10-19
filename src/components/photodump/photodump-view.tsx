@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight, History, Library, Loader2, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -11,14 +11,14 @@ import { Input } from "@/components/ui/input";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToList, type SlotValue } from "@/components/studio/media-slot";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
-import { useEngine, useGenerations } from "@/lib/api";
+import { useElements, useEngine, useGenerations } from "@/lib/api";
 import { customPack, DEFAULT_ASPECT, MAX_PACK_REFS, MAX_SELFIE_MB, PACKS, PHOTODUMP_ASPECTS, PHOTODUMP_MODELS, type Pack } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PackCover } from "./covers";
 import { useRun, useRunPreview, usePackActions, useUserPacks } from "./hooks";
-import { DownloadAll, ResultsGrid } from "./results";
+import { DownloadAll, ResultsGrid, runState } from "./results";
 import { RunLine, Steps } from "./steps";
 import { CharacterPicker } from "./subject";
 import { UploadBox } from "./upload-box";
@@ -46,6 +46,7 @@ const ratioOf = (a: string) => {
 function CreatePack({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState("");
   const [refs, setRefs] = useState<SlotValue[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
   const { create } = usePackActions();
   const busy = refs.some((r) => r.uploading);
   return (
@@ -73,18 +74,23 @@ function CreatePack({ open, onOpenChange, onCreated }: { open: boolean; onOpenCh
             </div>
           ))}
           {refs.length < MAX_PACK_REFS && (
-            <label className="grid aspect-square cursor-pointer place-items-center rounded-md border border-dashed text-muted-foreground hover:bg-accent">
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              aria-label="Add reference photos"
+              className="grid aspect-square place-items-center rounded-md border border-dashed text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <Plus className="size-4" />
-              <span className="sr-only">Add reference photos</span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                multiple
-                hidden
-                onChange={(e) => ([...(e.target.files ?? [])].slice(0, MAX_PACK_REFS - refs.length).forEach((f) => fileToList(f, setRefs, "image")), (e.target.value = ""))}
-              />
-            </label>
+            </button>
           )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            hidden
+            onChange={(e) => ([...(e.target.files ?? [])].slice(0, MAX_PACK_REFS - refs.length).forEach((f) => fileToList(f, setRefs, "image")), (e.target.value = ""))}
+          />
         </div>
         <DialogFooter>
           <Button
@@ -170,13 +176,25 @@ export function PhotodumpView() {
   };
 
   const subjectReady = subjectMode === "selfie" ? !!selfie?.ref && !selfie.uploading : !!elementId;
+  // The Model choice follows the engine: a pick the other engine had counts as Auto (one radio is always checked).
+  const elements = useElements();
+  const character = subjectMode === "character" ? elements.data?.find((e) => e.id === elementId) : undefined;
+  const choices: (string | undefined)[] = [undefined, ...PHOTODUMP_MODELS[engine]];
+  const unavailable = (m?: string): string | null => {
+    if (m !== "oss-z-image-turbo") return null;
+    if (pack?.custom) return "Your own packs recreate each reference photo with Qwen-Image-Edit";
+    if (!character) return "Needs a character with a trained LoRA";
+    return character.loras.some((l) => l.modelId === "oss-z-image-turbo" && l.engine === "open" && !l.referenceId) ? null : `${character.name} has no trained LoRA yet`;
+  };
+  const pick = choices.includes(modelPick) && !unavailable(modelPick) ? modelPick : undefined;
   const body = pack && subjectReady
-    ? { packId: pack.id, engine, aspectRatio: aspect, modelId: modelPick, ...(subjectMode === "selfie" ? { selfie: selfie!.ref } : { elementId }) }
+    ? { packId: pack.id, engine, aspectRatio: aspect, modelId: pick, ...(subjectMode === "selfie" ? { selfie: selfie!.ref } : { elementId }) }
     : null;
   const preview = useRunPreview("/api/photodump", step === 1 ? body : null);
+  const fixedAspect = !!body && !!preview.data?.fixedAspect;
   const current = runs.find((r) => r.batchId === batchId);
   const items = current?.items ?? [];
-  const finished = items.length > 0 && items.every((g) => g.status !== "queued" && g.status !== "running");
+  const state = runState(items);
   const product = pack?.product === "photodump" ? "Photodump" : "Instadump";
 
   const generate = () => {
@@ -236,7 +254,7 @@ export function PhotodumpView() {
                     onDoubleClick={() => (setPackId(p.id), go(1))}
                     className={cn("block w-full overflow-hidden rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring", sel && "ring-3 ring-primary")}
                   >
-                    <PackCover id={p.id} name={p.name} count={p.count} refs={p.refs} className="aspect-[3/4]" />
+                    <PackCover id={p.id} name={p.name} count={p.count} refs={p.refs} hue={p.hue} tone={p.tone} className="aspect-[3/4]" />
                   </button>
                   <p className="mt-1.5 line-clamp-2 px-0.5 text-[12px] text-muted-foreground">
                     {p.custom ? "Your pack" : p.product === "instadump" ? `Instadump${p.author ? ` · by ${p.author}` : ""}` : "Soul 2.0 Photodump"} · {p.description}
@@ -320,7 +338,7 @@ export function PhotodumpView() {
           </div>
           <aside className="space-y-5 rounded-2xl border p-4 lg:sticky lg:top-6 lg:self-start">
             <div className="flex items-center gap-3">
-              <PackCover id={pack.id} name={pack.name} count={pack.count} refs={pack.refs} bare className="size-14 shrink-0 rounded-lg" />
+              <PackCover id={pack.id} name={pack.name} count={pack.count} refs={pack.refs} hue={pack.hue} tone={pack.tone} bare className="size-14 shrink-0 rounded-lg" />
               <div className="min-w-0">
                 <p className="truncate text-[14px] font-medium">{pack.name}</p>
                 <p className="text-[12px] text-muted-foreground">{pack.count} photos</p>
@@ -328,9 +346,22 @@ export function PhotodumpView() {
             </div>
             <div className="space-y-2">
               <p className="text-[12.5px] font-medium">Aspect ratio</p>
-              <div role="radiogroup" aria-label="Aspect ratio" onKeyDown={radioKeys} className="flex flex-wrap gap-1">
+              {/* A model that keeps the photo's shape (Qwen-Image-Edit) ignores the aspect ratio: the picker is off and the run line says why. */}
+              <div role="radiogroup" aria-label="Aspect ratio" aria-disabled={fixedAspect || undefined} onKeyDown={radioKeys} className="flex flex-wrap gap-1">
                 {PHOTODUMP_ASPECTS.map((a) => (
-                  <button key={a} role="radio" aria-checked={aspect === a} tabIndex={radioTab(aspect === a)} onClick={() => setAspect(a)} className={cn("h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors", aspect === a ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}>
+                  <button
+                    key={a}
+                    role="radio"
+                    aria-checked={aspect === a}
+                    tabIndex={radioTab(aspect === a)}
+                    disabled={fixedAspect && aspect !== a}
+                    onClick={() => setAspect(a)}
+                    className={cn(
+                      "h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors disabled:opacity-40",
+                      aspect === a ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+                      fixedAspect && aspect === a && "opacity-60",
+                    )}
+                  >
                     {a === "auto" ? "Auto" : a}
                   </button>
                 ))}
@@ -339,11 +370,27 @@ export function PhotodumpView() {
             <div className="space-y-2">
               <p className="text-[12.5px] font-medium">Model</p>
               <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="flex flex-wrap gap-1">
-                {[undefined, ...PHOTODUMP_MODELS[engine]].map((m) => (
-                  <button key={m ?? "auto"} role="radio" aria-checked={modelPick === m} tabIndex={radioTab(modelPick === m)} onClick={() => setModelPick(m)} className={cn("h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors", modelPick === m ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}>
-                    {m ? MODEL_NAMES[m] : "Auto"}
-                  </button>
-                ))}
+                {choices.map((m) => {
+                  const why = unavailable(m);
+                  return (
+                    <button
+                      key={m ?? "auto"}
+                      role="radio"
+                      aria-checked={pick === m}
+                      tabIndex={radioTab(pick === m)}
+                      disabled={!!why}
+                      title={why ?? undefined}
+                      aria-label={why ? `${m ? MODEL_NAMES[m] : "Auto"} — ${why}` : undefined}
+                      onClick={() => setModelPick(m)}
+                      className={cn(
+                        "h-8 rounded-full border px-2.5 text-[12.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                        pick === m ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {m ? MODEL_NAMES[m] : "Auto"}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <RunLine preview={body ? preview.data : undefined} loading={preview.isFetching} />
@@ -365,7 +412,13 @@ export function PhotodumpView() {
             <div className="min-w-0">
               <h2 className="font-heading text-[26px] leading-tight">Get your {product}</h2>
               <p className="text-[14px] text-muted-foreground">
-                {!items.length ? "Starting…" : finished ? "Your new photos are ready - download, post, share and enjoy!" : `Making ${items.length} photos — they appear here as they finish.`}
+                {!items.length
+                  ? "Starting…"
+                  : state.busy
+                    ? `Making ${state.total} photos — they appear here as they finish.`
+                    : state.failed
+                      ? `${state.done} of ${state.total} photos are ready — retry the ${state.failed === 1 ? "one" : "ones"} that didn't make it.`
+                      : "Your new photos are ready - download, post, share and enjoy!"}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

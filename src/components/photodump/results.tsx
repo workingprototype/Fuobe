@@ -1,15 +1,16 @@
 "use client";
 
-import { Check, Download, Film, Maximize2, Pencil, Trash2 } from "lucide-react";
+import { Check, Download, Film, Loader2, Maximize2, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FailedTile, MediaThumb, PendingTile } from "@/components/studio/feed";
+import { MediaThumb, PendingTile } from "@/components/studio/feed";
 import { Viewer } from "@/components/studio/viewer";
-import { useCreateGeneration, useGenerationActions } from "@/lib/api";
+import { useGenerationActions } from "@/lib/api";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { useRetryPhoto } from "./hooks";
 
 export interface Tile {
   g: Generation;
@@ -54,6 +55,40 @@ function IconLink({ href, label, icon: Icon, onClick }: { href?: string; label: 
   );
 }
 
+/** A photo that failed or was canceled: which one it was ("Photo 3 of 9"), why, and Retry (inside the run). */
+function RetryTile({ g, ratio, busy, onRetry }: { g: Generation; ratio: number; busy: boolean; onRetry: () => void }) {
+  const which = g.request.step?.label;
+  return (
+    <div className="flex flex-col justify-between rounded-xl border border-dashed bg-background p-3" style={{ aspectRatio: Math.max(ratio, 0.8) }}>
+      <div className="min-h-0 space-y-1 overflow-hidden">
+        {which && <p className="text-[11.5px] font-medium text-muted-foreground">{which}</p>}
+        <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : "Couldn't generate this one"}</p>
+        {g.error && <p className="line-clamp-4 text-[12px] leading-snug break-words whitespace-pre-line text-muted-foreground">{g.error}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        disabled={busy}
+        aria-label={`Retry ${which ?? "this photo"}`}
+        className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
+      >
+        {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />} Retry
+      </button>
+    </div>
+  );
+}
+
+/** How a run is doing: everything made, some still rendering, or some that failed. */
+export function runState(items: Generation[]): { total: number; done: number; failed: number; busy: boolean } {
+  const tiles = tilesOf(items);
+  return {
+    total: tiles.length,
+    done: tiles.filter((t) => t.o).length,
+    failed: items.filter((g) => g.status === "failed" || g.status === "canceled").length,
+    busy: items.some((g) => g.status === "queued" || g.status === "running"),
+  };
+}
+
 /**
  * A grid of results: placeholders while they render, a retry card when one fails, and finished images
  * with Animate / Edit / Delete. With `onPick`, clicking an image selects it (Fashion Factory's "pick 1")
@@ -65,18 +100,21 @@ export function ResultsGrid({
   picked,
   onPick,
   className,
+  onRetried,
 }: {
   items: Generation[];
   ratio?: number;
   picked?: string;
   onPick?: (url: string) => void;
   className?: string;
+  /** A failed photo was retried: `from` is replaced by `to` (runs that track their generation ids). */
+  onRetried?: (from: string, to: string[]) => void;
 }) {
   const tiles = useMemo(() => tilesOf(items), [items]);
   const done = tiles.filter((t) => t.o);
   const [open, setOpen] = useState<number | null>(null);
   const { trash } = useGenerationActions();
-  const create = useCreateGeneration();
+  const retry = useRetryPhoto();
   const viewing = open !== null ? done[open] : undefined;
   return (
     <>
@@ -85,11 +123,17 @@ export function ResultsGrid({
           if (!t.o) {
             if (t.g.status === "queued" || t.g.status === "running") return <PendingTile key={t.key} g={t.g} ratio={ratio} />;
             return (
-              <FailedTile
+              <RetryTile
                 key={t.key}
                 g={t.g}
                 ratio={ratio}
-                onRetry={() => create.mutate({ ...t.g.request, title: undefined, batchTitle: undefined }, { onError: (e) => toast.error((e as Error).message) })}
+                busy={retry.isPending && retry.variables === t.g.id}
+                onRetry={() =>
+                  retry.mutate(t.g.id, {
+                    onSuccess: (r) => onRetried?.(t.g.id, r.items.map((x) => x.id)),
+                    onError: (e) => toast.error((e as Error).message),
+                  })
+                }
               />
             );
           }

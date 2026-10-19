@@ -21,7 +21,8 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getElement } from "./elements";
-import { createGenerations, previewGeneration } from "./generations";
+import { createGenerations, getGeneration, previewGeneration } from "./generations";
+import { trashGenerations } from "./library";
 import { higgsfieldKey } from "./providers/higgsfield";
 import { engineMode } from "./settings";
 
@@ -129,13 +130,17 @@ export function previewRun(requests: GenerationRequest[], notes: string[] = []) 
     const previews = requests.map((r) => previewGeneration(fitted(r)));
     const first = previews[0];
     const costs = previews.map((p) => p.costUsd);
+    // No aspect ratio setting (Qwen-Image-Edit's open workflow): the result follows image 1's shape — say so.
+    const fixedAspect = !first.model.options.aspectRatios?.length;
+    const asked = requests.some((r) => r.params?.aspectRatio && r.params.aspectRatio !== "auto");
     return {
       modelId: first.model.id,
       modelName: first.model.name,
       count: previews.reduce((n, p) => n + p.outputs, 0),
       costUsd: costs.some((c) => c === null) ? null : Math.round(costs.reduce((a, b) => a! + b!, 0)! * 1000) / 1000,
       demo: previews.some((p) => p.demo),
-      notes,
+      fixedAspect,
+      notes: fixedAspect && asked ? [...notes, `${first.model.name} keeps the shape of your photo — the aspect ratio doesn't apply`] : notes,
     };
   } catch (e) {
     return { error: (e as Error).message, notes };
@@ -150,6 +155,28 @@ export function createBatch(requests: GenerationRequest[], title: string): { bat
   if (!requests.length) throw new Error("Nothing to make");
   const { batchId, items } = createPipeline(requests.map((r, i) => ({ key: `p${i}`, request: { ...fitted(r), batchTitle: title } })));
   return { batchId, items };
+}
+
+/** The features whose photos can be retried from their run's grid (Photodump, Fashion Factory, Character Sheet). */
+const RETRY_FEATURES = new Set(["photodump", "fashion", "character-sheet", "app:app-ai-influencer"]);
+
+/**
+ * Run a failed or canceled photo again inside its run: the same request in the same batch (so the
+ * run's grid, Download all and the Library stack keep it), and the failed one goes to the Trash.
+ * A job that was one of several made from one request (×4 base shots on a one-per-job model) is
+ * retried as one job of its own share of photos.
+ */
+export function retryPhoto(id: string): Generation[] {
+  const g = getGeneration(id);
+  if (!g) throw new Error("That photo is gone");
+  if (!RETRY_FEATURES.has(g.feature)) throw new Error("This result isn't part of a photo run");
+  if (g.status !== "failed" && g.status !== "canceled") throw new Error("Only a failed or canceled photo can be retried");
+  const req = fitted(g.request);
+  const p = previewGeneration(req);
+  const per = p.jobs > 1 ? Math.max(1, Math.round(p.outputs / p.jobs)) : undefined;
+  const items = createGenerations(per ? { ...req, params: { ...req.params, numOutputs: per } } : req, g.batchId ? { batchId: g.batchId } : {});
+  trashGenerations([id]);
+  return items;
 }
 
 // ---------------------------------------------------------------------------

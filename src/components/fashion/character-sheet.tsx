@@ -1,9 +1,8 @@
 "use client";
 
-import { AtSign, ImagePlus, Loader2, RotateCcw, Shuffle, Sparkles, UserRoundPlus, X } from "lucide-react";
+import { AtSign, Check, ImagePlus, Loader2, RotateCcw, Shuffle, Sparkles, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PageHeader, PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -15,7 +14,7 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useRun, useRunPreview } from "@/components/photodump/hooks";
 import { ResultsGrid } from "@/components/photodump/results";
 import { RunLine } from "@/components/photodump/steps";
-import { useEngine, useGenerations, useSaveElement } from "@/lib/api";
+import { useElements, useEngine, useGenerations, useSaveElement } from "@/lib/api";
 import { castFieldVisible, castNameFor, randomCast, SHEET_MAX_REFS, type CastAnswers, type CastFieldData } from "@/lib/catalog/packs";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
@@ -90,12 +89,32 @@ function CastForm({ fields, values, set }: { fields: CastFieldData[]; values: Ca
   );
 }
 
-/** Save a finished sheet as a character (its sheet, views and the source photos as references). */
+/**
+ * Save a finished sheet as a character (its sheet, views and the source photos as references), once:
+ * a sheet that is already a character (its image is one of the character's references) shows that
+ * character instead, also after a reload.
+ */
 function SaveCharacter({ item, extra, defaultName }: { item: Generation; extra: string[]; defaultName: string }) {
   const [name, setName] = useState(defaultName);
   const save = useSaveElement();
-  const router = useRouter();
+  const elements = useElements();
   const refs = [...item.outputs.filter((o) => o.kind === "image").map((o) => o.url), ...extra].slice(0, 20);
+  const saved = save.data ?? elements.data?.find((e) => e.kind === "character" && !!refs[0] && e.references.includes(refs[0]));
+  if (saved)
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-background p-3">
+        <span className="grid size-7 place-items-center rounded-full bg-success/15 text-success">
+          <Check className="size-4" />
+        </span>
+        <p className="min-w-0 flex-1 text-[13px]">
+          Saved as <span className="font-medium">@{saved.handle}</span> — use it anywhere with <AtSign className="inline size-3" />
+          mentions, in <Link href="/photodump" className="text-brand-text hover:underline">Photodump</Link> or <Link href="/fashion-factory" className="text-brand-text hover:underline">Fashion Factory</Link>.
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/elements/${saved.id}`}>Open @{saved.handle}</Link>
+        </Button>
+      </div>
+    );
   return (
     <div className="flex flex-wrap items-end gap-2 rounded-2xl border bg-background p-3">
       <label className="min-w-40 flex-1 space-y-1">
@@ -103,13 +122,12 @@ function SaveCharacter({ item, extra, defaultName }: { item: Generation; extra: 
         <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className="h-8" />
       </label>
       <Button
-        disabled={!name.trim() || save.isPending}
+        disabled={!name.trim() || save.isPending || elements.isLoading}
         onClick={() =>
           save.mutate(
             { name: name.trim(), kind: "character", references: refs },
             {
-              onSuccess: (el) =>
-                toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } }),
+              // The card turns into "Saved as @handle · Open": no toast needed.
               onError: (e) => toast.error((e as Error).message),
             },
           )
@@ -139,6 +157,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
   const [brief, setBrief] = useState("");
   const [ids, setIds] = useState<string[]>([]);
   const [over, setOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const run = useRun<Record<string, unknown>>("/api/photodump/character");
   const { data } = useGenerations({ features: ["character-sheet", "app:app-ai-influencer"], limit: 60 });
   // This visit's sheets; after a reload, the most recent ones.
@@ -189,7 +208,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
 
           {mode === "reference" && (
             <div className="space-y-3">
-              <label
+              <div
                 onDragOver={(e) => (e.preventDefault(), setOver(true))}
                 onDragLeave={() => setOver(false)}
                 onDrop={(e) => {
@@ -197,13 +216,20 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
                   setOver(false);
                   addFiles(e.dataTransfer.files);
                 }}
-                className={cn("flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-10 text-center transition-colors hover:bg-accent", over && "border-primary bg-brand-faint")}
+                onPaste={(e) => addFiles(e.clipboardData.files)}
+                className={cn("rounded-2xl border border-dashed transition-colors", over && "border-primary bg-brand-faint")}
               >
-                <ImagePlus className="size-6 text-muted-foreground" />
-                <span className="text-[14px] font-medium">Drop images here</span>
-                <span className="text-[12.5px] text-muted-foreground">1–{SHEET_MAX_REFS} photos of one person · PNG, JPG or WebP</span>
-                <input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
-              </label>
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-2xl px-4 py-10 text-center outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                >
+                  <ImagePlus className="size-6 text-muted-foreground" />
+                  <span className="text-[14px] font-medium">Drop images here</span>
+                  <span className="text-[12.5px] text-muted-foreground">1–{SHEET_MAX_REFS} photos of one person · PNG, JPG or WebP · or click to choose</span>
+                </button>
+                <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
+              </div>
               {photos.length > 0 && (
                 <div className="grid grid-cols-5 gap-2">
                   {photos.map((p, i) => (
@@ -263,7 +289,12 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
           {mine.length ? (
             <>
               {!ids.length && <p className="text-[13px] font-medium text-muted-foreground">Recent sheets</p>}
-              <ResultsGrid items={mine} ratio={16 / 9} className="sm:grid-cols-1 lg:grid-cols-1" />
+              <ResultsGrid
+                items={mine}
+                ratio={16 / 9}
+                className="sm:grid-cols-1 lg:grid-cols-1"
+                onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
+              />
               {latest && (
                 <SaveCharacter
                   key={latest.id}

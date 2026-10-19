@@ -2,7 +2,7 @@
 
 import { Check, Loader2, Plus, UserRound, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,21 +20,50 @@ export function identityLabel(el: StudioElement): string {
   return `${el.references.length} photo${el.references.length === 1 ? "" : "s"}`;
 }
 
-/** Create a character from a few photos, without leaving the page. */
+/** Higgsfield's character-creation copy (docs/research/higgsfield-image-studios.md §2). */
+const CREATE_COPY = {
+  more: "Upload 20+ photos for best results",
+  moreTitle: "More Photos, Better Results",
+  avoidTitle: "Avoid These Types of Photos",
+  avoid: "No duplicates, group shots, pets, nudes, filters, face-covering accessories, or masks",
+  consent: "By clicking Save character, I consent to this biometric data processing and confirm these photos are of me or of a person at least 18 years old who gave written permission.",
+} as const;
+
+const MAX_PHOTOS = 20;
+
+/** Create a character from photos of one person, without leaving the page. */
 export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (el: StudioElement) => void }) {
   const [name, setName] = useState("");
   const [photos, setPhotos] = useState<SlotValue[]>([]);
+  const [over, setOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const save = useSaveElement();
   const busy = photos.some((p) => p.uploading);
+  const addFiles = (files: Iterable<File>) => [...files].filter((f) => /^image\/(png|jpe?g|webp)$/.test(f.type)).slice(0, MAX_PHOTOS - photos.length).forEach((f) => fileToList(f, setPhotos, "image"));
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="max-h-[92svh] overflow-y-auto sm:max-w-md"
+        onPaste={(e) => addFiles(e.clipboardData.files)}
+        onDragOver={(e) => (e.preventDefault(), setOver(true))}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          addFiles(e.dataTransfer.files);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>New character</DialogTitle>
-          <DialogDescription>A few clear photos of one person: different angles, at least one full-body, no sunglasses, filters or group shots.</DialogDescription>
+          <DialogDescription>
+            <span className="font-medium text-foreground">{CREATE_COPY.moreTitle}</span> · {CREATE_COPY.more}: different angles, at least one full-body.
+          </DialogDescription>
         </DialogHeader>
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-[12.5px]">
+          <span className="font-medium">{CREATE_COPY.avoidTitle}</span> · {CREATE_COPY.avoid}
+        </p>
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. “Maya”" maxLength={60} aria-label="Character name" />
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className={cn("grid grid-cols-4 gap-1.5 rounded-lg transition-colors", over && "bg-brand-faint")}>
           {photos.map((p, i) => (
             <div key={p.id ?? i} className="relative aspect-square overflow-hidden rounded-md bg-muted">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -49,17 +78,25 @@ export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolea
               </button>
             </div>
           ))}
-          {photos.length < 20 && (
-            <label className="grid aspect-square cursor-pointer place-items-center rounded-md border border-dashed text-muted-foreground hover:bg-accent">
+          {photos.length < MAX_PHOTOS && (
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              aria-label="Add photos"
+              className="grid aspect-square place-items-center rounded-md border border-dashed text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <Plus className="size-4" />
-              <span className="sr-only">Add photos</span>
-              <input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => ([...(e.target.files ?? [])].slice(0, 20 - photos.length).forEach((f) => fileToList(f, setPhotos, "image")), (e.target.value = ""))} />
-            </label>
+            </button>
           )}
         </div>
+        <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
+        <p className="text-[11.5px] text-muted-foreground tabular-nums">
+          {photos.length}/{MAX_PHOTOS} photos · PNG, JPG or paste
+        </p>
         <p className="text-[12px] text-muted-foreground">
           Or <Link href="/character-sheet" className="text-brand-text hover:underline">build one with Character Sheet</Link>, then pick it here.
         </p>
+        <p className="text-[11.5px] leading-snug text-muted-foreground">{CREATE_COPY.consent}</p>
         <DialogFooter>
           <Button
             disabled={!name.trim() || !photos.length || busy || save.isPending}

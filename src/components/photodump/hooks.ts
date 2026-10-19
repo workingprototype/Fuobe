@@ -17,6 +17,8 @@ export interface RunPreview {
   count?: number;
   costUsd?: number | null;
   demo?: boolean;
+  /** The model keeps the input photo's shape (no aspect ratio setting: Qwen-Image-Edit, try-on). */
+  fixedAspect?: boolean;
   notes: string[];
   error?: string;
 }
@@ -44,6 +46,18 @@ export function useRun<B>(url: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: B) => post<{ batchId?: string; items: Generation[]; notes?: string[] }>(url, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["generations"] });
+      void qc.invalidateQueries({ queryKey: ["library"] });
+    },
+  });
+}
+
+/** Retry a failed photo inside its run (same batch); the failed one goes to the Trash. */
+export function useRetryPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => post<{ items: Generation[] }>("/api/photodump/retry", { id }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["generations"] });
       void qc.invalidateQueries({ queryKey: ["library"] });

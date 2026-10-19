@@ -41,6 +41,31 @@ export function hueOf(s: string): number {
   return (h >>> 0) % 360;
 }
 
+/** Evenly spread hues for the i-th cover of a set (the golden angle: neighbours never share a band). */
+export const spreadHue = (i: number, offset = 18) => Math.round((offset + i * 137.508) % 360);
+
+/**
+ * How a drawn cover is treated (Fuobe ships no sample photos, so the cover is the only cue): black and
+ * white with grain, a hard flash hotspot, red and blue gels, a pastel wash, film grain, a spotlight in
+ * the dark, or a plain gradient in the look's hue.
+ */
+export type CoverTone = "mono" | "flash" | "gel" | "pastel" | "film" | "spot" | "plain";
+
+const TONES: [RegExp, CoverTone][] = [
+  [/black-and-white|\bb\s?&\s?w\b|\bbw\b|monochrome|noir|grayscale|greyscale/i, "mono"],
+  [/\bgels?\b|neon|solaris/i, "gel"],
+  [/flash|digicam|disposable|paparazzi/i, "flash"],
+  [/pastel|candy|bubbles|\baqua\b/i, "pastel"],
+  [/\bfilm\b|grain|noise|low-res|vintage|nostalgi|retro|35mm|vhs/i, "film"],
+  [/spotlight|shadows|\bdark\b|moody|melanchol|night/i, "spot"],
+];
+
+/** A look's cover treatment from its name and description ("Retro BW" → mono, "80s horror" → gel). */
+export function coverTone(...words: (string | undefined)[]): CoverTone {
+  const text = words.filter(Boolean).join(" ");
+  return TONES.find(([re]) => re.test(text))?.[1] ?? "plain";
+}
+
 const isSoulSource = (s: string): s is SoulPresetModel => s === "soul-v1" || s === "soul-v2";
 
 /**
@@ -317,15 +342,31 @@ const PACK_LOOK: Record<string, string> = {
   "editorial-shots": "High-end fashion magazine editorial",
 };
 
+/** Each pack's drawn cover, set by hand so the 14 read apart (hues are spread by position). */
+const PACK_TONE: Record<string, CoverTone> = {
+  "sleepy-head": "pastel",
+  "alter-ego": "spot",
+  "cool-girl-dump": "film",
+  "male-archive": "film",
+  "winter-special": "pastel",
+  "aura-farming": "spot",
+  "2000s-nostalgia": "flash",
+  "editorial-shots": "mono",
+  "surreal-self-ii": "gel",
+};
+
 export interface Pack extends PackMeta {
   shots: string[];
   look: string;
   /** User packs: one reference photo per shot (the photo to recreate). */
   refs?: string[];
   custom?: boolean;
+  /** The drawn cover: its hue and treatment. */
+  hue: number;
+  tone: CoverTone;
 }
 
-export const PACKS: Pack[] = PHOTODUMP_PACKS.map((p) => ({ ...p, shots: SHOTS[p.id] ?? [], look: PACK_LOOK[p.id] ?? "" }));
+export const PACKS: Pack[] = PHOTODUMP_PACKS.map((p, i) => ({ ...p, shots: SHOTS[p.id] ?? [], look: PACK_LOOK[p.id] ?? "", hue: spreadHue(i), tone: PACK_TONE[p.id] ?? "plain" }));
 export const getPack = (id: string) => PACKS.find((p) => p.id === id);
 
 /** A user's own pack (Instadump's "Create pack"): up to 15 reference photos to recreate. */
@@ -354,6 +395,8 @@ export function customPack(p: CustomPackLike): Pack {
     look: "",
     refs: p.refs,
     custom: true,
+    hue: hueOf(p.id),
+    tone: "plain",
   };
 }
 
@@ -386,7 +429,16 @@ const turboLora = (s: PhotoSubject) => (s.kind === "element" ? s.loras.find((l) 
 export function photodumpModel(subject: PhotoSubject, engine: Engine, caps: PlanCaps, pick?: string, custom = false): { modelId: string; note?: string } {
   if (engine === "open") {
     if (!custom && turboLora(subject) && pick !== "oss-qwen-edit") return { modelId: "oss-z-image-turbo" };
-    return { modelId: "oss-qwen-edit", note: subject.kind === "element" && !turboLora(subject) && !custom ? "No trained LoRA yet — Qwen-Image-Edit works from the character's photos" : undefined };
+    // Say why when the pick (or a character without a LoRA) ends up on Qwen-Image-Edit.
+    const note =
+      pick === "oss-z-image-turbo" && custom
+        ? "Your own packs recreate each reference photo — Qwen-Image-Edit runs them"
+        : pick === "oss-z-image-turbo" && subject.kind === "selfie"
+          ? "Z-Image Turbo + LoRA needs a character with a trained LoRA — Qwen-Image-Edit works from your photo"
+          : subject.kind === "element" && !turboLora(subject) && !custom
+            ? "No trained LoRA yet — Qwen-Image-Edit works from the character's photos"
+            : undefined;
+    return { modelId: "oss-qwen-edit", note };
   }
   if (!custom && soulId(subject) && caps.higgsfield && (!pick || pick === "soul-2")) return { modelId: "soul-2" };
   const m = pick === "seedream-5-pro" ? "seedream-5-pro" : "nano-banana-pro";
@@ -663,6 +715,8 @@ export type FashionAction =
   | { type: "outfitStarted"; ids: string[] }
   | { type: "pickOutfit"; url: string }
   | { type: "photosetStarted"; batchId: string }
+  /** A failed base shot or outfit was retried: its new generation(s) take its place. */
+  | { type: "retried"; from: string; to: string[] }
   | { type: "reset" };
 
 /** The exact message Higgsfield shows when a step can't go on, or null. */
@@ -714,6 +768,12 @@ export function fashionReducer(s: FashionState, a: FashionAction): FashionState 
       return { ...s, outfit: a.url };
     case "photosetStarted":
       return { ...s, step: "photoset", photosetBatch: a.batchId };
+    case "retried": {
+      const swap = (ids: string[]) => (ids.includes(a.from) ? ids.flatMap((id) => (id === a.from ? a.to : [id])) : ids);
+      const baseIds = swap(s.baseIds);
+      const outfitIds = swap(s.outfitIds);
+      return baseIds === s.baseIds && outfitIds === s.outfitIds ? s : { ...s, baseIds, outfitIds };
+    }
     case "reset":
       return FASHION_START;
   }
@@ -734,6 +794,8 @@ export function sheetFromReference(images: string[], engine: Engine, details?: s
   const notes: string[] = [];
   const max = engine === "open" ? 3 : SHEET_MAX_REFS;
   if (images.length > max) notes.push(`Qwen-Image-Edit takes 3 photos — the first 3 are used`);
+  // The open workflow has no size setting: the sheet comes out in the first photo's shape.
+  if (engine === "open") notes.push("Qwen-Image-Edit keeps the shape of your first photo — put a landscape photo first for a wide sheet");
   const extra = details?.trim().replace(/[.\s]+$/, "");
   return {
     request: {

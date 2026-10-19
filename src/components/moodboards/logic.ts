@@ -4,7 +4,7 @@
  * images best represent a board, and the 2×2 collages open-source style models take.
  */
 import { SOUL_CATEGORIES, SOUL_PRESETS, type SoulPreset, type SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
-import { getSoulPreset, hueOf } from "@/lib/catalog/packs";
+import { coverTone, getSoulPreset, hueOf, spreadHue, type CoverTone } from "@/lib/catalog/packs";
 import { kmeans, suggestName, type MoodboardPick, type MoodboardStatus, type RGB } from "@/lib/catalog/palettes";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
@@ -34,7 +34,9 @@ export interface CuratedMoodboard {
   name: string;
   category: string;
   description: string;
+  /** The drawn cover: a hue spread by the look's place in its set, and a treatment from its words. */
   hue: number;
+  tone?: CoverTone;
   /** Soul's styles: every category the preset is in (Soul 2.0's looks have one). */
   categories?: string[];
   /** Whose preset: Soul 2.0's looks (the default) or Soul's styles. */
@@ -43,13 +45,14 @@ export interface CuratedMoodboard {
   preview?: string;
 }
 
-const toCurated = (p: SoulPreset): CuratedMoodboard => ({
+const toCurated = (p: SoulPreset, i: number): CuratedMoodboard => ({
   id: p.id,
   name: p.name,
   category: p.categories[0] ?? "All presets",
   categories: p.categories,
   description: p.description,
-  hue: hueOf(p.id),
+  hue: spreadHue(i),
+  tone: coverTone(p.name, p.description),
   ...(p.model === "soul-v1" && { source: p.model }),
 });
 
@@ -63,6 +66,13 @@ export const CURATED_SETS: Record<SoulPresetModel, CuratedMoodboard[]> = {
   "soul-v1": SOUL_PRESETS.filter((p) => p.model === "soul-v1").map(toCurated),
 };
 export const SOUL_STYLES = CURATED_SETS["soul-v1"];
+
+const LOOKS = new Map([...CURATED_SETS["soul-v2"], ...CURATED_SETS["soul-v1"]].map((c) => [c.id, c]));
+/** A curated look's drawn cover by id (the composer chip's dot); unknown ids get a hue of their own. */
+export const curatedLook = (id: string): { hue: number; tone: CoverTone } => {
+  const c = LOOKS.get(id);
+  return c ? { hue: c.hue, tone: c.tone ?? "plain" } : { hue: hueOf(id), tone: "plain" };
+};
 
 /** What GET /api/providers/higgsfield/presets returns (Higgsfield's live list, or the built-in one as `fallback`). */
 export interface LivePresets {

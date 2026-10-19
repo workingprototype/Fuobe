@@ -214,7 +214,7 @@ export function FashionView() {
               <RefreshCw /> Regenerate
             </Button>
           </div>
-          <ResultsGrid items={baseItems} picked={s.base} onPick={(url) => dispatch({ type: "pickBase", url })} />
+          <ResultsGrid items={baseItems} picked={s.base} onPick={(url) => dispatch({ type: "pickBase", url })} onRetried={(from, to) => dispatch({ type: "retried", from, to })} />
           <Footer onBack={() => dispatch({ type: "back" })}>
             <Button onClick={() => !block(fashionBlocker(s)) && dispatch({ type: "next" })}>
               Next <ArrowRight />
@@ -254,7 +254,13 @@ export function FashionView() {
             {s.outfitIds.length ? (
               <>
                 <p className="text-[14px] text-muted-foreground">Select a result to generate your photoset from. Edit your outfit or continue</p>
-                <ResultsGrid items={outfitItems} picked={s.outfit} onPick={(url) => dispatch({ type: "pickOutfit", url })} className="lg:grid-cols-3" />
+                <ResultsGrid
+                  items={outfitItems}
+                  picked={s.outfit}
+                  onPick={(url) => dispatch({ type: "pickOutfit", url })}
+                  onRetried={(from, to) => dispatch({ type: "retried", from, to })}
+                  className="lg:grid-cols-3"
+                />
               </>
             ) : (
               <div className="grid h-full min-h-48 place-items-center rounded-2xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">Upload the outfit, then Generate outfit to dress your base shot.</div>
