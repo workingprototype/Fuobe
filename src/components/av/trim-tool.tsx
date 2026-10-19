@@ -31,6 +31,8 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
   const [duration, setDuration] = useState(0);
   const [unreadable, setUnreadable] = useState(false);
   const [range, setRange] = useState<[number, number]>([0, 0]);
+  // The preview above plays the selection.
+  const preview = useRef<HTMLVideoElement>(null);
   const trim = () => {
     if (!video || video.uploading) return void toast("Add the video first");
     if (range[1] - range[0] < MIN_LENGTH) return void toast(`Keep at least ${MIN_LENGTH} s`);
@@ -51,6 +53,7 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
       <div className={cn("mx-auto max-w-[820px] space-y-3", video ? "pt-4" : "mt-8")}>
         <MediaDrop
           kind="video"
+          player={preview}
           value={video}
           onChange={(v) => {
             setVideo(v);
@@ -68,7 +71,7 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
         />
         {video && !video.uploading && (duration > 0 || unreadable) && (
           <Panel title="Keep">
-            {duration > 0 ? <VideoRange src={video.ref} duration={duration} value={range} onChange={setRange} /> : <ManualRange value={range} onChange={setRange} />}
+            {duration > 0 ? <VideoRange src={video.ref} duration={duration} value={range} onChange={setRange} player={preview} /> : <ManualRange value={range} onChange={setRange} />}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <p className="flex-1 text-[13px] text-muted-foreground">
                 Keeps <span className="font-mono text-foreground">{formatCueTime(Math.max(0, range[1] - range[0]))}</span>
@@ -93,10 +96,26 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
   );
 }
 
-/** Filmstrip + two-handle range + exact times + play the selection. */
-export function VideoRange({ src, duration, value, onChange }: { src: string; duration: number; value: [number, number]; onChange: (v: [number, number]) => void }) {
+/**
+ * Filmstrip + two-handle range + exact times + play the selection — in the visible preview passed as
+ * `player`, else in a hidden one of its own (sound only).
+ */
+export function VideoRange({
+  src,
+  duration,
+  value,
+  onChange,
+  player: shown,
+}: {
+  src: string;
+  duration: number;
+  value: [number, number];
+  onChange: (v: [number, number]) => void;
+  player?: React.RefObject<HTMLVideoElement | null>;
+}) {
   const [thumbs, setThumbs] = useState<string[]>([]);
-  const player = useRef<HTMLVideoElement>(null);
+  const own = useRef<HTMLVideoElement>(null);
+  const player = shown ?? own;
   const [playing, setPlaying] = useState(false);
   useEffect(() => {
     const ctl = new AbortController();
@@ -105,7 +124,7 @@ export function VideoRange({ src, duration, value, onChange }: { src: string; du
       .catch(() => {});
     return () => ctl.abort();
   }, [src, duration]);
-  // Playing the selection stops at the out point.
+  // Playing the selection stops at the out point (or when the player's own controls pause it).
   useEffect(() => {
     const v = player.current;
     if (!v || !playing) return;
@@ -115,9 +134,14 @@ export function VideoRange({ src, duration, value, onChange }: { src: string; du
         setPlaying(false);
       }
     };
+    const paused = () => setPlaying(false);
     v.addEventListener("timeupdate", tick);
-    return () => v.removeEventListener("timeupdate", tick);
-  }, [playing, value]);
+    v.addEventListener("pause", paused);
+    return () => {
+      v.removeEventListener("timeupdate", tick);
+      v.removeEventListener("pause", paused);
+    };
+  }, [player, playing, value]);
   const play = () => {
     const v = player.current;
     if (!v) return;
@@ -136,7 +160,7 @@ export function VideoRange({ src, duration, value, onChange }: { src: string; du
   };
   return (
     <div className="space-y-3">
-      <video ref={player} src={src} playsInline preload="metadata" className="hidden" onPause={() => setPlaying(false)} />
+      {!shown && <video ref={own} src={src} playsInline preload="metadata" className="hidden" />}
       <div className="relative h-12 overflow-hidden rounded-lg bg-muted" aria-hidden>
         <div className="flex h-full">
           {thumbs.map((u, i) => (

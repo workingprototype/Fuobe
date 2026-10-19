@@ -22,7 +22,10 @@ export function MediaDrop({
   onUnreadable,
   className,
   compact,
+  player,
 }: {
+  /** The preview <video>, for tools that drive it (Trim plays the selection in it). */
+  player?: React.Ref<HTMLVideoElement>;
   kind: "video" | "image";
   value: SlotValue | null;
   onChange: (v: SlotValue | null) => void;
@@ -85,6 +88,7 @@ export function MediaDrop({
           {kind === "video" ? (
             <video
               key={value.preview}
+              ref={player}
               src={value.preview}
               controls
               playsInline
