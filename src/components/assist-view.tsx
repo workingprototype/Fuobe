@@ -275,7 +275,7 @@ function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistItem, { ro
                   {j.modelName}
                   <span className="font-normal text-muted-foreground">
                     {" · "}
-                    {j.op === "storyboard" ? `Storyboard · ${j.count} frames` : `${OPERATION_LABELS[j.op] ?? j.op}${j.count > 1 ? ` · ${j.count} takes` : ""}`}
+                    {j.op === "storyboard" ? `Storyboard · ${j.count} frames` : j.op === "memory" ? "Remember" : `${OPERATION_LABELS[j.op] ?? j.op}${j.count > 1 ? ` · ${j.count} takes` : ""}`}
                   </span>
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">{j.prompt}</p>

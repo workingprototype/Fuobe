@@ -175,6 +175,66 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Assist (assist-skills): user skills and built-in toggles, projects with their sources, typed
+  // memories, and per-chat state (project, mode, loaded skills, the context the model was given).
+  `CREATE TABLE IF NOT EXISTS skills (
+    name TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    when_to_use TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    files_json TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS skill_toggles (name TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS assist_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT 'iris',
+    instructions TEXT NOT NULL DEFAULT '',
+    skills_json TEXT NOT NULL DEFAULT '[]',
+    use_personal_memory INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS assist_project_sources (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT,
+    element_id TEXT,
+    content TEXT,
+    status TEXT NOT NULL DEFAULT 'ready',
+    error TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_project_sources_project ON assist_project_sources(project_id, created_at);
+  CREATE TABLE IF NOT EXISTS assist_memory (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'personal',
+    project_id TEXT,
+    category TEXT NOT NULL,
+    text TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_memory_scope ON assist_memory(scope, project_id, updated_at DESC);
+  CREATE TABLE IF NOT EXISTS assist_thread_state (
+    thread_id TEXT PRIMARY KEY,
+    project_id TEXT,
+    mode TEXT,
+    model TEXT,
+    effort TEXT,
+    skills_json TEXT NOT NULL DEFAULT '[]',
+    context TEXT,
+    sent_json TEXT
+  );
+  CREATE INDEX IF NOT EXISTS assist_thread_state_project ON assist_thread_state(project_id);`,
 ];
 
 declare global {
