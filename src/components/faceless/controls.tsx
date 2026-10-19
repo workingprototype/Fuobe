@@ -84,9 +84,9 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
     <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", className)}>
       <Popover>
         <PopoverTrigger asChild>
-          <button type="button" className="inline-flex items-center gap-1 rounded-full font-mono text-[12px] text-foreground tabular-nums hover:underline">
+          <button type="button" className={cn("inline-flex items-center gap-1 rounded-full font-mono text-[12px] text-foreground tabular-nums transition-opacity hover:underline", loading && "opacity-60")}>
             {price}
-            <Info className="size-3 text-muted-foreground" />
+            {loading ? <Loader2 className="size-3 animate-spin text-muted-foreground" /> : <Info className="size-3 text-muted-foreground" />}
           </button>
         </PopoverTrigger>
         <PopoverContent className="w-72 p-3 text-[13px]" collisionPadding={12}>

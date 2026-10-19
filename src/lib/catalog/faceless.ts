@@ -1193,7 +1193,9 @@ export function subjectOf(idea: string): string {
     .replace(/^(a |an |my )?(youtube )?channel\s+(about|with|on|for|of)\s+/i, "")
     .replace(/^(please\s+)?(explain|describe|tell (me|us) about|show (me|us)|teach (me|us)( about)?)\s+(to (me|us|kids)\s+)?/i, "")
     .replace(/^(about|on)\s+/i, "")
-    .trim();
+    .trim()
+    // "The untold beginning of …" reads as a noun phrase mid-sentence.
+    .replace(/^(The|A|An) /, (m) => m.toLowerCase());
   return s || "your subject";
 }
 
@@ -1250,7 +1252,10 @@ const fill = (t: string, s: string) => t.replaceAll("{S}", capital(s)).replaceAl
 /** Topic suggestions without an LLM: templates per genre around the channel's subject. */
 export function offlineTopics(idea: string, genre: FacelessGenre, count = 5, skip = 0): TopicIdea[] {
   const s = subjectOf(idea);
-  const list = OFFLINE_TOPICS[genre] ?? OFFLINE_TOPICS.education;
+  // "The rise and fall of {s}" for a channel about the rise and fall of empires would say it twice.
+  const lead = (t: string) => t.split("{")[0].replace(/^the\s+/i, "").trim().toLowerCase();
+  const all = OFFLINE_TOPICS[genre] ?? OFFLINE_TOPICS.education;
+  const list = all.filter(([t]) => !lead(t) || !s.toLowerCase().includes(lead(t)));
   return Array.from({ length: Math.min(count, list.length) }, (_, i) => {
     const [title, hook] = list[(i + skip) % list.length];
     return { title: fill(title, s), hook };
@@ -1584,7 +1589,12 @@ export interface EpisodeCard {
   aspect: EpisodeAspect;
   seconds: number;
   favorite: boolean;
+  /** The finished film (hover plays it). */
   poster: Generation | null;
+  /** The first scene's picture: the card's image (stills show everywhere, before the film is done too). */
+  still: Generation | null;
+  /** Rendering a change: an earlier version is finished. */
+  updating: boolean;
   progress: number;
   createdAt: number;
 }

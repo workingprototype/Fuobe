@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  * clay — tinted with the style's hue.
  */
 
-type Motif = "graphics" | "lines" | "paper" | "solid3d" | "paint" | "flat" | "pixel" | "clay" | "iso" | "poly";
+type Motif = "graphics" | "lines" | "sketch" | "paper" | "collage" | "fold" | "solid3d" | "figure" | "mix" | "paint" | "flat" | "pixel" | "clay" | "toy" | "iso" | "poly";
 
 const MOTIF: Record<string, Motif> = {
   "editorial-motion-graphics": "graphics",
@@ -21,21 +21,21 @@ const MOTIF: Record<string, Motif> = {
   "paper-diorama": "paper",
   "pastel-flat-2d": "flat",
   "colorful-3d": "solid3d",
-  "hand-drawn": "lines",
+  "hand-drawn": "sketch",
   "poster-vector": "flat",
-  mannequin: "solid3d",
+  mannequin: "figure",
   "whiteboard-doodle": "lines",
-  "3d-papercraft": "paper",
+  "3d-papercraft": "fold",
   "mixed-media": "graphics",
   "low-poly": "poly",
   "2d-illustrator": "flat",
   "pixel-art": "pixel",
   claymotion: "clay",
   "isometric-flat-vector": "iso",
-  "3d-mix": "solid3d",
+  "3d-mix": "mix",
   "studio-3d": "solid3d",
-  "fluffy-toy": "clay",
-  "paper-collage": "paper",
+  "fluffy-toy": "toy",
+  "paper-collage": "collage",
 };
 
 const c = (l: number, ch: number, h: number) => `oklch(${l} ${ch} ${h % 360})`;
@@ -118,6 +118,97 @@ function Motif({ style, u }: { style: VisualStyle; u: string }) {
         }
       return <>{cells}</>;
     }
+    case "sketch":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.96, 0.02, h + 40)} />
+          <g fill="none" stroke={c(0.3, 0.03, h)} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 78 Q40 58 76 72 T154 66" strokeWidth="2" />
+            <path d="M10 84 Q44 66 80 78 T150 74" strokeWidth="1" opacity="0.6" />
+            <path d="M44 74 L44 46 M44 46 Q34 40 38 30 Q44 20 52 30 Q58 40 44 46" strokeWidth="2" />
+            <circle cx="118" cy="26" r="11" strokeWidth="1.6" />
+            <path d="M18 34 L30 30 M22 40 L34 36 M26 46 L38 42" strokeWidth="1" opacity="0.5" />
+          </g>
+          <circle cx="118" cy="26" r="10" fill={c(0.86, 0.1, h + 60)} opacity="0.6" />
+          <path d="M60 86 Q90 76 120 86 L120 92 Q90 84 60 92Z" fill={c(0.72, 0.1, h + 140)} opacity="0.55" />
+        </>
+      );
+    case "collage":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.84, 0.05, h + 30)} />
+          <path d="M8 14 L70 8 L74 52 L12 58Z" fill={c(0.62, 0.13, h)} transform="rotate(-3 40 30)" filter={`url(#${u}pshadow)`} />
+          <path d="M80 20 L150 16 L148 70 L84 74Z" fill={c(0.92, 0.03, h + 60)} transform="rotate(4 115 45)" filter={`url(#${u}pshadow)`} />
+          <circle cx="114" cy="42" r="16" fill={c(0.55, 0.15, h + 120)} />
+          <path d="M20 62 L96 58 L94 94 L16 92Z" fill={c(0.74, 0.11, h + 200)} filter={`url(#${u}pshadow)`} />
+          <rect x="60" y="4" width="22" height="7" fill="white" opacity="0.7" transform="rotate(8 70 8)" />
+          <g fill={c(0.35, 0.05, h)} opacity="0.35">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <circle key={i} cx={28 + i * 10} cy={76} r={2.2} />
+            ))}
+          </g>
+        </>
+      );
+    case "fold":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.92, 0.03, h)} />
+          <path d="M80 18 L112 50 L80 82 L48 50Z" fill={c(0.74, 0.1, h)} />
+          <path d="M80 18 L112 50 L80 50Z" fill={c(0.84, 0.08, h)} />
+          <path d="M48 50 L80 50 L80 82Z" fill={c(0.6, 0.1, h)} />
+          <path d="M118 62 L140 40 L150 70Z" fill={c(0.7, 0.12, h + 120)} />
+          <path d="M118 62 L140 40 L134 64Z" fill={c(0.8, 0.1, h + 120)} />
+          <path d="M14 76 L34 52 L48 80Z" fill={c(0.66, 0.1, h + 60)} />
+        </>
+      );
+    case "figure":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.9, 0.01, h)} />
+          <ellipse cx="80" cy="88" rx="62" ry="6" fill="black" opacity="0.1" />
+          {[
+            [56, 0],
+            [104, 6],
+          ].map(([x, dy]) => (
+            <g key={x} fill={c(0.8, 0.02, h + 30)} stroke={c(0.62, 0.02, h + 30)} strokeWidth="1">
+              <ellipse cx={x} cy={22 + dy} rx="7" ry="8" />
+              <rect x={x - 8} y={31 + dy} width="16" height="26" rx="7" />
+              <rect x={x - 15} y={33 + dy} width="6" height="22" rx="3" transform={`rotate(14 ${x - 12} ${33 + dy})`} />
+              <rect x={x + 9} y={33 + dy} width="6" height="22" rx="3" transform={`rotate(-14 ${x + 12} ${33 + dy})`} />
+              <rect x={x - 7} y={56 + dy} width="6" height="28" rx="3" />
+              <rect x={x + 1} y={56 + dy} width="6" height="28" rx="3" />
+            </g>
+          ))}
+        </>
+      );
+    case "mix":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.88, 0.05, h + 20)} />
+          <ellipse cx="80" cy="84" rx="58" ry="8" fill="black" opacity="0.1" />
+          <path d="M40 80 L58 40 L76 80Z" fill={c(0.66, 0.14, h + 40)} />
+          <circle cx="96" cy="64" r="16" fill={`url(#${u}ball)`} />
+          <rect x="112" y="46" width="26" height="30" rx="2" fill={c(0.92, 0.04, h + 90)} filter={`url(#${u}pshadow)`} />
+        </>
+      );
+    case "toy":
+      return (
+        <>
+          <rect width="160" height="100" fill={c(0.9, 0.05, h)} />
+          <ellipse cx="80" cy="86" rx="58" ry="8" fill={c(0.78, 0.07, h)} />
+          <g filter={`url(#${u}pshadow)`}>
+            <circle cx="60" cy="30" r="9" fill={c(0.8, 0.1, h)} />
+            <circle cx="96" cy="30" r="9" fill={c(0.8, 0.1, h)} />
+            <ellipse cx="78" cy="56" rx="30" ry="28" fill={c(0.86, 0.08, h)} />
+          </g>
+          <circle cx="68" cy="52" r="3" fill="#222" />
+          <circle cx="88" cy="52" r="3" fill="#222" />
+          <ellipse cx="78" cy="62" rx="6" ry="4" fill={c(0.7, 0.12, h + 20)} />
+          <g stroke="white" strokeOpacity="0.5" strokeWidth="1">
+            <path d="M54 46 l3 2 M98 70 l3 -1 M60 74 l2 3 M96 40 l3 1" />
+          </g>
+        </>
+      );
     case "clay":
       return (
         <>

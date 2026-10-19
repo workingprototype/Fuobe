@@ -220,8 +220,11 @@ export function listChannels(): FacelessChannel[] {
   );
   return rows.map((r) => {
     const c = toChannel(r);
-    const done = db().prepare("SELECT * FROM faceless_episodes WHERE channel_id = ? AND status = 'done' ORDER BY updated_at DESC LIMIT 1").get(r.id) as EpisodeRow | undefined;
-    return { ...c, episodes: counts.get(r.id) ?? 0, cover: done ? finalOf(toEpisode(done)) : null };
+    // The newest episode with a finished picture: its first scene is the cover.
+    const latest = db().prepare("SELECT * FROM faceless_episodes WHERE channel_id = ? AND plan_json IS NOT NULL ORDER BY created_at DESC LIMIT 1").get(r.id) as EpisodeRow | undefined;
+    const ep = latest && toEpisode(latest);
+    const still = ep?.plan ? getGeneration(ep.plan.ids[`still-${ep.script.blocks[0]?.id}`] ?? "") : null;
+    return { ...c, episodes: counts.get(r.id) ?? 0, cover: still?.status === "succeeded" ? still : null };
   });
 }
 
@@ -852,9 +855,7 @@ function toCard(r: EpisodeRow): EpisodeCard {
   const gens = new Map(ids.map((id) => [id, getGeneration(id)] as const));
   const status = ep.plan ? settle(ep, gens) : settle(ep, new Map());
   const final = ep.plan ? (gens.get(ep.plan.ids.captions ?? ep.plan.ids.mix ?? "") ?? null) : null;
-  // A still from the first scene stands in until the film is done.
   const firstStill = ep.plan ? (gens.get(ep.plan.ids[`still-${ep.script.blocks[0]?.id}`] ?? "") ?? null) : null;
-  const poster = final?.status === "succeeded" ? final : firstStill?.status === "succeeded" ? firstStill : null;
   return {
     id: ep.id,
     channelId: ep.channelId,
@@ -865,7 +866,9 @@ function toCard(r: EpisodeRow): EpisodeCard {
     aspect: ep.settings.aspect,
     seconds: totalSeconds(ep.script.blocks) || ep.settings.length,
     favorite: ep.favorite,
-    poster,
+    poster: final?.status === "succeeded" ? final : null,
+    still: firstStill?.status === "succeeded" ? firstStill : null,
+    updating: status === "rendering" && !!ep.plan?.lastFinal,
     progress: ids.length ? [...gens.values()].reduce((n, g) => n + stepProgress(g ?? null), 0) / ids.length : 0,
     createdAt: ep.createdAt,
   };

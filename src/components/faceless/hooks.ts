@@ -199,7 +199,7 @@ export function useDebounced<T>(value: T, ms: number): T {
 export function useEstimate(input: { kind: "faceless" | "explainer"; settings: EpisodeSettings; blocks?: ScriptBlock[]; genre?: FacelessGenre } | null) {
   const key = input && JSON.stringify(input);
   const debounced = useDebounced(key, 350);
-  return useQuery({
+  const q = useQuery({
     queryKey: ["faceless", "estimate", debounced],
     enabled: !!debounced,
     queryFn: async () => send<EstimateResult>("/api/faceless/estimate", "POST", JSON.parse(debounced!)),
@@ -207,6 +207,8 @@ export function useEstimate(input: { kind: "faceless" | "explainer"; settings: E
     staleTime: 20_000,
     retry: false,
   });
+  // Still showing the last settings' estimate: the new one is on its way.
+  return { data: q.data, isFetching: q.isFetching || key !== debounced };
 }
 
 export const voicePreview = (id: string) => send<Generation>("/api/faceless/voices/preview", "POST", { id });

@@ -40,7 +40,7 @@ export function ChannelAvatar({ channel, className }: { channel: Pick<FacelessCh
 }
 
 export function ChannelCard({ channel }: { channel: FacelessChannel }) {
-  const cover = channel.cover?.outputs.find((o) => o.kind === "video" || o.kind === "image");
+  const cover = channel.cover?.outputs.find((o) => o.kind === "image");
   return (
     <Link href={`/faceless/${channel.id}`} className="group/card block animate-fade-up rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <div className="relative aspect-video overflow-hidden rounded-xl bg-muted">
@@ -71,14 +71,18 @@ const STATUS: Record<Card["status"], string> = {
 
 /** An episode in a channel's list or the Explainer history. */
 export function EpisodeTile({ ep, href, onLike }: { ep: Card; href: string; onLike?: () => void }) {
-  const poster = ep.poster?.outputs.find((o) => o.kind === "video" || o.kind === "image");
+  // The first scene's picture shows everywhere (and before the film is done); the film plays on hover.
+  const picture = ep.still?.outputs.find((o) => o.kind === "image");
+  const film = ep.poster?.outputs.find((o) => o.kind === "video");
   const vertical = ep.aspect === "9:16";
   return (
     <div className="group/card relative min-w-0 animate-fade-up">
       <Link href={href} className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Open ${ep.title}`}>
         <div className={cn("relative overflow-hidden rounded-xl bg-muted", vertical ? "aspect-[4/5]" : "aspect-video")}>
-          {poster ? (
-            <MediaThumb output={poster} className={cn("transition-transform duration-300 ease-move group-hover/card:scale-[1.02]", ep.status !== "done" && "opacity-70")} />
+          {picture ? (
+            <MediaThumb output={picture} className={cn("transition-transform duration-300 ease-move group-hover/card:scale-[1.02]", ep.status !== "done" && "opacity-70")} />
+          ) : film ? (
+            <MediaThumb output={film} />
           ) : (
             <StyleArt styleId={ep.styleId} className="opacity-80" />
           )}
@@ -91,7 +95,7 @@ export function EpisodeTile({ ep, href, onLike }: { ep: Card; href: string; onLi
               ) : (
                 <AlertTriangle className="size-3.5" />
               )}
-              <span className="truncate">{STATUS[ep.status]}</span>
+              <span className="truncate">{ep.updating ? "Updating a scene" : STATUS[ep.status]}</span>
               {ep.status === "rendering" && <span className="ml-auto font-mono tabular-nums">{Math.round(ep.progress * 100)}%</span>}
             </div>
           )}

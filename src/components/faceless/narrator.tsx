@@ -35,7 +35,8 @@ function usePlayer() {
     a.onpause = () => setPlaying((p) => (p === key ? "" : p));
     void a.play().then(
       () => setPlaying(key),
-      () => toast.error("Couldn't play that sample"),
+      // A sample that took a while to make may not autoplay any more: it's cached, the next press plays it.
+      (e: Error) => (e.name === "NotAllowedError" ? toast("Sample ready — press play to listen", { id: "voice-sample" }) : toast.error("Couldn't play that sample", { id: "voice-sample" })),
     );
   };
   const toggle = async (key: string, load: () => Promise<string | null>) => {

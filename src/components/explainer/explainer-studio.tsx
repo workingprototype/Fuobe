@@ -353,7 +353,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
             </div>
           </div>
 
-          <ol className="mt-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3" aria-label="How it works">
+          <ol className="mt-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-1" aria-label="How it works">
             {STEPS.map((s, i) => (
               <li key={s.title} className="flex gap-2.5 rounded-2xl bg-muted/50 p-3">
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-brand-text shadow-soft">

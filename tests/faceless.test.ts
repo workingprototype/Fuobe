@@ -313,6 +313,12 @@ describe("writing", () => {
     expect(topics).toHaveLength(5);
     expect(topics[0].title).toMatch(/ancient civilizations/);
     expect(new Set(offlineTopics("x", "kids", 5, 5).map((t) => t.title)).size).toBe(5);
+    // A template that would repeat the channel's own words is skipped.
+    const empires = offlineTopics("Channel about the rise and fall of empires", "history", 5);
+    expect(empires).toHaveLength(5);
+    expect(empires.some((t) => /rise and fall of the rise and fall/i.test(t.title))).toBe(false);
+    expect(subjectOf("The untold beginning of Rome")).toBe("the untold beginning of Rome");
+    expect(subjectOf("Explain how dinosaurs went extinct, for kids")).toBe("how dinosaurs went extinct, for kids");
     const script = offlineScript("how volcanoes erupt", "education", 6);
     expect(script).toHaveLength(6);
     expect(script.every((b) => b.seconds <= 10 && b.narration && b.visual)).toBe(true);

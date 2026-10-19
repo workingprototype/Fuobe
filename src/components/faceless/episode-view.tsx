@@ -200,6 +200,12 @@ function TailSteps({ steps, onOpen }: { steps: StepView[]; onOpen: (g: Generatio
   );
 }
 
+/** "picture, clip, joining the scenes, voice-over, subtitles" from the steps a change re-runs. */
+const stepWords = (labels: string[]) =>
+  [...new Set(labels.map((l) => l.replace(/^Scene \d+ · /, "").replace(/^Joining scenes.*$/, "Joining the scenes").replace(/ \d+ of \d+$/, "")))]
+    .map((l) => l.charAt(0).toLowerCase() + l.slice(1))
+    .join(", ");
+
 const PART_OPTIONS: { value: ChangePart; label: string }[] = [
   { value: "picture", label: "Picture" },
   { value: "motion", label: "Motion" },
@@ -213,7 +219,9 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
   const [instruction, setInstruction] = useState("");
   const [lines, setLines] = useState<string[]>(() => scenes.map((s) => s.narration));
   const apply = useApplyChange(ep.id);
+  const retry = useEpisodeAction(ep.id);
   const ids = scenes.map((s) => s.id);
+  const failedStep = scenes.flatMap((s) => [s.still, ...s.clips]).find((x) => broken(x?.generation));
   const draft: ChangeDraft | null =
     part === "narration"
       ? lines.some((l, i) => l.trim() && l.trim() !== scenes[i].narration)
@@ -272,6 +280,22 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
           <p className="text-[13px] leading-relaxed text-muted-foreground">“{one.narration}”</p>
         </div>
       )}
+      {failedStep && (
+        <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-[13px]">
+          <AlertTriangle className="size-4 shrink-0 text-destructive" />
+          <span className="min-w-0 flex-1">
+            {failedStep.label} didn&apos;t finish{failedStep.generation?.error ? `: ${failedStep.generation.error}` : ""}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retry.isPending || busy}
+            onClick={() => retry.mutate("retry", { onSuccess: () => toast.success("Retrying what failed"), onError: (e) => toast.error((e as Error).message) })}
+          >
+            <RotateCcw /> Retry
+          </Button>
+        </div>
+      )}
       <div className="mt-4 space-y-3">
         <Segmented label="What to change" value={part} options={PART_OPTIONS} onChange={setPart} />
         {part === "narration" ? (
@@ -315,7 +339,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
                 : preview.isError
                   ? (preview.error as Error).message
                   : preview.data
-                    ? `Re-renders ${preview.data.labels.length} step${preview.data.labels.length === 1 ? "" : "s"} (${[...new Set(preview.data.labels.map((l) => l.replace(/^Scene \d+ · /, "")))].slice(0, 4).join(", ")}) · ${preview.data.demo ? "Demo · free" : ep.settings.engine === "open" ? "Free · your GPU" : preview.data.costUsd === null ? "price unknown" : `≈ ${usd(preview.data.costUsd)}`}`
+                    ? `Re-renders ${preview.data.labels.length} step${preview.data.labels.length === 1 ? "" : "s"} (${stepWords(preview.data.labels)}) · ${preview.data.demo ? "Demo · free" : ep.settings.engine === "open" ? "Free · your GPU" : preview.data.costUsd === null ? "price unknown" : `≈ ${usd(preview.data.costUsd)}`}`
                     : "Pricing…"}
           </p>
           <Button variant="ghost" onClick={discard} disabled={!draft}>
