@@ -481,7 +481,7 @@ export function Stage(p: StageProps) {
           </>
         )}
         <ModeButton icon={Minus} label="Zoom out" k="−" onClick={() => zoomBy(0.8)} />
-        <button type="button" onClick={refit} className="h-8 min-w-12 shrink-0 rounded-full px-1.5 font-mono text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground" aria-label={`Zoom ${Math.round(view.zoom * 100)}%: fit to screen`}>
+        <button type="button" onClick={refit} className="h-8 min-w-12 shrink-0 rounded-full px-1.5 font-mono text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground max-lg:h-7 max-lg:min-w-10" aria-label={`Zoom ${Math.round(view.zoom * 100)}%: fit to screen`}>
           {Math.round(view.zoom * 100)}%
         </button>
         <ModeButton icon={Plus} label="Zoom in" k="+" onClick={() => zoomBy(1.25)} />
@@ -503,7 +503,7 @@ function ModeButton({ icon: Icon, label, k, active, disabled, onClick, className
           disabled={disabled}
           onClick={onClick}
           className={cn(
-            "grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent",
+            "grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent max-lg:size-7",
             active && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover",
             className,
           )}
