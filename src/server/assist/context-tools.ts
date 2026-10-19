@@ -1,0 +1,115 @@
+import "server-only";
+import { z } from "zod";
+import { guessCategory, MEMORY_CATEGORIES, MEMORY_MAX_CHARS, toCategory, type MemoryCategory } from "@/lib/assist";
+import { getSkill, skillFile } from "../skills";
+import { canUseSkill, skillsFor } from "./context";
+import { defineTool } from "./define";
+import { addMemory, deleteMemory } from "./memory";
+import { getProject, sourceText } from "./projects";
+
+/** Tools for Skills, Memory and Projects (Supercomputer's "load skill", "use and update memory", "project assets"). */
+
+const listSkills = defineTool({
+  name: "list_skills",
+  description:
+    "List the skills you can load: playbooks for whole kinds of jobs (product photos, UGC videos, thumbnails, faceless videos, dubbing…) with what each does and when to use it. The context already lists them briefly; call this for the full descriptions or to search by words.",
+  schema: z.object({
+    query: z.string().optional().describe("Words to match in a skill's name, title or description."),
+  }),
+  async run({ query }, ctx) {
+    const projectId = ctx.thread?.projectId ?? null;
+    let list = skillsFor(projectId);
+    if (query?.trim()) {
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const scored = list.map((s) => ({ s, n: words.filter((w) => `${s.name} ${s.title} ${s.description} ${s.whenToUse}`.toLowerCase().includes(w)).length }));
+      if (scored.some((x) => x.n)) list = scored.filter((x) => x.n).sort((a, b) => b.n - a.n).map((x) => x.s);
+    }
+    return {
+      content: JSON.stringify(list.map((s) => ({ name: s.name, title: s.title, description: s.description, whenToUse: s.whenToUse || undefined, loaded: ctx.thread?.skills.includes(s.name) || undefined }))),
+      items: [{ id: "", role: "tool", text: `Looked through ${list.length} skill${list.length === 1 ? "" : "s"}` }],
+    };
+  },
+});
+
+const loadSkill = defineTool({
+  name: "load_skill",
+  description:
+    "Load a skill by name before you plan a job it covers; its instructions then guide this chat. Load one whenever the user's request matches a listed skill — once per chat is enough. With `file`, read one of the extra files a skill comes with.",
+  schema: z.object({
+    name: z.string().describe("The skill's name, e.g. product-photoshoot (without the slash)."),
+    file: z.string().optional().describe("A file bundled with the skill, as listed under it."),
+  }),
+  async run({ name, file }, ctx) {
+    const n = name.replace(/^\//, "").trim();
+    const s = getSkill(n);
+    const projectId = ctx.thread?.projectId ?? null;
+    if (!s || !canUseSkill(n, projectId)) {
+      const names = skillsFor(projectId).map((x) => x.name);
+      return { content: `No skill called “${n}” is available here. Available: ${names.join(", ") || "none"}.`, isError: true };
+    }
+    if (file) {
+      const text = skillFile(n, file);
+      if (text === null) return { content: `/${n} has no file “${file}”. Its files: ${s.files.map((f) => f.path).join(", ") || "none"}.`, isError: true };
+      return { content: text.length > 40_000 ? `${text.slice(0, 40_000)}\n… (cut at 40,000 characters)` : text, items: [{ id: "", role: "tool", text: `Read ${file} from ${s.title}` }] };
+    }
+    const item = { id: "", role: "tool" as const, text: `Using the ${s.title} skill`, href: `/assist/skills?skill=${s.name}` };
+    if (ctx.thread) {
+      if (ctx.thread.skills.includes(n)) return { content: `/${n} is already loaded — its instructions are in your context. Follow them.` };
+      ctx.thread.loadSkill(n);
+      return { content: `Loaded /${n} (${s.title}). Its instructions are added to your context right after this result — read them, then follow them for this job.`, items: [item] };
+    }
+    // Over MCP there's no chat context to add to: the instructions come back as the result.
+    return { content: `# ${s.title} (/${s.name})\n\n${s.body}`, items: [item] };
+  },
+});
+
+const remember = defineTool({
+  name: "remember",
+  description:
+    "Save a lasting fact about the user to memory so every future chat follows it: a preference (\"always vertical 9:16\"), their style, how they like replies, a naming or brand convention, their setup, a fix that worked. One short sentence per call, in the third person or as an instruction. Don't save one-off details of the current job, guesses, or secrets (keys, passwords). To correct a memory, pass its id as `replaces`. In ask-first mode the user approves each memory.",
+  schema: z.object({
+    text: z.string().describe(`The memory, one sentence (under ${MEMORY_MAX_CHARS} characters).`),
+    category: z.string().optional().describe(`One of: ${MEMORY_CATEGORIES.join(", ")}.`),
+    scope: z.enum(["personal", "project"]).optional().describe("project = only this project's chats (default inside a project); personal = every chat."),
+    replaces: z.string().optional().describe("The id of a memory this one corrects or replaces."),
+  }),
+  gated: true,
+  title: () => "Remember this?",
+  plan: ({ text, category, scope }, ctx) => {
+    const cat: MemoryCategory = toCategory(category) ?? guessCategory(text);
+    const where = (scope ?? (ctx.thread?.projectId ? "project" : "personal")) === "project" ? "This project" : "All chats";
+    return [{ tool: "remember", modelId: "memory", modelName: `Memory · ${cat}`, kind: "text", op: "memory", prompt: text.trim(), count: 0, costUsd: 0, demo: false, note: where, ...(text.trim().length > MEMORY_MAX_CHARS && { error: `Too long — keep it under ${MEMORY_MAX_CHARS} characters` }) }];
+  },
+  async run({ text, category, scope, replaces }, ctx) {
+    const projectId = ctx.thread?.projectId ?? null;
+    const sc = scope ?? (projectId ? "project" : "personal");
+    const cat: MemoryCategory = toCategory(category) ?? guessCategory(text);
+    const m = addMemory({ text, category: cat, scope: sc, projectId: sc === "project" ? projectId : null, source: "agent" });
+    if (replaces && replaces !== m.id) deleteMemory(replaces);
+    return {
+      content: JSON.stringify({ saved: m.id, category: m.category, scope: m.scope }),
+      items: [{ id: "", role: "tool", text: `Remembered: ${m.text}`, href: "/assist/memory" }],
+    };
+  },
+});
+
+const readSource = defineTool({
+  name: "read_source",
+  description: "Read the full text of one of this project's sources (a page, a document, a note) by the id shown in the project's source list. Only works inside a project.",
+  schema: z.object({
+    id: z.string().describe("The source id from the context, e.g. Ab3dE9xK1q."),
+  }),
+  async run({ id }, ctx) {
+    const projectId = ctx.thread?.projectId;
+    if (!projectId || !getProject(projectId)) return { content: "This chat isn't in a project, so it has no sources.", isError: true };
+    const s = sourceText(projectId, id.replace(/^\[|\]$/g, ""));
+    if (!s) return { content: `No source ${id} in this project.`, isError: true };
+    if (!s.text) return { content: JSON.stringify({ title: s.source.title, kind: s.source.kind, url: s.source.url, note: s.source.error ?? "This source has no text: pass its URL as an input instead." }) };
+    return {
+      content: `# ${s.source.title}${s.source.url ? `\n${s.source.url}` : ""}\n\n${s.text}`,
+      items: [{ id: "", role: "tool", text: `Read ${s.source.title}` }],
+    };
+  },
+});
+
+export const CONTEXT_TOOLS = [listSkills, loadSkill, remember, readSource];
