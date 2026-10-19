@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, ExternalLink, ImagePlus, Layers, Library, Loader2, MonitorSmartphone, MoreHorizontal, Pencil, RotateCcw, Sun, Trash2, Type, Upload, Wand2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -32,39 +32,65 @@ const CAPABILITIES = [
 
 const IMAGE_TYPES = "image/png,image/jpeg,image/webp";
 
-/** Upload or pick an image, read its size, create the project and open it. */
-function useOpenImage() {
+/**
+ * Upload or pick an image, read its size, create the project and open it. The page stays alive in
+ * the background once you're in the editor (Next keeps recent pages in an <Activity>), so the
+ * “Preparing your project” cover is lifted as the page hides: coming back finds it usable.
+ */
+function useOpenImage(onLeft?: () => void) {
   const router = useRouter();
   const { create } = useLayerActions();
   const [busy, setBusy] = useState<string | null>(null);
-  const open = async (source: string, opts: { name?: string; generationId?: string; label?: string } = {}) => {
-    setBusy(opts.label ?? "Preparing your project");
-    try {
-      const img = await loadImage(source).catch(() => {
-        throw new Error("This image cannot be decomposed — Layer decomposition needs a generated or uploaded image.");
-      });
-      const [width, height] = sizeOf(img);
-      const v = await create({ source, width, height, name: opts.name, generationId: opts.generationId });
-      router.replace(`/layers/${v.project.id}`);
-    } catch (e) {
-      toast.error((e as Error).message || "Couldn't open the editor for this image. Please try again.");
+  // Set right before opening the editor; the page hiding then resets (not React's strict-mode re-mount).
+  const leaving = useRef(false);
+  const left = useRef(onLeft);
+  useLayoutEffect(() => {
+    left.current = onLeft;
+  });
+  useLayoutEffect(
+    () => () => {
+      if (!leaving.current) return;
+      leaving.current = false;
       setBusy(null);
-    }
-  };
-  const openFile = async (file: File) => {
-    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
-      toast.error("Only images can be edited here. Pick an image or upload one.");
-      return;
-    }
-    setBusy("Uploading…");
-    try {
-      const asset = await uploadFile(file);
-      await open(asset.url, { name: file.name.replace(/\.[^.]+$/, "").slice(0, 80) });
-    } catch (e) {
-      toast.error((e as Error).message);
-      setBusy(null);
-    }
-  };
+      left.current?.();
+    },
+    [],
+  );
+  const open = useCallback(
+    async (source: string, opts: { name?: string; generationId?: string; label?: string } = {}) => {
+      setBusy(opts.label ?? "Preparing your project");
+      try {
+        const img = await loadImage(source).catch(() => {
+          throw new Error("This image cannot be decomposed — Layer decomposition needs a generated or uploaded image.");
+        });
+        const [width, height] = sizeOf(img);
+        const v = await create({ source, width, height, name: opts.name, generationId: opts.generationId });
+        leaving.current = true;
+        router.replace(`/layers/${v.project.id}`);
+      } catch (e) {
+        toast.error((e as Error).message || "Couldn't open the editor for this image. Please try again.");
+        setBusy(null);
+      }
+    },
+    [create, router],
+  );
+  const openFile = useCallback(
+    async (file: File) => {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+        toast.error("Only images can be edited here. Pick an image or upload one.");
+        return;
+      }
+      setBusy("Uploading…");
+      try {
+        const asset = await uploadFile(file);
+        await open(asset.url, { name: file.name.replace(/\.[^.]+$/, "").slice(0, 80) });
+      } catch (e) {
+        toast.error((e as Error).message);
+        setBusy(null);
+      }
+    },
+    [open],
+  );
   return { busy, open, openFile };
 }
 
@@ -78,18 +104,18 @@ function ProjectCard({ p, onRename, onDelete }: { p: LayerProject; onRename: () 
           {p.status !== "ready" && (
             <span
               className={cn(
-                "absolute top-2 left-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium backdrop-blur",
-                p.status === "processing" ? "bg-background/85 text-foreground" : "bg-destructive/90 text-white",
+                "absolute top-2 left-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium backdrop-blur",
+                p.status === "processing" ? "bg-background/85 text-foreground" : p.status === "unopened" ? "bg-background/90 text-brand-text" : "bg-destructive/90 text-white",
               )}
             >
-              {p.status === "processing" ? <Loader2 className="size-3 animate-spin" /> : null}
-              {p.status === "processing" ? "Processing…" : "Couldn't be processed"}
+              {p.status === "processing" ? <Loader2 className="size-3 shrink-0 animate-spin" /> : p.status === "unopened" ? <Layers className="size-3 shrink-0" /> : null}
+              <span className="truncate">{p.status === "processing" ? "Processing…" : p.status === "unopened" ? "Layers ready — open to see them" : "Couldn't be processed"}</span>
             </span>
           )}
         </div>
         <h3 className="mt-2 truncate pr-9 text-[14px] font-medium">{p.name}</h3>
         <p className="text-[12px] text-muted-foreground">
-          {timeAgo(p.updatedAt)} · {p.layers} layer{p.layers === 1 ? "" : "s"}
+          {timeAgo(p.updatedAt)} · {p.status === "unopened" && p.pendingLayers ? `${p.pendingLayers} layers ready` : `${p.layers} layer${p.layers === 1 ? "" : "s"}`}
         </p>
       </Link>
       <DropdownMenu>
@@ -129,12 +155,13 @@ function Capabilities() {
         <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label="Previous capability" onClick={() => setAt((at + CAPABILITIES.length - 1) % CAPABILITIES.length)}>
           <ChevronLeft />
         </Button>
-        <div className="scrollbar-none flex min-w-0 gap-1.5 overflow-x-auto" role="tablist" aria-label="What Layers can do">
+        <div className="scrollbar-none flex min-w-0 gap-1.5 overflow-x-auto" role="group" aria-label="What Layers can do">
           {CAPABILITIES.map((x, i) => (
             <button
               key={x.label}
-              role="tab"
-              aria-selected={i === at}
+              type="button"
+              aria-pressed={i === at}
+              aria-controls="layers-capability"
               onClick={() => setAt(i)}
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
@@ -149,7 +176,7 @@ function Capabilities() {
           <ChevronRight />
         </Button>
       </div>
-      <p className="mt-2 text-center text-[13px] text-muted-foreground" aria-live="polite">
+      <p id="layers-capability" className="mt-2 text-center text-[13px] text-muted-foreground" aria-live="polite">
         {c.text}
       </p>
     </div>
@@ -160,7 +187,11 @@ function ProjectsInner() {
   const params = useSearchParams();
   const projects = useLayerProjects();
   const { rename, remove } = useLayerActions();
-  const { busy, open, openFile } = useOpenImage();
+  const { bfcacheId } = useRouter();
+  const started = useRef<string | null>(null);
+  const { busy, open, openFile } = useOpenImage(() => {
+    started.current = null;
+  });
   const file = useRef<HTMLInputElement>(null);
   const hydrated = useHydrated();
   const [picking, setPicking] = useState(false);
@@ -169,18 +200,21 @@ function ProjectsInner() {
   const [deleting, setDeleting] = useState<LayerProject | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  // Deep link: /layers?image=<url>[&generation=<id>&name=…] opens that image as a project.
+  // Deep link: /layers?image=<url>[&generation=<id>&name=…] opens that image as a project. Each
+  // link opens once per visit (the guard holds the navigation and link it handled, and is
+  // forgotten once the editor opens), so every “Open in Layers”, of the same image or another,
+  // opens a new project, and React's strict-mode re-mount doesn't open a second one.
   const deep = params.get("image");
-  const started = useRef(false);
+  const link = deep ? `${bfcacheId}|${params.toString()}` : null;
   useEffect(() => {
-    if (!deep || started.current) return;
-    started.current = true;
+    if (!deep || !link || started.current === link) return;
+    started.current = link;
     if (!deep.startsWith("/api/files/")) {
       toast.error("Only images from your library can be edited here. Pick an image or upload one.");
       return;
     }
     void open(deep, { generationId: params.get("generation") ?? undefined, name: params.get("name") ?? undefined });
-  }, [deep, params, open]);
+  }, [deep, link, params, open]);
 
   const items = projects.data ?? [];
 

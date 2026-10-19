@@ -42,6 +42,19 @@ import {
   toLocal,
   TOOL_MODELS,
   zipPlan,
+  defaultLayers,
+  exportScale,
+  layerDensity,
+  layerExportScale,
+  LayerLimitError,
+  layersModelFor,
+  MAX_NODES,
+  MAX_REVISIONS,
+  minLayers,
+  roomFor,
+  scaledSize,
+  sourceBoxOf,
+  updateNode,
   type Box,
   type History,
   type LayerDoc,
@@ -469,5 +482,79 @@ describe("tools and prices", () => {
     expect(clampLayers("oss-qwen-layered", 16)).toBe(10);
     expect(clampLayers("seedream-5-layers", 1)).toBe(3);
     expect(clampLayers("oss-qwen-layered-control", 2)).toBe(2);
+  });
+
+  it("sends a named element to Layered-Control on the open engine, as the form says", () => {
+    // What the Separate layer form posts: the model it shows (the default, or the one picked).
+    expect(layersModelFor("split", "open", "oss-qwen-layered", "the guitar")).toBe("oss-qwen-layered-control");
+    expect(layersModelFor("split", "open", undefined, "the guitar")).toBe("oss-qwen-layered-control");
+    expect(layersModelFor("split", "open", "oss-qwen-layered-control", "the face")).toBe("oss-qwen-layered-control");
+    // Control needs a name; without one the plain model splits.
+    expect(layersModelFor("split", "open", "oss-qwen-layered-control", "  ")).toBe("oss-qwen-layered");
+    expect(layersModelFor("split", "open", undefined, undefined)).toBeUndefined();
+    // Cloud models and the decomposition take the prompt as an instruction.
+    expect(layersModelFor("split", "cloud", "seedream-5-layers", "the guitar")).toBe("seedream-5-layers");
+    expect(layersModelFor("decompose", "open", "oss-qwen-layered", "the guitar")).toBe("oss-qwen-layered");
+    expect([defaultLayers("decompose", "seedream-5-layers"), defaultLayers("split", "oss-qwen-layered"), defaultLayers("split", "oss-qwen-layered-control")]).toEqual([8, 3, 2]);
+    expect([minLayers("oss-qwen-layered-control"), minLayers("oss-qwen-layered")]).toEqual([2, 3]);
+  });
+});
+
+describe("exports keep every layer's detail", () => {
+  it("renders at the densest visible layer's scale, kept to 8192 px", () => {
+    const d = doc([node("bg", 0, { w: 960, h: 720, natural: [960, 720] })], 960, 720);
+    expect(exportScale(d)).toBe(1);
+    // A 4× upscale of the whole picture, laid over it.
+    const up = addNodes(d, [node("up", 0, { w: 960, h: 720, natural: [3840, 2880] })]);
+    expect(exportScale(up)).toBe(4);
+    expect(scaledSize(960, 720, exportScale(up))).toEqual([3840, 2880]);
+    // Hidden layers don't count; a crop counts its own pixels.
+    expect(exportScale(updateNode(up, "up", { hidden: true }))).toBe(1);
+    expect(layerDensity(node("c", 0, { w: 100, crop: [0, 0, 300, 150], natural: [1000, 1000] }))).toBe(3);
+    // Enlarged past its pixels: the document's own size, never smaller.
+    expect(exportScale(doc([node("big", 0, { w: 400, natural: [100, 50] })]))).toBe(1);
+    // Capped on the long side.
+    const huge = addNodes(doc([], 4000, 3000), [node("x", 0, { w: 4000, h: 3000, natural: [16000, 12000] })]);
+    expect(scaledSize(4000, 3000, exportScale(huge))[0]).toBe(8192);
+    // A cropped download: the layer's own density, capped on its box.
+    expect(layerExportScale(node("u", 0, { w: 100, natural: [400, 200] }), [0, 0, 100, 50])).toBe(4);
+    expect(layerExportScale(node("u", 0, { w: 100, natural: [100000, 50000] }), [0, 0, 100, 50])).toBeCloseTo(81.92);
+  });
+});
+
+describe("limits the server enforces", () => {
+  it("keeps a layer's first revision and the newest ones", () => {
+    let n = node("a", 0);
+    for (let i = 1; i <= 70; i++) n = addRevision(n, { src: `/api/files/r${i}.png`, natural: [100, 50], label: `Edit ${i}`, at: i + 1 });
+    expect(n.revisions).toHaveLength(MAX_REVISIONS);
+    expect(n.revisions[0].label).toBe("Original");
+    expect(n.revisions.at(-1)?.label).toBe("Edit 70");
+    expect(n.revisions[1].label).toBe("Edit 22");
+    expect(n.revision).toBe(MAX_REVISIONS - 1);
+    expect(n.src).toBe("/api/files/r70.png");
+  });
+
+  it("refuses to grow a project past 200 layers", () => {
+    const full = doc(Array.from({ length: MAX_NODES }, (_, i) => node(`n${i}`, i)));
+    expect(roomFor(full)).toBe(false);
+    expect(roomFor(deleteNode(full, "n0"))).toBe(true);
+    expect(() => addNodes(full, [node("x", 0)])).toThrow(LayerLimitError);
+    expect(() => duplicateNode(full, "n1", "dup")).toThrow(/up to 200 layers/);
+    // Moving, deleting and merging still work at the limit.
+    expect(moveNode(full, "n0", 5).nodes).toHaveLength(MAX_NODES);
+    expect(replaceNodes(full, ["n0", "n1"], [node("m", 0)]).nodes).toHaveLength(MAX_NODES - 1);
+  });
+});
+
+describe("where the original sits", () => {
+  it("moves with Expand & Crop, so Compare's before lines up with the after", () => {
+    const d = initialDoc("/api/files/x.png", 960, 720, 1);
+    expect(sourceBoxOf(d)).toEqual([0, 0, 960, 720]);
+    const wide = reframeDoc(d, [-160, 0, 1280, 720]);
+    expect(sourceBoxOf(wide)).toEqual([160, 0, 960, 720]);
+    const crop = reframeDoc(wide, [200, 100, 400, 300]);
+    expect(sourceBoxOf(crop)).toEqual([-40, -100, 960, 720]);
+    // Documents saved before this was kept: the whole canvas.
+    expect(sourceBoxOf({ width: 10, height: 20 })).toEqual([0, 0, 10, 20]);
   });
 });

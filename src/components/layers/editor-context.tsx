@@ -37,6 +37,12 @@ export interface EditorCtx {
   jobs: LayerJob[];
   /** The job still working on a layer (queued, running, or finished but not laid out yet). */
   busyJob: (nodeId: string) => LayerJob | undefined;
+  /** The newest failed run on a layer the user hasn't dismissed yet. */
+  failedJob: (nodeId: string) => LayerJob | undefined;
+  /** Show a job's tool (and its layer): where its failure can be retried. */
+  showJob: (job: LayerJob) => void;
+  /** “An image can only be decomposed once”: the project's fact, whichever version is open. */
+  decomposed: boolean;
   /** Start a tool; resolves to the job, or null when it couldn't start (the reason was shown). */
   run: (input: RunInput) => Promise<LayerJob | null>;
   /** Dismiss a failed job, cancel a running one, or mark one used (a text detection that filled Edit text). */
@@ -61,6 +67,35 @@ export interface EditorCtx {
 }
 
 export type ToolId = "decompose" | "edit-text" | "remove-bg" | "regional" | "upscale" | "relight" | "angles" | "expand" | "grade";
+
+/** The tool form that started each kind of job (none: the layer card or the Generate layer dialog). */
+export const TOOL_FOR_JOB: Record<LayerTool, ToolId | null> = {
+  decompose: "decompose",
+  split: "decompose",
+  regenerate: null,
+  "generate-layer": null,
+  "text-detect": "edit-text",
+  "text-edit": "edit-text",
+  "bg-remove": "remove-bg",
+  regional: "regional",
+  upscale: "upscale",
+  relight: "relight",
+  angles: "angles",
+  expand: "expand",
+};
+
+/**
+ * A key press the editor's shortcuts should leave alone: already handled, typed into a field, or
+ * pressed in a dialog, menu or list (a Delete in the Edit history sheet mustn't delete a layer).
+ */
+export function keysBelongElsewhere(e: KeyboardEvent): boolean {
+  if (e.defaultPrevented) return true;
+  const t = e.target;
+  if (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return true;
+  if (t instanceof Element && t.closest('[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"]')) return true;
+  // A modal is open (focus can sit on its overlay or the page behind for a moment).
+  return !!document.querySelector('[role="dialog"][data-state="open"],[role="alertdialog"][data-state="open"],[role="menu"][data-state="open"]');
+}
 
 export const Ctx = createContext<EditorCtx | null>(null);
 

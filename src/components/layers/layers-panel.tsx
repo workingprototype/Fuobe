@@ -21,7 +21,10 @@ import {
   Scissors,
   Sparkles,
   SplitSquareVertical,
+  Link2,
   Trash2,
+  TriangleAlert,
+  Unlink2,
   Upload,
   X,
 } from "lucide-react";
@@ -39,13 +42,30 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { LibraryGrid } from "@/components/studio/media-slot";
 import { uploadFile } from "@/lib/api";
-import { addNodes, deleteNode, duplicateNode, jobStatusText, moveNode, setRevision, TOOL_MODELS, updateNode, type LayerNode, type LayerRevision } from "@/lib/layers";
+import {
+  addNodes,
+  deleteNode,
+  duplicateNode,
+  jobStatusText,
+  LayerLimitError,
+  moveNode,
+  roomFor,
+  setRevision,
+  TOOL_LABELS,
+  TOOL_MODELS,
+  updateNode,
+  type LayerNode,
+  type LayerRevision,
+} from "@/lib/layers";
 import { cn } from "@/lib/utils";
 import { Field } from "./bits";
-import { costLabel, isFailed, latestJob, modelsFor, useEditor } from "./editor-context";
+import { costLabel, modelsFor, TOOL_FOR_JOB, useEditor } from "./editor-context";
 import { downloadLayer, loadImage, sizeOf } from "./render";
 
-/** A layer's thumbnail showing just the part of its image it uses (its crop), on a checkerboard. */
+/**
+ * A layer's thumbnail showing just the part of its image it uses (its crop), on a mid-grey
+ * checkerboard so white-only layers (text) and black-only ones both stay visible in either theme.
+ */
 export function LayerThumb({ node, className }: { node: Pick<LayerNode, "src" | "crop" | "natural" | "w" | "h">; className?: string }) {
   const crop = node.crop;
   const nat = node.natural;
@@ -59,11 +79,17 @@ export function LayerThumb({ node, className }: { node: Pick<LayerNode, "src" | 
         }
       : { backgroundImage: `url("${node.src}")`, backgroundSize: "100% 100%" };
   return (
-    <span className={cn("checkerboard grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border", className)}>
+    <span className={cn("grid size-10 shrink-0 place-items-center overflow-hidden rounded-md border", className)} style={THUMB_CHECKER}>
       <span className="block max-h-full max-w-full bg-no-repeat" style={{ ...style, aspectRatio: `${aspect}`, width: aspect >= 1 ? "100%" : "auto", height: aspect >= 1 ? "auto" : "100%" }} />
     </span>
   );
 }
+
+const THUMB_CHECKER: React.CSSProperties = {
+  backgroundColor: "#8f8f8f",
+  backgroundImage: "conic-gradient(#a6a6a6 25%, transparent 0 50%, #a6a6a6 0 75%, transparent 0)",
+  backgroundSize: "10px 10px",
+};
 
 /** Add a layer from a file or the library: sized to fit 80% of the canvas, centred. */
 async function layerFromImage(url: string, name: string, doc: { width: number; height: number }): Promise<LayerNode> {
@@ -94,8 +120,8 @@ function AddLayer() {
       commit(addNodes(doc, [n]));
       select(n.id);
       toast.success("Layer added", { duration: 1500 });
-    } catch {
-      toast.error("Failed to add layer");
+    } catch (e) {
+      toast.error(e instanceof LayerLimitError ? e.message : "Failed to add layer");
     }
   };
 
@@ -298,10 +324,12 @@ function LayerRow({
   onDragHandle: (e: React.PointerEvent, id: string) => void;
   dropBefore: boolean;
 }) {
-  const { doc, commit, select, busyJob, openTool, setSplitTarget, setMode, mode } = useEditor();
+  const { doc, commit, select, busyJob, failedJob, openTool, setSplitTarget, setMode, mode } = useEditor();
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(node.name);
   const job = busyJob(node.id);
+  // A failed run stays on its row until it's dismissed (its layer card or tool form says why).
+  const failed = busy ? undefined : failedJob(node.id);
   const move = (dz: number) => {
     const to = node.z + dz;
     if (to < 0 || to >= total) return;
@@ -352,9 +380,15 @@ function LayerRow({
           <LayerThumb node={node} />
           <span className="min-w-0 flex-1">
             {renaming ? null : <span className={cn("block truncate text-[13px]", selected && "font-medium text-brand-text")}>{node.name}</span>}
-            <span className="block truncate text-[11px] text-muted-foreground">
-              {busy ?? (node.revisions.length > 1 ? `Version ${node.revision + 1} of ${node.revisions.length}` : node.maskSrc ? "Masked" : `Layer ${index}`)}
-            </span>
+            {failed ? (
+              <span className="flex items-center gap-1 truncate text-[11px] font-medium text-destructive">
+                <TriangleAlert className="size-3 shrink-0" /> {TOOL_LABELS[failed.tool]} failed
+              </span>
+            ) : (
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {busy ?? (node.revisions.length > 1 ? `Version ${node.revision + 1} of ${node.revisions.length}` : node.maskSrc ? "Masked" : `Layer ${index}`)}
+              </span>
+            )}
           </span>
         </button>
         {renaming && (
@@ -396,7 +430,7 @@ function LayerRow({
             <DropdownMenuItem onSelect={() => setTimeout(() => setRenaming(true), 50)}>
               <Pencil /> Rename layer
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => commit(duplicateNode(doc, node.id, nanoid(8)))}>
+            <DropdownMenuItem onSelect={() => (roomFor(doc) ? commit(duplicateNode(doc, node.id, nanoid(8))) : toast.error(new LayerLimitError().message, { id: "layers-limit" }))}>
               <Copy /> Duplicate
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void downloadLayer(doc, node).catch(() => toast.error("Could not download the layer."))}>
@@ -446,7 +480,7 @@ function LayerRow({
 
 /** Per-layer AI: “Layer edit prompt” + reference → Generate / Regenerate, and the layer's revisions. */
 function SelectedLayer({ node }: { node: LayerNode }) {
-  const { doc, commit, run, engine, models, isDemo, jobs, endJob, busyJob } = useEditor();
+  const { doc, commit, run, engine, models, isDemo, endJob, busyJob, failedJob, showJob, tool } = useEditor();
   const [prompt, setPrompt] = useState(node.prompt ?? "");
   const [ref, setRef] = useState<string | null>(node.refSrc ?? null);
   const options = modelsFor(models, TOOL_MODELS.regenerate[engine]);
@@ -456,10 +490,9 @@ function SelectedLayer({ node }: { node: LayerNode }) {
   const [keepAlpha, setKeepAlpha] = useState(node.z > 0);
   const [starting, setStarting] = useState(false);
   const running = busyJob(node.id);
-  const failed = useMemo(() => {
-    const j = latestJob(jobs, ["regenerate"], node.id);
-    return j && isFailed(j) ? j : undefined;
-  }, [jobs, node.id]);
+  // The newest failed run on this layer, whichever tool started it (its form can try again).
+  const failed = failedJob(node.id);
+  const failedForm = failed ? TOOL_FOR_JOB[failed.tool] : null;
   const edited = node.revisions.length > 1;
   const rev = node.revisions[node.revision];
 
@@ -534,14 +567,20 @@ function SelectedLayer({ node }: { node: LayerNode }) {
           </Button>
         </div>
       )}
-      {failed && (
+      {failed && !(failedForm && tool === failedForm) && (
         <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[12px]">
-          <p className="font-medium text-destructive">Layer generation failed</p>
+          <p className="font-medium text-destructive">{failed.tool === "regenerate" ? "Layer generation failed" : `${TOOL_LABELS[failed.tool]} failed`}</p>
           <p className="text-muted-foreground">{failed.result?.error ?? "Try again."}</p>
           <div className="mt-1.5 flex gap-3">
-            <button type="button" className="font-medium text-brand-text hover:underline" onClick={() => void go()}>
-              Try again
-            </button>
+            {failed.tool === "regenerate" ? (
+              <button type="button" className="font-medium text-brand-text hover:underline" onClick={() => void go()}>
+                Try again
+              </button>
+            ) : failedForm ? (
+              <button type="button" className="font-medium text-brand-text hover:underline" onClick={() => showJob(failed)}>
+                Open {TOOL_LABELS[failed.tool]}
+              </button>
+            ) : null}
             <button type="button" className="text-muted-foreground hover:underline" onClick={() => endJob(failed.id, "dismiss")}>
               Dismiss
             </button>
@@ -569,32 +608,88 @@ function SelectedLayer({ node }: { node: LayerNode }) {
       <Field label="Opacity" hint={`${Math.round((node.opacity ?? 1) * 100)}%`}>
         <Slider aria-label="Opacity" min={0} max={100} step={1} value={[Math.round((node.opacity ?? 1) * 100)]} onValueChange={([v]) => commit(updateNode(doc, node.id, { opacity: v / 100 }), `opacity:${node.id}`)} />
       </Field>
-      <div className="grid grid-cols-5 gap-1.5">
-        {(
-          [
-            ["x", "X"],
-            ["y", "Y"],
-            ["w", "W"],
-            ["h", "H"],
-            ["rotation", "°"],
-          ] as const
-        ).map(([k, label]) => (
-          <label key={k} className="space-y-0.5">
-            <span className="block text-center text-[11px] text-muted-foreground">{label}</span>
-            <Input
-              type="number"
-              inputMode="decimal"
-              aria-label={k === "rotation" ? "Rotation in degrees" : `${label} in pixels`}
-              className="h-7 px-1 text-center font-mono text-[12px]"
-              value={Math.round(node[k])}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (!Number.isFinite(v) || ((k === "w" || k === "h") && v < 1)) return;
-                commit(updateNode(doc, node.id, { [k]: v }), `${k}:${node.id}`);
-              }}
-            />
-          </label>
-        ))}
+      <Geometry node={node} />
+    </div>
+  );
+}
+
+/**
+ * A number typed into a draft: committed on Enter, on leaving the field and on arrow-key steps
+ * (Shift: 10), so clearing it or typing "-50" passes through no in-between values. Escape reverts.
+ */
+function NumberField({ label, name, value, min, onCommit }: { label: string; name: string; value: number; min?: number; onCommit: (v: number) => void }) {
+  const shown = String(Math.round(value));
+  const [draft, setDraft] = useState<string | null>(null);
+  const commitDraft = (s: string) => {
+    setDraft(null);
+    const v = Number(s.trim().replace(",", "."));
+    if (!s.trim() || !Number.isFinite(v) || (min !== undefined && v < min) || Math.round(v) === Math.round(value)) return;
+    onCommit(v);
+  };
+  return (
+    <label className="flex h-7 min-w-0 items-center rounded-md border bg-transparent pl-2 text-[12px] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+      <span className="w-3 shrink-0 text-[11px] text-muted-foreground" aria-hidden>
+        {label}
+      </span>
+      <input
+        type="text"
+        inputMode="decimal"
+        aria-label={name}
+        className="h-full min-w-0 flex-1 bg-transparent px-1 text-right font-mono text-[12px] outline-none"
+        value={draft ?? shown}
+        onChange={(e) => {
+          // Digits, one leading minus and a decimal point: "-" and "" are fine while typing.
+          if (/^-?\d*([.,]\d*)?$/.test(e.target.value)) setDraft(e.target.value);
+        }}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => commitDraft(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commitDraft(e.currentTarget.value);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            setDraft(null);
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const step = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1);
+            const base = Number((draft ?? shown).replace(",", "."));
+            const next = Math.round(Number.isFinite(base) ? base : value) + step;
+            if (min !== undefined && next < min) return;
+            setDraft(null);
+            onCommit(next);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+/** X / Y, W ⛓ H and rotation, two to a row; W and H keep the layer's shape while the link is on. */
+function Geometry({ node }: { node: LayerNode }) {
+  const { doc, commit } = useEditor();
+  const [locked, setLocked] = useState(true);
+  const set = (k: "x" | "y" | "w" | "h" | "rotation", v: number) => {
+    let patch: Partial<LayerNode> = { [k]: v };
+    if (locked && (k === "w" || k === "h") && node.w > 0 && node.h > 0) patch = k === "w" ? { w: v, h: (v * node.h) / node.w } : { h: v, w: (v * node.w) / node.h };
+    commit(updateNode(doc, node.id, patch), `${k}:${node.id}`);
+  };
+  return (
+    <div className="space-y-1.5" role="group" aria-label="Position and size">
+      <div className="grid grid-cols-2 gap-1.5">
+        <NumberField label="X" name="X in pixels" value={node.x} onCommit={(v) => set("x", v)} />
+        <NumberField label="Y" name="Y in pixels" value={node.y} onCommit={(v) => set("y", v)} />
+      </div>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1">
+        <NumberField label="W" name="Width in pixels" value={node.w} min={1} onCommit={(v) => set("w", v)} />
+        <Button size="icon-xs" variant="ghost" aria-pressed={locked} aria-label="Keep the layer's shape when changing W or H" title={locked ? "W and H keep the shape" : "W and H change on their own"} onClick={() => setLocked(!locked)}>
+          {locked ? <Link2 /> : <Unlink2 />}
+        </Button>
+        <NumberField label="H" name="Height in pixels" value={node.h} min={1} onCommit={(v) => set("h", v)} />
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <NumberField label="°" name="Rotation in degrees" value={node.rotation} onCommit={(v) => set("rotation", v)} />
       </div>
     </div>
   );
@@ -644,7 +739,7 @@ export function LayersPanel() {
   };
 
   return (
-    <aside className="flex min-h-0 w-[240px] shrink-0 flex-col border-l bg-background lg:w-[264px] xl:w-[300px]" aria-label="Layers panel">
+    <aside className="flex min-h-0 w-[232px] shrink-0 flex-col border-l bg-background lg:w-[264px] xl:w-[300px]" aria-label="Layers panel">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
         <h2 className="text-[13px] font-semibold">Layers</h2>
         <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>

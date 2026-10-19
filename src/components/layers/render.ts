@@ -5,8 +5,21 @@
  * pictures handed to models all go through drawNode, so what you download is what you see.
  */
 
-import { uploadFile } from "@/lib/api";
-import { bboxFromAlpha, cropRect, nativeSize, slugify, sourceRect, storedZip, zipPlan, type Box, type LayerDoc, type LayerNode } from "@/lib/layers";
+import {
+  bboxFromAlpha,
+  cropRect,
+  exportScale,
+  layerExportScale,
+  nativeSize,
+  slugify,
+  sourceBoxOf,
+  sourceRect,
+  storedZip,
+  zipPlan,
+  type Box,
+  type LayerDoc,
+  type LayerNode,
+} from "@/lib/layers";
 
 // ---------------------------------------------------------------------------
 // Images
@@ -112,7 +125,8 @@ export function layerCanvas(node: LayerNode, w: number, h: number, src: Sources 
   const maskOverride = src.masks?.get(node.id);
   const mask = maskOverride ?? (node.maskSrc ? readyImage(node.maskSrc, onLoad) : undefined);
   if (node.maskSrc && !maskOverride && !mask) return null;
-  const key = cache && !preview ? `${node.src}|${node.crop?.join(",")}|${node.maskSrc}|${maskOverride ? src.maskVersion : ""}|${node.feather ?? 0}|${w}x${h}` : "";
+  // Large copies (exports) aren't kept: the cache holds stage-sized ones.
+  const key = cache && !preview && w * h <= 2048 * 2048 ? `${node.src}|${node.crop?.join(",")}|${node.maskSrc}|${maskOverride ? src.maskVersion : ""}|${node.feather ?? 0}|${w}x${h}` : "";
   const hit = key ? softCache.get(key) : undefined;
   if (hit) return hit;
   const c = document.createElement("canvas");
@@ -139,10 +153,10 @@ export function layerCanvas(node: LayerNode, w: number, h: number, src: Sources 
 
 /**
  * Draw a layer in document coordinates (the context's transform maps document px to the target).
- * `pxPerDoc` is how many target pixels one document pixel covers (sizes the offscreen copy). Returns
- * false while an image is still loading.
+ * `pxPerDoc` is how many target pixels one document pixel covers (sizes the offscreen copy of a
+ * masked or feathered layer, at most `softMax` px). Returns false while an image is still loading.
  */
-export function drawNode(ctx: CanvasRenderingContext2D, node: LayerNode, pxPerDoc: number, src: Sources = {}, onLoad?: () => void): boolean {
+export function drawNode(ctx: CanvasRenderingContext2D, node: LayerNode, pxPerDoc: number, src: Sources = {}, onLoad?: () => void, softMax = 2048): boolean {
   const soft = !!(node.maskSrc || node.feather || src.masks?.has(node.id) || src.previews?.has(node.id));
   ctx.save();
   ctx.globalAlpha = node.opacity ?? 1;
@@ -151,7 +165,7 @@ export function drawNode(ctx: CanvasRenderingContext2D, node: LayerNode, pxPerDo
   let ok = true;
   if (soft) {
     // Offscreen at the size it's shown, capped (a 4K layer on a small stage doesn't need 4K pixels).
-    const k = Math.min(1, 2048 / Math.max(node.w * pxPerDoc, node.h * pxPerDoc));
+    const k = Math.min(1, softMax / Math.max(node.w * pxPerDoc, node.h * pxPerDoc));
     const c = layerCanvas(node, Math.ceil(node.w * pxPerDoc * k), Math.ceil(node.h * pxPerDoc * k), src, onLoad);
     if (c) ctx.drawImage(c, -node.w / 2, -node.h / 2, node.w, node.h);
     else ok = false;
@@ -190,7 +204,31 @@ export async function renderDoc(doc: LayerDoc, opts: { rect?: Box; scale?: numbe
   }
   ctx.scale(scale, scale);
   ctx.translate(-rect[0], -rect[1]);
-  for (const n of nodes) drawNode(ctx, n, scale, opts.src);
+  ctx.imageSmoothingQuality = "high";
+  // Masked layers keep their detail in large exports (the stage caps them at 2048 px).
+  for (const n of nodes) drawNode(ctx, n, scale, opts.src, undefined, 8192);
+  return c;
+}
+
+/**
+ * The image the project was opened on, where it sits in the document now (Expand & Crop moves it),
+ * on a transparent canvas the document's size: Compare's “before”, lined up with the “after”.
+ */
+export async function renderSource(doc: LayerDoc, scale = 1): Promise<HTMLCanvasElement> {
+  const img = await loadImage(doc.source);
+  const [x, y, w, h] = sourceBoxOf(doc);
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, Math.round(doc.width * scale));
+  c.height = Math.max(1, Math.round(doc.height * scale));
+  const ctx = c.getContext("2d")!;
+  // Canvas the original didn't have (an expanded margin) reads as empty: a checkerboard.
+  const cell = 12;
+  ctx.fillStyle = "#e7e7e7";
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#f7f7f7";
+  for (let cy = 0; cy < c.height; cy += cell) for (let cx = (cy / cell) % 2 ? cell : 0; cx < c.width; cx += cell * 2) ctx.fillRect(cx, cy, cell, cell);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, x * scale, y * scale, w * scale, h * scale);
   return c;
 }
 
@@ -205,11 +243,22 @@ export function toBlob(c: HTMLCanvasElement, type = "image/png", quality?: numbe
   return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't render the image"))), type, quality));
 }
 
-/** Upload a render as a PNG and return its /api/files URL. */
+/**
+ * Store a render as a PNG and return its /api/files URL. Saved as a derived file: it stays out of
+ * the Library's Uploads (the project that uses it keeps it).
+ */
 export async function uploadRender(c: HTMLCanvasElement, name: string): Promise<string> {
-  const blob = await toBlob(c);
-  const asset = await uploadFile(new File([blob], `${slugify(name) || "layer"}.png`, { type: "image/png" }));
-  return asset.url;
+  return uploadDerived(await toBlob(c), name);
+}
+
+/** Store a PNG the editor made (a render, a mask) as a derived file. */
+export async function uploadDerived(blob: Blob, name: string): Promise<string> {
+  const form = new FormData();
+  form.append("file", new File([blob], `${slugify(name) || "layer"}.png`, { type: "image/png" }));
+  const res = await fetch("/api/layers/renders", { method: "POST", body: form });
+  const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  if (!res.ok || !body.url) throw new Error(body.error ?? "Couldn't save the picture for the model. Please try again.");
+  return body.url;
 }
 
 /** The alpha box of an image in its own pixels (measured on a copy at most 1024 px wide). */
@@ -283,33 +332,44 @@ function save(blob: Blob, name: string) {
 const bytes = async (c: HTMLCanvasElement) => new Uint8Array(await (await toBlob(c)).arrayBuffer());
 
 /**
- * cropped-layers.zip (each layer alone, cut to its rotation-aware box) or positioned-layers.zip
- * (each layer alone on a transparent canvas the size of the document), both with composite.png.
+ * Export size: "full" keeps every layer's detail (an upscaled layer makes the export bigger, see
+ * exportScale), "document" renders at the document's own pixels.
  */
-export async function downloadZip(doc: LayerDoc, kind: "cropped" | "positioned"): Promise<number> {
+export type ExportSize = "full" | "document";
+
+const docScale = (doc: LayerDoc, size: ExportSize) => (size === "full" ? exportScale(doc) : 1);
+
+/**
+ * cropped-layers.zip (each layer alone, cut to its rotation-aware box, at its own detail) or
+ * positioned-layers.zip (each layer alone on a transparent canvas the size of the export), both with
+ * composite.png.
+ */
+export async function downloadZip(doc: LayerDoc, kind: "cropped" | "positioned", size: ExportSize = "full"): Promise<number> {
   if (!doc.nodes.length) throw new Error("No layers to download");
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
   const files: { name: string; data: Uint8Array }[] = [];
+  const scale = docScale(doc, size);
   for (const { nodeId, file } of zipPlan(doc)) {
     const n = byId.get(nodeId)!;
     const rect = kind === "cropped" ? cropRect(n, doc) : ([0, 0, doc.width, doc.height] as Box);
     if (!rect) continue; // entirely off the canvas
-    files.push({ name: file, data: await bytes(await renderDoc(doc, { rect, only: n.id })) });
+    const s = kind === "cropped" && size === "full" ? layerExportScale(n, rect) : scale;
+    files.push({ name: file, data: await bytes(await renderDoc(doc, { rect, only: n.id, scale: s })) });
   }
-  files.push({ name: "composite.png", data: await bytes(await renderDoc(doc)) });
+  files.push({ name: "composite.png", data: await bytes(await renderDoc(doc, { scale })) });
   save(new Blob([storedZip(files) as BlobPart], { type: "application/zip" }), kind === "cropped" ? "cropped-layers.zip" : "positioned-layers.zip");
   return files.length - 1;
 }
 
-export async function downloadPng(doc: LayerDoc, name: string): Promise<void> {
-  save(await toBlob(await renderDoc(doc)), `${slugify(name) || "image"}.png`);
+export async function downloadPng(doc: LayerDoc, name: string, size: ExportSize = "full"): Promise<void> {
+  save(await toBlob(await renderDoc(doc, { scale: docScale(doc, size) })), `${slugify(name) || "image"}.png`);
 }
 
-/** One layer as you see it (cropped to its box). */
+/** One layer as you see it (cropped to its box), at its own detail. */
 export async function downloadLayer(doc: LayerDoc, node: LayerNode): Promise<void> {
   const rect = cropRect(node, doc);
   if (!rect) throw new Error("This layer is outside the canvas");
-  save(await toBlob(await renderDoc(doc, { rect, only: node.id })), zipPlan(doc).find((e) => e.nodeId === node.id)?.file ?? "layer.png");
+  save(await toBlob(await renderDoc(doc, { rect, only: node.id, scale: layerExportScale(node, rect) })), zipPlan(doc).find((e) => e.nodeId === node.id)?.file ?? "layer.png");
 }
 
 /** "16:9" for 1920×1080; a decimal ratio ("1.37:1") when the numbers don't reduce. */

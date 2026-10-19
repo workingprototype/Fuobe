@@ -5,7 +5,16 @@ import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -13,16 +22,25 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Engine } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
-import { docJson, type LayerDoc, type LayerJob, type LayerVersion } from "@/lib/layers";
+import { docJson, exportScale, scaledSize, type LayerDoc, type LayerJob, type LayerVersion } from "@/lib/layers";
 import { cn } from "@/lib/utils";
-import { downloadPng, downloadZip } from "./render";
+import { downloadPng, downloadZip, type ExportSize } from "./render";
 
 export type SaveState = "saved" | "saving" | "dirty" | "error" | "conflict";
 
-/** The download menu (shared with the phone view): the two zips and the flat PNG, built in the browser. */
+/**
+ * The download menu (shared with the phone view): the two zips and the flat PNG, built in the
+ * browser. When a layer carries more detail than the document (an upscale), the export can keep it
+ * (“Full detail”, the default) or stay at the document's size.
+ */
 export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name: string; jobs: LayerJob[]; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
+  const [size, setSize] = useState<ExportSize>("full");
   const splitting = jobs.some((j) => (j.tool === "decompose" || j.tool === "split") && j.state === "pending");
+  const scale = exportScale(doc);
+  const [dw, dh] = scaledSize(doc.width, doc.height, 1);
+  const [fw, fh] = scaledSize(doc.width, doc.height, scale);
+  const larger = fw > dw;
   const go = async (kind: "cropped" | "positioned" | "image") => {
     if (!doc.nodes.length) {
       toast.error("No layers to download");
@@ -34,9 +52,10 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
     }
     setBusy(true);
     const t = toast.loading(kind === "image" ? "Rendering the image…" : "Packing the layers…");
+    const at = larger ? size : "document";
     try {
-      if (kind === "image") await downloadPng(doc, name);
-      else await downloadZip(doc, kind);
+      if (kind === "image") await downloadPng(doc, name, at);
+      else await downloadZip(doc, kind, at);
       toast.success("Downloaded", { id: t, duration: 1500 });
     } catch (e) {
       toast.error((e as Error).message || "Couldn't download this version. Please try again.", { id: t });
@@ -52,7 +71,7 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
           {!compact && <span className="hidden xl:inline">Download</span>}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuItem onSelect={() => void go("cropped")}>
           <FileArchive /> Cropped layers .zip
         </DropdownMenuItem>
@@ -62,19 +81,61 @@ export function DownloadMenu({ doc, name, jobs, compact }: { doc: LayerDoc; name
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void go("image")}>
           <ImageDown /> Image .png
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+            {larger && size === "full" ? fw : dw} × {larger && size === "full" ? fh : dh}
+          </span>
         </DropdownMenuItem>
+        {larger && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[11px] font-medium text-muted-foreground">Size</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={size} onValueChange={(v) => setSize(v as ExportSize)}>
+              <DropdownMenuRadioItem value="full" onSelect={(e) => e.preventDefault()}>
+                Full detail
+                <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+                  {fw} × {fh}
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="document" onSelect={(e) => e.preventDefault()}>
+                Canvas size
+                <span className="ml-auto font-mono text-[11px] text-muted-foreground">
+                  {dw} × {dh}
+                </span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-function SaveBadge({ state }: { state: SaveState }) {
+/** The autosave state: an icon at every width, its words from 1280 px (and in its tooltip). A failed save can be retried now. */
+function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
   const text = { saved: "Saved", saving: "Saving…", dirty: "Saving…", error: "Not saved — retrying", conflict: "Changed in another tab" }[state];
+  const bad = state === "error" || state === "conflict";
+  const body = (
+    <>
+      {state === "saved" ? <Check className="size-3.5 shrink-0" /> : bad ? <CloudOff className="size-3.5 shrink-0" /> : <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+      <span className="sr-only xl:not-sr-only">{text}</span>
+    </>
+  );
+  const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-subtle-foreground");
   return (
-    <span className={cn("hidden items-center gap-1 text-[12px] whitespace-nowrap xl:inline-flex", state === "error" || state === "conflict" ? "text-warning" : "text-subtle-foreground")} role="status" aria-live="polite">
-      {state === "saved" ? <Check className="size-3.5" /> : state === "error" || state === "conflict" ? <CloudOff className="size-3.5" /> : <Loader2 className="size-3.5 animate-spin" />}
-      {text}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {state === "error" ? (
+          <button type="button" className={cn(cls, "hover:bg-accent")} onClick={onRetry} aria-label="Not saved. Retry now">
+            {body}
+          </button>
+        ) : (
+          <span className={cls} role="status" aria-live="polite">
+            {body}
+          </span>
+        )}
+      </TooltipTrigger>
+      <TooltipContent>{state === "error" ? "Not saved yet — Fuobe keeps retrying. Click to retry now." : text}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -82,6 +143,7 @@ export function TopBar(p: {
   name: string;
   onRename: (name: string) => void;
   save: SaveState;
+  onRetrySave: () => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -142,7 +204,7 @@ export function TopBar(p: {
         }}
         className="h-8 w-[clamp(6rem,16vw,16rem)] min-w-0 truncate rounded-md border border-transparent bg-transparent px-2 font-heading text-[19px] outline-none hover:border-border focus:border-primary focus:ring-4 focus:ring-brand-faint"
       />
-      <SaveBadge state={p.save} />
+      <SaveBadge state={p.save} onRetry={p.onRetrySave} />
 
       <div className="ml-auto flex items-center gap-1">
         <Tooltip>
@@ -193,7 +255,14 @@ export function TopBar(p: {
       </div>
 
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
-        <SheetContent className="w-[min(92vw,380px)]">
+        <SheetContent
+          className="w-[min(92vw,380px)]"
+          // Focus the sheet itself, not its first Restore button (Enter mustn't restore a version by accident).
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement | null)?.focus();
+          }}
+        >
           <SheetHeader>
             <SheetTitle>Edit history</SheetTitle>
             <SheetDescription>Every tool result is saved as a version. Restoring one adds it on top — nothing is lost.</SheetDescription>

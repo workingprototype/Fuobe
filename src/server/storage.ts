@@ -79,7 +79,8 @@ export interface Asset {
   relPath: string;
   contentType: string;
   size: number;
-  source: "upload" | "generation";
+  /** "derived": a picture a tool rendered for a model (a layer, a region, a mask), not listed with your uploads. */
+  source: "upload" | "generation" | "derived";
   generationId: string | null;
   createdAt: number;
   url: string;
@@ -92,7 +93,7 @@ interface AssetRow {
   rel_path: string;
   content_type: string;
   size: number;
-  source: "upload" | "generation";
+  source: Asset["source"];
   generation_id: string | null;
   created_at: number;
 }
@@ -126,7 +127,7 @@ export function saveFile(opts: {
   const id = nanoid(12);
   const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
-  const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "upload" ? "uploads" : "outputs", day, `${id}.${ext}`);
+  const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "generation" ? "outputs" : "uploads", day, `${id}.${ext}`);
   const abs = path.join(FILES_DIR, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, opts.data);
@@ -155,14 +156,14 @@ export function getAsset(id: string): Asset | null {
   return row ? toAsset(row) : null;
 }
 
-/** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. */
+/** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. Derived renders only when asked for. */
 export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string }): Asset[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.source) {
     where.push("source = ?");
     args.push(opts.source);
-  }
+  } else where.push("source != 'derived'");
   if (opts.kind) {
     where.push("kind = ?");
     args.push(opts.kind);

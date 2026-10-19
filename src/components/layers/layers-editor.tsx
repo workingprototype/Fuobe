@@ -6,35 +6,43 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { toast } from "sonner";
 import { ErrorState, NotFoundState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
+import { useSidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CompareSlider } from "@/components/studio/compare-slider";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { uploadFile, useEngine, useStatus } from "@/lib/api";
+import { useEngine, useStatus } from "@/lib/api";
 import {
   APPLIES_TO_DOC,
+  decomposeCost,
   deleteNode,
   duplicateNode,
   getNode,
   historyReducer,
+  LayerLimitError,
   nativeSize,
+  roomFor,
+  TOOL_LABELS,
+  TOOL_MODELS,
   updateNode,
   type Box,
   type LayerDoc,
+  type LayerJob,
   type LayerModelInfo,
   type LayerNode,
   type LayerProjectView,
+  type LayerTool,
 } from "@/lib/layers";
-import { applyJob } from "./apply";
-import { Ctx, isFailed, isRunning, type EditorCtx, type MaskEdit, type RunInput, type StageMode, type ToolId } from "./editor-context";
+import { applyMeasured, idPool, type Applied } from "./apply";
+import { costLabel, Ctx, isFailed, isRunning, keysBelongElsewhere, latestJob, TOOL_FOR_JOB, type EditorCtx, type MaskEdit, type RunInput, type StageMode, type ToolId } from "./editor-context";
 import { LayersPanel } from "./layers-panel";
+import { measureJob } from "./measure";
 import { MobileView } from "./mobile-view";
-import { loadImage, ratioOf, renderDoc, renderNative, toBlob, uploadRender } from "./render";
+import { loadImage, ratioOf, renderDoc, renderNative, renderSource, toBlob, uploadDerived, uploadRender } from "./render";
 import { Stage } from "./stage";
 import { ToolRail } from "./tools";
 import { TopBar, type SaveState } from "./top-bar";
 import { LayersRequestError, saveCover, saveDoc, useLayerActions, useLayerProject } from "./use-layers";
 
-const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 /** Focus is on a control that uses the arrow keys itself. */
 const widget = (t: EventTarget | null) =>
   t instanceof HTMLElement && !!t.closest('[role="radio"],[role="slider"],[role="menuitem"],[role="menu"],[role="tab"],[role="option"],[role="dialog"],[data-reorder]');
@@ -48,6 +56,12 @@ function pristine(doc: LayerDoc): boolean {
 
 /** A layer whose file is exactly what it shows. */
 const plain = (n: LayerNode) => !n.crop && !n.maskSrc && !n.feather;
+
+/** Tools whose failures a layer row shows (a text detection's shows in Edit text). */
+const NODE_TOOLS = (Object.keys(TOOL_FOR_JOB) as LayerTool[]).filter((t) => t !== "text-detect");
+
+/** Autosave retries after a failure (then every 15 s). */
+const RETRY_MS = [2000, 5000, 15000];
 
 function EditorSkeleton() {
   return (
@@ -87,6 +101,24 @@ export function LayersEditor({ id, models }: { id: string; models: Record<string
   return <EditorSkeleton />;
 }
 
+/**
+ * Below 1280 px the app's sidebar folds to icons while the editor is open, so the canvas keeps its
+ * room next to a tool's form and the Layers panel; it opens again when you leave.
+ */
+function useRoomyCanvas() {
+  const sidebar = useSidebar();
+  const ref = useRef(sidebar);
+  useLayoutEffect(() => {
+    ref.current = sidebar;
+  });
+  useEffect(() => {
+    const s = ref.current;
+    if (s.isMobile || !s.open || window.innerWidth >= 1280) return;
+    s.setOpen(false);
+    return () => ref.current.setOpen(true);
+  }, []);
+}
+
 function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: () => Promise<{ data?: LayerProjectView }>; models: Record<string, LayerModelInfo> }) {
   // The document is the editor's once loaded; later fetches bring jobs and versions.
   const [initial] = useState(view);
@@ -95,13 +127,16 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const isMobile = useIsMobile();
   const [engine, setEngine] = useEngine();
   const status = useStatus().data;
+  useRoomyCanvas();
 
   const [hist, dispatch] = useReducer(historyReducer, initial.doc, (doc) => ({ past: [], present: doc, future: [] }));
   const doc = hist.present;
   const docRef = useRef(doc);
+  const histRef = useRef(hist);
   useLayoutEffect(() => {
     docRef.current = doc;
-  }, [doc]);
+    histRef.current = hist;
+  }, [doc, hist]);
   const headRef = useRef(initial.headVersionId);
   const [head, setHeadState] = useState(initial.headVersionId);
   const setHead = useCallback((v: string) => {
@@ -110,10 +145,13 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   }, []);
   const savedRef = useRef<LayerDoc>(initial.doc);
   const [save, setSave] = useState<SaveState>("saved");
+  /** The document a tool's version was saved with: undoing past it saves a new version (the tool's keeps its result). */
+  const milestone = useRef<LayerDoc | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = getNode(doc, selectedId);
-  const [tool, setTool] = useState<ToolId | null>(() => (!initial.doc.decomposed && initial.doc.nodes.length === 1 ? "decompose" : null));
+  const decomposed = doc.decomposed || view.project.decomposed;
+  const [tool, setTool] = useState<ToolId | null>(() => (!initial.doc.decomposed && !initial.project.decomposed && initial.doc.nodes.length === 1 ? "decompose" : null));
   const [splitTarget, setSplitTarget] = useState<string | null>(null);
   const [mode, setModeState] = useState<StageMode>("select");
   const [region, setRegion] = useState<Box | null>(null);
@@ -124,58 +162,94 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const [maskVersion, setMaskVersion] = useState(0);
   const [brushSize, setBrushSize] = useState(() => Math.round(Math.max(initial.doc.width, initial.doc.height) / 30));
   const [compare, setCompare] = useState(false);
+  const toolRef = useRef(tool);
+  const selectedRef = useRef(selectedId);
+  useLayoutEffect(() => {
+    toolRef.current = tool;
+    selectedRef.current = selectedId;
+  }, [tool, selectedId]);
 
   const commit = useCallback((d: LayerDoc, merge?: string) => dispatch({ type: "commit", doc: d, merge, at: Date.now() }), []);
   const resetTo = useCallback(
     (v: LayerProjectView) => {
       setHead(v.headVersionId);
       savedRef.current = v.doc;
+      docRef.current = v.doc;
+      milestone.current = null;
       dispatch({ type: "reset", doc: v.doc });
       setSave("saved");
     },
     [setHead],
   );
 
-  // ---- Autosave into the head version (debounced; flushed with keepalive when leaving).
-  const pending = useRef<LayerDoc | null>(null);
-  /** The save in flight: a tool's version waits for it, so the two never cross. */
-  const saving = useRef<Promise<unknown>>(Promise.resolve());
-  useEffect(() => {
-    if (doc === savedRef.current) return;
-    pending.current = doc;
-    setSave("dirty");
-    const t = setTimeout(async () => {
-      setSave("saving");
-      const put = async (): Promise<void> => {
-        const sentHead = headRef.current;
-        try {
-          await saveDoc(id, doc, sentHead);
-        } catch (e) {
-          // A tool's result became the head meanwhile (this tab): save onto the new head.
-          if (e instanceof LayersRequestError && e.status === 409 && headRef.current !== sentHead) return put();
-          throw e;
+  // ---- Writes to the server (autosaves, tool results, restores) run one at a time, so they never
+  // cross: a result saved as a version can't be overwritten by an autosave started before it.
+  const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const serial = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const p = writes.current.then(fn);
+    writes.current = p.catch(() => {});
+    return p;
+  }, []);
+
+  // ---- Autosave into the head version (debounced; retried with backoff; flushed with keepalive when leaving).
+  const failures = useRef(0);
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The newest saveNow, for its own retries. */
+  const saveAgain = useRef<() => Promise<void>>(() => Promise.resolve());
+  const saveNow = useCallback(
+    (): Promise<void> =>
+      serial(async () => {
+        if (retry.current) clearTimeout(retry.current);
+        retry.current = null;
+        const d = docRef.current;
+        if (d === savedRef.current) {
+          setSave((s) => (s === "conflict" ? s : "saved"));
+          return;
         }
-      };
-      const p = put();
-      saving.current = p.catch(() => {});
-      try {
-        await p;
-        savedRef.current = doc;
-        if (pending.current === doc) pending.current = null;
-        setSave("saved");
-      } catch (e) {
-        if (e instanceof LayersRequestError && e.status === 409) {
-          setSave("conflict");
-          toast.error(e.message, { id: "layers-conflict", action: { label: "Reload", onClick: () => void refetch().then((r) => r.data && resetTo(r.data)) } });
-        } else setSave("error");
-      }
-    }, 700);
+        setSave("saving");
+        try {
+          if (milestone.current && histRef.current.future.includes(milestone.current)) {
+            // Undone past a tool's result: that version keeps the result; this becomes a new one.
+            const v = await actions.version(id, { doc: d, label: "Edit" });
+            setHead(v.headVersionId);
+            milestone.current = null;
+          } else {
+            await saveDoc(id, d, headRef.current);
+          }
+          savedRef.current = d;
+          if (failures.current) toast.dismiss("layers-save");
+          failures.current = 0;
+          setSave(docRef.current === d ? "saved" : "dirty");
+        } catch (e) {
+          if (e instanceof LayersRequestError && e.status === 409) {
+            setSave("conflict");
+            toast.error(e.message, { id: "layers-conflict", action: { label: "Reload", onClick: () => void refetch().then((r) => r.data && resetTo(r.data)) } });
+            return;
+          }
+          setSave("error");
+          const n = failures.current++;
+          if (n >= 2) toast.error("Your latest changes aren't saved yet", { id: "layers-save", description: `${(e as Error).message || "The server didn't answer"}. Fuobe keeps trying.`, duration: 10_000 });
+          retry.current = setTimeout(() => void saveAgain.current(), RETRY_MS[Math.min(n, RETRY_MS.length - 1)]);
+        }
+      }),
+    [serial, actions, id, setHead, refetch, resetTo],
+  );
+  useLayoutEffect(() => {
+    saveAgain.current = saveNow;
+  }, [saveNow]);
+  useEffect(() => {
+    if (doc === savedRef.current) {
+      setSave((s) => (s === "dirty" ? "saved" : s));
+      return;
+    }
+    setSave((s) => (s === "conflict" || s === "error" ? s : "dirty"));
+    const t = setTimeout(() => void saveNow(), 700);
     return () => clearTimeout(t);
-  }, [doc, id, refetch, resetTo]);
+  }, [doc, saveNow]);
   useEffect(() => {
     const flush = () => {
-      const d = pending.current;
-      if (d && d !== savedRef.current) void saveDoc(id, d, headRef.current, true).catch(() => {});
+      const d = docRef.current;
+      if (d !== savedRef.current) void saveDoc(id, d, headRef.current, true).catch(() => {});
     };
     const onHide = () => document.visibilityState === "hidden" && flush();
     document.addEventListener("visibilitychange", onHide);
@@ -183,6 +257,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     return () => {
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", flush);
+      if (retry.current) clearTimeout(retry.current);
       flush();
     };
   }, [id]);
@@ -205,10 +280,40 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     };
   }, [doc, id, initial.doc]);
 
+  // ---- Selection changes end mask editing and per-layer previews.
+  const select = useCallback((nid: string | null) => {
+    setSelectedId(nid);
+    setModeState((m) => (m === "brush" || m === "eraser" ? "select" : m));
+    setMask((m) => (m && m.nodeId !== nid ? null : m));
+  }, []);
+
+  const openTool = useCallback((t: ToolId | null) => {
+    setTool(t);
+    if (t !== "decompose") setSplitTarget(null);
+  }, []);
+
   // ---- Jobs: start, and lay out their results as they land.
   const busyJob = useCallback(
     (nodeId: string) => view.jobs.find((j) => j.nodeId === nodeId && j.tool !== "text-detect" && j.state === "pending" && !isFailed(j)),
     [view.jobs],
+  );
+  const failedJob = useCallback(
+    (nodeId: string) => {
+      const j = latestJob(view.jobs, NODE_TOOLS, nodeId);
+      return j && isFailed(j) && j.result?.status === "failed" ? j : undefined;
+    },
+    [view.jobs],
+  );
+  const showJob = useCallback(
+    (j: LayerJob) => {
+      const node = getNode(docRef.current, j.nodeId);
+      select(node ? node.id : null);
+      const t = TOOL_FOR_JOB[j.tool];
+      if (!t) return;
+      setTool(t);
+      setSplitTarget(j.tool === "split" && node ? node.id : null);
+    },
+    [select],
   );
 
   const run = useCallback<EditorCtx["run"]>(
@@ -259,45 +364,94 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     [actions, id],
   );
 
+  // A finished result is measured (its images loaded) first, then laid out on the document as it is
+  // right before its version is saved, and once more on the newest document if you edited meanwhile.
   const applying = useRef(new Set<string>());
-  const queue = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     for (const j of view.jobs) {
       if (j.state !== "pending" || j.result?.status !== "succeeded" || !APPLIES_TO_DOC.has(j.tool) || applying.current.has(j.id)) continue;
       applying.current.add(j.id);
-      queue.current = queue.current.then(async () => {
-        try {
-          await saving.current;
-          const res = await applyJob(docRef.current, j, () => nanoid(8));
-          const v = await actions.version(id, { doc: res.doc, label: j.label, jobId: j.id });
-          setHead(v.headVersionId);
-          savedRef.current = res.doc;
-          dispatch({ type: "commit", doc: res.doc });
-          if (res.select) setSelectedId(res.select);
-          if (j.tool === "split") setSplitTarget(null);
-          toast.success(res.message, { duration: 2500 });
-        } catch (e) {
-          if (e instanceof LayersRequestError && e.status === 409) {
-            // Another tab laid it out first: take the saved version.
-            const r = await refetch();
-            if (r.data) resetTo(r.data);
-          } else {
-            toast.error(`Couldn't add the result to your layers: ${(e as Error).message}`);
-            endJob(j.id, "dismiss");
-          }
-        }
+      const fail = (e: unknown) => {
+        toast.error(`Couldn't add the result to your layers: ${(e as Error).message}`);
+        endJob(j.id, "dismiss");
+      };
+      void measureJob(j).then(
+        (measured) =>
+          serial(async () => {
+            const ids = idPool(() => nanoid(8));
+            const at = Date.now();
+            const base = docRef.current;
+            let res: Applied;
+            try {
+              res = applyMeasured(base, j, measured, { newId: ids(), at });
+            } catch (e) {
+              fail(e);
+              return;
+            }
+            try {
+              const v = await actions.version(id, { doc: res.doc, label: j.label, jobId: j.id });
+              setHead(v.headVersionId);
+              savedRef.current = res.doc;
+              if (docRef.current !== base) {
+                // Edited while the version saved: lay the result out on the newest document (the same
+                // new layer ids); the autosave then puts it into the new version.
+                try {
+                  res = applyMeasured(docRef.current, j, measured, { newId: ids(), at });
+                } catch {
+                  // The newest document can't take it (e.g. the layer limit): keep the saved one.
+                }
+              }
+              milestone.current = res.doc;
+              docRef.current = res.doc;
+              dispatch({ type: "commit", doc: res.doc });
+              // Select the result unless you've moved on to another layer meanwhile.
+              const sel = selectedRef.current;
+              if (res.select && (!sel || sel === j.nodeId || !getNode(res.doc, sel))) setSelectedId(res.select);
+              if (j.tool === "split") setSplitTarget(null);
+              toast.success(res.message, { duration: 2500 });
+            } catch (e) {
+              if (e instanceof LayersRequestError && e.status === 409) {
+                // Another tab laid it out first: take the saved version.
+                const r = await refetch();
+                if (r.data) resetTo(r.data);
+              } else fail(e);
+            }
+          }),
+        fail,
+      );
+    }
+  }, [view.jobs, actions, id, refetch, resetTo, endJob, setHead, serial]);
+
+  // ---- Failures are told once, wherever you are (the tool's form or the layer's card shows them too).
+  const told = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!told.current) {
+      // Failures from before this visit show on their layers and forms, without a toast each.
+      told.current = new Set(view.jobs.filter(isFailed).map((j) => j.id));
+      return;
+    }
+    for (const j of view.jobs) {
+      if (!isFailed(j) || told.current.has(j.id)) continue;
+      told.current.add(j.id);
+      if (j.result?.status !== "failed") continue; // canceled: you asked for it
+      const node = getNode(docRef.current, j.nodeId);
+      const form = TOOL_FOR_JOB[j.tool];
+      const scope = (j.nodeId ?? null) === selectedRef.current;
+      // Already in view: the open form (or the selected layer's card) shows the failure.
+      if (scope && (form ? toolRef.current === form : j.tool === "regenerate")) continue;
+      toast.error(`${TOOL_LABELS[j.tool]} failed${node ? ` on ${node.name}` : ""}`, {
+        id: `layers-failed-${j.id}`,
+        description: j.result.error ?? "The model didn't finish.",
+        ...(form || node ? { action: { label: "View", onClick: () => showJob(j) } } : {}),
       });
     }
-  }, [view.jobs, actions, id, refetch, resetTo, endJob, setHead]);
+  }, [view.jobs, showJob]);
 
   // ---- Masks (brush paints the layer back, eraser hides it).
-  const setMode = useCallback(
-    (m: StageMode) => {
-      setModeState(m);
-      if (m !== "brush" && m !== "eraser") setMask(null);
-    },
-    [],
-  );
+  const setMode = useCallback((m: StageMode) => {
+    setModeState(m);
+    if (m !== "brush" && m !== "eraser") setMask(null);
+  }, []);
   useEffect(() => {
     if ((mode !== "brush" && mode !== "eraser") || !selected) return;
     if (mask?.nodeId === selected.id) return;
@@ -331,9 +485,8 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     if (!mask) return;
     setSavingMask(true);
     try {
-      const blob = await toBlob(mask.canvas);
-      const asset = await uploadFile(new File([blob], "layer-mask.png", { type: "image/png" }));
-      commit(updateNode(docRef.current, mask.nodeId, { maskSrc: asset.url }));
+      const url = await uploadDerived(await toBlob(mask.canvas), "layer-mask");
+      commit(updateNode(docRef.current, mask.nodeId, { maskSrc: url }));
       toast.success("Mask saved", { duration: 1500 });
       setMode("select");
     } catch (e) {
@@ -342,16 +495,6 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
       setSavingMask(false);
     }
   };
-
-  // ---- Selection changes end mask editing and per-layer previews.
-  const select = useCallback(
-    (nid: string | null) => {
-      setSelectedId(nid);
-      setModeState((m) => (m === "brush" || m === "eraser" ? "select" : m));
-      setMask((m) => (m && m.nodeId !== nid ? null : m));
-    },
-    [],
-  );
 
   const setPreview = useCallback((pid: string, c: HTMLCanvasElement | null) => {
     setPreviews((old) => {
@@ -363,15 +506,10 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     });
   }, []);
 
-  const openTool = useCallback((t: ToolId | null) => {
-    setTool(t);
-    if (t !== "decompose") setSplitTarget(null);
-  }, []);
-
-  // ---- Keyboard.
+  // ---- Keyboard (never behind a dialog, a menu or in a field).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (typing(e.target)) return;
+      if (keysBelongElsewhere(e)) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -387,7 +525,9 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
       const sel = getNode(d, selectedId);
       if (mod && e.key.toLowerCase() === "d" && sel) {
         e.preventDefault();
-        commit(duplicateNode(d, sel.id, nanoid(8)));
+        if (e.repeat) return;
+        if (!roomFor(d)) toast.error(new LayerLimitError().message, { id: "layers-limit" });
+        else commit(duplicateNode(d, sel.id, nanoid(8)));
         return;
       }
       if (mod || e.altKey) return;
@@ -423,24 +563,25 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedId, mode, commit, select, setMode, busyJob]);
 
-  // ---- Compare: the original against the current composite.
-  const [composite, setComposite] = useState<string | null>(null);
+  // ---- Compare: the original, where it sits in the document now, against the current composite.
+  const [pair, setPair] = useState<{ before: string; after: string } | null>(null);
   useEffect(() => {
     if (!compare) return;
-    let url: string | null = null;
+    const urls: string[] = [];
     let gone = false;
-    void renderDoc(doc, { scale: Math.min(1, 1600 / Math.max(doc.width, doc.height)) })
-      .then((c) => toBlob(c))
-      .then((b) => {
+    const scale = Math.min(1, 1600 / Math.max(doc.width, doc.height));
+    void Promise.all([renderSource(doc, scale), renderDoc(doc, { scale })])
+      .then((cs) => Promise.all(cs.map((c) => toBlob(c))))
+      .then(([b, a]) => {
         if (gone) return;
-        url = URL.createObjectURL(b);
-        setComposite(url);
+        urls.push(URL.createObjectURL(b), URL.createObjectURL(a));
+        setPair({ before: urls[0], after: urls[1] });
       })
       .catch(() => toast.error("Couldn't render the comparison"));
     return () => {
       gone = true;
-      if (url) URL.revokeObjectURL(url);
-      setComposite(null);
+      for (const u of urls) URL.revokeObjectURL(u);
+      setPair(null);
     };
   }, [compare, doc]);
 
@@ -481,6 +622,9 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     isDemo,
     jobs: view.jobs,
     busyJob,
+    failedJob,
+    showJob,
+    decomposed,
     run,
     endJob,
     mode,
@@ -498,7 +642,23 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
     setSplitTarget,
   };
 
-  if (isMobile) return <MobileView project={view.project} doc={doc} jobs={view.jobs} />;
+  if (isMobile) {
+    const modelId = TOOL_MODELS.decompose[engine][0];
+    const model = models[modelId];
+    return (
+      <MobileView
+        project={view.project}
+        doc={doc}
+        jobs={view.jobs}
+        decomposed={decomposed}
+        separateCost={costLabel(model, isDemo(model), decomposeCost(modelId, 8))}
+        onSeparate={async () => {
+          await run({ tool: "decompose", target: { kind: "whole" }, settings: { resolution: "1K", mode: "standard", layers: 8 }, label: "Layer decomposition" });
+        }}
+        onDismiss={(jobId) => endJob(jobId, "dismiss")}
+      />
+    );
+  }
 
   return (
     <Ctx.Provider value={ctx}>
@@ -507,6 +667,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
           name={view.project.name}
           onRename={(n) => void actions.rename(id, n).catch((e) => toast.error((e as Error).message))}
           save={save}
+          onRetrySave={() => void saveNow()}
           canUndo={hist.past.length > 0}
           canRedo={hist.future.length > 0}
           onUndo={() => dispatch({ type: "undo" })}
@@ -514,8 +675,10 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
           versions={view.versions}
           headVersionId={head}
           onRestore={async (vid) => {
+            // Unsaved edits go into the version they were made on first.
+            void saveNow();
             try {
-              const v = await actions.version(id, { from: vid });
+              const v = await serial(() => actions.version(id, { from: vid }));
               resetTo(v);
               select(null);
               toast.success("Version restored", { duration: 1500 });
@@ -535,7 +698,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
           <main className="relative flex min-w-0 flex-1 flex-col">
             {compare ? (
               <div className="checkerboard grid min-h-0 flex-1 place-items-center overflow-hidden p-6">
-                {composite ? <CompareSlider before={doc.source} after={composite} alt="Your layers" /> : <Loader2 className="size-5 animate-spin text-muted-foreground" />}
+                {pair ? <CompareSlider before={pair.before} after={pair.after} alt="Your layers" /> : <Loader2 className="size-5 animate-spin text-muted-foreground" />}
               </div>
             ) : (
               <Stage

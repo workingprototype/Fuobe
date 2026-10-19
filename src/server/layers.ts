@@ -8,11 +8,15 @@ import {
   APPLIES_TO_DOC,
   clampLayers,
   CUTOUT_MODELS,
+  defaultLayers,
   initialDoc,
+  layersModelFor,
+  MAX_NODES,
   RELIGHT_DIRECTIONS,
   RELIGHT_LIGHTS,
   textChanges,
   textEditPrompt,
+  TOOL_LABELS,
   TOOL_MODELS,
   type Box,
   type LayerDoc,
@@ -118,7 +122,8 @@ const DocSchema = z.object({
   height: z.number().int().min(1).max(20_000),
   source: FileUrl,
   decomposed: z.boolean(),
-  nodes: z.array(Node).max(200),
+  sourceBox: BoxSchema.optional(),
+  nodes: z.array(Node).max(MAX_NODES),
 });
 
 /** A document the browser sent, cleaned (null when it can't be read). */
@@ -165,21 +170,6 @@ export const JobInputSchema = z.object({
 
 // ---------------------------------------------------------------------------
 // Jobs → generation requests (pure: no database)
-
-const TOOL_LABELS: Record<LayerTool, string> = {
-  decompose: "Layer decomposition",
-  split: "Separate layer",
-  regenerate: "Layer edit",
-  "generate-layer": "Generate layer",
-  "text-detect": "Detect text",
-  "text-edit": "Edit text",
-  "bg-remove": "Remove background",
-  regional: "Regional edit",
-  upscale: "Upscale",
-  relight: "Relight",
-  angles: "Angles",
-  expand: "Expand",
-};
 
 /** The tool's model on this engine: the one asked for (when the tool offers it) or its default. */
 export function toolModel(tool: LayerTool, engine: Engine, modelId?: string): ModelDef {
@@ -236,10 +226,9 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
   switch (tool) {
     case "decompose":
     case "split": {
-      // Open: a named element goes to the prompt-guided Layered-Control model.
-      const wantsControl = tool === "split" && engine === "open" && !!prompt && !input.modelId;
-      const model = toolModel(tool, engine, wantsControl ? "oss-qwen-layered-control" : input.modelId);
-      const layers = clampLayers(model.id, s.layers ?? (model.id === "oss-qwen-layered-control" ? 2 : tool === "split" ? 3 : 8));
+      // Open: a named element goes to the prompt-guided Layered-Control model (the form says so).
+      const model = toolModel(tool, engine, layersModelFor(tool, engine, input.modelId, prompt));
+      const layers = clampLayers(model.id, s.layers ?? defaultLayers(tool, model.id));
       const res = s.resolution ?? "1K";
       const params: GenerationRequest["params"] = { ...aspectFor(model) };
       let p: string | undefined;
@@ -386,14 +375,28 @@ function resultOf(job: LayerJob): LayerJobResult | null {
 
 const ACTIVE = new Set(["queued", "running"]);
 
-function statusOf(row: ProjectRow, doc: LayerDoc | null): LayerProject["status"] {
-  const dec = parseJobs(row.jobs_json).filter((j) => j.tool === "decompose" && j.state !== "dismissed");
+/**
+ * “An image can only be decomposed once” as a fact of the project, not of the open version (an
+ * older version can be restored): a decomposition landed, or a split of the original picture did.
+ * saveJobs keeps these jobs for good.
+ */
+const decomposes = (j: LayerJob, sourceUrl: string) => j.state === "applied" && (j.tool === "decompose" || (j.tool === "split" && j.settings?.image === sourceUrl));
+
+function isDecomposed(row: ProjectRow, jobs: LayerJob[], doc: LayerDoc | null): boolean {
+  return !!doc?.decomposed || jobs.some((j) => decomposes(j, row.source_url));
+}
+
+function statusOf(row: ProjectRow, doc: LayerDoc | null): Pick<LayerProject, "status" | "pendingLayers" | "decomposed"> {
+  const jobs = parseJobs(row.jobs_json);
+  const decomposed = isDecomposed(row, jobs, doc);
+  const dec = jobs.filter((j) => j.tool === "decompose" && j.state !== "dismissed");
   const last = dec[dec.length - 1];
-  if (!last || last.state === "applied") return "ready";
+  if (!last || last.state === "applied") return { status: "ready", decomposed };
   const r = resultOf(last);
-  if (r && ACTIVE.has(r.status)) return "processing";
-  if (r?.status === "succeeded") return "processing"; // finished, waiting for the editor to lay it out
-  return doc?.decomposed ? "ready" : "failed";
+  if (r && ACTIVE.has(r.status)) return { status: "processing", decomposed };
+  // Finished, waiting for the editor to lay the layers out.
+  if (r?.status === "succeeded") return { status: "unopened", pendingLayers: r.outputs.filter((o) => o.kind === "image").length, decomposed };
+  return { status: decomposed ? "ready" : "failed", decomposed };
 }
 
 function headDoc(row: ProjectRow): LayerDoc | null {
@@ -411,7 +414,7 @@ function toProject(row: ProjectRow, doc = headDoc(row)): LayerProject {
     width: doc?.width ?? row.width,
     height: doc?.height ?? row.height,
     layers: doc?.nodes.length ?? 1,
-    status: statusOf(row, doc),
+    ...statusOf(row, doc),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -546,13 +549,18 @@ export function createVersion(id: string, input: { doc?: LayerDoc; label?: strin
   return projectView(id)!;
 }
 
-/** Jobs kept per project: every pending one, plus the latest finished ones (the last text detection among them). */
+/**
+ * Jobs kept per project: every pending one, the one that decomposed the image (for good: it says
+ * the image can't be decomposed again), plus the latest finished ones (the last text detection among them).
+ */
 const KEEP_JOBS = 40;
 
 function saveJobs(id: string, jobs: LayerJob[], now = Date.now()) {
+  const source = getRow(id)?.source_url ?? "";
   const pending = jobs.filter((j) => j.state === "pending");
-  const done = jobs.filter((j) => j.state !== "pending").slice(-Math.max(0, KEEP_JOBS - pending.length));
-  const keep = jobs.filter((j) => pending.includes(j) || done.includes(j)).map((j) => {
+  const first = jobs.find((j) => decomposes(j, source));
+  const done = jobs.filter((j) => j.state !== "pending" && j !== first).slice(-Math.max(0, KEEP_JOBS - pending.length - (first ? 1 : 0)));
+  const keep = jobs.filter((j) => pending.includes(j) || done.includes(j) || j === first).map((j) => {
     const { result: _drop, ...rest } = j;
     void _drop;
     return rest;
@@ -571,7 +579,7 @@ export function startJob(id: string, input: LayerJobInput): LayerJob {
     return !r || ACTIVE.has(r.status) || (r.status === "succeeded" && APPLIES_TO_DOC.has(j.tool));
   };
   if (input.tool === "decompose") {
-    if (headDoc(row)?.decomposed) throw new LayersError("An image can only be decomposed once. Pick a layer and use Separate layer to split it further.", 409);
+    if (isDecomposed(row, jobs, headDoc(row))) throw new LayersError("An image can only be decomposed once. Pick a layer and use Separate layer to split it further.", 409);
     if (jobs.some((j) => j.tool === "decompose" && running(j))) throw new LayersError("This image is already being decomposed", 409);
   }
   if (input.nodeId && jobs.some((j) => j.nodeId === input.nodeId && j.tool !== "text-detect" && running(j))) {

@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Kbd } from "@/components/ui/kbd";
 import { resizeBox, rotationTo, toLocal, type Box, type Handle, type LayerDoc, type LayerNode } from "@/lib/layers";
 import { cn } from "@/lib/utils";
-import type { MaskEdit, StageMode } from "./editor-context";
+import { keysBelongElsewhere, type MaskEdit, type StageMode } from "./editor-context";
 import { drawNode, opaqueAt, type Sources } from "./render";
 
 interface View {
@@ -29,7 +29,6 @@ const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const HANDLE_POS: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
 const HANDLE_CURSOR: Record<Handle, string> = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
 
-const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 export interface StageProps {
   doc: LayerDoc;
@@ -172,7 +171,7 @@ export function Stage(p: StageProps) {
   }, [fit]);
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (typing(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (keysBelongElsewhere(e) || e.metaKey || e.ctrlKey || e.altKey) return;
       // Space presses a focused button; it pans only from the canvas or the page.
       if (e.code === "Space" && !e.repeat && !(e.target instanceof HTMLElement && e.target.closest("button, a, [role]"))) {
         setSpace(true);

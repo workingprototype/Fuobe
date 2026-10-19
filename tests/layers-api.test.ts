@@ -21,6 +21,7 @@ const one = await import("@/app/api/layers/[id]/route");
 const versions = await import("@/app/api/layers/[id]/versions/route");
 const jobs = await import("@/app/api/layers/[id]/jobs/route");
 const job = await import("@/app/api/layers/[id]/jobs/[jobId]/route");
+const renders = await import("@/app/api/layers/renders/route");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -75,6 +76,28 @@ describe("job steps", () => {
     expect(s.request).toMatchObject({ modelId: "oss-qwen-layered-control", prompt: "the guitar", params: { numLayers: 2 } });
     expect(steps({ tool: "split", engine: "open" })[0].request.modelId).toBe("oss-qwen-layered");
     expect(steps({ tool: "split", prompt: "the guitar" })[0].request.prompt).toMatch(/^Separate the guitar onto its own layer/);
+  });
+
+  it("routes what the Separate layer form sends: a named element on the open engine runs on Layered-Control", () => {
+    // The form always sends the model it shows; the default is plain Qwen-Image-Layered.
+    const [s] = steps({ tool: "split", engine: "open", modelId: "oss-qwen-layered", prompt: "the guitar", nodeId: "n1", settings: { resolution: "1K", mode: "standard", layers: 2 } });
+    expect(s.request).toMatchObject({ modelId: "oss-qwen-layered-control", prompt: "the guitar", params: { numLayers: 2 } });
+    expect(steps({ tool: "split", engine: "open", modelId: "oss-qwen-layered-control", prompt: "the face", settings: { layers: 3 } })[0].request).toMatchObject({ modelId: "oss-qwen-layered-control", params: { numLayers: 3 } });
+    // Control needs a name: without one the plain model splits.
+    expect(steps({ tool: "split", engine: "open", modelId: "oss-qwen-layered-control", settings: { layers: 4 } })[0].request).toMatchObject({ modelId: "oss-qwen-layered", params: { numLayers: 4 } });
+    // A named element without a layer count: the element and the rest.
+    expect(steps({ tool: "split", engine: "open", prompt: "the hat" })[0].request.params).toMatchObject({ numLayers: 2 });
+  });
+
+  it("sends Angles the camera the form shows for its model", () => {
+    // Nano Banana Pro: a camera chip, no sliders.
+    const nbp = steps({ tool: "angles", modelId: "nano-banana-pro", settings: { angle: "Back", keepAlpha: false } })[0].request;
+    expect(nbp).toMatchObject({ modelId: "nano-banana-pro", op: "edit" });
+    expect(nbp.prompt).toMatch(/^Show the exact same subject from a view from directly behind/);
+    expect(nbp.params?.extra).toBeUndefined();
+    // Qwen Multiple Angles: the sliders.
+    const qwen = steps({ tool: "angles", modelId: "qwen-multiple-angles", settings: { rotate: 120, tilt: -10, zoom: 2 } })[0].request;
+    expect(qwen.params?.extra).toEqual({ horizontal_angle: 120, vertical_angle: -10, zoom: 2 });
   });
 
   it("cuts the background back out after editing a transparent layer", () => {
@@ -294,6 +317,43 @@ describe("layers API", () => {
     expect(v.versions[0].label).toBe("Restored “Original”");
     expect(v.doc.nodes).toHaveLength(1);
     expect(v.doc.decomposed).toBe(false);
+    // The image was decomposed all the same: that's the project's, not the version's.
+    expect(v.project.decomposed).toBe(true);
+    const again = await jobs.POST(req("POST", { tool: "decompose", engine: "cloud", image: source, frame: [0, 0, 1920, 1080] }), ctx({ id }));
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { error: string }).error).toMatch(/can only be decomposed once/);
+  });
+
+  it("counts separating the original picture as its decomposition", async () => {
+    const src = upload();
+    let res = await list.POST(req("POST", { source: src, width: 64, height: 48 }));
+    const v0 = (await res.json()) as LayerProjectView;
+    const pid = v0.project.id;
+    expect(v0.project.decomposed).toBe(false);
+    res = await jobs.POST(req("POST", { tool: "split", engine: "cloud", image: src, nodeId: "original", frame: [0, 0, 64, 48], prompt: "the cup" }), ctx({ id: pid }));
+    expect(res.status).toBe(201);
+    const split = (await res.json()) as LayerJob;
+    await settle(split.generationIds[0]);
+    res = await versions.POST(req("POST", { doc: { ...v0.doc, decomposed: true }, label: split.label, jobId: split.id }), ctx({ id: pid }));
+    expect(((await res.json()) as LayerProjectView).project.decomposed).toBe(true);
+    // Restoring the original version doesn't make it decomposable again.
+    res = await versions.POST(req("POST", { from: v0.headVersionId }), ctx({ id: pid }));
+    expect(((await res.json()) as LayerProjectView).doc.decomposed).toBe(false);
+    res = await jobs.POST(req("POST", { tool: "decompose", engine: "cloud", image: src, frame: [0, 0, 64, 48] }), ctx({ id: pid }));
+    expect(res.status).toBe(409);
+    await one.DELETE(req("DELETE"), ctx({ id: pid }));
+  });
+
+  it("saves where the original sits in the document", async () => {
+    const src = upload();
+    const v0 = (await (await list.POST(req("POST", { source: src, width: 64, height: 48 }))).json()) as LayerProjectView;
+    expect(v0.doc.sourceBox).toEqual([0, 0, 64, 48]);
+    const grown: LayerDoc = { ...v0.doc, width: 96, sourceBox: [16, 0, 64, 48], nodes: v0.doc.nodes.map((x) => ({ ...x, x: 16 })) };
+    const res = await one.PATCH(req("PATCH", { doc: grown, versionId: v0.headVersionId }), ctx({ id: v0.project.id }));
+    expect(res.status).toBe(200);
+    const after = (await (await one.GET(req("GET"), ctx({ id: v0.project.id }))).json()) as LayerProjectView;
+    expect(after.doc.sourceBox).toEqual([16, 0, 64, 48]);
+    await one.DELETE(req("DELETE"), ctx({ id: v0.project.id }));
   });
 
   it("opens a finished layers result as a project", async () => {
@@ -305,6 +365,11 @@ describe("layers API", () => {
     expect(v.jobs).toHaveLength(1);
     expect(v.jobs[0]).toMatchObject({ tool: "decompose", state: "pending", generationIds: [g.id], frame: [0, 0, 512, 512] });
     expect(v.jobs[0].result?.status).toBe("succeeded");
+    // Until the editor lays the layers out, the card says they're ready to see (not “Processing…” for good).
+    expect(v.project).toMatchObject({ status: "unopened", layers: 1 });
+    expect(v.project.pendingLayers).toBe(v.jobs[0].result?.outputs.filter((o) => o.kind === "image").length);
+    const card = ((await (await list.GET()).json()) as { items: LayerProject[] }).items.find((p) => p.id === v.project.id);
+    expect(card?.status).toBe("unopened");
     const bad = await list.POST(req("POST", { source, width: 512, height: 512, generationId: "nope" }));
     expect(bad.status).toBe(400);
   });
@@ -321,5 +386,35 @@ describe("layers API", () => {
     expect(gens.getGeneration(made)?.status).toBe("succeeded");
     res = await one.DELETE(req("DELETE"), ctx({ id }));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("pictures the editor renders for models", () => {
+  const post = (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return renders.POST(new Request("http://localhost/api/layers/renders", { method: "POST", body: form }));
+  };
+
+  it("are stored as derived files: kept out of Uploads and the pickers, still served", async () => {
+    const res = await post(new File([PNG], "layers-subject.png", { type: "image/png" }));
+    expect(res.status).toBe(201);
+    const a = (await res.json()) as { id: string; url: string; source: string };
+    expect(a).toMatchObject({ source: "derived" });
+    expect(a.url).toMatch(/^\/api\/files\/uploads\/.+\.png$/);
+    const { listAssets, getAsset } = await import("@/server/storage");
+    expect(getAsset(a.id)?.source).toBe("derived");
+    // The Library's Uploads tab (source=upload) and the pickers (every source) don't list it.
+    expect(listAssets({ source: "upload" }).some((x) => x.id === a.id)).toBe(false);
+    expect(listAssets({}).some((x) => x.id === a.id)).toBe(false);
+    expect(listAssets({ source: "derived" }).some((x) => x.id === a.id)).toBe(true);
+    // Uploads still list.
+    const up = upload();
+    expect(listAssets({ source: "upload" }).some((x) => x.url === up)).toBe(true);
+  });
+
+  it("only takes PNGs", async () => {
+    expect((await post(new File([Buffer.from("<svg/>")], "x.png", { type: "image/png" }))).status).toBe(415);
+    expect((await post(new File([PNG], "x.jpg", { type: "image/jpeg" }))).status).toBe(415);
   });
 });

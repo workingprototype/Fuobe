@@ -1,5 +1,3 @@
-"use client";
-
 import {
   addNodes,
   addRevision,
@@ -16,13 +14,17 @@ import {
   type LayerRevision,
   type MeasuredOutput,
 } from "@/lib/layers";
-import { alphaBox, loadImage, sizeOf } from "./render";
 
 /**
  * What a finished tool job does to the document: decompositions and splits become layers (placed by
  * their boxes, or cropped to their alpha), edits become a new revision of their layer (or a new
  * layer on top for the whole image), a region edit becomes the Original / New pair, Expand grows the
  * canvas with the fill underneath.
+ *
+ * Two halves: measuring the result's images takes the browser (src/components/layers/measure.ts,
+ * once per job), laying them out is pure ({@link applyMeasured}). The editor lays a result out on
+ * the document as it is right before saving the version, and again on the newest document if the
+ * user edited meanwhile, so no edit made while a result lands is lost.
  */
 
 const NEW_LAYER_NAMES: Partial<Record<LayerJob["tool"], string>> = {
@@ -34,6 +36,22 @@ const NEW_LAYER_NAMES: Partial<Record<LayerJob["tool"], string>> = {
   angles: "New angle",
 };
 
+/** One image of a result, measured: its pixel size and the box of its opaque pixels. */
+export interface MeasuredImage {
+  url: string;
+  meta?: Record<string, unknown>;
+  natural: [number, number];
+  /** Alpha box (image px); null when fully clear, undefined when not measured. */
+  alpha?: Box | null;
+}
+
+export interface MeasuredJob {
+  /** The result's images, in output order. */
+  outputs: MeasuredImage[];
+  /** A regional edit's region as it was (the Original half of the pair); null when it didn't load. */
+  original?: MeasuredImage | null;
+}
+
 export interface Applied {
   doc: LayerDoc;
   /** Toast text. */
@@ -42,9 +60,23 @@ export interface Applied {
   select?: string;
 }
 
-async function measure(url: string) {
-  const img = await loadImage(url);
-  return { img, natural: sizeOf(img) };
+export interface ApplyOptions {
+  /** New layer ids: hand the same sequence to a second call (a rebase) to get the same ids. */
+  newId: () => string;
+  /** Revision time stamps. */
+  at: number;
+}
+
+/** Ids from a pool: every function it hands out returns the same sequence. */
+export function idPool(make: () => string): () => () => string {
+  const pool: string[] = [];
+  return () => {
+    let i = 0;
+    return () => {
+      pool[i] ??= make();
+      return pool[i++];
+    };
+  };
 }
 
 /** Keep the frame's centre and width; take the height from the image's shape. */
@@ -58,27 +90,36 @@ function newNode(id: string, name: string, box: Box, src: string, natural: [numb
   return { id, name: name.slice(0, 80), z: 0, x: box[0], y: box[1], w: box[2], h: box[3], rotation: 0, src, crop, natural, revisions: [rev], revision: 0 };
 }
 
-export async function applyJob(doc: LayerDoc, job: LayerJob, newId: () => string): Promise<Applied> {
+/** The images of a job's result that need measuring, and whether their alpha box is needed. */
+export function imagesToMeasure(job: LayerJob): { url: string; alpha: boolean }[] {
   const outputs = (job.result?.outputs ?? []).filter((o) => o.kind === "image");
+  if (job.tool === "decompose" || job.tool === "split") return outputs.map((o) => ({ url: o.url, alpha: true }));
+  const last = outputs[outputs.length - 1];
+  return last ? [{ url: last.url, alpha: job.tool === "generate-layer" }] : [];
+}
+
+/** Lay a measured result out on `doc` (pure). Throws when there's nothing to add. */
+export function applyMeasured(doc: LayerDoc, job: LayerJob, m: MeasuredJob, opts: ApplyOptions): Applied {
+  const { newId, at } = opts;
+  const outputs = m.outputs;
   if (!outputs.length) throw new Error("The model returned no image");
-  const at = Date.now();
   const prompt = typeof job.settings?.prompt === "string" ? job.settings.prompt : undefined;
 
   if (job.tool === "decompose" || job.tool === "split") {
     const target = job.tool === "split" ? getNode(doc, job.nodeId) : undefined;
     const frame: Box = target ? [target.x, target.y, target.w, target.h] : job.frame;
-    const measured = await Promise.all(outputs.map(async (o) => ({ o, ...(await measure(o.url)) })));
     // Seedream's pixel boxes are measured on its base layer (z 0).
-    const base = measured.find((m) => m.o.meta?.z === 0) ?? measured[0];
+    const base = outputs.find((o) => o.meta?.z === 0) ?? outputs[0];
     const placed: MeasuredOutput[] = [];
-    for (const m of measured) {
-      let p = placeOutput(frame, m.natural, m.o.meta ?? {}, base.natural);
+    for (const o of outputs) {
+      let p = placeOutput(frame, o.natural, o.meta ?? {}, base.natural);
       if (p.needsAlpha) {
-        const t = tightenToAlpha(frame, m.natural, alphaBox(m.img));
-        if (!t) continue; // an empty layer
+        // Unmeasured: the whole canvas (an empty layer measures null and is left out).
+        const t = o.alpha === undefined ? { box: frame, crop: null, needsAlpha: false } : tightenToAlpha(frame, o.natural, o.alpha);
+        if (!t) continue;
         p = t;
       }
-      placed.push({ url: m.o.url, meta: m.o.meta, natural: m.natural, placement: p });
+      placed.push({ url: o.url, meta: o.meta, natural: o.natural, placement: p });
     }
     if (!placed.length) throw new Error("No layers came back from the split");
     const nodes = nodesFromOutputs(placed, {
@@ -90,21 +131,19 @@ export async function applyJob(doc: LayerDoc, job: LayerJob, newId: () => string
     if (job.tool === "decompose") {
       return { doc: { ...doc, decomposed: true, nodes }, message: `Decomposed into ${nodes.length} layers` };
     }
-    const next = target ? replaceNodes(doc, [target.id], nodes) : addNodes(doc, nodes);
+    let next = target ? replaceNodes(doc, [target.id], nodes) : addNodes(doc, nodes);
+    // Separating the original picture is its decomposition (“An image can only be decomposed once”).
+    if (!next.decomposed && typeof job.settings?.image === "string" && job.settings.image === doc.source) next = { ...next, decomposed: true };
     return { doc: next, message: `${target?.name ?? "Layer"} split into ${nodes.length} layers`, select: nodes[nodes.length - 1]?.id };
   }
 
   const out = outputs[outputs.length - 1];
-  const { img, natural } = await measure(out.url);
+  const natural = out.natural;
 
   if (job.tool === "regional") {
-    const original = typeof job.settings?.image === "string" ? job.settings.image : undefined;
     const rect = job.frame;
     const add: LayerNode[] = [];
-    if (original) {
-      const before = await measure(original).catch(() => null);
-      if (before) add.push({ ...newNode(newId(), "Original", rect, original, before.natural, "Original", at), role: "original" });
-    }
+    if (m.original) add.push({ ...newNode(newId(), "Original", rect, m.original.url, m.original.natural, "Original", at), role: "original" });
     const feather = typeof job.settings?.feather === "number" ? job.settings.feather : 12;
     const edited = { ...newNode(newId(), "New", rect, out.url, natural, "Regional edit", at, null, prompt), role: "new" as const, feather };
     add.push(edited);
@@ -118,8 +157,7 @@ export async function applyJob(doc: LayerDoc, job: LayerJob, newId: () => string
   }
 
   if (job.tool === "generate-layer") {
-    const alpha = alphaBox(img);
-    const crop = alpha ?? null;
+    const crop = out.alpha ?? null;
     const [cw, ch] = crop ? [crop[2], crop[3]] : natural;
     const k = Math.min((doc.width * 0.5) / cw, (doc.height * 0.5) / ch);
     const w = cw * k;

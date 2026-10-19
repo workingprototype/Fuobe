@@ -37,10 +37,13 @@ import {
   clampLayers,
   DECOMPOSE_COPY,
   decomposeCost,
+  defaultLayers,
   expandPads,
   getNode,
   jobStatusText,
   LAYER_PRICES,
+  layersModelFor,
+  minLayers,
   reframeDoc,
   RELIGHT_DIRECTIONS,
   RELIGHT_LIGHTS,
@@ -57,6 +60,7 @@ import {
   type LayerTool,
   type TextBlock,
 } from "@/lib/layers";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { cn } from "@/lib/utils";
 import { Field, Segmented } from "./bits";
 import { costLabel, isFailed, isRunning, latestJob, modelsFor, useEditor, type Target, type ToolId } from "./editor-context";
@@ -125,14 +129,17 @@ function ModelSelect({ tool, value, onChange }: { tool: LayerTool; value?: strin
   );
 }
 
-/** The model the tool will run (picked, or the engine's default). */
+/** The model the tool will run (picked, or the engine's default); `picked` is what the user chose, if anything. */
 function useToolModel(tool: LayerTool) {
   const { engine, models } = useEditor();
   const [picked, setPicked] = useState<string | undefined>();
   const options = TOOL_MODELS[tool][engine];
-  const id = picked && options.includes(picked) ? picked : options[0];
-  return { modelId: id, model: id ? models[id] : undefined, setModelId: setPicked };
+  const chosen = picked && options.includes(picked) ? picked : undefined;
+  const id = chosen ?? options[0];
+  return { modelId: id, model: id ? models[id] : undefined, setModelId: setPicked, picked: chosen };
 }
+
+type ToolModel = ReturnType<typeof useToolModel>;
 
 /** A running or failed job of this tool on this target. */
 function JobState({ job, onRetry, failedTitle = "That didn't work" }: { job?: LayerJob; onRetry?: () => void; failedTitle?: string }) {
@@ -233,15 +240,21 @@ function useRun() {
 // Layer Decomposition (and Separate layer)
 
 function DecomposeTool() {
-  const { doc, engine, isDemo, jobs, splitTarget, setSplitTarget, selected, endJob } = useEditor();
+  const { doc, engine, models, isDemo, jobs, splitTarget, setSplitTarget, selected, endJob, decomposed } = useEditor();
   // Separate layer: picked from a layer's menu, or with the button below once the image is decomposed.
   const splitNode = getNode(doc, splitTarget);
-  const tool: LayerTool = splitNode ? "split" : "decompose";
-  const { modelId, model, setModelId } = useToolModel(tool);
+  const tool = splitNode ? "split" : "decompose";
+  const picker = useToolModel(tool);
   const [resolution, setResolution] = useState<"1K" | "1.5K" | "2K">("1K");
   const [mode, setMode] = useState<"standard" | "fast">("standard");
-  const [layers, setLayers] = useState(8);
+  /** The slider's value once moved (until then each model's own default). */
+  const [layers, setLayers] = useState<number | null>(null);
   const [prompt, setPrompt] = useState("");
+  const asked = splitNode ? prompt.trim() : "";
+  // On the open engine a named element runs on Layered-Control, and only there.
+  const auto = tool === "split" && engine === "open";
+  const modelId = layersModelFor(tool, engine, picker.modelId, asked) ?? picker.modelId;
+  const model = modelId ? models[modelId] : undefined;
   const { busy, go } = useRun();
   const [phase, setPhase] = useState<"setting-up" | "submitting" | null>(null);
   const job = splitNode ? latestJob(jobs, ["split"], splitNode.id) : latestJob(jobs, ["decompose"]);
@@ -253,7 +266,8 @@ function DecomposeTool() {
   }, [job]);
 
   const max = LAYER_PRICES[modelId ?? ""]?.maxLayers ?? 10;
-  const n = clampLayers(modelId ?? "", Math.min(layers, max));
+  const min = minLayers(modelId ?? "");
+  const n = clampLayers(modelId ?? "", Math.min(layers ?? defaultLayers(tool, modelId), max));
   const hasRes = !!modelId && (modelId.startsWith("seedream") || modelId.startsWith("oss-"));
   const hasMode = modelId === "seedream-5-layers" || !!modelId?.startsWith("oss-");
   const usd = decomposeCost(modelId ?? "", n, resolution);
@@ -266,8 +280,9 @@ function DecomposeTool() {
     await go({
       tool,
       target,
-      modelId,
-      prompt: prompt.trim() || undefined,
+      // The model that runs, as the form shows it (a model picked by hand, Layered-Control for a named element).
+      ...(picker.picked || modelId !== picker.modelId ? { modelId } : {}),
+      prompt: asked || undefined,
       settings: { resolution, mode, layers: n },
       label: splitNode ? `Separating ${splitNode.name}` : "Layer decomposition",
     });
@@ -284,7 +299,7 @@ function DecomposeTool() {
         : isFailed(job)
           ? "failed"
           : "ready"
-      : !splitNode && doc.decomposed
+      : !splitNode && decomposed
         ? "decomposed"
         : null;
 
@@ -324,7 +339,7 @@ function DecomposeTool() {
     );
   }
 
-  if (!splitNode && doc.decomposed) {
+  if (!splitNode && decomposed) {
     const [title, body] = DECOMPOSE_COPY.decomposed;
     return (
       <div className="space-y-3">
@@ -360,12 +375,18 @@ function DecomposeTool() {
           <Field label="What to pull out (optional)" htmlFor="split-prompt">
             <Input id="split-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={200} placeholder="e.g. “the guitar”" className="h-9" />
           </Field>
-          {engine === "open" && prompt.trim() && <p className="text-[11px] text-muted-foreground">A named element runs on Qwen-Image-Layered Control.</p>}
         </div>
       ) : (
         <p className="text-[12px] text-pretty text-muted-foreground">Break the image into clean, editable layers — subject, background and details. An image can only be decomposed once; you can separate any layer again later.</p>
       )}
-      <ModelSelect tool={tool} value={modelId} onChange={setModelId} />
+      {auto ? (
+        <div className="space-y-0.5">
+          <p className="text-[12px] text-muted-foreground">Model · {model?.name ?? modelId}</p>
+          <p className="text-[11px] text-subtle-foreground">{asked ? "A named element runs on Qwen-Image-Layered Control." : "Name an element to pull it out with Qwen-Image-Layered Control."}</p>
+        </div>
+      ) : (
+        <ModelSelect tool={tool} value={modelId} onChange={picker.setModelId} />
+      )}
       {hasRes && (
         <Field label="Resolution">
           <Segmented
@@ -394,7 +415,7 @@ function DecomposeTool() {
         </Field>
       )}
       <Field label="Layers" hint={modelId?.startsWith("seedream") ? `up to ${n}` : n}>
-        <Slider aria-label="Layers" min={modelId === "oss-qwen-layered-control" ? 2 : 3} max={Math.max(3, max)} step={1} value={[n]} onValueChange={([v]) => setLayers(v)} />
+        <Slider aria-label="Layers" min={min} max={Math.max(min, max)} step={1} value={[n]} onValueChange={([v]) => setLayers(v)} />
       </Field>
       {modelId?.startsWith("seedream") && <p className="text-[11px] text-subtle-foreground">Seedream decides the final count (up to 16) and names each layer.</p>}
       {!model && <p className="text-[12px] text-muted-foreground">No {engine === "open" ? "open-source" : "cloud"} model can split layers yet.</p>}
@@ -542,10 +563,30 @@ function EditTextTool() {
 // ---------------------------------------------------------------------------
 // Remove background, Upscale, Relight, Angles
 
-function SimpleTool({ tool, verb, failedTitle, children, settings, prompt, disabled }: { tool: LayerTool; verb: string; failedTitle: string; children?: React.ReactNode; settings?: LayerJobInput["settings"]; prompt?: string; disabled?: boolean }) {
+function SimpleTool({
+  tool,
+  verb,
+  failedTitle,
+  children,
+  settings,
+  prompt,
+  disabled,
+  picker,
+}: {
+  tool: LayerTool;
+  verb: string;
+  failedTitle: string;
+  children?: React.ReactNode;
+  settings?: LayerJobInput["settings"];
+  prompt?: string;
+  disabled?: boolean;
+  /** The model state, when the form above depends on the model (Angles). */
+  picker?: ToolModel;
+}) {
   const { jobs, isDemo } = useEditor();
   const { target, node } = useTarget();
-  const { modelId, model, setModelId } = useToolModel(tool);
+  const own = useToolModel(tool);
+  const { modelId, model, setModelId } = picker ?? own;
   const { busy, go } = useRun();
   const job = latestJob(jobs, [tool], node?.id ?? null);
   const run = () => void go({ tool, target, modelId, prompt, settings, label: verb });
@@ -571,22 +612,10 @@ function RelightTool() {
   return (
     <SimpleTool tool="relight" verb="Relight" failedTitle="Couldn't relight it" settings={{ light, direction, keepAlpha: !!selected && keepAlpha }} prompt={extra.trim() || undefined}>
       <Field label="Lighting">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Lighting">
-          {RELIGHT_LIGHTS.map(([l]) => (
-            <Chip key={l} active={light === l} onClick={() => setLight(l)}>
-              {l}
-            </Chip>
-          ))}
-        </div>
+        <Chips label="Lighting" value={light} options={RELIGHT_LIGHTS.map(([l]) => l)} onChange={setLight} />
       </Field>
       <Field label="Direction">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Direction">
-          {RELIGHT_DIRECTIONS.map(([d]) => (
-            <Chip key={d} active={direction === d} onClick={() => setDirection(d)}>
-              {d}
-            </Chip>
-          ))}
-        </div>
+        <Chips label="Direction" value={direction} options={RELIGHT_DIRECTIONS.map(([d]) => d)} onChange={setDirection} />
       </Field>
       <Field label="Anything else (optional)" htmlFor="relight-extra">
         <Input id="relight-extra" value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={300} placeholder="e.g. “a soft blue fill from the right”" className="h-9" />
@@ -597,16 +626,18 @@ function RelightTool() {
 }
 
 function AnglesTool() {
-  const { selected, engine } = useEditor();
-  const { modelId } = useToolModel("angles");
+  const { selected } = useEditor();
+  // One model state for the form and its Model select: Qwen Multiple Angles takes sliders, the others a camera.
+  const picker = useToolModel("angles");
   const [rotate, setRotate] = useState(45);
   const [tilt, setTilt] = useState(0);
   const [zoom, setZoom] = useState(5);
   const [angle, setAngle] = useState(ANGLES[0][0]);
   const [keepAlpha, setKeepAlpha] = useState(!!selected && selected.z > 0);
-  const sliders = modelId === "qwen-multiple-angles" && engine === "cloud";
+  const sliders = picker.modelId === "qwen-multiple-angles";
+  const keep = !!selected && keepAlpha;
   return (
-    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" settings={{ rotate, tilt, zoom, angle, keepAlpha: !!selected && keepAlpha }}>
+    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" picker={picker} settings={sliders ? { rotate, tilt, zoom, keepAlpha: keep } : { angle, keepAlpha: keep }}>
       {sliders ? (
         <>
           <Field label="Rotate" hint={`${rotate}°`}>
@@ -621,13 +652,7 @@ function AnglesTool() {
         </>
       ) : (
         <Field label="Camera">
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Camera angle">
-            {ANGLES.map(([a]) => (
-              <Chip key={a} active={angle === a} onClick={() => setAngle(a)}>
-                {a}
-              </Chip>
-            ))}
-          </div>
+          <Chips label="Camera angle" value={angle} options={ANGLES.map(([a]) => a)} onChange={setAngle} />
         </Field>
       )}
       <KeepAlpha node={selected} value={keepAlpha} onChange={setKeepAlpha} />
@@ -635,20 +660,26 @@ function AnglesTool() {
   );
 }
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+const chipClass = (active: boolean) =>
+  cn(
+    "inline-flex h-7 items-center rounded-full px-2.5 text-[12px] font-medium transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+    active ? "bg-brand-faint text-brand-text hover:bg-brand-faint-hover" : "bg-secondary text-secondary-foreground hover:bg-accent",
+  );
+
+/**
+ * A row of chips to pick one of (a radio group): one Tab stop, the arrow keys move the pick. With
+ * nothing picked yet, the first chip takes the Tab stop.
+ */
+function Chips<T extends string>({ label, value, options, onChange, names }: { label: string; value: T | null; options: readonly T[]; onChange: (v: T) => void; names?: (v: T) => string }) {
+  const stop = value !== null && options.includes(value) ? value : options[0];
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-7 items-center rounded-full px-2.5 text-[12px] font-medium transition-colors",
-        active ? "bg-brand-faint text-brand-text hover:bg-brand-faint-hover" : "bg-secondary text-secondary-foreground hover:bg-accent",
-      )}
-    >
-      {children}
-    </button>
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={label} onKeyDown={radioKeys}>
+      {options.map((o) => (
+        <button key={o} type="button" role="radio" aria-checked={value === o} tabIndex={radioTab(o === stop)} onClick={() => onChange(o)} className={chipClass(value === o)}>
+          {names ? names(o) : o}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -790,8 +821,7 @@ function RegionalTool() {
 // ---------------------------------------------------------------------------
 // Expand & Crop
 
-const FRAME_RATIOS: [string, number | null][] = [
-  ["Free", null],
+const FRAME_RATIOS: [string, number][] = [
   ["1:1", 1],
   ["4:5", 4 / 5],
   ["3:4", 3 / 4],
@@ -863,12 +893,16 @@ function ExpandTool() {
     <div className="space-y-4">
       <p className="text-[12px] text-pretty text-muted-foreground">Drag the edges or corners. Crop keeps pixels on layers. Expand adds empty canvas, or turn on Fill with AI to generate it.</p>
       <Field label="Shape">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Frame shape">
-          {FRAME_RATIOS.map(([label, r]) => (
-            <Chip key={label} active={r === null ? false : Math.abs(f[2] / f[3] - r) < 0.01} onClick={() => setFrame(r ? frameAround(doc.width, doc.height, r) : [0, 0, doc.width, doc.height])}>
-              {r === null ? "Reset" : label}
-            </Chip>
-          ))}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Chips
+            label="Frame shape"
+            value={FRAME_RATIOS.find(([, r]) => Math.abs(f[2] / f[3] - r) < 0.01)?.[0] ?? null}
+            options={FRAME_RATIOS.map(([l]) => l)}
+            onChange={(l) => setFrame(frameAround(doc.width, doc.height, FRAME_RATIOS.find(([x]) => x === l)![1]))}
+          />
+          <button type="button" className={chipClass(false)} onClick={() => setFrame([0, 0, doc.width, doc.height])} disabled={f[0] === 0 && f[1] === 0 && f[2] === doc.width && f[3] === doc.height}>
+            Reset
+          </button>
         </div>
       </Field>
       <div className="grid grid-cols-2 gap-2 font-mono text-[12px] text-muted-foreground">
@@ -979,20 +1013,17 @@ function GradeTool() {
     <div className="space-y-4">
       <Scope node={node} />
       <Field label="Looks">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Looks">
-          {PRESETS.map((p) => (
-            <Chip
-              key={p.id}
-              active={preset === p.id}
-              onClick={() => {
-                setPreset(p.id);
-                setGrade(applyPreset(p));
-              }}
-            >
-              {p.name}
-            </Chip>
-          ))}
-        </div>
+        <Chips
+          label="Looks"
+          value={preset}
+          options={PRESETS.map((p) => p.id)}
+          names={(id) => PRESETS.find((p) => p.id === id)?.name ?? id}
+          onChange={(id) => {
+            const p = PRESETS.find((x) => x.id === id)!;
+            setPreset(p.id);
+            setGrade(applyPreset(p));
+          }}
+        />
       </Field>
       {groups.map((g) => (
         <fieldset key={g} className="space-y-2.5">
@@ -1034,7 +1065,7 @@ export function ToolRail() {
   const running = jobs.filter(isRunning).length;
   return (
     // Below 1280 px the list folds to icons (tooltips name them) so the canvas keeps its room; a tool's form stays readable.
-    <aside className={cn("flex min-h-0 shrink-0 flex-col border-r bg-background", current ? "w-[256px] xl:w-[280px]" : "w-[60px] xl:w-[280px]")} aria-label="Tools">
+    <aside className={cn("flex min-h-0 shrink-0 flex-col border-r bg-background", current ? "w-[240px] lg:w-[256px] xl:w-[280px]" : "w-[60px] xl:w-[280px]")} aria-label="Tools">
       {current ? (
         <>
           <div className="flex h-12 shrink-0 items-center gap-1 px-2">
@@ -1055,7 +1086,8 @@ export function ToolRail() {
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
             <div className="px-3 pt-1 pb-6">
               {tool === "decompose" && <DecomposeTool />}
-              {tool === "edit-text" && <EditTextTool />}
+              {/* Its rows belong to one scope: picking another layer (or the whole image) starts afresh. */}
+              {tool === "edit-text" && <EditTextTool key={selected?.id ?? "whole"} />}
               {tool === "remove-bg" && (
                 <SimpleTool tool="bg-remove" verb="Remove background" failedTitle="Failed to load image. Please try again.">
                   <HowItWorks>Remove background finds the main subject of your image and cuts everything else away, giving you the subject on a transparent background.</HowItWorks>

@@ -65,7 +65,21 @@ export interface LayerDoc {
   source: string;
   /** “An image can only be decomposed once”: set after the first decomposition lands. */
   decomposed: boolean;
+  /** Where the source image sits in the document (doc px): Expand & Crop moves it. Unset = the whole canvas. */
+  sourceBox?: Box;
   nodes: LayerNode[];
+}
+
+/** Layers a project holds at most (the server refuses more). */
+export const MAX_NODES = 200;
+/** Revisions a layer keeps: its first one and the newest (the server refuses more than 60). */
+export const MAX_REVISIONS = 50;
+
+/** A document change that would go past {@link MAX_NODES}. */
+export class LayerLimitError extends Error {
+  constructor() {
+    super(`A project can hold up to ${MAX_NODES} layers. Merge or delete some layers first.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +108,15 @@ export interface LayerProject {
   height: number;
   /** Layers in the newest version. */
   layers: number;
-  /** "processing" while a decomposition runs, "failed" when the only one failed. */
-  status: "ready" | "processing" | "failed";
+  /**
+   * "processing" while a decomposition runs, "unopened" when it finished but the editor hasn't laid
+   * the layers out yet (`pendingLayers` of them), "failed" when the only one failed.
+   */
+  status: "ready" | "processing" | "unopened" | "failed";
+  /** Layers a finished decomposition holds, waiting for the editor to lay them out. */
+  pendingLayers?: number;
+  /** “An image can only be decomposed once”: true once a decomposition (or a split of the original picture) landed, whichever version is open. */
+  decomposed: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -174,6 +195,22 @@ export interface LayerJobInput {
     aspect?: string;
   };
 }
+
+/** What each tool is called in job titles, toasts and the generations' step labels. */
+export const TOOL_LABELS: Record<LayerTool, string> = {
+  decompose: "Layer decomposition",
+  split: "Separate layer",
+  regenerate: "Layer edit",
+  "generate-layer": "Generate layer",
+  "text-detect": "Detect text",
+  "text-edit": "Edit text",
+  "bg-remove": "Remove background",
+  regional: "Regional edit",
+  upscale: "Upscale",
+  relight: "Relight",
+  angles: "Angles",
+  expand: "Expand",
+};
 
 /** Models each tool offers, per engine (the first is the default). Checked against the catalog in tests. */
 export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }> = {
@@ -257,10 +294,35 @@ export function decomposeCost(modelId: string, layers: number, resolution: "1K" 
   return Math.round(p.perLayer * n * (p.doubleAt2K && resolution === "2K" ? 2 : 1) * 1000) / 1000;
 }
 
+/** Qwen-Image-Layered Control: pulls a named element out of a layer (it needs the name). */
+export const LAYERED_CONTROL = "oss-qwen-layered-control";
+
+/**
+ * The model a decomposition or a split runs on. On the open engine a split with a named element
+ * (a prompt) goes to Layered-Control and one without a name to plain Qwen-Image-Layered, whichever of
+ * the two was asked for (the form says so). Elsewhere: the model asked for (unset = the default).
+ */
+export function layersModelFor(tool: "decompose" | "split", engine: "cloud" | "open", modelId: string | undefined, prompt: string | undefined): string | undefined {
+  if (tool !== "split" || engine !== "open") return modelId;
+  const plain = TOOL_MODELS.split.open[0];
+  if (prompt?.trim()) return !modelId || modelId === plain ? LAYERED_CONTROL : modelId;
+  return modelId === LAYERED_CONTROL ? plain : modelId;
+}
+
+/** The layer count a decomposition starts at: 8 for the image, 3 for a layer, 2 for a named element. */
+export function defaultLayers(tool: "decompose" | "split", modelId: string | undefined): number {
+  return modelId === LAYERED_CONTROL ? 2 : tool === "split" ? 3 : 8;
+}
+
+/** The fewest layers a model can be asked for (Layered-Control: the element and the rest). */
+export function minLayers(modelId: string): number {
+  return modelId === LAYERED_CONTROL ? 2 : 3;
+}
+
 /** The layer count a decomposition model can be asked for (Seedream picks its own, up to 16). */
 export function clampLayers(modelId: string, layers: number): number {
   const max = LAYER_PRICES[modelId]?.maxLayers ?? 10;
-  return Math.min(max, Math.max(modelId === "oss-qwen-layered-control" ? 2 : 3, Math.round(layers)));
+  return Math.min(max, Math.max(minLayers(modelId), Math.round(layers)));
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +490,33 @@ export function nativeSize(node: Pick<LayerNode, "w" | "h" | "crop" | "natural">
   h = Math.max(1, Math.round(h * k));
   return [w, h];
 }
+
+/** Exports stay at most this many pixels on their long side. */
+export const EXPORT_MAX_PX = 8192;
+
+/** Image pixels per document pixel a layer carries: 1 as placed, 4 after a 4× upscale. */
+export function layerDensity(node: Pick<LayerNode, "w" | "crop" | "natural">): number {
+  const src = sourceRect(node);
+  return src && node.w > 0 && src[2] > 0 ? src[2] / node.w : 1;
+}
+
+/**
+ * The scale an export renders at so no visible layer loses detail (an upscaled layer makes the
+ * whole picture bigger): the densest layer's, never below 1, kept to `max` px on the long side.
+ */
+export function exportScale(doc: Pick<LayerDoc, "width" | "height" | "nodes">, max = EXPORT_MAX_PX): number {
+  let d = 1;
+  for (const n of doc.nodes) if (!n.hidden) d = Math.max(d, layerDensity(n));
+  return Math.max(1, Math.min(d, max / Math.max(doc.width, doc.height)));
+}
+
+/** One layer's own scale for a cropped download (its density, ≥ 1, ≤ `max` px on the long side of `rect`). */
+export function layerExportScale(node: Pick<LayerNode, "w" | "crop" | "natural">, rect: Box, max = EXPORT_MAX_PX): number {
+  return Math.max(1, Math.min(layerDensity(node), max / Math.max(rect[2], rect[3])));
+}
+
+/** The pixel size of a render of `w × h` doc px at `scale`. */
+export const scaledSize = (w: number, h: number, scale: number): [number, number] => [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))];
 
 export type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
@@ -597,6 +686,7 @@ export function initialDoc(source: string, width: number, height: number, at = D
     height,
     source,
     decomposed: false,
+    sourceBox: [0, 0, width, height],
     nodes: [{ id, name: "Original image", z: 0, x: 0, y: 0, w: width, h: height, rotation: 0, src: source, crop: null, natural: [width, height], revisions: [rev], revision: 0 }],
   };
 }
@@ -607,7 +697,13 @@ export function normalize(doc: LayerDoc): LayerDoc {
   return nodes.every((n, i) => n === doc.nodes[i]) ? doc : { ...doc, nodes };
 }
 
-const withNodes = (doc: LayerDoc, nodes: LayerNode[]): LayerDoc => normalize({ ...doc, nodes: nodes.map((n, i) => (n.z === i ? n : { ...n, z: i })) });
+const withNodes = (doc: LayerDoc, nodes: LayerNode[]): LayerDoc => {
+  if (nodes.length > MAX_NODES && nodes.length > doc.nodes.length) throw new LayerLimitError();
+  return normalize({ ...doc, nodes: nodes.map((n, i) => (n.z === i ? n : { ...n, z: i })) });
+};
+
+/** Whether `more` layers still fit in the document. */
+export const roomFor = (doc: Pick<LayerDoc, "nodes">, more = 1): boolean => doc.nodes.length + more <= MAX_NODES;
 
 export function getNode(doc: LayerDoc, id: string | null | undefined): LayerNode | undefined {
   return id ? doc.nodes.find((n) => n.id === id) : undefined;
@@ -677,9 +773,13 @@ function refit(node: LayerNode, rev: Pick<LayerRevision, "crop" | "natural">): P
   return { x: node.x, y: node.y + node.h / 2 - h / 2, w: node.w, h };
 }
 
-/** Add a new version of a layer's pixels and switch to it. */
+/**
+ * Add a new version of a layer's pixels and switch to it. A layer keeps {@link MAX_REVISIONS}: its
+ * first one (“Reset layer”) and the newest.
+ */
 export function addRevision(node: LayerNode, rev: LayerRevision): LayerNode {
-  const revisions = node.revisions.length ? [...node.revisions, rev] : [{ src: node.src, crop: node.crop ?? null, natural: node.natural, label: "Before", at: rev.at - 1 }, rev];
+  let revisions = node.revisions.length ? [...node.revisions, rev] : [{ src: node.src, crop: node.crop ?? null, natural: node.natural, label: "Before", at: rev.at - 1 }, rev];
+  if (revisions.length > MAX_REVISIONS) revisions = [revisions[0], ...revisions.slice(revisions.length - (MAX_REVISIONS - 1))];
   return { ...node, ...refit(node, rev), src: rev.src, crop: rev.crop ?? null, natural: rev.natural, revisions, revision: revisions.length - 1 };
 }
 
@@ -699,7 +799,13 @@ export function reframeDoc(doc: LayerDoc, rect: Box): LayerDoc {
   const [rx, ry, rw, rh] = rect.map(Math.round) as Box;
   if (rw < 8 || rh < 8 || !intersect([rx, ry, rw, rh], [0, 0, doc.width, doc.height])) throw new Error("The frame no longer overlaps the image. Move it back over the picture.");
   if (rx === 0 && ry === 0 && rw === doc.width && rh === doc.height) return doc;
-  return { ...doc, width: rw, height: rh, nodes: doc.nodes.map((n) => ({ ...n, x: n.x - rx, y: n.y - ry })) };
+  const [sx, sy, sw, sh] = sourceBoxOf(doc);
+  return { ...doc, width: rw, height: rh, sourceBox: [sx - rx, sy - ry, sw, sh], nodes: doc.nodes.map((n) => ({ ...n, x: n.x - rx, y: n.y - ry })) };
+}
+
+/** Where the source image sits in the document (the whole canvas for documents saved before this was kept). */
+export function sourceBoxOf(doc: Pick<LayerDoc, "width" | "height" | "sourceBox">): Box {
+  return asBox(doc.sourceBox) ?? [0, 0, doc.width, doc.height];
 }
 
 /** Outpaint padding for an expanded frame (whole pixels, multiples of 8 as the open workflow wants). */
