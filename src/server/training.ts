@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ElementLora, StudioElement } from "@/lib/catalog/elements";
-import { aiToolkitJob, getTrainingTarget, triggerFor, type TrainingTarget } from "@/lib/catalog/training";
+import { aiToolkitJob, getTrainingTarget, trainingCaption, triggerFor, type TrainingTarget } from "@/lib/catalog/training";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { falFetch, falProvider } from "./providers/fal";
@@ -160,7 +160,7 @@ function addIdentity(elementId: string, loras: ElementLora[]) {
 
 /** Photos + one caption per photo: "photo of <trigger>, <description>". */
 async function dataset(el: StudioElement, trigger: string, images: string[]) {
-  const caption = `photo of ${trigger}${el.description ? `, ${el.description.replace(/[.\s]+$/, "")}` : ""}`;
+  const caption = trainingCaption(el.kind === "style" ? "style" : "character", trigger, el.description);
   const files: { name: string; data: Buffer }[] = [];
   for (const [i, ref] of images.entries()) {
     const f = await readRef(ref);
@@ -228,7 +228,7 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
   fs.mkdirSync(folder, { recursive: true });
   for (const f of files) fs.writeFileSync(path.join(folder, f.name), f.data);
   const name = `fuobe_${el.handle.toLowerCase()}_${id.slice(0, 6)}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: folder, outputFolder: path.join(root, "output") });
+  const job = aiToolkitJob({ name, trigger, datasetFolder: folder, outputFolder: path.join(root, "output"), kind: el.kind === "style" ? "style" : "character" });
   const created = await aitk("/api/jobs", { method: "POST", body: JSON.stringify({ name, gpu_ids: "0", job_config: job }) });
   const jobId = String(created.id);
   await aitk(`/api/jobs/${jobId}/start`);
@@ -334,7 +334,7 @@ export async function trainingKit(elementId: string): Promise<{ name: string; da
   const trigger = triggerFor(el.handle);
   const { files } = await dataset(el, trigger, images);
   const name = `fuobe_${el.handle.toLowerCase()}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output" });
+  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output", kind: el.kind === "style" ? "style" : "character" });
   const readme = `# Train ${el.name} with AI-Toolkit
 
 1. Install AI-Toolkit: https://github.com/ostris/ai-toolkit (24 GB GPU recommended)

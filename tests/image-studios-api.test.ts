@@ -25,6 +25,16 @@ const photodumpRoute = await import("@/app/api/photodump/route");
 const packsRoute = await import("@/app/api/photodump/packs/route");
 const fashionRoute = await import("@/app/api/photodump/fashion/route");
 const characterRoute = await import("@/app/api/photodump/character/route");
+const retryRoute = await import("@/app/api/photodump/retry/route");
+const trainRoute = await import("@/app/api/moodboards/[id]/train/route");
+const generationsRoute = await import("@/app/api/generations/route");
+const { db } = await import("@/server/db");
+const { listGenerations } = gens;
+const { applySignature, withSignatureWords } = await import("@/lib/catalog/palettes");
+const { toPick } = await import("@/components/moodboards/logic");
+const { extractOutputs } = await import("@/lib/catalog/payload");
+const { aiToolkitJob, trainingCaption } = await import("@/lib/catalog/training");
+const { getModel } = await import("@/lib/catalog");
 
 beforeAll(() => {
   setSetting("demoMode", "auto");
@@ -93,10 +103,31 @@ describe("palettes", () => {
     const locks = items.filter((g) => g.modelId === "oss-palette-image");
     expect(locks.map((g) => g.op)).toEqual(["color-match", "color-match"]);
     expect(locks[0].request.step?.label).toBe("Palette lock 1 of 2");
+    expect((locks[0].request as { title?: string }).title).toBe("a lighthouse");
+    expect(items.find((g) => g.modelId === "oss-qwen-image")!.request.step?.label).toBe("Before palette lock 1 of 2");
     const done = await settle(locks[0].id);
     expect(done.status).toBe("succeeded");
     expect(done.request.params?.palette).toEqual(["#102030", "#2A9D8F"]);
   }, 45_000);
+});
+
+describe("style signature on the server", () => {
+  it("keeps the user's words in the stored request and runs with the signature's sentences", async () => {
+    const signed = applySignature(
+      { feature: "image", modelId: "nano-banana-pro", prompt: "a lighthouse at dusk", params: { numOutputs: 1 } },
+      { palette: { id: "p1", name: "Teal Dusk", colors: ["#102030", "#2A9D8F"], background: "#264653", slug: null } },
+      { caps: palettes.signatureCaps(), getModel },
+    );
+    const res = await generationsRoute.POST(json("POST", signed.request));
+    expect(res.status).toBe(201);
+    const [g] = (await res.json()).items;
+    expect(g.request.prompt).toBe("a lighthouse at dusk");
+    expect(g.request.signature.palette.name).toBe("Teal Dusk");
+    expect(g.request.signature.from.modelId).toBe("nano-banana-pro");
+    // The row's prompt (what the model got) has the palette sentence once.
+    expect(g.prompt).toBe(withSignatureWords(signed.request).prompt);
+    expect(g.prompt.match(/Color palette/g)).toHaveLength(1);
+  });
 });
 
 describe("moodboards", () => {
@@ -146,6 +177,64 @@ describe("moodboards", () => {
     expect(moodboards.deleteMoodboard(m.id)).toBe(true);
     expect(moodboards.getMoodboard(m.id)).toBeNull();
   });
+
+  it("keeps the Recraft style id a real cover job returns, and Recraft then runs on the saved style", () => {
+    // Recraft V4 Styles answers with the style it made from the inline images (fal: images + style_id).
+    const out = extractOutputs({ images: [{ url: "https://fal.media/cover.png", content_type: "image/png" }], style_id: "3f6c1a2b-0000-4000-8000-000000000000" }, "edit");
+    expect(out[0].meta?.styleId).toBe("3f6c1a2b-0000-4000-8000-000000000000");
+    const images = Array.from({ length: 6 }, upload);
+    const m = moodboards.createMoodboard({ name: "Paper Cut", images, engine: "cloud" });
+    // Stand in for the fal run: the cover job finished on fal with that output.
+    db()
+      .prepare("UPDATE generations SET status = 'succeeded', provider = 'fal', outputs_json = ? WHERE id = ?")
+      .run(JSON.stringify([{ url: images[0], kind: "image", meta: { styleId: "3f6c1a2b-0000-4000-8000-000000000000" } }]), m.generationId);
+    const done = moodboards.getMoodboard(m.id)!;
+    expect(done.status).toBe("complete");
+    expect(done.styleId).toBe("3f6c1a2b-0000-4000-8000-000000000000");
+    expect(done.cover).toBe(images[0]);
+    const r = applySignature({ feature: "image", modelId: "recraft-4-1", prompt: "a fox", params: { numOutputs: 1 } }, { moodboard: toPick(done) }, { caps: palettes.signatureCaps(), getModel });
+    expect(r.modelId).toBe("recraft-4-style-saved");
+    expect(r.request.params?.styleId).toBe("3f6c1a2b-0000-4000-8000-000000000000");
+    moodboards.deleteMoodboard(m.id);
+  });
+
+  it("a cloud board whose cover job can't start (no key, demo off) is ready from its images", () => {
+    setSetting("demoMode", "off");
+    try {
+      const m = moodboards.createMoodboard({ name: "No Key", images: Array.from({ length: 5 }, upload), engine: "cloud" });
+      expect(m.status).toBe("complete");
+      expect(m.generationId).toBeNull();
+      expect(m.styleId).toBeNull();
+      expect(toPick(m).refs).toHaveLength(5);
+      moodboards.deleteMoodboard(m.id);
+    } finally {
+      setSetting("demoMode", "auto");
+    }
+  });
+
+  it("a style LoRA trains with the style preset, and is refused on a cloud-only install", async () => {
+    const job = aiToolkitJob({ name: "x", trigger: "nnhzfz", datasetFolder: "/d", outputFolder: "/o", kind: "style" });
+    const train = job.config.process[0];
+    expect(train.train.steps).toBe(1500);
+    expect(train.sample.prompts.every((p: string) => p.endsWith("nnhzfz style"))).toBe(true);
+    expect(aiToolkitJob({ name: "x", trigger: "t", datasetFolder: "/d", outputFolder: "/o" }).config.process[0].train.steps).toBe(2500);
+    expect(trainingCaption("style", "nnhzfz", "the visual style of the “Neon Haze” moodboard.")).toBe("nnhzfz style, the visual style of the “Neon Haze” moodboard");
+    expect(trainingCaption("character", "mayafz")).toBe("photo of mayafz");
+
+    setSetting("demoMode", "off");
+    const m = moodboards.createMoodboard({ name: "Cloud Only", images: Array.from({ length: 5 }, upload), engine: "cloud" });
+    setSetting("demoMode", "auto");
+    setSetting("engineMode", "cloud");
+    try {
+      const res = await trainRoute.POST(json("POST"), params({ id: m.id }) as never);
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toMatch(/cloud APIs only/);
+      expect(moodboards.getMoodboard(m.id)!.lora).toBeNull();
+    } finally {
+      setSetting("engineMode", "both");
+      moodboards.deleteMoodboard(m.id);
+    }
+  });
 });
 
 describe("photodump, fashion factory and character sheet runs", () => {
@@ -162,6 +251,38 @@ describe("photodump, fashion factory and character sheet runs", () => {
     expect(items[0].request.inputs.images).toEqual([selfie]);
     expect((await settle(items[0].id)).status).toBe("succeeded");
   }, 45_000);
+
+  it("retries a canceled photo inside its batch (the failed one goes to the Trash)", async () => {
+    const { batchId, items } = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie: upload(), aspectRatio: "3:4" }))).json();
+    const victim = items[3];
+    await gens.cancelGeneration(victim.id);
+    expect(gens.getGeneration(victim.id)!.status).toBe("canceled");
+    const res = await retryRoute.POST(json("POST", { id: victim.id }));
+    expect(res.status).toBe(201);
+    const { items: again } = await res.json();
+    expect(again).toHaveLength(1);
+    expect(again[0].batchId).toBe(batchId);
+    expect(again[0].request.step.label).toBe("Photo 4 of 9");
+    expect(again[0].request.batchTitle).toBe(victim.request.batchTitle);
+    // The run still has 9 photos: the canceled one is in the Trash.
+    const run = listGenerations({ features: ["photodump"], limit: 200 }).filter((g) => g.batchId === batchId);
+    expect(run).toHaveLength(9);
+    expect(run.some((g) => g.id === victim.id)).toBe(false);
+    // Only failed or canceled photos of a photo run can be retried.
+    expect((await retryRoute.POST(json("POST", { id: again[0].id }))).status).toBe(422);
+  }, 45_000);
+
+  it("says on Qwen-Image-Edit that the aspect ratio doesn't apply", async () => {
+    const preview = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "open", selfie: upload(), aspectRatio: "16:9" }, "http://x/api/photodump?preview=1"))).json();
+    expect(preview.modelId).toBe("oss-qwen-edit");
+    expect(preview.fixedAspect).toBe(true);
+    expect(preview.notes.join()).toMatch(/keeps the shape of your photo/);
+    const cloud = await (await photodumpRoute.POST(json("POST", { packId: "winter-special", engine: "cloud", selfie: upload(), aspectRatio: "16:9" }, "http://x/api/photodump?preview=1"))).json();
+    expect(cloud.fixedAspect).toBe(false);
+    // Picking Z-Image Turbo + LoRA with a selfie says why it runs on Qwen-Image-Edit.
+    const z = await (await photodumpRoute.POST(json("POST", { packId: "zen", engine: "open", selfie: upload(), modelId: "oss-z-image-turbo" }, "http://x/api/photodump?preview=1"))).json();
+    expect(z.notes[0]).toMatch(/needs a character with a trained LoRA/);
+  });
 
   it("makes a user pack and a character's photodump on the open engine", async () => {
     const pack = await (await packsRoute.POST(json("POST", { name: "Mine", refs: [upload(), upload()] }))).json();
@@ -194,6 +315,10 @@ describe("photodump, fashion factory and character sheet runs", () => {
   it("makes character sheets from references, a Soul Cast build and a description", async () => {
     const tooMany = await characterRoute.POST(json("POST", { mode: "reference", engine: "cloud", images: Array.from({ length: 6 }, upload) }));
     expect((await tooMany.json()).error).toBe("Maximum 5 images");
+    const long = await characterRoute.POST(json("POST", { mode: "describe", engine: "cloud", prompt: "x".repeat(2100) }));
+    expect((await long.json()).error).toBe("Keep the description under 2,000 characters");
+    const badCast = await characterRoute.POST(json("POST", { mode: "cast", engine: "cloud", cast: { genre: { nested: true } } }));
+    expect((await badCast.json()).error).toBe("Check the cast fields");
     const ref = await (await characterRoute.POST(json("POST", { mode: "reference", engine: "cloud", images: [upload(), upload()] }))).json();
     expect(ref.items[0]).toMatchObject({ modelId: "nano-banana-pro", op: "edit", feature: "character-sheet" });
     const cast = await (await characterRoute.POST(json("POST", { mode: "cast", engine: "open", cast: { genre: "Western", gender: "Female", age: 30, archetype: "Rebel" } }))).json();

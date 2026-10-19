@@ -7,6 +7,7 @@ import {
   castFieldVisible,
   castNameFor,
   castSheetModel,
+  coverTone,
   customPack,
   CURATED_MOODBOARDS,
   FASHION,
@@ -19,6 +20,7 @@ import {
   getPack,
   inTab,
   PACKS,
+  photodumpModel,
   planPhotodump,
   presetFallback,
   presetPrompt,
@@ -26,6 +28,7 @@ import {
   randomCast,
   sheetFromReference,
   shotPrompt,
+  spreadHue,
   type FashionState,
   type PhotoSubject,
 } from "@/lib/catalog/packs";
@@ -46,6 +49,9 @@ import {
   type PalettePick,
   type RGB,
   type SignatureCaps,
+  reuseSignature,
+  withBackground,
+  withSignatureWords,
 } from "@/lib/catalog/palettes";
 import { buildPayload } from "@/lib/catalog/payload";
 import { planGeneration } from "@/lib/catalog/plan";
@@ -82,6 +88,8 @@ const CAPS: SignatureCaps = {
 };
 const ctx = { caps: CAPS, getModel };
 const plan = (r: GenerationRequest) => planGeneration(r, getModel, getPreset);
+/** The prompt as the server runs it: the user's words plus the signature's sentences. */
+const said = (s: { request: GenerationRequest }) => withSignatureWords(s.request).prompt;
 
 const fill = (rgb: RGB, n: number): RGB[] => Array.from({ length: n }, () => [...rgb] as RGB);
 const PAL: PalettePick = { id: "p1", name: "Teal Dusk", colors: ["#102030", "#2A9D8F", "#E9C46A", "#F4A261"], background: "#264653", slug: null };
@@ -136,6 +144,20 @@ describe("palettes: k-means extraction", () => {
   });
 });
 
+describe("palettes: the manual editor", () => {
+  it("Use as background keeps the colour that loses the flag", () => {
+    const start = { colors: ["#FFFFFF", "#D1FE17", "#1C1E20"], background: "#53C546" };
+    const moved = withBackground(start, "#FFFFFF", true);
+    expect(moved).toEqual({ colors: ["#FFFFFF", "#D1FE17", "#1C1E20", "#53C546"], background: "#FFFFFF" });
+    // Turning the flag off leaves the colour in the palette.
+    expect(withBackground(start, "#53C546", false)).toEqual({ colors: ["#FFFFFF", "#D1FE17", "#1C1E20", "#53C546"], background: null });
+    // Off on a colour that isn't the background changes nothing; the 12-colour limit holds.
+    expect(withBackground(start, "#FFFFFF", false)).toBe(start);
+    const full = { colors: Array.from({ length: 12 }, (_, i) => `#0000${(i * 16).toString(16).padStart(2, "0").toUpperCase()}`), background: "#ABCDEF" };
+    expect(withBackground(full, full.colors[0], true).colors).toHaveLength(12);
+  });
+});
+
 describe("palettes: routing per model", () => {
   it("the Image studio can look up every model a signature routes to, without listing them in its picker", () => {
     const slice = studioCatalog(IMAGE_STUDIO);
@@ -174,7 +196,9 @@ describe("palettes: routing per model", () => {
     for (const id of ["nano-banana-pro", "soul-2", "gpt-image-2-5"]) {
       const r = applySignature(req(id), { palette: PAL }, ctx);
       expect(r.modelId).toBe(id);
-      expect(r.request.prompt).toMatch(/^a lighthouse at dusk\. Color palette: use only these colors.*#102030.*background color #264653\.$/);
+      // The user's words stay in the prompt; the server adds the palette sentence when it plans the run.
+      expect(r.request.prompt).toBe("a lighthouse at dusk");
+      expect(said(r)).toMatch(/^a lighthouse at dusk\. Color palette: use only these colors.*#102030.*background color #264653\.$/);
       expect(r.lock).toBeUndefined();
       expect(() => plan(r.request)).not.toThrow();
     }
@@ -196,7 +220,7 @@ describe("palettes: routing per model", () => {
 
     const free = applySignature(req("oss-qwen-image"), { palette: PAL }, ctx);
     expect(free.lock).toBeUndefined();
-    expect(free.request.prompt).toMatch(/Color palette/);
+    expect(said(free)).toMatch(/Color palette/);
     const locked = applySignature(req("oss-qwen-image"), { palette: { ...PAL, lock: true } }, ctx);
     expect(locked.lock?.colors).toEqual([...PAL.colors, "#264653"]);
     expect(locked.notes).toEqual(["Then recoloured to “Teal Dusk” by a palette-transfer step"]);
@@ -219,16 +243,18 @@ describe("moodboards: routing per model", () => {
     const soul = applySignature(req("soul-2"), { moodboard: curated }, ctx);
     expect(soul.request.params?.extra?.style_id).toBe(curated.id);
     expect(soul.request.prompt).toBe("a rooftop party");
+    expect(soul.request.signature?.words).toBeUndefined();
     const open = applySignature(req("oss-z-image-turbo"), { moodboard: curated }, ctx);
     expect(open.modelId).toBe("oss-z-image-turbo");
-    expect(open.request.prompt).toBe(presetPrompt({ name: curated.name, description: curated.description! }, "a rooftop party"));
+    expect(open.request.prompt).toBe("a rooftop party");
+    expect(said(open)).toBe(presetPrompt({ name: curated.name, description: curated.description! }, "a rooftop party"));
   });
 
   it("personal boards: style references on multi-reference cloud models, Nano Banana Pro for the rest", () => {
     const nano = applySignature(req("nano-banana-pro", ["/api/files/uploads/own.png"]), { moodboard: board }, ctx);
     expect(nano.request.op).toBe("edit");
     expect(nano.request.inputs?.images).toEqual(["/api/files/uploads/own.png", ...refs.slice(0, 6)]);
-    expect(nano.request.prompt).toMatch(/Use images 2–7 only as a style reference/);
+    expect(said(nano)).toMatch(/Use images 2–7 only as a style reference/);
     expect(plan(nano.request).op).toBe("edit");
 
     const soul = applySignature(req("soul-2"), { moodboard: board }, ctx);
@@ -263,7 +289,7 @@ describe("moodboards: routing per model", () => {
 
     const lora = applySignature(req("oss-z-image-turbo"), { moodboard: { ...board, loraHandle: "Neon_Haze" } }, ctx);
     expect(lora.modelId).toBe("oss-z-image-turbo");
-    expect(lora.request.prompt).toBe("a rooftop party. In the style of @Neon_Haze.");
+    expect(said(lora)).toBe("a rooftop party. In the style of @Neon_Haze.");
   });
 
   it("Soul's 106 styles are curated picks too: style_id on soul-1, words on Soul 2.0 and everything else", () => {
@@ -285,7 +311,7 @@ describe("moodboards: routing per model", () => {
     expect(soul2.request.params?.extra?.style_id).toBeUndefined();
     expect(soul2.notes[0]).toBe("Sunset beach is a Soul preset — described in words on Higgsfield Soul 2.0");
     const turbo = applySignature(req("oss-z-image-turbo"), { moodboard: pick }, ctx);
-    expect(turbo.request.prompt).toBe(presetPrompt(sunset, "a rooftop party"));
+    expect(said(turbo)).toBe(presetPrompt(sunset, "a rooftop party"));
   });
 
   it("curated sets come from the built-in list, with Higgsfield's live previews (and newer presets) on top", () => {
@@ -301,14 +327,40 @@ describe("moodboards: routing per model", () => {
     expect(curatedPick(withLive(CURATED_SETS["soul-v1"], { items: [{ id: "v1-new", name: "New one" }] }, "soul-v1").at(-1)!).source).toBe("soul-v1");
   });
 
-  it("a reused run isn't styled twice (Reuse keeps the composer's chips)", () => {
+  it("an older run that kept the sentences in its prompt isn't styled twice; Run again doesn't add the board twice", () => {
     const once = applySignature(req("oss-z-image-turbo"), { moodboard: curated, palette: PAL }, ctx);
-    const twice = applySignature({ ...req(once.modelId), prompt: once.request.prompt, inputs: once.request.inputs }, { moodboard: curated, palette: PAL }, ctx);
-    expect(twice.request.prompt).toBe(once.request.prompt);
+    const legacy = { ...req(once.modelId), prompt: said(once), inputs: once.request.inputs };
+    const twice = applySignature(legacy, { moodboard: curated, palette: PAL }, ctx);
+    expect(said(twice)).toBe(said(once));
     const nano = applySignature(req("nano-banana-pro"), { moodboard: board }, ctx);
-    const again = applySignature({ ...nano.request, op: undefined }, { moodboard: board }, ctx);
+    const again = applySignature({ ...nano.request, op: undefined, signature: undefined }, { moodboard: board }, ctx);
     expect(again.request.inputs?.images).toEqual(nano.request.inputs?.images);
-    expect(again.request.prompt).toBe(nano.request.prompt);
+  });
+
+  it("Soul presets go native wherever the model's own preset list is theirs; Soul Cinema (no presets) gets words", () => {
+    const style = SOUL_STYLES[0];
+    const pick = curatedPick(style);
+    const cinema = applySignature(req("soul-cinema"), { moodboard: pick }, ctx);
+    expect(cinema.request.params?.extra?.style_id).toBeUndefined();
+    expect(cinema.notes[0]).toBe(`Higgsfield Soul Cinema has one fixed look and no presets — ${style.name} is described in words`);
+    expect(said(cinema)).toMatch(/In the style of/);
+    // A model whose preset picker is Soul's list takes the style id natively, whatever its id.
+    const soul1 = getModel("soul-1")!;
+    const twin = { ...soul1, id: "soul-twin", options: { ...soul1.options, presets: { ...soul1.options.presets!, param: "style_id" } } };
+    const ctx2 = { caps: CAPS, getModel: (id: string) => (id === "soul-twin" ? twin : getModel(id)) };
+    const native = applySignature(req("soul-twin"), { moodboard: pick }, ctx2);
+    expect(native.request.params?.extra?.style_id).toBe(style.id);
+    expect(native.request.prompt).toBe("a rooftop party");
+    expect(native.request.signature?.words).toBeUndefined();
+    expect(native.notes).toEqual([]);
+  });
+
+  it("Recraft V4 Styles keeps your own images first and fills up to 10 with the board's", () => {
+    const own = ["/api/files/uploads/mine.png"];
+    const r = applySignature(req("recraft-4-1", own), { moodboard: board }, ctx);
+    expect(r.modelId).toBe("recraft-4-style");
+    expect(r.request.inputs?.images).toEqual([...own, ...refs.slice(0, 9)]);
+    expect(r.notes.join()).toMatch(/Your image is used as style references too/);
   });
 
   it("a board that isn't ready blocks with Higgsfield's copy; palette + moodboard combine", () => {
@@ -316,7 +368,65 @@ describe("moodboards: routing per model", () => {
     const both = applySignature(req("oss-z-image-turbo"), { moodboard: board, palette: PAL }, ctx);
     // The moodboard moves it to the style model, which then gets the palette in words (not the palette model).
     expect(both.modelId).toBe("oss-style-qwen-edit");
-    expect(both.request.prompt).toMatch(/Color palette/);
+    expect(said(both)).toMatch(/Color palette/);
+  });
+});
+
+describe("style signature: the request record and Reuse", () => {
+  const req = (modelId: string, extra: Partial<GenerationRequest> = {}): GenerationRequest => ({ feature: "image", modelId, prompt: "a lighthouse at dusk", params: { numOutputs: 1, aspectRatio: "16:9" }, ...extra });
+  const board: MoodboardPick = { id: "mb1", kind: "personal", name: "Neon Haze", status: "complete", refs: ["/api/files/uploads/r1.png", "/api/files/uploads/r2.png"], collages: [] };
+
+  it("keeps the user's words in the prompt and the sentences in signature.words (titles and Reuse show the words)", () => {
+    const r = applySignature(req("nano-banana-pro"), { palette: PAL }, ctx);
+    expect(r.request.prompt).toBe("a lighthouse at dusk");
+    expect(r.request.signature?.words).toMatch(/^Color palette: use only these colors/);
+    expect(r.request.signature?.palette).toEqual(PAL);
+    expect(r.request.signature?.from).toEqual({ modelId: "nano-banana-pro", params: { numOutputs: 1, aspectRatio: "16:9" }, images: 0 });
+    // The server plans it with the sentences.
+    expect(plan(withSignatureWords(r.request)).prompt).toMatch(/^a lighthouse at dusk\. Color palette/);
+    // Without words there's nothing to add.
+    const plain = req("nano-banana-pro");
+    expect(withSignatureWords(plain)).toBe(plain);
+  });
+
+  it("Reuse of a Recraft palette run: Recraft V4.1 without the hidden palette fields, the palette back on the chip", () => {
+    const r = applySignature(req("recraft-4-1"), { palette: PAL }, ctx);
+    expect(r.request.params?.palette).toHaveLength(4);
+    const back = reuseSignature(r.request)!;
+    expect(back.modelId).toBe("recraft-4-1");
+    expect(back.params).toEqual({ numOutputs: 1, aspectRatio: "16:9" });
+    expect(back.params.extra?.background_color).toBeUndefined();
+    expect(back.signature).toEqual({ palette: PAL });
+    // Applying the restored chip again gives the same run.
+    const again = applySignature({ ...req(back.modelId), params: back.params }, back.signature, ctx);
+    expect(again.request.params).toEqual(r.request.params);
+  });
+
+  it("Reuse of an open Z-Image palette run goes back to Z-Image Turbo (not the hidden Palette model)", () => {
+    const r = applySignature(req("oss-z-image-turbo"), { palette: PAL }, ctx);
+    expect(r.modelId).toBe("oss-zimage-palette");
+    const back = reuseSignature(r.request)!;
+    expect(back.modelId).toBe("oss-z-image-turbo");
+    expect(back.params.palette).toBeUndefined();
+    expect(back.signature.palette?.id).toBe("p1");
+  });
+
+  it("Reuse of a moodboard run keeps only your own images and the board on the chip; Soul's style id too", () => {
+    const own = "/api/files/uploads/own.png";
+    const r = applySignature(req("nano-banana-pro", { inputs: { images: [own] } }), { moodboard: board }, ctx);
+    expect(r.request.inputs?.images).toEqual([own, ...board.refs!]);
+    const back = reuseSignature(r.request)!;
+    expect(back.images).toEqual([own]);
+    expect(back.signature.moodboard?.id).toBe("mb1");
+
+    const look = curatedPick(CURATED_SETS["soul-v2"][3]);
+    const soul = applySignature(req("soul-2"), { moodboard: look }, ctx);
+    expect(soul.request.params?.extra?.style_id).toBe(look.id);
+    const soulBack = reuseSignature(soul.request)!;
+    expect(soulBack.params.extra).toBeUndefined();
+    expect(soulBack.signature.moodboard).toEqual(look);
+    // A run without a signature isn't touched.
+    expect(reuseSignature(req("soul-2"))).toBeNull();
   });
 });
 
@@ -425,6 +535,24 @@ describe("Photodump packs and planning", () => {
   });
 });
 
+describe("Photodump: model choice and retries", () => {
+  const selfie: PhotoSubject = { kind: "selfie", url: "/api/files/uploads/me.png" };
+  it("says why a pick that can't run ends up on another model", () => {
+    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo")).toEqual({ modelId: "oss-qwen-edit", note: "Z-Image Turbo + LoRA needs a character with a trained LoRA — Qwen-Image-Edit works from your photo" });
+    expect(photodumpModel(selfie, "open", { higgsfield: false }, "oss-z-image-turbo", true).note).toMatch(/Your own packs recreate each reference photo/);
+    expect(photodumpModel(selfie, "open", { higgsfield: false }).note).toBeUndefined();
+  });
+
+  it("a retried base shot or outfit takes the failed one's place in the wizard", () => {
+    let s: FashionState = { ...FASHION_START, step: "generation", templateId: "red-room", elementId: "el1", baseIds: ["g1", "g2"], outfitIds: ["o1"] };
+    s = fashionReducer(s, { type: "retried", from: "g2", to: ["g3"] });
+    expect(s.baseIds).toEqual(["g1", "g3"]);
+    s = fashionReducer(s, { type: "retried", from: "o1", to: ["o2", "o3"] });
+    expect(s.outfitIds).toEqual(["o2", "o3"]);
+    expect(fashionReducer(s, { type: "retried", from: "nope", to: ["x"] })).toBe(s);
+  });
+});
+
 describe("Fashion Factory", () => {
   const maya = { kind: "element" as const, handle: "Maya", name: "Maya", references: ["/api/files/uploads/m1.png"], loras: [] };
 
@@ -522,6 +650,27 @@ describe("Character Sheet", () => {
   it("hides the same Soul Cast fields as Cinema Studio", () => {
     const cases = [{ gender: "Female" }, { gender: "Male" }, { gender: "Male", facial_hair: "Beard" }, { gender: "Male", facial_hair: "Clean-shaven" }, {}];
     for (const v of cases) for (const f of SOUL_CAST_FIELDS) expect(castFieldVisible(f.key, v), `${f.key} ${JSON.stringify(v)}`).toBe(f.when ? f.when(v) : true);
+  });
+});
+
+describe("drawn covers", () => {
+  it("curated looks and packs get spread hues and a treatment from their words", () => {
+    expect(coverTone("Retro BW", "Grainy black-and-white film portrait")).toBe("mono");
+    expect(coverTone("80s horror", "1980s horror lighting: red and blue gels, fog")).toBe("gel");
+    expect(coverTone("Flash editorial", "Direct on-camera flash fashion editorial")).toBe("flash");
+    expect(coverTone("Neutral pastel film", "Film stock with neutral pastel tones")).toBe("pastel");
+    expect(coverTone("Old smartphone", "Low-res early phone camera: noise, soft focus")).toBe("film");
+    expect(coverTone("General", "Soul 2.0's neutral default look")).toBe("plain");
+    // Neighbours in a set never share a hue band.
+    const looks = CURATED_SETS["soul-v2"].slice(0, 6);
+    for (let i = 1; i < looks.length; i++) {
+      const d = Math.abs(looks[i].hue - looks[i - 1].hue) % 360;
+      expect(Math.min(d, 360 - d)).toBeGreaterThan(40);
+    }
+    expect(CURATED_SETS["soul-v2"].find((l) => l.name === "Retro BW")?.tone).toBe("mono");
+    expect(new Set(PACKS.map((p) => p.hue)).size).toBe(PACKS.length);
+    expect(getPack("2000s-nostalgia")?.tone).toBe("flash");
+    expect(spreadHue(0)).not.toBe(spreadHue(1));
   });
 });
 

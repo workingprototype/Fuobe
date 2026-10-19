@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { LibraryGrid } from "@/components/studio/media-slot";
-import { uploadFile, useEngine } from "@/lib/api";
+import { uploadFile, useEngine, useStatus } from "@/lib/api";
 import type { RGB } from "@/lib/catalog/palettes";
 import { cn } from "@/lib/utils";
 import { useMoodboardActions } from "./hooks";
@@ -45,6 +45,8 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
   const [libraryOpen, setLibraryOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const [engine] = useEngine();
+  const status = useStatus();
+  const [over, setOver] = useState(false);
   const { create } = useMoodboardActions();
   const keys = useRef(new Set<string>());
 
@@ -126,6 +128,35 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
   };
 
   const q = quality(items.length);
+  // "Upload from assets": the Library's images, before and after the first one is added.
+  const assets = (
+    <Popover open={libraryOpen} onOpenChange={setLibraryOpen}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Library /> Upload from assets
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-2" collisionPadding={12}>
+        <p className="px-1 pb-2 text-[12.5px] text-muted-foreground">Use images you&apos;ve already created</p>
+        {libraryOpen && <LibraryGrid kinds={["image"]} onPick={(v) => void add({ url: v.ref, key: v.ref })} />}
+      </PopoverContent>
+    </Popover>
+  );
+  // What making the board does on this engine, and what it costs (the cloud cover job is a Recraft V4 Styles run).
+  const n = Math.min(items.length, MOODBOARD_LIMITS.refs);
+  const st = status.data;
+  const fal = !!st?.providers.fal?.configured;
+  const demo = st?.demoMode === "on" || (!fal && st?.demoMode !== "off");
+  const how =
+    engine === "open"
+      ? `Open source: collages for Qwen-Image-Edit from the ${n} most representative images`
+      : !st
+        ? `Cloud: a Recraft style from the ${n} most representative images`
+        : demo
+          ? `Cloud: a Recraft style from the ${n} most representative images · demo, free`
+          : fal
+            ? `Cloud: Recraft V4 Styles saves a style and draws the cover from the ${n} most representative images · ≈ $0.04 on fal`
+            : `Cloud: no fal key, so no saved Recraft style — the ${n} most representative images are used as references`;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -152,69 +183,63 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
         </div>
 
         <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
-        {items.length === 0 ? (
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              addFiles(e.dataTransfer.files);
-            }}
-            className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center"
-          >
-            <ImagePlus className="size-7 text-muted-foreground" />
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button size="sm" onClick={() => input.current?.click()}>
-                <Upload /> Upload from device
-              </Button>
-              <Popover open={libraryOpen} onOpenChange={setLibraryOpen}>
-                <PopoverTrigger asChild>
-                  <Button size="sm" variant="outline">
-                    <Library /> Upload from assets
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-2" collisionPadding={12}>
-                  <p className="px-1 pb-2 text-[12.5px] text-muted-foreground">Use images you&apos;ve already created</p>
-                  {libraryOpen && <LibraryGrid kinds={["image"]} onPick={(v) => void add({ url: v.ref, key: v.ref })} />}
-                </PopoverContent>
-              </Popover>
+        <div
+          onDragOver={(e) => (e.preventDefault(), setOver(true))}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setOver(false);
+            addFiles(e.dataTransfer.files);
+          }}
+          className={cn("rounded-xl transition-colors", over && "bg-brand-faint ring-2 ring-primary/50")}
+        >
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-8 text-center">
+              <ImagePlus className="size-7 text-muted-foreground" />
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button size="sm" onClick={() => input.current?.click()}>
+                  <Upload /> Upload from device
+                </Button>
+                {assets}
+              </div>
+              <p className="text-[12px] text-muted-foreground">PNG, JPG or Paste from clipboard</p>
             </div>
-            <p className="text-[12px] text-muted-foreground">PNG, JPG or Paste from clipboard</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
-            {items.map((it, i) => (
-              <div key={it.id} className="relative aspect-square overflow-hidden rounded-lg bg-muted">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={it.preview} alt="" className="size-full object-cover" />
-                {it.uploading && (
-                  <span className="absolute inset-0 grid place-items-center bg-background/60" role="status" aria-label="Uploading">
-                    <Loader2 className="size-4 animate-spin" />
-                  </span>
-                )}
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+              {items.map((it, i) => (
+                <div key={it.id} className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={it.preview} alt="" className="size-full object-cover" />
+                  {it.uploading && (
+                    <span className="absolute inset-0 grid place-items-center bg-background/60" role="status" aria-label="Uploading">
+                      <Loader2 className="size-4 animate-spin" />
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => remove(it)}
+                    aria-label={`Remove image ${i + 1}`}
+                    className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+              {items.length < MOODBOARD_LIMITS.max && (
                 <button
                   type="button"
-                  onClick={() => remove(it)}
-                  aria-label={`Remove image ${i + 1}`}
-                  className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background"
+                  onClick={() => input.current?.click()}
+                  className="grid aspect-square place-items-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  aria-label="Add image"
                 >
-                  <X className="size-3" />
+                  <span className="flex flex-col items-center gap-1 text-[11.5px]">
+                    <Plus className="size-4" /> Add image
+                  </span>
                 </button>
-              </div>
-            ))}
-            {items.length < MOODBOARD_LIMITS.max && (
-              <button
-                type="button"
-                onClick={() => input.current?.click()}
-                className="grid aspect-square place-items-center rounded-lg border border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                aria-label="Add image"
-              >
-                <span className="flex flex-col items-center gap-1 text-[11.5px]">
-                  <Plus className="size-4" /> Add image
-                </span>
-              </button>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          )}
+        </div>
 
         {items.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
@@ -226,9 +251,12 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
                 {q.label} · {items.length}/{MOODBOARD_LIMITS.max}
               </span>
             </div>
-            <Button size="sm" variant="outline" onClick={() => input.current?.click()}>
-              <Upload /> Upload more
-            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => input.current?.click()}>
+                <Upload /> Upload more
+              </Button>
+              {assets}
+            </div>
           </div>
         )}
 
@@ -243,7 +271,7 @@ export function CreateMoodboardDialog({ open, onOpenChange, onCreated }: { open:
         </label>
 
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[12px] text-muted-foreground">{items.length < MOODBOARD_LIMITS.min ? COPY.tooFew : `${engine === "open" ? "Open source: collages for Qwen-Image-Edit" : "Cloud: a Recraft style"} from the ${Math.min(items.length, MOODBOARD_LIMITS.refs)} most representative images`}</p>
+          <p className="text-[12px] text-muted-foreground">{items.length < MOODBOARD_LIMITS.min ? COPY.tooFew : how}</p>
           <Button onClick={submit} disabled={busy}>
             {busy && <Loader2 className="animate-spin" />} Create moodboard
           </Button>

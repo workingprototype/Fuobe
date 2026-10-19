@@ -125,8 +125,11 @@ function startPrep(id: string, name: string, images: string[], collages: string[
       title: `Moodboard cover · ${name}`,
     });
     update(id, { generation_id: g.id, status: "queued", error: null, cover_url: null, style_id: null, engine });
-  } catch (e) {
-    update(id, { status: "failed", error: (e as Error).message });
+  } catch {
+    // The cover job can't start (no fal key with demo mode off, say). The board still works from its own
+    // images — style references on the cloud, collages on the open engine — so it's ready now, with its
+    // first image as the cover and no saved Recraft style (Recraft then gets the images inline).
+    update(id, { generation_id: null, status: "complete", error: null, cover_url: null, style_id: null, engine });
   }
 }
 
@@ -190,6 +193,7 @@ const STYLE_TARGET = "aitk-z-image";
 export function trainMoodboard(id: string): Moodboard {
   const m = getMoodboard(id);
   if (!m) throw new Error("Moodboard not found");
+  if (engineMode() === "cloud") throw new Error("This install is set to paid cloud APIs only (Settings → Engine mode) — a style LoRA trains on your own GPU");
   if (m.status !== "complete") throw new Error("This moodboard is still training. Try again once it is ready.");
   // Say what's missing (an AI-Toolkit URL) before making the style element, so a refusal leaves nothing behind.
   const target = getTrainingTarget(STYLE_TARGET);
