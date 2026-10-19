@@ -175,6 +175,37 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Faceless Studio channels (genre, saved style / voice / aspect / subtitles) and episodes (Faceless and Explainer: script, render plan).
+  `CREATE TABLE IF NOT EXISTS faceless_channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    idea TEXT NOT NULL,
+    genre TEXT NOT NULL,
+    avatar_url TEXT,
+    reference_json TEXT,
+    settings_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS faceless_channels_updated ON faceless_channels(updated_at DESC);
+  CREATE TABLE IF NOT EXISTS faceless_episodes (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    settings_json TEXT NOT NULL,
+    script_json TEXT NOT NULL,
+    plan_json TEXT,
+    sources_json TEXT,
+    favorite INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS faceless_episodes_channel ON faceless_episodes(channel_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS faceless_episodes_kind ON faceless_episodes(kind, created_at DESC);`,
 ];
 
 declare global {

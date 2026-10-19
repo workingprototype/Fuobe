@@ -1,5 +1,5 @@
 import { estimateCost } from "./plan";
-import type { ChainSlot, Engine, GenerationRequest, ModelDef } from "./types";
+import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from "./types";
 
 /*
  * Faceless Studio and the Explainer: the data and the pure planning shared by the browser (wizard,
@@ -366,6 +366,8 @@ export interface EpisodeSettings {
   resolution?: string;
   /** Reference images that show the subject (Explainer sources). */
   sourceImages?: string[];
+  /** Explainer "Auto": the script decides the length. */
+  auto?: boolean;
 }
 
 export interface ScriptBlock {
@@ -1189,6 +1191,7 @@ export function subjectOf(idea: string): string {
     .trim()
     .replace(/[.!?]+$/, "")
     .replace(/^(a |an |my )?(youtube )?channel\s+(about|with|on|for|of)\s+/i, "")
+    .replace(/^(please\s+)?(explain|describe|tell (me|us) about|show (me|us)|teach (me|us)( about)?)\s+(to (me|us|kids)\s+)?/i, "")
     .replace(/^(about|on)\s+/i, "")
     .trim();
   return s || "your subject";
@@ -1346,12 +1349,12 @@ export function parseScript(text: string): ParsedScript | null {
 
 const BEATS: Record<FacelessGenre, { narration: string; visual: string }[]> = {
   education: [
-    { narration: "Have you ever wondered how {s} actually works? In the next few minutes, it will all make sense.", visual: "An intriguing establishing picture of {s}, seen from a surprising angle" },
-    { narration: "Let's start with the basics: what {s} is, and why it matters more than you might think.", visual: "A simple diagram-like picture introducing {s}" },
-    { narration: "Here is the first key idea. Once you see it, the rest of {s} starts to click.", visual: "A close-up that highlights the first key part of {s}" },
+    { narration: "Today's question: {s}. In the next few minutes, it will all make sense.", visual: "An intriguing establishing picture about {s}, seen from a surprising angle" },
+    { narration: "Let's start with the basics, and why this matters more than you might think.", visual: "A simple diagram-like picture introducing {s}" },
+    { narration: "Here is the first key idea. Once you see it, the rest starts to click.", visual: "A close-up that highlights the first key part of {s}" },
     { narration: "Now add the second piece. This is where most people get confused, so let's slow down.", visual: "Two parts of {s} side by side, showing how they connect" },
-    { narration: "Put together, these pieces explain something you see every day.", visual: "An everyday scene where {s} is quietly at work" },
-    { narration: "And here's a surprising fact about {s} that even experts find fascinating.", visual: "A dramatic, surprising view related to {s}" },
+    { narration: "Put together, these pieces explain something you see every day.", visual: "An everyday scene connected to {s}" },
+    { narration: "So that's the answer, in a nutshell. Now you know more than most people do.", visual: "A satisfying wide picture that sums up {s}" },
   ],
   history: [
     { narration: "This is the story of {s}, and it begins long before most people think.", visual: "A sweeping historical landscape where the story of {s} begins" },
@@ -1446,3 +1449,140 @@ export function defaultSettings(engine: Engine, genre: GenreInfo, o: { explainer
 
 /** A short line the narrator reads for a voice preview. */
 export const previewLine = (name: string) => `Hi, I'm ${name}. I'll be narrating your episode — here's how I sound.`;
+
+// ---------------------------------------------------------------------------
+// What the API sends (shared by the server module and the client hooks)
+
+export interface ChannelReference {
+  url: string;
+  kind: "channel" | "video" | "playlist";
+  title?: string;
+  author?: string;
+  /** The link's thumbnail, saved as an upload (offered as a style reference). */
+  thumbnail?: string;
+}
+
+/** Saved on the channel so every episode looks and sounds the same. */
+export type ChannelSettings = Pick<EpisodeSettings, "engine" | "styleId" | "styleRefs" | "voice" | "aspect" | "subtitles" | "music" | "animation" | "length">;
+
+export interface FacelessChannel {
+  id: string;
+  name: string;
+  idea: string;
+  genre: FacelessGenre;
+  avatarUrl: string | null;
+  reference: ChannelReference | null;
+  settings: ChannelSettings;
+  createdAt: number;
+  updatedAt: number;
+  /** Lists: how many episodes, and the newest finished one's poster. */
+  episodes?: number;
+  cover?: Generation | null;
+}
+
+export type EpisodeStatus = "writing" | "write-failed" | "review" | "rendering" | "done" | "failed";
+
+export interface EpisodeScript {
+  title?: string;
+  blocks: ScriptBlock[];
+  /** Written without an LLM (a demo-quality draft), and why. */
+  offline?: boolean;
+  note?: string;
+  source: "ai" | "pasted";
+}
+
+/** A source the Explainer read: an image (a reference for the pictures), a document's text, or a summarised link. */
+export type ExplainerSource = { kind: "image"; url: string; name?: string } | { kind: "text"; name: string; text: string } | { kind: "link"; url: string; title?: string; text: string };
+
+export interface EpisodeChange {
+  at: number;
+  blocks: string[];
+  part: ChangePart;
+  instruction: string;
+  costUsd: number | null;
+}
+
+export type StillEdits = Record<string, { source: string; instruction: string }>;
+
+export interface EpisodePlan {
+  batchId: string;
+  /** Step key → the generation that made it (the current version). */
+  ids: Record<string, string>;
+  /** Picture edits the current version was made with. */
+  stillEdits?: StillEdits;
+  /** The version before the last change (Undo). */
+  previous?: { ids: Record<string, string>; blocks: ScriptBlock[]; stillEdits?: StillEdits };
+  /** The last finished film, shown while a change renders. */
+  lastFinal?: string;
+  changes: EpisodeChange[];
+}
+
+export interface FacelessEpisode {
+  id: string;
+  channelId: string | null;
+  kind: "faceless" | "explainer";
+  title: string;
+  topic: string;
+  status: EpisodeStatus;
+  error: string | null;
+  settings: EpisodeSettings;
+  script: EpisodeScript;
+  plan: EpisodePlan | null;
+  sources: ExplainerSource[];
+  favorite: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StepView {
+  key: string;
+  part: StepPart;
+  block?: number;
+  label: string;
+  generation: Generation | null;
+}
+
+export interface EpisodeView {
+  episode: FacelessEpisode;
+  channel: FacelessChannel | null;
+  steps: StepView[];
+  final: Generation | null;
+  /** The previous finished film while a change renders. */
+  previousFinal: Generation | null;
+  /** 0–1 over every step. */
+  progress: number;
+  /** What the current version cost so far, and the render's estimate. */
+  spentUsd: number;
+  estimate: CostBreakdown | null;
+}
+
+/** One item in the Explainer's history or a channel's episode list. */
+export interface EpisodeCard {
+  id: string;
+  channelId: string | null;
+  kind: "faceless" | "explainer";
+  title: string;
+  status: EpisodeStatus;
+  styleId: string;
+  aspect: EpisodeAspect;
+  seconds: number;
+  favorite: boolean;
+  poster: Generation | null;
+  progress: number;
+  createdAt: number;
+}
+
+export interface EstimateResult {
+  estimate: CostBreakdown;
+  demo: boolean;
+  seconds: number;
+  blocks: number;
+  error?: string;
+}
+
+export interface ChangePreview {
+  rerun: string[];
+  labels: string[];
+  costUsd: number | null;
+  demo: boolean;
+}
