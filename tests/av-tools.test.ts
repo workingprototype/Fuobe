@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
-import { getModel } from "@/lib/catalog";
+import { getModel, getPreset } from "@/lib/catalog";
+import { planGeneration } from "@/lib/catalog/plan";
 import { burnRequest, burnRouteFor, CAPTION_STYLES, nearestColorName, OPEN_FONT_SIZE, previewText, styleById, usesCues, type CaptionLook } from "@/lib/av/captions";
 import { animateSpinHref, model3dRequest, model3dView, MODELS_3D } from "@/lib/av/model3d";
 import { frameParams, frameRequest } from "@/lib/av/frames";
@@ -123,5 +124,45 @@ describe("extract frame on both engines", () => {
     expect(frameParams("open", { at: 3.2 })).toEqual({ startTime: 3.2, endTime: 3.7, extra: { frameIndex: 0 } });
     expect(frameRequest({ feature: "f", engine: "open", video: "v.mp4", pick: "last" })).toEqual({ feature: "f", modelId: "oss-extract-frame", op: "frame", inputs: { video: "v.mp4" } });
     expect(getModel("oss-extract-frame")?.routes[0]).toMatchObject({ provider: "comfyui", endpoint: "frame-extract", op: "frame" });
+  });
+});
+
+describe("apps on the new models", () => {
+  // Every app this package routes runs with only its inputs on both engines: no note needed, the pinned model, its settings.
+  const ids = ["app-virtual-try-on", "app-angles", "app-product-shot", "app-image-to-3d", "app-hook-frame"];
+  const plan = (id: string, engine: "cloud" | "open", presetOptions?: Record<string, string>) => {
+    const preset = getPreset(id)!;
+    const route = engine === "cloud" ? preset.cloud! : preset.open!;
+    const images = (preset.inputs ?? []).filter((s) => s.accept === "image").map((_, i) => `/api/files/in${i}.png`);
+    return planGeneration({ feature: `app:${id}`, presetId: id, modelId: route.modelId, inputs: { images }, presetOptions }, getModel, getPreset);
+  };
+
+  it.each(ids.flatMap((id) => [[id, "cloud"] as const, [id, "open"] as const]))("%s plans on %s without a prompt", (id, engine) => {
+    expect(() => plan(id, engine)).not.toThrow();
+  });
+
+  it("pins the dedicated models", () => {
+    expect(plan("app-virtual-try-on", "cloud").model.id).toBe("fashn-tryon");
+    expect(plan("app-virtual-try-on", "open").model.id).toBe("oss-tryon-klein");
+    expect(plan("app-product-shot", "cloud").model.id).toBe("bria-product-shot");
+    expect(plan("app-product-shot", "open").model.id).toBe("oss-product-shot");
+    expect(plan("app-image-to-3d", "cloud").model.id).toBe("hunyuan-3d-3-1-pro");
+    expect(plan("app-image-to-3d", "open").model.id).toBe("oss-trellis2");
+  });
+
+  it("Angles: the choices set the camera sliders on the cloud and the LoRA's words on the open engine", () => {
+    const choice = { angle: "back-left", height: "high-angle", distance: "close-up" };
+    const cloud = plan("app-angles", "cloud", choice);
+    expect(cloud.model.id).toBe("qwen-multiple-angles");
+    expect(cloud.params.extra).toMatchObject({ horizontal_angle: 225, vertical_angle: 60, zoom: 10 });
+    expect(cloud.prompt.length).toBeGreaterThan(0);
+    const open = plan("app-angles", "open", choice);
+    expect(open.prompt).toMatch(/^<sks> back-left quarter view high-angle shot close-up/);
+    expect(open.loras[0]?.file).toMatch(/multiple-angles/);
+  });
+
+  it("Product Shot sends a scene description only (Bria takes a description or a reference photo, never both)", () => {
+    expect(plan("app-product-shot", "cloud", { scene: "beach" }).prompt).toMatch(/^The product on warm sand at the beach/);
+    expect(getPreset("app-product-shot")!.inputs!.some((s) => s.key === "image2")).toBe(false);
   });
 });

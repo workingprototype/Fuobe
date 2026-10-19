@@ -116,7 +116,12 @@ function ModelCard({ g }: { g: Generation }) {
       live = false;
     };
   }, []);
-  useEffect(() => () => void (recorded && URL.revokeObjectURL(recorded.url)), [recorded]);
+  // The recorded clip's blob URL lives until another recording replaces it (saving it doesn't change it).
+  const recordedUrl = recorded?.url;
+  useEffect(() => () => void (recordedUrl && URL.revokeObjectURL(recordedUrl)), [recordedUrl]);
+  // The turntable that came with the model (TRELLIS.2, demo) or the one recorded here, shown in place of the 3D view.
+  const clip = view.turntable ?? recordedUrl;
+  const [show, setShow] = useState<"3d" | "video">("3d");
   const record = async () => {
     if (!viewer) return;
     setRecording(0);
@@ -139,7 +144,9 @@ function ModelCard({ g }: { g: Generation }) {
   return (
     <article className="overflow-hidden rounded-2xl border bg-background shadow-soft">
       <div className="relative aspect-[4/3] bg-[radial-gradient(circle_at_50%_40%,var(--muted),var(--background))]">
-        {failed ? (
+        {show === "video" && clip ? (
+          <video src={clip} controls loop muted playsInline autoPlay preload="metadata" aria-label={`Turntable of the ${g.modelName ?? "3D"} model`} className="size-full bg-media object-contain" />
+        ) : failed ? (
           <div className="grid size-full place-items-center p-6 text-center text-[13px] text-muted-foreground">Couldn&apos;t load the 3D viewer — download the .glb to open it.</div>
         ) : !ready || !view.glb ? (
           <div className="grid size-full place-items-center text-muted-foreground">
@@ -166,6 +173,22 @@ function ModelCard({ g }: { g: Generation }) {
           </div>
         )}
         {g.provider === "mock" && <span className="absolute top-3 left-3 rounded-full bg-highlight/40 px-2 py-0.5 text-[11px] font-medium">Demo</span>}
+        {clip && recording === null && (
+          <div role="radiogroup" aria-label="Show" className="absolute top-3 right-3 inline-flex rounded-full bg-background/85 p-0.5 shadow-soft backdrop-blur">
+            {(["3d", "video"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={show === v}
+                onClick={() => setShow(v)}
+                className={cn("h-6 rounded-full px-2.5 text-[11px] font-medium transition", show === v ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
+              >
+                {v === "3d" ? "3D" : "Turntable"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="space-y-2 p-3">
         <p className="truncate text-[13px] text-muted-foreground">{g.modelName}</p>
@@ -187,15 +210,9 @@ function ModelCard({ g }: { g: Generation }) {
                 </a>
               </Button>
             ))}
-          {view.turntable ? (
+          {clip ? (
             <Button asChild variant="outline" size="sm" className="rounded-full">
-              <a href={view.turntable} download={`${name} turntable.mp4`}>
-                <Video className="size-3.5" /> Turntable
-              </a>
-            </Button>
-          ) : recorded ? (
-            <Button asChild variant="outline" size="sm" className="rounded-full">
-              <a href={recorded.url} download={`${name} turntable.webm`}>
+              <a href={clip} download={`${name} turntable.${view.turntable ? "mp4" : "webm"}`} aria-label="Download the turntable video">
                 <Video className="size-3.5" /> Turntable
               </a>
             </Button>
@@ -212,7 +229,6 @@ function ModelCard({ g }: { g: Generation }) {
             </Button>
           )}
         </div>
-        {view.turntable && <video src={view.turntable} muted loop playsInline autoPlay className="hidden" aria-hidden />}
       </div>
     </article>
   );

@@ -24,6 +24,10 @@ export interface MotionModel {
   maxRefs: number;
 }
 
+/**
+ * Gemini Omni Flash's edit endpoint is left out on purpose: it takes the clip and a text instruction only
+ * (no reference images), so it can't put the subject from your photos into the segment.
+ */
 export const MOTION_MODELS: Record<Engine, MotionModel[]> = {
   cloud: [
     { id: "kling-o3", label: "Kling O3 edit", op: "v2v", min: 3, max: 10, maxRefs: 4 },

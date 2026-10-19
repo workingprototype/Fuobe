@@ -283,7 +283,9 @@ export const APPS: Preset[] = [
     userPrompt: "optional",
     placeholder: "Anything to keep in mind (optional)",
     prompt: "Show the exact same scene and subject as a {option:angle}, {option:height}, {option:distance}, as if the camera physically moved. Keep identity, outfit, props, lighting and environment consistent. {prompt}",
-    cloud: { modelId: "qwen-multiple-angles", op: "edit", promptTemplate: "{prompt}" },
+    // fal builds the camera words from the sliders; this goes in as its additional_prompt (never empty, so the
+    // app runs without a note).
+    cloud: { modelId: "qwen-multiple-angles", op: "edit", promptTemplate: "Keep the same subject, identity, outfit, lighting and environment. {prompt}" },
     open: {
       modelId: "oss-qwen-edit",
       op: "edit",
@@ -503,7 +505,8 @@ export const APPS: Preset[] = [
     icon: "Aperture",
     hue: 30,
     badges: ["new"],
-    inputs: [product, { key: "image2", label: "Scene reference", hint: "Optional: a photo of the setting you want", accept: "image", required: false }],
+    // Described scenes only: Bria takes a scene description or a reference photo, never both.
+    inputs: [product],
     options: [
       opt("scene", "Scene", [
         ["Marble counter", "on a white marble kitchen counter, soft morning window light"],
@@ -519,7 +522,7 @@ export const APPS: Preset[] = [
     prompt: "The product {option:scene}. {prompt}",
     cloud: { modelId: "bria-product-shot", op: "edit" },
     open: { modelId: "oss-product-shot", op: "edit" },
-    parity: "The open version cuts the product out, puts it on white and relights it into the scene with Qwen-Image-Edit 2509 + the White_to_Scene LoRA; the scene reference photo is used on the cloud only",
+    parity: "The open version cuts the product out, puts it on white and relights it into the scene with Qwen-Image-Edit 2509 + the White_to_Scene LoRA",
   }),
   app({
     name: "Product Placement",
