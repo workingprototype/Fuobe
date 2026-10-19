@@ -111,8 +111,8 @@ export function AdsHome() {
         </section>
 
         <section className="mt-14">
-          <div className="mb-4 flex items-end justify-between gap-3">
-            <h2 className="font-heading text-[24px]">Your brands</h2>
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+            <h2 className="font-heading text-[24px] whitespace-nowrap">Your brands</h2>
             <span className="text-[12px] text-muted-foreground">Every brand gets its own research, products and ads</span>
           </div>
           {brands.isLoading ? (

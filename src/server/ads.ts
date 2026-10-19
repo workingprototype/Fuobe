@@ -539,14 +539,30 @@ export function mentionedProducts(text: string, products: Pick<Product, "id" | "
   return [...products].sort((a, b) => b.name.length - a.name.length).filter((p) => mentionRe(p.name).test(text)).map((p) => p.id);
 }
 
-/** What to make from a message with no LLM: counts ("4 ads"), @mentions, and the rest as direction. */
+const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, twelve: 12, fifteen: 15, twenty: 20 };
+/** "2 ads", "three playful ad variations", "5 new versions": the number, the words between, the noun. */
+const COUNT_RE = new RegExp(`\\b(\\d{1,2}|${Object.keys(NUMBER_WORDS).join("|")})\\s+((?:[a-z'-]+\\s+){0,3}?)(?:new\\s+)?(?:ads?|variations?|versions?|creatives?)(?:\\s+(?:variations?|versions?|creatives?))?\\b`, "i");
+
+/**
+ * What to make from a message with no LLM: the count ("2 playful ads", "three ads"), the
+ * @mentioned products, and the rest as the creative direction ("playful", "with a holiday theme").
+ */
 export function offlineProposal(text: string, products: Pick<Product, "id" | "name">[]): { count: number; productIds: string[]; direction: string } | null {
   if (!/\b(ads?|make|create|generate|variations?|versions?|more|another|locali[sz]e|change)\b/i.test(text)) return null;
-  const count = Math.min(MAX_ADS_PER_PRODUCT, Math.max(1, parseInt(/(\d{1,2})\s*(?:new\s+)?(?:ads?|variations?|versions?|creatives?)/i.exec(text)?.[1] ?? "4", 10)));
-  let direction = text;
+  const m = COUNT_RE.exec(text);
+  const n = m ? (NUMBER_WORDS[m[1].toLowerCase()] ?? parseInt(m[1], 10)) : 4;
+  const count = Math.min(MAX_ADS_PER_PRODUCT, Math.max(1, n));
   const ids = mentionedProducts(text, products);
-  for (const p of products) direction = direction.replace(mentionRe(p.name), p.name);
-  direction = direction.replace(/\b(please|can you|could you|make|create|generate|write)\b/gi, " ").replace(/\b\d{1,2}\s*(new\s+)?(ads?|variations?|versions?|creatives?)\b/gi, " ").replace(/\s+/g, " ").trim();
+  // The direction keeps the describing words ("playful") and drops the count, the products and the verbs.
+  let direction = m ? text.replace(m[0], m[2].replace(/\bads?\b/gi, "")) : text;
+  for (const p of [...products].sort((a, b) => b.name.length - a.name.length)) direction = direction.replace(new RegExp(`(?:\\b(?:for|of|with|featuring)\\s+)?${mentionRe(p.name).source}`, "gi"), " ");
+  direction = direction
+    .replace(/\b(please|can you|could you|make|create|generate|write|me|some)\b/gi, " ")
+    .replace(/\bfor (?:my|our|the|this) products?\b/gi, " ")
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   return { count, productIds: ids, direction };
 }
 
@@ -611,7 +627,7 @@ export async function chat(brandId: string, text: string): Promise<ChatMessage[]
         ? {
             id: nanoid(8),
             role: "assistant",
-            text: `Here's the plan: ${p.count} ad${p.count === 1 ? "" : "s"} for ${ids.map((id) => products.find((x) => x.id === id)?.name).join(", ")}${p.direction ? `, ${p.direction.charAt(0).toLowerCase()}${p.direction.slice(1)}` : ""}. Create them?`,
+            text: `Here's the plan: ${p.count} ad${p.count === 1 ? "" : "s"}${ids.length > 1 ? " each" : ""} for ${ids.map((id) => products.find((x) => x.id === id)?.name).join(", ")}${p.direction ? ` — ${p.direction.charAt(0).toLowerCase()}${p.direction.slice(1)}` : ""}. Create ${p.count * ids.length === 1 ? "it" : "them"}?`,
             at: Date.now(),
             proposal: { items: ids.map((productId) => ({ productId, count: p.count })), direction: p.direction || undefined },
           }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Play, Scissors } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clampClip, initialClip, MULTIPLIER, type ClipRange as Range } from "@/lib/catalog/marketing";
 import { cn } from "@/lib/utils";
 
@@ -12,8 +12,10 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart
  * A plain in/out picker for the reference ad: the player, a bar showing the kept part, two time
  * fields and "set from the playhead" buttons. (A drop-in for a fuller trimmer later.)
  */
-export function ClipRange({ src, duration, value, onChange, onDuration, className }: { src: string; duration: number | null; value: Range | null; onChange: (r: Range) => void; onDuration: (d: number) => void; className?: string }) {
+export function ClipRange({ src, duration, value, onChange, onDuration, onUnplayable, className }: { src: string; duration: number | null; value: Range | null; onChange: (r: Range) => void; onDuration: (d: number) => void; onUnplayable?: () => void; className?: string }) {
   const video = useRef<HTMLVideoElement>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const unplayable = failed === src;
   const stopAt = useRef<number | null>(null);
   useEffect(() => {
     const v = video.current;
@@ -49,9 +51,18 @@ export function ClipRange({ src, duration, value, onChange, onDuration, classNam
         playsInline
         preload="metadata"
         onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && onDuration(e.currentTarget.duration)}
-        className="mx-auto max-h-[46vh] w-full rounded-xl bg-black object-contain"
+        onError={() => {
+          setFailed(src);
+          onUnplayable?.();
+        }}
+        className={cn("mx-auto max-h-[46vh] w-full rounded-xl bg-black object-contain", unplayable && "hidden")}
         aria-label="Reference ad"
       />
+      {unplayable && (
+        <div className="grid aspect-video place-items-center rounded-xl bg-muted px-6 text-center text-[13px] text-muted-foreground">
+          This browser can&apos;t play this clip&apos;s format, so there&apos;s no preview here. It&apos;s still used as it is — set the in and out points by time.
+        </div>
+      )}
       {range && d > 0 && (
         <div className="mt-3 space-y-2.5">
           <div className="relative h-2 rounded-full bg-muted" aria-hidden>

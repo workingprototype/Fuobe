@@ -455,7 +455,11 @@ describe("Ads Studio", () => {
     const res = await chatRoute.POST(json("POST", { text: "Make 3 ads for @Night Serum with a holiday theme" }), params({ id: brandId }));
     const { messages } = await res.json();
     const reply = messages.at(-1);
-    expect(reply.proposal).toEqual({ items: [{ productId: products[1].id, count: 3 }], direction: "for Night Serum with a holiday theme" });
+    expect(reply.proposal).toEqual({ items: [{ productId: products[1].id, count: 3 }], direction: "with a holiday theme" });
+    expect(reply.text).toBe("Here's the plan: 3 ads for Night Serum — with a holiday theme. Create them?");
+    expect(ads.offlineProposal("Make 2 playful ads for @Night Serum", products)).toEqual({ count: 2, productIds: [products[1].id], direction: "playful" });
+    expect(ads.offlineProposal("Write five ad variations with different CTAs", products)).toMatchObject({ count: 5, productIds: [], direction: "with different CTAs" });
+    expect(ads.offlineProposal("Generate 4 ads for my product", products)).toMatchObject({ count: 4, direction: "" });
     const question = await (await chatRoute.POST(json("POST", { text: "What's our tone?" }), params({ id: brandId }))).json();
     expect(question.messages.at(-1).proposal).toBeNull();
     const ok = await confirmRoute.POST(json("POST", { messageId: reply.id, engine: "cloud" }), params({ id: brandId }));

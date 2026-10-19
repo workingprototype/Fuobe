@@ -13,6 +13,7 @@ import { uploadImages } from "@/components/brand/image-list";
 import { fileToSlot, LibraryGrid, type SlotValue } from "@/components/studio/media-slot";
 import { initialClip, mentionedImages, MULTIPLIER, MULTIPLIER_MODELS, multiplierResolution, type ClipRange as Range, type MarketingRun, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
+import { probeMedia } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
@@ -198,18 +199,36 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const length = cut ? cut.end - cut.start : 0;
   const ready = !!video && !video.uploading && !!video.ref && duration != null && !!cut;
 
+  // Which reference is current (a late answer about an older clip is ignored), and whether its length is known.
+  const clip = useRef(0);
+  const known = useRef(false);
   /** A new reference (a library pick, or an upload that reports its preview first, then its server URL). */
   const startVideo = () => {
+    clip.current += 1;
+    known.current = false;
     setDuration(null);
     setRange(null);
+    return clip.current;
+  };
+  /** The length from the file's own header, for clips this browser can't play (e.g. H.264 without the codec). */
+  const probe = async (source: Blob | string, token: number) => {
+    try {
+      const blob = typeof source === "string" ? await (await fetch(source)).blob() : source;
+      const d = probeMedia(new Uint8Array(await blob.arrayBuffer()))?.duration;
+      if (d && token === clip.current && !known.current) onDuration(d);
+    } catch {
+      // Unknown container: the player is the only other source of the length.
+    }
   };
   const onFile = (f: File) => {
     if (!f.type.startsWith("video/") && !/\.(mp4|mov|webm|m4v)$/i.test(f.name)) return void toast("Video only — drop a clip here");
-    startVideo();
+    const token = startVideo();
     void fileToSlot(f, setVideo, "video");
+    if (f.size <= 400 * 1024 * 1024) void probe(f, token);
   };
   const onDuration = (d: number) => {
-    const first = duration == null;
+    const first = !known.current;
+    known.current = true;
     setDuration(d);
     setRange((r) => r ?? initialClip(d));
     if (!first) return;
@@ -300,7 +319,10 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
               <ReferenceDrop onFile={onFile} onPick={(v) => (startVideo(), setVideo(v))} />
             ) : (
               <div className="relative">
-                <ClipRange src={video.preview} duration={duration} value={range} onChange={setRange} onDuration={onDuration} />
+                <ClipRange src={video.preview} duration={duration} value={range} onChange={setRange} onDuration={onDuration} onUnplayable={() => {
+                    if (!video.uploading && video.ref && !known.current) void probe(video.ref, clip.current);
+                  }}
+                />
                 {video.uploading && (
                   <p className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" /> Uploading…

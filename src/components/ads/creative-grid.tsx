@@ -130,7 +130,7 @@ export function CreativeGrid({ brand, products, creatives }: { brand: BrandKit; 
   };
 
   return (
-    <section aria-label="Ads">
+    <section aria-label="Ads" className="@container">
       {pending > 0 && <p className="mb-3 text-[13px] text-muted-foreground">Generating {pending} ad{pending === 1 ? "" : "s"} — they land in the grid as they render.</p>}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div role="radiogroup" aria-label="Format" className="inline-flex rounded-full bg-muted p-0.5">
@@ -163,7 +163,7 @@ export function CreativeGrid({ brand, products, creatives }: { brand: BrandKit; 
       {groups.map((g) => (
         <div key={g.key} className="mb-8">
           {g.title && <h3 className="mb-3 text-[14px] font-semibold">{g.title}</h3>}
-          <div className={cn("grid gap-x-3 gap-y-5", ratio === "9:16" ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5")}>
+          <div className={cn("grid gap-x-3 gap-y-5", ratio === "9:16" ? "grid-cols-2 @xl:grid-cols-3 @4xl:grid-cols-4 @6xl:grid-cols-5" : "grid-cols-2 @2xl:grid-cols-3 @5xl:grid-cols-4 @7xl:grid-cols-5")}>
             {g.items.map((c) => (
               <CreativeCard key={c.id} c={c} brand={brand} ratio={ratio} product={byId.get(c.productId ?? "")} n={number.get(c.id) ?? 0} onEdit={() => setEditing(c)} />
             ))}

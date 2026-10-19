@@ -174,7 +174,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
                   <button key={p.id} type="button" onClick={() => choose(p)} aria-pressed={p.id === productId} className={cn("w-28 shrink-0 rounded-xl border p-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring", p.id === productId && "border-primary bg-brand-faint")}>
                     <ProductThumb product={p} className="aspect-square rounded-lg" />
                     <span className="mt-1 block truncate text-[12px] font-medium">{p.name}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">{priceText(p) || `${p.images.length} pictures`}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">{priceText(p) || `${p.images.length} picture${p.images.length === 1 ? "" : "s"}`}</span>
                   </button>
                 ))}
               </div>
@@ -188,7 +188,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
           <Step n={2} title="Your product kit" hint="Review the details we extracted — edit anything before generating your video." done={!!desc.trim() && picked.length > 0}>
             <div className="grid min-w-0 gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div className="min-w-0 space-y-3">
-                <p className="text-[12px] font-medium text-muted-foreground">These {Math.min(3, picked.length) || 3} images will be used in your video</p>
+                <p className="text-[12px] font-medium text-muted-foreground">{picked.length === 0 ? "Pick at least one image for your video" : picked.length === 1 ? "This image will be used in your video" : `These ${picked.length} images will be used in your video`}</p>
                 <ImageList value={picked} onChange={(v) => setPicked(v.slice(0, 5))} max={5} heroLabel="First" size="sm" />
                 {product.images.filter((u) => !picked.includes(u)).length > 0 && (
                   <>

@@ -2,6 +2,7 @@
 
 import { Clapperboard, Copy, LayoutTemplate, MousePointerClick, Target } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { useEngine } from "@/lib/api";
@@ -19,6 +20,14 @@ const TABS: { id: SuiteTab; href: string; label: string; icon: typeof Target }[]
 
 /** The marketing suite's sticky header: title, the four tools as tabs, and the engine switch. */
 export function MarketingHeader({ title, active, engine, onEngine, right }: { title: string; active: SuiteTab; engine?: Engine; onEngine?: (e: Engine) => void; right?: React.ReactNode }) {
+  const nav = useRef<HTMLElement>(null);
+  // On a phone the tabs scroll sideways: bring the current one into view.
+  useEffect(() => {
+    const el = nav.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    const box = nav.current;
+    if (!el || !box) return;
+    if (el.offsetLeft + el.offsetWidth > box.scrollLeft + box.clientWidth || el.offsetLeft < box.scrollLeft) box.scrollLeft = el.offsetLeft - 12;
+  }, [active]);
   return (
     <header className="sticky top-0 z-30 border-b border-transparent bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="flex h-14 min-w-0 items-center gap-2 px-3 sm:px-6">
@@ -29,7 +38,7 @@ export function MarketingHeader({ title, active, engine, onEngine, right }: { ti
           {engine && onEngine && <EngineSwitch value={engine} onChange={onEngine} />}
         </div>
       </div>
-      <nav aria-label="Marketing tools" className="scrollbar-none -mb-px flex gap-1 overflow-x-auto px-3 sm:px-6">
+      <nav ref={nav} aria-label="Marketing tools" className="scrollbar-none -mb-px flex gap-1 overflow-x-auto px-3 sm:px-6">
         {TABS.map((t) => (
           <Link
             key={t.id}
