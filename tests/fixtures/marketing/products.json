@@ -1,0 +1,19 @@
+{
+  "products": [
+    {
+      "title": "Maple Pecan Granola",
+      "handle": "maple-pecan-granola",
+      "vendor": "Ember & Oat",
+      "body_html": "<p>Crunchy clusters of organic oats, Oregon pecans and dark maple syrup.</p><ul><li>Vegan and gluten-free</li><li>Only 6 grams of sugar per serving</li></ul>",
+      "variants": [{ "price": "12.50" }],
+      "images": [{ "src": "/cdn/shop/products/maple-pecan.jpg" }, { "src": "https://cdn.example-shop.com/maple-pecan-2.jpg" }]
+    },
+    {
+      "title": "Cocoa Hazelnut Butter",
+      "handle": "cocoa-hazelnut-butter",
+      "body_html": "Stone-ground hazelnuts with raw cocoa. No palm oil.",
+      "variants": [{ "price": 9 }],
+      "images": []
+    }
+  ]
+}

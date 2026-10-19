@@ -1125,6 +1125,19 @@ const local: ModelDef[] = [
     options: {},
     hidden: true,
   },
+  // Ads Studio: a creative composited over its visual (headline, copy, CTA, logo in the brand fonts), saved from the browser.
+  {
+    id: "local-ad-compose",
+    name: "Ad compositor",
+    vendor: "Fuobe",
+    family: "local",
+    engine: "open",
+    kind: "image",
+    tagline: "Headline, copy, CTA and logo set over the visual in your brand fonts, in your browser",
+    routes: [{ op: "edit", provider: "local", endpoint: "canvas" }],
+    options: {},
+    hidden: true,
+  },
 ];
 
 export const MODELS: ModelDef[] = [...cloud, ...open, ...local];

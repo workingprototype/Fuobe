@@ -208,6 +208,10 @@ const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
   { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
   { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
   { table: "canvases", cols: ["graph_json"] },
+  { table: "brand_kits", cols: ["kit_json", "chat_json"] },
+  { table: "products", cols: ["images_json"] },
+  { table: "ad_creatives", cols: ["meta_json"] },
+  { table: "marketing_runs", cols: ["meta_json"] },
 ];
 
 /** Whether anything still refers to this stored file (see ASSET_REFS). */

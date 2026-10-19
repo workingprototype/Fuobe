@@ -1,0 +1,11 @@
+:root{--color-foreground:#1c1917;--color-background:#ffffff;--color-accent:#0f766e;--color-border:#e7e5e4;--font-body-family:"Inter",sans-serif}
+body{font-family:"Inter",-apple-system,BlinkMacSystemFont,sans-serif;color:#1c1917;background:#fff}
+h2,.heading{font-family:Fraunces,Georgia,serif}
+.button{background-color:#c2410c;color:#fff}
+.button--secondary{background:#0f766e;color:#fff}
+.price{color:#c2410c}
+.price--sale{color:#c2410c}
+.muted{color:#78716c}
+.overlay{background:rgba(0,0,0,.4)}
+.chip{background:hsl(174, 84%, 25%)}
+@font-face{font-family:"Ember Display";src:url(/fonts/ember.woff2)}

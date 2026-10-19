@@ -175,6 +175,78 @@ const MIGRATIONS: string[] = [
     edited_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS canvases_updated ON canvases(updated_at DESC);`,
+  // Marketing: brand kits (researched or manual), products (shared by every marketing flow), Ads Studio runs and their
+  // creatives, and Marketing Studio / Click to Ad / Ad Multiplier runs (a batch of chained generations plus what made it).
+  `CREATE TABLE IF NOT EXISTS brand_kits (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    website TEXT,
+    status TEXT NOT NULL DEFAULT 'ready',
+    progress_json TEXT,
+    kit_json TEXT NOT NULL DEFAULT '{}',
+    chat_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS brand_kits_updated ON brand_kits(updated_at DESC);
+  CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    brand_id TEXT,
+    name TEXT NOT NULL,
+    description TEXT,
+    price REAL,
+    currency TEXT,
+    audience TEXT,
+    selling_points_json TEXT NOT NULL DEFAULT '[]',
+    url TEXT,
+    images_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS products_brand ON products(brand_id, created_at);
+  CREATE TABLE IF NOT EXISTS ad_batches (
+    id TEXT PRIMARY KEY,
+    brand_id TEXT NOT NULL,
+    engine TEXT NOT NULL,
+    route TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    direction TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ad_batches_brand ON ad_batches(brand_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS ad_creatives (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    brand_id TEXT NOT NULL,
+    product_id TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    angle TEXT,
+    headline TEXT,
+    body TEXT,
+    cta TEXT,
+    visual TEXT,
+    generation_id TEXT,
+    layout TEXT,
+    meta_json TEXT,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ad_creatives_brand ON ad_creatives(brand_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS ad_creatives_batch ON ad_creatives(batch_id);
+  CREATE INDEX IF NOT EXISTS ad_creatives_generation ON ad_creatives(generation_id);
+  CREATE TABLE IF NOT EXISTS marketing_runs (
+    id TEXT PRIMARY KEY,
+    feature TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    final_ids_json TEXT NOT NULL DEFAULT '[]',
+    engine TEXT NOT NULL,
+    title TEXT NOT NULL,
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS marketing_runs_feature ON marketing_runs(feature, created_at DESC);`,
 ];
 
 declare global {
