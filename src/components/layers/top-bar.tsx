@@ -186,7 +186,10 @@ export function TopBar(p: {
           </TooltipTrigger>
           <TooltipContent>{p.doc.nodes.length ? "Copy the layers as a design file (JSON)" : "Add a layer to copy as JSON."}</TooltipContent>
         </Tooltip>
-        <EngineSwitch value={p.engine} onChange={p.setEngine} />
+        {/* Icons only below 1024 px (names stay in the tooltips and aria labels), so a tablet with the sidebar open keeps both engines in reach. */}
+        <div className="flex shrink-0 max-lg:[&_a>span]:hidden max-lg:[&_button>span]:hidden">
+          <EngineSwitch value={p.engine} onChange={p.setEngine} />
+        </div>
       </div>
 
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>

@@ -761,17 +761,17 @@ function RegionalTool() {
               max={Math.round(Math.min(pair.edited.w, pair.edited.h) / 2)}
               step={1}
               value={[Math.round(pair.edited.feather ?? 0)]}
-              onValueChange={([v]) => commit({ ...doc, nodes: doc.nodes.map((n) => (n.id === pair.edited.id ? { ...n, feather: v } : n)) })}
+              onValueChange={([v]) => commit({ ...doc, nodes: doc.nodes.map((n) => (n.id === pair.edited.id ? { ...n, feather: v } : n)) }, `feather:${pair.edited.id}`)}
             />
           </Field>
-          <div className="flex gap-2">
-            <Button size="sm" className="flex-1 rounded-full" onClick={() => void merge()} disabled={merging}>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" className="grow rounded-full" onClick={() => void merge()} disabled={merging}>
               {merging && <Loader2 className="animate-spin" />} Merge layers
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="flex-1 rounded-full"
+              className="grow rounded-full"
               onClick={() => {
                 setRegion(null);
                 setPrompt("");

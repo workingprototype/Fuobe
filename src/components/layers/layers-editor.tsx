@@ -125,7 +125,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const [brushSize, setBrushSize] = useState(() => Math.round(Math.max(initial.doc.width, initial.doc.height) / 30));
   const [compare, setCompare] = useState(false);
 
-  const commit = useCallback((d: LayerDoc) => dispatch({ type: "commit", doc: d }), []);
+  const commit = useCallback((d: LayerDoc, merge?: string) => dispatch({ type: "commit", doc: d, merge, at: Date.now() }), []);
   const resetTo = useCallback(
     (v: LayerProjectView) => {
       setHead(v.headVersionId);
@@ -411,7 +411,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        commit(updateNode(d, sel.id, { x: sel.x + dx, y: sel.y + dy }));
+        commit(updateNode(d, sel.id, { x: sel.x + dx, y: sel.y + dy }), `nudge:${sel.id}`);
         return;
       }
       const k = e.key.toLowerCase();

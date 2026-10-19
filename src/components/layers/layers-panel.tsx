@@ -567,7 +567,7 @@ function SelectedLayer({ node }: { node: LayerNode }) {
         </div>
       )}
       <Field label="Opacity" hint={`${Math.round((node.opacity ?? 1) * 100)}%`}>
-        <Slider aria-label="Opacity" min={0} max={100} step={1} value={[Math.round((node.opacity ?? 1) * 100)]} onValueChange={([v]) => commit(updateNode(doc, node.id, { opacity: v / 100 }))} />
+        <Slider aria-label="Opacity" min={0} max={100} step={1} value={[Math.round((node.opacity ?? 1) * 100)]} onValueChange={([v]) => commit(updateNode(doc, node.id, { opacity: v / 100 }), `opacity:${node.id}`)} />
       </Field>
       <div className="grid grid-cols-5 gap-1.5">
         {(
@@ -590,7 +590,7 @@ function SelectedLayer({ node }: { node: LayerNode }) {
               onChange={(e) => {
                 const v = Number(e.target.value);
                 if (!Number.isFinite(v) || ((k === "w" || k === "h") && v < 1)) return;
-                commit(updateNode(doc, node.id, { [k]: v }));
+                commit(updateNode(doc, node.id, { [k]: v }), `${k}:${node.id}`);
               }}
             />
           </label>
@@ -644,7 +644,7 @@ export function LayersPanel() {
   };
 
   return (
-    <aside className="flex min-h-0 w-[264px] shrink-0 flex-col border-l bg-background xl:w-[300px]" aria-label="Layers panel">
+    <aside className="flex min-h-0 w-[240px] shrink-0 flex-col border-l bg-background lg:w-[264px] xl:w-[300px]" aria-label="Layers panel">
       <div className="flex h-12 shrink-0 items-center gap-2 px-3">
         <h2 className="text-[13px] font-semibold">Layers</h2>
         <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>

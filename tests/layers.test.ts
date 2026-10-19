@@ -19,6 +19,7 @@ import {
   duplicateNode,
   expandPads,
   historyReducer,
+  MERGE_WINDOW_MS,
   initialDoc,
   layerFileName,
   moveNode,
@@ -344,6 +345,34 @@ describe("edit history", () => {
     expect(h).toEqual({ past: [d0, d1], present: d3, future: [] });
     expect(historyReducer(h, { type: "redo" })).toBe(h);
     expect(historyReducer(h, { type: "reset", doc: d0 })).toEqual({ past: [], present: d0, future: [] });
+  });
+
+  it("folds a burst of commits with the same merge key into one undo step", () => {
+    const d0 = initialDoc("/s.png", 10, 10, 1);
+    const at = (w: number) => ({ ...d0, width: w });
+    let h: History = { past: [], present: d0, future: [] };
+    // A slider drag: 11 → 12 → 13 within the window is one step back to d0.
+    h = historyReducer(h, { type: "commit", doc: at(11), merge: "opacity:a", at: 1000 });
+    h = historyReducer(h, { type: "commit", doc: at(12), merge: "opacity:a", at: 1100 });
+    h = historyReducer(h, { type: "commit", doc: at(13), merge: "opacity:a", at: 2000 });
+    expect(h.past).toEqual([d0]);
+    expect(h.present.width).toBe(13);
+    // A pause longer than the window starts a new step.
+    h = historyReducer(h, { type: "commit", doc: at(14), merge: "opacity:a", at: 2000 + MERGE_WINDOW_MS });
+    expect(h.past.map((d) => d.width)).toEqual([10, 13]);
+    // Another key, or a plain commit, never folds into the previous step.
+    h = historyReducer(h, { type: "commit", doc: at(15), merge: "x:a", at: 3300 });
+    h = historyReducer(h, { type: "commit", doc: at(16), at: 3301 });
+    h = historyReducer(h, { type: "commit", doc: at(17), merge: "x:a", at: 3302 });
+    expect(h.past.map((d) => d.width)).toEqual([10, 13, 14, 15, 16]);
+    // Undo ends the burst: the next commit with the same key is its own step.
+    h = historyReducer(h, { type: "undo" });
+    h = historyReducer(h, { type: "commit", doc: at(18), merge: "x:a", at: 3303 });
+    expect(h.past.map((d) => d.width)).toEqual([10, 13, 14, 15, 16]);
+    expect(h.present.width).toBe(18);
+    h = historyReducer(h, { type: "commit", doc: at(19), merge: "x:a", at: 3304 });
+    expect(h.past.map((d) => d.width)).toEqual([10, 13, 14, 15, 16]);
+    expect(h.present.width).toBe(19);
   });
 
   it("keeps at most 100 steps", () => {

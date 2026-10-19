@@ -1,10 +1,10 @@
 import { connection } from "next/server";
 import { z } from "zod";
-import { createProject, LayersError, listProjects } from "@/server/layers";
+import { createProject, FileUrl, LayersError, listProjects } from "@/server/layers";
 
 const Body = z.object({
   /** The image to open: an upload or a result (an /api/files/ URL). */
-  source: z.string().max(2000).startsWith("/api/files/"),
+  source: FileUrl,
   /** Its pixel size, read by the browser that loaded it. */
   width: z.number().positive().max(20_000),
   height: z.number().positive().max(20_000),

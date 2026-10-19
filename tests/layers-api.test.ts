@@ -232,6 +232,9 @@ describe("layers API", () => {
     // Files from elsewhere are refused.
     res = await one.PATCH(req("PATCH", { doc: { ...moved, nodes: [{ ...moved.nodes[0], src: "http://evil.example/x.png" }] } }), ctx({ id }));
     expect(res.status).toBe(400);
+    // A stored-file path can't smuggle quotes or brackets into the thumbnails' CSS url().
+    res = await one.PATCH(req("PATCH", { doc: { ...moved, nodes: [{ ...moved.nodes[0], src: '/api/files/x.png"),url(http://evil.example/' }] } }), ctx({ id }));
+    expect(res.status).toBe(400);
     res = await one.PATCH(req("PATCH", { doc: { ...initialDoc("/api/files/other.png", 10, 10) } }), ctx({ id }));
     expect(res.status).toBe(400);
   });

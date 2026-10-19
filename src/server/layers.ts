@@ -71,8 +71,11 @@ export class LayersError extends Error {
 // ---------------------------------------------------------------------------
 // Validation of documents and job requests coming from the browser
 
-/** Files the document may point at: stored assets only. */
-const FileUrl = z.string().max(2000).startsWith("/api/files/");
+/** Files the document may point at: stored assets only (no quotes or brackets: thumbnails put them in CSS url()). */
+export const FileUrl = z
+  .string()
+  .max(2000)
+  .regex(/^\/api\/files\/[^"'()\\\s<>]+$/);
 const num = z.number().finite();
 const BoxSchema = z.tuple([num, num, num, num]);
 const clamped = (max: number) => z.string().transform((s) => s.slice(0, max));

@@ -26,7 +26,8 @@ export interface EditorCtx {
   versions: LayerVersion[];
   headVersionId: string;
   doc: LayerDoc;
-  commit: (doc: LayerDoc) => void;
+  /** Save an edit as an undo step; commits with the same `merge` key in quick succession (a slider drag) are one step. */
+  commit: (doc: LayerDoc, merge?: string) => void;
   selectedId: string | null;
   selected: LayerNode | undefined;
   select: (id: string | null) => void;

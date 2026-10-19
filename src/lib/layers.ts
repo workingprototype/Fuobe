@@ -715,17 +715,31 @@ export interface History {
   past: LayerDoc[];
   present: LayerDoc;
   future: LayerDoc[];
+  /** The last commit's merge key and time: a burst of commits with the same key is one undo step. */
+  merge?: { key: string; at: number };
 }
 
-export type HistoryAction = { type: "commit"; doc: LayerDoc } | { type: "undo" } | { type: "redo" } | { type: "reset"; doc: LayerDoc };
+/**
+ * `merge` (with `at`, ms) folds a continuous edit into one undo step: a slider drag, typing in a
+ * number field, arrow-key nudges. Commits with the same key less than {@link MERGE_WINDOW_MS} apart
+ * replace the present instead of adding a step.
+ */
+export type HistoryAction = { type: "commit"; doc: LayerDoc; merge?: string; at?: number } | { type: "undo" } | { type: "redo" } | { type: "reset"; doc: LayerDoc };
 
 export const HISTORY_LIMIT = 100;
+export const MERGE_WINDOW_MS = 1200;
 
 export function historyReducer(h: History, a: HistoryAction): History {
   switch (a.type) {
-    case "commit":
+    case "commit": {
       if (a.doc === h.present) return h;
-      return { past: [...h.past, h.present].slice(-HISTORY_LIMIT), present: a.doc, future: [] };
+      const at = a.at ?? 0;
+      const merge = a.merge ? { key: a.merge, at } : undefined;
+      if (merge && h.merge?.key === merge.key && h.past.length && at - h.merge.at < MERGE_WINDOW_MS) {
+        return { past: h.past, present: a.doc, future: [], merge };
+      }
+      return { past: [...h.past, h.present].slice(-HISTORY_LIMIT), present: a.doc, future: [], ...(merge ? { merge } : {}) };
+    }
     case "undo":
       if (!h.past.length) return h;
       return { past: h.past.slice(0, -1), present: h.past[h.past.length - 1], future: [h.present, ...h.future] };
