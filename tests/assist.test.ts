@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { claudeStream } from "./fixtures/claude-sse";
 import type Anthropic from "@anthropic-ai/sdk";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-assist-"));
@@ -204,11 +205,8 @@ describe("claude request", () => {
     ];
     globalThis.fetch = (async (url: string, init: RequestInit) => {
       sent.push({ url: String(url), headers: new Headers(init.headers), body: JSON.parse(String(init.body)) });
-      const a = answers.shift()!;
-      return new Response(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "claude-opus-5-5", stop_sequence: null, stop_details: null, usage: { input_tokens: 1, output_tokens: 1 }, ...a }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      // Assist's Claude calls stream; the agent keeps the final message.
+      return claudeStream(answers.shift()! as Parameters<typeof claudeStream>[0]);
     }) as typeof fetch;
     try {
       await agent.run(t.id);
@@ -220,7 +218,7 @@ describe("claude request", () => {
     const [first, second] = sent;
     expect(first.url).toMatch(/\/v1\/messages\?beta=true$/);
     expect(first.headers.get("anthropic-beta")).toContain("server-side-fallback-2026-07-01");
-    expect(first.body).toMatchObject({ model: "claude-opus-5-5", thinking: { type: "adaptive" }, output_config: { effort: "medium" }, fallbacks: "default" });
+    expect(first.body).toMatchObject({ model: "claude-opus-5-5", thinking: { type: "adaptive" }, output_config: { effort: "medium" }, fallbacks: "default", stream: true });
     expect(first.body.tool_choice).toBeUndefined();
     const system = first.body.system as { text: string; cache_control?: unknown }[];
     expect(system[0].cache_control).toEqual({ type: "ephemeral" });

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { claudeStream } from "./fixtures/claude-sse";
 import type Anthropic from "@anthropic-ai/sdk";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -184,20 +185,10 @@ describe("modes", () => {
       const sent: { headers: Headers; body: Record<string, unknown> }[] = [];
       const realFetch = globalThis.fetch;
       // The reply streams (server-sent events); the agent keeps the final message.
-      const sse = (events: Record<string, unknown>[]) => events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
       globalThis.fetch = (async (_url: string, init: RequestInit) => {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         sent.push({ headers: new Headers(init.headers), body });
-        const events = [
-          { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, usage: { input_tokens: 1, output_tokens: 0 } } },
-          { type: "content_block_start", index: 0, content_block: { type: "text", text: "", citations: null } },
-          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } },
-          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lo" } },
-          { type: "content_block_stop", index: 0 },
-          { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null, stop_details: null }, usage: { output_tokens: 2 } },
-          { type: "message_stop" },
-        ];
-        return new Response(sse(events), { status: 200, headers: { "content-type": "text/event-stream" } });
+        return claudeStream({ content: [{ type: "text", text: "Hello" }], stop_reason: "end_turn", model: String(body.model) });
       }) as typeof fetch;
       try {
         await agent.run(t.id);

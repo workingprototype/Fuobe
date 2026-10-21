@@ -4,7 +4,6 @@ title: YouTube Script
 description: A complete YouTube script with a full spoken body in one of six genres — business and finance, tech review, commentary or video essay, storytelling or documentary, true crime, or explainer and education — plus hook options, timestamps, production cues and a retention map.
 when_to_use: The user asks for a YouTube script, a video script, an outline with hooks, or "write the script for my video". The deliverable is text; offer to produce the video afterwards with faceless-video or narration.
 icon: file-text
-studio: /assist
 tags: [youtube, script, writing]
 offline:
   kind: text

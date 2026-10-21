@@ -262,9 +262,11 @@ describe("skills on the server", () => {
     for (const n of ["product-photoshoot", "ugc-video", "short-film", "narration", "thumbnail-generation", "image-repurposer", "faceless-video", "video-repurposer", "character-sheet", "youtube-script", "video-montage", "katana", "brand-asset-creation", "marketing-studio-cards"]) {
       expect(builtin.map((s) => s.name)).toContain(n);
     }
-    // Studio links point at pages that exist.
+    // Studio links point at pages that exist (a text-only skill like youtube-script has none).
+    expect(builtin.find((s) => s.name === "youtube-script")?.studio).toBeUndefined();
     for (const s of builtin) {
-      const route = s.studio!.split("?")[0].replace(/^\/apps\/.+$/, "/apps/[id]").replace(/^\/(audio|video-tools|upscale)\/.+$/, "/$1/[mode]");
+      if (!s.studio) continue;
+      const route = s.studio.split("?")[0].replace(/^\/apps\/.+$/, "/apps/[id]").replace(/^\/(audio|video-tools|upscale)\/.+$/, "/$1/[mode]");
       const page = path.join(process.cwd(), "src/app/(studio)", route, "page.tsx");
       expect(fs.existsSync(page), `${s.name} → ${s.studio}`).toBe(true);
     }
