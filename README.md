@@ -72,6 +72,15 @@ claude mcp add --transport http fuobe http://localhost:3000/api/mcp --header "Au
 
 Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only from public addresses unless `FUOBE_ALLOW_PRIVATE_URLS=1`.
 
+### Upgrading from an earlier version
+
+- **Your data upgrades on its own.** The database migrations run once each at start-up, in order, and an existing `data/` folder (or `FUOBE_DATA_DIR`) keeps everything it holds. The list is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#storage-srcserverdbts-storagets-settingsts).
+- **If you ran one of the round-3 package branches** (`r3/*`, `r3b/*`) before they were merged, start with a fresh data folder. Those branches numbered their migrations differently, so tables can be missing. Move the old folder aside rather than deleting it if it holds results you want.
+- **Install the new dependencies:** `pnpm install` (round 3 adds `@xyflow/react`, `@google/model-viewer`, `three` and `unpdf`), then `npx next typegen` before `pnpm typecheck`.
+- **Password-less installs reached by a domain name** (a reverse proxy, a tunnel, a Tailscale name) now get 403. Set a password, or add the name to `FUOBE_ALLOWED_ORIGINS`.
+- **Inputs from LAN addresses** (an image URL on your NAS, say) are refused unless `FUOBE_ALLOW_PRIVATE_URLS=1`.
+- **ComfyUI:** re-run `scripts/comfy/install-comfyui.sh` for the three node packs round 3 adds (ComfyUI-MelBandRoFormer, ComfyUI-QwenASR, ComfyUI-HunyuanVideo-Foley) at their pinned commits.
+
 ### Setting up the open-source engine
 
 1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 14 custom node packs at the commits Fuobe was validated with (`NC_PACKS=1` adds the non-commercial ComfyUI-Whisper).
