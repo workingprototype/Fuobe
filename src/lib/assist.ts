@@ -197,7 +197,15 @@ export function parseFrontmatter(src: string): Record<string, Yamlish> {
   const unquote = (v: string) => {
     const t = v.trim();
     if ((t.startsWith('"') && t.endsWith('"') && t.length > 1) || (t.startsWith("'") && t.endsWith("'") && t.length > 1)) {
-      return t.startsWith('"') ? t.slice(1, -1).replace(/\\"/g, '"').replace(/\\n/g, "\n") : t.slice(1, -1).replace(/''/g, "'");
+      if (t.startsWith("'")) return t.slice(1, -1).replace(/''/g, "'");
+      // Double-quoted scalars use JSON's escapes (toSkillMd writes them with JSON.stringify).
+      try {
+        const v = JSON.parse(t) as unknown;
+        if (typeof v === "string") return v;
+      } catch {
+        // Not valid JSON (a lone backslash…): unescape the common cases only.
+      }
+      return t.slice(1, -1).replace(/\\(["\\])/g, "$1").replace(/\\n/g, "\n");
     }
     return t.replace(/\s+#.*$/, "");
   };
@@ -400,7 +408,30 @@ const CATEGORY_ALIASES: Record<string, MemoryCategory> = {
   notes: "Notes",
   note: "Notes",
   other: "Notes",
+  misc: "Notes",
+  general: "Notes",
 };
+
+/** Lines an assistant writes around its list, not memories ("Here's what I remember:", "Let me know…"). */
+const BOILERPLATE = [
+  /^(?:here(?:'|’)?s|here (?:is|are)|below (?:is|are)|these are|this is|that's|that is)\b.*\b(?:memor\w*|remember\w*|know|saved|stored|things)\b.*$/i,
+  /^(?:let me know|feel free|is there anything|if you(?:'|’)?d like|if you want|want me to|would you like|i can (?:also )?(?:update|forget|add))\b/i,
+  /^(?:memories|memory|saved memories|my memories|your memories|what i (?:know|remember)(?: about you)?)$/i,
+];
+
+/** Leading dates some exports put on each memory ("2025-03-12:", "[12/03/2025]", "March 12, 2025 —"). */
+const LEADING_DATE =
+  /^\[?(?:\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?Z?)?|\d{1,2}[/.]\d{1,2}[/.]\d{2,4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2},? \d{4})\]?\s*(?:[:—–-]\s*)?/i;
+
+/** Markdown emphasis and code marks around words (**Name**, __x__, `y`). */
+const stripMarks = (s: string) => s.replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/(^|\s)[*_](\S(?:.*?\S)?)[*_](?=\s|[:.,;!?]|$)/g, "$1$2").replace(/`([^`]+)`/g, "$1");
+
+/** "Sure! Here's…" → "Here's…"; "I remember that you prefer…" → "You prefer…". */
+const stripLeadIn = (s: string) =>
+  s
+    .replace(/^(?:sure|of course|certainly|okay|ok|absolutely|great)\b[,!.]*\s*/i, "")
+    .replace(/^i (?:remember|know|recall|noted|have saved)(?: that)?\s+(?=you\b)/i, "")
+    .replace(/^you\b/, "You");
 
 export const toCategory = (s: string | undefined): MemoryCategory | undefined => (s ? CATEGORY_ALIASES[s.trim().toLowerCase()] : undefined);
 
@@ -422,12 +453,13 @@ export function parseMemoryImport(text: string): { category: MemoryCategory; tex
     // Plain text.
   }
   const add = (raw: string, cat?: MemoryCategory) => {
-    let t = raw.replace(/\s+/g, " ").trim();
+    let t = stripLeadIn(stripMarks(raw.replace(/\s+/g, " ").trim()).replace(LEADING_DATE, "").trim());
     const prefix = /^\[?([A-Za-z ]{3,20})\]?\s*[:—–-]\s+(.+)$/.exec(t);
     const pc = prefix ? toCategory(prefix[1]) : undefined;
     if (pc) t = prefix![2].trim();
     t = t.replace(/^["“](.*)["”]$/, "$1").trim();
-    if (t.length < 4 || /^(here (is|are)|below (is|are)|these are|i remember|memories|memory|saved memories)\b.*:?$/i.test(t)) return;
+    // A lead-in or a heading ends with a colon and has nothing after it.
+    if (t.length < 4 || /:\s*$/.test(t) || BOILERPLATE.some((re) => re.test(t))) return;
     const key = t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -447,9 +479,11 @@ export function parseMemoryImport(text: string): { category: MemoryCategory; tex
   for (const line of text.split(/\r?\n/)) {
     const l = line.trim();
     if (!l) continue;
-    const h = /^(?:#{1,6}\s+|\*\*)?([A-Za-z ]{3,24}?)(?:\*\*)?\s*:?\s*$/.exec(l);
-    if (h && toCategory(h[1]) && !/^[-*•]\s/.test(l)) {
-      heading = toCategory(h[1]);
+    // "## Preferences", "**Your preferences:**", "Style:" set the category for the lines below.
+    const h = /^(?:#{1,6}\s+)?([A-Za-z ]{3,30}?)\s*:?\s*$/.exec(stripMarks(l).replace(/:\s*$/, ""));
+    const hc = h ? toCategory(h[1].replace(/^(?:your|my|the)\s+/i, "")) : undefined;
+    if (hc && !/^[-*•]\s/.test(l)) {
+      heading = hc;
       continue;
     }
     if (/^#{1,6}\s/.test(l)) continue;

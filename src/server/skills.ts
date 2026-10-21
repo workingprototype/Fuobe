@@ -226,10 +226,33 @@ export function updateSkill(name: string, patch: Partial<SkillInput>): Skill {
     if (conflict) throw new SkillError(conflict, 409);
   }
   const meta = { ...(s.icon && { icon: s.icon }), ...(s.studio && { studio: s.studio }), ...(s.tags?.length && { tags: s.tags }), ...(cur.offline && { offline: cur.offline }) };
-  db()
-    .prepare("UPDATE skills SET name = ?, title = ?, description = ?, when_to_use = ?, body = ?, meta_json = ?, updated_at = ? WHERE name = ?")
-    .run(s.name, s.title, s.description, s.whenToUse, s.body, JSON.stringify(meta), Date.now(), name);
+  db().transaction(() => {
+    db()
+      .prepare("UPDATE skills SET name = ?, title = ?, description = ?, when_to_use = ?, body = ?, meta_json = ?, updated_at = ? WHERE name = ?")
+      .run(s.name, s.title, s.description, s.whenToUse, s.body, JSON.stringify(meta), Date.now(), name);
+    if (s.name !== name) renameSkillRefs(name, s.name);
+  })();
   return getSkill(s.name)!;
+}
+
+/**
+ * Keep the skill lists of projects and chats in step with a rename (`to`) or a delete (`to` null):
+ * a project whose only skill went away would otherwise have no skills at all.
+ */
+function renameSkillRefs(from: string, to: string | null): void {
+  const like = `%${JSON.stringify(from)}%`;
+  for (const [table, key] of [
+    ["assist_projects", "id"],
+    ["assist_thread_state", "thread_id"],
+  ] as const) {
+    const rows = db().prepare(`SELECT ${key} AS id, skills_json FROM ${table} WHERE skills_json LIKE ?`).all(like) as { id: string; skills_json: string }[];
+    for (const r of rows) {
+      const list = JSON.parse(r.skills_json) as string[];
+      if (!list.includes(from)) continue;
+      const next = [...new Set(list.flatMap((n) => (n === from ? (to ? [to] : []) : [n])))];
+      db().prepare(`UPDATE ${table} SET skills_json = ? WHERE ${key} = ?`).run(JSON.stringify(next), r.id);
+    }
+  }
 }
 
 /** A user copy of any skill (the way to change a built-in). */
@@ -249,7 +272,10 @@ export function deleteSkill(name: string): void {
   const cur = getSkill(name);
   if (!cur) throw new SkillError("No such skill", 404);
   if (cur.source === "builtin") throw new SkillError("Built-in skills can't be deleted — switch it off instead", 403);
-  db().prepare("DELETE FROM skills WHERE name = ?").run(name);
+  db().transaction(() => {
+    db().prepare("DELETE FROM skills WHERE name = ?").run(name);
+    renameSkillRefs(name, null);
+  })();
 }
 
 export function setSkillEnabled(name: string, enabled: boolean): Skill {

@@ -30,6 +30,7 @@ const { zipStored, unzip } = await import("@/server/assist/unzip");
 const { createElement } = await import("@/server/elements");
 const { saveFile } = await import("@/server/storage");
 const agent = await import("@/server/assist/agent");
+const { db } = await import("@/server/db");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -83,6 +84,20 @@ offline:
     expect(r.ok && r.skill).toMatchObject({ name: "a-b", title: "A: b", description: "Does a thing well", whenToUse: "When asked", icon: "film", studio: "/video", tags: ["x", "y z"], body: "# Hi\n\nText" });
   });
 
+  it("round-trips backslashes, quotes, '#' and colons through SKILL.md, unchanged on every save", () => {
+    const s = { name: "esc", title: 'Back\\slash "quoted" #1: yes', description: "Save to C:\\new\\tables — 50% #brand 'ok'", whenToUse: "When it's \\n literally", tags: ["a#b", 'c"d'], body: "Body" };
+    let md1 = toSkillMd(s);
+    for (let k = 0; k < 3; k++) {
+      const r = parseSkillMd(md1);
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.skill).toMatchObject({ title: s.title, description: s.description, whenToUse: s.whenToUse });
+      md1 = toSkillMd({ ...r.skill, tags: s.tags });
+    }
+    // Hand-written YAML: a lone backslash in double quotes is kept, single quotes double up.
+    expect(parseFrontmatter(`a: "C:\\d"\nb: 'it''s'\nc: plain # comment`)).toEqual({ a: "C:\\d", b: "it's", c: "plain" });
+  });
+
   it("makes names from titles", () => {
     expect(skillSlug("Café Reels — 2026!")).toBe("cafe-reels-2026");
     expect(skillSlug("!!!")).toBe("my-skill");
@@ -126,6 +141,32 @@ Tooling: Uses an RTX 4090 with ComfyUI
       { category: "Tooling", text: "Uses an RTX 4090 with ComfyUI" },
     ]);
   });
+  it("reads a real ChatGPT memory answer: lead-in, bold labels, dates and the sign-off", () => {
+    const items = parseMemoryImport(`Sure! Here's what I remember about you:
+
+1. **Name**: Sam
+2. **Preferences**: Prefers vertical 9:16 videos for social.
+3. **Work:** Runs a small video studio in Lisbon.
+4. Uses ComfyUI on an RTX 4090.
+5. [2025-03-12] Likes warm, *filmic* colour grading.
+6. March 3, 2025 — Wants replies short and direct.
+
+**Your communication preferences:**
+- I remember that you hate emoji in captions.
+
+Here’s everything I know.
+Let me know if you'd like me to update or forget any of these!`);
+    expect(items).toEqual([
+      { category: "Notes", text: "Name: Sam" },
+      { category: "Preference", text: "Prefers vertical 9:16 videos for social." },
+      { category: "Tooling", text: "Work: Runs a small video studio in Lisbon." },
+      { category: "Environment", text: "Uses ComfyUI on an RTX 4090." },
+      { category: "Style", text: "Likes warm, filmic colour grading." },
+      { category: "Communication", text: "Wants replies short and direct." },
+      { category: "Communication", text: "You hate emoji in captions." },
+    ]);
+  });
+
   it("reads JSON exports too", () => {
     expect(parseMemoryImport(JSON.stringify({ memories: [{ content: "Brand colour is teal #1E9E8F", category: "convention" }, "Call me Sam"] }))).toEqual([
       { category: "Convention", text: "Brand colour is teal #1E9E8F" },
@@ -309,6 +350,26 @@ describe("projects", () => {
     await expect(projects.addSource(p.id, { kind: "text", text: "21st" })).rejects.toThrow(/up to 20 sources/);
     expect(projects.deleteSource(p.id, note.id)).toBe(true);
     expect(projects.getProject(p.id)!.sources).toHaveLength(19);
+  });
+
+  it("renaming or deleting a project's only skill keeps the project usable", async () => {
+    const { skillsFor, canUseSkill } = await import("@/server/assist/context");
+    skills.createSkill({ name: "only-one", title: "Only one", description: "The project's skill.", body: "# Do" });
+    const p = projects.createProject({ name: "One skill", skills: ["only-one"] });
+    const t = agent.createThread({ engine: "cloud", agent: "offline", projectId: p.id });
+    agent.addMessage(t.id, "/only-one hello");
+    expect(skillsFor(p.id).map((s) => s.name)).toEqual(["only-one"]);
+    skills.updateSkill("only-one", { name: "only-two" });
+    expect(projects.getProject(p.id)!.skills).toEqual(["only-two"]);
+    expect(canUseSkill("only-two", p.id)).toBe(true);
+    skills.deleteSkill("only-two");
+    expect(projects.getProject(p.id)!.skills).toEqual([]);
+    // With none of its own left, the project falls back to every enabled skill.
+    expect(skillsFor(p.id).length).toBeGreaterThan(10);
+    expect(canUseSkill("narration", p.id)).toBe(true);
+    // A project that still lists a skill that has vanished (an old row) falls back too.
+    db().prepare("UPDATE assist_projects SET skills_json = ? WHERE id = ?").run(JSON.stringify(["gone-skill"]), p.id);
+    expect(canUseSkill("narration", p.id)).toBe(true);
   });
 
   it("deleting a project keeps its chats as personal chats and drops its memory", () => {

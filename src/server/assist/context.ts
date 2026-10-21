@@ -44,11 +44,15 @@ export const approvalLine = (autoApprove: boolean) =>
     ? "Auto-run is on: generations start without an approval card, so keep plans within what the user asked for. Memories you save are kept straight away."
     : "Ask-first is on: each generate call (and each memory you save) shows an approval card.";
 
-/** The skills a chat can use: a project's own list when it has one, else every enabled skill. */
+/** A project's own skills that still exist (a deleted or renamed one drops out). */
+function projectSkills(project: { skills: string[] } | null): Skill[] {
+  return project?.skills.map((n) => getSkill(n)).filter((s): s is Skill => !!s) ?? [];
+}
+
+/** The skills a chat can use: a project's own list when it has one that resolves, else every enabled skill. */
 export function skillsFor(projectId: string | null): Skill[] {
-  const project = projectId ? getProject(projectId) : null;
-  if (project?.skills.length) return project.skills.map((n) => getSkill(n)).filter((s): s is Skill => !!s);
-  return enabledSkills();
+  const own = projectSkills(projectId ? getProject(projectId) : null);
+  return own.length ? own : enabledSkills();
 }
 
 export function canUseSkill(name: string, projectId: string | null): boolean {
@@ -73,7 +77,7 @@ export function chatFacts(c: ChatInfo, now = new Date()): ContextFact[] {
       text: [
         `This chat is in the project “${project.name}”.`,
         project.instructions ? `The project's instructions — follow them:\n${project.instructions}` : "It has no extra instructions.",
-        project.skills.length ? `Only the project's skills are available here.` : "",
+        projectSkills(project).length ? `Only the project's skills are available here.` : "",
       ]
         .filter(Boolean)
         .join("\n"),
