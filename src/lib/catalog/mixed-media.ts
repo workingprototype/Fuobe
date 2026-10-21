@@ -510,7 +510,16 @@ export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: st
             op: "v2v",
             prompt: prompts.frame,
             inputs: { video: input.source.url },
-            params: { startTime: input.range.start, endTime: input.range.end, fps: input.fps, aspectRatio: "auto", resolution: input.resolution, ...seed, extra: { denoise: denoiseFor(input.values) } },
+            // frames: exactly floor(seconds × fps), as the page counts them (the graph's own count would add one).
+            params: {
+              startTime: input.range.start,
+              endTime: input.range.end,
+              fps: input.fps,
+              aspectRatio: "auto",
+              resolution: input.resolution,
+              ...seed,
+              extra: { denoise: denoiseFor(input.values), frames: mixedFrames(input.range.end - input.range.start, input.fps) },
+            },
           },
         },
       ],
@@ -534,7 +543,8 @@ export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: st
         prompt: prompts.video,
         inputs: input.anchor ? { images: [input.anchor] } : undefined,
         params: {
-          duration: Math.max(1, Math.round(input.range.end - input.range.start)),
+          // The cut's exact length (what per-second prices count); no restyle route is sent a length, each keeps its clip's.
+          duration: Math.round((input.range.end - input.range.start) * 1000) / 1000,
           generateAudio: false,
           ...(input.modelResolution ? { resolution: input.modelResolution } : {}),
           ...seed,

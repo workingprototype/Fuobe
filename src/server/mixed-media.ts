@@ -13,8 +13,8 @@ import {
   type MixedPlanInput,
   type MixedResolution,
 } from "@/lib/catalog/mixed-media";
-import type { PlanStep } from "@/lib/catalog/shorts";
-import { takesImage } from "@/lib/catalog/shorts-models";
+import { clipLengthProblem, type PlanStep } from "@/lib/catalog/shorts";
+import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
@@ -60,11 +60,20 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
   const fps = clampFps(body.fps, sourceFps);
   const modelId = body.modelId && MIXED_MODELS[body.engine].includes(body.modelId) ? body.modelId : MIXED_MODELS[body.engine][0];
   const model = getModel(modelId);
+  // A cut the model won't take is paid for, then refused: say so before anything runs.
+  const len = body.range.end - body.range.start;
+  const fits = (id: string) => clipLengthProblem({ name: getModel(id)?.name ?? id, minSeconds: sourceSeconds(id).min, maxSeconds: sourceSeconds(id).max }, len);
+  const tooShort = body.engine === "cloud" ? fits(modelId) : null;
+  if (tooShort) {
+    const other = MIXED_MODELS.cloud.find((id) => !fits(id));
+    const more = (sourceSeconds(modelId).min ?? 0) > len;
+    throw new ShortsError(`${tooShort} — select ${more ? "more" : "less"}${other ? `, or pick ${getModel(other)?.name ?? other}` : ""}`);
+  }
   const notes: string[] = [];
   const anchor = body.engine === "cloud" && body.anchor && takesImage(modelId) ? body.anchor : undefined;
   if (body.engine === "cloud") {
     if (body.anchor && !anchor) notes.push(`${model?.name} restyles from words only — the preview frame isn't sent`);
-    notes.push(`${model?.name} renders smooth motion at its own frame rate; the frame rate sets the frame count shown here and the open engine's sampling`);
+    notes.push(`${model?.name} restyles the clip as smooth video — the open engine restyles it frame by frame at 4–24 FPS`);
   } else if (body.resolution !== "1K") notes.push("The open engine renders up to 1536 px on the long side");
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
   return {

@@ -278,6 +278,13 @@ export interface ShortsSegment {
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
+/** Why a restyle model can't take a clip this long, or null ("Kling O3 4K Edit needs at least 3 s"). */
+export function clipLengthProblem(m: { name: string; minSeconds?: number; maxSeconds?: number }, seconds: number): string | null {
+  if (m.minSeconds && seconds < m.minSeconds - 0.01) return `${m.name} needs at least ${m.minSeconds} s`;
+  if (m.maxSeconds && seconds > m.maxSeconds + 0.01) return `${m.name} takes up to ${m.maxSeconds} s`;
+  return null;
+}
+
 /** What's wrong with a selection, or null. */
 export function rangeProblem(range: ShortsRange, duration?: number): string | null {
   const len = range.end - range.start;
@@ -462,8 +469,9 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
           op: "v2v",
           prompt: restylePrompt(input.look, input.language, refs.length),
           inputs: refs.length ? { images: refs } : undefined,
-          // Whole seconds (Wan's edit takes 2–10); the price is per second of video.
-          params: { aspectRatio: input.aspectRatio, duration: Math.max(2, Math.round(seconds)), ...(input.resolution ? { resolution: input.resolution } : {}), ...seed },
+          // The segment's exact length: what per-second prices count. No restyle route is sent a length
+          // (each keeps its clip's), so the restyled segments add up to the selection and stay on the sound.
+          params: { aspectRatio: input.aspectRatio, duration: r3(seconds), ...(input.resolution ? { resolution: input.resolution } : {}), ...seed },
           step: segLabel(seg, total, "restyle"),
         },
         after: [keys.cut],

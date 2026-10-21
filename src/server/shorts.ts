@@ -1,12 +1,14 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel } from "@/lib/catalog";
-import { maxRefsFor, reframes, resolutionFor } from "@/lib/catalog/shorts-models";
+import { maxRefsFor, reframes, resolutionFor, sourceSeconds } from "@/lib/catalog/shorts-models";
 import {
+  clipLengthProblem,
   customPresetName,
   getShortsPreset,
   lookFromCustom,
   lookFromPreset,
+  planSegments,
   planShorts,
   planStitch,
   planTake,
@@ -234,6 +236,12 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
   const duration = info.duration ?? body.source.duration;
   const problem = rangeProblem(body.range, duration);
   if (problem) throw new ShortsError(problem);
+  // Every segment has to be a clip the restyle model takes (a cut outside its window is paid for, then refused).
+  const limits = sourceSeconds(modelId);
+  const odd = planSegments(body.range, body.engine)
+    .map((s) => clipLengthProblem({ name: getModel(modelId)?.name ?? modelId, minSeconds: limits.min, maxSeconds: limits.max }, s.end - s.start))
+    .find(Boolean);
+  if (odd) throw new ShortsError(`${odd} per segment — pick another model`);
   const name = fileTitle(body.source.name);
   return {
     info,

@@ -84,11 +84,11 @@ describe("Shorts sessions", () => {
     try {
       const est = await shorts.estimateShorts(body({ source: { url: clip, duration: 12 } }) as never);
       expect(est.demo).toBe(false);
-      // Gemini Omni Flash at $0.03/s: two 6 s segments, plus the cuts, the join and the soundtrack (≈ free).
-      expect(est.costUsd!).toBeGreaterThanOrEqual(0.36);
-      expect(est.costUsd!).toBeLessThan(0.4);
-      expect(est.perSegmentUsd!).toBeGreaterThanOrEqual(0.18);
-      expect(est.perSegmentUsd!).toBeLessThan(0.2);
+      // Gemini Omni Flash at 720p ($0.10/s): two 6 s segments, plus the cuts, the join and the soundtrack (≈ free).
+      expect(est.costUsd!).toBeGreaterThanOrEqual(1.2);
+      expect(est.costUsd!).toBeLessThan(1.25);
+      expect(est.perSegmentUsd!).toBeGreaterThanOrEqual(0.6);
+      expect(est.perSegmentUsd!).toBeLessThan(0.62);
       expect(est.notes.join(" ")).toMatch(/keeps your clip's shape/);
     } finally {
       setSetting("falKey", "");
@@ -320,6 +320,15 @@ describe("Mixed Media renders", () => {
     const [ra, rb] = [await a.json(), await b.json()];
     expect(ra.final.id).toBe(rb.final.id);
     await settle(ra.final.id);
+  });
+
+  it("refuses a cut the cloud model won't take, before anything is paid for", async () => {
+    const res = await mixedRoute.POST(json("POST", mm({ engine: "cloud", modelId: "kling-o3-4k-edit", range: { start: 2, end: 3.4 } })));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Kling O3 4K Edit needs at least 3 s — select more, or pick LTX 2.3 Reference Restyle");
+    // LTX takes it.
+    const est = await mixed.estimateMixed(mm({ engine: "cloud", range: { start: 2, end: 3.4 } }) as never);
+    expect(est.costUsd).toBe(0);
   });
 
   it("asks for a grabbed frame before a cloud preview", async () => {

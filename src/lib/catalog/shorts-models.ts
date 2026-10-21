@@ -35,6 +35,23 @@ export function reframes(modelId: string): boolean {
   return routes.length > 0 && routes.every((r) => r.map?.aspectRatio);
 }
 
+/**
+ * How long a clip each restyle model takes (docs/research/paid-model-apis-3.md, "Input windows"):
+ * a cut outside it is paid for and then refused by the provider.
+ */
+const SOURCE_SECONDS: Record<string, { min?: number; max?: number }> = {
+  "kling-o3-4k-edit": { min: 3, max: 15 },
+  "happy-horse-video-edit": { min: 3, max: 60 },
+  "runway-aleph-2": { min: 2, max: 30 },
+  "wan-2-7": { min: 2, max: 10 },
+  // Higgsfield feeds Gemini Omni Flash ≤10 s segments.
+  "gemini-omni-flash": { max: 10 },
+};
+
+export function sourceSeconds(modelId: string): { min?: number; max?: number } {
+  return SOURCE_SECONDS[modelId] ?? {};
+}
+
 /** The cloud model's 720p setting, when it has one (Higgsfield renders Shorts at 720p). */
 export function resolutionFor(modelId: string): string | undefined {
   const m = getModel(modelId);
@@ -55,13 +72,26 @@ export interface RestyleModelInfo {
   reframes: boolean;
   price: string | null;
   resolutions?: string[];
+  /** Shortest and longest clip it takes, in seconds. */
+  minSeconds?: number;
+  maxSeconds?: number;
+}
+
+/** What one unit costs at the resolution the studios ask for, counting input seconds when the model bills them. */
+export function unitPrice(m: ModelDef): number | null {
+  const p = m.pricing;
+  if (!p) return null;
+  const res = resolutionFor(m.id) ?? m.defaults?.resolution;
+  const usd = (res && p.byResolution?.[res]) || p.usd;
+  return p.unit === "second" && p.inputSeconds ? usd * 2 : usd;
 }
 
 function priceLine(m: ModelDef): string | null {
   if (m.engine === "open") return "Free · your GPU";
   const p = m.pricing;
-  if (!p) return null;
-  const usd = p.usd < 0.1 ? p.usd.toFixed(3).replace(/0$/, "") : p.usd.toFixed(2);
+  const v = unitPrice(m);
+  if (!p || v === null) return null;
+  const usd = v < 0.1 ? v.toFixed(3).replace(/0$/, "") : v.toFixed(2);
   return `$${usd} / ${p.unit === "second" ? "s" : p.unit}`;
 }
 
@@ -82,6 +112,8 @@ export function modelInfos(ids: string[]): RestyleModelInfo[] {
         reframes: reframes(id),
         price: priceLine(m),
         ...(m.options.resolutions ? { resolutions: m.options.resolutions } : {}),
+        ...(sourceSeconds(id).min ? { minSeconds: sourceSeconds(id).min } : {}),
+        ...(sourceSeconds(id).max ? { maxSeconds: sourceSeconds(id).max } : {}),
       },
     ];
   });
