@@ -319,10 +319,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1): numb
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
   const n = params.numOutputs ?? 1;
-  let per = p.usd;
-  if (p.unit === "image") per = p.usd * n;
-  if (p.unit === "second") per = p.usd * (params.duration ?? model.defaults?.duration ?? 5);
-  if (p.unit === "minute") per = (p.usd * (params.duration ?? 60)) / 60;
+  const res = params.resolution ?? model.defaults?.resolution;
+  const usd = (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  let per = usd;
+  if (p.unit === "image") per = usd * n;
+  if (p.unit === "second") per = usd * (params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
   return Math.round(per * jobs * 1000) / 1000;
 }

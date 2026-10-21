@@ -1070,6 +1070,21 @@ const cloudTools: ModelDef[] = [
     pricing: { unit: "request", usd: 0.001 },
     hidden: true,
   },
+  {
+    // Shorts Studio: a clip cropped to 9:16 or 16:9 before a restyle model that keeps its input's shape.
+    id: "scale-video",
+    name: "Crop to size",
+    vendor: "fal",
+    family: "utility",
+    engine: "cloud",
+    kind: "video",
+    tagline: "Centre-crop (or pad) a clip to an exact size, no AI",
+    // Size in params.extra {width, height} (even numbers); "crop" scales to cover, then centre-crops.
+    routes: [{ op: "reframe", provider: "fal", endpoint: "fal-ai/workflow-utilities/scale-video", map: { prompt: false, video: "video_url", defaults: { mode: "crop" } } }],
+    options: {},
+    pricing: { unit: "request", usd: 0.001, note: "billed per compute second" },
+    hidden: true,
+  },
 ];
 
 /**

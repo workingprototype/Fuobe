@@ -246,7 +246,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "trim":
     case "captions":
     case "mux":
-      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } }];
+      return [
+        { url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } },
+        // The segment cutter also hands over the segment's first frame (Shorts restyles it, then the clip).
+        ...(meta.firstFrame ? [{ url: svgUri(demoSvg("first frame", ar, 3)), kind: "image" as const, contentType: "image/svg+xml", meta: { role: "first-frame", demo: true } }] : []),
+      ];
   }
   if (kind === "image") {
     return Array.from({ length: Number(meta.count) }, (_, i) => ({ url: svgUri(demoSvg(prompt, ar, i)), kind: "image" as const, contentType: "image/svg+xml" }));
@@ -282,6 +286,8 @@ export const mockProvider: ProviderAdapter = {
         targetLanguage: input.targetLanguage,
         sourceLanguage: input.sourceLanguage,
         numLayers: input.numLayers,
+        // Workflows whose second output is the cut's first frame (video-segment-resample).
+        firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
       },
       payload: { demo: true, ...input },
     };

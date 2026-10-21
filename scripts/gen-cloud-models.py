@@ -280,7 +280,9 @@ model("gemini-omni-flash", "Gemini Omni Flash 1.1", "Google", "gemini-omni", "vi
       "Google's any-to-video model with reference and edit modes",
       [("t2v", "google/gemini-omni-flash/v1.1/text-to-video"), ("i2v", "google/gemini-omni-flash/v1.1/image-to-video"),
        ("ref2v", "google/gemini-omni-flash/v1.1/reference-to-video"), ("v2v", "google/gemini-omni-flash/v1.1/edit")],
-      badges=["new", "audio"], defaults={"aspectRatio": "16:9"})
+      badges=["new", "audio"], defaults={"aspectRatio": "16:9", "resolution": "720p"},
+      # Billed per second of output by resolution (research: $0.03 at 360p, $0.10 at 720p, $0.15 at 1080p, $0.30 at 4K).
+      pricing=("second", 0.1, "720p; 360p $0.03, 1080p $0.15, 4K $0.30", {"byResolution": {"360p": 0.03, "720p": 0.1, "1080p": 0.15, "4k": 0.3}}))
 model("wan-3", "Wan 3.0", "Alibaba Wan", "wan", "video", "Alibaba's newest video model with audio",
       [("t2v", "alibaba/wan-3.0/text-to-video"), ("i2v", "alibaba/wan-3.0/image-to-video", "fal", "+flf2v"), ("ref2v", "alibaba/wan-3.0/reference-to-video")],
       badges=["new", "audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
@@ -289,7 +291,9 @@ model("wan-3-prime", "Wan 3.0 Prime", "Alibaba Wan", "wan", "video", "Highest-fi
       badges=["pro", "audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
 model("wan-2-7", "Wan 2.7", "Alibaba Wan", "wan", "video", "Hosted Wan with references and video edit",
       [("t2v", "fal-ai/wan/v2.7/text-to-video"), ("i2v", "fal-ai/wan/v2.7/image-to-video", "fal", "+flf2v"),
-       ("ref2v", "fal-ai/wan/v2.7/reference-to-video"), ("v2v", "fal-ai/wan/v2.7/edit-video"),
+       # Its video edit's duration defaults to 0 = the input's length: never sent, so a restyle stays as long as its
+       # clip (the model's 5 s default would cut it short and drift off the original sound).
+       ("ref2v", "fal-ai/wan/v2.7/reference-to-video"), ("v2v", "fal-ai/wan/v2.7/edit-video", "fal", {"drop": ["duration"]}),
        # Replicate's Wan 2.7 video edit keeps the source's length and framing: its own ratio/duration enums would widen the fal routes'.
        ("v2v", "wan-video/wan-2.7-videoedit", "replicate", {"drop": ["aspectRatio", "duration"]})],
       badges=["audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "1080p"})
@@ -340,7 +344,7 @@ model("wan-vace-reframe", "Wan VACE Reframe (hosted)", "Alibaba Wan", "wan", "vi
 model("happy-horse-video-edit", "Happy Horse Video Edit", "Alibaba", "happy-horse", "video",
       "Restyle or swap things in 3–60 s clips, with up to 5 reference images",
       [("v2v", "alibaba/happy-horse/video-edit")], badges=["new", "audio"], defaults={"resolution": "720p"},
-      pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56"),
+      pricing=("second", 0.28, "720p, input + output seconds; 1080p $0.56", {"byResolution": {"720p": 0.28, "1080p": 0.56}, "inputSeconds": True}),
       controls=[("audio_setting", "Audio")])
 model("lucy-edit-pro", "Lucy Edit Pro", "Decart", "lucy", "video",
       "Text-guided video edits that keep motion and identity — outfits, props, styles",
@@ -968,8 +972,11 @@ for m in M:
     opts.update(m["options"])
     pricing = None
     if m["pricing"]:
-        u, usd, *note = m["pricing"]
-        pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {})}
+        u, usd, *rest = m["pricing"]
+        # Optional: a note, then extra Pricing fields (byResolution, inputSeconds).
+        note = [x for x in rest if isinstance(x, str)]
+        extra = next((x for x in rest if isinstance(x, dict)), {})
+        pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {}), **extra}
     elif first_e:
         pricing = parse_price(first_e)
     d = {

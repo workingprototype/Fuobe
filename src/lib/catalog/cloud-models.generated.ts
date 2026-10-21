@@ -4466,11 +4466,19 @@ export const CLOUD_MODELS: ModelDef[] = [
       "audio"
     ],
     "defaults": {
-      "aspectRatio": "16:9"
+      "aspectRatio": "16:9",
+      "resolution": "720p"
     },
     "pricing": {
       "unit": "second",
-      "usd": 0.03
+      "usd": 0.1,
+      "note": "720p; 360p $0.03, 1080p $0.15, 4K $0.30",
+      "byResolution": {
+        "360p": 0.03,
+        "720p": 0.1,
+        "1080p": 0.15,
+        "4k": 0.3
+      }
     }
   },
   {
@@ -4775,11 +4783,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "video": "video_url",
           "seed": "seed",
           "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
+          "resolution": "resolution"
         }
       },
       {
@@ -5977,7 +5981,12 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.28,
-      "note": "720p, input + output seconds; 1080p $0.56"
+      "note": "720p, input + output seconds; 1080p $0.56",
+      "byResolution": {
+        "720p": 0.28,
+        "1080p": 0.56
+      },
+      "inputSeconds": true
     }
   },
   {
