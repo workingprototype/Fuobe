@@ -19,9 +19,13 @@ import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from 
  * - clip: the still animated (Gemini Omni Flash, Higgsfield's engine, or Seedance 2.5 / Wan 2.2 Lightning).
  *   Frame by frame keeps the still and moves the camera slowly over it (a Ken Burns prompt, cheaper settings).
  * - narration: the whole reviewed script read in one take (one natural voice-over; ElevenLabs v4, or
- *   Chatterbox cloning a voice sample). Blocks are paced to their own lines, so picture and voice stay together.
- * - music: an instrumental bed (Sonilo / ACE-Step), mixed under the voice by the open mixer (oss-mux): the
- *   cloud soundtrack tool takes one track.
+ *   Chatterbox cloning a voice sample), then timed word by word (ElevenLabs forced alignment on the cloud,
+ *   Qwen3-ASR on the open engine).
+ * - The render runs in two stages: the pictures, the narration and its timing first; then each block is
+ *   cut to where its lines really fall (retimeBlocks) and the clips, joins, music, mix and subtitles follow,
+ *   so picture and voice stay together over the whole film, whatever pace the narrator reads at.
+ * - music: an instrumental bed (Sonilo / ACE-Step) as long as the film, mixed under the voice: fal's compose
+ *   with the bed levelled to -28 LUFS on the cloud, oss-mux at -14 dB on the open engine.
  * - captions: Auto Subtitle on the cloud; Qwen3-ASR timings + the open burn-in on the open engine.
  */
 
@@ -334,13 +338,14 @@ export const MIN_BLOCK = 3;
 export type AnimationMode = "animated" | "frames";
 export type EpisodeAspect = "16:9" | "9:16";
 
-export const ANIMATION_MODES: { id: AnimationMode; label: string; tagline: string; copy: string }[] = [
-  { id: "animated", label: "Fully animated", tagline: "Seamless motion video", copy: "Continuous animation across every scene" },
+export const ANIMATION_MODES: { id: AnimationMode; label: string; tagline: string; copy: string; openCopy: string }[] = [
+  { id: "animated", label: "Fully animated", tagline: "Seamless motion video", copy: "Continuous animation across every scene", openCopy: "Continuous animation across every scene" },
   {
     id: "frames",
     label: "Frame by frame",
     tagline: "Scene by scene video",
-    copy: "Paced stills with a slow camera move — faster and lighter on credits",
+    copy: "Paced stills with a slow camera move, rendered at a lower quality — lighter on credits",
+    openCopy: "Paced stills with a slow camera move — on your GPU it takes about as long as Fully animated",
   },
 ];
 
@@ -545,13 +550,21 @@ export interface EngineModels {
   join: string;
   /** Joins at most this many clips at once (longer films are folded). */
   joinMax: number;
-  /** Puts the voice on the film: one track (cloud) or the voice over a music bed (open). */
+  /** Puts the voice on the film (no music). */
   mux: string;
-  /** The open mixer: the only one that lays music under the voice. */
+  /** Lays the voice over a music bed on the film. */
   mixMusic: string;
+  /** Brings the bed down under the voice before the mix (the cloud mixer has no volume control). */
+  levelMusic?: string;
   captions: string;
-  /** Open captions: transcribe the narration first, then burn the timed lines in. */
-  transcribe?: string;
+  /** Word timings of the narration: the scenes are cut to them (and the open captions burn them in). */
+  align: string;
+  /** The captions are burned from those timings (the cloud captioner transcribes by itself). */
+  captionsUseWords: boolean;
+  /** Pictures that show the subject of attached images, when the still model can't read images. */
+  sourceStill?: string;
+  /** "Upscale to 1080p" on a finished episode. */
+  upscale: string;
   write: string;
 }
 
@@ -570,8 +583,12 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     join: "join-clips",
     joinMax: 24,
     mux: "merge-audio-video",
-    mixMusic: "oss-mux",
+    mixMusic: "ffmpeg-compose",
+    levelMusic: "ffmpeg-loudnorm",
     captions: "auto-subtitle",
+    align: "elevenlabs-align",
+    captionsUseWords: false,
+    upscale: "seedvr-video",
     write: "text-llm",
   },
   open: {
@@ -590,7 +607,10 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     mux: "oss-mux",
     mixMusic: "oss-mux",
     captions: "oss-captions-burnin",
-    transcribe: "oss-qwen3-asr",
+    align: "oss-qwen3-asr",
+    captionsUseWords: true,
+    sourceStill: "oss-qwen-edit",
+    upscale: "oss-upscale-video-esrgan",
     write: "oss-text-llm",
   },
 };
@@ -614,7 +634,16 @@ export const DEFAULT_RESOLUTION: Record<string, Record<AnimationMode, string>> =
  */
 export const PRICE_PER_SECOND: Record<string, Record<string, number>> = {
   "gemini-omni-flash": { "360p": 0.03, "720p": 0.1, "1080p": 0.15, "4k": 0.3 },
+  // Seedance 2.5 (research: $0.2205 / $0.473 / $1.164 per second at 480p / 720p / 1080p).
+  "seedance-2-5": { "480p": 0.2205, "720p": 0.473, "1080p": 1.164 },
 };
+
+/** Music models that make any whole length up to this (Sonilo: up to 600 s; ACE-Step's workflow: up to 240 s). */
+export const MUSIC_MAX: Record<string, number> = { "sonilo-music": 600, "oss-ace-step": 240 };
+
+/** How far the bed sits under the voice: levelled to -28 LUFS on the cloud, lowered by 14 dB by the open mixer. */
+export const BED_LUFS = -28;
+export const BED_DB = -14;
 
 export type ModelLookup = (id: string) => ModelDef | undefined;
 

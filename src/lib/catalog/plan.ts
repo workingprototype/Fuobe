@@ -96,7 +96,7 @@ const PROMPTLESS = new Set<Operation>([
   "concat", "frame", "color-match", "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
   // round 3: tools that work from their inputs (open caption burn-in takes timed lines as its prompt and says so when they're missing)
-  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize",
+  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize", "level",
 ]);
 
 /**
@@ -255,6 +255,7 @@ const NEEDS: Partial<
   vectorize: { images: 1, msg: "Add the image to turn into an SVG" },
   transcribe: { oneOf: ["audio", "video"], msg: "Add the audio or video to transcribe" },
   "separate-audio": { oneOf: ["audio", "video"], msg: "Add the audio or video to split" },
+  level: { audio: true, msg: "Add the audio to level" },
 };
 
 const given = (v: unknown) => (Array.isArray(v) ? v.length > 0 : !!v);
