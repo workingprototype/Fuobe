@@ -91,6 +91,11 @@ export function useDubActions() {
   const saveDraft = useMutation({
     mutationFn: async ({ id, lang, cues }: { id: string; lang: string; cues: Cue[] }) =>
       json<DubSessionView>(await fetch(`/api/dub/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang, cues }) })),
+    // The edit is in the cache at once: a review reopened before the server answers shows it (and doesn't save over it).
+    onMutate: async ({ id, lang, cues }) => {
+      await qc.cancelQueries({ queryKey: ["dub"] });
+      qc.setQueryData<DubSessionView[]>(["dub"], (xs) => xs?.map((x) => (x.id === id ? { ...x, drafts: { ...x.drafts, [lang]: cues } } : x)));
+    },
     onSuccess: put,
   });
   const voice = useMutation({
