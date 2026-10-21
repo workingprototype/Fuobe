@@ -17,7 +17,7 @@ import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useEngine } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
-import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, translateKey, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
+import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
 import type { Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
@@ -493,9 +493,11 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
             <>
               {" "}
               <span className="font-medium text-foreground">
-                {crowded.length === 1 ? `Line ${crowded[0] + 1} looks` : `${crowded.length} lines (${crowded.slice(0, 4).map((i) => i + 1).join(", ")}${crowded.length > 4 ? "…" : ""}) look`} long for {crowded.length === 1 ? "its" : "their"} time
+                {crowded.length === 1
+                  ? `${takeLines(crowded[0]).replace(/^l/, "L")}${crowded[0].first === crowded[0].last ? " looks" : " (spoken as one take) look"} long for the time before the next line`
+                  : `${crowded.length} takes look long for their time (${crowded.slice(0, 4).map(takeLines).join(", ")}${crowded.length > 4 ? "…" : ""})`}
               </span>{" "}
-              — shorten {crowded.length === 1 ? "it" : "them"} or move the next line later.
+              — shorten the words or start the next line later.
             </>
           )}
         </p>

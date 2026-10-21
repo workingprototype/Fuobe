@@ -339,20 +339,22 @@ export function priceLine(p: DubPrice): string {
 /** Characters a voice speaks per second, about (used to flag lines that won't fit before the next one). */
 const SPOKEN_CPS = 16;
 
-/** Takes whose words likely run past the next take's start (it would be cut there): their first line's index. */
-export function crowdedLines(cues: Cue[], duration?: number): number[] {
+/** Takes whose words likely run past the next take's start (they'd be cut there): the lines (indexes) each take speaks. */
+export function crowdedLines(cues: Cue[], duration?: number): { first: number; last: number }[] {
   const phrases = dubPhrases(cues, duration);
   const length = trackLength(phrases, duration);
-  const out: number[] = [];
+  const out: { first: number; last: number }[] = [];
   phrases.forEach((p, i) => {
     const room = (i + 1 < phrases.length ? phrases[i + 1].start : length) - p.start;
-    if (p.text.length / SPOKEN_CPS > room + 0.25) {
-      const first = cues.findIndex((c) => Math.max(0, c.start) === p.start && c.text.trim());
-      if (first >= 0) out.push(first);
-    }
+    if (p.text.length / SPOKEN_CPS <= room + 0.25) return;
+    const inside = cues.flatMap((c, k) => (c.text.trim() && Math.max(0, c.start) >= p.start && c.start < p.end ? [k] : []));
+    if (inside.length) out.push({ first: inside[0], last: inside.at(-1)! });
   });
   return out;
 }
+
+/** "line 3", "lines 1–4": the lines a crowded take speaks. */
+export const takeLines = (t: { first: number; last: number }) => (t.first === t.last ? `line ${t.first + 1}` : `lines ${t.first + 1}–${t.last + 1}`);
 
 /** A session with its generations, as the studio shows it. */
 export interface DubSessionView extends DubSession {

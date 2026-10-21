@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { cueReducer, cueProblems, formatCueTime, normalizeCues, parseCueTime } from "@/lib/av/cue-edit";
-import { BLANK_FRAME, crowdedLines, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, priceLine, reviewCues, spokenText, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { BLANK_FRAME, crowdedLines, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, priceLine, reviewCues, spokenText, takeLines, voiceSteps, type DubSessionView } from "@/lib/av/dub";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
@@ -95,7 +95,16 @@ describe("dub pipeline DAGs", () => {
       { start: 1.6, end: 3, text: "Corta" },
       { start: 10, end: 12, text: "Bien" },
     ];
-    expect(crowdedLines(tight, 14)).toEqual([0]);
+    expect(crowdedLines(tight, 14)).toEqual([{ first: 0, last: 0 }]);
+    // Lines a breath apart are one take: the hint names them all.
+    const joined = [
+      { start: 0, end: 1, text: "Una frase demasiado larga para un segundo" },
+      { start: 1.1, end: 2, text: "y otra más que tampoco cabe aquí" },
+      { start: 2.5, end: 3, text: "Fin" },
+    ];
+    expect(crowdedLines(joined, 4)).toEqual([{ first: 0, last: 1 }]);
+    expect(takeLines({ first: 0, last: 1 })).toBe("lines 1–2");
+    expect(takeLines({ first: 2, last: 2 })).toBe("line 3");
     expect(crowdedLines(cues, 30)).toEqual([]);
   });
 
