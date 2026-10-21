@@ -1,0 +1,140 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+/**
+ * The clip a studio works on: shown at once from the file (object URL), uploaded in the background
+ * with progress, then read by the server (length, frame rate, sound) from its header. Shared by
+ * Shorts Studio and Mixed Media.
+ */
+
+export interface SourceInfo {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+export interface SourceClip {
+  name: string;
+  size: number;
+  /** What the trimmer plays: the local file until the upload is done, then the uploaded copy. */
+  preview: string;
+  /** The uploaded file (/api/files/…), once uploaded. */
+  url?: string;
+  /** 0–1 while uploading. */
+  progress: number;
+  uploading: boolean;
+  error?: string;
+  info?: SourceInfo;
+  /** Length and size as the browser read them (formats the server can't read). */
+  browserDuration?: number;
+  browserWidth?: number;
+  browserHeight?: number;
+}
+
+const VIDEO_TYPE = /^video\/(mp4|quicktime|webm|x-m4v)$/;
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm)$/i;
+
+export function checkClipFile(file: File, maxBytes: number): string | null {
+  if (!VIDEO_TYPE.test(file.type) && !VIDEO_EXT.test(file.name)) return "That isn't a video — use an MP4 or MOV";
+  if (file.size > maxBytes) return `That file's over ${Math.round(maxBytes / 1024 / 1024)} MB. Try a shorter or smaller clip.`;
+  return null;
+}
+
+function upload(file: File, onProgress: (p: number) => void, signal: AbortSignal): Promise<{ url: string; name?: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/uploads");
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      const body = xhr.response as { url?: string; name?: string; error?: string } | null;
+      if (xhr.status >= 200 && xhr.status < 300 && body?.url) resolve({ url: body.url, name: body.name });
+      else reject(new Error(body?.error ?? `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("Upload failed — check your connection"));
+    xhr.onabort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", () => xhr.abort());
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+}
+
+async function probe(url: string): Promise<SourceInfo> {
+  const res = await fetch("/api/shorts/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+  return res.ok ? ((await res.json()) as SourceInfo) : {};
+}
+
+export function useSourceClip(maxBytes: number) {
+  const [clip, setClip] = useState<SourceClip | null>(null);
+  const abort = useRef<AbortController | null>(null);
+  const objectUrl = useRef<string | null>(null);
+
+  const release = () => {
+    abort.current?.abort();
+    abort.current = null;
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+  };
+  useEffect(() => release, []);
+
+  const pick = useCallback(
+    (file: File): string | null => {
+      const problem = checkClipFile(file, maxBytes);
+      if (problem) return problem;
+      release();
+      const local = URL.createObjectURL(file);
+      objectUrl.current = local;
+      const ctrl = new AbortController();
+      abort.current = ctrl;
+      setClip({ name: file.name, size: file.size, preview: local, progress: 0, uploading: true });
+      void (async () => {
+        try {
+          const up = await upload(file, (p) => setClip((c) => (c && c.preview === local ? { ...c, progress: p } : c)), ctrl.signal);
+          const info = await probe(up.url).catch(() => ({}) as SourceInfo);
+          if (ctrl.signal.aborted) return;
+          // Keep playing the local copy (no reload mid-trim); the uploaded one is what jobs use.
+          setClip((c) => (c && c.preview === local ? { ...c, url: up.url, uploading: false, progress: 1, info } : c));
+        } catch (e) {
+          if ((e as Error).name === "AbortError") return;
+          setClip((c) => (c && c.preview === local ? { ...c, uploading: false, error: (e as Error).message } : c));
+        }
+      })();
+      return null;
+    },
+    [maxBytes],
+  );
+
+  /** Use a clip that is already uploaded (a hand-off from the Library or a result). */
+  const adopt = useCallback((url: string, name = "clip") => {
+    release();
+    setClip({ name, size: 0, preview: url, url, progress: 1, uploading: true });
+    void probe(url)
+      .catch(() => ({}) as SourceInfo)
+      .then((info) => setClip((c) => (c && c.url === url ? { ...c, uploading: false, info } : c)));
+  }, []);
+
+  const clear = useCallback(() => {
+    release();
+    setClip(null);
+  }, []);
+
+  /** What the browser's player read (the trimmer's onMeta). */
+  const setBrowserMeta = useCallback(
+    (m: { duration: number; width?: number; height?: number }) =>
+      setClip((c) => (c && m.duration > 0 ? { ...c, browserDuration: m.duration, ...(m.width && m.height ? { browserWidth: m.width, browserHeight: m.height } : {}) } : c)),
+    [],
+  );
+
+  return { clip, pick, adopt, clear, setBrowserMeta };
+}
+
+/** The clip's length: its header's, else what the browser read. */
+export const clipDuration = (c: SourceClip | null) => c?.info?.duration ?? c?.browserDuration;
+
+/** The clip's picture size: its header's, else what the browser read. */
+export const clipSize = (c: SourceClip | null): { width?: number; height?: number } =>
+  c?.info?.width && c.info.height ? { width: c.info.width, height: c.info.height } : { width: c?.browserWidth, height: c?.browserHeight };

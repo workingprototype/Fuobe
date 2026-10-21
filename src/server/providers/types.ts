@@ -20,6 +20,10 @@ export interface RemoteOutput {
   draftId?: string;
   kind?: MediaKind;
   contentType?: string;
+  /** Text results (transcripts): the content; `url` is then a data:text/plain URI holding the same text. */
+  text?: string;
+  /** Structured extras for OutputFile.meta (layer name/z/bbox, cues, textBlocks, stem, 3D preview…). */
+  meta?: Record<string, unknown>;
   /** Extra headers needed to download (e.g. auth for a private ComfyUI). */
   headers?: Record<string, string>;
 }

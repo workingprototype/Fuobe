@@ -1,29 +1,7 @@
 "use client";
 
-import {
-  AudioLines,
-  Clapperboard,
-  Copy,
-  Download,
-  Heart,
-  ImagePlus,
-  Mic2,
-  MoreHorizontal,
-  RotateCcw,
-  Trash2,
-  Wand2,
-  X,
-  ZoomIn,
-  Cpu,
-  Cloud,
-  Crop,
-  FastForward,
-  Sparkles,
-  UserRoundPlus,
-} from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -33,100 +11,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { getModel, getPreset } from "@/lib/catalog";
-import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
-import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
+import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
+import { useCreateGeneration, useGenerationActions } from "@/lib/api";
 import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
+import { downloadHref, downloadName, userTitle } from "@/lib/library";
+import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
+import { TileActions, useCanHover, type RunnerOptions } from "./result-actions";
+import { LayersStack, MediaThumb } from "./result-media";
 import { Viewer } from "./viewer";
 
-/** "a 26-year-old surfer from Lisbon, freckles" → "Surfer From Lisbon" — a starting name, renamed on the element page. */
-function characterName(prompt: string | undefined): string {
-  const words = (prompt ?? "").replace(/@\S+/g, "").replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/\d/.test(w) && !/^(the|and|with|from|who|year|old|of)$/i.test(w));
-  const pick = words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-  return pick || "New character";
-}
+export { MediaThumb } from "./result-media";
+export { downloadName } from "@/lib/library";
 
-/** Save an image as a character element (AI Influencer sheets, any portrait) to @mention it later. */
-function useSaveAsCharacter() {
-  const save = useSaveElement();
-  const router = useRouter();
-  return (g: Generation, o: OutputFile) =>
-    save.mutate(
-      { name: characterName(g.request.prompt), kind: "character", references: [o.url] },
-      {
-        onSuccess: (el) => toast.success(`Saved as @${el.handle}`, { action: { label: "Open", onClick: () => router.push(`/elements/${el.id}`) } }),
-        onError: (e) => toast.error((e as Error).message),
-      },
-    );
-}
-
-export function downloadName(g: Generation, o: OutputFile, i: number): string {
-  const ext = o.url.split(".").pop()?.split("?")[0] ?? "bin";
-  const base = (g.request.prompt || g.prompt || g.modelId).slice(0, 40).replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "fuobe";
-  return `${base}-${g.id.slice(0, 6)}${i ? `-${i + 1}` : ""}.${ext}`;
-}
-
-function IconAction({ label, onClick, href, children }: { label: string; onClick?: () => void; href?: string; children: React.ReactNode }) {
-  const cls = "grid size-8 place-items-center rounded-lg text-white/90 transition-colors hover:bg-white/20 hover:text-white";
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {href ? (
-          <Link href={href} className={cls} aria-label={label} onClick={(e) => e.stopPropagation()}>
-            {children}
-          </Link>
-        ) : (
-          <button
-            className={cls}
-            aria-label={label}
-            onClick={(e) => {
-              e.stopPropagation();
-              onClick?.();
-            }}
-          >
-            {children}
-          </button>
-        )}
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-export function MediaThumb({ output, className, autoPlay }: { output: OutputFile; className?: string; autoPlay?: boolean }) {
-  if (output.kind === "video") {
-    return (
-      <video
-        src={`${output.url}#t=0.1`}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        autoPlay={autoPlay}
-        onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-        onMouseLeave={(e) => {
-          if (!autoPlay) e.currentTarget.pause();
-        }}
-        className={cn("size-full object-cover", className)}
-      />
-    );
-  }
-  if (output.kind === "audio") {
-    return (
-      <div className={cn("flex size-full flex-col items-center justify-center gap-3 bg-brand-faint p-4 text-brand-text", className)}>
-        <AudioLines className="size-8" />
-        <audio src={output.url} controls className="w-full" onClick={(e) => e.stopPropagation()} />
-      </div>
-    );
-  }
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={output.url} alt="" loading="lazy" className={cn("size-full object-cover", className)} />;
-}
-
+/** A result's tile shape: its aspect ratio (the request's or the model's default, from the server). */
 export function tileRatio(g: Generation): number {
-  const ar = g.request.params?.aspectRatio ?? getModel(g.modelId)?.defaults?.aspectRatio;
   if (g.kind === "audio") return 1.6;
+  if (g.kind === "text") return 0.85;
+  const ar = g.request.params?.aspectRatio ?? g.aspectRatio ?? undefined;
   return ratioValue(ar && ar !== "auto" ? ar : undefined, g.kind === "video" ? 16 / 9 : 1);
 }
 
@@ -147,7 +49,14 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <button onClick={() => void cancel(g)} className="grid size-7 shrink-0 place-items-center rounded-full bg-background/70 text-muted-foreground hover:text-foreground" aria-label="Cancel">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                void cancel(g);
+              }}
+              className="grid size-7 shrink-0 place-items-center rounded-full bg-background/70 text-muted-foreground hover:text-foreground"
+              aria-label="Cancel"
+            >
               <X className="size-3.5" />
             </button>
           </TooltipTrigger>
@@ -170,7 +79,13 @@ export function FailedTile({ g, ratio, onRetry }: { g: Generation; ratio: number
         <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : "Couldn't generate this one"}</p>
         {g.error && <p className="line-clamp-5 text-[12px] leading-snug break-words whitespace-pre-line text-muted-foreground">{g.error}</p>}
       </div>
-      <button onClick={onRetry} className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRetry();
+        }}
+        className="mt-2 inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent"
+      >
         <RotateCcw className="size-3" /> Retry
       </button>
     </div>
@@ -187,33 +102,117 @@ export function useFinalizeDraft() {
     );
 }
 
-export function GenerationGroup({
-  g,
-  onOpen,
-  onReuse,
-}: {
-  g: Generation;
-  onOpen: (g: Generation, index: number) => void;
-  onReuse?: (g: Generation) => void;
-}) {
-  const { favorite, remove } = useGenerationActions();
-  const create = useCreateGeneration();
-  const model = getModel(g.modelId);
-  const preset = g.presetId ? getPreset(g.presetId) : undefined;
+// ---------------------------------------------------------------------------
+// Feed: one stable context for every group, so a poll or a keystroke re-renders only what changed.
+
+interface FeedApi {
+  open: (g: Generation, index: number) => void;
+  retry: (g: Generation) => void;
+  runner: RunnerOptions;
+  reuse?: (g: Generation) => void;
+}
+
+const FeedCtx = createContext<FeedApi | null>(null);
+
+function useFeed(): FeedApi {
+  const c = useContext(FeedCtx);
+  if (!c) throw new Error("GenerationGroup outside Feed");
+  return c;
+}
+
+function DraftButton({ g, draftId }: { g: Generation; draftId: string }) {
+  const finalize = useFinalizeDraft();
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        finalize(g, draftId);
+      }}
+      className="absolute top-2 left-2 inline-flex h-7 items-center gap-1 rounded-full bg-black/55 pr-2.5 pl-2 text-[12px] font-medium text-white backdrop-blur transition-colors hover:bg-black/75"
+    >
+      <Sparkles className="size-3.5" /> Draft · render 1080p
+    </button>
+  );
+}
+
+const SHOW_ON_HOVER = "opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100";
+
+const OutputTile = memo(function OutputTile({ g, index, ratio, layered, count }: { g: Generation; index: number; ratio: number; layered?: boolean; count: number }) {
+  const feed = useFeed();
+  const canHover = useCanHover();
+  // Actions mount on first hover / focus / tap: a long feed shouldn't hold thousands of menus and tooltips.
+  const [hot, setHot] = useState<false | "bar" | "menu">(false);
+  const o = g.outputs[index];
+  const audio = o.kind === "audio";
+  const ctx = useMemo(() => ({ reuse: !!feed.reuse }), [feed.reuse]);
+  return (
+    // The tile opens on click; keyboards and screen readers use the Open button over it (a sibling of
+    // the action buttons, so no button sits inside another).
+    <div
+      onClick={() => feed.open(g, index)}
+      onPointerEnter={(e) => e.pointerType === "mouse" && !hot && setHot("bar")}
+      onFocus={() => canHover && !hot && setHot("bar")}
+      className="group/tile relative h-56 max-w-full animate-fade-up cursor-zoom-in overflow-hidden rounded-xl bg-muted sm:h-64"
+      style={{ aspectRatio: audio ? 1.6 : layered ? Math.max(ratio, 0.8) : ratio }}
+    >
+      {layered ? <LayersStack g={g} /> : <MediaThumb output={o} g={g} />}
+      <button
+        type="button"
+        aria-label={`Open “${userTitle(g)}”${count > 1 ? ` · ${index + 1} of ${count}` : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          feed.open(g, index);
+        }}
+        className="pointer-events-none absolute inset-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      />
+      {o.draftId && <DraftButton g={g} draftId={o.draftId} />}
+      {g.favorite && <Heart className={cn("absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow", audio && canHover && "group-focus-within/tile:opacity-0 group-hover/tile:opacity-0")} />}
+      {canHover && hot === "bar" && (
+        <TileActions
+          g={g}
+          index={index}
+          ctx={ctx}
+          opts={feed.runner}
+          // Audio keeps its player at the bottom: its actions go along the top.
+          tone={audio ? "surface" : "media"}
+          className={cn(audio ? "absolute inset-x-0 top-0 p-2" : "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8", SHOW_ON_HOVER)}
+        />
+      )}
+      {!canHover &&
+        (hot === "menu" ? (
+          <TileActions g={g} index={index} ctx={ctx} opts={feed.runner} menuOnly className={cn("absolute right-2", g.favorite ? "top-8" : "top-2")} />
+        ) : (
+          <button
+            aria-label="More actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              setHot("menu");
+            }}
+            className={cn("absolute right-2 grid size-8 place-items-center rounded-lg bg-black/45 text-white backdrop-blur", g.favorite ? "top-8" : "top-2")}
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        ))}
+    </div>
+  );
+});
+
+/** One request: the user's words in serif, a meta line, then its outputs (or progress / failure). */
+export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generation }) {
+  const feed = useFeed();
+  const { favorite, trash } = useGenerationActions();
   const ratio = tileRatio(g);
   const active = g.status === "queued" || g.status === "running";
   const placeholders = Math.max(1, g.request.params?.numOutputs ?? 1);
-  const retry = () =>
-    create.mutate(g.request, {
-      onError: (e) => toast.error((e as Error).message),
-    });
-  const finalize = useFinalizeDraft();
-  const saveCharacter = useSaveAsCharacter();
+  const layered = g.status === "succeeded" && isLayered(g);
+  const shown = shownOutputs(g);
+  const single = g.status === "succeeded" && shown.length === 1 ? g.outputs[shown[0]] : null;
+  const singleName = single ? downloadName(g, single, shown[0]) : "";
   const p = g.request.params ?? {};
   const meta = [
     g.request.step?.label,
-    preset?.name,
-    model?.name ?? g.modelId,
+    g.presetName,
+    g.modelName ?? g.modelId,
     OPERATION_LABELS[g.op],
     p.aspectRatio,
     p.resolution,
@@ -221,11 +220,11 @@ export function GenerationGroup({
   ].filter(Boolean);
 
   return (
-    <section className="group/gen animate-fade-up space-y-2.5">
+    <section data-gen-id={g.id} className="group/gen animate-fade-up space-y-2.5 [contain-intrinsic-size:auto_330px] [content-visibility:auto]">
       <header className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 font-heading text-[19px] leading-snug" title={g.prompt ?? undefined}>
-            {g.request.prompt?.trim() || preset?.name || g.prompt || "Untitled"}
+            {userTitle(g)}
           </h3>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
@@ -241,18 +240,17 @@ export function GenerationGroup({
             {g.costUsd ? <span className="font-mono before:mr-1.5 before:content-['·']">{formatCost(g.costUsd)}</span> : null}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/gen:opacity-100 sm:focus-within:opacity-100">
-          {onReuse && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button onClick={() => onReuse(g)} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
-                  <RotateCcw className="size-3.5" /> Reuse
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Load prompt, model and settings into the composer</TooltipContent>
-            </Tooltip>
+        <div className="flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/gen:opacity-100 sm:focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+          {feed.reuse && (
+            <button
+              onClick={() => feed.reuse?.(g)}
+              title="Load prompt, model and settings into the composer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <RotateCcw className="size-3.5" /> Reuse
+            </button>
           )}
-          <DropdownMenu>
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <button className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="More">
                 <MoreHorizontal className="size-4" />
@@ -260,27 +258,35 @@ export function GenerationGroup({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onClick={() => {
+                onSelect={() => {
                   void navigator.clipboard.writeText(g.prompt ?? "");
                   toast("Prompt copied");
                 }}
               >
                 <Copy /> Copy prompt
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={retry}>
+              <DropdownMenuItem onSelect={() => feed.retry(g)}>
                 <RotateCcw /> Run again
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void favorite(g)}>
+              <DropdownMenuItem onSelect={() => void favorite(g)}>
                 <Heart /> {g.favorite ? "Remove from favorites" : "Add to favorites"}
               </DropdownMenuItem>
+              {single && !layered && (
+                <DropdownMenuItem asChild>
+                  <a href={downloadHref(single.url, singleName)} download={singleName}>
+                    <Download /> Download
+                  </a>
+                </DropdownMenuItem>
+              )}
+              {g.status === "succeeded" && g.outputs.length > 1 && (
+                <DropdownMenuItem asChild>
+                  <a href={`/api/generations/zip?ids=${g.id}`} download>
+                    <FolderDown /> Download all ({g.outputs.length})
+                  </a>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  void remove(g);
-                  toast("Deleted");
-                }}
-              >
+              <DropdownMenuItem variant="destructive" onSelect={() => void trash([g])}>
                 <Trash2 /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -296,86 +302,19 @@ export function GenerationGroup({
           ))}
         {(g.status === "failed" || g.status === "canceled") && (
           <div className="h-56 max-w-full sm:h-64">
-            <FailedTile g={g} ratio={ratio} onRetry={retry} />
+            <FailedTile g={g} ratio={ratio} onRetry={() => feed.retry(g)} />
           </div>
         )}
         {g.status === "succeeded" &&
-          g.outputs.map((o, i) => (
-            <div
-              key={o.url}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpen(g, i)}
-              onKeyDown={(e) => e.key === "Enter" && onOpen(g, i)}
-              className="group/tile relative h-56 max-w-full animate-fade-up cursor-zoom-in overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-64"
-              style={{ aspectRatio: o.kind === "audio" ? 1.6 : ratio }}
-            >
-              <MediaThumb output={o} />
-              {o.draftId && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    finalize(g, o.draftId!);
-                  }}
-                  className="absolute top-2 left-2 inline-flex h-7 items-center gap-1 rounded-full bg-black/55 pr-2.5 pl-2 text-[12px] font-medium text-white backdrop-blur transition-colors hover:bg-black/75"
-                >
-                  <Sparkles className="size-3.5" /> Draft · render 1080p
-                </button>
-              )}
-              {g.favorite && <Heart className="absolute top-2 right-2 size-4 fill-highlight text-highlight drop-shadow" />}
-              {o.kind !== "audio" && (
-                <div className="absolute inset-x-0 bottom-0 flex items-center gap-0.5 bg-gradient-to-t from-black/60 to-transparent p-2 pt-8 opacity-0 transition-opacity duration-100 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100">
-                  <IconAction label="Download" href={`${o.url}?download=${encodeURIComponent(downloadName(g, o, i))}`}>
-                    <Download className="size-4" />
-                  </IconAction>
-                  <IconAction label={g.favorite ? "Unfavorite" : "Favorite"} onClick={() => void favorite(g)}>
-                    <Heart className={cn("size-4", g.favorite && "fill-current")} />
-                  </IconAction>
-                  {o.kind === "image" ? (
-                    <>
-                      <IconAction label="Animate" href={`/video?image=${encodeURIComponent(o.url)}`}>
-                        <Clapperboard className="size-4" />
-                      </IconAction>
-                      <IconAction label="Edit" href={`/edit?image=${encodeURIComponent(o.url)}`}>
-                        <Wand2 className="size-4" />
-                      </IconAction>
-                      <IconAction label="Upscale" href={`/upscale?image=${encodeURIComponent(o.url)}`}>
-                        <ZoomIn className="size-4" />
-                      </IconAction>
-                      <IconAction label="Use as reference" href={`/image?ref=${encodeURIComponent(o.url)}`}>
-                        <ImagePlus className="size-4" />
-                      </IconAction>
-                      <IconAction label="Save as character" onClick={() => saveCharacter(g, o)}>
-                        <UserRoundPlus className="size-4" />
-                      </IconAction>
-                    </>
-                  ) : (
-                    <>
-                      <IconAction label="Extend" href={`/extend?video=${encodeURIComponent(o.url)}`}>
-                        <FastForward className="size-4" />
-                      </IconAction>
-                      <IconAction label="Reframe" href={`/reframe?video=${encodeURIComponent(o.url)}`}>
-                        <Crop className="size-4" />
-                      </IconAction>
-                      <IconAction label="Lipsync" href={`/lipsync?video=${encodeURIComponent(o.url)}`}>
-                        <Mic2 className="size-4" />
-                      </IconAction>
-                      <IconAction label="Upscale" href={`/upscale?video=${encodeURIComponent(o.url)}`}>
-                        <ZoomIn className="size-4" />
-                      </IconAction>
-                      <IconAction label="Add sound" href={`/audio?video=${encodeURIComponent(o.url)}`}>
-                        <AudioLines className="size-4" />
-                      </IconAction>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+          (layered ? (
+            <OutputTile g={g} index={0} ratio={ratio} layered count={1} />
+          ) : (
+            shown.map((i) => <OutputTile key={g.outputs[i].url} g={g} index={i} ratio={ratio} count={shown.length} />)
           ))}
       </div>
     </section>
   );
-}
+});
 
 export function Feed({
   items,
@@ -387,26 +326,46 @@ export function Feed({
   empty?: React.ReactNode;
 }) {
   const [open, setOpen] = useState<{ id: string; index: number } | null>(null);
+  const create = useCreateGeneration();
+  // Groups get stable callbacks that read the latest props through refs.
+  const createRef = useRef(create);
+  const reuseRef = useRef(onReuse);
+  useEffect(() => {
+    createRef.current = create;
+    reuseRef.current = onReuse;
+  });
+  const hasReuse = !!onReuse;
+  const openAt = useCallback((g: Generation, index: number) => setOpen({ id: g.id, index }), []);
+  const api = useMemo<FeedApi>(
+    () => ({
+      open: openAt,
+      retry: (g) => createRef.current.mutate(g.request, { onError: (e) => toast.error((e as Error).message) }),
+      reuse: hasReuse ? (g) => reuseRef.current?.(g) : undefined,
+      runner: { onOpen: openAt, onReuse: hasReuse ? (g) => reuseRef.current?.(g) : undefined },
+    }),
+    [openAt, hasReuse],
+  );
   if (!items.length) return <>{empty}</>;
-  const flat = items.flatMap((g) => (g.status === "succeeded" ? g.outputs.map((_, i) => ({ g, i })) : []));
-  const pos = open ? flat.findIndex((f) => f.g.id === open.id && f.i === open.index) : -1;
+  const flat = items.flatMap((g) => (g.status === "succeeded" ? (isLayered(g) ? [{ g, i: 0 }] : shownOutputs(g).map((i) => ({ g, i }))) : []));
+  const pos = open ? flat.findIndex((f) => f.g.id === open.id && (f.i === open.index || isLayered(f.g))) : -1;
   return (
-    <>
+    <FeedCtx.Provider value={api}>
       <div className="space-y-9">
         {items.map((g) => (
-          <GenerationGroup key={g.id} g={g} onOpen={(gg, i) => setOpen({ id: gg.id, index: i })} onReuse={onReuse} />
+          <GenerationGroup key={g.id} g={g} />
         ))}
       </div>
       {open && pos >= 0 && (
         <Viewer
           generation={flat[pos].g}
-          index={flat[pos].i}
+          index={isLayered(flat[pos].g) ? open.index : flat[pos].i}
+          onIndex={(index) => setOpen({ id: flat[pos].g.id, index })}
           onClose={() => setOpen(null)}
           onPrev={pos > 0 ? () => setOpen({ id: flat[pos - 1].g.id, index: flat[pos - 1].i }) : undefined}
           onNext={pos < flat.length - 1 ? () => setOpen({ id: flat[pos + 1].g.id, index: flat[pos + 1].i }) : undefined}
           onReuse={onReuse}
         />
       )}
-    </>
+    </FeedCtx.Provider>
   );
 }

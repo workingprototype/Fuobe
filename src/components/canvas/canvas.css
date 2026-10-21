@@ -1,0 +1,123 @@
+/*
+ * React Flow themed with Fuobe's tokens (src/app/globals.css), so the board follows light and
+ * dark mode like the rest of the app. Scoped to the canvas editor.
+ */
+.fuobe-canvas .react-flow {
+  --xy-background-color: var(--background);
+  --xy-background-pattern-dots-color: var(--border-strong);
+  --xy-edge-stroke: var(--border-strong);
+  --xy-edge-stroke-width: 2;
+  --xy-edge-stroke-selected: var(--primary);
+  --xy-connectionline-stroke: var(--primary);
+  --xy-connectionline-stroke-width: 2;
+  --xy-minimap-background-color: var(--popover);
+  --xy-minimap-mask-background-color: color-mix(in oklab, var(--muted) 70%, transparent);
+  --xy-minimap-mask-stroke-color: var(--border-strong);
+  --xy-minimap-node-background-color: var(--muted);
+  --xy-controls-button-background-color: var(--popover);
+  --xy-controls-button-background-color-hover: var(--secondary);
+  --xy-controls-button-color: var(--foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: var(--elevation-normal);
+  --xy-selection-background-color: var(--brand-faint);
+  --xy-selection-border: 1px solid var(--primary);
+  --xy-node-boxshadow-selected: none;
+  --xy-node-border-radius: 14px;
+  --xy-edge-label-background-color: var(--popover);
+  --xy-edge-label-color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Our "output" node type shares React Flow's built-in class name: drop the built-in look. */
+.fuobe-canvas .react-flow__node-output {
+  padding: 0;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  text-align: start;
+}
+.fuobe-canvas .react-flow__node-output.selectable:hover,
+.fuobe-canvas .react-flow__node-output.selectable.selected,
+.fuobe-canvas .react-flow__node-output.selectable:focus,
+.fuobe-canvas .react-flow__node-output.selectable:focus-visible {
+  box-shadow: none;
+}
+
+/* Typed handles: a dot in the colour of what they carry. */
+.fuobe-canvas .react-flow__handle.canvas-handle {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  border: 2px solid var(--card);
+  background: var(--port, var(--muted-foreground));
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition: transform 100ms, box-shadow 100ms;
+}
+.fuobe-canvas .react-flow__handle.canvas-handle:hover,
+.fuobe-canvas .react-flow__handle.canvas-handle.connectingto,
+.fuobe-canvas .react-flow__handle.canvas-handle.valid {
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--port, var(--primary)) 35%, transparent);
+}
+.fuobe-canvas .react-flow__handle.canvas-handle-any {
+  background: conic-gradient(var(--chart-2), var(--chart-5), var(--chart-4), var(--chart-3), var(--chart-2));
+}
+/* Bigger touch targets for connecting by hand. */
+.fuobe-canvas .react-flow__handle.canvas-handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.fuobe-canvas .react-flow__edge.selected .react-flow__edge-path,
+.fuobe-canvas .react-flow__edge:hover .react-flow__edge-path {
+  filter: drop-shadow(0 0 3px color-mix(in oklab, var(--primary) 45%, transparent));
+}
+
+.fuobe-canvas .react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.fuobe-canvas .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+}
+.fuobe-canvas .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.fuobe-canvas .react-flow__attribution {
+  background: transparent;
+  font-size: 10px;
+  opacity: 0.55;
+}
+.fuobe-canvas .react-flow__attribution a {
+  color: var(--muted-foreground);
+}
+
+.fuobe-canvas .react-flow__minimap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--elevation-normal);
+}
+
+.fuobe-canvas .react-flow__node.selectable:focus-visible {
+  outline: none;
+}
+.fuobe-canvas .react-flow__node:focus-visible > [data-testid^="canvas-node-"] {
+  box-shadow: 0 0 0 4px var(--brand-faint);
+  border-color: var(--primary);
+}
+
+.fuobe-canvas .react-flow__pane.draggable {
+  cursor: default;
+}
+.fuobe-canvas .react-flow__pane.dragging {
+  cursor: grabbing;
+}

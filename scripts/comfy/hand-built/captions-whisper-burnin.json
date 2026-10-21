@@ -1,0 +1,130 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "input.mp4",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "_meta": {
+      "title": "VHS_LoadVideo"
+    }
+  },
+  "2": {
+    "class_type": "VHS_VideoInfoLoaded",
+    "inputs": {
+      "video_info": [
+        "1",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "VHS_VideoInfoLoaded"
+    }
+  },
+  "3": {
+    "class_type": "Apply Whisper",
+    "inputs": {
+      "audio": [
+        "1",
+        2
+      ],
+      "model": "large-v3-turbo",
+      "language": "auto",
+      "prompt": ""
+    },
+    "_meta": {
+      "title": "Apply Whisper"
+    }
+  },
+  "4": {
+    "class_type": "Add Subtitles To Frames",
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ],
+      "alignment": [
+        "3",
+        2
+      ],
+      "font_color": "white",
+      "font_border_color": "black",
+      "font_border_width": 6,
+      "font_family": "Roboto-Bold.ttf",
+      "font_size": 90,
+      "x_position": 0,
+      "y_position": 0,
+      "center_x": true,
+      "center_y": true,
+      "video_fps": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Add Subtitles To Frames"
+    }
+  },
+  "5": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ],
+      "frame_rate": [
+        "2",
+        0
+      ],
+      "loop_count": 0,
+      "filename_prefix": "fuobe/captions-whisper-burnin",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "audio": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VHS_VideoCombine"
+    }
+  },
+  "6": {
+    "class_type": "Save SRT",
+    "inputs": {
+      "alignment": [
+        "3",
+        1
+      ],
+      "name": "fuobe_captions"
+    },
+    "_meta": {
+      "title": "Save SRT"
+    }
+  },
+  "7": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/captions-whisper-transcript",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "SaveText"
+    }
+  }
+}

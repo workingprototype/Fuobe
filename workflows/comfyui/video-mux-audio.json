@@ -1,0 +1,120 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Video (its picture is copied, never decoded)"
+    }
+  },
+  "3": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "dub_voice.mp3"
+    },
+    "_meta": {
+      "title": "New voice (audio)"
+    }
+  },
+  "4": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "background.mp3"
+    },
+    "_meta": {
+      "title": "Background stem or music bed (audio2)"
+    }
+  },
+  "5": {
+    "class_type": "AudioAdjustVolume",
+    "inputs": {
+      "audio": [
+        "4",
+        0
+      ],
+      "volume": 0
+    },
+    "_meta": {
+      "title": "Background level (dB)"
+    }
+  },
+  "6": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "10",
+        0
+      ],
+      "audio2": [
+        "3",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Voice over the background"
+    }
+  },
+  "7": {
+    "class_type": "ConcatenateVideo",
+    "inputs": {
+      "videos.video0": [
+        "1",
+        0
+      ],
+      "codec": "auto",
+      "complete_audio": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Same picture, new soundtrack (stream copy)"
+    }
+  },
+  "8": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "7",
+        0
+      ],
+      "filename_prefix": "fuobe/video-mux-audio",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  },
+  "9": {
+    "class_type": "EmptyAudio",
+    "inputs": {
+      "duration": 60,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "_meta": {
+      "title": "Soundtrack length (the video's)"
+    }
+  },
+  "10": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "9",
+        0
+      ],
+      "audio2": [
+        "5",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Background over silence"
+    }
+  }
+}

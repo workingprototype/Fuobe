@@ -7,6 +7,7 @@
  * (fal, replicate, comfyui, ...). Presets (apps, camera motions, effects) sit on top
  * of models and add prompt templates, fixed inputs and LoRAs.
  */
+import type { SignatureRecord } from "./palettes";
 
 export type Engine = "cloud" | "open";
 
@@ -57,7 +58,10 @@ export type Operation =
   | "image-to-3d" // image → a 3D model (.glb), optionally a turntable video
   | "separate-audio" // audio or video → voice and background stems
   | "translate" // text → the same text in params.targetLanguage (LLM)
-  | "write"; // brief → text (LLM: scripts, ad copy, shot lists)
+  | "write" // brief → text (LLM: scripts, ad copy, shot lists)
+  | "vectorize" // image → the same picture as an SVG
+  | "level" // audio → the same audio at a set loudness (a music bed under a voice-over)
+  | "timeline"; // audio clips placed at their start times over silence → one track as long as the video (dub voices)
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -104,6 +108,9 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   "separate-audio": "Separate voice",
   translate: "Translate",
   write: "Write",
+  vectorize: "Vectorize",
+  level: "Level audio",
+  timeline: "Place on the timeline",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -151,6 +158,10 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   "separate-audio": "audio",
   translate: "text",
   write: "text",
+  vectorize: "image",
+  level: "audio",
+  // The open engine returns the track; fal's compose renders it as a video (the result follows the model).
+  timeline: "audio",
 };
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
@@ -189,7 +200,7 @@ export interface FieldMap {
   video?: string;
   /** Video field that takes an array (receives the one input video). */
   videoArray?: string;
-  /** Array field that receives every clip of `inputs.videos`, in order (join clips). */
+  /** Array field that receives every clip of `inputs.videos`, in order (join clips; reference videos for reference-to-video). */
   videos?: string;
   audio?: string;
   aspectRatio?: string | EnumField;
@@ -220,15 +231,44 @@ export interface FieldMap {
   endTime?: DurationField;
   /** Frames per second (frame sampling, images to video). */
   fps?: string;
-  /** Colour palette: hex strings converted to the API's shape. */
-  palette?: { key: string; format: "hex" | "rgb-object" | "rgb-array" | "ideogram" };
+  /**
+   * Colour palette: hex strings converted to the API's shape ("rgb-object" = Recraft on fal [{r,g,b}],
+   * "rgb-array" = Recraft on Higgsfield [{rgb:[r,g,b]}], "ideogram" = {members:[{rgb:{r,g,b}, color_weight}]}).
+   * `background` names the API's background-colour field: a hex string sent as params.extra[background]
+   * is converted to the same shape.
+   */
+  palette?: { key: string; format: "hex" | "rgb-object" | "rgb-array" | "ideogram"; background?: string };
   /** A saved style id (Recraft styles, Soul 2.0 moodboards). */
   styleId?: string;
   /** How many layers to split an image into. */
   numLayers?: string;
-  sourceLanguage?: string;
+  /**
+   * Language of the speech. With `values` (the API's own list, e.g. VEED's "es-ES"), the request's
+   * language is matched to an entry by exact value or ISO code, and left out when nothing matches.
+   */
+  sourceLanguage?: string | { key: string; values: string[] };
+  /** Second image field (inputs.images[1]): a try-on garment, a product shot's scene reference, a style image. */
+  image2?: string;
   /** Static fields always sent (e.g. safety checker switches). */
   fixed?: Record<string, unknown>;
+  /** Array field that receives `inputs.audios` (reference audio clips: Seedance / Cinema Studio reference-to-video). */
+  audios?: string;
+  /**
+   * Timeline render (fal ffmpeg compose `tracks`): one visual track (inputs.images[0] as a still, else
+   * inputs.video) as long as params.extra.timeline.length, and one audio track with inputs.audios placed
+   * at params.extra.timeline.clips[i].start for .duration seconds (keyframes in milliseconds).
+   */
+  timeline?: string;
+  /**
+   * Fields sent unless the request sets them (a canonical field or params.extra wins): Wizper's
+   * `language: null` (detect instead of assuming English), Mirelo's full-length soundtrack.
+   */
+  defaults?: Record<string, unknown>;
+  /**
+   * A timeline render (fal ffmpeg compose): one track for `video`, an audio track for `audio` (the voice)
+   * and one for `audio2` (a background bed), each placed at 0 and as long as `duration` (seconds).
+   */
+  tracks?: string;
 }
 
 export interface ModelRoute {
@@ -276,12 +316,33 @@ export interface ModelOptions {
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
   /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
   controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /** Images it needs before it can run (try-on: the person and the garment). */
+  minImages?: number;
+  /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
+  imageLabels?: string[];
+  /** None of its routes takes a prompt (try-on, 3D, transcription): the composer can hide the prompt box. */
+  promptless?: boolean;
+  /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
+  maxVideos?: number;
+  maxAudios?: number;
+  /** Spoken languages it can be told (transcription, captions): sent as params.sourceLanguage; unset = its default. */
+  sourceLanguages?: string[];
+  /**
+   * What this model needs beyond its operation's own inputs, checked before a job is created (the
+   * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
+   * model whose operation is otherwise promptless.
+   */
+  requires?: { images?: number; prompt?: boolean; msg: string };
 }
 
 export interface Pricing {
   unit: "image" | "second" | "video" | "request" | "megapixel" | "minute";
   usd: number;
   note?: string;
+  /** The price per unit at each resolution (params.resolution), when it differs (Gemini Omni Flash: 360p $0.03/s … 4K $0.30/s); `usd` is the default resolution's. */
+  byResolution?: Record<string, number>;
+  /** Billed on the input clip's seconds as well as the output's (Happy Horse video edit): a restyle costs about twice the clip's length. */
+  inputSeconds?: boolean;
 }
 
 export interface ModelDef {
@@ -368,12 +429,16 @@ export interface GenerationRequest {
     sketch?: string;
     video?: string;
     audio?: string;
+    /** Second audio track: the background stem (or a music bed) mixed under `audio` (mux). */
+    audio2?: string;
     /** Reference recording of the voice to speak with / convert into. */
     voiceAudio?: string;
     /** Second speaker's reference voice (open-source dialogue). */
     voiceAudio2?: string;
-    /** Several clips in order (join clips). */
+    /** Several clips in order (join clips), or reference videos (reference-to-video: Seedance, Cinema Studio). */
     videos?: string[];
+    /** Reference audio clips (reference-to-video: voices, music or sound the clip should follow). */
+    audios?: string[];
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
@@ -392,6 +457,16 @@ export interface GenerationRequest {
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
   step?: { label: string; index: number; of: number };
+  /** Server-set: what the user calls this result, shown instead of the prompt (Library, feeds). */
+  title?: string;
+  /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
+  batchTitle?: string;
+  /**
+   * The Image studio's style signature (Color signature + Moodboard chips): what was picked, the
+   * sentences the server adds to the prompt (`prompt` keeps the user's own words), and the request as
+   * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
+   */
+  signature?: SignatureRecord;
 }
 
 export interface ChainSlot {
@@ -399,10 +474,18 @@ export interface ChainSlot {
    * "prompt" takes the dependency's text output (OutputFile.text): it replaces "{text}" in the
    * request's prompt, or becomes the prompt when there is no placeholder.
    * "voiceAudio" clones the voice of the dependency's audio output.
+   * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
+   * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
+  /**
+   * Audio slots: take the dependency's output whose `meta.stem` is this (separate-audio makes
+   * "voice" and "background"; "voice" also matches vocals/speech/target, "background" also
+   * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
+   */
+  stem?: string;
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
@@ -414,9 +497,12 @@ export interface GenInput extends GenParams {
   mask?: string;
   video?: string;
   audio?: string;
+  /** Second audio track (mux: the background mixed under `audio`). */
+  audio2?: string;
   voiceAudio?: string;
   voiceAudio2?: string;
   videos?: string[];
+  audios?: string[];
   loras?: LoraRef[];
 }
 
@@ -462,6 +548,15 @@ export interface Generation {
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
+  /** Display names resolved on the server, so result views need no catalog in the browser. */
+  modelName?: string;
+  presetName?: string | null;
+  /** The aspect ratio it was made at (the request's, else the model's default), for tile shapes. */
+  aspectRatio?: string | null;
+  /** Moved to the Trash at (soft delete; purged after 30 days). */
+  deletedAt?: number | null;
+  /** Library folder it's in. */
+  folderId?: string | null;
 }
 
 /** Input slot a preset asks the user for. */
@@ -478,6 +573,8 @@ export interface PresetChoice {
   label: string;
   /** Text substituted for {option:<key>} in the prompt template. */
   prompt: string;
+  /** Model settings this choice sets (params.extra), e.g. the camera angle sliders of Qwen Multiple Angles; what the user set wins. */
+  extra?: Record<string, number | string>;
 }
 
 export interface PresetOption {

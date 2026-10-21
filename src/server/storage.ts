@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { DATA_DIR, db } from "./db";
 import type { MediaKind } from "@/lib/catalog/types";
+import { fetchRemote } from "./remote-fetch";
 
 export const FILES_DIR = path.join(DATA_DIR, "files");
 
@@ -22,6 +23,14 @@ const EXT_BY_TYPE: Record<string, string> = {
   "audio/ogg": "ogg",
   "audio/flac": "flac",
   "audio/mp4": "m4a",
+  "audio/aac": "aac",
+  // Text outputs (transcripts, translations, scripts) and 3D models.
+  "text/plain": "txt",
+  "application/x-subrip": "srt",
+  "text/vtt": "vtt",
+  "application/json": "json",
+  "model/gltf-binary": "glb",
+  "model/gltf+json": "gltf",
 };
 
 const TYPE_BY_EXT: Record<string, string> = {
@@ -39,6 +48,13 @@ const TYPE_BY_EXT: Record<string, string> = {
   ogg: "audio/ogg",
   flac: "audio/flac",
   m4a: "audio/mp4",
+  aac: "audio/aac",
+  txt: "text/plain",
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  json: "application/json",
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
 };
 
 export function contentTypeFor(fileName: string, fallback = "application/octet-stream"): string {
@@ -47,8 +63,12 @@ export function contentTypeFor(fileName: string, fallback = "application/octet-s
 }
 
 export function kindFor(contentType: string): MediaKind {
-  if (contentType.startsWith("video/")) return "video";
-  if (contentType.startsWith("audio/")) return "audio";
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  // Transcripts, translations and scripts: plain text, subtitles or JSON cue lists.
+  if (type.startsWith("text/") || type === "application/json" || type === "application/x-subrip") return "text";
+  if (type.startsWith("model/")) return "model3d";
   return "image";
 }
 
@@ -59,7 +79,8 @@ export interface Asset {
   relPath: string;
   contentType: string;
   size: number;
-  source: "upload" | "generation";
+  /** "derived": a picture a tool rendered for a model (a layer, a region, a mask), not listed with your uploads. */
+  source: "upload" | "generation" | "derived";
   generationId: string | null;
   createdAt: number;
   url: string;
@@ -72,7 +93,7 @@ interface AssetRow {
   rel_path: string;
   content_type: string;
   size: number;
-  source: "upload" | "generation";
+  source: Asset["source"];
   generation_id: string | null;
   created_at: number;
 }
@@ -104,9 +125,9 @@ export function saveFile(opts: {
   generationId?: string;
 }): Asset {
   const id = nanoid(12);
-  const ext = EXT_BY_TYPE[opts.contentType] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
+  const ext = EXT_BY_TYPE[opts.contentType.split(";")[0].trim()] ?? opts.name?.split(".").pop()?.toLowerCase() ?? "bin";
   const day = new Date().toISOString().slice(0, 10);
-  const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "upload" ? "uploads" : "outputs", day, `${id}.${ext}`);
+  const relPath = path.join(/*turbopackIgnore: true*/ opts.source === "generation" ? "outputs" : "uploads", day, `${id}.${ext}`);
   const abs = path.join(FILES_DIR, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, opts.data);
@@ -135,18 +156,23 @@ export function getAsset(id: string): Asset | null {
   return row ? toAsset(row) : null;
 }
 
-export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number }): Asset[] {
+/** Newest first; page with `before` (+ `beforeId`): the last asset of the previous page. Derived renders only when asked for. */
+export function listAssets(opts: { source?: Asset["source"]; kind?: MediaKind; limit?: number; before?: number; beforeId?: string }): Asset[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.source) {
     where.push("source = ?");
     args.push(opts.source);
-  }
+  } else where.push("source != 'derived'");
   if (opts.kind) {
     where.push("kind = ?");
     args.push(opts.kind);
   }
-  const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT ?`;
+  if (opts.before) {
+    where.push(opts.beforeId ? "(created_at < ? OR (created_at = ? AND id < ?))" : "created_at < ?");
+    args.push(...(opts.beforeId ? [opts.before, opts.before, opts.beforeId] : [opts.before]));
+  }
+  const sql = `SELECT * FROM assets ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, id DESC LIMIT ?`;
   return (db().prepare(sql).all(...args, opts.limit ?? 100) as AssetRow[]).map(toAsset);
 }
 
@@ -182,10 +208,11 @@ export async function readRef(ref: string): Promise<{ data: Buffer; contentType:
     return { data: fs.readFileSync(abs), contentType: contentTypeFor(abs), name: path.basename(abs) };
   }
   if (/^https?:\/\//.test(ref)) {
-    const res = await fetch(ref);
-    if (!res.ok) throw new Error(`Could not fetch ${ref}: ${res.status}`);
-    const contentType = res.headers.get("content-type")?.split(";")[0] ?? contentTypeFor(ref);
-    return { data: Buffer.from(await res.arrayBuffer()), contentType, name: ref.split("/").pop() ?? "input" };
+    // Public links only: never this machine or its private network (see remote-fetch.ts).
+    const res = await fetchRemote(ref);
+    const path0 = new URL(res.url).pathname;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return { data: res.data, contentType: header ?? contentTypeFor(path0), name: path0.split("/").pop() || "input" };
   }
   const asset = getAsset(ref);
   if (!asset) throw new Error(`Unknown asset ${ref}`);

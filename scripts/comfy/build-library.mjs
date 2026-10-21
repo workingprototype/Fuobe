@@ -57,9 +57,16 @@ export const LOADER_FOLDERS = {
   MMAudioModelLoader: { mmaudio_model: 'mmaudio' },
   MMAudioFeatureUtilsLoader: { vae_model: 'mmaudio', synchformer_model: 'mmaudio', clip_model: 'mmaudio' },
   ReActorFaceSwap: { swap_model: 'insightface', face_restore_model: 'facerestore_models' },
+  // comfyui-oss-3 additions
+  ImageOnlyCheckpointLoader: { ckpt_name: 'checkpoints' },
+  MelBandRoFormerModelLoader: { model_name: 'diffusion_models' },
+  HunyuanModelLoader: { model_name: 'foley' },
+  HunyuanDependenciesLoader: { vae_name: 'foley', synchformer_name: 'foley' },
+  ThinkSoundModelLoader: { thinksound_model: 'thinksound' },
+  ThinkSoundFeatureUtilsLoader: { vae_model: 'thinksound', synchformer_model: 'thinksound' },
 };
-// Nodes that fetch their own weights at runtime (no manual download needed).
-const SELF_DOWNLOADING = new Set(['RIFE VFI', 'DownloadAndLoadWav2VecModel', 'RMBG']);
+// Nodes that fetch their own weights at runtime (no manual download needed; listed in the entry's autoDownloads).
+const SELF_DOWNLOADING = new Set(['RIFE VFI', 'DownloadAndLoadWav2VecModel', 'RMBG', 'AILab_Qwen3ASRSubtitle', 'Apply Whisper', 'ClothesSegment', 'LatentSyncNode']);
 // Binding keys whose input is a user-supplied model file (not part of "models").
 const USER_MODEL_KEYS = new Set(['lora', 'loraHigh', 'loraLow', 'upscaleModel']);
 const MODEL_EXT = /\.(safetensors|sft|gguf|ckpt|pt|pth|bin|onnx)$/i;
@@ -67,6 +74,12 @@ const NUMERIC_DEFAULT_KEYS = [
   'width', 'height', 'frames', 'fps', 'steps', 'cfg', 'guidance', 'denoise', 'shift', 'scale', 'duration',
   'loraStrength', 'multiplier', 'bpm', 'padLeft', 'padTop', 'padRight', 'padBottom', 'cameraMotion',
   'contextFrames', 'exaggeration', 'temperature', 'motionStrength', 'strength',
+  // comfyui-oss-3 additions
+  'startTime', 'startFrame', 'numLayers', 'maxSize', 'controlStrength', 'framesPerBatch', 'maxTokens', 'maxChars',
+  'backgroundVolumeDb', 'startStep', 'audioScale', 'lipsExpression', 'fontSize', 'textureSize', 'turntableFps',
+  'octreeResolution', 'columns', 'rows',
+  // av-tools (Wave B)
+  'frameIndex',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -77,6 +90,14 @@ export const BINDING_KEYS = new Set([
   // comfyui-oss-2 additions (see library.spec.mjs header)
   'audio2', 'video2', 'video3', 'video4', 'language', 'exaggeration', 'temperature', 'contextFrames', 'tracks',
   'motionStrength', 'strength',
+  // comfyui-oss-3 additions (see library.spec.mjs header)
+  'startTime', 'startFrame', 'numLayers', 'maxSize', 'paletteText', 'paletteImage', 'method', 'controlStrength',
+  'framesPerBatch', 'checkpoint', 'description', 'instruction', 'maxTokens', 'sourceLanguage', 'asrModel', 'hints',
+  'maxChars', 'backgroundVolumeDb', 'startStep', 'audioScale', 'lengthMode', 'lipsExpression', 'whisperModel',
+  'fontSize', 'fontColor', 'captionPosition', 'textureSize', 'turntableFps', 'octreeResolution', 'columns', 'rows',
+  'gridPrompt', 'sheetPrompt',
+  // av-tools (Wave B, see library.spec.mjs header)
+  'frameIndex',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
@@ -197,6 +218,13 @@ async function main() {
     for (const o of outIds) if (!graph[o]) errs.push(`output node ${o} missing`);
     // Predictable output location: output/fuobe/<id>_00001_.ext
     for (const o of outIds) if (graph[o] && 'filename_prefix' in graph[o].inputs) graph[o].inputs.filename_prefix = `fuobe/${spec.id}`;
+    // Previews used as pass-throughs (V3 PreviewImage/MaskPreview return their input): link around them.
+    const PASS_THROUGH = { PreviewImage: 'images', MaskPreview: 'mask' };
+    for (const id of G.outputNodeIds(graph, objectInfo)) {
+      const inp = PASS_THROUGH[graph[id].class_type];
+      const src = inp && graph[id].inputs[inp];
+      if (!outIds.includes(id) && G.isLink(src) && G.consumers(graph, id).length) G.rewire(graph, [id, 0], src);
+    }
     // Drop any other output nodes (previews etc.), then everything not feeding the kept outputs.
     for (const id of G.outputNodeIds(graph, objectInfo)) if (!outIds.includes(id)) delete graph[id];
     G.prune(graph, objectInfo, outIds);
@@ -307,6 +335,10 @@ async function main() {
       notes: spec.notes || '',
     };
     if (spec.autoDownloads) entry.autoDownloads = spec.autoDownloads;
+    // "isolated": the node pack has process-wide side effects; run it on a separate ComfyUI (see README).
+    if (spec.worker) entry.worker = spec.worker;
+    // The app rewrites the graph before submitting (e.g. "captions": one segment per caption cue).
+    if (spec.expand) entry.expand = spec.expand;
     if (!validated && st && st.sha256 === hash && st.error) entry.validationError = st.error;
     if (errs.length) {
       errors.push(...errs.map((e) => `${spec.id}: ${e}`));

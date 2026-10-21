@@ -1,0 +1,21 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "input.mp4", "force_rate": 0, "custom_width": 0, "custom_height": 0, "frame_load_cap": 0, "skip_first_frames": 0,
+      "select_every_nth": 1, "format": "None", "meta_batch": ["2", 0]
+    },
+    "_meta": { "title": "Clip (loaded 8 frames per pass)" }
+  },
+  "2": { "class_type": "VHS_BatchManager", "inputs": { "frames_per_batch": 8 }, "_meta": { "title": "Meta batch: re-queue every 8 frames" } },
+  "3": { "class_type": "ImageInvert", "inputs": { "image": ["1", 0] }, "_meta": { "title": "Per-frame work (invert)" } },
+  "4": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["3", 0], "frame_rate": 8, "loop_count": 0, "filename_prefix": "fuobe/selftest-meta-batch", "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p", "crf": 19, "save_metadata": true, "trim_to_audio": false, "pingpong": false, "save_output": true,
+      "meta_batch": ["2", 0], "audio": ["1", 2]
+    },
+    "_meta": { "title": "Save video (written by the last pass)" }
+  }
+}

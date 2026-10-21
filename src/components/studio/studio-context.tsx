@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { GenParams, InputSlot, MediaKind, Operation, Preset } from "@/lib/catalog/types";
 import type { FeedFilter } from "@/lib/api";
+import type { Signature } from "@/lib/catalog/palettes";
 import type { SlotValue } from "./media-slot";
 
 export type SlotKey = InputSlot["key"];
@@ -18,6 +19,8 @@ export interface StudioConfig {
   kind: MediaKind;
   /** Operations whose models appear in the picker. */
   ops: Operation[];
+  /** Narrower than `ops` for the picker list: the Image studio lists text-to-image models; edit-only tools live in Edit. */
+  pickerOps?: Operation[];
   feed: FeedFilter;
   slots: InputSlot[];
   /** Extra reference images (multi-reference edit / image prompt), or a list of clips (kind "video": join clips). */
@@ -36,6 +39,12 @@ export interface StudioConfig {
   sketchAutoOpen?: "mask" | "draw";
   /** Appended to the user prompt on submit (e.g. identity lock for characters). */
   promptSuffix?: string;
+  /** Optional slots of which one is needed (Lipsync: a portrait or a video): Generate names the group. */
+  anyOf?: SlotKey[][];
+  /** Color signature + Moodboard chips (Image studio): a saved palette and a style, routed per model (src/lib/catalog/palettes.ts). */
+  signature?: boolean;
+  /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
+  extraModels?: string[];
 }
 
 export interface Draft {
@@ -50,23 +59,39 @@ export interface Draft {
   /** Motions/effects: strength of the preset, and an optional second one mixed in (Mix). */
   presetStrength?: number;
   mix?: { presetId: string; strength: number };
+  /** The Color signature and Moodboard picked in the composer (studios with `signature`). */
+  signature?: Signature;
 }
 
-interface Ctx {
+interface Actions {
   config: StudioConfig;
-  draft: Draft;
   setDraft: (patch: Partial<Draft> | ((d: Draft) => Partial<Draft>)) => void;
   setSlot: (key: SlotKey, v: SlotValue | null) => void;
   /** Put an image somewhere sensible (first empty image slot, else references). */
   addImage: (v: SlotValue) => void;
 }
 
-const StudioCtx = createContext<Ctx | null>(null);
+interface Ctx extends Actions {
+  draft: Draft;
+}
 
-export function useStudio(): Ctx {
-  const c = useContext(StudioCtx);
-  if (!c) throw new Error("useStudio outside StudioProvider");
+// Two contexts: the draft changes on every keystroke, the config and actions never do, so the
+// page shell and the feed (which only need actions) don't re-render while you type.
+const ActionsCtx = createContext<Actions | null>(null);
+const DraftCtx = createContext<Draft | null>(null);
+
+/** Config and stable actions only: use this where the draft isn't needed (no re-render per keystroke). */
+export function useStudioActions(): Actions {
+  const c = useContext(ActionsCtx);
+  if (!c) throw new Error("useStudioActions outside StudioProvider");
   return c;
+}
+
+/** Everything, including the draft (re-renders on every draft change). */
+export function useStudio(): Ctx {
+  const actions = useStudioActions();
+  const draft = useContext(DraftCtx)!;
+  return useMemo(() => ({ ...actions, draft }), [actions, draft]);
 }
 
 export function StudioProvider({
@@ -98,11 +123,15 @@ export function StudioProvider({
     },
     [config],
   );
-  const value = useMemo(() => ({ config, draft, setDraft, setSlot, addImage }), [config, draft, setDraft, setSlot, addImage]);
-  return <StudioCtx.Provider value={value}>{children}</StudioCtx.Provider>;
+  const actions = useMemo(() => ({ config, setDraft, setSlot, addImage }), [config, setDraft, setSlot, addImage]);
+  return (
+    <ActionsCtx.Provider value={actions}>
+      <DraftCtx.Provider value={draft}>{children}</DraftCtx.Provider>
+    </ActionsCtx.Provider>
+  );
 }
 
 /** Replace a slot value by key, updating only when it's the same upload (async upload callbacks). */
-export function slotUpdater(setSlot: Ctx["setSlot"], key: SlotKey) {
+export function slotUpdater(setSlot: Actions["setSlot"], key: SlotKey) {
   return (v: SlotValue | null) => setSlot(key, v);
 }

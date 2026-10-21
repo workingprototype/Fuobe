@@ -1,0 +1,71 @@
+"use client";
+
+import { Clapperboard, Copy, LayoutTemplate, MousePointerClick, Target } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { EngineSwitch } from "@/components/studio/engine-switch";
+import { useEngine } from "@/lib/api";
+import type { Engine } from "@/lib/catalog/types";
+import { cn } from "@/lib/utils";
+
+export type SuiteTab = "studio" | "click" | "ads" | "multiplier";
+
+const TABS: { id: SuiteTab; href: string; label: string; icon: typeof Target }[] = [
+  { id: "studio", href: "/marketing", label: "Marketing Studio", icon: LayoutTemplate },
+  { id: "click", href: "/marketing/click-to-ad", label: "Click to Ad", icon: MousePointerClick },
+  { id: "ads", href: "/ads", label: "Ads Studio", icon: Target },
+  { id: "multiplier", href: "/ads/multiplier", label: "Ad Multiplier", icon: Copy },
+];
+
+/** The marketing suite's sticky header: title, the four tools as tabs, and the engine switch. */
+export function MarketingHeader({ title, active, engine, onEngine, right }: { title: string; active: SuiteTab; engine?: Engine; onEngine?: (e: Engine) => void; right?: React.ReactNode }) {
+  const nav = useRef<HTMLElement>(null);
+  // On a phone the tabs scroll sideways: bring the current one into view.
+  useEffect(() => {
+    const el = nav.current?.querySelector<HTMLElement>('[aria-current="page"]');
+    const box = nav.current;
+    if (!el || !box) return;
+    if (el.offsetLeft + el.offsetWidth > box.scrollLeft + box.clientWidth || el.offsetLeft < box.scrollLeft) box.scrollLeft = el.offsetLeft - 12;
+  }, [active]);
+  return (
+    <header className="sticky top-0 z-30 border-b border-transparent bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <div className="flex h-14 min-w-0 items-center gap-2 px-3 sm:px-6">
+        <SidebarTrigger className="md:hidden" />
+        <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">{title}</h1>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {right}
+          {engine && onEngine && <EngineSwitch value={engine} onChange={onEngine} />}
+        </div>
+      </div>
+      <nav ref={nav} aria-label="Marketing tools" className="scrollbar-none -mb-px flex gap-1 overflow-x-auto px-3 sm:px-6">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            href={t.href}
+            aria-current={t.id === active ? "page" : undefined}
+            className={cn(
+              "inline-flex h-9 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground",
+              t.id === active && "border-primary text-foreground",
+            )}
+          >
+            <t.icon className="size-3.5" />
+            {t.label}
+          </Link>
+        ))}
+      </nav>
+    </header>
+  );
+}
+
+/** The engine for marketing views (shared with every studio: the same switch, the same Settings lock). */
+export function useMarketingEngine() {
+  const [engine, setEngine, mode] = useEngine();
+  return { engine: mode === "both" ? engine : (mode as Engine), setEngine, mode };
+}
+
+export const EmptyIcon = ({ icon: Icon = Clapperboard }: { icon?: typeof Clapperboard }) => (
+  <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-brand-faint text-brand-text">
+    <Icon className="size-6" />
+  </div>
+);

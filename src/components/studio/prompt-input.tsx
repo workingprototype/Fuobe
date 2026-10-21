@@ -2,8 +2,9 @@
 
 import { AtSign, AudioLines, MapPin, Package, Palette, Plus, ScanFace } from "lucide-react";
 import Link from "next/link";
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { elementKindInfo, mentionAtCaret, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { hasMention } from "@/lib/composer";
 import { cn } from "@/lib/utils";
 
 export const ELEMENT_ICONS: Record<ElementKind, typeof ScanFace> = {
@@ -55,8 +56,10 @@ export const PromptInput = forwardRef<
     placeholder?: string;
     elements: StudioElement[];
     className?: string;
+    /** Docked and not focused: keep the prompt to one line. */
+    collapsed?: boolean;
   }
->(function PromptInput({ value, onChange, onSubmit, placeholder, elements, className }, ref) {
+>(function PromptInput({ value, onChange, onSubmit, placeholder, elements, className, collapsed }, ref) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState<number | null>(null);
@@ -77,6 +80,24 @@ export const PromptInput = forwardRef<
   }, [mention, visual]);
 
   const syncCaret = () => setCaret(ta.current?.selectionStart ?? null);
+
+  // Collapsed to one line (docked, not focused): show the start of the prompt, not wherever the caret was.
+  useEffect(() => {
+    if (!collapsed) return;
+    if (ta.current) ta.current.scrollTop = 0;
+    if (mirror.current) mirror.current.scrollTop = 0;
+  }, [collapsed]);
+
+  // Typed into before the page hydrated: keep those words (React would reset the field to the draft's value on its next update).
+  const onChangeRef = useRef(onChange);
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  useLayoutEffect(() => {
+    const el = ta.current;
+    if (el && el.value !== value) onChangeRef.current(el.value);
+    // Mount only: afterwards the field and the draft move together.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const insert = (el: StudioElement) => {
     if (!mention) return;
@@ -155,10 +176,13 @@ export const PromptInput = forwardRef<
         }}
         rows={1}
         placeholder={placeholder}
-        spellCheck
+        aria-label="Prompt"
+        // Spellcheck would underline every @handle in red.
+        spellCheck={!hasMention(value)}
         className={cn(
           shared,
-          "scrollbar-none relative field-sizing-content max-h-52 min-h-12 resize-none bg-transparent text-transparent caret-foreground outline-none placeholder:text-subtle-foreground selection:bg-brand-faint selection:text-transparent",
+          "scrollbar-none relative field-sizing-content resize-none bg-transparent text-transparent caret-foreground outline-none placeholder:text-subtle-foreground selection:bg-brand-faint selection:text-transparent",
+          collapsed ? "max-h-[38px] min-h-[38px] overflow-hidden" : "max-h-52 min-h-12",
         )}
       />
       {open && (

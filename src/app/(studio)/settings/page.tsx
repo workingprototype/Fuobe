@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { PageShell } from "@/components/page-shell";
-import { PageHeader } from "@/components/preset-gallery";
+import { PageHeader, PageShell } from "@/components/page-shell";
 import { SettingsForm } from "@/components/settings-form";
 
 export const metadata: Metadata = { title: "Settings" };

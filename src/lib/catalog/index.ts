@@ -1,9 +1,11 @@
-import { APPS as RAW_APPS } from "./apps";
+import { APP_ALIASES, APPS as RAW_APPS } from "./apps";
 import { EFFECTS as RAW_EFFECTS, MOTIONS as RAW_MOTIONS } from "./motions";
 import { MODELS } from "./models";
+import { LLM_MODELS } from "./llm-models";
 import { OSS_LORAS } from "./oss-loras.generated";
 import type { Engine, MediaKind, ModelDef, Operation, Preset } from "./types";
 
+MODELS.push(...LLM_MODELS.filter((m) => !MODELS.some((x) => x.id === m.id))); // text steps (translate, write) on the configured LLM; once per hot reload
 export { MODELS };
 
 const modelIndex = new Map(MODELS.map((m) => [m.id, m]));
@@ -62,9 +64,23 @@ const APP_OPEN_OVERRIDES: Record<string, Preset["open"]> = {
   "app-face-swap": { modelId: "oss-reactor", op: "face-swap" },
   // Qwen-Image-Edit with the Relight LoRA beats a plain edit prompt for lighting changes.
   "app-relight": { modelId: "oss-qwen-relight", op: "edit" },
+  // FLUX.2 [klein] + the try-on LoRA was trained for exactly this (the provider adds the TRYON trigger word).
+  "app-virtual-try-on": {
+    modelId: "oss-tryon-klein",
+    op: "edit",
+    promptTemplate:
+      "A full-body photo of a person. Replace the outfit with the garment shown in the reference image, with its fabric, colour, pattern, logo and fit. The final image is a full body shot. {prompt}",
+  },
 };
 
-export const APPS: Preset[] = RAW_APPS.map((a) => (APP_OPEN_OVERRIDES[a.id] ? { ...a, open: APP_OPEN_OVERRIDES[a.id] } : a)).map(withOssLoras);
+/** What the open version does differently, shown on the app page next to an override above. */
+const APP_OPEN_PARITY: Record<string, string> = {
+  "app-virtual-try-on": "The open version uses FLUX.2 [klein] 4B with a try-on LoRA and masks the old outfit out first (10 GB GPU, Apache-2.0)",
+};
+
+export const APPS: Preset[] = RAW_APPS.map((a) =>
+  APP_OPEN_OVERRIDES[a.id] ? { ...a, open: APP_OPEN_OVERRIDES[a.id], parity: a.parity ?? APP_OPEN_PARITY[a.id] } : a,
+).map(withOssLoras);
 export const MOTIONS: Preset[] = RAW_MOTIONS.map(withOssLoras).map(withFunCamera);
 export const EFFECTS: Preset[] = RAW_EFFECTS.map(withOssLoras);
 export const PRESETS: Preset[] = [...APPS, ...MOTIONS, ...EFFECTS];
@@ -75,7 +91,7 @@ export function getModel(id: string): ModelDef | undefined {
 }
 
 export function getPreset(id: string): Preset | undefined {
-  return presetIndex.get(id);
+  return presetIndex.get(id) ?? (APP_ALIASES[id] ? presetIndex.get(APP_ALIASES[id]) : undefined);
 }
 
 export function modelsFor(opts: { kind?: MediaKind; ops?: Operation[]; engine?: Engine | "all" }): ModelDef[] {

@@ -3,6 +3,7 @@ import type { ProviderId } from "@/lib/catalog/types";
 import { comfyProvider } from "./comfyui";
 import { falProvider } from "./fal";
 import { higgsfieldProvider } from "./higgsfield";
+import { llmProvider } from "./llm";
 import { mockProvider } from "./mock";
 import { replicateProvider } from "./replicate";
 import type { ProviderAdapter } from "./types";
@@ -43,7 +44,7 @@ export const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   local: localProvider,
   openai: notImplemented("openai", "OpenAI"),
   google: notImplemented("google", "Google"),
-  llm: notImplemented("llm", "LLM"),
+  llm: llmProvider,
 };
 
 export function provider(id: ProviderId): ProviderAdapter {

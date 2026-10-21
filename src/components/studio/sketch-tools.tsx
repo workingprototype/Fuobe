@@ -32,17 +32,22 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
     <>
       {current?.ref ? (
         <div className="group/slot relative size-14 shrink-0">
-          <button
-            onClick={() => setEditing(mode)}
-            className="size-full overflow-hidden rounded-xl border-2 border-primary bg-muted"
-            aria-label={mode === "mask" ? "Edit the painted area" : "Edit the drawing"}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={current.preview} alt="" className="size-full object-cover" />
-            <span className="absolute inset-x-0 bottom-0 bg-primary/90 py-px text-center text-[9px] font-semibold text-primary-foreground">
-              {mode === "mask" ? "Area" : "Drawing"}
-            </span>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setEditing(mode)}
+                className="size-full overflow-hidden rounded-xl border-2 border-primary bg-muted"
+                aria-label={mode === "mask" ? "Edit the painted area" : "Edit the drawing"}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={current.preview} alt="" className="size-full object-cover" />
+                <span className="absolute inset-x-0 bottom-0 bg-primary/90 py-px text-center text-[9px] font-semibold text-primary-foreground">
+                  {mode === "mask" ? "Area" : "Drawing"}
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{mode === "mask" ? "Touch up the painted area" : "Touch up the drawing"}</TooltipContent>
+          </Tooltip>
           <button
             onClick={clear}
             className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-soft"
@@ -73,6 +78,8 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
           onOpenChange={(o) => !o && setEditing(null)}
           image={image}
           mode={editing}
+          // Reopen the earlier strokes so a touch-up adds to the drawing instead of replacing it.
+          initialStrokes={current?.sketch?.mode === editing ? current.sketch.strokes : undefined}
           onDone={(r) =>
             setDraft((d) => {
               const extra = { ...d.params.extra };
@@ -82,7 +89,7 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
                 slots: {
                   ...d.slots,
                   mask: r.mask ? { ref: r.mask, preview: r.preview, kind: "image" } : null,
-                  sketch: { ref: r.overlay, preview: r.preview, kind: "image" },
+                  sketch: { ref: r.overlay, preview: r.preview, kind: "image", sketch: { mode: editing, strokes: r.strokes } },
                 },
                 params: { ...d.params, extra },
               };

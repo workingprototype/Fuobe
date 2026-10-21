@@ -1,0 +1,63 @@
+{
+  "1": {
+    "class_type": "ThinkSoundModelLoader",
+    "inputs": {
+      "thinksound_model": "thinksound_light.ckpt",
+      "precision": "fp16",
+      "offload_device": "auto"
+    },
+    "_meta": {
+      "title": "ThinkSoundModelLoader"
+    }
+  },
+  "2": {
+    "class_type": "ThinkSoundFeatureUtilsLoader",
+    "inputs": {
+      "vae_model": "vae.ckpt",
+      "synchformer_model": "synchformer_state_dict.pth",
+      "precision": "fp16",
+      "enable_offload": true
+    },
+    "_meta": {
+      "title": "ThinkSoundFeatureUtilsLoader"
+    }
+  },
+  "3": {
+    "class_type": "ThinkSoundSampler",
+    "inputs": {
+      "thinksound_model": [
+        "1",
+        0
+      ],
+      "feature_utils": [
+        "2",
+        0
+      ],
+      "duration": 8,
+      "steps": 24,
+      "cfg_scale": 5,
+      "seed": 0,
+      "caption": "glass shattering on a tiled floor",
+      "cot_description": "A single wine glass slips and shatters on hard tiles: a sharp crack, then a spray of small glass fragments skittering, short tail of room reverb.",
+      "force_offload": true,
+      "performance_mode": "balanced"
+    },
+    "_meta": {
+      "title": "ThinkSoundSampler"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/sfx-thinksound",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "SaveAudioMP3"
+    }
+  }
+}

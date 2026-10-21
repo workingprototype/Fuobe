@@ -1,0 +1,124 @@
+{
+  "1": {
+    "class_type": "HunyuanModelLoader",
+    "inputs": {
+      "model_name": "hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors",
+      "precision": "bf16",
+      "quantization": "auto"
+    },
+    "_meta": {
+      "title": "HunyuanModelLoader"
+    }
+  },
+  "2": {
+    "class_type": "HunyuanDependenciesLoader",
+    "inputs": {
+      "vae_name": "vae_128d_48k_fp16.safetensors",
+      "synchformer_name": "synchformer_state_dict_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "HunyuanDependenciesLoader"
+    }
+  },
+  "3": {
+    "class_type": "HunyuanFoleySampler",
+    "inputs": {
+      "hunyuan_model": [
+        "1",
+        0
+      ],
+      "hunyuan_deps": [
+        "2",
+        0
+      ],
+      "image": [
+        "5",
+        0
+      ],
+      "frame_rate": 8,
+      "duration": 8,
+      "prompt": "footsteps on gravel, a car door closes",
+      "negative_prompt": "noisy, harsh",
+      "cfg_scale": 4.5,
+      "steps": 50,
+      "sampler": "euler",
+      "batch_size": 1,
+      "seed": 0,
+      "force_offload": true
+    },
+    "_meta": {
+      "title": "HunyuanFoleySampler (video-synced)"
+    }
+  },
+  "4": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/v2a-hunyuan-foley",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "Save the sound track"
+    }
+  },
+  "5": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "input.mp4",
+      "force_rate": 8,
+      "custom_width": 512,
+      "custom_height": 0,
+      "frame_load_cap": 65,
+      "skip_first_frames": 0,
+      "select_every_nth": 1
+    },
+    "_meta": {
+      "title": "Frames the foley follows (8 fps, 512 px wide: small in memory)"
+    }
+  },
+  "6": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Video (its picture is copied, never decoded)"
+    }
+  },
+  "7": {
+    "class_type": "ConcatenateVideo",
+    "inputs": {
+      "videos.video0": [
+        "6",
+        0
+      ],
+      "codec": "auto",
+      "complete_audio": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Same picture, the new sound (stream copy)"
+    }
+  },
+  "8": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "7",
+        0
+      ],
+      "filename_prefix": "fuobe/v2a-hunyuan-foley",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  }
+}

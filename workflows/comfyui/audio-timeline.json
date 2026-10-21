@@ -1,0 +1,94 @@
+{
+  "1": {
+    "class_type": "EmptyAudio",
+    "inputs": {
+      "duration": 10,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "_meta": {
+      "title": "The track: silence as long as the video (duration)"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "line.wav"
+    },
+    "_meta": {
+      "title": "A spoken line (audio; the provider adds one per line)"
+    }
+  },
+  "3": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": 0,
+      "duration": 600
+    },
+    "_meta": {
+      "title": "Cut where the next line starts"
+    }
+  },
+  "4": {
+    "class_type": "EmptyAudio",
+    "inputs": {
+      "duration": 0.5,
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "_meta": {
+      "title": "Silence before the line (startTime)"
+    }
+  },
+  "5": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "4",
+        0
+      ],
+      "audio2": [
+        "3",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "The line at its start time"
+    }
+  },
+  "6": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "1",
+        0
+      ],
+      "audio2": [
+        "5",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Laid on the track (cut or padded to its length)"
+    }
+  },
+  "7": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": [
+        "6",
+        0
+      ],
+      "filename_prefix": "fuobe/audio-timeline"
+    },
+    "_meta": {
+      "title": "Save the track (FLAC, lossless: no encoder delay shifts the lines)"
+    }
+  }
+}

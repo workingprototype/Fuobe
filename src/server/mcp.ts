@@ -2,20 +2,25 @@ import "server-only";
 import { z } from "zod";
 import { apiSchema, executeTool, getTool, planFor, TOOLS, type ToolContext } from "./assist/tools";
 import { engineMode } from "./settings";
+import { enabledSkills, getSkill } from "./skills";
 
 /**
  * Fuobe as an MCP server (Model Context Protocol, streamable HTTP transport, stateless):
  * other agents — Claude Desktop, Claude Code, any MCP client — can look up models, price a
  * plan, start generations and fetch results. Same tools as Assist; the client's own approval
- * prompt replaces Assist's plan card, so `estimate_cost` is offered for asking first.
+ * prompt replaces Assist's plan card, so `estimate_cost` / `estimate_job` are offered for asking
+ * first. Assist's skills are served as MCP prompts (and through list_skills / load_skill).
  */
 
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-const SERVER_INFO = { name: "fuobe", title: "Fuobe studio", version: "1.0.0" };
+const SERVER_INFO = { name: "fuobe", title: "Fuobe studio", version: "1.1.0" };
 const INSTRUCTIONS =
-  "Fuobe is an AI image, video and audio studio (paid cloud models and open-source ComfyUI workflows). " +
-  "Look up models with search_models, price a plan with estimate_cost and tell the user the cost before you call generate or create_storyboard. " +
-  "Generations run in the background: poll check_generations (wait_seconds up to 120) for output URLs. Output URLs are paths on this Fuobe server.";
+  "Fuobe is an AI image, video and audio studio (paid cloud models and open-source ComfyUI workflows); it also transcribes, translates and writes text and turns images into 3D models. " +
+  "Look up models with search_models (kinds image, video, audio, text, model3d), price a plan with estimate_cost and tell the user the cost before you call generate or create_storyboard. " +
+  'Chain steps in one generate call with "after" (a still, then animate it). ' +
+  "Whole studio jobs have their own tools (split_layers, restyle_footage, dub_video, faceless_episode, create_ads, add_captions): price them with estimate_job first. " +
+  "Skills are playbooks for kinds of jobs (product photos, UGC videos, thumbnails…): list_skills, then load_skill to read one — they're also offered as prompts. " +
+  "Generations run in the background: poll check_generations (wait_seconds up to 120) for output URLs; text results come back inline. Output URLs are paths on this Fuobe server.";
 
 interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -31,16 +36,27 @@ const fail = (id: JsonRpcRequest["id"], code: number, message: string): JsonRpcR
 
 const ctx = (): ToolContext => ({ engine: engineMode() === "open" ? "open" : "cloud" });
 
-const READ_ONLY = new Set(["search_models", "list_elements", "list_recent", "check_generations", "estimate_cost"]);
+const READ_ONLY = new Set(["search_models", "list_elements", "list_recent", "check_generations", "estimate_cost", "estimate_job", "list_skills", "load_skill", "read_source"]);
+
+/** Gated tools other than generate and create_storyboard (priced with estimate_job). */
+const jobTools = () => TOOLS.filter((t) => t.gated && t.plan && !["generate", "create_storyboard", "remember"].includes(t.name)).map((t) => t.name);
+
+function describe(t: (typeof TOOLS)[number]): string {
+  // Assist's approval card doesn't exist here: say what the call costs instead.
+  const base = t.description.replace(/The app shows the user the plan[^.]*\.( so call this directly instead of asking for confirmation in text\.)?/, "").replace(/\s*Gated by the same approval card as generate\.|\s*In ask-first mode the user approves each memory\./, "").trim();
+  if (!t.gated) return t.description;
+  if (t.name === "remember") return `${base} Changes what Fuobe Assist remembers about the user in every chat: confirm with the user first.`;
+  const how = t.name === "generate" || t.name === "create_storyboard" ? "price it with estimate_cost" : "price it with estimate_job";
+  return `${base} Spends money on paid models (or GPU time on open ones): ${how} and confirm with the user first.`;
+}
 
 function toolList() {
-  const tools = TOOLS.map((t) => ({
+  const tools: { name: string; title: string; description: string; inputSchema: unknown; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }[] = TOOLS.map((t) => ({
     name: t.name,
     title: t.name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()),
-    // Assist's approval card doesn't exist here: say what the call costs instead.
-    description: t.gated ? `${t.description.replace(/The app shows the user the plan[^.]*\.( so call this directly instead of asking for confirmation in text\.)?/, "").trim()} Spends money on paid models (or GPU time on open ones): price it with estimate_cost and confirm with the user first.` : t.description,
+    description: describe(t),
     inputSchema: apiSchema(t.schema),
-    annotations: { readOnlyHint: READ_ONLY.has(t.name), openWorldHint: !!t.gated },
+    annotations: { readOnlyHint: READ_ONLY.has(t.name), openWorldHint: !!t.gated && t.name !== "remember" },
   }));
   const gen = getTool("generate")!;
   tools.push({
@@ -48,6 +64,22 @@ function toolList() {
     title: "Estimate cost",
     description: "Price a generate call without running it: the model, operation, number of outputs and estimated USD for each job, and whether it would run as a demo (no provider connected). Call it before generate whenever the user hasn't already agreed to a price.",
     inputSchema: apiSchema(gen.schema),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  });
+  const jobs = jobTools();
+  tools.push({
+    name: "estimate_job",
+    title: "Estimate a studio job",
+    description: `Price a studio tool call (${jobs.join(", ")}) without running it: every step with its model and estimated USD, and whether it would run as a demo. Pass the tool's name and the arguments you'd give it.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        tool: { type: "string", enum: jobs, description: "The studio tool to price." },
+        arguments: { type: "object", description: "The arguments you'd pass to that tool." },
+      },
+      required: ["tool", "arguments"],
+      additionalProperties: false,
+    },
     annotations: { readOnlyHint: true, openWorldHint: false },
   });
   return tools;
@@ -67,6 +99,7 @@ function toContent(content: unknown): Content[] {
 }
 
 const CallParams = z.object({ name: z.string(), arguments: z.record(z.string(), z.unknown()).optional() });
+const JobParams = z.object({ tool: z.string(), arguments: z.record(z.string(), z.unknown()) });
 
 async function call(params: unknown) {
   const p = CallParams.safeParse(params);
@@ -76,9 +109,48 @@ async function call(params: unknown) {
     const plan = planFor("generate", getTool("generate")!.schema.parse(args), ctx());
     return { content: [{ type: "text", text: JSON.stringify(plan) }], structuredContent: plan, isError: plan.jobs.every((j) => j.error) };
   }
+  if (name === "estimate_job") {
+    const j = JobParams.safeParse(args);
+    if (!j.success || !jobTools().includes(j.data.tool)) return { content: [{ type: "text", text: `Pass tool (one of ${jobTools().join(", ")}) and its arguments.` }], isError: true };
+    const plan = planFor(j.data.tool, j.data.arguments, ctx());
+    const isError = !!plan.error || plan.jobs.every((x) => x.error);
+    return { content: [{ type: "text", text: JSON.stringify(plan) }], structuredContent: plan, isError };
+  }
   if (!getTool(name)) return undefined;
   const out = await executeTool(name, args, ctx());
   return { content: toContent(out.content), isError: !!out.isError };
+}
+
+// ---------------------------------------------------------------------------
+// Prompts: Assist's skills
+
+function promptList() {
+  return enabledSkills().map((s) => ({
+    name: s.name,
+    title: s.title,
+    description: s.whenToUse ? `${s.description} Use when: ${s.whenToUse}` : s.description,
+    arguments: [{ name: "request", description: "What to make (optional): the job the skill should guide.", required: false }],
+  }));
+}
+
+function promptGet(params: unknown) {
+  const p = z.object({ name: z.string(), arguments: z.record(z.string(), z.string()).optional() }).safeParse(params);
+  if (!p.success) return null;
+  const s = getSkill(p.data.name);
+  if (!s || !s.enabled) return undefined;
+  const request = p.data.arguments?.request?.trim();
+  return {
+    description: s.description,
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: `Follow the “${s.title}” skill from Fuobe for this job, using Fuobe's tools (search_models, generate and the studio tools).\n\n${s.body}${request ? `\n\n---\n\nThe job: ${request}` : ""}`,
+        },
+      },
+    ],
+  };
 }
 
 /** Handle one JSON-RPC message; null for notifications (no response). */
@@ -92,7 +164,7 @@ export async function handleMcp(msg: unknown): Promise<JsonRpcResponse | null> {
       const asked = String(m.params?.protocolVersion ?? "");
       return ok(m.id, {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
-        capabilities: { tools: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
         serverInfo: SERVER_INFO,
         instructions: INSTRUCTIONS,
       });
@@ -115,7 +187,13 @@ export async function handleMcp(msg: unknown): Promise<JsonRpcResponse | null> {
     case "resources/list":
       return ok(m.id, { resources: [] });
     case "prompts/list":
-      return ok(m.id, { prompts: [] });
+      return ok(m.id, { prompts: promptList() });
+    case "prompts/get": {
+      const r = promptGet(m.params);
+      if (r === null) return fail(m.id, -32602, "prompts/get needs a name");
+      if (r === undefined) return fail(m.id, -32602, `Unknown prompt ${String(m.params?.name)}`);
+      return ok(m.id, r);
+    }
     default:
       return fail(m.id, -32601, `Method not found: ${m.method}`);
   }

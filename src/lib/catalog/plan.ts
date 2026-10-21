@@ -15,6 +15,8 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
   if (req.op) return req.op;
   const ops = new Set(model.routes.map((r) => r.op));
   const imgs = req.inputs?.images?.length ?? 0;
+  // Reference clips (Cinema Studio, Seedance) only fit reference-to-video.
+  const clipRefs = (req.inputs?.videos?.length ?? 0) + (req.inputs?.audios?.length ?? 0);
   const has = (op: Operation) => ops.has(op);
   if (model.kind === "video") {
     if (req.inputs?.video && req.inputs?.audio && has("lipsync")) return "lipsync";
@@ -23,7 +25,7 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (req.inputs?.video && has("v2v")) return "v2v";
     if (req.inputs?.video && has("extend")) return "extend";
     if (imgs && req.inputs?.endImage && has("flf2v")) return "flf2v";
-    if (imgs > 1 && has("ref2v")) return "ref2v";
+    if ((imgs > 1 || clipRefs > 0) && has("ref2v")) return "ref2v";
     if (imgs && has("i2v")) return "i2v";
     if (has("t2v")) return "t2v";
   }
@@ -93,7 +95,22 @@ export interface Plan {
 const PROMPTLESS = new Set<Operation>([
   "concat", "frame", "color-match", "finalize", "reframe", "dialogue", "voice-change", "dub", "bg-remove-video", "depth-video", "upscale-image", "upscale-video", "bg-remove",
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
+  // round 3: tools that work from their inputs (open caption burn-in takes timed lines as its prompt and says so when they're missing)
+  "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize", "level",
+  // av-tools: the dub voice track (clips placed on the video's timeline)
+  "timeline",
 ]);
+
+/**
+ * The prompt can be left empty: the operation works from its inputs, the model takes no prompt at all
+ * (try-on, transcription, 3D), or (when the routes' field maps are known, on the server) none of the
+ * routes for this operation sends one.
+ */
+export function promptOptional(model: ModelDef, op: Operation): boolean {
+  if (PROMPTLESS.has(op) || model.options.promptless) return true;
+  const routes = routesFor(model, op);
+  return routes.length > 0 && routes.every((r) => r.map?.prompt === false);
+}
 
 export function planGeneration(
   req: GenerationRequest,
@@ -121,6 +138,9 @@ export function planGeneration(
     // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt.
     const sameModel = route.modelId === model.id;
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
+    // Option choices that set model settings (Angles: rotate / tilt / zoom); a value the user set wins.
+    const chosen = Object.assign({}, ...(preset.options ?? []).map((o) => o.choices.find((c) => c.value === (req.presetOptions?.[o.key] ?? o.default ?? o.choices[0]?.value))?.extra ?? {}));
+    if (sameModel && Object.keys(chosen).length) params = { ...params, extra: { ...chosen, ...params.extra } };
     loras = sameModel ? (route.loras ?? []) : [];
     if (sameModel) op = op ?? route.op;
   }
@@ -180,11 +200,14 @@ export function planGeneration(
     throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
-  if (!prompt && !PROMPTLESS.has(op)) {
+  const requires = model.options.requires;
+  if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
+  if (requires?.prompt && !prompt) throw new Error(requires.msg);
+  if (!prompt && !promptOptional(model, op)) {
     throw new Error("Write a prompt first");
   }
 
-  const missing = missingInputs(op, req);
+  const missing = missingInputs(op, req) ?? unreadInputs(model, op, req) ?? missingImages(model, req);
   if (missing) throw new Error(missing);
   const presets = model.options.presets;
   if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
@@ -196,13 +219,17 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
-const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; msg: string }>> = {
+type InputKey = keyof NonNullable<GenerationRequest["inputs"]>;
+
+const NEEDS: Partial<
+  Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; oneOf?: InputKey[]; msg: string }>
+> = {
   edit: { images: 1, msg: "Add an image to edit" },
   inpaint: { images: 1, mask: true, msg: "Add an image and paint the area to change" },
   outpaint: { images: 1, msg: "Add an image to extend" },
   i2v: { images: 1, msg: "Add a start frame" },
   flf2v: { images: 1, endImage: true, msg: "Add a start and an end frame" },
-  ref2v: { images: 1, msg: "Add reference images" },
+  ref2v: { oneOf: ["images", "videos", "audios"], msg: "Add reference images" },
   v2v: { video: true, msg: "Add a video" },
   avatar: { images: 1, audio: true, msg: "Add a portrait and a voice track" },
   lipsync: { video: true, audio: true, msg: "Add a video and a voice track" },
@@ -222,7 +249,21 @@ const NEEDS: Partial<Record<Operation, { images?: number; video?: boolean; video
   concat: { videos: 2, msg: "Add at least two clips to join" },
   frame: { video: true, msg: "Add a video" },
   "color-match": { images: 1, msg: "Add the image or video and a reference image" },
+  // round 3 (open engine)
+  trim: { video: true, msg: "Add the video to trim" },
+  mux: { video: true, audio: true, msg: "Add a video and the soundtrack to put on it" },
+  captions: { video: true, msg: "Add the video to caption" },
+  layers: { images: 1, msg: "Add the image to split into layers" },
+  "image-to-3d": { images: 1, msg: "Add a product or object photo" },
+  // round 3 (cloud catalog)
+  "text-layers": { images: 1, msg: "Add the image to lift the text from" },
+  vectorize: { images: 1, msg: "Add the image to turn into an SVG" },
+  transcribe: { oneOf: ["audio", "video"], msg: "Add the audio or video to transcribe" },
+  "separate-audio": { oneOf: ["audio", "video"], msg: "Add the audio or video to split" },
+  level: { audio: true, msg: "Add the audio to level" },
 };
+
+const given = (v: unknown) => (Array.isArray(v) ? v.length > 0 : !!v);
 
 /** Human message for the first missing input of an operation, or null. */
 export function missingInputs(op: Operation, req: Pick<GenerationRequest, "inputs">): string | null {
@@ -235,7 +276,48 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   if (n.audio && !i.audio) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
   if (n.mask && !i.mask) return n.msg;
+  if (n.oneOf && !n.oneOf.some((k) => given(i[k]))) return n.msg;
   return null;
+}
+
+const INPUT_WORDS: Partial<Record<InputKey, string>> = {
+  images: "reference images",
+  videos: "reference videos",
+  audios: "reference audio",
+  audio: "audio",
+  video: "video",
+};
+
+/** Whether a route's field map has a place for this input. */
+function readsInput(map: NonNullable<ModelRoute["map"]>, k: InputKey): boolean {
+  if (k === "images") return !!(map.image || map.images);
+  if (k === "video") return !!(map.video || map.videoArray);
+  return !!map[k as keyof typeof map];
+}
+
+/**
+ * For "this or that" inputs: what was attached is something none of the model's routes can send
+ * (Demucs splits audio, not a video; a reference-to-video model that only takes images was given clips).
+ * Needs the routes' field maps, so only the server (full catalog) checks it.
+ */
+function unreadInputs(model: ModelDef, op: Operation, req: Pick<GenerationRequest, "inputs">): string | null {
+  const keys = NEEDS[op]?.oneOf;
+  const routes = routesFor(model, op);
+  if (!keys || !routes.length || routes.some((r) => !r.map)) return null;
+  const i = req.inputs ?? {};
+  const attached = keys.filter((k) => given(i[k]));
+  const reads = (k: InputKey) => routes.some((r) => readsInput(r.map!, k));
+  if (!attached.length || attached.some(reads)) return null;
+  const words = keys.filter(reads).map((k) => INPUT_WORDS[k] ?? k);
+  return words.length ? `${model.name} works from ${words.join(" or ")} — add one` : null;
+}
+
+/** Models that need several images (try-on: the person, then the garment). */
+function missingImages(model: ModelDef, req: Pick<GenerationRequest, "inputs">): string | null {
+  const min = model.options.minImages ?? 0;
+  if ((req.inputs?.images?.length ?? 0) >= min) return null;
+  const labels = model.options.imageLabels?.slice(0, min);
+  return labels?.length === min ? `Add the ${labels.join(" and the ")}` : `${model.name} needs ${min} images`;
 }
 
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
@@ -243,10 +325,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1): numb
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
   const n = params.numOutputs ?? 1;
-  let per = p.usd;
-  if (p.unit === "image") per = p.usd * n;
-  if (p.unit === "second") per = p.usd * (params.duration ?? model.defaults?.duration ?? 5);
-  if (p.unit === "minute") per = (p.usd * (params.duration ?? 60)) / 60;
+  const res = params.resolution ?? model.defaults?.resolution;
+  const usd = (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  let per = usd;
+  if (p.unit === "image") per = usd * n;
+  if (p.unit === "second") per = usd * (params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
   return Math.round(per * jobs * 1000) / 1000;
 }

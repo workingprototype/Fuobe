@@ -1,53 +1,49 @@
 "use client";
 
-import {
-  ArrowUp,
-  AtSign,
-  FileVideo2,
-  Clock,
-  Copy as CopyIcon,
-  Film,
-  Loader2,
-  Maximize,
-  Ratio,
-  Settings2,
-  Shuffle,
-  Sparkles,
-  Volume2,
-  VolumeX,
-  X,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
-import { EFFECTS, getModel, getPreset, modelsFor, MOTIONS } from "@/lib/catalog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
-import { OPERATION_LABELS, type GenerationRequest, type MediaKind, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
-import { enhance, useCreateGeneration, useElements, useEngine, useStatus } from "@/lib/api";
+import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "@/lib/catalog/types";
+import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { formatCost, ratioValue } from "@/lib/format";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { PRESET_ICONS } from "@/components/preset-icons";
-import { fileToSlot, MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
+import { AttachMenu } from "./attach-menu";
+import { useAttach, useComposerBridge, useUploadReaper } from "./attachments";
+import { DialogueEditor, LanguageChip, VoicePicker } from "./audio-controls";
+import { loadFullCatalog, useCatalog } from "./catalog";
+import { Chip, chipBase, chipIdle } from "./chip";
+import { MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
 import { ControlsChip, ProviderPresetChip } from "./model-controls";
 import { ModelPicker } from "./model-picker";
 import { ELEMENT_ICONS, PromptInput, type PromptInputHandle } from "./prompt-input";
+import { radioKeys, radioTab } from "./radio-keys";
+import { SettingsChip } from "./settings-panel";
+import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
-import { MultiShotChip, ShotsEditor } from "./shots-editor";
-import { DialogueEditor, LanguageChip, SlidersChip, VoicePicker } from "./audio-controls";
-import { useStudio } from "./studio-context";
-import { nanoid } from "nanoid";
+import { RECENT_MODELS, useStoredList } from "./stored-list";
+import { useStudio, type Draft } from "./studio-context";
+import { useEdgeFade } from "./use-edge-fade";
+import { useSignature } from "../palettes/use-signature";
 
 const EMPTY: StudioElement[] = [];
 
-/** Operations that transform one input into one result — no batch count. */
-const SINGLE_TAKE = new Set<Operation | undefined>(["lipsync", "avatar", "upscale-video", "dub", "extend", "reframe", "finalize", "v2a", "interpolate"]);
+/** The motion / effect picker (and its preset icons) is its own chunk: only video studios load it. */
+const PresetChips = dynamic(() => import("./preset-chips"), {
+  loading: () => <span aria-hidden className="h-8 w-32 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
+
+/** Color signature + Moodboard chips (studios with `signature`): their own chunk too. */
+const SignatureChips = dynamic(() => import("../palettes/signature-chips"), {
+  loading: () => <span aria-hidden className="h-8 w-40 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
 
 /** Two speakers to start a dialogue with. */
 const defaultLines = (m: ModelDef) => {
@@ -59,258 +55,10 @@ const defaultLines = (m: ModelDef) => {
 };
 
 // ---------------------------------------------------------------------------
-// Chips
-
-function Chip({
-  icon: Icon,
-  children,
-  active,
-  ...props
-}: React.ComponentProps<"button"> & { icon?: typeof Ratio; active?: boolean }) {
-  return (
-    <button
-      type="button"
-      {...props}
-      className={cn(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
-        active ? "bg-brand-faint text-brand-text hover:bg-brand-faint-hover" : "bg-secondary text-secondary-foreground hover:bg-accent",
-        props.className,
-      )}
-    >
-      {Icon && <Icon className="size-3.5" />}
-      {children}
-    </button>
-  );
-}
-
-function RatioGlyph({ ratio }: { ratio: string }) {
-  const r = ratioValue(ratio === "auto" ? "1:1" : ratio);
-  const w = r >= 1 ? 18 : 18 * r;
-  const h = r >= 1 ? 18 / r : 18;
-  return <span className="inline-block rounded-[3px] border-[1.5px] border-current" style={{ width: w, height: h }} />;
-}
-
-function AspectChip({ options, value, onChange }: { options: string[]; value?: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Chip icon={Ratio}>{value ?? options[0]}</Chip>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" align="start" side="top">
-        <p className="px-1 pb-2 text-[13px] font-medium">Aspect ratio</p>
-        <div className="grid grid-cols-4 gap-1">
-          {options.map((o) => (
-            <button
-              key={o}
-              onClick={() => {
-                onChange(o);
-                setOpen(false);
-              }}
-              className={cn(
-                "flex h-16 flex-col items-center justify-center gap-1.5 rounded-lg text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent",
-                value === o && "bg-brand-faint text-brand-text",
-              )}
-            >
-              <span className="grid h-5 place-items-center">
-                <RatioGlyph ratio={o} />
-              </span>
-              {o === "auto" ? "Auto" : o}
-            </button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function SegmentChip<T extends string | number>({
-  icon,
-  label,
-  options,
-  value,
-  onChange,
-  format = (v) => String(v),
-}: {
-  icon: typeof Ratio;
-  label: string;
-  options: T[];
-  value?: T;
-  onChange: (v: T) => void;
-  format?: (v: T) => string;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Chip icon={icon}>{value !== undefined ? format(value) : format(options[0])}</Chip>
-      </PopoverTrigger>
-      <PopoverContent className="w-auto min-w-44 p-2" align="start" side="top">
-        <p className="px-1 pb-2 text-[13px] font-medium">{label}</p>
-        <div className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5">
-          {options.map((o) => (
-            <button
-              key={String(o)}
-              onClick={() => {
-                onChange(o);
-                setOpen(false);
-              }}
-              className={cn(
-                "h-7 min-w-12 flex-1 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition",
-                value === o && "bg-background text-foreground shadow-soft",
-              )}
-            >
-              {format(o)}
-            </button>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function PresetGrid({ list, value, onPick }: { list: Preset[]; value?: string; onPick: (id: string) => void }) {
-  const [cat, setCat] = useState<string>("All");
-  const cats = ["All", ...new Set(list.map((p) => p.category))];
-  return (
-    <>
-      <div className="scrollbar-none mb-2 flex gap-1 overflow-x-auto">
-        {cats.map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={cn("h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent", cat === c && "bg-secondary text-foreground")}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-      <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
-        {list
-          .filter((p) => cat === "All" || p.category === cat)
-          .map((p) => {
-            const PI = PRESET_ICONS[p.look.icon] ?? Film;
-            return (
-              <button
-                key={p.id}
-                onClick={() => onPick(p.id)}
-                className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
-              >
-                <span className="grid aspect-video w-full place-items-center rounded-md text-white" style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}>
-                  <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
-                </span>
-                <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
-              </button>
-            );
-          })}
-      </div>
-    </>
-  );
-}
-
-function PresetChip({ type, value, onChange }: { type: "motion" | "effect"; value?: string; onChange: (id?: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const list = type === "motion" ? MOTIONS : EFFECTS;
-  const selected = value ? getPreset(value) : undefined;
-  const Icon = selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : Film;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Chip icon={Icon} active={!!selected}>
-          {selected?.name ?? (type === "motion" ? "Camera motion" : "Effect")}
-          {selected && (
-            <X
-              className="-mr-1 size-3.5 opacity-70 hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange(undefined);
-              }}
-            />
-          )}
-        </Chip>
-      </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12}>
-        <PresetGrid
-          list={list}
-          value={value}
-          onPick={(id) => {
-            onChange(id);
-            setOpen(false);
-          }}
-        />
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-const MIXABLE = [...MOTIONS, ...EFFECTS];
-const pct = (n: number) => `${Math.round(n * 100)}%`;
-
-/** Higgsfield's Mix: a second motion or effect on top of the first, each with a strength. */
-function MixChip({
-  primary,
-  strength,
-  mix,
-  onChange,
-}: {
-  primary: Preset;
-  strength: number;
-  mix?: { presetId: string; strength: number };
-  onChange: (patch: { presetStrength?: number; mix?: { presetId: string; strength: number } | undefined }) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const second = mix ? getPreset(mix.presetId) : undefined;
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Chip icon={Shuffle} active={!!second}>
-          {second ? `+ ${second.name}` : "Mix"}
-          {second && (
-            <X
-              className="-mr-1 size-3.5 opacity-70 hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange({ mix: undefined });
-              }}
-            />
-          )}
-        </Chip>
-      </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,460px)] space-y-3 p-3" align="start" side="top" collisionPadding={12}>
-        <div className="space-y-2.5">
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[12px]">
-              <span className="font-medium">{primary.name}</span>
-              <span className="font-mono text-muted-foreground">{pct(strength)}</span>
-            </div>
-            <Slider min={0.1} max={1} step={0.05} value={[strength]} onValueChange={([v]) => onChange({ presetStrength: v })} aria-label={`${primary.name} strength`} />
-          </div>
-          {second && mix && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-[12px]">
-                <span className="font-medium">{second.name}</span>
-                <span className="font-mono text-muted-foreground">{pct(mix.strength)}</span>
-              </div>
-              <Slider min={0.1} max={1} step={0.05} value={[mix.strength]} onValueChange={([v]) => onChange({ mix: { ...mix, strength: v } })} aria-label={`${second.name} strength`} />
-            </div>
-          )}
-        </div>
-        <p className="text-[12px] text-muted-foreground">{second ? "Swap the second preset:" : "Pick a second motion or effect to combine with it:"}</p>
-        <PresetGrid
-          list={MIXABLE.filter((p) => p.id !== primary.id && !p.inputs.some((i) => i.key === "endImage"))}
-          value={mix?.presetId}
-          onPick={(id) => onChange({ mix: { presetId: id, strength: mix?.strength ?? 0.6 } })}
-        />
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// ---------------------------------------------------------------------------
 
 function buildRequest(
   feature: string,
-  draft: ReturnType<typeof useStudio>["draft"],
+  draft: Pick<Draft, "slots" | "refs" | "presetId" | "modelId" | "prompt" | "negativePrompt" | "params" | "presetOptions" | "presetStrength" | "mix">,
   op: Operation | undefined,
   promptSuffix?: string,
   refKind: MediaKind = "image",
@@ -344,68 +92,182 @@ function buildRequest(
   };
 }
 
+/** Docked and collapsed, the composer hides its tiles: this event asks it to open first. */
+const EXPAND_EVENT = "composer:expand";
+
+/** Point at an attachment tile: scroll it into view and pulse its outline. */
+function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
+  const el = root?.querySelector<HTMLElement>(`[data-slot-key="${key}"]`);
+  if (!el) {
+    if (retried || !root) return;
+    root.dispatchEvent(new Event(EXPAND_EVENT));
+    requestAnimationFrame(() => pulseSlot(root, key, true));
+    return;
+  }
+  el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const primary = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim() || "currentColor";
+  el.animate(
+    [
+      { boxShadow: `0 0 0 0 color-mix(in oklab, ${primary} 70%, transparent)` },
+      { boxShadow: `0 0 0 7px color-mix(in oklab, ${primary} 0%, transparent)` },
+    ],
+    { duration: 650, iterations: 2, easing: "ease-out" },
+  );
+}
+
 export function Composer({ docked }: { docked: boolean }) {
-  const { config, draft, setDraft, setSlot, addImage } = useStudio();
+  const { config, draft, setDraft, setSlot } = useStudio();
+  const catalog = useCatalog();
   const [engine, setEngine] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
+  const [focused, setFocused] = useState(false);
   const promptRef = useRef<PromptInputHandle>(null);
-  const status = useStatus().data;
-  const elements = useElements().data ?? EMPTY;
+  const root = useRef<HTMLDivElement>(null);
+  // Connection status can arrive before this Suspense subtree hydrates: render the server's view (no status) until then.
+  const hydrated = useHydrated();
+  const liveStatus = useStatus().data;
+  const status = hydrated ? liveStatus : undefined;
+  const liveElements = useElements().data;
+  const elements = (hydrated && liveElements) || EMPTY;
+  const [, setRecent] = useStoredList(RECENT_MODELS);
+  const bridgeRef = useComposerBridge();
+  const [chipRow, fade] = useEdgeFade<HTMLDivElement>();
+  useUploadReaper(draft);
+  // Typed into before the page hydrated: the prompt already has focus (onFocus never ran).
+  useLayoutEffect(() => {
+    if (root.current?.contains(document.activeElement)) setFocused(true);
+  }, []);
+  useEffect(() => {
+    const el = root.current;
+    const expand = () => setFocused(true);
+    el?.addEventListener(EXPAND_EVENT, expand);
+    return () => el?.removeEventListener(EXPAND_EVENT, expand);
+  }, []);
 
-  const preset: Preset | undefined = draft.presetId ? getPreset(draft.presetId) : config.preset;
+  const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
-  const models = useMemo(() => modelsFor({ kind: config.kind, ops: config.ops }), [config.kind, config.ops]);
-  const model: ModelDef | undefined = getModel(draft.modelId);
+  const pickerOps = config.pickerOps ?? config.ops;
+  const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: pickerOps }), [catalog.models, config.kind, pickerOps]);
+  const model: ModelDef | undefined = catalog.getModel(draft.modelId);
+  const presetLoading = !!draft.presetId && !preset && !catalog.complete;
+
+  // Presets handed over in the URL, a Mix, or a model outside this studio's slice: fetch the full catalog.
+  const needsFull = presetLoading || (!!draft.mix && !catalog.getPreset(draft.mix.presetId)) || (catalog.ready && !model);
+  useEffect(() => {
+    if (needsFull) void loadFullCatalog();
+  }, [needsFull]);
 
   // Keep the selected model in sync with the engine switch.
   useEffect(() => {
     if (!model || model.engine === engine) return;
-    const next = lockedModel
-      ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId)
-      : config.defaultModels[engine];
-    if (next && getModel(next)) setDraft((d) => ({ modelId: next, params: { ...getModel(next)!.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
-  }, [engine, model, lockedModel, preset, config.defaultModels, setDraft]);
+    const next = lockedModel ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId) : config.defaultModels[engine];
+    const m = next ? catalog.getModel(next) : undefined;
+    if (m) setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
+  }, [engine, model, lockedModel, preset, config.defaultModels, setDraft, catalog]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
-  const rawRequest = buildRequest(config.feature, draft, studioOp, config.promptSuffix, config.multiRef?.kind);
-  const mentions = model ? applyMentions(rawRequest, model, elements) : { request: rawRequest, mentioned: [], notes: [] };
-  const sketched = model ? applySketch(mentions.request, model) : { request: mentions.request };
-  const request = model ? stripMotionPaths(sketched.request, model) : sketched.request;
+  const opts = model?.options ?? {};
+  // Try-on names its images: "Person photo", then "Add garment" (instead of "Image" / "Add ref").
+  const baseSlots = preset?.inputs ?? config.slots;
+  const named = useMemo(
+    () => namedImageSlots(baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length),
+    [baseSlots, model?.options.imageLabels, config.multiRef?.label, draft.refs.length],
+  );
+  const slots = named.slots;
+  // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
+  const refMax = !config.multiRef
+    ? 0
+    : config.multiRef.kind === "video"
+      ? Math.min(config.multiRef.max, model?.engine === "open" ? 4 : config.multiRef.max)
+      : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
+  const attach = useAttach(slots, refMax);
+
+  // The page's drop zone hands its files to this composer.
+  useEffect(() => {
+    if (!bridgeRef) return;
+    bridgeRef.current = attach.attachFiles;
+    return () => {
+      if (bridgeRef.current === attach.attachFiles) bridgeRef.current = null;
+    };
+  }, [bridgeRef, attach.attachFiles]);
+
+  // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
+  const signature = useSignature(!!config.signature, draft.signature);
+  const prepare = (d: typeof draft) => {
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind));
+    // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
+    const raw = signed.worded;
+    const m = catalog.getModel(raw.modelId) ?? model;
+    const mentions = m ? applyMentions(raw, m, elements) : { request: raw, mentioned: [], notes: [] };
+    const sketched = m ? applySketch(mentions.request, m) : { request: mentions.request };
+    return { mentions, sketched, signed, request: m ? stripMotionPaths(sketched.request, m) : sketched.request };
+  };
+  const { mentions, sketched, signed } = prepare(draft);
   const resolvesOnServer = mentions.mentioned.length > 0 || !!draft.slots.mask?.ref || !!draft.slots.sketch?.ref;
+
+  // Plan with stand-ins for attachments that are missing or still uploading, so the cost and the
+  // operation are known up front and the blocker can name the slot in the studio's own words.
+  // Studios that need one of several inputs (Lipsync: a portrait or a video) name the group.
+  const anyOf = preset?.inputs ? undefined : config.anyOf;
+  const missing = firstMissingSlot(slots, draft.slots, anyOf);
+  const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading);
+  const engineError = lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null;
   let op: Operation | undefined;
-  let blocker: string | null = null;
   let cost: number | null = null;
-  try {
-    if (!model) throw new Error("Pick a model");
-    if (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud)) {
-      throw new Error(`${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet`);
+  let planError: string | null = null;
+  if (model && !engineError && !presetLoading) {
+    try {
+      const stand = (v: SlotValue | null | undefined, kind: MediaKind): SlotValue | null | undefined => (v?.uploading ? { ...v, ref: PLACEHOLDER[kind] } : v);
+      const planSlots: Draft["slots"] = Object.fromEntries(Object.entries(draft.slots).map(([k, v]) => [k, stand(v, v?.kind ?? "image")]));
+      for (const s of slots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
+      for (const g of anyOf ?? []) {
+        const first = slots.find((s) => s.key === g[0]);
+        if (first && !g.some((k) => planSlots[k]?.ref)) planSlots[first.key] = { ref: PLACEHOLDER[first.accept], preview: "", kind: first.accept };
+      }
+      const { request: planned } = prepare({ ...draft, slots: planSlots, refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue) });
+      const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
+      op = plan.op;
+      cost = estimateCost(plan.model, plan.params, plan.jobs);
+    } catch (e) {
+      planError = (e as Error).message;
     }
-    const plan = planGeneration({ ...request, prompt: request.prompt || (config.promptOptional ? " " : "") }, getModel, getPreset);
-    op = plan.op;
-    cost = estimateCost(plan.model, plan.params, plan.jobs);
-    for (const s of preset?.inputs ?? config.slots) {
-      if (s.required && !draft.slots[s.key]?.ref) throw new Error(`Add ${s.label.toLowerCase()}`);
-    }
-    if (Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading)) throw new Error("Uploading…");
-    if (!config.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim())) {
-      throw new Error("Write a prompt first");
-    }
-  } catch (e) {
-    blocker = (e as Error).message;
   }
+  if (signed.blocker) planError = signed.blocker;
+  // Models that take no prompt (try-on, 3D, transcription, upscalers) never ask for one.
+  const promptMissing =
+    !config.promptOptional && !opts.promptless && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
+  const blocker = blockerFor({
+    loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
+    model: !!model,
+    engineError,
+    missing,
+    uploading,
+    planError,
+    promptMissing,
+  });
 
   const submit = () => {
-    if (blocker || create.isPending) {
-      if (blocker) toast(blocker);
+    if (blocker || create.isPending || signature.lock.isPending) {
+      if (blocker) {
+        // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
+        toast(blocker.message, { id: "composer-blocker" });
+        // Point at the tile to fill: the missing slot, or the clip list of a tool that only takes clips.
+        const target = blocker.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+        if (target) pulseSlot(root.current, target);
+      }
       return;
     }
+    toast.dismiss("composer-blocker");
+    setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
-    create.mutate(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind), {
-      onSuccess: (items) => {
-        toast.success(items.length > 1 ? `${items.length} jobs queued` : "Queued", { duration: 1500 });
-      },
+    // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind));
+    // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
+    if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
+    create.mutate(sent.request, {
       onError: (e) => toast.error((e as Error).message),
     });
   };
@@ -423,26 +285,14 @@ export function Composer({ docked }: { docked: boolean }) {
     }
   };
 
-  // Paste images from the clipboard.
+  // Paste images, clips or audio from the clipboard (text pastes as usual).
   const onPaste = (e: React.ClipboardEvent) => {
-    const file = [...e.clipboardData.files].find((f) => /^(image|video|audio)\//.test(f.type));
-    if (!file) return;
+    const files = [...e.clipboardData.files].filter((f) => /^(image|video|audio)\//.test(f.type));
+    if (!files.length) return;
     e.preventDefault();
-    const id = nanoid(6);
-    void fileToSlot(file, (v) => {
-      if (!v) return;
-      addImage({ ...v, id });
-    });
+    attach.attachFiles(files);
   };
 
-  const slots = preset?.inputs ?? config.slots;
-  const opts = model?.options ?? {};
-  // Clips: ComfyUI joins 4 at a time. Images: what the model takes beyond the fixed image slots.
-  const refMax = !config.multiRef
-    ? 0
-    : config.multiRef.kind === "video"
-      ? Math.min(config.multiRef.max, model?.engine === "open" ? 4 : config.multiRef.max)
-      : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
   const p = draft.params;
   const setP = (patch: Partial<typeof p>) => setDraft((d) => ({ params: { ...d.params, ...patch } }));
   const setExtra = (key: string, v: unknown) =>
@@ -452,50 +302,151 @@ export function Composer({ docked }: { docked: boolean }) {
       else extra[key] = v;
       return { params: { ...d.params, extra: Object.keys(extra).length ? extra : undefined } };
     });
+  // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
+  const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none";
+  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
+  const effectiveOp = studioOp ?? op;
+  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
+  const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
+  const costText = costLabel({ demo, cost }, formatCost);
+
+  // Attachments: only when something is attached or a required slot is still empty (U8).
+  const kinds = [...attach.kinds];
+  const hasAttachment = slots.some((s) => draft.slots[s.key]) || draft.refs.length > 0;
+  // Tools whose only input is a list of clips (Join clips) keep their "Add clip" tile in view.
+  const showAttachments =
+    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
+  const collapsed = docked && !focused;
+  // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
+  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
+
+  // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
+  const blocking = blocker?.message;
+  useEffect(() => {
+    toast.dismiss("composer-blocker");
+  }, [blocking]);
+
+  // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
+  const voiceChips = (
+    <>
+      {model && (opts.voices?.length || opts.voiceClone) && effectiveOp !== "dialogue" && (
+        <VoicePicker
+          model={model}
+          voice={p.voice}
+          sample={draft.slots.voiceAudio}
+          label={effectiveOp === "voice-change" ? "New voice" : "Voice"}
+          onChange={(c) => {
+            if (c?.kind === "preset") setDraft((d) => ({ params: { ...d.params, voice: c.id }, slots: { ...d.slots, voiceAudio: null } }));
+            if (c?.kind === "sample") setSlot("voiceAudio", c.value);
+          }}
+        />
+      )}
+      {/* Open-source dialogue clones each speaker from a sample. */}
+      {model &&
+        opts.voiceClone &&
+        effectiveOp === "dialogue" &&
+        (["voiceAudio", "voiceAudio2"] as const).map((key, i) => (
+          <VoicePicker
+            key={key}
+            model={{ ...model, options: { ...model.options, voices: [] } }}
+            sample={draft.slots[key]}
+            label={`Speaker ${i ? "B" : "A"}`}
+            onChange={(c) => c?.kind === "sample" && setSlot(key, c.value)}
+          />
+        ))}
+      {model && opts.languages && (
+        <LanguageChip languages={opts.languages} value={p.targetLanguage} label={effectiveOp === "dub" ? "Translate to…" : "Language"} onChange={(targetLanguage) => setP({ targetLanguage })} />
+      )}
+    </>
+  );
+  const styleChips = (
+    <>
+      {(config.presetPicker || (preset && (preset.type === "motion" || preset.type === "effect"))) && (
+        <PresetChips
+          picker={config.presetPicker}
+          preset={preset}
+          presetId={draft.presetId}
+          strength={draft.presetStrength ?? 1}
+          mix={draft.mix}
+          onPreset={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
+          onMix={(patch) => setDraft(patch)}
+        />
+      )}
+      {config.signature && (
+        <SignatureChips
+          value={draft.signature}
+          onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
+          engine={engine}
+          presetSource={opts.presets?.source}
+          styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
+          onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}
+        />
+      )}
+      {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
+      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
+    </>
+  );
+  const hasSecondary =
+    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
+    !!config.presetPicker ||
+    !!config.signature ||
+    preset?.type === "motion" ||
+    preset?.type === "effect";
 
   return (
     <div
+      ref={root}
       className={cn(
         "group/composer w-full rounded-[20px] border bg-background p-2.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer",
         docked && "shadow-normal",
       )}
       onPaste={onPaste}
+      onFocus={() => setFocused(true)}
+      onBlur={(e) => {
+        const to = e.relatedTarget as HTMLElement | null;
+        // Moving into one of the composer's own popovers or sheets keeps it open.
+        if (e.currentTarget.contains(to) || to?.closest("[data-radix-popper-content-wrapper],[role=dialog]")) return;
+        setFocused(false);
+      }}
+      onKeyDown={(e) => {
+        // ⌘/Ctrl+Enter generates from any field (shots, dialogue lines); the prompt handles Enter itself.
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.defaultPrevented && !e.nativeEvent.isComposing) {
+          e.preventDefault();
+          submit();
+        }
+      }}
     >
-      {/* Attachments */}
-      {(slots.length > 0 || config.multiRef) && (
-        <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1 pb-2">
+      {showAttachments && !collapsed && (
+        <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-2">
           {slots.map((s) => (
             <MediaSlot
               key={s.key}
+              slotKey={s.key}
               label={s.label}
               kind={s.accept}
               required={s.required}
               value={draft.slots[s.key] ?? null}
-              onChange={(v) => {
-                setSlot(s.key, v);
-                // A drawing belongs to the image it was made on.
-                if (s.key === "image") setDraft((d) => ({ slots: { ...d.slots, mask: null, sketch: null } }));
-              }}
+              onChange={(v) => attach.setSlotValue(s.key, v)}
+              onFile={(f) => attach.uploadToSlot(s.key, f, s.accept)}
             />
           ))}
           {config.sketch && draft.slots.image?.ref && !draft.slots.image.uploading && (
             <SketchTools modes={config.sketch} image={draft.slots.image.ref} autoOpen={config.sketchAutoOpen} />
           )}
           {config.multiRef &&
-            draft.refs.map((r) => (
+            draft.refs.map((r, i) => (
               <div key={r.id ?? r.ref} className="relative size-14 shrink-0 overflow-hidden rounded-xl border bg-muted">
                 <SlotPreview value={r} />
                 {r.uploading && (
-                  <div className="absolute inset-0 grid place-items-center bg-background/60">
+                  <div className="absolute inset-0 grid place-items-center bg-background/60" role="status" aria-label="Uploading">
                     <Loader2 className="size-4 animate-spin" />
                   </div>
                 )}
                 <button
-                  onClick={() => setDraft((d) => ({ refs: d.refs.filter((x) => x !== r) }))}
+                  onClick={() => attach.removeRef(r)}
                   className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background"
-                  aria-label="Remove reference"
+                  aria-label={`Remove ${config.multiRef?.kind === "video" ? "clip" : "reference"} ${i + 1}`}
                 >
                   <X className="size-3" />
                 </button>
@@ -503,26 +454,17 @@ export function Composer({ docked }: { docked: boolean }) {
             ))}
           {config.multiRef && draft.refs.length < refMax && (
             <MediaSlot
-              label={config.multiRef.label}
+              slotKey="refs"
+              label={named.refLabel ?? config.multiRef.label}
               kind={config.multiRef.kind ?? "image"}
               value={null}
-              onFile={(f) => {
-                const id = nanoid(6);
-                void fileToSlot(f, (v) =>
-                  setDraft((d) => {
-                    if (!v) return { refs: d.refs.filter((r) => r.id !== id) };
-                    const exists = d.refs.some((r) => r.id === id);
-                    return { refs: exists ? d.refs.map((r) => (r.id === id ? { ...v, id } : r)) : [...d.refs, { ...v, id }] };
-                  }),
-                );
-              }}
-              onChange={(v) => v && setDraft((d) => ({ refs: [...d.refs, { ...v, id: nanoid(6) }] }))}
+              onFile={attach.addRefFile}
+              onChange={(v) => v && setDraft((d) => ({ refs: [...d.refs, v] }))}
             />
           )}
         </div>
       )}
 
-      {/* Prompt */}
       {showPrompt && (
         <PromptInput
           ref={promptRef}
@@ -531,15 +473,12 @@ export function Composer({ docked }: { docked: boolean }) {
           onSubmit={submit}
           placeholder={preset?.promptPlaceholder ?? config.placeholder}
           elements={elements}
+          collapsed={collapsed}
         />
       )}
 
-      {/* Dialogue script */}
-      {model && (studioOp ?? op) === "dialogue" && (
-        <DialogueEditor model={model} lines={p.dialogue ?? defaultLines(model)} onChange={(dialogue) => setP({ dialogue })} />
-      )}
+      {model && effectiveOp === "dialogue" && <DialogueEditor model={model} lines={p.dialogue ?? defaultLines(model)} onChange={(dialogue) => setP({ dialogue })} />}
 
-      {/* Multi-shot */}
       {model?.options.multiShot && p.shots && <ShotsEditor model={model} shots={p.shots} onChange={(shots) => setP({ shots })} />}
 
       {/* @mentioned elements */}
@@ -564,10 +503,7 @@ export function Composer({ docked }: { docked: boolean }) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {words ??
-                    (el.loras.some((l) => l.modelId === model?.id)
-                      ? `Uses ${el.name}'s trained LoRA on ${model?.name}`
-                      : `${el.name}'s photos are sent as reference images`)}
+                  {words ?? (el.loras.some((l) => l.modelId === model?.id) ? `Uses ${el.name}'s trained LoRA on ${model?.name}` : `${el.name}'s photos are sent as reference images`)}
                 </TooltipContent>
               </Tooltip>
             );
@@ -579,18 +515,19 @@ export function Composer({ docked }: { docked: boolean }) {
       {preset?.options?.length ? (
         <div className="flex flex-wrap gap-3 px-1.5 pb-2">
           {preset.options.map((o) => (
-            <div key={o.key} className="flex flex-wrap items-center gap-1">
+            <div key={o.key} role="radiogroup" aria-label={o.label} onKeyDown={radioKeys} className="flex flex-wrap items-center gap-1">
               <span className="mr-1 text-[12px] text-muted-foreground">{o.label}</span>
               {o.choices.map((c) => {
                 const sel = (draft.presetOptions[o.key] ?? o.default ?? o.choices[0].value) === c.value;
                 return (
                   <button
                     key={c.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={sel}
+                    tabIndex={radioTab(sel)}
                     onClick={() => setDraft((d) => ({ presetOptions: { ...d.presetOptions, [o.key]: c.value } }))}
-                    className={cn(
-                      "h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors",
-                      sel ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
-                    )}
+                    className={cn("h-7 rounded-full border px-2.5 text-[12px] font-medium transition-colors", sel ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}
                   >
                     {c.label}
                   </button>
@@ -601,30 +538,73 @@ export function Composer({ docked }: { docked: boolean }) {
         </div>
       ) : null}
 
-      {/* Toolbar */}
-      <div className="flex items-end gap-2">
-        <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
-          {!lockedModel ? (
-            <ModelPicker
-              models={models}
-              value={model}
-              engine={engine}
-              onEngineChange={setEngine}
-              onChange={(m) => {
-                setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
-                if (m.engine !== engine) setEngine(m.engine);
-              }}
-            />
-          ) : (
-            <Chip icon={Sparkles}>{model?.name}</Chip>
+      {/* Toolbar: one row; it scrolls (with faded edges) when it doesn't fit. */}
+      <div className="flex items-center gap-2">
+        {/* Phones (below sm): "+", Settings (icon), the model (it shrinks to fit) and @; the other chips are in the settings sheet. */}
+        <div ref={chipRow} style={fade} data-composer-toolbar className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1">
+          {kinds.length > 0 && <AttachMenu kinds={kinds} onFiles={attach.attachFiles} onPick={attach.attach} />}
+          {collapsed && showAttachments && attached.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setFocused(true)}
+              aria-label={`${attached.length} attached. Show attachments`}
+              className={cn(chipBase, chipIdle, "gap-1.5 pl-1 max-sm:order-1")}
+            >
+              <span className="flex -space-x-2.5">
+                {attached.slice(0, 3).map((v, i) => (
+                  <span key={v.id ?? `${v.ref}-${i}`} className="size-6 overflow-hidden rounded-full border-2 border-secondary bg-muted">
+                    <SlotPreview value={v} />
+                  </span>
+                ))}
+              </span>
+              <span className="tabular-nums">
+                {attached.length}
+                <span className="max-sm:hidden"> attached</span>
+              </span>
+            </button>
           )}
+          {/* The model chip may shrink (its name truncates) on phones, so the row fits without scrolling. */}
+          <span className="flex min-w-0 shrink-0 max-sm:order-2 max-sm:min-w-[4.5rem] max-sm:shrink max-sm:[&>button]:min-w-0 max-sm:[&>button]:shrink max-sm:[&>button>svg:first-child]:hidden">
+            {!lockedModel ? (
+              catalog.ready ? (
+                <ModelPicker
+                  models={models}
+                  value={model}
+                  engine={engine}
+                  onEngineChange={setEngine}
+                  defaultModels={config.defaultModels}
+                  onChange={(m) => {
+                    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
+                    if (m.engine !== engine) setEngine(m.engine);
+                  }}
+                />
+              ) : (
+                <Chip icon={Loader2} disabled className="[&>svg]:animate-spin">
+                  Loading models…
+                </Chip>
+              )
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Chip icon={Sparkles}>
+                    <span className="min-w-0 truncate">{model?.name ?? "…"}</span>
+                  </Chip>
+                </TooltipTrigger>
+                <TooltipContent>{preset?.name} runs on {model?.name ?? "its own model"}</TooltipContent>
+              </Tooltip>
+            )}
+          </span>
           {showPrompt && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={() => promptRef.current?.startMention()}
-                  className="grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-accent"
+                  // Phones: at the end of the row (typing @ does the same); folded away with the docked composer.
+                  className={cn(
+                    "grid size-8 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 max-sm:order-3",
+                    collapsed && "max-sm:hidden",
+                  )}
                   aria-label="Add an element"
                 >
                   <AtSign className="size-3.5" />
@@ -633,192 +613,69 @@ export function Composer({ docked }: { docked: boolean }) {
               <TooltipContent>Add a character, location or prop · type @</TooltipContent>
             </Tooltip>
           )}
-          {config.presetPicker && (
-            <PresetChip
-              type={config.presetPicker}
-              value={draft.presetId}
-              onChange={(id) => setDraft(id ? { presetId: id } : { presetId: undefined, mix: undefined, presetStrength: undefined })}
-            />
-          )}
-          {preset && (preset.type === "motion" || preset.type === "effect") && (
-            <MixChip primary={preset} strength={draft.presetStrength ?? 1} mix={draft.mix} onChange={(patch) => setDraft(patch)} />
-          )}
-          {opts.aspectRatios && opts.aspectRatios.length > 1 && op !== "i2v" && op !== "flf2v" && (
-            <AspectChip options={opts.aspectRatios} value={p.aspectRatio} onChange={(v) => setP({ aspectRatio: v })} />
-          )}
-          {opts.resolutions && opts.resolutions.length > 1 && (
-            <SegmentChip icon={Maximize} label="Quality" options={opts.resolutions} value={p.resolution} onChange={(v) => setP({ resolution: v })} />
-          )}
-          {opts.durations && opts.durations.length > 1 && !p.shots && (
-            <SegmentChip
-              icon={Clock}
-              label="Duration"
-              options={opts.durations}
-              value={p.duration}
-              onChange={(v) => setP({ duration: v })}
-              format={(v) => (v >= 1000 ? `${Math.round(v / 1000)}s` : `${v}s`)}
-            />
-          )}
-          {config.kind === "image" && (
-            <SegmentChip icon={CopyIcon} label="Images" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
-          )}
-          {config.kind === "video" && !SINGLE_TAKE.has((studioOp ?? op)!) && (
-            <SegmentChip icon={CopyIcon} label="Videos" options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
-          )}
-          {model && (opts.voices?.length || opts.voiceClone) && (studioOp ?? op) !== "dialogue" && (
-            <VoicePicker
-              model={model}
-              voice={p.voice}
-              sample={draft.slots.voiceAudio}
-              label={(studioOp ?? op) === "voice-change" ? "New voice" : "Voice"}
-              onChange={(c) => {
-                if (c?.kind === "preset") setDraft((d) => ({ params: { ...d.params, voice: c.id }, slots: { ...d.slots, voiceAudio: null } }));
-                if (c?.kind === "sample") setSlot("voiceAudio", c.value);
-              }}
-            />
-          )}
-          {/* Open-source dialogue clones each speaker from a sample. */}
-          {model && opts.voiceClone && (studioOp ?? op) === "dialogue" &&
-            (["voiceAudio", "voiceAudio2"] as const).map((key, i) => (
-              <VoicePicker
-                key={key}
-                model={{ ...model, options: { ...model.options, voices: [] } }}
-                sample={draft.slots[key]}
-                label={`Speaker ${i ? "B" : "A"}`}
-                onChange={(c) => c?.kind === "sample" && setSlot(key, c.value)}
-              />
-            ))}
-          {model && opts.languages && (
-            <LanguageChip
-              languages={opts.languages}
-              value={p.targetLanguage}
-              label={(studioOp ?? op) === "dub" ? "Translate to…" : "Language"}
-              onChange={(targetLanguage) => setP({ targetLanguage })}
-            />
-          )}
-          {model && opts.sliders && <SlidersChip model={model} values={p.extra ?? {}} onChange={setExtra} />}
-          {opts.multiShot && model && <MultiShotChip model={model} params={p} onChange={setP} />}
-          {opts.draft && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Chip icon={FileVideo2} active={!!p.draft} onClick={() => setP({ draft: !p.draft })}>
-                  Draft
-                </Chip>
-              </TooltipTrigger>
-              <TooltipContent>{p.draft ? "Cheap 480p take — finish the one you like in 1080p" : "Draft mode: preview at 480p first, then render the keeper in 1080p"}</TooltipContent>
-            </Tooltip>
-          )}
-          {opts.presets && (
-            <ProviderPresetChip
-              spec={opts.presets}
-              value={p.extra?.[opts.presets.param] as string | undefined}
-              onChange={(id) => setExtra(opts.presets!.param, id)}
-            />
-          )}
-          {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
-          {opts.audio === true && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Chip icon={p.generateAudio === false ? VolumeX : Volume2} active={p.generateAudio !== false} onClick={() => setP({ generateAudio: p.generateAudio === false })}>
-                  Audio
-                </Chip>
-              </TooltipTrigger>
-              <TooltipContent>{p.generateAudio === false ? "Silent video (cheaper)" : "Native sound, music and dialogue"}</TooltipContent>
-            </Tooltip>
-          )}
-          {showPrompt && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Chip icon={enhancing ? Loader2 : Sparkles} active={!!p.enhancePrompt} onClick={() => setP({ enhancePrompt: !p.enhancePrompt })} onDoubleClick={runEnhance} className={enhancing ? "[&>svg]:animate-spin" : undefined}>
-                  Enhance
-                </Chip>
-              </TooltipTrigger>
-              <TooltipContent>Rewrite the prompt with an LLM before generating · double-click to rewrite now</TooltipContent>
-            </Tooltip>
-          )}
-          <Popover>
-            <PopoverTrigger asChild>
-              <button className="grid size-8 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" aria-label="Advanced settings">
-                <Settings2 className="size-4" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80 space-y-3" align="start" side="top">
-              <p className="text-[13px] font-medium">Advanced</p>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-                  <span>Seed</span>
-                  <span className="flex items-center gap-2">
-                    Random
-                    <Switch checked={p.seed === undefined} onCheckedChange={(r) => setP({ seed: r ? undefined : Math.floor(Math.random() * 1e9) })} />
-                  </span>
-                </div>
-                {p.seed !== undefined && (
-                  <div className="flex gap-1.5">
-                    <input
-                      type="number"
-                      value={p.seed}
-                      onChange={(e) => setP({ seed: Number(e.target.value) })}
-                      className="h-8 flex-1 rounded-md border bg-background px-2 font-mono text-sm outline-none focus:border-primary"
-                    />
-                    <Button variant="secondary" size="icon" className="size-8" onClick={() => setP({ seed: Math.floor(Math.random() * 1e9) })}>
-                      <Shuffle className="size-3.5" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-              {opts.negativePrompt && (
-                <div className="space-y-1.5">
-                  <span className="text-[12px] text-muted-foreground">Negative prompt</span>
-                  <textarea
-                    value={draft.negativePrompt}
-                    onChange={(e) => setDraft({ negativePrompt: e.target.value })}
-                    rows={3}
-                    placeholder="blurry, low quality, extra fingers…"
-                    className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
-                  />
-                </div>
-              )}
-              {model && (
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  {model.name} via {model.engine === "open" ? "ComfyUI" : [...new Set(model.routes.map((r) => r.provider))].join(" / ")}
-                  {op ? ` · ${OPERATION_LABELS[op]}` : ""}
-                  {opNote ? ` · ${opNote}` : ""}
-                </p>
-              )}
-            </PopoverContent>
-          </Popover>
+          <span className="contents max-sm:hidden">{voiceChips}</span>
+          <SettingsChip
+            model={model}
+            op={op}
+            shape={shape}
+            params={p}
+            setP={setP}
+            setExtra={setExtra}
+            negativePrompt={draft.negativePrompt}
+            setNegativePrompt={(negativePrompt) => setDraft({ negativePrompt })}
+            kind={config.kind}
+            enhancing={enhancing}
+            onRewrite={runEnhance}
+            opNote={opNote}
+            className="max-sm:order-1"
+            extras={
+              hasSecondary ? (
+                <>
+                  {voiceChips}
+                  {styleChips}
+                </>
+              ) : undefined
+            }
+          />
+          <span className="contents max-sm:hidden">{styleChips}</span>
         </div>
-        <span className="hidden shrink-0 font-mono text-[12px] text-muted-foreground sm:inline">
-          {model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured)
-            ? "Demo · free"
-            : cost === 0
-              ? "Free"
-              : cost != null
-                ? `≈ ${formatCost(cost)}`
-                : ""}
-        </span>
+        {costText && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="shrink-0 text-[12px] font-medium text-muted-foreground tabular-nums">
+                <span className="sm:hidden">{costLabel({ demo, cost, compact: true }, formatCost)}</span>
+                <span className="hidden sm:inline">{costText}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {demo ? "Demo mode: no key connected for this model, so outputs are free placeholders" : cost === 0 ? "Runs on your own GPU" : "Estimated cost, billed by the provider to your key"}
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               size="icon"
               onClick={submit}
-              disabled={create.isPending}
-              aria-label="Generate"
+              disabled={create.isPending || signature.lock.isPending}
+              aria-label={blocker ? `Generate — ${blocker.message}` : "Generate"}
               className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
             >
-              {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+              {create.isPending || signature.lock.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {blocker ?? (
+            {blocker?.message ?? (
               <span className="flex items-center gap-1.5">
                 Generate <Kbd>↵</Kbd>
+                {costText && <span className="text-muted-foreground tabular-nums">· {costText}</span>}
               </span>
             )}
           </TooltipContent>
         </Tooltip>
       </div>
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
+      {signed.notes.length > 0 && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{signed.notes.join(" · ")}</p>}
       {model && op && model.options.endFrame === undefined && draft.slots.endImage?.ref && (
         <p className="px-2 pt-1 text-[12px] text-warning">{model.name} ignores the end frame — pick Kling 2.5, Veo 3.1, Seedance or Wan 2.2 to use it.</p>
       )}

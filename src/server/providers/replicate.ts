@@ -1,5 +1,5 @@
 import "server-only";
-import { buildPayload, extractMedia } from "@/lib/catalog/payload";
+import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { toDataUri } from "../storage";
 import { ProviderError, type ProviderAdapter } from "./types";
@@ -58,7 +58,7 @@ export const replicateProvider: ProviderAdapter = {
     return { externalId: res.id, payload };
   },
 
-  async poll({ externalId }) {
+  async poll({ externalId, route }) {
     const p = (await rFetch(`${API}/predictions/${externalId}`)) as {
       status: string;
       output: unknown;
@@ -72,8 +72,9 @@ export const replicateProvider: ProviderAdapter = {
       return { state: "running", progress: pct ? Number(pct) / 100 : undefined, message: last ?? "Processing" };
     }
     if (p.status === "succeeded") {
-      const outputs = extractMedia({ output: p.output });
-      if (!outputs.length) return { state: "failed", error: "No media in output" };
+      // Object outputs (Scribe's {text, words}) are read as the result itself; URL lists keep their order (layers).
+      const outputs = extractOutputs({ output: p.output }, route?.op);
+      if (!outputs.length) return { state: "failed", error: noOutputsError({ output: p.output }) };
       return { state: "succeeded", outputs };
     }
     return { state: "failed", error: p.error ?? p.status };

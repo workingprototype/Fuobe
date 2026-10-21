@@ -1,7 +1,8 @@
 import "server-only";
-import { buildPayload, extractMedia } from "@/lib/catalog/payload";
+import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
+import type { Operation } from "@/lib/catalog/types";
 import { getSetting } from "../settings";
-import { ProviderError, type ProviderAdapter } from "./types";
+import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
 
 /**
  * Higgsfield's pay-per-use API (docs.higgsfield.ai, see docs/research/higgsfield-api.md).
@@ -69,6 +70,29 @@ export async function hfUpload(data: Buffer, contentType: string): Promise<strin
   return slot.public_url;
 }
 
+/** RequestStatus fields that hold results (docs/research/higgsfield-api.json → lifecycle.status.outputs). */
+const MEDIA_FIELDS = ["images", "image", "video", "videos", "audio", "audios"] as const;
+/** Extra artifacts some video/3D jobs attach; kept as links on the first output, not shown as media. */
+const ARTIFACT_FIELDS = ["zip", "mov", "jsx", "fbx", "ply"] as const;
+
+/**
+ * The outputs of a completed RequestStatus. The body also carries status_url and cancel_url (API links,
+ * not results), so only the documented media fields are read.
+ */
+export function higgsfieldOutputs(status: Record<string, unknown>, op?: Operation): RemoteOutput[] {
+  const media = Object.fromEntries(MEDIA_FIELDS.filter((k) => status[k] != null).map((k) => [k, status[k]]));
+  const outputs: RemoteOutput[] = extractOutputs(media, op);
+  const artifacts = Object.fromEntries(
+    ARTIFACT_FIELDS.flatMap((k) => {
+      const v = status[k] as { url?: unknown } | string | undefined;
+      const url = typeof v === "string" ? v : typeof v?.url === "string" ? v.url : undefined;
+      return url ? [[k, url]] : [];
+    }),
+  );
+  if (outputs.length && Object.keys(artifacts).length) outputs[0] = { ...outputs[0], meta: { ...outputs[0].meta, artifacts } };
+  return outputs;
+}
+
 export const higgsfieldProvider: ProviderAdapter = {
   id: "higgsfield",
   label: "Higgsfield",
@@ -91,16 +115,16 @@ export const higgsfieldProvider: ProviderAdapter = {
     };
   },
 
-  async poll({ meta }) {
-    const s = (await hfFetch(meta.statusUrl as string)) as { status: string; error?: string | null };
+  async poll({ meta, route }) {
+    const s = (await hfFetch(meta.statusUrl as string)) as { status: string; error?: string | null } & Record<string, unknown>;
     switch (s.status) {
       case "queued":
         return { state: "queued", message: "In queue" };
       case "in_progress":
         return { state: "running", message: "Generating" };
       case "completed": {
-        const outputs = extractMedia(s);
-        return outputs.length ? { state: "succeeded", outputs } : { state: "failed", error: `No media in response: ${JSON.stringify(s).slice(0, 300)}` };
+        const outputs = higgsfieldOutputs(s, route?.op);
+        return outputs.length ? { state: "succeeded", outputs } : { state: "failed", error: noOutputsError(s) };
       }
       case "nsfw":
         return { state: "failed", error: "Higgsfield's moderation blocked this prompt or result (not charged)" };

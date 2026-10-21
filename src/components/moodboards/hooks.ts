@@ -1,0 +1,69 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import type { SoulPresetModel } from "@/lib/catalog/higgsfield-presets.generated";
+import type { Engine } from "@/lib/catalog/types";
+import { CURATED_SETS, withLive, type CuratedMoodboard, type LivePresets, type Moodboard } from "./logic";
+
+/**
+ * A curated set (Soul 2.0's looks or Soul's styles): the built-in list at once, with Higgsfield's
+ * preview images (and newer presets) once its live list loads with a key. Shares the style
+ * picker's cache (the same request).
+ */
+export function useCuratedSet(source: SoulPresetModel, enabled = true): CuratedMoodboard[] {
+  const live = useQuery({
+    queryKey: ["provider-presets", source],
+    queryFn: async () => (await (await fetch(`/api/providers/higgsfield/presets?source=${source}`)).json()) as LivePresets,
+    staleTime: 60 * 60 * 1000,
+    enabled,
+  });
+  return useMemo(() => withLive(CURATED_SETS[source], live.data, source), [source, live.data]);
+}
+
+async function json<T>(res: Response): Promise<T> {
+  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+  return body;
+}
+
+const busy = (m: Moodboard) => m.status !== "complete" && m.status !== "failed";
+
+/** Your moodboards (polled while one builds or trains) and Soul 2.0's curated looks. */
+export function useMoodboards(enabled = true) {
+  return useQuery({
+    queryKey: ["moodboards"],
+    queryFn: async () => json<{ items: Moodboard[]; curated: CuratedMoodboard[] }>(await fetch("/api/moodboards")),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: (q) => (q.state.data?.items.some((m) => busy(m) || m.lora?.status === "training") ? 2000 : false),
+  });
+}
+
+export function useMoodboardActions() {
+  const qc = useQueryClient();
+  const done = useCallback(() => void qc.invalidateQueries({ queryKey: ["moodboards"] }), [qc]);
+  const post = async <T,>(url: string, body?: unknown, method = "POST") =>
+    json<T>(await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }));
+  const create = useMutation({
+    mutationFn: (b: { name: string; images: string[]; collages: string[]; engine: Engine }) => post<Moodboard>("/api/moodboards", b),
+    onSuccess: done,
+  });
+  const retry = useMutation({ mutationFn: (b: { id: string; engine?: Engine }) => post<Moodboard>(`/api/moodboards/${b.id}/retry`, { engine: b.engine }), onSuccess: done });
+  const train = useMutation({
+    mutationFn: (id: string) => post<Moodboard>(`/api/moodboards/${id}/train`),
+    onSuccess: () => {
+      done();
+      void qc.invalidateQueries({ queryKey: ["elements"] });
+    },
+  });
+  const rename = useMutation({ mutationFn: (b: { id: string; name: string }) => post<Moodboard>(`/api/moodboards/${b.id}`, { name: b.name }, "PATCH"), onSuccess: done });
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/moodboards/${id}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) await json(res);
+    },
+    onSuccess: done,
+  });
+  return useMemo(() => ({ create, retry, train, rename, remove }), [create, retry, train, rename, remove]);
+}

@@ -1,4 +1,5 @@
 import { getModel } from "@/lib/catalog";
+import { SIGNATURE_MODELS } from "@/lib/catalog/palettes";
 import type { Preset } from "@/lib/catalog/types";
 import type { StudioConfig } from "@/components/studio/studio-context";
 
@@ -9,10 +10,16 @@ export const IMAGE_STUDIO: StudioConfig = {
   placeholder: "Describe an image… try “a koi pond at night, neon rain”",
   kind: "image",
   ops: ["t2i", "edit"],
+  // Text-to-image models (most also edit with refs); single-purpose edit tools (try-on, product shots,
+  // style transfer, angles) are listed in the Edit studio.
+  pickerOps: ["t2i"],
   feed: { kind: "image", features: ["image", "edit", "app:*", "character:*"] },
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
   defaultModels: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
+  // Color signature + Moodboard chips, and the models they can move a request to.
+  signature: true,
+  extraModels: Object.values(SIGNATURE_MODELS),
   suggestions: [
     "Editorial portrait of a woman in a yellow raincoat, Tokyo crosswalk at dusk, 35mm film",
     "Isometric cozy reading nook with plants and warm lamp light, 3D render",
@@ -95,6 +102,7 @@ export const LIPSYNC_STUDIO: StudioConfig = {
     { key: "video", label: "Video", accept: "video", hint: "To re-sync an existing clip" },
     { key: "audio", label: "Voice", accept: "audio", required: true },
   ],
+  anyOf: [["image", "video"]],
   defaultModels: { cloud: "kling-avatar-2", open: "oss-infinitetalk" },
   promptOptional: true,
 };
@@ -188,7 +196,7 @@ export const SFX_STUDIO: StudioConfig = {
   ops: ["sfx"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-sfx", open: "" },
+  defaultModels: { cloud: "mirelo-sfx-2", open: "oss-stable-audio-3" },
   suggestions: ["Thunder rolling over a quiet forest", "Footsteps on gravel, distant birds", "Sci-fi door whooshing open"],
 };
 
@@ -201,7 +209,7 @@ export const MUSIC_STUDIO: StudioConfig = {
   ops: ["music"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "elevenlabs-music", open: "oss-ace-step" },
+  defaultModels: { cloud: "sonilo-music", open: "oss-ace-step" },
   suggestions: ["Lo-fi hip hop beat with soft piano, 80 bpm", "Epic orchestral trailer music building to a drop", "Upbeat indie pop with handclaps and a whistled hook"],
 };
 
@@ -209,12 +217,13 @@ export const FOLEY_STUDIO: StudioConfig = {
   feature: "audio",
   title: "Audio",
   hero: "Add sound to a video",
+  subtitle: "Foley in sync with the picture: Mirelo SFX 2.0 on the cloud, HunyuanVideo-Foley or MMAudio on your ComfyUI.",
   placeholder: "Optional: describe the sound, e.g. “footsteps on gravel, distant birds”",
   kind: "video",
   ops: ["v2a"],
   feed: { features: ["audio"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
-  defaultModels: { cloud: "mmaudio-cloud", open: "oss-mmaudio" },
+  defaultModels: { cloud: "mirelo-sfx-2-video", open: "oss-hunyuan-foley-video" },
   promptOptional: true,
 };
 
@@ -228,13 +237,9 @@ export function appStudio(preset: Preset): StudioConfig {
     feature: `app:${preset.id}`,
     title: preset.name,
     hero: preset.description,
-    subtitle: [
-      preset.cloud ? `Cloud: ${getModel(preset.cloud.modelId)?.name}` : "No cloud version yet",
-      preset.open ? `Open source: ${getModel(preset.open.modelId)?.name}` : "No open-source version yet",
-      preset.parity,
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    // Which model runs it on each engine lives in the preset header's Details popover (U23); the
+    // hero only says when an engine has no version, plus how the two versions differ.
+    subtitle: [!preset.cloud ? "Open source only for now" : !preset.open ? "Cloud only for now" : undefined, preset.parity].filter(Boolean).join(" · "),
     placeholder: preset.promptPlaceholder ?? "Add details (optional)",
     kind,
     ops,

@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 
 interface TokenInfo {
@@ -21,6 +22,12 @@ interface AuthStatus {
   enabled: boolean;
   fromEnv: boolean;
   tokens: TokenInfo[];
+}
+
+/** Copy and say whether it worked (plain-http LAN origins have no Clipboard API; copyText falls back). */
+async function copyWithToast(text: string) {
+  if (await copyText(text)) toast("Copied");
+  else toast.error("Couldn’t copy — select the text and copy it instead");
 }
 
 async function call<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -58,10 +65,10 @@ function PasswordForm({ status, onDone }: { status: AuthStatus; onDone: () => vo
       {status.enabled && (
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-current`} className="text-[13px]">Current password</Label>
-          <Input id={`${id}-current`} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className="w-72" />
+          <Input id={`${id}-current`} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} className="w-full max-w-72" />
         </div>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 sm:w-[36rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:w-[36rem] sm:max-w-full sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-new`} className="text-[13px]">{status.enabled ? "New password" : "Password"}</Label>
           <Input id={`${id}-new`} type="password" autoComplete="new-password" placeholder="At least 8 characters" value={next} onChange={(e) => setNext(e.target.value)} />
@@ -93,15 +100,13 @@ function McpSnippet({ token, needsToken }: { token: string | null; needsToken: b
   const auth = needsToken ? ` --header "Authorization: Bearer ${token ?? "fuobe_…"}"` : "";
   const cmd = `claude mcp add --transport http fuobe ${origin}/api/mcp${auth}`;
   return (
-    <div className="space-y-1.5 sm:w-[36rem]">
+    <div className="space-y-1.5 sm:w-[36rem] sm:max-w-full">
       <p className="text-[12px] font-medium">Connect an agent over MCP</p>
       <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-2">
         <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap">{cmd}</code>
         <button
-          onClick={() => {
-            void navigator.clipboard.writeText(cmd);
-            toast("Copied");
-          }}
+          type="button"
+          onClick={() => void copyWithToast(cmd)}
           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
           aria-label="Copy command"
         >
@@ -131,7 +136,7 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label className="text-[13px]">API tokens</Label>
+        <h3 className="text-[13px] font-medium">API tokens</h3>
         <p className="text-[12px] text-muted-foreground">
           For scripts and agents (the REST API and the MCP endpoint at <code className="font-mono">/api/mcp</code>). Send as <code className="font-mono">Authorization: Bearer fuobe_…</code>. Only needed once a password is set.
         </p>
@@ -140,22 +145,18 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
         <div className="rounded-xl border border-primary/40 bg-brand-faint p-3">
           <p className="text-[12px] font-medium">Copy this token now — it won&apos;t be shown again.</p>
           <div className="mt-2 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-md bg-background px-2 py-1.5 font-mono text-[12px]">{fresh}</code>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                void navigator.clipboard.writeText(fresh);
-                toast("Copied");
-              }}
-            >
+            {/* The whole token, wrapped (a phone can't show it on one line); one tap selects it all. */}
+            <code aria-label="New API token" className="min-w-0 flex-1 rounded-md bg-background px-2 py-1.5 font-mono text-[12px] break-all select-all">
+              {fresh}
+            </code>
+            <Button size="sm" variant="secondary" className="shrink-0" onClick={() => void copyWithToast(fresh)}>
               <Copy /> Copy
             </Button>
           </div>
         </div>
       )}
       {status.tokens.length > 0 && (
-        <ul className="divide-y rounded-xl border sm:w-[36rem]">
+        <ul className="divide-y rounded-xl border sm:w-[36rem] sm:max-w-full">
           {status.tokens.map((t) => (
             <li key={t.id} className="flex items-center gap-3 px-3 py-2">
               <KeyRound className="size-4 text-muted-foreground" />
@@ -183,9 +184,15 @@ function Tokens({ status, onChange }: { status: AuthStatus; onChange: () => void
         </ul>
       )}
       <McpSnippet token={fresh} needsToken={status.enabled} />
-      <div className="flex gap-2 sm:w-[36rem]">
-        <Input placeholder="Token name, e.g. “Claude Desktop”" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button size="sm" variant="secondary" className="h-9" disabled={!name.trim()} onClick={() => void create()}>
+      <div className="flex gap-2 sm:w-[36rem] sm:max-w-full">
+        <Input
+          aria-label="Token name"
+          placeholder="Token name, e.g. “Claude Desktop”"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && void create()}
+        />
+        <Button size="sm" variant="secondary" className="h-9 shrink-0" disabled={!name.trim()} onClick={() => void create()}>
           Create token
         </Button>
       </div>

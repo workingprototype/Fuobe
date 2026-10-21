@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Agent worktrees and local data live inside the checkout but aren't part of it.
+    ".claude/**",
+    "data/**",
   ]),
 ]);
 

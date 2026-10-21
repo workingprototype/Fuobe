@@ -1,26 +1,35 @@
 "use client";
 
-import { AtSign, AudioLines, Check, Copy, GraduationCap, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { AtSign, AudioLines, Check, Copy, GraduationCap, Loader2, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
-import { PageShell } from "@/components/page-shell";
-import { PageHeader } from "@/components/preset-gallery";
+import { PageHeader, PageShell } from "@/components/page-shell";
+import { PageSkeleton } from "@/components/skeletons";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StudioPage } from "@/components/studio/studio-page";
 import { fileToSlot, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ELEMENT_ICONS } from "@/components/studio/prompt-input";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
-import { TrainDialog } from "@/components/train-dialog";
-import type { StudioConfig } from "@/components/studio/studio-context";
-import { useDeleteElement, useElement, useElements, useSaveElement } from "@/lib/api";
+import { useDeleteElement, useElements, useSaveElement } from "@/lib/api";
 import { ELEMENT_KINDS, elementKindInfo, handleFor, type ElementKind, type StudioElement } from "@/lib/catalog/elements";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 const TIPS: Record<ElementKind, string> = {
@@ -40,7 +49,10 @@ function PhotoGrid({ photos, setPhotos }: { photos: SlotValue[]; setPhotos: Reac
       void fileToSlot(f, (v) =>
         setPhotos((ps) => {
           if (!v) return ps.filter((p) => p.id !== id);
-          return ps.some((p) => p.id === id) ? ps.map((p) => (p.id === id ? { ...v, id } : p)) : [...ps, { ...v, id }];
+          if (ps.some((p) => p.id === id)) return ps.map((p) => (p.id === id ? { ...v, id } : p));
+          // Only the first (uploading) call adds the photo; a finished upload of a photo the user
+          // already removed must not bring it back.
+          return v.uploading ? [...ps, { ...v, id }] : ps;
         }),
       );
     }
@@ -218,9 +230,9 @@ function HandleCopy({ handle }: { handle: string }) {
   const [done, setDone] = useState(false);
   return (
     <button
-      onClick={(e) => {
+      onClick={async (e) => {
         e.preventDefault();
-        void navigator.clipboard?.writeText(`@${handle}`);
+        if (!(await copyText(`@${handle}`))) return void toast.error("Couldn’t copy — select the handle instead");
         setDone(true);
         setTimeout(() => setDone(false), 1200);
       }}
@@ -243,7 +255,7 @@ function ElementCard({ el }: { el: StudioElement }) {
           {el.references[0] && <audio src={el.references[0]} controls className="w-full" />}
         </div>
       ) : (
-        <Link href={`/elements/${el.id}`} className="block">
+        <Link href={`/elements/${el.id}`} className="block" aria-label={`Open ${el.name}`}>
           <div className="grid aspect-square grid-cols-2 grid-rows-2 gap-0.5 bg-muted">
             {el.references.length ? (
               el.references.slice(0, 4).map((r, i, arr) => (
@@ -283,16 +295,38 @@ function ElementCard({ el }: { el: StudioElement }) {
           <Icon className="size-3" /> {elementKindInfo(el.kind).label}
         </span>
       </div>
-      <button
-        onClick={() => {
-          del.mutate(el.id);
-          toast(`Deleted ${el.name}`);
-        }}
-        className="absolute top-2 right-2 grid size-8 place-items-center rounded-lg bg-background/80 text-muted-foreground opacity-0 backdrop-blur transition group-hover:opacity-100 hover:text-destructive"
-        aria-label={`Delete ${el.name}`}
-      >
-        <Trash2 className="size-4" />
-      </button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <button
+            className="absolute top-2 right-2 grid size-8 place-items-center rounded-lg bg-background/80 text-muted-foreground backdrop-blur transition outline-none group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0"
+            aria-label={`Delete ${el.name}`}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {el.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              @{el.handle} will stop working in prompts{el.loras.length ? " and its trained identity is removed" : ""}. Images you already made stay in your library.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() =>
+                del.mutate(el.id, {
+                  onSuccess: () => toast(`Deleted ${el.name}`),
+                  onError: (e) => toast.error((e as Error).message),
+                })
+              }
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -315,13 +349,14 @@ function ElementsBody() {
           <Plus /> New element
         </Button>
       </PageHeader>
-      <div className="mb-5 flex gap-1">
+      <div role="group" aria-label="Kinds" className="scrollbar-none -mx-1 mb-5 flex gap-1 overflow-x-auto px-1">
         {(["all", ...ELEMENT_KINDS.map((k) => k.kind)] as const).map((k) => (
           <button
             key={k}
             onClick={() => setTab(k)}
+            aria-pressed={tab === k}
             className={cn(
-              "h-8 rounded-full px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-accent",
+              "h-8 shrink-0 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent",
               tab === k && "bg-secondary text-foreground",
             )}
           >
@@ -367,74 +402,8 @@ function ElementsBody() {
 
 export function ElementsView() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<PageSkeleton title="Elements" rows={2} />}>
       <ElementsBody />
     </Suspense>
-  );
-}
-
-/** A studio for one element: the prompt starts with its @handle, references are resolved by the server. */
-export function ElementStudio({ id }: { id: string }) {
-  const q = useElement(id);
-  const [editing, setEditing] = useState(false);
-  const [training, setTraining] = useState(false);
-  const el = q.data;
-  const config = useMemo<StudioConfig | null>(() => {
-    if (!el) return null;
-    return {
-      feature: `element:${el.id}`,
-      title: el.name,
-      hero:
-        el.kind === "character"
-          ? `Where should ${el.name} go next?`
-          : el.kind === "location"
-            ? `What happens at ${el.name}?`
-            : el.kind === "prop"
-              ? `Where should ${el.name} show up?`
-              : `What should look like ${el.name}?`,
-      subtitle: `Mention @${el.handle} in any studio to use ${el.kind === "character" ? "them" : "it"} there too.`,
-      placeholder: `Describe a scene with @${el.handle}…`,
-      kind: "image",
-      ops: ["t2i", "edit"],
-      feed: { features: [`element:${el.id}`, `character:${el.id}`] },
-      slots: [],
-      multiRef: { label: "Add ref", max: 8 },
-      defaultModels: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
-    };
-  }, [el]);
-  if (q.isError)
-    return (
-      <PageShell>
-        <p className="text-muted-foreground">Element not found.</p>
-      </PageShell>
-    );
-  if (!config || !el)
-    return (
-      <PageShell>
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </PageShell>
-    );
-  return (
-    <>
-      <StudioPage
-        config={config}
-        initialPrompt={`@${el.handle} `}
-        header={
-          <>
-            {el.kind !== "voice" && (
-              <Button variant={el.loras.length ? "ghost" : "secondary"} size="sm" onClick={() => setTraining(true)}>
-                {el.status === "training" ? <Loader2 className="animate-spin" /> : <GraduationCap />}
-                {el.status === "training" ? "Training…" : el.loras.length ? `Trained · ${el.loras.length}` : "Train"}
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-              <Pencil /> Edit
-            </Button>
-          </>
-        }
-      />
-      <ElementDialog open={editing} onOpenChange={setEditing} element={el} />
-      <TrainDialog open={training} onOpenChange={setTraining} element={el} />
-    </>
   );
 }

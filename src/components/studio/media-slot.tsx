@@ -1,16 +1,18 @@
 "use client";
 
 import { AudioLines, FileVideo, ImagePlus, Library, Loader2, Upload, X } from "lucide-react";
+import { nanoid } from "nanoid";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { uploadFile, useAssets } from "@/lib/api";
+import { useAssets, type Asset } from "@/lib/api";
 import type { MediaKind } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import type { SketchMode, Stroke } from "./sketch-editor";
 
 export interface SlotValue {
-  /** Client-side identity for list items (references). */
+  /** Client-side identity for list items (references) and in-flight uploads. */
   id?: string;
   /** What the server receives: an /api/files URL (or any URL). */
   ref: string;
@@ -18,9 +20,11 @@ export interface SlotValue {
   kind: MediaKind;
   name?: string;
   uploading?: boolean;
+  /** Drawings and masks: the strokes they were made from, so the editor reopens them (in image pixels). */
+  sketch?: { mode: SketchMode; strokes: Stroke[] };
 }
 
-const ACCEPT: Record<MediaKind, string> = {
+export const ACCEPT: Record<MediaKind, string> = {
   image: "image/png,image/jpeg,image/webp,image/gif",
   video: "video/mp4,video/webm,video/quicktime",
   audio: "audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/flac,audio/mp4,audio/webm",
@@ -30,22 +34,90 @@ const ACCEPT: Record<MediaKind, string> = {
 
 const MAX_MB = 200;
 
-/** Upload a File and stream state changes back (preview first, then server ref). */
-export async function fileToSlot(file: File, onChange: (v: SlotValue | null) => void, kind?: MediaKind): Promise<void> {
-  const k: MediaKind = kind ?? (file.type.startsWith("video/") ? "video" : file.type.startsWith("audio/") ? "audio" : "image");
+const EXT_KIND: [RegExp, MediaKind][] = [
+  [/\.(mp4|webm|mov|m4v)$/i, "video"],
+  [/\.(mp3|wav|ogg|flac|m4a|aac|opus)$/i, "audio"],
+  [/\.(txt|srt|vtt)$/i, "text"],
+  [/\.(glb|gltf)$/i, "model3d"],
+];
+
+/** What a file is, by its type (or its extension when the browser gives none). Anything else counts as an image. */
+export const kindOfFile = (f: File): MediaKind => {
+  if (f.type.startsWith("video/")) return "video";
+  if (f.type.startsWith("audio/")) return "audio";
+  if (f.type.startsWith("image/")) return "image";
+  if (f.type.startsWith("text/")) return "text";
+  return EXT_KIND.find(([re]) => re.test(f.name))?.[1] ?? "image";
+};
+
+/** "Image only — drop a photo here": a tile was given the wrong kind of file. */
+export const wrongKindMessage = (kind: MediaKind) =>
+  ({ image: "Image only — drop a photo here", video: "Video only — drop a clip here", audio: "Audio only — drop a sound file here", text: "Text only — drop a .txt or .srt file here", model3d: "3D only — drop a .glb file here" })[kind];
+
+async function upload(file: File, signal?: AbortSignal): Promise<Asset> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/uploads", { method: "POST", body: form, signal });
+  const body = (await res.json().catch(() => ({}))) as Asset & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? `Upload failed (${res.status})`);
+  return body;
+}
+
+/**
+ * Upload a File and stream state changes back: a local preview first (`uploading: true`), then
+ * the server ref, or null on failure. Pass a signal to cancel (a removed attachment): an aborted
+ * upload calls back nothing more. The preview's object URL is revoked once the upload settles.
+ */
+export async function fileToSlot(file: File, onChange: (v: SlotValue | null) => void, kind?: MediaKind, opts: { signal?: AbortSignal } = {}): Promise<void> {
+  const k: MediaKind = kind ?? kindOfFile(file);
   if (file.size > MAX_MB * 1024 * 1024) {
     toast.error(`That file's over ${MAX_MB} MB. Try a smaller one.`);
     return;
   }
   const preview = URL.createObjectURL(file);
+  // Give the <img>/<video> a moment to switch to the server URL before the blob goes away.
+  const revoke = () => setTimeout(() => URL.revokeObjectURL(preview), 1500);
   onChange({ ref: "", preview, kind: k, name: file.name, uploading: true });
   try {
-    const asset = await uploadFile(file);
+    const asset = await upload(file, opts.signal);
+    if (opts.signal?.aborted) return;
+    // The server knows best what the file is: a clip uploaded into an image slot doesn't stay there.
+    if (kind && asset.kind && asset.kind !== kind) {
+      onChange(null);
+      toast.error(wrongKindMessage(kind));
+      return;
+    }
     onChange({ ref: asset.url, preview: asset.url, kind: asset.kind, name: file.name });
   } catch (e) {
+    if (opts.signal?.aborted || (e as Error).name === "AbortError") return;
     onChange(null);
     toast.error((e as Error).message || "Upload failed. Please try again.");
+  } finally {
+    revoke();
   }
+}
+
+/**
+ * Upload into a list kept in React state (reference photos, a storyboard's looks): appended once
+ * with its preview, then replaced by id when the upload finishes, or dropped if it fails. A file
+ * removed from the list while it uploads stays removed.
+ */
+export function fileToList(file: File, setList: (update: (xs: SlotValue[]) => SlotValue[]) => void, kind?: MediaKind): void {
+  const id = nanoid(8);
+  let placed = false;
+  void fileToSlot(
+    file,
+    (v) => {
+      const first = !placed;
+      placed = true;
+      setList((xs) => {
+        if (first) return v ? [...xs, { ...v, id }] : xs;
+        if (!xs.some((x) => x.id === id)) return xs;
+        return v ? xs.map((x) => (x.id === id ? { ...v, id } : x)) : xs.filter((x) => x.id !== id);
+      });
+    },
+    kind,
+  );
 }
 
 function KindIcon({ kind, className }: { kind: MediaKind; className?: string }) {
@@ -54,7 +126,7 @@ function KindIcon({ kind, className }: { kind: MediaKind; className?: string }) 
   return <ImagePlus className={className} />;
 }
 
-export function SlotPreview({ value, className }: { value: SlotValue; className?: string }) {
+export function SlotPreview({ value, className }: { value: Pick<SlotValue, "kind" | "preview" | "name">; className?: string }) {
   if (value.kind === "video")
     return <video src={value.preview} muted playsInline loop autoPlay className={cn("size-full object-cover", className)} />;
   if (value.kind === "audio")
@@ -67,9 +139,53 @@ export function SlotPreview({ value, className }: { value: SlotValue; className?
   return <img src={value.preview} alt={value.name ?? ""} className={cn("size-full object-cover", className)} />;
 }
 
+/** Grid of your uploads and results of one kind (or several). */
+export function LibraryGrid({ kinds, onPick }: { kinds: MediaKind[]; onPick: (v: SlotValue) => void }) {
+  const [kind, setKind] = useState<MediaKind>(kinds[0] ?? "image");
+  const assets = useAssets(undefined, kind);
+  return (
+    <div className="space-y-2">
+      {kinds.length > 1 && (
+        <div role="tablist" aria-label="Kind" className="inline-flex rounded-full bg-muted p-0.5">
+          {kinds.map((k) => (
+            <button
+              key={k}
+              role="tab"
+              aria-selected={k === kind}
+              onClick={() => setKind(k)}
+              className={cn("h-7 rounded-full px-3 text-[12px] font-medium text-muted-foreground capitalize transition", k === kind && "bg-background text-foreground shadow-soft")}
+            >
+              {k === "image" ? "Images" : k === "video" ? "Videos" : k === "audio" ? "Audio" : k}
+            </button>
+          ))}
+        </div>
+      )}
+      {assets.isLoading ? (
+        <div className="grid h-40 place-items-center">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : assets.data?.length ? (
+        <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto">
+          {assets.data.map((a) => (
+            <button
+              key={a.id}
+              className="aspect-square overflow-hidden rounded-md bg-muted ring-primary transition outline-none hover:ring-2 focus-visible:ring-2"
+              aria-label={a.name ?? `${a.kind} from your library`}
+              onClick={() => onPick({ ref: a.url, preview: a.url, kind: a.kind, name: a.name ?? undefined })}
+            >
+              <SlotPreview value={{ preview: a.url, kind: a.kind }} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="px-1 py-6 text-center text-sm text-muted-foreground">Nothing here yet. Uploads and results show up here.</p>
+      )}
+    </div>
+  );
+}
+
 function LibraryPicker({ kind, onPick }: { kind: MediaKind; onPick: (v: SlotValue) => void }) {
   const [open, setOpen] = useState(false);
-  const assets = useAssets(undefined, kind);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -81,25 +197,16 @@ function LibraryPicker({ kind, onPick }: { kind: MediaKind; onPick: (v: SlotValu
           <Library className="size-3" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-2" align="start">
+      <PopoverContent className="w-80 p-2" align="start" collisionPadding={12}>
         <p className="px-1 pb-2 text-[13px] font-medium">From your library</p>
-        {assets.data?.length ? (
-          <div className="grid max-h-72 grid-cols-4 gap-1.5 overflow-y-auto">
-            {assets.data.map((a) => (
-              <button
-                key={a.id}
-                className="aspect-square overflow-hidden rounded-md bg-muted ring-primary transition hover:ring-2"
-                onClick={() => {
-                  onPick({ ref: a.url, preview: a.url, kind: a.kind, name: a.name ?? undefined });
-                  setOpen(false);
-                }}
-              >
-                <SlotPreview value={{ ref: a.url, preview: a.url, kind: a.kind }} />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="px-1 py-6 text-center text-sm text-muted-foreground">Nothing here yet.</p>
+        {open && (
+          <LibraryGrid
+            kinds={[kind]}
+            onPick={(v) => {
+              onPick(v);
+              setOpen(false);
+            }}
+          />
         )}
       </PopoverContent>
     </Popover>
@@ -115,6 +222,7 @@ export function MediaSlot({
   required,
   size = "md",
   onFile,
+  slotKey,
 }: {
   label: string;
   kind: MediaKind;
@@ -124,8 +232,15 @@ export function MediaSlot({
   size?: "md" | "lg";
   /** Take over file handling (e.g. to append to a list with a stable id). */
   onFile?: (f: File) => void;
+  /** Marks the tile so the composer can point at it ("Add a start frame"). */
+  slotKey?: string;
 }) {
-  const handleFile = (f: File) => (onFile ? onFile(f) : void fileToSlot(f, onChange, kind));
+  const handleFile = (f: File) => {
+    // A tile takes its own kind only (a clip dropped on the Image tile would land as a video there).
+    if (kindOfFile(f) !== kind) return void toast(wrongKindMessage(kind));
+    if (onFile) onFile(f);
+    else void fileToSlot(f, onChange, kind);
+  };
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const dim = size === "lg" ? "size-20" : "size-14";
@@ -134,7 +249,8 @@ export function MediaSlot({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className={cn("group/slot relative shrink-0", dim)}
+          data-slot-key={slotKey}
+          className={cn("group/slot relative shrink-0 rounded-xl", dim)}
           onDragOver={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -153,7 +269,7 @@ export function MediaSlot({
             <div className="size-full overflow-hidden rounded-xl border bg-muted">
               <SlotPreview value={value} />
               {value.uploading && (
-                <div className="absolute inset-0 grid place-items-center rounded-xl bg-background/60">
+                <div className="absolute inset-0 grid place-items-center rounded-xl bg-background/60" role="status" aria-label="Uploading">
                   <Loader2 className="size-4 animate-spin" />
                 </div>
               )}
@@ -169,6 +285,7 @@ export function MediaSlot({
             <button
               type="button"
               onClick={() => input.current?.click()}
+              aria-label={`${label}${required ? " (required)" : ""}: upload`}
               className={cn(
                 "flex size-full flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-border-strong text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text",
                 over && "border-primary bg-brand-faint text-brand-text",

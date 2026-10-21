@@ -3,11 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import type { ElementLora, StudioElement } from "@/lib/catalog/elements";
-import { aiToolkitJob, getTrainingTarget, triggerFor, type TrainingTarget } from "@/lib/catalog/training";
+import { aiToolkitJob, getTrainingTarget, trainingCaption, triggerFor, type TrainingTarget } from "@/lib/catalog/training";
 import { DATA_DIR, db } from "./db";
 import { getElement, updateElement } from "./elements";
 import { falFetch, falProvider } from "./providers/fal";
 import { hfFetch, hfUpload, higgsfieldKey } from "./providers/higgsfield";
+import { ProviderError } from "./providers/types";
 import { getSetting } from "./settings";
 import { readRef } from "./storage";
 import { zip } from "./zip";
@@ -120,9 +121,23 @@ export function startTraining(elementId: string, targetId: string): Training {
     .prepare(`INSERT INTO trainings (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
     .run(row);
   updateElement(elementId, { status: "training" });
-  void submit(row.id, el, target, row.trigger_word ?? "", images).catch((e) => fail(row.id, el.id, (e as Error).message));
+  submittingTrainings().add(row.id);
+  void submit(row.id, el, target, row.trigger_word ?? "", images)
+    .catch((e) => fail(row.id, el.id, (e as Error).message))
+    .finally(() => submittingTrainings().delete(row.id));
   return toTraining(row);
 }
+
+/** Trainings this process is still uploading (shared across hot reloads). */
+declare global {
+  var __fuobeTrainingSubmits: Set<string> | undefined;
+}
+const submittingTrainings = (): Set<string> => (globalThis.__fuobeTrainingSubmits ??= new Set<string>());
+
+/** The longest a training may run before it's given up on. */
+const MAX_TRAINING_MS = 8 * 3_600_000;
+/** A queued training this old that nothing is uploading was cut off by a restart. */
+const STALE_TRAINING_MS = 2 * 60 * 1000;
 
 function fail(id: string, elementId: string, error: string) {
   update(id, { status: "failed", error, message: null, completed_at: Date.now() });
@@ -145,7 +160,7 @@ function addIdentity(elementId: string, loras: ElementLora[]) {
 
 /** Photos + one caption per photo: "photo of <trigger>, <description>". */
 async function dataset(el: StudioElement, trigger: string, images: string[]) {
-  const caption = `photo of ${trigger}${el.description ? `, ${el.description.replace(/[.\s]+$/, "")}` : ""}`;
+  const caption = trainingCaption(el.kind === "style" ? "style" : "character", trigger, el.description);
   const files: { name: string; data: Buffer }[] = [];
   for (const [i, ref] of images.entries()) {
     const f = await readRef(ref);
@@ -164,7 +179,7 @@ async function aitk(pathname: string, init: RequestInit = {}) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) },
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`AI-Toolkit ${res.status}: ${JSON.stringify(body).slice(0, 300)}`);
+  if (!res.ok) throw new ProviderError(`AI-Toolkit ${res.status}: ${JSON.stringify(body).slice(0, 300)}`, res.status);
   return body as Record<string, unknown>;
 }
 
@@ -213,7 +228,7 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
   fs.mkdirSync(folder, { recursive: true });
   for (const f of files) fs.writeFileSync(path.join(folder, f.name), f.data);
   const name = `fuobe_${el.handle.toLowerCase()}_${id.slice(0, 6)}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: folder, outputFolder: path.join(root, "output") });
+  const job = aiToolkitJob({ name, trigger, datasetFolder: folder, outputFolder: path.join(root, "output"), kind: el.kind === "style" ? "style" : "character" });
   const created = await aitk("/api/jobs", { method: "POST", body: JSON.stringify({ name, gpu_ids: "0", job_config: job }) });
   const jobId = String(created.id);
   await aitk(`/api/jobs/${jobId}/start`);
@@ -223,13 +238,30 @@ async function submit(id: string, el: StudioElement, t: TrainingTarget, trigger:
 // ---------------------------------------------------------------------------
 // Polling (called from the generation runner's tick)
 
+/** A provider answer that won't change by asking again: the job failed or is gone (not auth, timeouts or rate limits). */
+const permanent = (e: unknown) => e instanceof ProviderError && e.status !== undefined && e.status >= 400 && e.status < 500 && ![401, 403, 408, 429].includes(e.status);
+
 export async function pollTrainings(): Promise<void> {
+  // Trainings a restart cut off mid-upload never reach the trainer: fail them so the element can retrain.
+  const stale = db()
+    .prepare("SELECT * FROM trainings WHERE status = 'queued' AND external_id IS NULL AND created_at < ?")
+    .all(Date.now() - STALE_TRAINING_MS) as Row[];
+  for (const r of stale) if (!submittingTrainings().has(r.id)) fail(r.id, r.element_id, "Interrupted before it reached the trainer — start it again");
   const rows = db().prepare("SELECT * FROM trainings WHERE status = 'running' AND external_id IS NOT NULL").all() as Row[];
-  await Promise.all(rows.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Checking status failed: ${(e as Error).message}` }))));
+  await Promise.all(
+    rows.map((r) =>
+      pollOne(r).catch((e) => {
+        if (permanent(e)) return fail(r.id, r.element_id, (e as Error).message);
+        update(r.id, { message: `Checking status failed: ${(e as Error).message}` });
+      }),
+    ),
+  );
 }
 
 async function pollOne(r: Row) {
-  const t = getTrainingTarget(r.target)!;
+  const t = getTrainingTarget(r.target);
+  if (!t) return fail(r.id, r.element_id, `Unknown training target ${r.target}`);
+  if (Date.now() - r.created_at > MAX_TRAINING_MS) return fail(r.id, r.element_id, `Training didn't finish within ${MAX_TRAINING_MS / 3_600_000} hours`);
   const meta = JSON.parse(r.meta_json ?? "{}") as Record<string, string>;
   if (r.provider === "higgsfield") {
     const ref = (await hfFetch(`v1/custom-references/${r.external_id}`)) as { status: string; fail_reason?: string };
@@ -242,7 +274,9 @@ async function pollOne(r: Row) {
     return;
   }
   if (r.provider === "fal") {
-    const s = (await falFetch(`${meta.statusUrl}?logs=1`)) as { status: string; logs?: { message: string }[] };
+    const s = (await falFetch(`${meta.statusUrl}?logs=1`)) as { status: string; logs?: { message: string }[]; error?: string };
+    if (s.error) return fail(r.id, r.element_id, `fal couldn't train this: ${s.error}`);
+    if (s.status === "FAILED" || s.status === "ERROR" || s.status === "CANCELLED") return fail(r.id, r.element_id, `fal training ${s.status.toLowerCase()}`);
     if (s.status !== "COMPLETED") {
       const last = s.logs?.at(-1)?.message;
       const step = last && /(\d+)\s*\/\s*(\d+)/.exec(last);
@@ -300,7 +334,7 @@ export async function trainingKit(elementId: string): Promise<{ name: string; da
   const trigger = triggerFor(el.handle);
   const { files } = await dataset(el, trigger, images);
   const name = `fuobe_${el.handle.toLowerCase()}`.replace(/[^a-z0-9_]/g, "_");
-  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output" });
+  const job = aiToolkitJob({ name, trigger, datasetFolder: "./dataset", outputFolder: "./output", kind: el.kind === "style" ? "style" : "character" });
   const readme = `# Train ${el.name} with AI-Toolkit
 
 1. Install AI-Toolkit: https://github.com/ostris/ai-toolkit (24 GB GPU recommended)

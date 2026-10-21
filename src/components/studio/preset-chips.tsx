@@ -1,0 +1,202 @@
+"use client";
+
+import { Ban, Film, Loader2, Shuffle } from "lucide-react";
+import { useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
+import type { Preset } from "@/lib/catalog/types";
+import { cn } from "@/lib/utils";
+import { PRESET_ICONS } from "@/components/preset-icons";
+import { loadFullCatalog, useCatalog } from "./catalog";
+import { Chip, ClearableChip } from "./chip";
+
+/**
+ * Camera-motion / effect picker and Mix. Loaded as its own chunk (with the preset icons), and
+ * the preset lists come from the full catalog chunk, fetched on first hover or open.
+ */
+
+function PresetGrid({ list, value, onPick, noneLabel }: { list: Preset[] | null; value?: string; onPick: (id: string | undefined) => void; noneLabel: string }) {
+  const [cat, setCat] = useState<string>("All");
+  if (!list)
+    return (
+      <div className="grid h-40 place-items-center" role="status" aria-label="Loading presets">
+        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  const cats = ["All", ...new Set(list.map((p) => p.category))];
+  return (
+    <>
+      <div className="scrollbar-none mb-2 flex gap-1 overflow-x-auto" role="tablist" aria-label="Categories">
+        {cats.map((c) => (
+          <button
+            key={c}
+            role="tab"
+            aria-selected={cat === c}
+            onClick={() => setCat(c)}
+            className={cn("h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent", cat === c && "bg-secondary text-foreground")}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      <div className="grid max-h-72 grid-cols-3 gap-1.5 overflow-y-auto">
+        {cat === "All" && (
+          <button type="button" aria-pressed={!value} onClick={() => onPick(undefined)} className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", !value && "ring-2")}>
+            <span className="grid aspect-video w-full place-items-center rounded-md bg-muted text-muted-foreground">
+              <Ban className="size-5" />
+            </span>
+            <span className="truncate px-0.5 text-[12px] font-medium">{noneLabel}</span>
+          </button>
+        )}
+        {list
+          .filter((p) => cat === "All" || p.category === cat)
+          .map((p) => {
+            const PI = PRESET_ICONS[p.look.icon] ?? Film;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={value === p.id}
+                onClick={() => onPick(p.id)}
+                className={cn("group flex flex-col items-start gap-1 overflow-hidden rounded-lg p-1 text-left ring-primary transition hover:bg-accent", value === p.id && "ring-2")}
+              >
+                <span className="grid aspect-video w-full place-items-center rounded-md text-white" style={{ background: `linear-gradient(135deg, ${p.look.from}, ${p.look.to})` }}>
+                  <PI className="size-5 transition-transform duration-300 group-hover:scale-125" />
+                </span>
+                <span className="truncate px-0.5 text-[12px] font-medium">{p.name}</span>
+              </button>
+            );
+          })}
+      </div>
+    </>
+  );
+}
+
+const prefetch = () => void loadFullCatalog();
+
+export function PresetChip({ type, value, onChange }: { type: "motion" | "effect"; value?: string; onChange: (id?: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const catalog = useCatalog();
+  const list = catalog.presets?.[type] ?? null;
+  const selected = value ? catalog.getPreset(value) : undefined;
+  const Icon = selected ? (PRESET_ICONS[selected.look.icon] ?? Film) : value && !catalog.complete ? Loader2 : Film;
+  const noun = type === "motion" ? "camera motion" : "effect";
+  return (
+    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel={`Clear ${noun}`}>
+      <Popover
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (o) prefetch();
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Chip icon={Icon} active={!!value} onPointerEnter={prefetch} onFocus={prefetch} className={cn(value && !selected && "[&>svg]:animate-spin")}>
+            {selected?.name ?? (value ? "Loading…" : type === "motion" ? "Camera motion" : "Effect")}
+          </Chip>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(92vw,460px)] p-2" align="start" side="top" collisionPadding={12} aria-label={type === "motion" ? "Camera motions" : "Effects"}>
+          <PresetGrid
+            list={list}
+            value={value}
+            noneLabel="None"
+            onPick={(id) => {
+              onChange(id);
+              setOpen(false);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+    </ClearableChip>
+  );
+}
+
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+/** Higgsfield's Mix: a second motion or effect on top of the first, each with a strength. */
+export function MixChip({
+  primary,
+  strength,
+  mix,
+  onChange,
+}: {
+  primary: Preset;
+  strength: number;
+  mix?: { presetId: string; strength: number };
+  onChange: (patch: { presetStrength?: number; mix?: { presetId: string; strength: number } | undefined }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const catalog = useCatalog();
+  const second = mix ? catalog.getPreset(mix.presetId) : undefined;
+  const mixable = catalog.presets ? [...catalog.presets.motion, ...catalog.presets.effect].filter((p) => p.id !== primary.id && !p.inputs.some((i) => i.key === "endImage")) : null;
+  return (
+    <ClearableChip active={!!mix} onClear={() => onChange({ mix: undefined })} clearLabel="Remove the mix">
+      <Popover
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (o) prefetch();
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Chip icon={Shuffle} active={!!mix} onPointerEnter={prefetch} onFocus={prefetch}>
+            {second ? `+ ${second.name}` : "Mix"}
+          </Chip>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(92vw,460px)] space-y-3 p-3" align="start" side="top" collisionPadding={12} aria-label="Mix">
+          <div className="space-y-2.5">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="font-medium">{primary.name}</span>
+                <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>
+              </div>
+              <Slider min={0.1} max={1} step={0.05} value={[strength]} onValueChange={([v]) => onChange({ presetStrength: v })} aria-label={`${primary.name} strength`} />
+            </div>
+            {second && mix && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="font-medium">{second.name}</span>
+                  <span className="text-muted-foreground tabular-nums">{pct(mix.strength)}</span>
+                </div>
+                <Slider min={0.1} max={1} step={0.05} value={[mix.strength]} onValueChange={([v]) => onChange({ mix: { ...mix, strength: v } })} aria-label={`${second.name} strength`} />
+              </div>
+            )}
+          </div>
+          <p className="text-[12px] text-muted-foreground">{second ? "Swap the second preset:" : "Pick a second motion or effect to combine with it:"}</p>
+          <PresetGrid
+            list={mixable}
+            value={mix?.presetId}
+            noneLabel="No mix"
+            onPick={(id) => onChange({ mix: id ? { presetId: id, strength: mix?.strength ?? 0.6 } : undefined })}
+          />
+        </PopoverContent>
+      </Popover>
+    </ClearableChip>
+  );
+}
+
+/** Both chips, as one lazily loaded unit for the composer toolbar. */
+export default function PresetChips({
+  picker,
+  preset,
+  presetId,
+  strength,
+  mix,
+  onPreset,
+  onMix,
+}: {
+  picker?: "motion" | "effect";
+  preset?: Preset;
+  presetId?: string;
+  strength: number;
+  mix?: { presetId: string; strength: number };
+  onPreset: (id?: string) => void;
+  onMix: (patch: { presetStrength?: number; mix?: { presetId: string; strength: number } | undefined }) => void;
+}) {
+  return (
+    <>
+      {picker && <PresetChip type={picker} value={presetId} onChange={onPreset} />}
+      {preset && (preset.type === "motion" || preset.type === "effect") && <MixChip primary={preset} strength={strength} mix={mix} onChange={onMix} />}
+    </>
+  );
+}

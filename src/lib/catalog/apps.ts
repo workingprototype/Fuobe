@@ -91,11 +91,24 @@ function videoApp(a: Omit<AppSpec, "cloud" | "open">): Preset {
   return app({ ...a, cloud: VIDEO_CLOUD, open: VIDEO_OPEN });
 }
 
+/** An option whose choices also set one of the model's settings (params.extra[param]). */
+const angleOption = (key: string, label: string, param: string, choices: [string, string, number][]): PresetOption => ({
+  key,
+  label,
+  choices: choices.map(([l, p, v]) => ({ value: slug(l), label: l, prompt: p, extra: { [param]: v } })),
+});
+
 const opt = (key: string, label: string, choices: [string, string][]): PresetOption => ({
   key,
   label,
   choices: choices.map(([l, p]) => ({ value: slug(l), label: l, prompt: p })),
 });
+
+/**
+ * Old app ids still stored on generations (their Reuse / Retry look the preset up by id): the app they
+ * became. The Virality Predictor app is the Hook Frame app since /virality took its name and URL.
+ */
+export const APP_ALIASES: Record<string, string> = { "app-virality-predictor": "app-hook-frame" };
 
 export const APPS: Preset[] = [
   // ---------------- Identity & people
@@ -248,25 +261,44 @@ export const APPS: Preset[] = [
     icon: "Rotate3d",
     hue: 190,
     badges: ["top"],
+    // The cloud model turns its rotate / tilt / zoom settings into the Multiple-Angles LoRA's own words; the open
+    // route runs that LoRA on Qwen-Image-Edit 2511 with the same words ("<sks> front-left quarter view …").
     options: [
-      opt("angle", "Angle", [
-        ["Front", "a straight-on front view at eye level"],
-        ["Left 45°", "rotated 45 degrees to the left around the subject"],
-        ["Right 45°", "rotated 45 degrees to the right around the subject"],
-        ["Left profile", "a full left side profile view"],
-        ["Right profile", "a full right side profile view"],
-        ["Back", "a view from directly behind"],
-        ["High angle", "a high-angle view looking down at the subject"],
-        ["Bird's eye", "a top-down bird's-eye view from directly above"],
-        ["Low angle", "a low-angle view looking up at the subject"],
-        ["Worm's eye", "an extreme worm's-eye view from the ground"],
-        ["Close-up", "a tight close-up"],
-        ["Wide", "a wide shot showing the full environment"],
+      angleOption("angle", "Angle", "horizontal_angle", [
+        ["Front", "front view", 0],
+        ["Front right", "front-right quarter view", 45],
+        ["Right side", "right side view", 90],
+        ["Back right", "back-right quarter view", 135],
+        ["Back", "back view", 180],
+        ["Back left", "back-left quarter view", 225],
+        ["Left side", "left side view", 270],
+        ["Front left", "front-left quarter view", 315],
+      ]),
+      angleOption("height", "Height", "vertical_angle", [
+        ["Eye level", "eye-level shot", 0],
+        ["Low angle", "low-angle shot", -30],
+        ["Elevated", "elevated shot", 30],
+        ["High angle", "high-angle shot", 60],
+      ]),
+      angleOption("distance", "Distance", "zoom", [
+        ["Medium", "medium shot", 5],
+        ["Close-up", "close-up", 10],
+        ["Wide", "wide shot", 0],
       ]),
     ],
-    prompt:
-      "Show the exact same scene and subject from {option:angle}, as if the camera physically moved. Keep identity, outfit, props, lighting direction and environment consistent; reveal plausible unseen sides.",
-    parity: "Open version should add the Qwen-Edit multiple-angles LoRA for best results",
+    userPrompt: "optional",
+    placeholder: "Anything to keep in mind (optional)",
+    prompt: "Show the exact same scene and subject as a {option:angle}, {option:height}, {option:distance}, as if the camera physically moved. Keep identity, outfit, props, lighting and environment consistent. {prompt}",
+    // fal builds the camera words from the sliders; this goes in as its additional_prompt (never empty, so the
+    // app runs without a note).
+    cloud: { modelId: "qwen-multiple-angles", op: "edit", promptTemplate: "Keep the same subject, identity, outfit, lighting and environment. {prompt}" },
+    open: {
+      modelId: "oss-qwen-edit",
+      op: "edit",
+      loras: [{ file: "qwen-image-edit-2511-multiple-angles-lora.safetensors", url: "https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA/resolve/main/qwen-image-edit-2511-multiple-angles-lora.safetensors", strength: 1 }],
+      promptTemplate: "<sks> {option:angle} {option:height} {option:distance}. {prompt}",
+    },
+    parity: "Both engines run the same Multiple-Angles LoRA: hosted by fal on the cloud, added to Qwen-Image-Edit 2511 on the open engine (0.3 GB)",
   }),
   app({
     name: "Shots",
@@ -378,14 +410,15 @@ export const APPS: Preset[] = [
     placeholder: "Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”",
     prompt: "{prompt}",
     cloud: { modelId: "ai-influencer", op: "t2i" },
+    // The Soul Cast sheet workflow: Z-Image Turbo draws the turnaround (front, three-quarter, profile, back) and
+    // cuts it into the four views, which make a better character element than one wide sheet.
     open: {
-      modelId: "oss-z-image-turbo",
+      modelId: "oss-zimage-soul-cast",
       op: "t2i",
-      params: { aspectRatio: "16:9" },
-      promptTemplate:
-        "Character design sheet of an original character: {prompt}. Front view, three-quarter view, side view and back view side by side, plus a row of four facial expressions; full body, the same face, hairstyle and outfit in every view; plain light-grey studio background, soft even light, photorealistic, high detail.",
+      promptTemplate: "An original character: {prompt}. The same face, hairstyle and outfit in every view, photorealistic, high detail.",
     },
-    parity: "Save the sheet as a character (tile menu) to use it in any prompt with @. The open version prompts Z-Image Turbo for the sheet",
+    parity:
+      "Save the sheet as a character (tile menu) to use it in any prompt with @. From your own photos or a Soul Cast build, use Character Sheet. The open version draws the turnaround on Z-Image Turbo and cuts it into the four views",
   }),
   app({
     name: "Match Lighting",
@@ -473,6 +506,32 @@ export const APPS: Preset[] = [
     parity: "Higgsfield renders it as an animated end-card video; Fuobe makes the still (animate it with Product 360)",
   }),
   app({
+    name: "Product Shot",
+    category: "Product",
+    description: "Your product photo, relit into a new scene",
+    icon: "Aperture",
+    hue: 30,
+    badges: ["new"],
+    // Described scenes only: Bria takes a scene description or a reference photo, never both.
+    inputs: [product],
+    options: [
+      opt("scene", "Scene", [
+        ["Marble counter", "on a white marble kitchen counter, soft morning window light"],
+        ["Studio podium", "on a minimal stone podium in a studio, soft key light and gentle shadows"],
+        ["Nature", "outdoors on a mossy rock in a sunlit forest, dappled light"],
+        ["Beach", "on warm sand at the beach at golden hour, the sea softly blurred behind"],
+        ["Dark luxury", "on dark slate with dramatic rim light and reflections, luxury mood"],
+        ["Bathroom shelf", "on a clean bathroom shelf with plants, bright and airy"],
+      ]),
+    ],
+    userPrompt: "optional",
+    placeholder: "Or describe your own scene (optional)",
+    prompt: "The product {option:scene}. {prompt}",
+    cloud: { modelId: "bria-product-shot", op: "edit" },
+    open: { modelId: "oss-product-shot", op: "edit" },
+    parity: "The open version cuts the product out, puts it on white and relights it into the scene with Qwen-Image-Edit 2509 + the White_to_Scene LoRA",
+  }),
+  app({
     name: "Product Placement",
     category: "Product",
     description: "Place your product into any scene",
@@ -497,10 +556,13 @@ export const APPS: Preset[] = [
     prompt:
       "Create a bold, high-end social media advertisement featuring the product from the image, dynamic composition, premium lighting, props that match the product. {prompt}. Keep the product exact.",
   }),
+  // Click to Ad and Link to Video Ad open the Click to Ad flow (/marketing/click-to-ad, redirected in
+  // next.config.ts): a product link → product kit → a 9:16 ad with voiceover and captions. The
+  // entries stay so the gallery keeps its cards.
   app({
     name: "Click to Ad",
     category: "Product",
-    description: "Product photo → UGC or studio ad creative",
+    description: "Product link → 9:16 video ad with voiceover and captions",
     icon: "MousePointerClick",
     hue: 30,
     inputs: [product],
@@ -516,12 +578,11 @@ export const APPS: Preset[] = [
     ],
     prompt:
       "Create an ad image: {option:format}. {prompt}. The product from the image must keep its exact shape, colors, label and logo. Leave clean space for a headline.",
-    parity: "Higgsfield scrapes a product URL and builds a whole ad set; Fuobe needs a product photo and makes one creative per run",
   }),
   app({
     name: "Link to Video Ad",
     category: "Product",
-    description: "Product photo → short video ad",
+    description: "Paste a product link, get a short video ad",
     icon: "Link",
     hue: 45,
     inputs: [product],
@@ -531,7 +592,6 @@ export const APPS: Preset[] = [
       "A short commercial for the product in the image: the camera glides in from a wide hero angle, the product rotates slightly as light sweeps across its surface, then the shot settles on a crisp close-up of the logo. {prompt}. Premium studio lighting, the product's design and label stay exactly the same.",
     cloud: VIDEO_CLOUD,
     open: VIDEO_OPEN,
-    parity: "Higgsfield builds the ad from a product URL with scripts and voiceover; Fuobe animates one product photo",
   }),
   app({
     name: "Unboxing Video",
@@ -554,6 +614,19 @@ export const APPS: Preset[] = [
     prompt: "The product from the image rotates slowly 360 degrees on a turntable in a clean studio, consistent lighting, product details stay exact",
     cloud: VIDEO_CLOUD,
     open: VIDEO_OPEN,
+  }),
+  app({
+    name: "Image to 3D",
+    category: "Product",
+    description: "A 3D model of your product (.glb) to spin, download and animate",
+    icon: "Box",
+    hue: 240,
+    badges: ["new"],
+    inputs: [product],
+    prompt: "",
+    cloud: { modelId: "hunyuan-3d-3-1-pro", op: "image-to-3d" },
+    open: { modelId: "oss-trellis2", op: "image-to-3d" },
+    parity: "The open version (TRELLIS.2) also renders a turntable video; for cloud models the 3D page records one in your browser",
   }),
   videoApp({
     name: "Billboard Ad",
@@ -767,6 +840,8 @@ export const APPS: Preset[] = [
     ],
     prompt:
       "Dress the person from the first image in the garment from the second image. Keep the person's face, body, pose and background; reproduce the garment's fabric, color, pattern, logo and fit realistically, with natural folds and shadows.",
+    // FASHN Try-On 1.6 was built for exactly this (Garment / Quality settings); it takes no prompt.
+    cloud: { modelId: "fashn-tryon", op: "edit" },
   }),
   app({
     name: "Outfit Swap",
@@ -1608,8 +1683,10 @@ export const APPS: Preset[] = [
       "Create an exploded knolling layout of everything in the image: each object, garment and accessory separated and neatly arranged on a clean light background, each with a small label naming it. Keep every item's exact design, colors and logos.",
     parity: "Approximation: Higgsfield's AI Lens also identifies brands and prices; Fuobe only produces the breakdown image",
   }),
+  // Higgsfield's Virality Predictor (a brain-response model) is the /virality page: a labelled heuristic hook
+  // analysis. This app is the "make a stronger opening frame" step it links to.
   app({
-    name: "Virality Predictor",
+    name: "Hook Frame",
     category: "Utility",
     description: "Turn your opening frame into a stronger hook",
     icon: "TrendingUp",
@@ -1617,8 +1694,6 @@ export const APPS: Preset[] = [
     inputs: [{ key: "image", label: "Opening frame", hint: "The first frame of your video", accept: "image", required: true }],
     prompt:
       "Rework this opening frame into a scroll-stopping hook thumbnail: stronger contrast and color, clearer focal point on the face or product, a more expressive moment and bold composition. Keep the same people, product and setting; add no text.",
-    parity:
-      "Not reproducible: Higgsfield scores a clip with a proprietary engagement model (score, hold rate, heatmap). Fuobe has no analysis model, so this app only improves the hook frame",
   }),
   app({
     name: "Similarity Score",

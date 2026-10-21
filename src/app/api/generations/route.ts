@@ -1,6 +1,8 @@
 import { connection } from "next/server";
 import { z } from "zod";
 import { createGenerations, listGenerations } from "@/server/generations";
+import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
+import { SignatureSchema } from "@/server/palettes";
 
 const RequestSchema = z.object({
   feature: z.string().min(1),
@@ -17,9 +19,12 @@ const RequestSchema = z.object({
       sketch: z.string().optional(),
       video: z.string().optional(),
       audio: z.string().optional(),
+      audio2: z.string().optional(),
       voiceAudio: z.string().optional(),
       voiceAudio2: z.string().optional(),
       videos: z.array(z.string()).max(24).optional(),
+      // Reference audio clips for reference-to-video (Seedance 2.5 / Cinema Studio take up to 10).
+      audios: z.array(z.string()).max(10).optional(),
     })
     .optional(),
   params: z
@@ -51,22 +56,23 @@ const RequestSchema = z.object({
   presetOptions: z.record(z.string(), z.string()).optional(),
   presetStrength: z.number().min(0).max(1).optional(),
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
+  // Image studio: the Color signature / Moodboard picks (its sentences join the prompt on the server).
+  signature: SignatureSchema,
+  // What a tool calls its result (Trim · 0:01.0–0:02.5, Captions · Karaoke), shown instead of the prompt.
+  title: z.string().max(200).optional(),
+  batchTitle: z.string().max(200).optional(),
 });
 
+/**
+ * List generations, newest first. Filters: kind / kinds, features (`x*` = prefix), models, statuses,
+ * favorites=1, folder=<id>, q, since / until (createdAt ms), trash=1 (the Trash, newest deletion first),
+ * paging with before=<createdAt>:<id> of the last row (<deletedAt>:<id> in the Trash; a bare
+ * timestamp still works) and limit (≤ 200).
+ */
 export async function GET(request: Request) {
   await connection();
-  const u = new URL(request.url);
-  const items = listGenerations({
-    feature: u.searchParams.get("feature") ?? undefined,
-    features: u.searchParams.get("features")?.split(",").filter(Boolean),
-    kind: u.searchParams.get("kind") ?? undefined,
-    favorites: u.searchParams.get("favorites") === "1",
-    status: u.searchParams.get("status") ?? undefined,
-    q: u.searchParams.get("q") ?? undefined,
-    before: u.searchParams.get("before") ? Number(u.searchParams.get("before")) : undefined,
-    limit: u.searchParams.get("limit") ? Number(u.searchParams.get("limit")) : undefined,
-  });
-  return Response.json({ items });
+  ensureTrashPurge();
+  return Response.json({ items: listGenerations(listOptionsFrom(new URL(request.url).searchParams)) });
 }
 
 export async function POST(request: Request) {

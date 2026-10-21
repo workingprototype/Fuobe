@@ -4,7 +4,9 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
+import { cueText, type Cue } from "@/lib/cues";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   LAST_FRAME_CHAIN,
@@ -23,11 +25,14 @@ import { listElements } from "./elements";
 import { pollTrainings } from "./training";
 import { createExtendChain, createShotFilm } from "./chains";
 import { enhancePrompt } from "./enhance";
+import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
-import type { RemoteOutput } from "./providers/types";
+import { probeComfy } from "./providers/comfyui";
+import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
+import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
-import { contentTypeFor, readRef, saveFile } from "./storage";
+import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
 
 interface Row {
   id: string;
@@ -55,9 +60,28 @@ interface Row {
   updated_at: number;
   completed_at: number | null;
   depends_on: string | null;
+  /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
+  deleted_at?: number | null;
+  folder_id?: string | null;
 }
 
-function toGeneration(r: Row): Generation {
+/** Trash and folder columns, joined onto every library read. */
+const LIBRARY_COLUMNS = "g.*, t.deleted_at AS deleted_at, fi.folder_id AS folder_id";
+const LIBRARY_JOIN = "generations g LEFT JOIN generation_trash t ON t.generation_id = g.id LEFT JOIN folder_items fi ON fi.generation_id = g.id";
+
+export function toGeneration(r: Row): Generation {
+  const request = JSON.parse(r.request_json) as GenerationRequest;
+  const model = getModel(r.model_id);
+  const ar = request.params?.aspectRatio ?? model?.defaults?.aspectRatio;
+  // Rows read without the library join (the runner's own SELECTs) look the trash and folder up.
+  const lib =
+    r.deleted_at !== undefined && r.folder_id !== undefined
+      ? { deleted_at: r.deleted_at, folder_id: r.folder_id }
+      : (db()
+          .prepare(
+            "SELECT (SELECT deleted_at FROM generation_trash WHERE generation_id = ?) AS deleted_at, (SELECT folder_id FROM folder_items WHERE generation_id = ?) AS folder_id",
+          )
+          .get(r.id, r.id) as { deleted_at: number | null; folder_id: string | null });
   return {
     id: r.id,
     batchId: r.batch_id,
@@ -72,7 +96,7 @@ function toGeneration(r: Row): Generation {
     progress: r.progress,
     message: r.message,
     prompt: r.prompt,
-    request: JSON.parse(r.request_json) as GenerationRequest,
+    request,
     outputs: JSON.parse(r.outputs_json) as OutputFile[],
     error: r.error,
     costUsd: r.cost_usd,
@@ -80,6 +104,11 @@ function toGeneration(r: Row): Generation {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
+    modelName: model?.name ?? r.model_id,
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    aspectRatio: ar && ar !== "auto" ? ar : null,
+    deletedAt: lib.deleted_at ?? null,
+    folderId: lib.folder_id ?? null,
   };
 }
 
@@ -91,10 +120,12 @@ function update(id: string, fields: Partial<Row>): void {
     .run({ ...fields, __now: Date.now(), __id: id });
 }
 
-export function getGeneration(id: string): Generation | null {
+/** One generation; a row in the Trash reads as missing unless `includeDeleted`. */
+export function getGeneration(id: string, opts: { includeDeleted?: boolean } = {}): Generation | null {
   ensureRunner();
-  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
-  return r ? toGeneration(r) : null;
+  const r = db().prepare(`SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE g.id = ?`).get(id) as Row | undefined;
+  if (!r || (r.deleted_at && !opts.includeDeleted)) return null;
+  return toGeneration(r);
 }
 
 export interface ListOptions {
@@ -102,55 +133,127 @@ export interface ListOptions {
   feature?: string;
   features?: string[];
   kind?: string;
+  kinds?: string[];
+  models?: string[];
   favorites?: boolean;
   status?: string;
+  statuses?: string[];
+  /** Only the Trash, newest deletion first (`before` is then a deletedAt cursor). Otherwise the Trash is left out. */
+  trashed?: boolean;
+  folderId?: string;
   limit?: number;
+  /**
+   * Paging cursor: made before this (deleted before, in the Trash). With `beforeId` it is the last
+   * row of the previous page, so rows sharing its timestamp (a bulk trash, a batch made in one
+   * millisecond) are paged by id instead of skipped.
+   */
   before?: number;
+  beforeId?: string;
+  /** Date range on createdAt: since ≤ t < until. */
+  since?: number;
+  until?: number;
   q?: string;
 }
 
+const featureLike = (f: string) => (f.endsWith("*") ? `${f.slice(0, -1)}%` : f);
+
 export function listGenerations(o: ListOptions = {}): Generation[] {
-  const where: string[] = [];
+  const where: string[] = [o.trashed ? "t.deleted_at IS NOT NULL" : "t.deleted_at IS NULL"];
   const args: unknown[] = [];
-  if (o.batchId) {
-    where.push("batch_id = ?");
-    args.push(o.batchId);
-  }
-  if (o.feature) {
-    where.push("feature = ?");
-    args.push(o.feature);
-  }
-  if (o.features?.length) {
-    where.push(`(${o.features.map(() => "feature LIKE ?").join(" OR ")})`);
-    args.push(...o.features.map((f) => (f.endsWith("*") ? `${f.slice(0, -1)}%` : f)));
-  }
-  if (o.kind) {
-    where.push("kind = ?");
-    args.push(o.kind);
-  }
-  if (o.favorites) where.push("favorite = 1");
-  if (o.status) {
-    where.push("status = ?");
-    args.push(o.status);
-  }
+  const add = (sql: string, ...values: unknown[]) => {
+    where.push(sql);
+    args.push(...values);
+  };
+  const oneOf = (col: string, values: unknown[]) => add(`${col} IN (${values.map(() => "?").join(", ")})`, ...values);
+  if (o.batchId) add("g.batch_id = ?", o.batchId);
+  if (o.feature) add("g.feature = ?", o.feature);
+  if (o.features?.length) add(`(${o.features.map(() => "g.feature LIKE ?").join(" OR ")})`, ...o.features.map(featureLike));
+  if (o.kind) add("g.kind = ?", o.kind);
+  if (o.kinds?.length) oneOf("g.kind", o.kinds);
+  if (o.models?.length) oneOf("g.model_id", o.models);
+  if (o.favorites) add("g.favorite = 1");
+  if (o.status) add("g.status = ?", o.status);
+  if (o.statuses?.length) oneOf("g.status", o.statuses);
+  if (o.folderId) add("fi.folder_id = ?", o.folderId);
   if (o.before) {
-    where.push("created_at < ?");
-    args.push(o.before);
+    const col = o.trashed ? "t.deleted_at" : "g.created_at";
+    if (o.beforeId) add(`(${col} < ? OR (${col} = ? AND g.id < ?))`, o.before, o.before, o.beforeId);
+    else add(`${col} < ?`, o.before);
   }
-  if (o.q) {
-    where.push("prompt LIKE ?");
-    args.push(`%${o.q}%`);
-  }
-  const sql = `SELECT * FROM generations ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT ?`;
-  return (db().prepare(sql).all(...args, Math.min(o.limit ?? 60, 200)) as Row[]).map(toGeneration);
+  if (o.since) add("g.created_at >= ?", o.since);
+  if (o.until) add("g.created_at < ?", o.until);
+  const q = o.q?.trim();
+  // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
+  if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
+  // The cursor's order: timestamp, then id (both descending).
+  const order = o.trashed ? "t.deleted_at DESC, g.id DESC" : "g.created_at DESC, g.id DESC";
+  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ?`;
+  return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
 
 export function setFavorite(id: string, favorite: boolean): void {
   update(id, { favorite: favorite ? 1 : 0 });
 }
 
+/**
+ * Everywhere a stored file can still be in use, by URL (which ends in the asset id, …/<id>.png) or
+ * by id: other jobs' inputs and outputs, elements, Assist chats (attachments, results), Cinema
+ * covers, palettes and takes, canvas nodes. `except` names a column whose row belongs to the
+ * generation being purged (its own row and Cinema membership don't keep its files).
+ */
+const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
+  { table: "generations", cols: ["request_json", "outputs_json"], except: "id" },
+  { table: "characters", cols: ["reference_asset_ids_json", "loras_json", "lora_file"] },
+  { table: "trainings", cols: ["meta_json"] },
+  { table: "assist_threads", cols: ["messages_json", "items_json", "pending_json"] },
+  { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
+  { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
+  { table: "canvases", cols: ["graph_json"] },
+  { table: "layer_projects", cols: ["source_url", "cover_url"] },
+  { table: "layer_versions", cols: ["doc_json"] },
+  { table: "shorts_sessions", cols: ["source_json", "look_json"] },
+  { table: "shorts_presets", cols: ["references_json"] },
+  { table: "brand_kits", cols: ["kit_json", "chat_json"] },
+  { table: "products", cols: ["images_json"] },
+  { table: "ad_creatives", cols: ["meta_json"] },
+  { table: "marketing_runs", cols: ["meta_json"] },
+  // Image studios: a palette's thumbnail, a moodboard's images, collages and cover, an Instadump pack's photos.
+  { table: "palettes", cols: ["thumb_url"] },
+  { table: "moodboards", cols: ["images_json", "collages_json", "cover_url"] },
+  { table: "photodump_packs", cols: ["refs_json"] },
+  // Faceless / Explainer: a channel's avatar, style references and voice samples, episode sources.
+  { table: "faceless_channels", cols: ["avatar_url", "reference_json", "settings_json"] },
+  { table: "faceless_episodes", cols: ["settings_json", "sources_json"] },
+];
+
+/** Whether anything still refers to this stored file (see ASSET_REFS). */
+export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
+  for (const r of ASSET_REFS) {
+    const where = r.cols.map((c) => `instr(COALESCE(${c}, ''), @id) > 0`).join(" OR ");
+    const except = r.except ? ` AND ${r.except} != @g` : "";
+    try {
+      if (db().prepare(`SELECT 1 FROM ${r.table} WHERE (${where})${except} LIMIT 1`).get({ id: assetId, g: exceptGeneration })) return true;
+    } catch {
+      // A table or column this install doesn't have yet: nothing there to keep the file for.
+    }
+  }
+  return false;
+}
+
+/**
+ * Delete for good (Trash → Delete forever, Empty trash, the 30-day purge): the row, its trash and
+ * folder entries, and the output files nothing else still points at (assetInUse). Dependents still
+ * waiting on it fail ("An earlier step didn't finish"). Use deleteForever / emptyTrash in
+ * src/server/library.ts (they cancel running jobs first); moving to the Trash is trashGenerations.
+ */
 export function deleteGeneration(id: string): void {
-  db().prepare("DELETE FROM generations WHERE id = ?").run(id);
+  const assets = db().prepare("SELECT id FROM assets WHERE generation_id = ?").all(id) as { id: string }[];
+  db().transaction(() => {
+    db().prepare("DELETE FROM generations WHERE id = ?").run(id);
+    db().prepare("DELETE FROM generation_trash WHERE generation_id = ?").run(id);
+    db().prepare("DELETE FROM folder_items WHERE generation_id = ?").run(id);
+  })();
+  for (const a of assets) if (!assetInUse(a.id, id)) deleteAsset(a.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -163,14 +266,34 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
-  const real = routes.find((r) => provider(r.provider).isConfigured());
+  const real = routes.find(routeReady);
   if (real) return { route: real, demo: false };
   if (demo === "off") {
+    if (routes.every((r) => r.provider === "llm")) throw new Error(llmMissing(routes[0]));
     const names = [...new Set(routes.map((r) => provider(r.provider).label))].join(" or ");
     throw new Error(`Connect ${names} in Settings to run this model`);
   }
   return { route: routes[0], demo: true };
 }
+
+/** Text steps depend on which LLM the route may use (the open model never calls Claude). */
+const routeReady = (r: ModelRoute) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured());
+
+/** What a run produces: colour matching works on images and videos, and fal renders a timeline as a video, so those follow the model. */
+export function outputKind(op: Generation["op"], model: { kind: MediaKind }): MediaKind {
+  return op === "color-match" || op === "timeline" ? model.kind : OPERATION_OUTPUT[op];
+}
+
+// Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row
+// (soft delete, when the table has one) leaves the feeds like a deleted one.
+setResolver((ids) =>
+  ids.map((id): LiveEvent => {
+    const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as (Row & { deleted_at?: number | null; trashed_at?: number | null }) | undefined;
+    const g = r && (toGeneration(r) as Generation & { deletedAt?: number | null; trashedAt?: number | null });
+    if (!r || !g || r.deleted_at || r.trashed_at || g.deletedAt || g.trashedAt) return { type: "deleted", id, json: JSON.stringify({ id }) };
+    return { type: "generation", id, json: JSON.stringify(g) };
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Create
@@ -178,8 +301,10 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
-  const model = getModel(original.modelId);
-  const req = model ? stripMotionPaths(applySketch(applyMentions(original, model, listElements()).request, model).request, model) : original;
+  // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
+  const worded = withSignatureWords(original);
+  const model = getModel(worded.modelId);
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   const plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {
@@ -189,15 +314,30 @@ function prepare(original: GenerationRequest) {
         : `${plan.model.name} is an open-source model, but this install is set to paid cloud APIs only (Settings → Engine mode)`,
     );
   }
+  // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
+  if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
+  if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op));
   const providerId: ProviderId = demo ? "mock" : route.provider;
-  return { req, plan, route, demo, providerId, cost: demo ? 0 : estimateCost(plan.model, plan.params, 1) };
+  // A text step that runs on Ollama is free; only Claude costs money.
+  const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
+  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1) };
 }
+
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
   const { plan, demo, providerId, cost } = prepare(req);
   return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+}
+
+/** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */
+export function previewChained(req: GenerationRequest, deps: number) {
+  if (!deps) return previewGeneration(req);
+  // A waiting step always runs as one job (createGenerations doesn't batch dependents).
+  const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
+  const jobs = Math.max(1, p.jobs);
+  return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
 
 export interface CreateOptions {
@@ -241,11 +381,12 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       engine: plan.model.engine,
       provider: providerId,
       op: plan.op,
-      kind: OPERATION_OUTPUT[plan.op],
+      kind: outputKind(plan.op, plan.model),
       status: "queued",
       progress: null,
       message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
-      prompt: plan.prompt,
+      // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
+      prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
       request_json: JSON.stringify(original),
       provider_input_json: null,
       external_id: null,
@@ -275,8 +416,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
 
 /** Where each dependency's output goes: `chain`, or the single-image `chainFrom`. */
 function slotsFor(req: GenerationRequest, n: number): ChainSlot[] {
-  if (req.chain?.length) return req.chain.slice(0, n);
-  return Array.from({ length: n }, () => ({ slot: "images" as const, position: req.chainFrom ?? "last" }));
+  // Dependencies beyond the listed slots are images (a chain shorter than dependsOn used to crash the launch).
+  return Array.from({ length: n }, (_, i) => req.chain?.[i] ?? { slot: "images" as const, position: req.chainFrom ?? "last" });
 }
 
 const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
@@ -286,8 +427,33 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   videos: "video",
   audio: "audio",
   voiceAudio: "audio",
+  audio2: "audio",
+  audios: "audio",
   prompt: "text",
 };
+
+/** Names providers give the same stem (ComfyUI: voice/background; Demucs: vocals…; SAM Audio: target/residual). */
+const STEM_ALIASES: Record<string, string[]> = {
+  voice: ["voice", "vocals", "speech", "target"],
+  background: ["background", "accompaniment", "instrumental", "residual", "no_vocals"],
+};
+
+/**
+ * Soundtrack slots a video can fill: a step that made only a clip hands over the clip itself, and the
+ * mux reads its sound (ComfyUI's LoadAudio and fal's FFmpeg take a video file as the audio input).
+ * Shorts and Mixed Media put the trimmed source's own sound back under the restyled picture this way.
+ */
+const SOUNDTRACK_SLOTS = new Set<ChainSlot["slot"]>(["audio", "audio2"]);
+
+/** The dependency output a slot takes: the first of the slot's kind, or the one with the slot's `stem`. */
+export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | undefined {
+  const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
+  if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
+  const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
+  return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
+}
+
+const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : SLOT_KIND[s.slot]);
 
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
@@ -295,9 +461,23 @@ function placeholderFor(s: ChainSlot): string {
   return kind === "image" ? "/api/files/placeholder.png" : kind === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
 }
 
-/** What a chained step takes from a dependency's output: the file URL, or the text for "prompt". */
-function chainValue(o: OutputFile | undefined, s: ChainSlot): string | undefined {
-  return s.slot === "prompt" ? o?.text : o?.url;
+/**
+ * What a chained step takes from a dependency's output: the file URL, or the text for "prompt".
+ * A translation of timed text gets the cue list (so the timing survives); text saved only as a
+ * file, or cut short inline (meta.truncated), is read back from it.
+ */
+async function chainValue(o: OutputFile | undefined, s: ChainSlot, op?: Generation["op"]): Promise<string | undefined> {
+  if (!o) return undefined;
+  if (s.slot !== "prompt") return o.url;
+  const cues = Array.isArray(o.meta?.cues) && o.meta.cues.length ? (o.meta.cues as Cue[]) : null;
+  if (op === "translate" && cues) return JSON.stringify(cues);
+  if (typeof o.text === "string" && !o.meta?.truncated) return o.text;
+  // Timed text is saved as subtitles: its words come from the cues, not the .srt file.
+  if (cues) return cueText(cues);
+  if (!o.url) return undefined;
+  return readRef(o.url)
+    .then((f) => f.data.toString("utf8"))
+    .catch(() => undefined);
 }
 
 /**
@@ -308,7 +488,7 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   const inputs = { ...req.inputs };
   let prompt = req.prompt;
   const slots = slotsFor(req, urls.length);
-  for (const k of ["images", "videos"] as const) {
+  for (const k of ["images", "videos", "audios"] as const) {
     const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && (s.position ?? "last") === pos ? [urls[i]] : []));
     const first = at("first");
     const last = at("last");
@@ -316,53 +496,98 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   }
   slots.forEach((s, i) => {
     if (s.slot === "prompt") prompt = prompt?.includes("{text}") ? prompt.replaceAll("{text}", urls[i]) : urls[i];
-    else if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = urls[i];
+    else if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios") inputs[s.slot] = urls[i];
   });
   return { ...req, prompt, inputs };
 }
 
-/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. */
-const launching = new Set<string>();
+/** Generations this process is handing to a provider right now (shared across hot reloads and bundles). */
+declare global {
+  var __fuobeSubmitting: Set<string> | undefined;
+}
+const submitting = (): Set<string> => (globalThis.__fuobeSubmitting ??= new Set<string>());
+
+/**
+ * A chain runs all for real or all as a demo (a demo join of paid clips, or a paid step fed a demo
+ * placeholder, helps nobody). Returns the error for a step that can't match its dependencies, and
+ * whether it should run as a demo because they did.
+ */
+function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route: ModelRoute }, deps: Pick<Row, "provider">[]): { error?: string; forceDemo?: boolean } {
+  const demoDeps = deps.filter((d) => d.provider === "mock").length;
+  if (p.demo && demoDeps < deps.length) {
+    const needs = p.route.provider === "llm" ? "Claude or Ollama" : provider(p.route.provider).label;
+    return { error: `${p.plan.model.name} needs ${needs} to continue what the earlier steps made for real — connect it in Settings, then retry` };
+  }
+  if (!p.demo && demoDeps > 0) {
+    if (getSetting("demoMode") === "off") return { error: "An earlier step ran as a demo — retry it with its provider connected" };
+    return { forceDemo: true };
+  }
+  return {};
+}
+
+/** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
   const rows = db()
     .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
     .all() as Row[];
   for (const r of rows) {
-    if (launching.has(r.id)) continue;
+    if (submitting().has(r.id)) continue;
     const request = JSON.parse(r.request_json) as GenerationRequest;
     const ids = depIds(r.depends_on);
     const slots = slotsFor(request, ids.length);
-    const deps = ids.map((id) => db().prepare("SELECT status, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "outputs_json"> | undefined);
+    const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
     const earlier = request.frame ? "The previous frame" : "An earlier step";
     if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
       update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
       continue;
     }
     if (deps.some((d) => d!.status !== "succeeded")) continue;
-    const urls = deps.map((d, i) => chainValue((JSON.parse(d!.outputs_json) as OutputFile[]).find((o) => o.kind === SLOT_KIND[slots[i].slot]), slots[i]));
-    if (urls.some((u) => !u)) {
-      update(r.id, { status: "failed", error: `${earlier} has no ${SLOT_KIND[slots[urls.findIndex((u) => !u)].slot]} to use`, message: null, completed_at: Date.now() });
-      continue;
-    }
-    launching.add(r.id);
+    submitting().add(r.id);
+    let handedOff = false;
     try {
-      const original = withChainInputs(request, urls as string[]);
-      const { req, plan, route, providerId, cost, demo } = prepare(original);
+      // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
+      const values = await Promise.all(deps.map((d, i) => chainValue(pickOutput(JSON.parse(d!.outputs_json) as OutputFile[], slots[i]), slots[i], r.op)));
+      const missing = values.findIndex((u) => !u);
+      if (missing >= 0) {
+        update(r.id, { status: "failed", error: `${earlier} has no ${slotNoun(slots[missing])} to use`, message: null, completed_at: Date.now() });
+        continue;
+      }
+      // Routing reads cached reachability: make sure it's fresh for local engines.
+      const model = getModel(request.modelId);
+      if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
+      if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
+      const original = withChainInputs(request, values as string[]);
+      const prepared = prepare(original);
+      const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
+      if (mode.error) throw new Error(mode.error);
+      const p = mode.forceDemo ? { ...prepared, demo: true, providerId: "mock" as const, cost: 0 } : prepared;
       update(r.id, {
-        provider: providerId,
-        op: plan.op,
-        prompt: plan.prompt,
-        cost_usd: cost,
+        provider: p.providerId,
+        op: p.plan.op,
+        kind: outputKind(p.plan.op, p.plan.model),
+        prompt: p.plan.prompt,
+        cost_usd: p.cost,
         request_json: JSON.stringify(original),
-        message: demo ? "Demo mode — no provider connected" : "Submitting",
+        message: mode.forceDemo ? "Demo — an earlier step ran as a demo" : p.demo ? "Demo mode — no provider connected" : "Submitting",
       });
-      await submit(r.id, route, providerId, plan, req, 0);
+      // In the background: an upload must not hold up the runner's other polls.
+      handedOff = true;
+      void submit(r.id, p.route, p.providerId, p.plan, p.req, 0);
     } catch (e) {
       update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
     } finally {
-      launching.delete(r.id);
+      if (!handedOff) submitting().delete(r.id);
     }
   }
+}
+
+const statusOf = (id: string) => (db().prepare("SELECT status FROM generations WHERE id = ?").get(id) as Pick<Row, "status"> | undefined)?.status;
+
+/** Start the timeout clock: the job has reached its provider. */
+function recordSubmission(id: string, at: number): void {
+  db()
+    .prepare("INSERT INTO generation_runs (id, submitted_at, started_at) VALUES (?, ?, NULL) ON CONFLICT(id) DO UPDATE SET submitted_at = excluded.submitted_at, started_at = NULL")
+    .run(id, at);
 }
 
 async function submit(
@@ -374,6 +599,7 @@ async function submit(
   index: number,
 ): Promise<void> {
   const adapter = provider(providerId);
+  submitting().add(id);
   try {
     const prep = async (ref?: string) => {
       if (!ref) return undefined;
@@ -402,22 +628,38 @@ async function submit(
       mask: await prepMask(req.inputs?.mask),
       video: await prep(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
+      audio2: await prep(req.inputs?.audio2),
       voiceAudio: await prep(req.inputs?.voiceAudio),
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
       videos: (await Promise.all((req.inputs?.videos ?? []).map(prep))).filter(Boolean) as string[],
+      audios: (await Promise.all((req.inputs?.audios ?? []).map(prep))).filter(Boolean) as string[],
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,
     };
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
-    update(id, {
-      external_id: res.externalId,
-      external_meta_json: JSON.stringify(res.meta ?? {}),
-      provider_input_json: res.payload ? JSON.stringify(res.payload).slice(0, 200_000) : null,
-      message: "Queued",
-    });
+    const now = Date.now();
+    const status = statusOf(id);
+    if (!status || status === "canceled") {
+      // Canceled (or deleted) while it was being handed over: stop the provider's job too.
+      await adapter.cancel?.({ externalId: res.externalId, meta: res.meta ?? {}, route, model: plan.model, createdAt: now }).catch(() => {});
+      if (status) update(id, { external_id: res.externalId, external_meta_json: JSON.stringify(res.meta ?? {}), message: null });
+      return;
+    }
+    db().transaction(() => {
+      update(id, {
+        external_id: res.externalId,
+        external_meta_json: JSON.stringify(res.meta ?? {}),
+        provider_input_json: res.payload ? JSON.stringify(res.payload).slice(0, 200_000) : null,
+        message: "Queued",
+      });
+      recordSubmission(id, now);
+    })();
   } catch (e) {
-    update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+    // A cancel during the hand-over stays a cancel.
+    if (statusOf(id) !== "canceled") update(id, { status: "failed", error: (e as Error).message, completed_at: Date.now(), message: null });
+  } finally {
+    submitting().delete(id);
   }
 }
 
@@ -425,27 +667,87 @@ async function submit(
 // Polling loop
 
 const POLL_MS = 1500;
+/** Jobs about to finish (progress ≥ 0.9) are polled this often, so results land sooner. */
+const FAST_POLL_MS = 500;
+/** How long a job may run once its provider has started it… */
 const TIMEOUT_MS = 45 * 60 * 1000;
+/** …and how long it may wait in the provider's queue first (a busy local GPU works through jobs one by one). */
+const QUEUE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
+/** A row this old with no external id, that no submit in this process is working on, was cut off by a restart. */
+const STALE_SUBMIT_MS = 2 * 60 * 1000;
 
-declare global {
-  var __fuobeRunner: { timer: NodeJS.Timeout; busy: boolean; tick: () => Promise<void> } | undefined;
+interface RunnerState {
+  timer: NodeJS.Timeout;
+  busy: boolean;
+  tick: () => Promise<void>;
+  fastTimer?: NodeJS.Timeout;
+  fastBusy?: boolean;
+  fast?: () => Promise<void>;
+  /** Rows being polled right now (the fast lane and the tick never poll one row twice at once). */
+  polling?: Set<string>;
 }
 
+declare global {
+  var __fuobeRunner: RunnerState | undefined;
+}
+
+/**
+ * Start the background runner (once per process; started at boot by src/instrumentation.ts).
+ * Also installs the live-update hooks and primes the reachability probes routing reads.
+ */
 export function ensureRunner(): void {
-  if (globalThis.__fuobeRunner) {
-    // After a dev hot-reload, point the existing timer at this module's (fresh) code.
-    globalThis.__fuobeRunner.tick = tick;
+  watchGenerations(db());
+  const cur = globalThis.__fuobeRunner;
+  if (cur) {
+    // After a dev hot-reload, point the existing timers at this module's (fresh) code.
+    cur.tick = tick;
+    cur.fast = fastTick;
+    cur.polling ??= new Set();
+    if (!cur.fastTimer) {
+      cur.fastTimer = setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS);
+      cur.fastTimer.unref?.();
+    }
     return;
   }
-  const state = { busy: false, tick, timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS) };
+  const state: RunnerState = {
+    busy: false,
+    tick,
+    fast: fastTick,
+    polling: new Set(),
+    timer: setInterval(() => void globalThis.__fuobeRunner?.tick(), POLL_MS),
+    fastTimer: setInterval(() => void globalThis.__fuobeRunner?.fast?.(), FAST_POLL_MS),
+  };
   state.timer.unref?.();
+  state.fastTimer?.unref?.();
   globalThis.__fuobeRunner = state;
-  // Jobs that never got an external id (server died mid-submit) can't be recovered.
-  db()
-    .prepare(
-      "UPDATE generations SET status = 'failed', error = 'Interrupted before it reached the provider', completed_at = ? WHERE status IN ('queued','running') AND external_id IS NULL AND depends_on IS NULL AND created_at < ?",
-    )
-    .run(Date.now(), Date.now() - 2 * 60 * 1000);
+  void probeComfy().catch(() => false);
+  void probeOllama().catch(() => false);
+  sweepInterrupted();
+}
+
+/** Jobs that never got an external id (the server died mid-submit) can't be recovered. Runs every tick. */
+function sweepInterrupted(): void {
+  const rows = db()
+    .prepare("SELECT id FROM generations WHERE status IN ('queued','running') AND external_id IS NULL AND depends_on IS NULL AND created_at < ?")
+    .all(Date.now() - STALE_SUBMIT_MS) as Pick<Row, "id">[];
+  const busy = submitting();
+  for (const r of rows) {
+    if (busy.has(r.id)) continue;
+    update(r.id, { status: "failed", error: "Interrupted before it reached the provider", completed_at: Date.now(), message: null });
+  }
+}
+
+async function pollGuarded(r: Row): Promise<void> {
+  const polling = (globalThis.__fuobeRunner!.polling ??= new Set());
+  if (polling.has(r.id)) return;
+  polling.add(r.id);
+  try {
+    await pollOne(r);
+  } catch (e) {
+    update(r.id, { message: `Poll error: ${(e as Error).message}` });
+  } finally {
+    polling.delete(r.id);
+  }
 }
 
 async function tick(): Promise<void> {
@@ -453,17 +755,46 @@ async function tick(): Promise<void> {
   if (!state || state.busy) return;
   state.busy = true;
   try {
+    sweepInterrupted();
     const active = db()
       .prepare("SELECT * FROM generations WHERE status IN ('queued','running') AND external_id IS NOT NULL ORDER BY created_at ASC LIMIT 50")
       .all() as Row[];
-    await Promise.all([
-      ...active.map((r) => pollOne(r).catch((e) => update(r.id, { message: `Poll error: ${(e as Error).message}` }))),
-      pollTrainings().catch(() => {}),
-      advanceDependents().catch(() => {}),
-    ]);
+    await Promise.all([...active.map(pollGuarded), pollTrainings().catch(() => {}), advanceDependents().catch(() => {})]);
   } finally {
     state.busy = false;
   }
+}
+
+async function fastTick(): Promise<void> {
+  const state = globalThis.__fuobeRunner;
+  if (!state || state.fastBusy) return;
+  state.fastBusy = true;
+  try {
+    const rows = db()
+      .prepare(
+        "SELECT g.*, r.started_at AS run_started_at FROM generations g LEFT JOIN generation_runs r ON r.id = g.id WHERE g.status = 'running' AND g.external_id IS NOT NULL AND g.progress IS NOT NULL ORDER BY g.created_at ASC LIMIT 50",
+      )
+      .all() as (Row & { run_started_at: number | null })[];
+    const now = Date.now();
+    // At 90% (or on course to be there by now, at the pace it has reported since it started).
+    const nearlyDone = rows.filter((r) => {
+      const p = r.progress ?? 0;
+      if (p >= 0.9) return true;
+      const ran = r.run_started_at ? r.updated_at - r.run_started_at : 0;
+      return ran > 0 && p > 0 && (p * (now - r.run_started_at!)) / ran >= 0.9;
+    });
+    await Promise.all(nearlyDone.slice(0, 20).map(pollGuarded));
+  } finally {
+    state.fastBusy = false;
+  }
+}
+
+function runRoute(model: NonNullable<ReturnType<typeof getModel>>, r: Pick<Row, "op" | "provider">): ModelRoute {
+  return model.routes.find((x) => x.op === r.op && (x.provider === r.provider || r.provider === "mock")) ?? model.routes[0];
+}
+
+function pollContext(r: Row, model: NonNullable<ReturnType<typeof getModel>>): PollContext {
+  return { externalId: r.external_id!, meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>, route: runRoute(model, r), model, createdAt: r.created_at };
 }
 
 async function pollOne(r: Row): Promise<void> {
@@ -472,19 +803,43 @@ async function pollOne(r: Row): Promise<void> {
     update(r.id, { status: "failed", error: `Model ${r.model_id} no longer exists`, completed_at: Date.now() });
     return;
   }
-  if (Date.now() - r.created_at > TIMEOUT_MS) {
-    update(r.id, { status: "failed", error: "Timed out", completed_at: Date.now() });
-    return;
+  // The clock runs from when the provider got the job (and from when it started it), not from creation:
+  // a chained step created at the start of a long pipeline gets its full time once it's submitted.
+  const now = Date.now();
+  let run = db().prepare("SELECT submitted_at, started_at FROM generation_runs WHERE id = ?").get(r.id) as { submitted_at: number; started_at: number | null } | undefined;
+  if (!run) {
+    // Submitted before this was recorded (an upgrade mid-job): start counting now.
+    recordSubmission(r.id, now);
+    run = { submitted_at: now, started_at: null };
   }
-  const route = model.routes.find((x) => x.op === r.op && (x.provider === r.provider || r.provider === "mock")) ?? model.routes[0];
-  const res = await provider(r.provider).poll({
-    externalId: r.external_id!,
-    meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>,
-    route,
-    model,
-    createdAt: r.created_at,
-  });
-  if (res.state === "queued" || res.state === "running") {
+  const ctx = pollContext(r, model);
+  // Poll first: a job that finished while the server was asleep or down is collected, not timed out.
+  let res: PollResult | undefined;
+  let pollError: unknown;
+  try {
+    res = await provider(r.provider).poll(ctx);
+  } catch (e) {
+    pollError = e;
+  }
+  if (!res || res.state === "queued" || res.state === "running") {
+    // A job that has just left the queue gets its full running time from now.
+    const startsNow = res?.state === "running" && !run.started_at;
+    const overdue = run.started_at ? now - run.started_at > TIMEOUT_MS : !startsNow && now - run.submitted_at > QUEUE_TIMEOUT_MS;
+    if (overdue) {
+      // Stop the provider's job too, so it doesn't keep rendering (or billing) for nothing.
+      await provider(r.provider)
+        .cancel?.(ctx)
+        .catch(() => {});
+      update(r.id, {
+        status: "failed",
+        error: run.started_at ? `Timed out after ${TIMEOUT_MS / 60_000} minutes` : `Timed out waiting ${QUEUE_TIMEOUT_MS / 3_600_000} hours in the provider's queue`,
+        completed_at: now,
+        message: null,
+      });
+      return;
+    }
+    if (!res) throw pollError;
+    if (startsNow) db().prepare("UPDATE generation_runs SET started_at = ? WHERE id = ?").run(Date.now(), r.id);
     update(r.id, { status: res.state, progress: res.progress ?? r.progress, message: res.message ?? null });
     return;
   }
@@ -495,11 +850,11 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
-  for (const o of res.outputs) {
+  for (const o of res.outputs as RichOutput[]) {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {
-      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...(o.draftId ? { draftId: o.draftId } : {}) });
+      outputs.push({ url: o.url, kind: o.kind ?? r.kind, ...inlineText(o.text, o.meta), ...(o.draftId ? { draftId: o.draftId } : {}) });
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
@@ -512,10 +867,28 @@ async function pollOne(r: Row): Promise<void> {
   });
 }
 
-async function persistOutput(o: RemoteOutput, generationId: string): Promise<OutputFile> {
+/** Outputs may carry text (transcripts, translations, scripts) and structured extras (layer boxes, cues, stems). */
+type RichOutput = RemoteOutput & { text?: string; meta?: Record<string, unknown> };
+
+/**
+ * Text kept inline on the generation. Every list page and live event carries it, so longer text
+ * (long transcripts, scripts) is cut there, marked `meta.truncated`, and read in full from its file.
+ */
+export const MAX_INLINE_TEXT = 64_000;
+
+function inlineText(text: string | undefined, meta: Record<string, unknown> | undefined): Pick<OutputFile, "text" | "meta"> {
+  if (text === undefined) return meta ? { meta } : {};
+  if (text.length <= MAX_INLINE_TEXT) return { text, ...(meta && { meta }) };
+  return { text: text.slice(0, MAX_INLINE_TEXT), meta: { ...meta, truncated: true } };
+}
+
+async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
   let data: Buffer;
   let contentType = o.contentType;
-  if (o.url.startsWith("sample:")) {
+  if (!o.url && o.text !== undefined) {
+    data = Buffer.from(o.text);
+    contentType ??= "text/plain";
+  } else if (o.url.startsWith("sample:")) {
     const file = path.join(process.cwd(), "public", "samples", path.basename(o.url.slice(7)));
     data = fs.readFileSync(file);
     contentType ??= contentTypeFor(file);
@@ -531,22 +904,26 @@ async function persistOutput(o: RemoteOutput, generationId: string): Promise<Out
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
-  return { url: asset.url, kind: asset.kind, contentType: asset.contentType, assetId: asset.id, ...(o.draftId ? { draftId: o.draftId } : {}) };
+  // A text file's words travel with the generation, so feeds and the next chained step can use them.
+  const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
+  return {
+    url: asset.url,
+    kind: asset.kind,
+    contentType: asset.contentType,
+    assetId: asset.id,
+    ...inlineText(text, o.meta),
+    ...(o.draftId ? { draftId: o.draftId } : {}),
+  };
 }
 
 export async function cancelGeneration(id: string): Promise<void> {
   const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
   if (!r || (r.status !== "queued" && r.status !== "running")) return;
   const model = getModel(r.model_id);
+  // Without an external id the job is still being handed over: submit() cancels it as soon as it lands.
   if (r.external_id && model) {
     await provider(r.provider)
-      .cancel?.({
-        externalId: r.external_id,
-        meta: JSON.parse(r.external_meta_json ?? "{}") as Record<string, unknown>,
-        route: model.routes[0],
-        model,
-        createdAt: r.created_at,
-      })
+      .cancel?.(pollContext(r, model))
       .catch(() => {});
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });

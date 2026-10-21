@@ -1,23 +1,26 @@
 "use client";
 
-import { ArrowUp, AudioLines, Bot, Box, Check, CircleAlert, Clapperboard, Cpu, FileText, History, ImageIcon, Loader2, Paperclip, Plus, Search, Sparkles, Trash2, Video, X } from "lucide-react";
+import { Bot, Cpu, Loader2, MessageSquarePlus } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { Viewer } from "@/components/studio/viewer";
-import { uploadFile, useAssistActions, useAssistThread, useAssistThreads, useCreateGeneration, useEngine } from "@/lib/api";
-import type { AssistItem, AssistThread, PlannedJob } from "@/lib/assist";
-import { OPERATION_LABELS, type Generation, type MediaKind } from "@/lib/catalog/types";
-import { formatCost, timeAgo } from "@/lib/format";
+import { AssistComposer } from "@/components/assist/composer";
+import { ChatMenu } from "@/components/assist/chat-menu";
+import { useChatActions, useChats, useProjects, useSkills } from "@/components/assist/hooks";
+import { ModePicker, useModeChoice } from "@/components/assist/mode-picker";
+import { ProjectDot, RailButton } from "@/components/assist/shell";
+import { SkillIcon } from "@/components/assist/skill-icon";
+import { Transcript } from "@/components/assist/transcript";
+import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
+import { modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
+import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
@@ -27,410 +30,87 @@ const SUGGESTIONS = [
   "A 10-second vertical video of a fox running through snow, with sound",
 ];
 
-const KIND_ICON: Record<MediaKind | "storyboard", typeof ImageIcon> = { image: ImageIcon, video: Video, audio: AudioLines, text: FileText, model3d: Box, storyboard: Clapperboard };
+/** Skills offered as one-tap starters on the empty page (Supercomputer's suggestion cards). */
+const STARTER_SKILLS = ["product-photoshoot", "ugc-video", "thumbnail-generation", "faceless-video", "short-film", "localization"];
 
-const AGENT_LABEL: Record<AssistThread["agent"], string> = { claude: "Claude", ollama: "Local LLM", offline: "Offline planner" };
 const AGENT_HINT: Record<AssistThread["agent"], string> = {
   claude: "Claude plans the shoot, picks models and runs them with your approval.",
-  ollama: "Runs on your Ollama model (Settings → Prompt enhancement). Smaller local models follow instructions less reliably than Claude.",
+  ollama: "Runs on your local model through Ollama. Smaller local models follow instructions less reliably than Claude.",
   offline: "A simple rule-based planner. Add an Anthropic API key, or run Ollama, for the full assistant that picks models, chains steps and checks results.",
 };
 
-interface Attachment {
-  id: string;
-  preview: string;
-  url?: string;
-  kind: MediaKind;
-}
-
-// ---------------------------------------------------------------------------
-// Composer
-
-function Composer({
-  onSend,
-  disabled,
-  placeholder,
-  autoFocus,
-  footer,
-}: {
-  onSend: (text: string, attachments: string[]) => Promise<void>;
-  disabled?: boolean;
-  placeholder: string;
-  autoFocus?: boolean;
-  footer?: React.ReactNode;
-}) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<Attachment[]>([]);
-  const [sending, setSending] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const uploading = files.some((f) => !f.url);
-  const ready = text.trim().length > 0 && !uploading && !sending && !disabled;
-
-  const add = (list: FileList | null) => {
-    for (const f of Array.from(list ?? []).slice(0, 8 - files.length)) {
-      const id = nanoid(6);
-      const kind: MediaKind = f.type.startsWith("video") ? "video" : f.type.startsWith("audio") ? "audio" : "image";
-      setFiles((xs) => [...xs, { id, kind, preview: URL.createObjectURL(f) }]);
-      uploadFile(f)
-        .then((a) => setFiles((xs) => xs.map((x) => (x.id === id ? { ...x, url: a.url } : x))))
-        .catch((e) => {
-          toast.error((e as Error).message);
-          setFiles((xs) => xs.filter((x) => x.id !== id));
-        });
-    }
-  };
-
-  const send = async () => {
-    if (!ready) return;
-    setSending(true);
-    try {
-      await onSend(text.trim(), files.map((f) => f.url!));
-      setText("");
-      setFiles([]);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <div
-      className="rounded-composer border bg-background p-2.5 shadow-soft transition focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        add(e.dataTransfer.files);
-      }}
-    >
-      {files.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1">
-          {files.map((f) => (
-            <div key={f.id} className="relative size-14 overflow-hidden rounded-lg border bg-muted">
-              {f.kind === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={f.preview} alt="" className="size-full object-cover" />
-              ) : f.kind === "video" ? (
-                <video src={f.preview} muted className="size-full object-cover" />
-              ) : (
-                <AudioLines className="m-auto mt-4 size-5 text-muted-foreground" />
-              )}
-              {!f.url && <Loader2 className="absolute inset-0 m-auto size-4 animate-spin text-foreground" />}
-              <button
-                onClick={() => setFiles((xs) => xs.filter((x) => x.id !== f.id))}
-                className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full bg-foreground/80 text-background"
-                aria-label="Remove attachment"
-              >
-                <X className="size-2.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <textarea
-        value={text}
-        autoFocus={autoFocus}
-        onChange={(e) => setText(e.target.value)}
-        onPaste={(e) => e.clipboardData.files.length && add(e.clipboardData.files)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            void send();
-          }
-        }}
-        rows={1}
-        placeholder={placeholder}
-        className="field-sizing-content max-h-56 min-h-12 w-full resize-none bg-transparent px-2 py-1.5 text-base leading-relaxed outline-none placeholder:text-subtle-foreground"
-      />
-      <div className="mt-1 flex items-center gap-2">
-        <input ref={input} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={(e) => (add(e.target.files), (e.target.value = ""))} />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button onClick={() => input.current?.click()} className="grid size-9 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach files">
-              <Paperclip className="size-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Attach photos, video or audio</TooltipContent>
-        </Tooltip>
-        {footer}
-        <Button size="icon" className="ml-auto size-10 rounded-full" disabled={!ready} onClick={() => void send()} aria-label="Send">
-          {sending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function AskFirst({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+export function AskFirst({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+        <label className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground">
           <Switch size="sm" checked={checked} onCheckedChange={onChange} aria-label="Ask before generating" />
           Ask first
         </label>
       </TooltipTrigger>
-      <TooltipContent>{checked ? "You approve each plan and its cost before anything runs" : "Plans run right away — no approval card"}</TooltipContent>
+      <TooltipContent>{checked ? "You approve each plan (and each memory) before anything runs" : "Plans run right away — no approval card"}</TooltipContent>
     </Tooltip>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Transcript items
-
-/** Paragraphs, "- " bullets and **bold** — the little markdown the assistant uses. */
-function Prose({ text }: { text: string }) {
-  const inline = (s: string) => s.split(/(\*\*[^*]+\*\*)/g).map((p, i) => (p.startsWith("**") && p.endsWith("**") ? <strong key={i}>{p.slice(2, -2)}</strong> : p));
-  return (
-    <div className="space-y-2.5 text-[15px] leading-relaxed">
-      {text.split(/\n{2,}/).map((para, i) => {
-        const lines = para.split("\n");
-        if (lines.every((l) => /^\s*([-*•]|\d+\.)\s/.test(l))) {
-          return (
-            <ul key={i} className="list-disc space-y-1 pl-5 marker:text-muted-foreground">
-              {lines.map((l, j) => (
-                <li key={j}>{inline(l.replace(/^\s*([-*•]|\d+\.)\s/, ""))}</li>
-              ))}
-            </ul>
-          );
-        }
-        return (
-          <p key={i} className="whitespace-pre-wrap">
-            {inline(para)}
-          </p>
-        );
-      })}
-    </div>
-  );
+/** Usable skills for a chat: the project's own list when it has one, else every enabled skill. */
+export function chatSkills(all: SkillSummary[] | undefined, project?: AssistProject | null): SkillSummary[] {
+  if (!all) return [];
+  if (project?.skills.length) return all.filter((s) => project.skills.includes(s.name));
+  return all.filter((s) => s.enabled);
 }
 
-function jobPrice(j: PlannedJob): string {
-  if (j.error) return "—";
-  if (j.demo) return "Demo";
-  if (j.costUsd === 0) return "Free";
-  return j.costUsd === null ? "Price varies" : formatCost(j.costUsd);
-}
-
-function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistItem, { role: "approval" }>; live: boolean; onAnswer: (ok: boolean) => Promise<void> }) {
-  const [busy, setBusy] = useState<boolean | null>(null);
-  const runnable = item.jobs.some((j) => !j.error);
-  const allDemo = item.jobs.every((j) => j.demo || j.error);
-  const total = allDemo ? "Demo run — no provider connected" : item.totalUsd === null ? "Some prices vary" : item.totalUsd === 0 ? "Free" : `≈ ${formatCost(item.totalUsd)}`;
-  const answer = async (ok: boolean) => {
-    setBusy(ok);
-    try {
-      await onAnswer(ok);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
+/** The composer's chips for a new chat: mode, engine, ask-first. */
+export function NewChatControls({
+  choice,
+  setChoice,
+  can,
+  engine,
+  setEngine,
+  askFirst,
+  setAskFirst,
+}: {
+  choice: AssistModeChoice | null;
+  setChoice: (c: AssistModeChoice) => void;
+  can?: AssistAvailability;
+  engine: "cloud" | "open";
+  setEngine: (e: "cloud" | "open") => void;
+  askFirst: boolean;
+  setAskFirst: (v: boolean) => void;
+}) {
   return (
-    <div className={cn("animate-fade-up overflow-hidden rounded-2xl border bg-background shadow-soft", item.status !== "pending" && "opacity-80")}>
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2.5">
-        <Sparkles className="size-3.5 text-brand-text" />
-        <p className="min-w-0 flex-1 truncate text-[13px] font-medium">{item.summary}</p>
-        {item.status === "approved" && (
-          <span className="inline-flex items-center gap-1 text-[12px] font-medium text-brand-text">
-            <Check className="size-3" /> Approved
-          </span>
-        )}
-        {item.status === "declined" && <span className="text-[12px] text-muted-foreground">Skipped</span>}
-      </div>
-      <ul className="divide-y">
-        {item.jobs.map((j, i) => {
-          const Icon = KIND_ICON[j.op === "storyboard" ? "storyboard" : j.kind];
-          return (
-            <li key={i} className="flex gap-3 px-4 py-3">
-              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-secondary">
-                <Icon className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium">
-                  {j.modelName}
-                  <span className="font-normal text-muted-foreground">
-                    {" · "}
-                    {j.op === "storyboard" ? `Storyboard · ${j.count} frames` : `${OPERATION_LABELS[j.op] ?? j.op}${j.count > 1 ? ` · ${j.count} takes` : ""}`}
-                  </span>
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">{j.prompt}</p>
-                {j.error && (
-                  <p className="mt-1 flex items-center gap-1 text-[12px] text-destructive">
-                    <CircleAlert className="size-3" /> {j.error}
-                  </p>
-                )}
-              </div>
-              <span className="shrink-0 font-mono text-[12px] text-muted-foreground">{jobPrice(j)}</span>
-            </li>
-          );
-        })}
-      </ul>
-      <div className="flex flex-wrap items-center gap-2 border-t px-4 py-2.5">
-        <p className="text-[12px] text-muted-foreground">{total}</p>
-        {live && item.status === "pending" && (
-          <div className="ml-auto flex gap-1.5">
-            <Button variant="ghost" size="sm" disabled={busy !== null} onClick={() => void answer(false)}>
-              Not now
-            </Button>
-            <Button size="sm" disabled={busy !== null || !runnable} onClick={() => void answer(true)}>
-              {busy ? <Loader2 className="animate-spin" /> : <Check />} Run{item.totalUsd && !allDemo ? ` · ${formatCost(item.totalUsd)}` : ""}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[]; all: Map<string, Generation>; storyboard?: boolean; onOpen: (g: Generation, i: number) => void }) {
-  const create = useCreateGeneration();
-  const gens = ids.map((id) => all.get(id)).filter((g): g is Generation => !!g);
-  if (!gens.length) return null;
-  const tiles = gens.flatMap((g) => {
-    const ratio = tileRatio(g);
-    if (g.status === "succeeded") {
-      return g.outputs.map((o, i) => (
-        <button key={`${g.id}-${i}`} onClick={() => onOpen(g, i)} className="group relative overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
-          <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" />
-          {g.provider === "mock" && <span className="absolute top-2 left-2 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
-        </button>
-      ));
-    }
-    if (g.status === "failed" || g.status === "canceled") {
-      return [<FailedTile key={g.id} g={g} ratio={ratio} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />];
-    }
-    return Array.from({ length: Math.max(1, g.request.params?.numOutputs ?? 1) }, (_, i) => <PendingTile key={`${g.id}-${i}`} g={g} ratio={ratio} />);
-  });
-  const portrait = tileRatio(gens[0]) < 1;
-  return (
-    <div className={cn("grid gap-2", storyboard ? "grid-cols-2 sm:grid-cols-4" : portrait ? "grid-cols-2 sm:grid-cols-3" : tiles.length === 1 ? "grid-cols-1 sm:w-4/5" : "grid-cols-2")}>
-      {tiles}
-    </div>
-  );
-}
-
-function Transcript({ thread, all, onAnswer, onOpen }: { thread: AssistThread; all: Map<string, Generation>; onAnswer: (ok: boolean) => Promise<void>; onOpen: (g: Generation, i: number) => void }) {
-  const lastApproval = thread.items.findLast((i) => i.role === "approval")?.id;
-  return (
-    <div className="space-y-5">
-      {thread.items.map((item) => {
-        switch (item.role) {
-          case "user":
-            return (
-              <div key={item.id} className="flex animate-fade-up flex-col items-end gap-2">
-                {item.attachments?.length ? (
-                  <div className="flex flex-wrap justify-end gap-1.5">
-                    {item.attachments.map((a) => (
-                      <div key={a} className="size-16 overflow-hidden rounded-xl border bg-muted">
-                        <MediaThumb output={{ url: a, kind: /\.(mp4|webm|mov)$/i.test(a) ? "video" : /\.(mp3|wav|ogg|m4a)$/i.test(a) ? "audio" : "image" }} />
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap">{item.text}</div>
-              </div>
-            );
-          case "assistant":
-            return (
-              <div key={item.id} className="animate-fade-up">
-                <Prose text={item.text} />
-              </div>
-            );
-          case "tool":
-            return (
-              <p key={item.id} className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                <Search className="size-3" /> {item.text}
-              </p>
-            );
-          case "approval":
-            return <ApprovalCard key={item.id} item={item} live={item.id === lastApproval && thread.status === "waiting"} onAnswer={onAnswer} />;
-          case "generations":
-            return <GenerationCards key={item.id} ids={item.ids} all={all} storyboard={item.storyboard} onOpen={onOpen} />;
-          case "notice":
-            return (
-              <p
-                key={item.id}
-                className={cn("flex items-start gap-2 rounded-xl px-3 py-2 text-[13px]", item.tone === "error" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}
-              >
-                <CircleAlert className="mt-0.5 size-3.5 shrink-0" /> {item.text}
-              </p>
-            );
-        }
-      })}
-      {thread.status === "running" && (
-        <p className="shimmer-text animate-shimmer-text flex items-center gap-2 text-[14px] font-medium">
-          <Sparkles className="size-3.5" /> Thinking…
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
-function HistoryButton({ current, onPick }: { current: string | null; onPick: (id: string | null) => void }) {
-  const threads = useAssistThreads();
-  const actions = useAssistActions();
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-muted-foreground">
-          <History /> <span className="hidden sm:inline">History</span>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-1.5">
-        {threads.data?.threads.length ? (
-          <ul className="max-h-96 overflow-y-auto">
-            {threads.data.threads.map((t) => (
-              <li key={t.id} className="group flex items-center">
-                <button
-                  onClick={() => {
-                    onPick(t.id);
-                    setOpen(false);
-                  }}
-                  className={cn("min-w-0 flex-1 rounded-lg px-2.5 py-2 text-left hover:bg-accent", t.id === current && "bg-accent")}
-                >
-                  <p className="truncate text-[13px] font-medium">{t.title}</p>
-                  <p className="text-[11px] text-muted-foreground">{timeAgo(t.updatedAt)}</p>
-                </button>
-                <button
-                  onClick={() => {
-                    void actions.remove(t.id);
-                    if (t.id === current) onPick(null);
-                  }}
-                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive focus:opacity-100"
-                  aria-label={`Delete ${t.title}`}
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">No chats yet</p>
-        )}
-      </PopoverContent>
-    </Popover>
+    <>
+      <ModePicker value={choice} onChange={setChoice} availability={can} />
+      <EngineSwitch value={engine} onChange={setEngine} size="sm" />
+      <AskFirst checked={askFirst} onChange={setAskFirst} />
+    </>
   );
 }
 
 export function AssistView() {
   const router = useRouter();
-  const pathname = usePathname();
   const params = useSearchParams();
   const id = params.get("c");
   const [engine, setEngine] = useEngine();
   const [askFirst, setAskFirst] = useState(true);
   const [open, setOpen] = useState<{ g: Generation; i: number } | null>(null);
-  const threads = useAssistThreads();
+  // "Use in a new chat" on a skill opens /assist?skill=<name>: the composer starts with "/name ".
+  const skillParam = params.get("skill");
+  const [draft, setDraft] = useState(() => ({ key: 0, text: skillParam && /^[a-z0-9-]+$/.test(skillParam) ? `/${skillParam} ` : "" }));
+  const chats = useChats({ project: "none" });
+  const can = chats.data?.availability;
+  const [choice, setChoice] = useModeChoice(can?.defaultMode);
   const view = useAssistThread(id);
-  const actions = useAssistActions();
+  const assist = useAssistActions();
+  const actions = useChatActions();
+  const skills = useSkills();
+  const projects = useProjects();
   const end = useRef<HTMLDivElement>(null);
 
-  const go = (next: string | null) => router.replace(next ? `${pathname}?c=${next}` : pathname, { scroll: false });
+  const go = (next: string | null) => router.replace(next ? `/assist?c=${next}` : "/assist", { scroll: false });
   const thread = view.data?.thread;
+  const project = thread?.projectId ? projects.data?.find((p) => p.id === thread.projectId) : null;
+  const available = chatSkills(skills.data, project);
   const all = useMemo(() => new Map((view.data?.generations ?? []).map((g) => [g.id, g])), [view.data?.generations]);
   const viewable = useMemo(
     () =>
@@ -448,70 +128,73 @@ export function AssistView() {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [count, status]);
 
-  const agent = thread?.agent ?? threads.data?.agent;
-  const agentBadge = agent && (
+  const start = async (text: string, attachments: string[] = []) => {
+    const t = await actions.start({ text, attachments, engine, autoApprove: !askFirst, mode: choice ?? undefined });
+    if (t.note) toast(t.note);
+    go(t.id);
+  };
+
+  const agent = thread?.agent ?? chats.data?.agent;
+  const agentBadge = thread && agent && (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Link href="/settings" className="inline-flex h-7 items-center gap-1.5 rounded-full bg-muted px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground">
+        <Link href="/settings" className="hidden h-7 items-center gap-1.5 rounded-full bg-muted px-2.5 text-[12px] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground sm:inline-flex">
           {agent === "claude" ? <Bot className="size-3" /> : <Cpu className="size-3" />}
-          <span className={cn(id && "hidden sm:inline")}>{AGENT_LABEL[agent]}</span>
+          {modeLabel(thread)}
         </Link>
       </TooltipTrigger>
-      <TooltipContent className="max-w-64">
-        {AGENT_HINT[agent]}
-      </TooltipContent>
+      <TooltipContent className="max-w-64">{AGENT_HINT[agent]}</TooltipContent>
     </Tooltip>
   );
 
   return (
-    <div className="flex h-svh min-w-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 px-3 sm:px-6">
+    <div className="flex h-svh min-w-0 flex-col md:h-[calc(100svh-0.5rem)]">
+      <header className="flex h-14 shrink-0 items-center gap-1.5 px-3 sm:px-6">
         <SidebarTrigger className="md:hidden" />
-        <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">{thread?.title ?? "Assist"}</h1>
-        <div className="ml-auto flex items-center gap-1">
+        <RailButton />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {project && (
+            <Link href={`/assist/projects/${project.id}`} className="hidden min-w-0 shrink items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground sm:inline-flex">
+              <ProjectDot project={project} />
+              <span className="truncate">{project.name}</span>
+              <span aria-hidden>/</span>
+            </Link>
+          )}
+          <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">{thread?.title ?? "Assist"}</h1>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
           {agentBadge}
-          <HistoryButton current={id} onPick={go} />
           {id && (
-            <Button variant="ghost" size="sm" onClick={() => go(null)}>
-              <Plus /> <span className="hidden sm:inline">New chat</span>
+            <Button variant="ghost" size="sm" onClick={() => go(null)} aria-label="New chat">
+              <MessageSquarePlus /> <span className="hidden sm:inline">New chat</span>
             </Button>
           )}
+          {thread && <ChatMenu chat={thread} onDeleted={() => go(null)} />}
         </div>
       </header>
 
       {!id ? (
-        <main className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-3 pb-16 sm:px-6">
+        <main className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-3 pt-[10vh] pb-16 sm:px-6 sm:pt-[14vh]">
           <div className="w-full max-w-[760px]">
             <div className="mb-6 text-center">
-              <h2 className="font-heading text-display text-balance">What are we making?</h2>
-              <p className="mt-2 text-[14px] text-muted-foreground">Describe the whole job. Assist picks the models, shows you the plan and cost, then runs every step.</p>
+              <h2 className="font-heading text-display text-balance">What are we creating today?</h2>
+              <p className="mt-2 text-[14px] text-pretty text-muted-foreground">Describe the whole job. Assist picks the models, shows you the plan and cost, then runs every step. Type / to use a skill.</p>
             </div>
-            <Composer
+            <AssistComposer
+              key={draft.key}
+              initialText={draft.text}
               autoFocus
+              skills={available}
               placeholder="e.g. “A launch campaign for my sneaker: 3 hero stills, then a 5s vertical video of the best one”"
-              onSend={async (text, attachments) => {
-                const t = await actions.start({ text, attachments, engine, autoApprove: !askFirst });
-                go(t.id);
-              }}
-              footer={
-                <>
-                  <EngineSwitch value={engine} onChange={setEngine} size="sm" />
-                  <AskFirst checked={askFirst} onChange={setAskFirst} />
-                </>
-              }
+              onSend={start}
+              footer={<NewChatControls choice={choice} setChoice={setChoice} can={can} engine={engine} setEngine={setEngine} askFirst={askFirst} setAskFirst={setAskFirst} />}
             />
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
+            <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
-                  onClick={async () => {
-                    try {
-                      const t = await actions.start({ text: s, engine, autoApprove: !askFirst });
-                      go(t.id);
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    }
-                  }}
+                  onClick={() => start(s).catch((e) => toast.error((e as Error).message))}
                   className="max-w-full rounded-full border bg-background px-3.5 py-1.5 text-left text-[13px] text-muted-foreground transition hover:border-primary hover:text-foreground"
                 >
                   {s}
@@ -525,22 +208,41 @@ export function AssistView() {
           <main className="min-h-0 flex-1 overflow-y-auto px-3 sm:px-6">
             <div className="mx-auto w-full max-w-[760px] py-4">
               {view.isError ? (
-                <p className="py-20 text-center text-muted-foreground">This chat doesn&apos;t exist anymore.</p>
+                <div className="py-20 text-center">
+                  <p className="font-heading text-[22px]">This chat doesn&apos;t exist anymore</p>
+                  <Button variant="outline" className="mt-4" onClick={() => go(null)}>
+                    Start a new chat
+                  </Button>
+                </div>
               ) : thread ? (
-                <Transcript thread={thread} all={all} onAnswer={(ok) => actions.answer(thread.id, ok)} onOpen={(g, i) => setOpen({ g, i })} />
+                <Transcript thread={thread} all={all} skills={skills.data} onAnswer={(ok) => assist.answer(thread.id, ok)} onOpen={(g, i) => setOpen({ g, i })} />
               ) : (
-                <Loader2 className="mx-auto mt-20 animate-spin text-muted-foreground" />
+                <Loader2 className="mx-auto mt-20 animate-spin text-muted-foreground" aria-label="Loading the chat" />
               )}
               <div ref={end} className="h-4" />
             </div>
           </main>
-          <div className="shrink-0 px-3 pb-4 sm:px-6">
+          <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
             <div className="mx-auto w-full max-w-[760px]">
-              <Composer
+              <AssistComposer
+                skills={available}
                 placeholder={thread?.status === "waiting" ? "Or tell me what to change…" : "Ask for changes, variations or the next step…"}
                 disabled={!thread || thread.status === "running"}
-                onSend={(text, attachments) => actions.send(id, { text, attachments })}
-                footer={thread && <AskFirst checked={!thread.autoApprove} onChange={(v) => void actions.setAutoApprove(thread.id, !v)} />}
+                onSend={(text, attachments) => assist.send(id, { text, attachments })}
+                footer={
+                  thread && (
+                    <>
+                      <ModePicker
+                        value={{ mode: thread.mode ?? "smart", agent: thread.agent, model: thread.model, effort: thread.effort }}
+                        availability={can}
+                        disabled={thread.status === "running"}
+                        applyOnClose
+                        onChange={(c) => void actions.patch(thread.id, { mode: c }).catch((e) => toast.error((e as Error).message))}
+                      />
+                      <AskFirst checked={!thread.autoApprove} onChange={(v) => void assist.setAutoApprove(thread.id, !v)} />
+                    </>
+                  )
+                }
               />
             </div>
           </div>
@@ -559,3 +261,31 @@ export function AssistView() {
     </div>
   );
 }
+
+/** One-tap skill starters under the empty composer: picking one types `/name ` into it. */
+export function SkillStarters({ skills, onPick, className }: { skills: SkillSummary[]; onPick: (s: SkillSummary) => void; className?: string }) {
+  const shown = [...STARTER_SKILLS.map((n) => skills.find((s) => s.name === n)).filter((s): s is SkillSummary => !!s), ...skills.filter((s) => !STARTER_SKILLS.includes(s.name))].slice(0, 6);
+  if (!shown.length) return null;
+  return (
+    <div className={cn("mt-4", className)}>
+      <div className="flex items-center justify-between px-1 pb-2">
+        <p className="text-[12px] font-medium text-muted-foreground">Start with a skill</p>
+        <Link href="/assist/skills" className="text-[12px] text-brand-text hover:underline">
+          All skills
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((s) => (
+          <button key={s.name} onClick={() => onPick(s)} className="flex min-w-0 items-center gap-3 rounded-xl border bg-background p-2.5 text-left transition hover:border-primary hover:bg-accent">
+            <SkillIcon name={s.name} icon={s.icon} />
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-medium">{s.title}</span>
+              <span className="block truncate text-[12px] text-muted-foreground">{s.description}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+

@@ -1,4 +1,10 @@
 {
+  "audio-timeline": {
+    "sha256": "b483019231d6add28874dc3c835a85726eaccdaf0c1d60c0d2f0431159a7711a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.850Z"
+  },
   "bg-remove-birefnet": {
     "sha256": "8d12248b956c8cd91d207b5ec9a8585c681259aff216ac38745fa4bffdaae988",
     "validated": true,
@@ -11,11 +17,35 @@
     "error": null,
     "at": "2026-10-16T20:57:20.767Z"
   },
+  "captions-burnin": {
+    "sha256": "8bb4d7bca5145d94ee1d509e50e23ef40e4cd21cb7c152bbba32751eca4ea013",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T07:29:28.801Z"
+  },
+  "captions-qwen3-asr": {
+    "sha256": "75286c2efad353c7285df2eea90782db99e7b7e994adeeaaf242a2e70c790bf7",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T06:58:45.186Z"
+  },
+  "captions-whisper-burnin": {
+    "sha256": "31b33c6ce7f5d15b97fec8367f5ad005f15162f6b76530e5ff8feca633bf3c56",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:03.475Z"
+  },
   "draw-to-video-wan-move": {
     "sha256": "6c75d5e1b69774db6dea6e8879f61c3701ea60384e85e1e0291118cc77c1795e",
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:15.735Z"
+  },
+  "dub-prepare-separate-transcribe": {
+    "sha256": "9e19d9c940f8e38941e2581fbd8619ccf48ff9dad07edc69941acd7d262aa60f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:03.222Z"
   },
   "face-swap-reactor": {
     "sha256": "3bff3a7975736ff83aef7e2040c1af8b7dc18ac4e273bcd5dce73ab7eecf4a8a",
@@ -83,6 +113,18 @@
     "error": null,
     "at": "2026-10-16T20:57:15.735Z"
   },
+  "frame-extract": {
+    "sha256": "0f695a5ddf779a1d7b57f1c817e14c36e53534c81148449055f39c55cf9952ab",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.609Z"
+  },
+  "grid-zimage-contact-sheet": {
+    "sha256": "68bc71594b404d9cc14c7eb75817b4b0d3661ebb1bef2c6f17b6bc3fbe67646e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:06.175Z"
+  },
   "hidream-i1-dev-t2i": {
     "sha256": "19c70e814c0c92a3a503bad43fe5cd2db46bc25551651cb181952d033a801d11",
     "validated": true,
@@ -100,6 +142,18 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:25.685Z"
+  },
+  "image-to-3d-hunyuan3d-21": {
+    "sha256": "275a30c4184a8728e919166e72d88913abcf61a85b051a897ecb7249db849a08",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:04.747Z"
+  },
+  "image-to-3d-trellis2": {
+    "sha256": "7bfa7ebe14aa128a4b9b513e653998c5293ddc9221ca1d668191d27dc52725f6",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:04.654Z"
   },
   "infinitetalk-native": {
     "sha256": "816327852679ebc006a3842668c35a0c9127f724690abc4d58d7e820d2cf0de5",
@@ -131,6 +185,30 @@
     "error": null,
     "at": "2026-10-16T20:57:26.862Z"
   },
+  "layers-qwen-image-layered": {
+    "sha256": "7e8aae04b028f3e0000ca59ab953c4af5be0a1a65f734481d8162179d6cc9e77",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T06:58:43.946Z"
+  },
+  "layers-qwen-image-layered-control": {
+    "sha256": "cf214475197005342e0966857d6817c15aec2eafb3d28727bfd07e956e53bfd7",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:01:59.555Z"
+  },
+  "lipsync-latentsync16": {
+    "sha256": "b63f1be0da288b3144d0e0ea7f0585bbd30c547897d601a9823c672895cad07f",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:50.385Z"
+  },
+  "lipsync-v2v-infinitetalk": {
+    "sha256": "42e30f1bec920686a7b7bb1c41cbf336e97fd696c790526cf0e7c1b9457fb98b",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T06:58:47.182Z"
+  },
   "ltx2-i2v": {
     "sha256": "db32b2b64be6be2ec2a9e64cae5e74c042d2eada6131eee52f6a6c2866e2dab9",
     "validated": true,
@@ -155,6 +233,12 @@
     "error": null,
     "at": "2026-10-16T20:57:26.738Z"
   },
+  "mixed-media-zimage-frames": {
+    "sha256": "0e78a2602566f88e12a48711caa67d604a6d4455031e71b08f9b3cd030778387",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.881Z"
+  },
   "music-ace-step-15": {
     "sha256": "a64cd8f69aaad6969b547e9c9b8354444cf938325c153ac7a253daae2d1b0ac7",
     "validated": true,
@@ -172,6 +256,18 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:22.947Z"
+  },
+  "palette-zimage-hex": {
+    "sha256": "ef5fae49753c2f108d25ed5ab3fa60854885b209505f5fd7b21e6c968d85e8ae",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.173Z"
+  },
+  "product-shot-qwen-edit-2509": {
+    "sha256": "4cf09c72001f97c6ebdec621c2bd4116cf699a310329104a5fde9bac81b5c7fb",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.796Z"
   },
   "qwen-image-2512-t2i": {
     "sha256": "c18da4a3488120bdcee722e4ae7d187385544ec4805753e7dae6946ddb6f6ba5",
@@ -221,11 +317,95 @@
     "error": null,
     "at": "2026-10-16T20:57:16.889Z"
   },
+  "selftest-meta-batch": {
+    "sha256": "15894296f99cdd4919b88b3a67159bbe2cac97f4c19b3f7bf669e023156fb76c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:22:10.139Z"
+  },
+  "sfx-hunyuan-foley": {
+    "sha256": "54a10b4f9586f3e65c0f9cd1bcedf02d1842e3bf73df9dd98304eef0f07b212a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:02.997Z"
+  },
+  "sfx-mmaudio-t2a": {
+    "sha256": "2049f867f07f731989e8061a7051878501b6392c613d2c56a317d843623db754",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:03.111Z"
+  },
+  "sfx-stable-audio-3-small": {
+    "sha256": "22c6a8186e3cebf70aae3bbc221b774d48c3222e0c0a963db288e4283a5785ee",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.979Z"
+  },
+  "sfx-stable-audio-open": {
+    "sha256": "dc2999015dc76d17c80768c5029d689c61afd817b2233a242fa5856c79a9d6c5",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:02.056Z"
+  },
+  "sfx-thinksound": {
+    "sha256": "62ddfdeb6c6a357e2e5a0a21358d48ab0ebf0ca19880eaae6c79d314d513cd15",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:49.480Z"
+  },
+  "soul-cast-sheet-zimage": {
+    "sha256": "477cae400598303a08fa8b944f362b31ccd93d884ccbe4cdb4a52a25f69ae678",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:06.266Z"
+  },
+  "speech-translate-gemma4": {
+    "sha256": "baf609432b57514c43d2f91630b9ae3cb916e9fe8dab47ac02c6c9b64ded643a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:03.760Z"
+  },
   "storyboard-qwen-edit-2509-next-scene": {
     "sha256": "779d2a53bb5d45cfad1fe9da71e9258b4cf04af0036ae4708d74cc3788938106",
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:21.091Z"
+  },
+  "style-ref-flux2-klein-4b": {
+    "sha256": "ee964fa6e4647d4ed99ff0f185c4b871629e1178628e33320133b1d6dec43da8",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:00.584Z"
+  },
+  "style-ref-krea2": {
+    "sha256": "6c556b269e758fa0133a84a20d39818ab7cdedf4640775d905c37d70ab0e5504",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.029Z"
+  },
+  "style-ref-qwen-edit-2511": {
+    "sha256": "3b27e4d5db3d00122d65af1f8080c0a2d11e1d5e1a4e6305b49d462b59aa8a03",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:00.462Z"
+  },
+  "style-ref-uso-flux1": {
+    "sha256": "001cd050926a8a4af40c76c1c400eecb216c6d8cab1e34332072da61e72a314e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.082Z"
+  },
+  "translate-qwen35-textgen": {
+    "sha256": "0cbdf80883b7249dda9128050fc9c4f3c3df414b3cb3283bc057f389251fa010",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:03.621Z"
+  },
+  "tryon-flux2-klein-4b": {
+    "sha256": "3e697e48a436c9340b26524a1303c1c13a300d116ecab604e3981dbebd9195ef",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:05.105Z"
   },
   "tts-chatterbox-multilingual": {
     "sha256": "087e75d50567a17128d2bc728589eab2c3d97c7353f95946f21f5a60a58cd798",
@@ -269,6 +449,12 @@
     "error": null,
     "at": "2026-10-16T20:57:26.825Z"
   },
+  "v2a-hunyuan-foley": {
+    "sha256": "2b6f39b10c3d7bfdef30257682a207b7b89af5f246c38c5aa782de7b3b496359",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.719Z"
+  },
   "v2a-mmaudio": {
     "sha256": "3f8f0c2713a0e46202546db49a0228601d987a10577c96f248211259c7483608",
     "validated": true,
@@ -305,6 +491,42 @@
     "error": null,
     "at": "2026-10-16T23:33:20.703Z"
   },
+  "video-concat-sound1-2": {
+    "sha256": "70ed1a9d7d25e3022e0289e8c1c4db3a6471e616201e3c1575150ce68cfef108",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:17.252Z"
+  },
+  "video-concat-sound1-3": {
+    "sha256": "fde35477afe1883be1078a91cb0d1fda6548d9aefec2a78c74fc63c3a9a7dec0",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:17.510Z"
+  },
+  "video-concat-sound1-4": {
+    "sha256": "a8814d8c6216b7ffe1246dbedc8c6aeb8d83cc63070080514658083c4c87b11a",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:17.832Z"
+  },
+  "video-concat-sound2-2": {
+    "sha256": "0f63f456724039301c48e7fab8b99091c72fb2ddf5d5a2e89cb5c6c7f273cfc4",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:17.976Z"
+  },
+  "video-concat-sound2-3": {
+    "sha256": "aea8566b9e7b79a5b767502aa9bcc834e7f61ac75d804e0c412247e35d1b7679",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.368Z"
+  },
+  "video-concat-sound2-4": {
+    "sha256": "999fab48090cf6ec85d0d94d151169c2bbd522e152cf36ee57c8e6baf02bd09b",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-21T16:25:18.439Z"
+  },
   "video-depth-da3": {
     "sha256": "4c2dd5a6ee8b99eb9eeaf3ea5c9e7b3439964dc87171afef8dbbe2db53676f81",
     "validated": true,
@@ -323,6 +545,18 @@
     "error": null,
     "at": "2026-10-16T23:33:13.889Z"
   },
+  "video-mux-audio": {
+    "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T07:29:29.151Z"
+  },
+  "video-mux-audio-replace": {
+    "sha256": "612d36e755d90f5d62e4a8ea92dc825019b42d0882ad469d0597e6f7b9bc36dc",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-18T07:29:29.488Z"
+  },
   "video-reframe-wan22-fun-vace": {
     "sha256": "3d97f02a5da7badd11df1f1334de2924b4fc930c8976597b25c231d342b629de",
     "validated": true,
@@ -334,6 +568,24 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:15.433Z"
+  },
+  "video-restyle-wan22-fun-vace": {
+    "sha256": "e11ef47ba766cc4ce8bda70c6e16b6c4736a683b88f8cf86e6c569e56eaed1c6",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.799Z"
+  },
+  "video-segment-resample": {
+    "sha256": "957899bf0bd99a4bf9e2407a6149392eccc2ee6d8338088809992025e4d4b45d",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:02:01.523Z"
+  },
+  "video-trim": {
+    "sha256": "7c611e027051c751670b1716031b6bbe61e21d5db990410fde4d7a54994815e8",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-17T21:29:21.076Z"
   },
   "voice-change-chatterbox": {
     "sha256": "ad8b9d59f8cb4632f2859db6a0ee2e8b6114263a9507f144554cd827ceea3f0c",

@@ -29,6 +29,36 @@
 //   tracks                                (Wan-Move motion paths: JSON string [[{"x":px,"y":px}, ... one per frame], ...])
 //   motionStrength                        (Wan-Move track conditioning strength, float, default 1)
 //   strength                              (ColorTransfer strength 0-10, default 0.8)
+// Keys added with the comfyui-oss-3 workflows (docs/research/comfyui-oss-3.md). The provider fills the ones marked *
+// from Fuobe's canonical request; every other key is a model slider/control (params.extra[key]):
+//   startTime*                            (trim start, seconds: params.startTime)
+//   startFrame*                           (frames to skip after resampling: round(params.startTime * fps))
+//   numLayers*                            (Qwen-Image-Layered: how many RGBA layers, params.numLayers)
+//   maxSize                               (longest side the input is scaled to, px)
+//   paletteText*, paletteImage*           (Soul HEX: "Color palette: #..." and the swatch PNG rendered from params.palette)
+//   method                                (ColorTransfer method: mkl_lab | reinhard_lab | histogram)
+//   controlStrength                       (ControlNet / VACE control strength)
+//   framesPerBatch                        (VHS meta-batch size: frames per re-queued pass)
+//   checkpoint                            (checkpoint file name, e.g. Stable Audio 3 small vs medium)
+//   description                           (ThinkSound chain-of-thought sound description)
+//   instruction*                          (LLM instruction; "{language}" is replaced with params.targetLanguage)
+//   maxTokens                             (TextGenerate max_length)
+//   sourceLanguage*                       (ASR language combo, e.g. "English"; params.sourceLanguage, "auto" = detect)
+//   asrModel, hints, maxChars             (Qwen3-ASR model id, context hotwords, max characters per caption cue)
+//   backgroundVolumeDb                    (mux: background stem gain in dB)
+//   startStep, audioScale                 (InfiniteTalk V2V: first re-denoised step, audio conditioning scale)
+//   lengthMode, lipsExpression            (LatentSync VideoLengthAdjuster mode, lips expression strength)
+//   whisperModel                          (ComfyUI-Whisper model name)
+//   fontSize, fontColor, captionPosition  (caption style: % of the frame height / Whisper px, colour, top | bottom)
+//   textureSize, turntableFps             (TRELLIS.2 baked texture size, turntable video fps)
+//   octreeResolution                      (Hunyuan3D 2.1 mesh resolution)
+//   columns, rows                         (ImageGridtoBatch: how the sheet is cut into tiles)
+//   gridPrompt, sheetPrompt               (contact-sheet / turnaround framing text placed before the prompt)
+// Keys added with the av-tools workflows (Wave B):
+//   frameIndex                            (Extract frame: which frame of the Trim Video window, -1 = its last, 0 = its first)
+// Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
+// "sheet" | "tiles" | "layers" | "first-frame" | "turntable"). Entry fields: worker "isolated" (needs its own ComfyUI,
+// see README), expand "captions" (the provider writes one segment per caption cue before submitting).
 
 const b = (node, input) => ({ node, input });
 
@@ -44,6 +74,14 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI_Fill-ChatterBox': 'https://github.com/filliptm/ComfyUI_Fill-ChatterBox',
   'ComfyUI-IndexTTS2': 'https://github.com/snicolast/ComfyUI-IndexTTS2',
   'ComfyUI-Video-Depth-Anything': 'https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything',
+  // comfyui-oss-3 packs (pinned in install-comfyui.sh)
+  'ComfyUI-MelBandRoFormer': 'https://github.com/kijai/ComfyUI-MelBandRoFormer',
+  'ComfyUI-QwenASR': 'https://github.com/1038lab/ComfyUI-QwenASR',
+  'ComfyUI-HunyuanVideo-Foley': 'https://github.com/phazei/ComfyUI-HunyuanVideo-Foley',
+  'ComfyUI-Whisper': 'https://github.com/yuvraj108c/ComfyUI-Whisper',
+  // isolated worker only (process-wide side effects / old pins), see scripts/comfy/README.md
+  'ComfyUI-LatentSyncWrapper': 'https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper',
+  'ComfyUI-ThinkSound_Wrapper': 'https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper',
 };
 
 // Model download locations for files that the source workflow does not annotate
@@ -78,6 +116,8 @@ export const KNOWN_MODELS = {
   'qwen_image_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors' },
   'Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors' },
   'Qwen-Image-Edit-2509-Relight.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Relight.safetensors' },
+  // av-tools (Wave B): Product shot's open route
+  'Qwen-Image-Edit-2509-White_to_Scene.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-White_to_Scene.safetensors' },
   'Qwen-Image-Edit-2509-Light-Migration.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Light-Migration.safetensors' },
   'next-scene_lora-v2-3000.safetensors': { folder: 'loras', url: 'https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/main/next-scene_lora-v2-3000.safetensors' },
   'wan2.2_bernini_r_high_noise_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_high_noise_fp8_scaled.safetensors' },
@@ -86,6 +126,44 @@ export const KNOWN_MODELS = {
   'Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/resolve/main/WanMove/Wan21-WanMove_fp8_scaled_e4m3fn_KJ.safetensors' },
   'sam3.1_multiplex_fp16.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
+  // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
+  'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
+  'qwen_3_4b.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors' },
+  'ae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors' },
+  'Z-Image-Turbo-Fun-Controlnet-Union.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors' },
+  'qwen_image_layered_fp8mixed.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Layered_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_layered_fp8mixed.safetensors' },
+  'qwen_image_layered_control_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/DiffSynth-Studio/Qwen-Image-Layered-Control/resolve/main/qwen_image_layered_control_bf16.safetensors' },
+  'qwen_image_layered_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Layered_ComfyUI/resolve/main/split_files/vae/qwen_image_layered_vae.safetensors' },
+  'qwen_image_edit_2511_fp8mixed.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors' },
+  'Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/resolve/main/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors' },
+  'flux-2-klein-4b-fp8.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/main/flux-2-klein-4b-fp8.safetensors' },
+  'flux2-vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors' },
+  'tryon-klein-4b.safetensors': { folder: 'loras', url: 'https://huggingface.co/xocialize/tryon-FLUX.2-klein-4B-lora/resolve/main/tryon-klein-4b.safetensors' },
+  'krea2_turbo_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_int8_convrot.safetensors' },
+  'qwen3vl_4b_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors' },
+  'krea2_style_reference.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Krea-2/resolve/main/loras/krea2_style_reference.safetensors' },
+  'flux1-dev-fp8.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors' },
+  'uso-flux1-dit-lora-v1.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/USO_1.0_Repackaged/resolve/main/split_files/loras/uso-flux1-dit-lora-v1.safetensors' },
+  'uso-flux1-projector-v1.safetensors': { folder: 'model_patches', url: 'https://huggingface.co/Comfy-Org/USO_1.0_Repackaged/resolve/main/split_files/model_patches/uso-flux1-projector-v1.safetensors' },
+  'sigclip_vision_patch14_384.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors' },
+  'stable_audio_3_small_sfx.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_small_sfx.safetensors' },
+  't5gemma_b_b_ul2.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/text_encoders/t5gemma_b_b_ul2.safetensors' },
+  'stable-audio-open-1.0.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/stable-audio-open-1.0_repackaged/resolve/main/stable-audio-open-1.0.safetensors' },
+  't5-base.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/ComfyUI-Wiki/t5-base/resolve/main/t5-base.safetensors' },
+  'hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors': { folder: 'foley', url: 'https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors' },
+  'vae_128d_48k_fp16.safetensors': { folder: 'foley', url: 'https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/vae_128d_48k_fp16.safetensors' },
+  'synchformer_state_dict_fp16.safetensors': { folder: 'foley', url: 'https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/synchformer_state_dict_fp16.safetensors' },
+  'thinksound_light.ckpt': { folder: 'thinksound', url: 'https://huggingface.co/FunAudioLLM/ThinkSound/resolve/main/thinksound_light.ckpt' },
+  'vae.ckpt': { folder: 'thinksound', url: 'https://huggingface.co/FunAudioLLM/ThinkSound/resolve/main/vae.ckpt' },
+  'synchformer_state_dict.pth': { folder: 'thinksound', url: 'https://huggingface.co/FunAudioLLM/ThinkSound/resolve/main/synchformer_state_dict.pth' },
+  'MelBandRoformer_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Kijai/MelBandRoFormer_comfy/resolve/main/MelBandRoformer_fp16.safetensors' },
+  'qwen3.5_4b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_4b_bf16.safetensors' },
+  'gemma4_e4b_it_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors' },
+  'trellis_2_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors' },
+  'trellis_2_shape_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors' },
+  'trellis_2_texture_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors' },
+  'dino_v3_L_naf_fp32.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors' },
+  'hunyuan_3d_v2.1.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Comfy-Org/hunyuan3D_2.1_repackaged/resolve/main/hunyuan_3d_v2.1.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -1495,6 +1573,33 @@ export const SPEC = [
       'Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). ' +
       'All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative.',
   })),
+  // ---- marketing (Wave B): join clips and keep one clip's sound (UGC presenter, Click to Ad, Ad Multiplier) ----
+  ...[1, 2].flatMap((sound) =>
+    [2, 3, 4].map((n) => ({
+      id: `video-concat-sound${sound}-${n}`,
+      title: `Join ${n} clips at one frame rate, keeping clip ${sound}'s sound${sound === 2 ? ' (it starts where clip 1 ends)' : ''}`,
+      capability: 'concat',
+      handBuilt: `hand-built/video-concat-sound${sound}-${n}.json`,
+      bindings: {
+        ...Object.fromEntries(Array.from({ length: n }, (_, i) => [i === 0 ? 'video' : `video${i + 1}`, [b(String(1 + 3 * i), 'video')]])),
+        width: Array.from({ length: n }, (_, i) => b(String(2 + 3 * i), 'width')),
+        height: Array.from({ length: n }, (_, i) => b(String(2 + 3 * i), 'height')),
+        fps: [...Array.from({ length: n }, (_, i) => b(String(1 + 3 * i), 'force_rate')), b('21', 'fps')],
+      },
+      outputs: [{ node: '22', kind: 'video' }],
+      limits: { maxWidth: 1920, maxHeight: 1920, dimensionMultiple: 16 },
+      vramGb: 0,
+      license: 'no model (ComfyUI core nodes + VideoHelperSuite loader)',
+      notes:
+        `Hard-cut join of ${n} clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, ` +
+        'scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: ' +
+        (sound === 1
+          ? 'clip 1\'s own sound from the start (a voiced presenter followed by silent b-roll, or a reference ad followed by a new CTA). '
+          : 'silence as long as clip 1 (VHS_VideoInfoLoaded duration -> EmptyAudio), then clip 2\'s own sound (a silent hook clip, then the voiced presenter or the reference ad). ') +
+        `The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). ` +
+        'Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook\'s end). RAM grows with the total frame count at the target fps.',
+    })),
+  ),
 
   // ---- storyboard ----------------------------------------------------------
   {
@@ -1645,5 +1750,656 @@ export const SPEC = [
     outputs: [{ node: '6', kind: 'video' }],
     vramGb: 0,
     notes: 'Runs on any ComfyUI (CPU is fine), needs no model files. Exercises the SaveVideo output path.',
+  },
+  {
+    id: 'selftest-meta-batch',
+    title: 'Self-test: invert a clip 8 frames at a time (VHS meta-batch)',
+    capability: 'v2v',
+    handBuilt: 'hand-built/selftest-meta-batch.json',
+    bindings: { video: [b('1', 'video')], filenamePrefix: [b('4', 'filename_prefix')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'Runs on any ComfyUI (CPU is fine), needs no model files. VHS_BatchManager re-queues the prompt every 8 frames (new prompt ids, ui "unfinished_batch" until the last pass); ' +
+      'exercises the provider\'s meta-batch follow-up that mixed-media-zimage-frames relies on. Keeps the source fps and audio.',
+  },
+
+  // =========================================================================
+  // comfyui-oss-3 (round 3): docs/research/comfyui-oss-3.json. Graphs are the researcher's validated API graphs;
+  // changes are listed in each entry's notes.
+  // =========================================================================
+
+  // ---- Layers ---------------------------------------------------------------
+  {
+    id: 'layers-qwen-image-layered',
+    title: 'Layers: split an image into RGBA layers (Qwen-Image-Layered)',
+    capability: 'layers',
+    handBuilt: 'hand-built/layers-qwen-image-layered.json',
+    bindings: {
+      image: [b('74', 'image')], prompt: [b('116', 'value')], numLayers: [b('83:118', 'layers')], maxSize: [b('82', 'largest_size')],
+      seed: [b('83:3', 'seed')], steps: [b('83:3', 'steps')], cfg: [b('83:3', 'cfg')],
+    },
+    outputs: [{ node: '60', kind: 'image', role: 'layers' }],
+    limits: { maxLayers: 10 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Layered weights and the Comfy-Org repack)',
+    notes:
+      'Template image_qwen_image_layered with the fp8mixed weights (bf16 is 40.9 GB). The input is scaled so its longest side = maxSize (640 is the trained bucket; 1024 works, slower). ' +
+      'numLayers = how many RGBA layers come out (1-10, default 4 like the model card; the latent holds numLayers+1 slices and slice 0, the reconstructed composite, is cut off by LatentCut). prompt = optional caption of the whole image. ' +
+      'SaveImage writes one full-canvas RGBA PNG per layer, back to front: the provider reports them in that order with meta {name, z, bbox} (bbox from the alpha channel). "Separate layer" = run again on one layer.',
+  },
+  {
+    id: 'layers-qwen-image-layered-control',
+    title: 'Layers: pull out a named element (Qwen-Image-Layered-Control)',
+    capability: 'layers',
+    handBuilt: 'hand-built/layers-qwen-image-layered-control.json',
+    bindings: {
+      image: [b('74', 'image')], prompt: [b('83:6', 'text')], numLayers: [b('83:123', 'layers')], maxSize: [b('82', 'largest_size')],
+      seed: [b('83:3', 'seed')], steps: [b('83:3', 'steps')], cfg: [b('83:3', 'cfg')],
+    },
+    outputs: [{ node: '60', kind: 'image', role: 'layers' }],
+    limits: { maxLayers: 10 },
+    vramGb: 24,
+    license: 'Apache-2.0 (DiffSynth-Studio Qwen-Image-Layered-Control)',
+    notes:
+      'Template image_qwen_image_layered_control. prompt names the element(s) to separate ("guitar", "the headline text"); numLayers 2 gives [rest, element] back to front. ' +
+      'Higgsfield Layers "Separate layer" / click-to-extract. 40.9 GB bf16 download, cast to fp8_e4m3fn at load.',
+  },
+
+  // ---- Moodboards: style reference -----------------------------------------
+  {
+    id: 'style-ref-qwen-edit-2511',
+    title: 'Style reference: Qwen-Image-Edit-2511 + Lightning, new image in the look of 1-2 board collages',
+    capability: 'style-reference',
+    handBuilt: 'hand-built/style-ref-qwen-edit-2511.json',
+    bindings: {
+      image: [b('1', 'image')], image2: [b('2', 'image')], prompt: [b('20', 'string_b')], width: [b('26', 'width')], height: [b('26', 'height')],
+      seed: [b('27', 'seed')], steps: [b('27', 'steps')], cfg: [b('27', 'cfg')], loraStrength: [b('11', 'strength_model')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Edit-2511, Lightning LoRA)',
+    notes:
+      'The app builds 1-2 collages from the board (4-20 images as a contact sheet, ~1 MP each) and uploads them as image / image2 (one collage is passed twice). ' +
+      'The instruction asks for the look, not the content: same palette, light, contrast, grain, lens and mood. Output size = the empty latent (any aspect ratio). ' +
+      'Lightning 4 steps at cfg 1 (loraStrength 0, steps 40, cfg 4 for the slow full-quality path). Zero-shot; a persistent moodboard is a style LoRA trained like a character.',
+  },
+  {
+    id: 'style-ref-flux2-klein-4b',
+    title: 'Style reference: FLUX.2 [klein] 4B, four references (4 steps)',
+    capability: 'style-reference',
+    handBuilt: 'hand-built/style-ref-flux2-klein-4b.json',
+    bindings: {
+      image: [b('76', 'image')], image2: [b('81', 'image')], image3: [b('77', 'image')], image4: [b('78', 'image')], prompt: [b('75:74', 'text')],
+      width: [b('75:66', 'width'), b('75:62', 'width')], height: [b('75:66', 'height'), b('75:62', 'height')], seed: [b('75:73', 'noise_seed')], steps: [b('75:62', 'steps')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 10,
+    license: 'Apache-2.0 (FLUX.2 [klein] 4B)',
+    notes:
+      'Template image_flux2_klein_image_edit_4b_distilled with two extra ReferenceLatent references and an explicit output size. 1-4 references: ' +
+      'the provider bypasses the ReferenceLatent pair of each reference not given (bypassReference). Fast (4 steps, 8-10 GB). Weaker than Qwen-Image-Edit-2511 on complex prompts.',
+  },
+  {
+    id: 'style-ref-krea2',
+    title: 'Style reference: Krea 2 Turbo + style_reference LoRA, two references',
+    capability: 'style-reference',
+    handBuilt: 'hand-built/style-ref-krea2.json',
+    bindings: {
+      image: [b('69', 'image')], image2: [b('70', 'image')], prompt: [b('30:19', 'value')],
+      width: [b('30:61', 'width'), b('30:64', 'width')], height: [b('30:61', 'height'), b('30:64', 'height')], seed: [b('30:63', 'noise_seed')], steps: [b('30:60', 'steps')],
+      loraStrength: [b('30:15', 'strength_model')],
+    },
+    outputs: [{ node: '29', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license: 'Krea 2 Community License (free for individuals and small teams; enterprise terms above the thresholds); LoRA by Ostris under the same licence',
+    notes:
+      'The only open model here trained for style reference (1-2 references). The template ResolutionSelector is replaced by explicit width/height (multiple of 16); its TextGenerate prompt expansion is removed (Fuobe enhances prompts itself).',
+  },
+  {
+    id: 'style-ref-uso-flux1',
+    title: 'Style reference: USO on FLUX.1 [dev], two stacked style images (non-commercial base)',
+    capability: 'style-reference',
+    handBuilt: 'hand-built/style-ref-uso-flux1.json',
+    bindings: {
+      image: [b('1', 'image')], image2: [b('2', 'image')], prompt: [b('20', 'text')], width: [b('23', 'width')], height: [b('23', 'height')],
+      seed: [b('24', 'seed')], steps: [b('24', 'steps')], guidance: [b('21', 'guidance')],
+    },
+    outputs: [{ node: '26', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 20,
+    license: 'USO LoRA/projector Apache-2.0, but the FLUX.1 [dev] base is NON-COMMERCIAL (outputs may be used commercially per the BFL licence; running it as a paid service is not)',
+    notes: 'ByteDance USO style-only reference: each USOStyleReference stacks one more style image (CLIPVisionEncode + USOStyleReference pairs). 20 steps, guidance 3.5, cfg 1.',
+  },
+
+  // ---- Soul HEX: palette-conditioned generation -------------------------------
+  {
+    id: 'palette-zimage-hex',
+    title: 'Soul HEX: Z-Image Turbo with the hex palette in the prompt + ColorTransfer lock to a swatch',
+    capability: 'palette',
+    handBuilt: 'hand-built/palette-zimage-hex.json',
+    bindings: {
+      paletteImage: [b('1', 'image')], prompt: [b('20', 'string_a')], paletteText: [b('20', 'string_b')], width: [b('23', 'width')], height: [b('23', 'height')],
+      seed: [b('24', 'seed')], steps: [b('24', 'steps')], strength: [b('26', 'strength')], method: [b('26', 'method')],
+    },
+    outputs: [{ node: '27', kind: 'image' }],
+    defaults: { method: 'mkl_lab', paletteText: 'Color palette: #0F0C0B, #65370D, #916D4C, #C6BE94, #F2F1C4.' },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 12,
+    license: 'Apache-2.0 (Z-Image Turbo); ColorTransfer has no model',
+    notes:
+      'One job = generate + lock. The provider writes paletteText from params.palette ("Color palette: #.., #..") and renders paletteImage, a swatch PNG with one band per colour, server-side. ' +
+      'strength 0 = prompt only; 0.5-0.8 = lock; 1.0 = full statistics transfer (shifts skin tones). method mkl_lab (default, keeps contrast), reinhard_lab (softer), histogram (strongest). ' +
+      'palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too).',
+  },
+
+  // ---- Shorts Studio / Mixed Media: trim, segment, restyle ------------------------
+  {
+    id: 'video-trim',
+    title: 'Trim a clip by seconds (core Trim Video, keeps fps and audio)',
+    capability: 'trim',
+    handBuilt: 'hand-built/video-trim.json',
+    bindings: { video: [b('1', 'file')], startTime: [b('2', 'start_time')], duration: [b('2', 'duration')] },
+    outputs: [{ node: '3', kind: 'video' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'startTime = params.startTime, duration = params.endTime - params.startTime (0 = to the end). Keeps the source fps, size and audio. ' +
+      'Shorts Studio segmenting: one job per <=5 s window. Runs on CPU (verified end to end through Fuobe).',
+  },
+  {
+    id: 'video-segment-resample',
+    title: 'Cut a segment at a target fps and size, plus its first frame (VHS loader)',
+    capability: 'trim',
+    handBuilt: 'hand-built/video-segment-resample.json',
+    bindings: {
+      video: [b('1', 'video')], fps: [b('1', 'force_rate'), b('3', 'fps')], startFrame: [b('1', 'skip_first_frames')], frames: [b('1', 'frame_load_cap')],
+      width: [b('2', 'width')], height: [b('2', 'height')],
+    },
+    outputs: [{ node: '4', kind: 'video' }, { node: '7', kind: 'image', role: 'first-frame' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, dimensionMultiple: 16, maxFrames: 241, frameStep: 4 },
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'VHS_LoadVideo resamples to fps (force_rate) first, then skips startFrame frames (= params.startTime * fps) and keeps frames (= (endTime - startTime) * fps, 4n+1 for Wan); ImageScale crops to width x height (aspect ratio + resolution). ' +
+      '81 frames @16 fps = 5.06 s, the Wan 2.2 window. Second output = the segment\'s first frame (restyle it, then video-restyle-wan22-fun-vace). Also the Mixed Media frame sampler (fps 4-24). Runs on CPU.',
+  },
+  {
+    id: 'video-restyle-wan22-fun-vace',
+    title: 'Restyle a <=5 s segment: Wan 2.2 Fun VACE with depth control + a restyled first frame',
+    capability: 'v2v',
+    handBuilt: 'hand-built/video-restyle-wan22-fun-vace.json',
+    bindings: {
+      video: [b('1', 'file')], image: [b('4', 'image')], prompt: [b('12', 'text')], negativePrompt: [b('13', 'text')],
+      width: [b('3', 'width'), b('5', 'width'), b('9', 'width'), b('34', 'width'), b('35', 'width'), b('15', 'width')],
+      height: [b('3', 'height'), b('5', 'height'), b('9', 'height'), b('34', 'height'), b('35', 'height'), b('15', 'height')],
+      frames: [b('30', 'value')], fps: [b('26', 'fps')], seed: [b('22', 'noise_seed'), b('23', 'noise_seed')], steps: [b('22', 'steps'), b('23', 'steps')],
+      cfg: [b('22', 'cfg'), b('23', 'cfg')], shift: [b('20', 'shift'), b('21', 'shift')], controlStrength: [b('15', 'strength')],
+    },
+    outputs: [{ node: '27', kind: 'video' }],
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 81, frameStep: 4 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Wan 2.2 Fun VACE, lightx2v, Depth Anything 3 mono-large)',
+    notes:
+      'Shorts Studio chain: video-segment-resample (<=81 frames @16 fps + first frame) -> qwen-image-edit-2511 restyles the first frame with the preset prompt -> this graph -> video-concat-N. ' +
+      'Control: frame 0 = the restyled frame (image, kept), frames 1..N-1 = Depth Anything 3 depth maps (generated); the restyled frame is also the VACE reference. Lightx2v 4 steps. frames must be 4n+1 and <= the segment length.',
+  },
+  {
+    id: 'mixed-media-zimage-frames',
+    title: 'Mixed Media: per-frame stylisation at 4-24 fps (Z-Image Turbo img2img + Fun Union ControlNet canny)',
+    capability: 'v2v',
+    handBuilt: 'hand-built/mixed-media-zimage-frames.json',
+    bindings: {
+      video: [b('1', 'video')], fps: [b('1', 'force_rate'), b('22', 'frame_rate')], frames: [b('1', 'frame_load_cap')], startFrame: [b('1', 'skip_first_frames')],
+      width: [b('3', 'width')], height: [b('3', 'height')], prompt: [b('16', 'text')], seed: [b('20', 'seed')], steps: [b('20', 'steps')],
+      denoise: [b('20', 'denoise')], controlStrength: [b('14', 'strength')], framesPerBatch: [b('2', 'frames_per_batch')],
+    },
+    outputs: [{ node: '22', kind: 'video' }],
+    limits: { maxWidth: 1536, maxHeight: 1536, dimensionMultiple: 16, maxFrames: 240, frameStep: 1 },
+    vramGb: 16,
+    license: 'Apache-2.0 (Z-Image Turbo, Z-Image-Turbo-Fun-Controlnet-Union)',
+    notes:
+      'Higgsfield Mixed Media: frames sampled at 4/8/10/12/24 fps (force_rate), each frame restyled with the preset prompt, re-assembled at the same fps with the source audio. ' +
+      'VHS_BatchManager re-queues the prompt every framesPerBatch frames so VRAM stays flat: the provider follows the re-queued prompts (same filename prefix) and collects the final video. ' +
+      'Fixed batch noise = less flicker. denoise 0.55-0.8 trades fidelity for style; canny keeps outlines.',
+  },
+
+  // ---- Sound effects ------------------------------------------------------------
+  {
+    id: 'sfx-stable-audio-3-small',
+    title: 'Sound effects: Stable Audio 3.0 Small SFX (native, 8 steps)',
+    capability: 'sfx',
+    handBuilt: 'hand-built/sfx-stable-audio-3-small.json',
+    bindings: {
+      prompt: [b('52:31', 'value')], negativePrompt: [b('52:7', 'text')], duration: [b('52:36', 'value')], seed: [b('52:3', 'seed')], steps: [b('52:3', 'steps')],
+      cfg: [b('52:3', 'cfg')], checkpoint: [b('52:25', 'ckpt_name')],
+    },
+    outputs: [{ node: '57', kind: 'audio' }],
+    defaults: { checkpoint: 'stable_audio_3_small_sfx.safetensors' },
+    vramGb: 6,
+    license: 'Stability AI Community License (free below US$1M annual revenue)',
+    notes:
+      'Template audio_stable_audio_3_medium with the Qwen3.5 prompt-expansion branch removed and the checkpoint switched to small_sfx (Fuobe enhances prompts itself). Distilled: lcm, 8 steps, cfg 1. ' +
+      'checkpoint can be stable_audio_3_medium.safetensors (9.2 GB, music + SFX, longer) with the same graph. Stereo, duration in seconds (2-20 s for SFX).',
+  },
+  {
+    id: 'sfx-stable-audio-open',
+    title: 'Sound effects: Stable Audio Open 1.0 (native, up to 47 s)',
+    capability: 'sfx',
+    handBuilt: 'hand-built/sfx-stable-audio-open.json',
+    bindings: {
+      prompt: [b('6', 'text')], negativePrompt: [b('7', 'text')], duration: [b('11', 'seconds')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg')],
+    },
+    outputs: [{ node: '20', kind: 'audio' }],
+    vramGb: 6,
+    license: 'Stability AI Community License (free below US$1M annual revenue; enterprise licence above)',
+    notes: 'Template audio_stable_audio_example; SaveAudioAdvanced switched from flac to mp3 V0. 44.1 kHz stereo, max 47.6 s. dpmpp_3m_sde_gpu / exponential, 50 steps, cfg ~5.',
+  },
+  {
+    id: 'sfx-hunyuan-foley',
+    title: 'Sound effects: HunyuanVideo-Foley XL, text to audio (territory-restricted licence)',
+    capability: 'sfx',
+    handBuilt: 'hand-built/sfx-hunyuan-foley.json',
+    bindings: {
+      prompt: [b('3', 'prompt')], negativePrompt: [b('3', 'negative_prompt')], duration: [b('3', 'duration')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg_scale')],
+    },
+    outputs: [{ node: '4', kind: 'audio' }],
+    vramGb: 12,
+    license: 'Tencent Hunyuan Community License (territory EXCLUDES the EU, UK and South Korea)',
+    autoDownloads: ['HunyuanDependenciesLoader fetches the SigLIP2 and CLAP text encoders into the Hugging Face cache on first run'],
+    notes: 'HunyuanFoleySampler.image is optional, so the same graph is text-to-audio (connect frames for video-synced foley). 48 kHz. Needs loguru (install-comfyui.sh).',
+  },
+  {
+    id: 'sfx-mmaudio-t2a',
+    title: 'Sound effects: MMAudio large 44k v2, text only (non-commercial weights)',
+    capability: 'sfx',
+    handBuilt: 'hand-built/sfx-mmaudio-t2a.json',
+    bindings: {
+      prompt: [b('3', 'prompt')], negativePrompt: [b('3', 'negative_prompt')], duration: [b('3', 'duration')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg')],
+    },
+    outputs: [{ node: '4', kind: 'audio' }],
+    vramGb: 8,
+    license: 'CC-BY-NC-4.0 (MMAudio weights: NON-COMMERCIAL)',
+    notes: 'Same files as v2a-mmaudio (no new download). MMAudioSampler.images is optional: without it MMAudio runs text-to-audio. Trained on 8 s clips (longer durations degrade).',
+  },
+  {
+    id: 'sfx-thinksound',
+    title: 'Sound effects: ThinkSound light, text to audio with a sound description (isolated worker)',
+    capability: 'sfx',
+    handBuilt: 'hand-built/sfx-thinksound.json',
+    bindings: {
+      prompt: [b('3', 'caption')], description: [b('3', 'cot_description')], duration: [b('3', 'duration')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg_scale')],
+    },
+    outputs: [{ node: '4', kind: 'audio' }],
+    vramGb: 12,
+    worker: 'isolated',
+    license: 'Apache-2.0 (ThinkSound weights, FunAudioLLM); wrapper code has no LICENSE file',
+    autoDownloads: ['ThinkSoundFeatureUtilsLoader fetches google/t5-v1_1-xl and facebook/metaclip-h14 into the Hugging Face cache on first run'],
+    notes:
+      'The only permissive SFX model found. prompt = short caption, description = the chain-of-thought sound description ThinkSound was trained with (the provider uses the prompt when none is given). Max 30 s. ' +
+      'ISOLATED WORKER: the wrapper is stale and its requirements pin old versions that would downgrade the shared venv; run it on a separate ComfyUI (scripts/comfy/README.md).',
+  },
+
+  // ---- Dubbing / transcription / captions ---------------------------------------
+  {
+    id: 'dub-prepare-separate-transcribe',
+    title: 'Separate voice and background (MelBand RoFormer) and transcribe the voice with timestamps (Qwen3-ASR 1.7B)',
+    capability: 'separate-audio',
+    handBuilt: 'hand-built/dub-prepare-separate-transcribe.json',
+    bindings: {
+      audio: [b('1', 'audio')], sourceLanguage: [b('7', 'language')], asrModel: [b('7', 'model')], hints: [b('7', 'hints')], maxChars: [b('7', 'max_chars')],
+    },
+    outputs: [
+      { node: '5', kind: 'audio', stem: 'voice' },
+      { node: '6', kind: 'audio', stem: 'background' },
+      { node: '8', kind: 'text', role: 'cues' },
+      { node: '9', kind: 'text', role: 'transcript' },
+      { node: '10', kind: 'text', role: 'language' },
+    ],
+    defaults: { sourceLanguage: 'auto', asrModel: 'Qwen/Qwen3-ASR-1.7B-hf' },
+    vramGb: 8,
+    license: 'MelBand RoFormer weights MIT (KimberleyJSN); Qwen3-ASR / ForcedAligner Apache-2.0; ComfyUI-QwenASR code GPL-3.0 (same as ComfyUI)',
+    autoDownloads: [
+      'AILab_Qwen3ASRSubtitle downloads Qwen/Qwen3-ASR-1.7B-hf (4.08 GB; 0.6B: 1.56 GB) and Qwen/Qwen3-ForcedAligner-0.6B-hf (1.84 GB) into models/Qwen3-ASR on first run',
+    ],
+    notes:
+      'Dubbing step 1. Changed from the research graph: LoadAudio replaces LoadVideo + GetVideoComponents (LoadAudio decodes the soundtrack of a video upload too, without decoding frames), so it takes audio or video. ' +
+      'Outputs in order: voice stem, background stem (music + effects), cue lines ("start-end: text", seconds), plain transcript, detected language (PreviewAny, folded into the text outputs\' meta). ' +
+      'ASR runs on the separated vocals. 52 languages auto-detected (30 selectable).',
+  },
+  {
+    id: 'captions-qwen3-asr',
+    title: 'Transcribe speech into timed caption cues (Qwen3-ASR 0.6B + ForcedAligner)',
+    capability: 'transcribe',
+    handBuilt: 'hand-built/captions-qwen3-asr.json',
+    bindings: {
+      audio: [b('1', 'audio')], sourceLanguage: [b('3', 'language')], asrModel: [b('3', 'model')], maxChars: [b('3', 'max_chars')], hints: [b('3', 'hints')],
+    },
+    outputs: [{ node: '4', kind: 'text', role: 'cues' }, { node: '5', kind: 'text', role: 'language' }],
+    defaults: { sourceLanguage: 'auto', asrModel: 'Qwen/Qwen3-ASR-0.6B-hf' },
+    vramGb: 4,
+    license: 'Qwen3-ASR / ForcedAligner Apache-2.0; ComfyUI-QwenASR code GPL-3.0',
+    autoDownloads: ['AILab_Qwen3ASRSubtitle downloads Qwen/Qwen3-ASR-0.6B-hf (1.56 GB) and Qwen/Qwen3-ForcedAligner-0.6B-hf (1.84 GB) into models/Qwen3-ASR on first run'],
+    notes:
+      'Default caption source for Faceless / Shorts. Changed from the research graph: LoadAudio instead of LoadVideo + GetVideoComponents (audio or video input). ' +
+      'maxChars 32 + split_by_punctuation_or_pause_or_length gives short vertical-video lines. The text output is one "start-end: text" line per cue; the provider parses it into meta.cues. ' +
+      'output_format none: the node writes no file of its own (concurrent jobs would race on one captions.srt); SaveText returns the cues. ' +
+      'Burn the cues in with captions-burnin (chain: transcript text -> prompt).',
+  },
+  {
+    id: 'captions-burnin',
+    title: 'Burn captions into a video (core Draw Text Overlay, chunk by chunk)',
+    capability: 'captions',
+    handBuilt: 'hand-built/captions-burnin.json',
+    bindings: {
+      video: [b('1', 'file'), b('3', 'audio')], fontSize: [b('12', 'font_size')], fontColor: [b('12', 'color')], captionPosition: [b('12', 'position')],
+    },
+    outputs: [{ node: '92', kind: 'video' }],
+    defaults: { fontColor: '#ffffff', captionPosition: 'bottom' },
+    expand: 'captions',
+    vramGb: 0,
+    license: 'no model (ComfyUI core TextOverlay, GPL-3.0 like ComfyUI; Pillow\'s bundled Aileron font, OFL)',
+    notes:
+      'Fuobe\'s open caption burn-in, all inside ComfyUI with core nodes. The provider rewrites the graph per request (expandCaptionWorkflow): the cues (prompt lines "start-end: text" or SRT, e.g. from captions-qwen3-asr) ' +
+      'cut the clip into Trim Video windows. Gaps go straight to Concatenate Video (never decoded). A cue window is cut into chunks of at most ~384 MB of frames (about 0.5 s of 1080x1920 at 30 fps, 5 s at 360p); ' +
+      'each chunk is decoded (GetVideoComponents), gets a TextOverlay in the style of node 12 (fontSize = % of the frame height, fontColor, captionPosition top | bottom, outlined) and is encoded at once (CreateVideo codec h264), ' +
+      'so ComfyUI only needs one chunk of raw frames at a time and can evict finished chunks under memory pressure. Concatenate Video joins chunks and gaps in order and lays the clip\'s own soundtrack (LoadAudio, node 3) ' +
+      'under the result; for a silent clip node 3 is dropped. The provider reads the upload\'s MP4 header for duration, fps, size and audio: window edges sit between frames, cues past the end are dropped and the rest of the clip after the last cue stays uncaptioned. ' +
+      'Windows hold at least 3 frames (Concatenate Video rejects a 2-frame clip followed by another): a shorter pause between cues gets no gap, a shorter caption is held for 3 frames. ' +
+      'Measured on the CPU server under RAM pressure (--cache-ram 11): a 20 s 640x360 30 fps clip with 18 s of captions peaks at +0.50 GB RSS and a 40 s one at +0.45 GB (the old one-batch graph: +5.16 GB for the 20 s clip); ' +
+      'without pressure ComfyUI\'s RAM cache keeps finished chunks (+2.64 GB for 20 s) until memory runs low. Runs on CPU (verified end to end through Fuobe).',
+  },
+  {
+    id: 'captions-whisper-burnin',
+    title: 'Captions in one job: Whisper large-v3-turbo word timestamps burned into the frames (non-commercial code)',
+    capability: 'captions',
+    handBuilt: 'hand-built/captions-whisper-burnin.json',
+    bindings: {
+      video: [b('1', 'video')], sourceLanguage: [b('3', 'language')], whisperModel: [b('3', 'model')], fontSize: [b('4', 'font_size')], fontColor: [b('4', 'font_color')],
+    },
+    outputs: [{ node: '5', kind: 'video' }, { node: '7', kind: 'text', role: 'transcript' }],
+    defaults: { sourceLanguage: 'auto', whisperModel: 'large-v3-turbo', fontColor: 'white' },
+    vramGb: 6,
+    license: 'Whisper weights MIT (OpenAI); ComfyUI-Whisper code CC-BY-NC-SA-4.0 (NON-COMMERCIAL: the author asks to be contacted for commercial use)',
+    autoDownloads: ['Apply Whisper downloads large-v3-turbo.pt (1.62 GB) into models/stt/whisper on first run'],
+    notes:
+      'All-ComfyUI alternative that transcribes and burns in one job (word-by-word captions from words_alignment). One style per run (font, size, colour, border, centred). ' +
+      'Because of the NC code licence the default open route is captions-qwen3-asr + captions-burnin, and install-comfyui.sh only installs ComfyUI-Whisper with NC_PACKS=1. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
+      'VHS_LoadVideo decodes the whole clip and Add Subtitles To Frames copies it (about 2.5 copies of the frames in RAM): the provider refuses clips that would need more than half of the ComfyUI server\'s RAM and points to the chunked route. ' +
+      'sourceLanguage takes Whisper\'s own names (the provider maps ISO codes: tl/fil -> Tagalog, he -> Hebrew).',
+  },
+  {
+    id: 'translate-qwen35-textgen',
+    title: 'Translate text or timed caption lines with Qwen3.5 4B (core TextGenerate)',
+    capability: 'translate',
+    handBuilt: 'hand-built/translate-qwen35-textgen.json',
+    bindings: {
+      instruction: [b('2', 'string_a')], prompt: [b('2', 'string_b')], seed: [b('3', 'sampling_mode.seed')], maxTokens: [b('3', 'max_length')],
+    },
+    outputs: [{ node: '4', kind: 'text' }],
+    defaults: {
+      instruction:
+        'Translate the text below into {language}. If it has "start-end:" timestamps, keep every line and keep the timestamps exactly as they are, translate only the text after the colon and keep it about as long as the original so it can be spoken in the same time. Output only the translation.\n\n',
+    },
+    vramGb: 10,
+    license: 'Apache-2.0 (Qwen3.5)',
+    notes:
+      'Dubbing step 2 fully inside ComfyUI (Fuobe\'s LLM provider is the default; this keeps an all-open route). prompt = the text (e.g. the cue lines of dub-prepare-separate-transcribe), ' +
+      'instruction = defaults.instruction with {language} = params.targetLanguage. Temperature 0.3 for faithful output. Changed from the research graph: the text binding is named prompt.',
+  },
+  {
+    id: 'speech-translate-gemma4',
+    title: 'Speech to translated text in one step: Gemma 4 E4B audio input (core TextGenerate)',
+    capability: 'translate',
+    handBuilt: 'hand-built/speech-translate-gemma4.json',
+    bindings: { audio: [b('5', 'audio')], instruction: [b('1', 'prompt')], seed: [b('1', 'sampling_mode.seed')], maxTokens: [b('1', 'max_length')] },
+    outputs: [{ node: '8', kind: 'text' }],
+    defaults: { instruction: 'Transcribe the speech in this audio, then translate it into {language}. Output only the {language} translation.' },
+    vramGb: 12,
+    license: 'Apache-2.0 (Gemma 4)',
+    notes:
+      'Gemma 4 E2B/E4B take audio natively. No timestamps: use it for voice-over style dubs (whole-script TTS) or as a cross-check; use dub-prepare-separate-transcribe when the dub must follow cue timings. ' +
+      'Keep clips under a few minutes (context). Changed from the research graph: the prompt binding is named instruction ({language} = params.targetLanguage).',
+  },
+  {
+    id: 'lipsync-v2v-infinitetalk',
+    title: 'Lip re-sync real footage to a new voice: InfiniteTalk video-to-video (WanVideoWrapper)',
+    capability: 'lipsync',
+    handBuilt: 'hand-built/lipsync-v2v-infinitetalk.json',
+    bindings: {
+      video: [b('228', 'video')], audio: [b('125', 'audio')], prompt: [b('241', 'positive_prompt')], negativePrompt: [b('241', 'negative_prompt')],
+      width: [b('245', 'value')], height: [b('246', 'value')], frames: [b('270', 'value'), b('228', 'frame_load_cap')], seed: [b('128', 'seed')], steps: [b('128', 'steps')],
+      startStep: [b('128', 'start_step')], audioScale: [b('194', 'audio_scale')],
+    },
+    outputs: [{ node: '131', kind: 'video' }],
+    defaults: { fps: 25 },
+    limits: { maxWidth: 1280, maxHeight: 1280, dimensionMultiple: 16, maxFrames: 1000 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Wan 2.1, InfiniteTalk, lightx2v)',
+    autoDownloads: ['DownloadAndLoadWav2VecModel fetches TencentGameMate/chinese-wav2vec2-base (0.38 GB) on first run'],
+    notes:
+      'Same model files as infinitetalk-wanwrapper (no new download). The source frames are VAE-encoded and only the last steps are re-denoised (steps 4, startStep 2), so camera, background and body stay; ' +
+      'mouth, head and upper body follow the new audio. 81-frame windows until the audio ends. Changed from the research graph: VHS_LoadVideo gets only custom_width (height 0 keeps the source\'s proportions, no squashing) ' +
+      'and ImageResizeKJv2 crops to width x height, which the provider takes from the source\'s own shape (aspect ratio "auto", read from the MP4 header) at the chosen resolution; ' +
+      'frames (num_frames and VHS frame_load_cap) = the voice\'s length at 25 fps, at most 1000 (40 s): the provider refuses a longer voice instead of cutting it. Pass the clean dubbed voice, then mux the background with video-mux-audio.',
+  },
+  {
+    id: 'lipsync-latentsync16',
+    title: 'Lip re-sync, mouth only: LatentSync 1.6 (isolated worker)',
+    capability: 'lipsync',
+    handBuilt: 'hand-built/lipsync-latentsync16.json',
+    bindings: {
+      video: [b('1', 'video')], audio: [b('2', 'audio')], lengthMode: [b('3', 'mode')], seed: [b('4', 'seed')], lipsExpression: [b('4', 'lips_expression')], steps: [b('4', 'inference_steps')],
+    },
+    outputs: [{ node: '5', kind: 'video' }],
+    defaults: { lengthMode: 'loop_to_audio' },
+    vramGb: 20,
+    worker: 'isolated',
+    license: 'LatentSync 1.6 weights CreativeML OpenRAIL++-M (commercial use with use-based restrictions); wrapper code has no LICENSE file',
+    autoDownloads: ['LatentSyncNode snapshot_downloads ByteDance/LatentSync-1.6 (latentsync_unet.pt 5.07 GB, whisper/tiny.pt 0.08 GB), stabilityai/sd-vae-ft-mse (0.33 GB) and the s3fd face detector (0.09 GB) on first run'],
+    notes:
+      'Re-renders only the mouth (512x512 face crop): identity, background and camera are untouched. VideoLengthAdjuster: normal (pad audio, trim video), pingpong / loop_to_audio (extend the picture when the dub is longer). 25 fps; needs a visible, mostly frontal face. ' +
+      'ISOLATED WORKER: at import the wrapper overrides TMPDIR and folder_paths temp handling for the whole process, rmtree()s a temp folder next to ComfyUI and pip-installs packages at node init, so run it on a separate ComfyUI (scripts/comfy/README.md).',
+  },
+  {
+    id: 'video-mux-audio',
+    title: 'Add a soundtrack: new voice + background stem mixed onto a video (picture stream-copied)',
+    capability: 'mux',
+    handBuilt: 'hand-built/video-mux-audio.json',
+    bindings: {
+      video: [b('1', 'file')], audio: [b('3', 'audio')], audio2: [b('4', 'audio')], backgroundVolumeDb: [b('5', 'volume')], duration: [b('9', 'duration')],
+    },
+    outputs: [{ node: '8', kind: 'video' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'audio = the new voice (Chatterbox dub, narration), audio2 = the background stem of dub-prepare-separate-transcribe or a music bed (backgroundVolumeDb, e.g. -12 under narration). ' +
+      'Both are mixed over EmptyAudio of the video\'s length (duration: the provider reads it from the MP4 header), because AudioMerge cuts audio2 to audio1\'s length. ' +
+      'Concatenate Video with complete_audio copies the video stream packet by packet (no decode, no re-encode: lossless, constant memory) and encodes only the new AAC soundtrack. ' +
+      'Video length is unchanged. Without audio2 the provider uses video-mux-audio-replace. Runs on CPU (verified end to end through Fuobe; +0.02 GB RAM for a 900-frame clip).',
+  },
+  {
+    id: 'video-mux-audio-replace',
+    title: 'Replace a video\'s soundtrack with one audio track',
+    capability: 'mux',
+    handBuilt: 'hand-built/video-mux-audio-replace.json',
+    bindings: { video: [b('1', 'file')], audio: [b('3', 'audio')] },
+    outputs: [{ node: '8', kind: 'video' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'LoadVideo + LoadAudio -> Concatenate Video (complete_audio) -> SaveVideo: the picture is stream-copied, only the new soundtrack is encoded. The single-track variant of video-mux-audio (voice-over, narration, music). ' +
+      'A soundtrack longer than the video is cut at the video\'s end. Runs on CPU (verified end to end through Fuobe).',
+  },
+
+  // ---- Product 3D, try-on --------------------------------------------------------
+  {
+    id: 'image-to-3d-trellis2',
+    title: 'Image to textured 3D (TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-trellis2.json',
+    bindings: {
+      image: [b('122', 'image')], seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')],
+    },
+    outputs: [{ node: '322', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    vramGb: 16,
+    license: 'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)',
+    notes:
+      'Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> ' +
+      'baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui "3d"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps.',
+  },
+  {
+    id: 'image-to-3d-hunyuan3d-21',
+    title: 'Image to 3D shape: Hunyuan3D 2.1 (native, untextured GLB; territory-restricted licence)',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-hunyuan3d-21.json',
+    bindings: { image: [b('2', 'image')], seed: [b('7', 'seed')], steps: [b('7', 'steps')], cfg: [b('7', 'cfg')], octreeResolution: [b('8', 'octree_resolution')] },
+    outputs: [{ node: '10', kind: 'model3d' }],
+    vramGb: 10,
+    license: 'Tencent Hunyuan 3D 2.1 Community License (territory EXCLUDES the EU, UK and South Korea)',
+    notes: 'Template 3d_hunyuan3d-v2.1. Shape only (no Hunyuan3D-Paint in the native nodes): clay previews or a separate texture step. Feed a background-removed image (bg-remove-birefnet).',
+  },
+  {
+    id: 'tryon-flux2-klein-4b',
+    title: 'Virtual try-on: FLUX.2 [klein] 4B + try-on LoRA (person + top + bottom)',
+    capability: 'try-on',
+    handBuilt: 'hand-built/tryon-flux2-klein-4b.json',
+    bindings: {
+      image: [b('76', 'image')], image2: [b('81', 'image')], image3: [b('77', 'image')], prompt: [b('75:74', 'text')], seed: [b('75:73', 'noise_seed')],
+      steps: [b('75:62', 'steps')], loraStrength: [b('75:400', 'strength_model')],
+    },
+    outputs: [{ node: '9', kind: 'image' }],
+    defaults: { promptPrefix: 'TRYON' },
+    vramGb: 10,
+    license: 'Apache-2.0 (FLUX.2 [klein] 4B, try-on LoRA by xocialize); segformer_b2_clothes MIT; ComfyUI-RMBG code GPL-3.0',
+    autoDownloads: ['ClothesSegment (ComfyUI-RMBG) downloads segformer_b2_clothes (0.11 GB) into models/RMBG/segformer_clothes on first run'],
+    notes:
+      'Reference order is load-bearing (LoRA card): image = person, image2 = top (or a dress / whole outfit), image3 = bottom. image2 is required; without image3 the provider bypasses the bottom\'s ReferenceLatent pair ' +
+      '(one garment reference) instead of passing the top as the bottom. The LoRA was trained on clothing-agnostic inputs, ' +
+      'so ClothesSegment greys the old outfit out first. Trigger word TRYON (defaults.promptPrefix: the provider puts it at the start of the prompt). Output size = the person image (~1 MP).',
+  },
+
+  // ---- Cinema Studio grid and Soul Cast -------------------------------------------
+  {
+    id: 'grid-zimage-contact-sheet',
+    title: 'Image grid: one Z-Image Turbo contact sheet (2x2 / 3x3 / 4x4) + its tiles',
+    capability: 'image-grid',
+    handBuilt: 'hand-built/grid-zimage-contact-sheet.json',
+    bindings: {
+      gridPrompt: [b('20', 'string_a')], prompt: [b('20', 'string_b')], width: [b('23', 'width')], height: [b('23', 'height')], columns: [b('27', 'columns')], rows: [b('27', 'rows')],
+      seed: [b('24', 'seed')], steps: [b('24', 'steps')],
+    },
+    outputs: [{ node: '26', kind: 'image', role: 'sheet' }, { node: '28', kind: 'image', role: 'tiles' }],
+    defaults: {
+      gridPrompt:
+        'A {columns}x{rows} grid contact sheet of {count} film stills from the same scene, edge to edge with thin black gutters, consistent characters, wardrobe, lighting and colour grade in every panel, varied shot sizes and angles:',
+    },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 14,
+    license: 'Apache-2.0 (Z-Image Turbo)',
+    notes:
+      'gridPrompt defaults to a contact-sheet sentence for the chosen columns x rows ({columns}, {rows}, {count} are filled by the provider). ' +
+      'Higgsfield "full grid from a single prompt": one generation, then KJNodes ImageGridtoBatch cuts the sheet into columns x rows tiles (row-major). gridPrompt is chosen by the app per size/type ' +
+      '(freeform, zooms, shots); next/prev shots continue from a tile with storyboard-qwen-edit-2509-next-scene. Outputs: the sheet first, then the tiles.',
+  },
+  {
+    id: 'soul-cast-sheet-zimage',
+    title: 'Soul Cast: Z-Image Turbo character turnaround sheet (front, three-quarter, profile, back)',
+    capability: 'character-sheet',
+    handBuilt: 'hand-built/soul-cast-sheet-zimage.json',
+    bindings: {
+      sheetPrompt: [b('20', 'string_a')], prompt: [b('20', 'string_b')], width: [b('23', 'width')], height: [b('23', 'height')], columns: [b('27', 'columns')], rows: [b('27', 'rows')],
+      seed: [b('24', 'seed')], steps: [b('24', 'steps')],
+    },
+    outputs: [{ node: '26', kind: 'image', role: 'sheet' }, { node: '28', kind: 'image', role: 'tiles' }],
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 14,
+    license: 'Apache-2.0 (Z-Image Turbo)',
+    notes:
+      'The app compiles the Soul Cast fields (genre, era, archetype, age, build, hair, outfit...) into prompt; a batch of casts = several seeds. The sheet is cut into the 4 views; ' +
+      '"Save as character" turns one into an element (optionally an AI-Toolkit LoRA from the views).',
+  },
+
+  // ---- av-tools (Wave B): extract frame, video-synced foley, product shot ---------
+  {
+    id: 'frame-extract',
+    title: 'Extract a frame: the last frame, or the frame at a time (core Trim Video + Get Image from Batch)',
+    capability: 'frame',
+    handBuilt: 'hand-built/frame-extract.json',
+    bindings: {
+      video: [b('1', 'file')], startTime: [b('2', 'start_time')], duration: [b('2', 'duration')], frameIndex: [b('4', 'batch_index')],
+    },
+    outputs: [{ node: '5', kind: 'image' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'Defaults give the LAST frame: Trim Video with start_time -1 (negative = from the end) and duration 0 decodes only the last second, Get Image from Batch takes index -1. ' +
+      'Frame at time t: params.startTime = t, params.endTime = t + 0.5 and params.extra.frameIndex = 0 (the first frame of that window); the first frame of the clip is t = 0. ' +
+      'Only the window is decoded, so it runs in constant memory on any clip length. The open side of fal-ai/ffmpeg-api/extract-frame (Canvas Extract frame, extend chains, Katana keyframes). Runs on CPU.',
+  },
+  {
+    id: 'v2a-hunyuan-foley',
+    title: 'Foley for a video: HunyuanVideo-Foley XL follows the frames (territory-restricted licence)',
+    capability: 'v2a',
+    handBuilt: 'hand-built/v2a-hunyuan-foley.json',
+    bindings: {
+      video: [b('5', 'video'), b('6', 'file')], prompt: [b('3', 'prompt')], negativePrompt: [b('3', 'negative_prompt')], duration: [b('3', 'duration')],
+      fps: [b('5', 'force_rate'), b('3', 'frame_rate')], frames: [b('5', 'frame_load_cap')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg_scale')],
+    },
+    outputs: [{ node: '8', kind: 'video' }, { node: '4', kind: 'audio' }],
+    limits: { maxFrames: 481 },
+    vramGb: 12,
+    license: 'Tencent Hunyuan Community License (territory EXCLUDES the EU, UK and South Korea)',
+    autoDownloads: ['HunyuanDependenciesLoader fetches the SigLIP2 and CLAP text encoders into the Hugging Face cache on first run'],
+    notes:
+      'Same model files as sfx-hunyuan-foley (no new download). VHS_LoadVideo samples the clip at 8 fps, 512 px wide (frames = duration x fps, so a 60 s clip holds 481 small frames), ' +
+      'HunyuanFoleySampler gets them as its image input and makes duration seconds of 48 kHz sound in sync. Concatenate Video lays it under the untouched picture (stream copy); ' +
+      'a sound longer than the clip is cut at its end. Outputs: the video with the new sound, then the sound alone (MP3).',
+  },
+  {
+    id: 'product-shot-qwen-edit-2509',
+    title: 'Product shot: cut out (BiRefNet), put on white, relit into a scene (Qwen-Image-Edit 2509 + White_to_Scene LoRA)',
+    capability: 'edit',
+    handBuilt: 'hand-built/product-shot-qwen-edit-2509.json',
+    bindings: {
+      prompt: [b('1002', 'string_b')],
+      negativePrompt: [b('433:110', 'prompt')],
+      image: [b('78', 'image')],
+      seed: [b('433:3', 'seed')],
+      steps: [b('433:436', 'value')],
+      cfg: [b('433:437', 'value')],
+      loraStrength: [b('1001', 'strength_model')],
+    },
+    outputs: [{ node: '469', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Edit-2509, White_to_Scene and Lightning LoRAs); BiRefNet MIT',
+    notes:
+      'relight-qwen-edit-2509 with a cut-out in front: core RemoveBackground (BiRefNet) masks the product, Image Composite Masked puts it on a white backdrop the size of the photo, ' +
+      'then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger "白底图转场景," = "white background to scene", prefixed by node 1002) places and relights it in the scene the prompt describes. ' +
+      'The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud).',
+  },
+  {
+    id: 'audio-timeline',
+    title: 'Voice track on the video\'s timeline: spoken lines placed at their start times over silence (core audio nodes)',
+    capability: 'timeline',
+    handBuilt: 'hand-built/audio-timeline.json',
+    bindings: {
+      audio: [b('2', 'audio')], duration: [b('1', 'duration')], startTime: [b('4', 'duration')],
+    },
+    outputs: [{ node: '7', kind: 'audio' }],
+    expand: 'timeline',
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core audio nodes)',
+    notes:
+      'The dub voice track, all core nodes. The template places one line: EmptyAudio of the video\'s length (duration) is the track, the line (audio) is cut where the next line starts ' +
+      '(TrimAudioDuration), put after startTime seconds of silence (AudioConcat after EmptyAudio) and added onto the track (AudioMerge add: pads or cuts the line to the track). ' +
+      'The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, ' +
+      'each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). ' +
+      'SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track\'s length = the video\'s) and video-mux-audio. Runs on CPU.',
   },
 ];

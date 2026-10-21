@@ -1,0 +1,65 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Video"
+    }
+  },
+  "2": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": -1.0,
+      "duration": 0.0,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "Window the frame is taken from (default: the last second; only it is decoded)"
+    }
+  },
+  "3": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode the window"
+    }
+  },
+  "4": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "3",
+        0
+      ],
+      "batch_index": -1,
+      "length": 1
+    },
+    "_meta": {
+      "title": "Frame of the window (-1 = its last, 0 = its first)"
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "4",
+        0
+      ],
+      "filename_prefix": "fuobe/frame-extract"
+    },
+    "_meta": {
+      "title": "Save frame"
+    }
+  }
+}

@@ -1,0 +1,120 @@
+import "server-only";
+import { z } from "zod";
+import { CinemaError } from "./cinema";
+
+/** Request bodies of /api/cinema/** (zod drops unknown keys). */
+
+const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const FileRef = z.string().startsWith("/api/files/");
+const Slug = z.string().max(80).nullable().optional();
+
+export const DirectorSchema = z.object({
+  genre: Slug,
+  era: Slug,
+  tempo: Slug,
+  camera: Slug,
+  lens: Slug,
+  focal: Slug,
+  aperture: Slug,
+  palette: z
+    .union([z.object({ kind: z.literal("preset"), slug: z.string().max(80) }), z.object({ kind: z.literal("custom"), name: z.string().max(60), hex: z.array(Hex).min(1).max(12) })])
+    .nullable()
+    .optional(),
+  paletteLock: z.boolean().optional(),
+  lighting: z
+    .union([
+      z.object({ kind: z.literal("preset"), slug: z.string().max(80) }),
+      z.object({
+        kind: z.literal("custom"),
+        lights: z.array(z.object({ direction: z.string().max(40), color: Hex, brightness: z.number().int().min(0).max(100), diffuse: z.number().int().min(0).max(100) })).min(1).max(2),
+      }),
+    ])
+    .nullable()
+    .optional(),
+  emotions: z.record(z.string().max(60), z.object({ family: z.string().max(30), step: z.number().int().min(0).max(2) })).optional(),
+});
+
+export const ProjectCreate = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().max(140).nullable().optional(),
+  cover: FileRef.nullable().optional(),
+  costCapUsd: z.number().min(0).max(100_000).nullable().optional(),
+});
+
+export const ProjectPatch = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  description: z.string().max(140).nullable().optional(),
+  cover: FileRef.nullable().optional(),
+  costCapUsd: z.number().min(0).max(100_000).nullable().optional(),
+  director: DirectorSchema.optional(),
+  palettes: z.array(z.object({ name: z.string().max(60), hex: z.array(Hex).min(1).max(12) })).max(60).optional(),
+  brief: z.object({ title: z.string().max(120).optional(), body: z.string().max(20_000).optional() }).optional(),
+  pinned: z.boolean().optional(),
+});
+
+export const FolderCreate = z.object({
+  name: z.string().trim().min(1).max(60),
+  parentId: z.string().max(40).nullable().optional(),
+  color: Hex.nullable().optional(),
+});
+
+export const FolderPatch = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  parentId: z.string().max(40).nullable().optional(),
+  color: Hex.nullable().optional(),
+  pinned: z.boolean().optional(),
+  position: z.number().int().min(0).max(100_000).optional(),
+});
+
+const Ids = z.array(z.string().max(40)).min(1).max(500);
+export const ItemsPatch = z.object({ ids: Ids, folderId: z.string().max(40).nullable().optional(), favorite: z.boolean().optional() });
+export const ItemsDelete = z.object({ ids: Ids, deleteGenerations: z.boolean().optional() });
+export const TilesPut = z.object({ tiles: z.array(z.object({ url: FileRef, row: z.number().int().min(0).max(15), col: z.number().int().min(0).max(15) })).max(16) });
+
+const Shot = z.object({ prompt: z.string().max(2000), duration: z.number().min(1).max(30) });
+
+export const GenerateBody = z.object({
+  folderId: z.string().max(40).nullable().optional(),
+  input: z.object({
+    engine: z.enum(["cloud", "open"]),
+    mode: z.enum(["video", "image"]),
+    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view"]).default("generate"),
+    modelId: z.string().max(80).optional(),
+    prompt: z.string().max(60_000).default(""),
+    moves: z.array(z.string().max(40)).max(12).optional(),
+    settings: DirectorSchema.optional(),
+    images: z.array(FileRef).max(30).optional(),
+    videos: z.array(FileRef).max(10).optional(),
+    audios: z.array(FileRef).max(10).optional(),
+    duration: z.number().min(1).max(30).optional(),
+    resolution: z.string().max(10).optional(),
+    aspectRatio: z.string().max(10).optional(),
+    batch: z.number().int().min(1).max(4).optional(),
+    audio: z.boolean().optional(),
+    multiShot: z.object({ mode: z.enum(["off", "auto", "manual"]), shots: z.array(Shot).max(12).optional() }).optional(),
+    source: z.object({ url: FileRef, kind: z.enum(["image", "video"]), firstFrame: FileRef.optional() }).optional(),
+    grid: z.object({ size: z.enum(["2x2", "3x3", "4x4"]), type: z.enum(["freeform", "zooms", "shots", "next_shots", "prev_shots"]) }).optional(),
+    cast: z.record(z.string().max(40), z.union([z.string().max(300), z.number(), z.array(z.string().max(60)).max(10)])).optional(),
+    view: z.string().max(20).optional(),
+  }),
+});
+
+export const DirectorAsk = z.object({ text: z.string().trim().min(1).max(8000) });
+
+/** Parse a JSON body or answer 400 with `message`. */
+export async function body<S extends z.ZodType>(request: Request, schema: S, message: string): Promise<z.infer<S>> {
+  const parsed = schema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) throw new CinemaError(message, 400);
+  return parsed.data;
+}
+
+/** Turn thrown errors into the API's `{ error }` responses. */
+export async function handle(fn: () => Promise<Response> | Response): Promise<Response> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof CinemaError) return Response.json({ error: e.message }, { status: e.status });
+    console.error("[cinema]", e);
+    return Response.json({ error: (e as Error).message || "Something went wrong" }, { status: 500 });
+  }
+}

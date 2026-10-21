@@ -1,10 +1,30 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
+import {
+  applyToCanvasView,
+  applyToList,
+  applyToPages,
+  applyToThread,
+  backoff,
+  needsCatchUp,
+  parseSse,
+  shareById,
+  sharePagesById,
+  streamResponse,
+  toChannelMessage,
+  toStreamEvent,
+  type CanvasViewLike,
+  type ChannelMessage,
+  type Pages,
+  type StreamEvent,
+} from "./generation-stream";
+import { cursorAfter, filterToSearch, type FeedFilter, type Folder } from "./library";
 
 export interface Asset {
   id: string;
@@ -25,32 +45,388 @@ async function json<T>(res: Response): Promise<T> {
 
 // ---------------------------------------------------------------------------
 // Generations
+//
+// Lists live under ["generations", filter] (studio feeds, home) and ["library", filter] (the
+// Library's paged lists); Assist threads hold theirs in ["assist", id]. Every change (the live
+// stream, the user's own actions) goes through applyEvent(), which patches all of them by id.
 
-export interface FeedFilter {
-  kind?: MediaKind;
-  features?: string[];
-  favorites?: boolean;
-  q?: string;
-  limit?: number;
+export type { FeedFilter } from "./library";
+
+const isActive = (g: Generation) => g.status === "queued" || g.status === "running";
+/** Poll while something renders: fast without the live stream, a slow safety net with it. */
+const pollEvery = (items: Generation[] | undefined, live: boolean) => (items?.some(isActive) ? (live ? 10_000 : 1500) : false);
+
+/** Apply one change to every cached list and thread, skipping caches it doesn't change. */
+function applyEvent(qc: QueryClient, ev: StreamEvent): void {
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["generations"] })) {
+    const data = q.state.data as Generation[] | undefined;
+    const next = applyToList(data, (q.queryKey[1] ?? {}) as FeedFilter, ev);
+    if (next !== data) qc.setQueryData(q.queryKey, next);
+  }
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["library"] })) {
+    if (q.queryKey.length !== 2 || typeof q.queryKey[1] !== "object") continue;
+    const data = q.state.data as Pages | undefined;
+    const next = applyToPages(data, q.queryKey[1] as FeedFilter, ev);
+    if (next !== data) qc.setQueryData(q.queryKey, next);
+  }
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["assist"] })) {
+    if (typeof q.queryKey[1] !== "string") continue;
+    const data = q.state.data as AssistThreadView | undefined;
+    const next = applyToThread(data, ev);
+    if (next !== data) qc.setQueryData(q.queryKey, next);
+  }
+  // Canvas boards (["canvases", id]): a result trashed in the Viewer or the Library leaves its node.
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["canvases"] })) {
+    if (q.queryKey.length !== 2 || typeof q.queryKey[1] !== "string") continue;
+    const data = q.state.data as CanvasViewLike | undefined;
+    const next = applyToCanvasView(data, ev);
+    if (next !== data) qc.setQueryData(q.queryKey, next);
+  }
 }
+
+/** The freshest copy of a generation in any cache (a viewer may hold an older object). */
+function cached(qc: QueryClient, id: string): Generation | undefined {
+  let best: Generation | undefined;
+  const consider = (g: Generation | undefined) => {
+    if (g?.id === id && (!best || g.updatedAt >= best.updatedAt)) best = g;
+  };
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["generations"] })) (q.state.data as Generation[] | undefined)?.forEach(consider);
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["library"] })) (q.state.data as Pages | undefined)?.pages?.forEach((p) => p.forEach(consider));
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["assist"] })) (q.state.data as AssistThreadView | undefined)?.generations?.forEach(consider);
+  for (const q of qc.getQueryCache().findAll({ queryKey: ["canvases"] })) if (q.queryKey.length === 2) (q.state.data as CanvasViewLike | undefined)?.generations?.forEach(consider);
+  return best;
+}
+
+/**
+ * A local edit, applied before the server answers. It keeps the server's updatedAt (the browser's
+ * clock may be ahead of the server's, and a copy stamped with it would make the reducers drop the
+ * server's own events for that row as "late"); events at or after that time replace it.
+ */
+const patched = (g: Generation, patch: Partial<Generation>): Generation => ({ ...g, ...patch });
+
+// --- Live updates (GET /api/generations/stream, built by the runtime) -------------------------
+//
+// One stream per browser, not one per tab: over HTTP/1.1 a browser opens at most ~6 connections
+// to a host, so a stream held open in every tab would leave the 6th tab unable to load anything.
+// The tabs elect a leader with the Web Locks API: the leader reads the stream and passes every
+// event (and whether it's connected) to the other tabs on a BroadcastChannel. Without Web Locks
+// (an http:// address other than localhost) each tab reads its own. Either way a tab that has been
+// hidden for 30 s lets go (its stream, or its place in line to lead) and catches up when shown.
+
+const LOCK = "fuobe-generation-stream";
+const CHANNEL = "fuobe-generations";
+const HIDDEN_GRACE_MS = 30_000;
+
+interface ClientStreamState {
+  connected: boolean;
+  everConnected: boolean;
+  /** Mounted views showing generations in this tab. */
+  subscribers: number;
+  listeners: Set<() => void>;
+  /** Raw event listeners (views that keep their own caches: useGenerationEvents). */
+  handlers: Set<(ev: StreamEvent) => void>;
+  client: QueryClient | null;
+  /** Taking part: leading, or listening to the leader and waiting in line. */
+  running: boolean;
+  leader: boolean;
+  abort: AbortController | null;
+  timer: ReturnType<typeof setTimeout> | null;
+  attempt: number;
+  /** Our place in line for the lock (aborted to withdraw). */
+  ticket: AbortController | null;
+  /** Gives the lock back. */
+  release: (() => void) | null;
+  channel: BroadcastChannel | null;
+  hiddenTimer: ReturnType<typeof setTimeout> | null;
+  stopTimer: ReturnType<typeof setTimeout> | null;
+  hooked: boolean;
+}
+
+declare global {
+  // On window, so a hot-reloaded module keeps the lock and stream it already holds.
+  var __fuobeClientStream: ClientStreamState | undefined;
+}
+
+const live = (): ClientStreamState =>
+  (globalThis.__fuobeClientStream ??= {
+    connected: false,
+    everConnected: false,
+    subscribers: 0,
+    listeners: new Set(),
+    handlers: new Set(),
+    client: null,
+    running: false,
+    leader: false,
+    abort: null,
+    timer: null,
+    attempt: 0,
+    ticket: null,
+    release: null,
+    channel: null,
+    hiddenTimer: null,
+    stopTimer: null,
+    hooked: false,
+  });
+
+const shared = () => typeof navigator !== "undefined" && !!navigator.locks && typeof BroadcastChannel !== "undefined";
+
+function post(m: ChannelMessage) {
+  try {
+    live().channel?.postMessage(m);
+  } catch {}
+}
+
+function setLive(v: boolean) {
+  const s = live();
+  if (s.connected === v) return;
+  const catchUp = needsCatchUp(s.connected, v, s.everConnected);
+  s.connected = v;
+  if (v) s.everConnected = true;
+  if (s.leader) post({ type: "state", connected: v });
+  // Back after a drop: whatever changed meanwhile.
+  if (catchUp && s.client) {
+    void s.client.invalidateQueries({ queryKey: ["generations"] });
+    void s.client.invalidateQueries({ queryKey: ["library"] });
+    void s.client.invalidateQueries({ queryKey: ["canvases"] });
+  }
+  s.listeners.forEach((l) => l());
+}
+
+function receive(ev: StreamEvent) {
+  const s = live();
+  if (s.client) applyEvent(s.client, ev);
+  s.handlers.forEach((h) => h(ev));
+}
+
+/** Read the stream (this tab's own, or as the leader for every tab). */
+async function connect() {
+  const s = live();
+  s.timer = null;
+  if (s.abort || !s.running || !s.client || (shared() && !s.leader)) return;
+  const ctrl = new AbortController();
+  s.abort = ctrl;
+  let retryIn = 0;
+  try {
+    const res = await fetch("/api/generations/stream", { headers: { Accept: "text/event-stream" }, signal: ctrl.signal, cache: "no-store" });
+    const next = streamResponse({ ok: res.ok, status: res.status, contentType: res.headers.get("content-type"), hasBody: !!res.body }, s.attempt++);
+    if (!next.open || !res.body) {
+      void res.body?.cancel().catch(() => {});
+      retryIn = next.open ? backoff(s.attempt) : next.retryIn;
+    } else {
+      s.attempt = 0;
+      setLive(true);
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const parsed = parseSse(buf + value);
+        buf = parsed.rest;
+        for (const m of parsed.events) {
+          const ev = toStreamEvent(m);
+          if (!ev) continue;
+          receive(ev);
+          if (s.leader) post({ type: "event", ev });
+        }
+      }
+      retryIn = backoff(s.attempt++);
+    }
+  } catch {
+    if (ctrl.signal.aborted) return;
+    retryIn = backoff(s.attempt++);
+  }
+  if (s.abort !== ctrl) return;
+  s.abort = null;
+  setLive(false);
+  if (s.running && (!shared() || s.leader)) s.timer = setTimeout(() => void connect(), retryIn);
+}
+
+/** Wait in line for the lock; holding it, read the stream for every tab until we let go. */
+function lead() {
+  const s = live();
+  const ticket = new AbortController();
+  s.ticket = ticket;
+  navigator.locks
+    .request(LOCK, { signal: ticket.signal }, () => {
+      // Withdrawn meanwhile: give it straight back.
+      if (s.ticket !== ticket || !s.running) return;
+      s.ticket = null;
+      return new Promise<void>((resolve) => {
+        s.leader = true;
+        s.release = resolve;
+        // Whatever the last leader said: our own stream decides now (and catches up when it opens).
+        setLive(false);
+        void connect();
+      });
+    })
+    .catch(() => {});
+}
+
+function openChannel() {
+  const s = live();
+  const ch = new BroadcastChannel(CHANNEL);
+  ch.onmessage = (e: MessageEvent) => {
+    const m = toChannelMessage(e.data);
+    if (!m) return;
+    if (m.type === "hello") {
+      if (s.leader) post({ type: "state", connected: s.connected });
+      return;
+    }
+    if (s.leader) return;
+    if (m.type === "state") setLive(m.connected);
+    else receive(m.ev);
+  };
+  s.channel = ch;
+  post({ type: "hello" });
+}
+
+function start() {
+  const s = live();
+  if (s.running || !s.client) return;
+  s.running = true;
+  if (shared()) {
+    openChannel();
+    lead();
+  } else void connect();
+}
+
+function stop() {
+  const s = live();
+  if (!s.running) return;
+  s.running = false;
+  s.ticket?.abort();
+  s.ticket = null;
+  s.abort?.abort();
+  s.abort = null;
+  if (s.timer) clearTimeout(s.timer);
+  s.timer = null;
+  setLive(false);
+  s.leader = false;
+  const release = s.release;
+  s.release = null;
+  release?.();
+  s.channel?.close();
+  s.channel = null;
+}
+
+function onVisibility() {
+  const s = live();
+  if (document.visibilityState === "hidden") {
+    s.hiddenTimer ??= setTimeout(() => {
+      s.hiddenTimer = null;
+      stop();
+    }, HIDDEN_GRACE_MS);
+    return;
+  }
+  if (s.hiddenTimer) clearTimeout(s.hiddenTimer);
+  s.hiddenTimer = null;
+  if (s.subscribers) start();
+}
+
+/** Share one stream between every list on the page (and every tab, and canvas boards); returns whether it's connected. */
+export function useGenerationStream(): boolean {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const s = live();
+    s.client = qc;
+    s.subscribers++;
+    if (s.stopTimer) clearTimeout(s.stopTimer);
+    s.stopTimer = null;
+    if (!s.hooked) {
+      s.hooked = true;
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+    // A tab opened in the background waits until it's shown.
+    if (document.visibilityState !== "hidden") start();
+    return () => {
+      s.subscribers--;
+      if (s.subscribers) return;
+      // Keep it through quick remounts (route changes); drop it when nothing shows generations.
+      s.stopTimer = setTimeout(() => {
+        s.stopTimer = null;
+        if (!s.subscribers) stop();
+      }, 5000);
+    };
+  }, [qc]);
+  return useSyncExternalStore(
+    (cb) => {
+      const s = live();
+      s.listeners.add(cb);
+      return () => s.listeners.delete(cb);
+    },
+    () => live().connected,
+    () => false,
+  );
+}
+
+/**
+ * Listen to the shared live stream (one per browser) from a view with its own caches, instead of
+ * opening another EventSource. Returns whether it's connected; poll when it isn't.
+ */
+export function useGenerationEvents(onEvent: (ev: StreamEvent) => void): boolean {
+  const ref = useRef(onEvent);
+  useEffect(() => {
+    ref.current = onEvent;
+  });
+  useEffect(() => {
+    const h = (ev: StreamEvent) => ref.current(ev);
+    const s = live();
+    s.handlers.add(h);
+    return () => void s.handlers.delete(h);
+  }, []);
+  return useGenerationStream();
+}
+
+// --- Lists ----------------------------------------------------------------------------------
 
 function feedKey(f: FeedFilter) {
   return ["generations", f] as const;
 }
 
-export function useGenerations(filter: FeedFilter) {
+export function useGenerations(filter: FeedFilter, opts: { keepPrevious?: boolean } = {}) {
+  const connected = useGenerationStream();
   return useQuery({
     queryKey: feedKey(filter),
-    queryFn: async () => {
-      const qs = new URLSearchParams();
-      if (filter.kind) qs.set("kind", filter.kind);
-      if (filter.features?.length) qs.set("features", filter.features.join(","));
-      if (filter.favorites) qs.set("favorites", "1");
-      if (filter.q) qs.set("q", filter.q);
-      qs.set("limit", String(filter.limit ?? 80));
-      return (await json<{ items: Generation[] }>(await fetch(`/api/generations?${qs}`))).items;
-    },
-    refetchInterval: (q) => (q.state.data?.some((g) => g.status === "queued" || g.status === "running") ? 1500 : false),
+    queryFn: async () => (await json<{ items: Generation[] }>(await fetch(`/api/generations?${filterToSearch(filter)}`))).items,
+    placeholderData: opts.keepPrevious ? keepPreviousData : undefined,
+    structuralSharing: shareById,
+    refetchInterval: (q) => pollEvery(q.state.data, connected),
+  });
+}
+
+export const LIBRARY_PAGE = 60;
+
+/** The Library's paged list ("Load more" pages back with the before cursor). */
+export function useLibrary(filter: FeedFilter) {
+  const connected = useGenerationStream();
+  const f = { ...filter, limit: filter.limit ?? LIBRARY_PAGE };
+  return useInfiniteQuery({
+    queryKey: ["library", f] as const,
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) =>
+      (await json<{ items: Generation[] }>(await fetch(`/api/generations${f.trashed ? "/trash" : ""}?${filterToSearch(f, pageParam)}`))).items,
+    // The last row's timestamp and id: rows sharing a timestamp across the page boundary aren't skipped.
+    getNextPageParam: (last) => (last.length < f.limit ? undefined : cursorAfter(last.at(-1)!, f.trashed)),
+    placeholderData: keepPreviousData,
+    structuralSharing: sharePagesById,
+    refetchInterval: (q) => pollEvery(q.state.data?.pages.flat(), connected),
+  });
+}
+
+export interface LibraryFacets {
+  models: { id: string; name: string; count: number }[];
+  kinds: Partial<Record<MediaKind, number>>;
+  total: number;
+  favorites: number;
+  failed: number;
+  trash: number;
+}
+
+export function useLibraryFacets() {
+  return useQuery({
+    queryKey: ["library-facets"],
+    queryFn: async () => json<LibraryFacets>(await fetch("/api/generations/facets")),
+    staleTime: 15_000,
   });
 }
 
@@ -68,38 +444,150 @@ export function useCreateGeneration() {
         )
       ).items,
     onSuccess: (items) => {
-      // Show new cards instantly in every matching feed, then let polling take over.
-      qc.setQueriesData<Generation[]>({ queryKey: ["generations"] }, (old) => (old ? [...items, ...old] : old));
+      // Show new cards instantly in the feeds they belong to (newest first, like the server), then let polling take over.
+      for (const g of items) applyEvent(qc, { type: "generation", generation: { ...g, deletedAt: null } });
       void qc.invalidateQueries({ queryKey: ["generations"] });
+      void qc.invalidateQueries({ queryKey: ["library-facets"] });
     },
   });
 }
 
+export type BulkAction = "trash" | "restore" | "delete" | "favorite" | "unfavorite" | "move";
+
+/** The bulk endpoint takes this many ids per request. */
+export const BULK_MAX = 500;
+
+/** One bulk action, sent in batches of BULK_MAX (a select-all after a few "Load more" can be bigger). */
+async function bulkRequest(action: BulkAction, ids: string[], folderId?: string | null): Promise<number> {
+  let n = 0;
+  for (let i = 0; i < ids.length; i += BULK_MAX) {
+    const body = JSON.stringify({ action, ids: ids.slice(i, i + BULK_MAX), folderId });
+    n += (await json<{ count: number }>(await fetch("/api/generations/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body }))).count;
+  }
+  return n;
+}
+
+/** Stable result actions (one object per QueryClient), so memoized tiles don't re-render. */
 export function useGenerationActions() {
   const qc = useQueryClient();
-  const patchLocal = (id: string, fn: (g: Generation) => Generation | null) =>
-    qc.setQueriesData<Generation[]>({ queryKey: ["generations"] }, (old) =>
-      old?.map((g) => (g.id === id ? fn(g) : g)).filter((g): g is Generation => !!g),
-    );
-  return {
-    favorite: async (g: Generation) => {
-      patchLocal(g.id, (x) => ({ ...x, favorite: !x.favorite }));
-      await fetch(`/api/generations/${g.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ favorite: !g.favorite }),
-      });
-    },
-    remove: async (g: Generation) => {
-      patchLocal(g.id, () => null);
-      await fetch(`/api/generations/${g.id}`, { method: "DELETE" });
-    },
-    cancel: async (g: Generation) => {
-      patchLocal(g.id, (x) => ({ ...x, status: "canceled" }));
-      await fetch(`/api/generations/${g.id}/cancel`, { method: "POST" });
+  return useMemo(() => {
+    const refresh = () => {
       void qc.invalidateQueries({ queryKey: ["generations"] });
+      void qc.invalidateQueries({ queryKey: ["library"] });
+      void qc.invalidateQueries({ queryKey: ["library-facets"] });
+      void qc.invalidateQueries({ queryKey: ["folders"] });
+    };
+    const local = (gs: Generation[], patch: Partial<Generation> | null) => {
+      for (const g of gs) {
+        const cur = cached(qc, g.id) ?? g;
+        applyEvent(qc, patch ? { type: "generation", generation: patched(cur, patch) } : { type: "deleted", id: g.id });
+      }
+    };
+    /** Optimistic, then the server; on failure the caches are refetched and the error shown. */
+    const run = async (gs: Generation[], patch: Partial<Generation> | null, action: BulkAction, folderId?: string | null) => {
+      if (!gs.length) return 0;
+      local(gs, patch);
+      try {
+        return await bulkRequest(action, gs.map((g) => g.id), folderId);
+      } catch (e) {
+        toast.error((e as Error).message);
+        return 0;
+      } finally {
+        refresh();
+      }
+    };
+    const restore = (gs: Generation[]) => run(gs, { deletedAt: null }, "restore");
+    const trash = (gs: Generation[], what?: string) => {
+      // The server cancels jobs still rendering: say so.
+      const active = gs.filter((g) => isActive(cached(qc, g.id) ?? g)).length;
+      const p = run(gs, { deletedAt: Date.now() }, "trash");
+      const said =
+        gs.length === 1 ? (active ? "Canceled and moved to Trash" : "Moved to Trash") : `${gs.length} moved to Trash${active ? ` · ${active} canceled` : ""}`;
+      toast(what ?? said, {
+        id: "trash-undo",
+        duration: 6000,
+        action: { label: "Undo", onClick: () => void p.then(() => restore(gs)) },
+      });
+      return p;
+    };
+    return {
+      /** Toggle (or set) a favorite from the freshest cached copy, so a stale viewer object can't send the wrong value. */
+      favorite: async (g: Generation, value?: boolean) => {
+        const cur = cached(qc, g.id) ?? g;
+        const next = value ?? !cur.favorite;
+        local([cur], { favorite: next });
+        const res = await fetch(`/api/generations/${g.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ favorite: next }) });
+        if (!res.ok) refresh();
+      },
+      favoriteMany: (gs: Generation[], value: boolean) => run(gs, { favorite: value }, value ? "favorite" : "unfavorite"),
+      /** Move to the Trash quietly (callers that announce it themselves). */
+      remove: (g: Generation) => run([g], { deletedAt: Date.now() }, "trash"),
+      /** Move to the Trash with an Undo toast. */
+      trash,
+      restore,
+      deleteForever: (gs: Generation[]) => run(gs, null, "delete"),
+      emptyTrash: async () => {
+        await fetch("/api/generations/trash", { method: "DELETE" });
+        refresh();
+      },
+      move: (gs: Generation[], folderId: string | null) => run(gs, { folderId }, "move", folderId),
+      cancel: async (g: Generation) => {
+        local([g], { status: "canceled" });
+        await fetch(`/api/generations/${g.id}/cancel`, { method: "POST" });
+        refresh();
+      },
+    };
+  }, [qc]);
+}
+
+const UPLOADS_PAGE = 100;
+
+/** Files you uploaded (the Library's Uploads tab), newest first, paged like the Library ("Load more"). */
+export function useUploads(kind?: MediaKind) {
+  return useInfiniteQuery({
+    queryKey: ["assets", "upload", kind, "paged"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const qs = new URLSearchParams({ source: "upload", limit: String(UPLOADS_PAGE) });
+      if (kind) qs.set("kind", kind);
+      if (pageParam) qs.set("before", pageParam);
+      return (await json<{ items: Asset[] }>(await fetch(`/api/assets?${qs}`))).items;
     },
-  };
+    getNextPageParam: (last) => (last.length < UPLOADS_PAGE ? undefined : `${last.at(-1)!.createdAt}:${last.at(-1)!.id}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Library folders
+
+export function useFolders() {
+  return useQuery({
+    queryKey: ["folders"],
+    queryFn: async () => (await json<{ items: Folder[] }>(await fetch("/api/folders"))).items,
+    staleTime: 10_000,
+  });
+}
+
+export function useFolderActions() {
+  const qc = useQueryClient();
+  return useMemo(() => {
+    const send = async <T,>(url: string, method: string, body?: unknown) => {
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const out = res.status === 204 ? (undefined as T) : await json<T>(res);
+      void qc.invalidateQueries({ queryKey: ["folders"] });
+      return out;
+    };
+    return {
+      create: (body: { name: string; color?: string }) => send<Folder>("/api/folders", "POST", body),
+      update: (id: string, body: { name?: string; color?: string }) => send<Folder>(`/api/folders/${id}`, "PATCH", body),
+      remove: async (id: string) => {
+        await send<void>(`/api/folders/${id}`, "DELETE");
+        void qc.invalidateQueries({ queryKey: ["library"] });
+        void qc.invalidateQueries({ queryKey: ["generations"] });
+      },
+    };
+  }, [qc]);
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +626,8 @@ export function useElement(id: string) {
   return useQuery({
     queryKey: ["elements", id],
     queryFn: async () => json<StudioElement>(await fetch(`/api/elements/${id}`)),
+    // An unknown element is a 404 page, not a network hiccup: don't retry it.
+    retry: (n, e) => !/not found|\(404\)/i.test((e as Error).message) && n < 1,
     // Pick up the trained identity as soon as a training job finishes.
     refetchInterval: (q) => (q.state.data?.status === "training" ? 3000 : false),
   });

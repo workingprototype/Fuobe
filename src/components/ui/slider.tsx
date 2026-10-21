@@ -4,14 +4,23 @@ import * as React from "react"
 import { cn } from "cn"
 import { Slider as SliderPrimitive } from "radix-ui"
 
+/**
+ * shadcn Slider. The accessible name (`aria-label` / `aria-labelledby`) and `aria-valuetext` go to
+ * the thumbs, which carry role="slider" (Radix renders the root as a plain span). With several
+ * thumbs, `thumbLabels` names each one ("Minimum", "Maximum").
+ */
 function Slider({
   className,
   defaultValue,
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-valuetext": ariaValueText,
+  thumbLabels,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & { thumbLabels?: string[] }) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -48,6 +57,15 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          aria-label={
+            thumbLabels?.[index]
+              ? ariaLabel
+                ? `${ariaLabel}: ${thumbLabels[index]}`
+                : thumbLabels[index]
+              : ariaLabel
+          }
+          aria-labelledby={thumbLabels?.[index] ? undefined : ariaLabelledBy}
+          aria-valuetext={ariaValueText}
           className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
         />
       ))}

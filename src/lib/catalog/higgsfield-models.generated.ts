@@ -431,6 +431,8 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
         "endpoint": "higgsfield/cinema-studio/4.0",
         "map": {
           "images": "image_urls",
+          "videos": "video_urls",
+          "audios": "audio_urls",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
           "duration": {
@@ -638,6 +640,8 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
           ]
         }
       ],
+      "maxVideos": 10,
+      "maxAudios": 10,
       "maxImages": 30
     },
     "defaults": {
@@ -1014,6 +1018,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "bytedance/seedance-2.5/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
         "duration": {
@@ -1030,6 +1036,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "map": {
         "images": "image_urls",
         "video": "video_url",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "resolution": "resolution",
         "generateAudio": "generate_audio"
       }
@@ -1041,6 +1049,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "map": {
         "images": "image_urls",
         "video": "video_url",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "resolution": "resolution",
         "duration": {
           "key": "duration",
@@ -1101,6 +1111,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "bytedance/seedance-2.0/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
         "duration": {
@@ -1501,6 +1513,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "minimax/h3/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
         "duration": {
@@ -1691,6 +1705,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "alibaba/wan-3.0/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "seed": "seed",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
@@ -1758,6 +1774,8 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "alibaba/wan-3.0-prime/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
+        "audios": "audio_urls",
         "seed": "seed",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution",
@@ -1835,6 +1853,7 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "wan/v2.7/reference-to-video",
       "map": {
         "images": "image_urls",
+        "videos": "video_urls",
         "negativePrompt": "negative_prompt",
         "seed": "seed",
         "seedRange": [
@@ -1931,6 +1950,27 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "provider": "higgsfield",
       "endpoint": "recraft/v4.1/text-to-image",
       "map": {
+        "palette": {
+          "key": "colors",
+          "format": "rgb-array",
+          "background": "background_color"
+        },
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution"
+      }
+    }
+  ],
+  "recraft-4-1-pro": [
+    {
+      "op": "t2i",
+      "provider": "higgsfield",
+      "endpoint": "recraft/v4.1/pro/text-to-image",
+      "map": {
+        "palette": {
+          "key": "colors",
+          "format": "rgb-array",
+          "background": "background_color"
+        },
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution"
       }

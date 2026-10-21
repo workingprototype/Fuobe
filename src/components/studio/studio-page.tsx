@@ -1,20 +1,26 @@
 "use client";
 
-import { Upload } from "lucide-react";
+import { ArrowUp, Loader2, Upload } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { getModel, getPreset } from "@/lib/catalog";
-import type { Generation, MediaKind } from "@/lib/catalog/types";
+import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
+import { handoffKey, mergeHandoff } from "@/lib/composer";
+import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
+import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
+import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
+import { ComposerBridgeCtx, useComposerBridge, type ComposerBridge } from "./attachments";
+import { CatalogProvider, useCatalog } from "./catalog";
 import { Composer } from "./composer";
 import { EngineSwitch } from "./engine-switch";
 import { Feed } from "./feed";
-import { fileToSlot, type SlotValue } from "./media-slot";
-import { StudioProvider, useStudio, type Draft, type StudioConfig } from "./studio-context";
+import type { SlotValue } from "./media-slot";
+import { StudioProvider, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
 function kindOfUrl(url: string): MediaKind {
   if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
@@ -25,18 +31,25 @@ function kindOfUrl(url: string): MediaKind {
 const slot = (url: string | null | undefined): SlotValue | null =>
   url ? { ref: url, preview: url, kind: kindOfUrl(url), id: nanoid(6) } : null;
 
-function initialDraft(config: StudioConfig, sp: URLSearchParams, engine: "cloud" | "open"): Draft {
-  const preset = sp.get("preset") ? getPreset(sp.get("preset")!) : config.preset;
-  const presetRoute = preset ? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open : null;
+function initialDraft(
+  config: StudioConfig,
+  sp: URLSearchParams,
+  engine: "cloud" | "open",
+  lookup: { getModel: (id: string) => ModelDef | undefined; getPreset: (id: string) => Preset | undefined },
+): Draft {
+  const preset = sp.get("preset") ? lookup.getPreset(sp.get("preset")!) : config.preset;
+  const presetRoute = preset ? ((engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open) : null;
   const requested = sp.get("model");
   const modelId =
-    (requested && getModel(requested)?.id) ||
+    (requested && lookup.getModel(requested)?.id) ||
     (preset?.type === "app" ? presetRoute?.modelId : undefined) ||
     config.defaultModels[engine] ||
-    config.defaultModels.cloud;
-  const model = getModel(modelId);
+    config.defaultModels.cloud ||
+    // Open-only tools (Match colors) keep their open model under the Cloud switch, like cloud-only ones do under Open.
+    config.defaultModels.open;
+  const model = lookup.getModel(modelId);
   const slots: Draft["slots"] = {};
-  const imageSlot = config.slots.find((s) => s.accept === "image")?.key ?? (preset?.inputs.find((s) => s.accept === "image")?.key);
+  const imageSlot = config.slots.find((s) => s.accept === "image")?.key ?? preset?.inputs.find((s) => s.accept === "image")?.key;
   const refs: SlotValue[] = [];
   if (sp.get("image") && imageSlot) slots[imageSlot] = slot(sp.get("image"));
   if (sp.get("ref")) {
@@ -59,8 +72,11 @@ function initialDraft(config: StudioConfig, sp: URLSearchParams, engine: "cloud"
 
 /** Rebuild a composer draft from a past generation ("Reuse"). */
 function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft> {
-  const r = g.request;
-  const imgs = r.inputs?.images ?? [];
+  // A run styled by the Color signature / Moodboard chips comes back as it was before they routed it,
+  // with the picks on the chips (studios without the chips get the styled prompt instead).
+  const signed = config.signature ? reuseSignature(g.request) : null;
+  const r = signed ? { ...g.request, modelId: signed.modelId, params: signed.params } : config.signature ? g.request : withSignatureWords(g.request);
+  const imgs = signed ? signed.images : (r.inputs?.images ?? []);
   const imageKeys = config.slots.filter((s) => s.accept === "image" && s.key !== "endImage" && s.key !== "mask").map((s) => s.key);
   const slots: Draft["slots"] = {};
   imageKeys.forEach((k, i) => (slots[k] = slot(imgs[i])));
@@ -79,34 +95,132 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
     presetOptions: r.presetOptions ?? {},
     presetStrength: r.presetStrength,
     mix: r.mix,
+    signature: signed?.signature,
   };
 }
 
-function StudioBody({ header }: { header?: React.ReactNode }) {
-  const { config, setDraft, addImage } = useStudio();
+/**
+ * New results land at the top of the feed while the composer is docked at the bottom: when one
+ * arrives off-screen (you scrolled down into your history), a pill above the composer jumps to it (U4).
+ */
+function useOffscreenResults(items: Generation[] | undefined) {
+  const since = useRef(0);
+  const seen = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<string[]>([]);
+  useEffect(() => {
+    since.current = Date.now() - 2000;
+  }, []);
+  useEffect(() => {
+    if (!items) return;
+    if (!seen.current) {
+      seen.current = new Set(items.map((g) => g.id));
+      return;
+    }
+    const known = seen.current;
+    const added = items.filter((g) => !known.has(g.id) && g.createdAt >= since.current);
+    items.forEach((g) => known.add(g.id));
+    if (!added.length) return;
+    const raf = requestAnimationFrame(() => {
+      const off = added.filter((g) => !inView(g.id)).map((g) => g.id);
+      if (off.length) setFresh((f) => [...new Set([...off, ...f])]);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [items]);
+  // Clear the ones you scrolled to.
+  const pending = fresh.length > 0;
+  useEffect(() => {
+    if (!pending) return;
+    let raf = 0;
+    const check = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setFresh((f) => (f.some(inView) ? f.filter((id) => !inView(id)) : f)));
+    };
+    window.addEventListener("scroll", check, { passive: true, capture: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", check, { capture: true });
+    };
+  }, [pending]);
+  const present = fresh.filter((id) => items?.some((g) => g.id === id));
+  const working = present.filter((id) => items?.some((g) => g.id === id && (g.status === "queued" || g.status === "running"))).length;
+  const jump = () => {
+    document.querySelector(`[data-gen-id="${present[0]}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setFresh([]);
+  };
+  return { count: present.length, working, jump };
+}
+
+function inView(id: string): boolean {
+  const el = document.querySelector(`[data-gen-id="${id}"]`);
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return r.bottom > 56 && r.top < window.innerHeight - 160;
+}
+
+const EMPTY: Generation[] = [];
+
+/** The preset card (U23) is its own chunk: only app pages and studios with a motion or effect picked load it. */
+const PresetHeader = dynamic(() => import("@/components/preset-header").then((m) => m.PresetHeader));
+
+/** While a preset (app, camera motion, effect) is active and the feed is empty: what it does and what to add, above the composer. */
+function ActivePresetHeader() {
+  const { config, draft, setDraft } = useStudio();
+  const catalog = useCatalog();
+  const preset = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
+  if (!preset) return null;
+  return (
+    <PresetHeader
+      preset={preset}
+      className="mb-3"
+      modelName={(id) => catalog.getModel(id)?.name}
+      onClear={config.preset ? undefined : () => setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined })}
+    />
+  );
+}
+
+/** Sticky page header (title + engine), with an optional row of mode tabs under it. */
+function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
+  const [engine, setEngine] = useEngine();
+  return (
+    <div className="sticky top-0 z-20 bg-background/85 backdrop-blur">
+      <header className="flex h-14 items-center gap-2 px-3 sm:px-6">
+        <SidebarTrigger className="md:hidden" />
+        <h1 className="min-w-0 truncate font-heading text-[22px] leading-[1.15]">{title}</h1>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {header}
+          <EngineSwitch value={engine} onChange={setEngine} />
+        </div>
+      </header>
+      {tabs}
+    </div>
+  );
+}
+
+function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.ReactNode }) {
+  // Config and actions only: the draft lives in the composer, so typing doesn't re-render the page or the feed.
+  const { config, setDraft } = useStudioActions();
   const [engine, setEngine] = useEngine();
   const feed = useGenerations(config.feed);
+  const bridge = useComposerBridge();
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
-  const items = feed.data ?? [];
+  const items = feed.data ?? EMPTY;
+  // While the feed loads (and in the prerendered shell) the page shows the hero and the composer, never a blank area.
   const hasItems = items.length > 0;
+  const offscreen = useOffscreenResults(feed.data);
 
-  const reuse = (g: Generation) => {
-    setDraft(draftFromGeneration(g, config));
-    const model = getModel(g.modelId);
-    if (model && model.engine !== engine) setEngine(model.engine);
-    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
-  };
-
-  const composer = (docked: boolean) => (
-    <div data-composer className={cn("mx-auto w-full", docked ? "max-w-[800px]" : "max-w-[760px]")}>
-      <Composer docked={docked} />
-    </div>
+  const reuse = useCallback(
+    (g: Generation) => {
+      setDraft(draftFromGeneration(g, config));
+      if (g.engine !== engine) setEngine(g.engine);
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
+    },
+    [config, engine, setDraft, setEngine],
   );
 
   return (
     <div
-      className="relative flex min-h-svh flex-col"
+      className="relative flex min-h-svh min-w-0 flex-col"
       onDragEnter={(e) => {
         if (![...e.dataTransfer.types].includes("Files")) return;
         dragDepth.current++;
@@ -121,31 +235,16 @@ function StudioBody({ header }: { header?: React.ReactNode }) {
         e.preventDefault();
         dragDepth.current = 0;
         setDragging(false);
-        for (const f of [...e.dataTransfer.files].slice(0, 6)) {
-          const id = nanoid(6);
-          void fileToSlot(f, (v) => v && !v.uploading && addImage({ ...v, id }));
-        }
+        const files = [...e.dataTransfer.files];
+        if (!files.length) return;
+        if (bridge?.current) bridge.current(files);
+        else toast("Drop it on the composer");
       }}
     >
-      <header className="sticky top-0 z-20 flex h-14 items-center gap-2 bg-background/85 px-3 backdrop-blur sm:px-6">
-        <SidebarTrigger className="md:hidden" />
-        <h1 className="font-heading text-[22px] leading-none">{config.title}</h1>
-        <div className="ml-auto flex items-center gap-2">
-          {header}
-          <EngineSwitch value={engine} onChange={setEngine} />
-        </div>
-      </header>
+      <StudioHeader title={config.title} header={header} tabs={tabs} />
 
-      <main className="mx-auto w-full max-w-[1240px] flex-1 px-3 pb-8 sm:px-6">
-        {feed.isLoading ? (
-          <div className="space-y-3 pt-6">
-            <Skeleton className="h-6 w-1/3" />
-            <div className="flex gap-2">
-              <Skeleton className="h-56 w-56 rounded-xl" />
-              <Skeleton className="h-56 w-56 rounded-xl" />
-            </div>
-          </div>
-        ) : hasItems ? (
+      <main className={cn("mx-auto w-full max-w-[1240px] min-w-0 px-3 sm:px-6", hasItems && "flex-1 pb-8")}>
+        {hasItems ? (
           <div className="pt-4">
             <Feed items={items} onReuse={reuse} />
           </div>
@@ -153,35 +252,56 @@ function StudioBody({ header }: { header?: React.ReactNode }) {
           <div className="flex flex-col items-center pt-[16vh] text-center">
             <h2 className="font-heading text-display text-balance">{config.hero}</h2>
             {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
-            <div className="mt-10 w-full">{composer(false)}</div>
-            {config.suggestions && (
-              <div className="mt-4 flex max-w-[760px] flex-wrap justify-center gap-2">
-                {config.suggestions.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setDraft({ prompt: s })}
-                    className="h-8 rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    {s.length > 48 ? `${s.slice(0, 46)}…` : s}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </main>
 
-      {hasItems && (
-        <div className="sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
-          {composer(true)}
+      {/* One composer for both layouts (centred under the hero, docked under the feed), so it keeps focus and state when the first result arrives. */}
+      <div
+        className={cn(
+          hasItems
+            ? "sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6"
+            : "px-3 pt-10 sm:px-6",
+        )}
+      >
+          {hasItems && offscreen.count > 0 && (
+            <div className="pointer-events-none absolute inset-x-0 -top-2 flex justify-center">
+              <button
+                onClick={offscreen.jump}
+                className="pointer-events-auto inline-flex h-8 animate-pop-in items-center gap-1.5 rounded-full bg-foreground px-3.5 text-[13px] font-medium text-background shadow-strong transition hover:opacity-90"
+              >
+                {offscreen.working ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {offscreen.working ? `${offscreen.working} generating` : `${offscreen.count} new result${offscreen.count === 1 ? "" : "s"}`}
+                <ArrowUp className="size-3.5" />
+              </button>
+            </div>
+          )}
+        {!hasItems && <ActivePresetHeader />}
+        <div data-composer className={cn("mx-auto w-full", hasItems ? "max-w-[800px]" : "max-w-[760px]")}>
+          <Composer docked={hasItems} />
+        </div>
+      </div>
+
+      {!hasItems && config.suggestions && (
+        <div className="mx-auto mt-4 flex max-w-[760px] flex-wrap justify-center gap-2 px-3 pb-10">
+          {config.suggestions.map((s) => (
+            <button
+              key={s}
+              onClick={() => setDraft({ prompt: s })}
+              className="h-8 max-w-full truncate rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {s.length > 48 ? `${s.slice(0, 46)}…` : s}
+            </button>
+          ))}
         </div>
       )}
+      {!hasItems && config.signature && <SoulPresetCards />}
 
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-overlay p-8">
           <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-primary bg-background px-12 py-10 shadow-heavy">
             <Upload className="size-6 text-brand-text" />
-            <p className="font-medium">Drop to use as reference</p>
+            <p className="font-medium">Drop to attach</p>
             <p className="text-[13px] text-muted-foreground">Images, videos or audio · up to 200 MB</p>
           </div>
         </div>
@@ -192,34 +312,102 @@ function StudioBody({ header }: { header?: React.ReactNode }) {
 
 interface StudioPageProps {
   config: StudioConfig;
+  /**
+   * The models this studio needs, from the server (`studioCatalog(config)` in a server
+   * component). Without it the page loads the catalog chunk itself.
+   */
+  catalog?: StudioCatalog;
+  /** Extra header controls, left of the engine switch. */
   header?: React.ReactNode;
+  /** A row under the header (mode tabs). */
+  tabs?: React.ReactNode;
   initialRefs?: string[];
   /** Prompt to start with when the URL doesn't carry one (e.g. "@Maya "). */
   initialPrompt?: string;
 }
 
-function StudioInner({ config, header, initialRefs, initialPrompt }: StudioPageProps) {
-  const sp = useSearchParams();
-  const [engine] = useEngine();
-  // Recompute the initial draft only when the handoff params change.
-  const key = sp.toString();
-  const initial = useMemo(() => {
-    const d = initialDraft(config, new URLSearchParams(key), engine);
-    if (initialRefs?.length) d.refs = [...initialRefs.map((u) => slot(u)!), ...d.refs];
-    if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
-    return d;
-  }, [config, key]); // eslint-disable-line react-hooks/exhaustive-deps
+type DraftProps = Omit<StudioPageProps, "catalog">;
+
+/** Reports the URL's hand-off params. It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
+function UrlParams({ onChange }: { onChange: (key: string) => void }) {
+  const key = handoffKey(useSearchParams());
+  // Layout effect: on a client navigation the prefilled draft is in place before the first paint.
+  useLayoutEffect(() => onChange(key), [key, onChange]);
+  return null;
+}
+
+/**
+ * Applies the URL's hand-off params (`/video?image=…`) to the draft once they're known: right
+ * after hydration on a direct visit (the static shell can't know them), or on the first render
+ * of a client navigation. Fields the person already changed — a prompt typed before the page
+ * hydrated — are kept. A later change of the params (Animate → Video while on Video) starts a
+ * fresh draft instead.
+ */
+function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: string; start: Draft; build: React.RefObject<(key: string) => Draft>; ready: boolean; onNavigate: (key: string) => void }) {
+  const { setDraft } = useStudioActions();
+  const [url, setUrl] = useState<string | null>(null);
+  const applied = useRef({ key: startKey, ready, base: start, seen: false });
+  useLayoutEffect(() => {
+    if (url === null) return;
+    const a = applied.current;
+    if (a.seen && url !== a.key) return onNavigate(url);
+    a.seen = true;
+    if (url === a.key && ready === a.ready) return;
+    const next = build.current(url);
+    const base = a.base;
+    setDraft((d) => mergeHandoff(base, d, next));
+    applied.current = { key: url, ready, base: next, seen: true };
+  }, [url, ready, build, setDraft, onNavigate]);
   return (
-    <StudioProvider key={key} config={config} initial={initial}>
-      <StudioBody header={header} />
-    </StudioProvider>
+    <Suspense fallback={null}>
+      <UrlParams onChange={setUrl} />
+    </Suspense>
   );
 }
 
-export function StudioPage(props: StudioPageProps) {
+/**
+ * The studio. It renders the same tree in the static shell and after hydration (the URL is read
+ * by HandoffSync alone), so the composer the shell painted is the one you type into: nothing
+ * typed or focused before hydration is lost.
+ */
+function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: DraftProps) {
+  const [engine] = useEngine();
+  const catalog = useCatalog();
+  const bridge = useMemo<ComposerBridge>(() => ({ current: null }), []);
+  const build = (key: string) => {
+    const d = initialDraft(config, new URLSearchParams(key), engine, catalog);
+    if (initialRefs?.length) d.refs = [...initialRefs.map((u) => slot(u)!), ...d.refs];
+    if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
+    return d;
+  };
+  const buildRef = useRef(build);
+  useLayoutEffect(() => {
+    buildRef.current = build;
+  });
+  // The draft the composer starts from: the defaults (the URL is unknown in the static shell), or
+  // the hand-off params of a client navigation to new ones (a new epoch remounts the provider).
+  const [start, setStart] = useState({ key: "", epoch: 0 });
+  const initial = useMemo(() => build(start.key), [start, config]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onNavigate = useCallback((key: string) => setStart((s) => ({ key, epoch: s.epoch + 1 })), []);
   return (
-    <Suspense fallback={null}>
-      <StudioInner {...props} />
-    </Suspense>
+    <ComposerBridgeCtx.Provider value={bridge}>
+      <StudioProvider key={start.epoch} config={config} initial={initial}>
+        <StudioBody header={header} tabs={tabs} />
+        <HandoffSync startKey={start.key} start={initial} build={buildRef} ready={catalog.ready} onNavigate={onNavigate} />
+      </StudioProvider>
+    </ComposerBridgeCtx.Provider>
+  );
+}
+
+/**
+ * A studio page: header, hero, composer and feed. Everything but the URL is in the static shell:
+ * the title, the hero and a composer you can start typing into before the page hydrates. The
+ * hand-off params (`?image=`, `?prompt=`…) are applied once known (HandoffSync).
+ */
+export function StudioPage({ catalog, ...props }: StudioPageProps) {
+  return (
+    <CatalogProvider catalog={catalog} config={props.config}>
+      <StudioDraft {...props} />
+    </CatalogProvider>
   );
 }

@@ -1,6 +1,5 @@
-"use client";
-
-import { useRouter, useSearchParams } from "next/navigation";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import {
   AUDIO_STUDIO,
@@ -18,60 +17,68 @@ import {
   VIDEO_UPSCALE_STUDIO,
   VOICE_CHANGE_STUDIO,
 } from "@/lib/studios";
-import { cn } from "@/lib/utils";
-import { StudioPage } from "./studio-page";
+import { studioCatalog } from "@/lib/studio-catalog";
+import { HUB_MODES, modeHref, type HubKind } from "@/lib/hubs";
+import { CaptionsStudio } from "@/components/captions/captions-studio";
+import { DubStudio } from "@/components/dub/dub-studio";
+import { TrimTool } from "@/components/av/trim-tool";
+import { ModeStudio, ModeTabs } from "./mode-studio";
+import type { StudioConfig } from "./studio-context";
 
-const MODES = {
-  upscale: [
-    { id: "image", label: "Image", config: UPSCALE_STUDIO },
-    { id: "video", label: "Video", config: VIDEO_UPSCALE_STUDIO },
-  ],
-  audio: [
-    { id: "speech", label: "Speech", config: AUDIO_STUDIO },
-    { id: "dialogue", label: "Dialogue", config: DIALOGUE_STUDIO },
-    { id: "voice-change", label: "Voice change", config: VOICE_CHANGE_STUDIO },
-    { id: "translate", label: "Translate", config: TRANSLATE_STUDIO },
-    { id: "sfx", label: "Sound effects", config: SFX_STUDIO },
-    { id: "music", label: "Music", config: MUSIC_STUDIO },
-    { id: "video", label: "Sound for video", config: FOLEY_STUDIO },
-  ],
-  "video-tools": [
-    { id: "matte", label: "Remove background", config: VIDEO_MATTE_STUDIO },
-    { id: "relight", label: "Relight", config: VIDEO_RELIGHT_STUDIO },
-    { id: "depth", label: "Depth map", config: VIDEO_DEPTH_STUDIO },
-    { id: "join", label: "Join clips", config: JOIN_CLIPS_STUDIO },
-    { id: "colors", label: "Match colors", config: VIDEO_COLOR_MATCH_STUDIO },
-  ],
-} as const;
+const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
+  upscale: { image: UPSCALE_STUDIO, video: VIDEO_UPSCALE_STUDIO },
+  audio: {
+    speech: AUDIO_STUDIO,
+    dialogue: DIALOGUE_STUDIO,
+    "voice-change": VOICE_CHANGE_STUDIO,
+    translate: TRANSLATE_STUDIO,
+    sfx: SFX_STUDIO,
+    music: MUSIC_STUDIO,
+    video: FOLEY_STUDIO,
+  },
+  "video-tools": {
+    matte: VIDEO_MATTE_STUDIO,
+    relight: VIDEO_RELIGHT_STUDIO,
+    depth: VIDEO_DEPTH_STUDIO,
+    join: JOIN_CLIPS_STUDIO,
+    colors: VIDEO_COLOR_MATCH_STUDIO,
+  },
+};
 
-function Inner({ kind }: { kind: keyof typeof MODES }) {
-  const sp = useSearchParams();
-  const router = useRouter();
-  const modes = MODES[kind];
-  const current = modes.find((m) => m.id === sp.get("mode")) ?? (sp.get("video") ? modes.find((m) => m.id === "video") : undefined) ?? modes[0];
-  const tabs = (
-    <div className="scrollbar-none inline-flex h-9 max-w-[52vw] items-center overflow-x-auto rounded-full bg-muted p-0.5 lg:max-w-none">
-      {modes.map((m) => (
-        <button
-          key={m.id}
-          onClick={() => router.replace(`?mode=${m.id}`)}
-          className={cn(
-            "h-8 shrink-0 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition",
-            current.id === m.id && "bg-background text-foreground shadow-soft",
-          )}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
-  );
-  return <StudioPage key={current.id} config={current.config} header={tabs} />;
+/** Modes that are their own tool rather than a composer studio (Translate & dub, Captions, Trim). */
+const TOOLS: Partial<Record<HubKind, Record<string, (p: { tabs: React.ReactNode }) => React.ReactNode>>> = {
+  audio: { translate: ({ tabs }) => <DubStudio tabs={tabs} /> },
+  "video-tools": { captions: ({ tabs }) => <CaptionsStudio tabs={tabs} />, trim: ({ tabs }) => <TrimTool tabs={tabs} /> },
+};
+
+const HUB_TITLE: Record<HubKind, string> = { upscale: "Upscale", audio: "Audio", "video-tools": "Video tools" };
+
+/**
+ * A hub of studios with one path per mode (Audio → /audio/music, Video tools, Upscale). Server
+ * component: the page is prerendered with that mode's hero, tabs and composer, and ships only
+ * that mode's models. `mode` omitted = the first mode (the hub's own URL).
+ */
+export function ModeSwitchStudio({ kind, mode }: { kind: HubKind; mode?: string }) {
+  const current = mode ?? HUB_MODES[kind][0].id;
+  const tabs = HUB_MODES[kind].map((m) => ({ id: m.id, label: m.label, href: modeHref(kind, m.id) }));
+  const Tool = TOOLS[kind]?.[current];
+  if (Tool) return <Tool tabs={<ModeTabs tabs={tabs} current={current} />} />;
+  const config = CONFIGS[kind][current];
+  if (!config) notFound();
+  return <ModeStudio key={current} tabs={tabs} current={current} config={config} catalog={studioCatalog(config)} />;
 }
 
-export function ModeSwitchStudio({ kind }: { kind: keyof typeof MODES }) {
-  return (
-    <Suspense fallback={null}>
-      <Inner kind={kind} />
-    </Suspense>
-  );
+/** `generateStaticParams` for /<hub>/[mode]: every mode is prerendered. */
+export function hubParams(kind: HubKind): { mode: string }[] {
+  return HUB_MODES[kind].map((m) => ({ mode: m.id }));
+}
+
+export function hubMetadata(kind: HubKind, mode: string): Metadata {
+  const m = HUB_MODES[kind].find((x) => x.id === mode);
+  return { title: !m || m.id === HUB_MODES[kind][0].id ? HUB_TITLE[kind] : `${m.label} · ${HUB_TITLE[kind]}` };
+}
+
+/** The /<hub>/[mode] page body. */
+export function HubModePage({ kind, params }: { kind: HubKind; params: Promise<{ mode: string }> }) {
+  return <Suspense fallback={null}>{params.then(({ mode }) => <ModeSwitchStudio kind={kind} mode={mode} />)}</Suspense>;
 }

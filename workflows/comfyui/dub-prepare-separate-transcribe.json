@@ -1,0 +1,131 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "input.wav"
+    },
+    "_meta": {
+      "title": "Speech to transcribe (audio, or a video with sound)"
+    }
+  },
+  "3": {
+    "class_type": "MelBandRoFormerModelLoader",
+    "inputs": {
+      "model_name": "MelBandRoformer_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "MelBandRoFormerModelLoader"
+    }
+  },
+  "4": {
+    "class_type": "MelBandRoFormerSampler",
+    "inputs": {
+      "model": [
+        "3",
+        0
+      ],
+      "audio": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "MelBandRoFormerSampler"
+    }
+  },
+  "5": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "4",
+        0
+      ],
+      "filename_prefix": "fuobe/dub-prepare-separate-transcribe",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "SaveAudioMP3"
+    }
+  },
+  "6": {
+    "class_type": "SaveAudioMP3",
+    "inputs": {
+      "audio": [
+        "4",
+        1
+      ],
+      "filename_prefix": "fuobe/dub-prepare-separate-transcribe",
+      "quality": "V0"
+    },
+    "_meta": {
+      "title": "SaveAudioMP3"
+    }
+  },
+  "7": {
+    "class_type": "AILab_Qwen3ASRSubtitle",
+    "inputs": {
+      "audio": [
+        "4",
+        0
+      ],
+      "model": "Qwen/Qwen3-ASR-1.7B-hf",
+      "precision": "bf16",
+      "attention": "auto",
+      "forced_aligner": "Qwen/Qwen3-ForcedAligner-0.6B-hf",
+      "language": "auto",
+      "hints": "",
+      "output_format": "none",
+      "output_path": "",
+      "split_mode": "split_by_punctuation_or_pause",
+      "max_gap_sec": 0.6,
+      "max_chars": 40,
+      "max_inference_batch_size": 32,
+      "max_new_tokens": 256,
+      "normalize_text": true,
+      "unload_models": true
+    },
+    "_meta": {
+      "title": "AILab_Qwen3ASRSubtitle"
+    }
+  },
+  "8": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "7",
+        1
+      ],
+      "filename_prefix": "fuobe/dub-prepare-separate-transcribe",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "SaveText"
+    }
+  },
+  "9": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "7",
+        0
+      ],
+      "filename_prefix": "fuobe/dub-prepare-separate-transcribe",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "SaveText"
+    }
+  },
+  "10": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "7",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "PreviewAny"
+    }
+  }
+}
