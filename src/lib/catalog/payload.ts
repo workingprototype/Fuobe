@@ -109,6 +109,12 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.videos && input.videos?.length) out[map.videos] = input.videos;
   if (map.audio && input.audio) out[map.audio] = input.audio;
   if (map.audios && input.audios?.length) out[map.audios] = input.audios;
+  if (map.tracks && input.video) {
+    // fal's compose wants every keyframe's start and length in milliseconds.
+    const ms = Math.max(1000, Math.round((input.duration ?? 0) * 1000));
+    const track = (id: string, type: "video" | "audio", url: string) => ({ id, type, keyframes: [{ url, timestamp: 0, duration: ms }] });
+    out[map.tracks] = [track("video", "video", input.video), ...(input.audio ? [track("voice", "audio", input.audio)] : []), ...(input.audio2 ? [track("background", "audio", input.audio2)] : [])];
+  }
 
   if (map.aspectRatio && input.aspectRatio) {
     const [k, v] = enumValue(map.aspectRatio, input.aspectRatio);

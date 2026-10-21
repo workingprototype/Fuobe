@@ -59,7 +59,8 @@ export type Operation =
   | "separate-audio" // audio or video → voice and background stems
   | "translate" // text → the same text in params.targetLanguage (LLM)
   | "write" // brief → text (LLM: scripts, ad copy, shot lists)
-  | "vectorize"; // image → the same picture as an SVG
+  | "vectorize" // image → the same picture as an SVG
+  | "level"; // audio → the same audio at a set loudness (a music bed under a voice-over)
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -107,6 +108,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   translate: "Translate",
   write: "Write",
   vectorize: "Vectorize",
+  level: "Level audio",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -155,6 +157,7 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   translate: "text",
   write: "text",
   vectorize: "image",
+  level: "audio",
 };
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
@@ -251,6 +254,11 @@ export interface FieldMap {
    * `language: null` (detect instead of assuming English), Mirelo's full-length soundtrack.
    */
   defaults?: Record<string, unknown>;
+  /**
+   * A timeline render (fal ffmpeg compose): one track for `video`, an audio track for `audio` (the voice)
+   * and one for `audio2` (a background bed), each placed at 0 and as long as `duration` (seconds).
+   */
+  tracks?: string;
 }
 
 export interface ModelRoute {

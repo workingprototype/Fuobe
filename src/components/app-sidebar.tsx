@@ -47,6 +47,8 @@ import {
   Camera,
   Shirt,
   UserRoundCog,
+  Tv,
+  Presentation,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -128,6 +130,8 @@ const NAV: NavGroupDef[] = [
       { href: "/photodump", label: "Photodump", icon: Camera },
       { href: "/fashion-factory", label: "Fashion Factory", icon: Shirt },
       { href: "/character-sheet", label: "Character Sheet", icon: UserRoundCog },
+      { href: "/faceless", label: "Faceless Studio", icon: Tv },
+      { href: "/explainer", label: "Explainer", icon: Presentation },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },

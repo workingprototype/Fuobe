@@ -9,4 +9,7 @@ export async function register() {
   ensureRunner();
   const { ensureTrashPurge } = await import("./server/library");
   ensureTrashPurge();
+  // Faceless / Explainer renders whose narration was timed while the server was down continue with their scenes.
+  const { ensureFacelessRunner } = await import("./server/faceless");
+  ensureFacelessRunner();
 }
