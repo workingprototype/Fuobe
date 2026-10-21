@@ -39,12 +39,27 @@ export function ChannelAvatar({ channel, className }: { channel: Pick<FacelessCh
   );
 }
 
+/** A style for the card: the first style reference (your own style), or the preset's art. */
+function StylePicture({ styleId, styleRef, className }: { styleId: string; styleRef?: string | null; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  if (styleRef) return <img src={styleRef} alt="" className={cn("size-full object-cover", className)} />;
+  return <StyleArt styleId={styleId} className={className} />;
+}
+
+/** "Your own style" when the look comes from style references. */
+const styleName = (styleId: string, ownStyle: boolean) => (ownStyle ? "Your own style" : getStyle(styleId).name);
+
 export function ChannelCard({ channel }: { channel: FacelessChannel }) {
   const cover = channel.cover?.outputs.find((o) => o.kind === "image");
+  const refs = channel.settings.styleRefs ?? [];
   return (
     <Link href={`/faceless/${channel.id}`} className="group/card block animate-fade-up rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <div className="relative aspect-video overflow-hidden rounded-xl bg-muted">
-        {cover ? <MediaThumb output={cover} className="transition-transform duration-300 ease-move group-hover/card:scale-[1.02]" /> : <StyleArt styleId={channel.settings.styleId} className="opacity-90" />}
+        {cover ? (
+          <MediaThumb output={cover} className="transition-transform duration-300 ease-move group-hover/card:scale-[1.02]" />
+        ) : (
+          <StylePicture styleId={channel.settings.styleId} styleRef={refs[0]} className="opacity-90" />
+        )}
         <span className="absolute bottom-2 left-2 rounded-full bg-black/45 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">{genreInfo(channel.genre).label}</span>
       </div>
       <div className="mt-2.5 flex min-w-0 items-center gap-2.5 px-0.5">
@@ -52,7 +67,7 @@ export function ChannelCard({ channel }: { channel: FacelessChannel }) {
         <div className="min-w-0">
           <h3 className="truncate text-[15px] font-medium">{channel.name}</h3>
           <p className="truncate text-[12px] text-muted-foreground">
-            {channel.episodes ?? 0} episode{channel.episodes === 1 ? "" : "s"} · {getStyle(channel.settings.styleId).name}
+            {channel.episodes ?? 0} episode{channel.episodes === 1 ? "" : "s"} · {styleName(channel.settings.styleId, refs.length > 0)}
           </p>
         </div>
       </div>
@@ -84,7 +99,7 @@ export function EpisodeTile({ ep, href, onLike }: { ep: Card; href: string; onLi
           ) : film ? (
             <MediaThumb output={film} />
           ) : (
-            <StyleArt styleId={ep.styleId} className="opacity-80" />
+            <StylePicture styleId={ep.styleId} styleRef={ep.styleRef} className="opacity-80" />
           )}
           {ep.status !== "done" && (
             <div className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent p-2.5 pt-8 text-[12px] font-medium text-white">
@@ -109,7 +124,7 @@ export function EpisodeTile({ ep, href, onLike }: { ep: Card; href: string; onLi
         <div className="mt-2 min-w-0 px-0.5">
           <h3 className="line-clamp-2 text-[14px] leading-snug font-medium">{ep.title}</h3>
           <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-            {getStyle(ep.styleId).name} · {timeAgo(ep.createdAt)}
+            {styleName(ep.styleId, ep.ownStyle)} · {timeAgo(ep.createdAt)}
           </p>
         </div>
       </Link>

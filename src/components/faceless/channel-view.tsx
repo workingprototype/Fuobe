@@ -3,6 +3,7 @@
 import { ArrowLeft, Check, ImagePlus, Link2, Loader2, MoreHorizontal, Pencil, Plus, Settings2, Trash2, Tv } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -25,7 +26,7 @@ import { FACELESS_STYLE_IDS, genreInfo, getStyle, type ChannelSettings, type Fac
 import { cn } from "@/lib/utils";
 import { ChannelAvatar, EpisodeTile } from "./cards";
 import { Section, Segmented, ToggleRow } from "./controls";
-import { makeAvatar, useChannel, useDeleteChannel, useLikeEpisode, useUpdateChannel, waitFor } from "./hooks";
+import { makeAvatar, useChannel, useDeleteChannel, useLikeEpisode, useUpdateChannel } from "./hooks";
 import { NarratorList, voiceLabel } from "./narrator";
 import { StyleArt, StyleGrid } from "./style-art";
 
@@ -113,23 +114,24 @@ export function ChannelView({ id, picker }: { id: string; picker: PickerData }) 
   const [name, setName] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const qc = useQueryClient();
 
   if (error && /not found/i.test((error as Error).message)) return <NotFoundState title="This channel doesn't exist">It may have been deleted. Your episodes&apos; videos are still in your library.</NotFoundState>;
   const channel = data?.channel;
+  // The server attaches the avatar when it's drawn, whether or not this page is still open.
+  const avatarBusy = asking || !!channel?.avatarJob;
 
   const drawAvatar = async () => {
-    setAvatarBusy(true);
+    setAsking(true);
     try {
-      const g = await waitFor((await makeAvatar(id)).id);
-      const url = g.outputs.find((o) => o.kind === "image")?.url;
-      if (g.status !== "succeeded" || !url) throw new Error(g.error ?? "Couldn't draw the avatar");
-      await update.mutateAsync({ avatarUrl: url });
-      toast.success("Avatar updated");
+      await makeAvatar(id);
+      await qc.invalidateQueries({ queryKey: ["faceless", "channel", id] });
+      toast("Drawing a new avatar", { description: "It appears here when it's done — you can leave this page." });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setAvatarBusy(false);
+      setAsking(false);
     }
   };
 
@@ -213,7 +215,12 @@ export function ChannelView({ id, picker }: { id: string; picker: PickerData }) 
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <Chip>
                     <span className="h-4 w-6 overflow-hidden rounded-sm">
-                      <StyleArt styleId={channel.settings.styleId} />
+                      {channel.settings.styleRefs.length ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={channel.settings.styleRefs[0]} alt="" className="size-full object-cover" />
+                      ) : (
+                        <StyleArt styleId={channel.settings.styleId} />
+                      )}
                     </span>
                     {channel.settings.styleRefs.length ? "Your own style" : getStyle(channel.settings.styleId).name}
                   </Chip>
@@ -288,7 +295,7 @@ export function ChannelView({ id, picker }: { id: string; picker: PickerData }) 
                 <AlertDialogHeader>
                   <AlertDialogTitle>Delete “{channel.name}”?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The channel and its {data.episodes.length} episode{data.episodes.length === 1 ? "" : "s"} are removed from Faceless Studio. Their videos stay in your Library.
+                    The channel and its {data.episodes.length} episode{data.episodes.length === 1 ? "" : "s"} are removed from Faceless Studio, and anything still rendering stops. Finished videos stay in your Library.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

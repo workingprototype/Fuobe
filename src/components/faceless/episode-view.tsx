@@ -11,7 +11,9 @@ import {
   Film,
   Heart,
   History,
+  ListChecks,
   Loader2,
+  MonitorUp,
   MoreHorizontal,
   Music,
   Pencil,
@@ -43,7 +45,6 @@ import { NotFoundState } from "@/components/empty-state";
 import { MediaThumb } from "@/components/studio/feed";
 import { Viewer } from "@/components/studio/viewer";
 import {
-  blockTimes,
   formatLength,
   getStyle,
   PART_LABELS,
@@ -313,7 +314,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
                 {tooLong(lines[i]) && <span className="text-[12px] text-warning">Longer than the scene: the voice runs over into the next one.</span>}
               </label>
             ))}
-            <p className="text-[12px] text-muted-foreground">The whole voice-over is read again, so it stays one natural take.</p>
+            <p className="text-[12px] text-muted-foreground">The whole voice-over is read again, so it stays one natural take; then the scenes are cut to the new lines, and a scene that moves by more than a second is animated again.</p>
           </div>
         ) : (
           <textarea
@@ -339,7 +340,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
                 : preview.isError
                   ? (preview.error as Error).message
                   : preview.data
-                    ? `Re-renders ${preview.data.labels.length} step${preview.data.labels.length === 1 ? "" : "s"} (${stepWords(preview.data.labels)}) · ${preview.data.demo ? "Demo · free" : ep.settings.engine === "open" ? "Free · your GPU" : preview.data.costUsd === null ? "price unknown" : `≈ ${usd(preview.data.costUsd)}`}`
+                    ? `Re-renders ${preview.data.labels.length} step${preview.data.labels.length === 1 ? "" : "s"} (${stepWords(preview.data.labels)})${preview.data.retime ? ", plus any scene whose timing moves" : ""} · ${preview.data.demo ? "Demo · free" : ep.settings.engine === "open" ? "Free · your GPU" : preview.data.costUsd === null ? "price unknown" : `≈ ${usd(preview.data.costUsd)}${preview.data.retime ? "+" : ""}`}`
                     : "Pricing…"}
           </p>
           <Button variant="ghost" onClick={discard} disabled={!draft}>
@@ -359,18 +360,21 @@ function Timeline({ view, onOpen }: { view: View; onOpen: (g: Generation) => voi
   const ep = view.episode;
   const [selected, setSelected] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<number | null>(null);
+  // Touch screens have no Shift or ⌘: "Select several" makes a tap add or remove a scene.
+  const [several, setSeveral] = useState(false);
   const scenes = useMemo<SceneRow[]>(() => {
-    const times = blockTimes(ep.script.blocks);
+    // Where each scene sits in the film (cut to the narration once it's timed), from the server.
+    const times = new Map(view.scenes.map((s) => [s.id, s]));
     return ep.script.blocks.map((b, i) => ({
       id: b.id,
       index: i,
       narration: b.narration,
-      seconds: b.seconds,
-      start: times[i].start,
+      seconds: times.get(b.id)?.seconds ?? b.seconds,
+      start: times.get(b.id)?.start ?? 0,
       still: view.steps.find((s) => s.key === `still-${b.id}`),
       clips: view.steps.filter((s) => s.part === "clip" && s.key.startsWith(`clip-${b.id}-`)),
     }));
-  }, [ep.script.blocks, view.steps]);
+  }, [ep.script.blocks, view.steps, view.scenes]);
   const pick = (i: number, e: React.MouseEvent) => {
     const id = scenes[i].id;
     if (e.shiftKey && anchor !== null) {
@@ -378,7 +382,7 @@ function Timeline({ view, onOpen }: { view: View; onOpen: (g: Generation) => voi
       setSelected(scenes.slice(a, b + 1).map((s) => s.id).slice(0, 12));
       return;
     }
-    if (e.metaKey || e.ctrlKey) {
+    if (several || e.metaKey || e.ctrlKey) {
       setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(0, 12)));
       setAnchor(i);
       return;
@@ -389,11 +393,27 @@ function Timeline({ view, onOpen }: { view: View; onOpen: (g: Generation) => voi
   const chosen = scenes.filter((s) => selected.includes(s.id));
   return (
     <section aria-labelledby="timeline-title" className="space-y-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="timeline-title" className="font-heading text-[22px]">
           Timeline
         </h2>
-        <p className="text-[12px] text-muted-foreground">Pick a scene to change it · Shift for a run, ⌘/Ctrl for several</p>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <p className="text-[12px] text-muted-foreground">
+            {view.timing === "narration" ? "Each scene is cut to its lines · " : ""}Pick a scene to change it<span className="pointer-coarse:hidden"> · Shift for a run, ⌘/Ctrl for several</span>
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={several}
+            onClick={() => {
+              setSeveral((v) => !v);
+              if (several) setSelected((s) => s.slice(0, 1));
+            }}
+            className={cn("h-7 rounded-full px-2.5 text-[12px]", several && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover")}
+          >
+            <ListChecks /> Select several
+          </Button>
+        </div>
       </div>
       <div className="scrollbar-none -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:-mx-0 sm:px-0" role="group" aria-label="Scenes">
         {scenes.map((s) => (
@@ -417,11 +437,12 @@ function Changes({ view }: { view: View }) {
       </summary>
       <ul className="mt-2 space-y-1.5">
         {[...changes].reverse().map((c) => (
-          <li key={c.at} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
-            <span className="font-medium">
+          <li key={c.at} className={cn("flex flex-wrap items-baseline gap-x-2 text-[12px]", c.undone && "text-muted-foreground")}>
+            <span className={cn("font-medium", c.undone && "line-through")}>
               Scene {c.blocks.map((b) => blocks.findIndex((x) => x.id === b) + 1 || "?").join(", ")} · {c.part}
             </span>
-            <span className="min-w-0 truncate text-muted-foreground">{c.instruction}</span>
+            <span className={cn("min-w-0 truncate text-muted-foreground", c.undone && "line-through")}>{c.instruction}</span>
+            {c.undone && <span className="text-[11px] font-medium">Undone</span>}
             <span className="ml-auto font-mono text-muted-foreground tabular-nums">
               {c.costUsd != null ? `≈ ${usd(c.costUsd)} · ` : ""}
               {timeAgo(c.at)}
@@ -447,9 +468,12 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
 
   if (error && /not found/i.test((error as Error).message)) return <NotFoundState title="This episode doesn't exist">It may have been deleted. Its videos are still in your library.</NotFoundState>;
   const ep = view?.episode;
-  const film = view?.final;
+  // The download is the 1080p copy once it's made, else the film.
+  const upscaled = view?.upscaled?.status === "succeeded" ? view.upscaled : null;
+  const upscaling = !!view?.upscaled && active(view.upscaled);
+  const film = upscaled ?? view?.final;
   const filmOut = film?.outputs.find((o) => o.kind === "video");
-  const run = (a: "retry" | "rewrite" | "undo", ok?: string) => action.mutate(a, { onSuccess: () => ok && toast.success(ok), onError: (e) => toast.error((e as Error).message) });
+  const run = (a: "retry" | "rewrite" | "undo" | "upscale", ok?: string) => action.mutate(a, { onSuccess: () => ok && toast.success(ok), onError: (e) => toast.error((e as Error).message) });
 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
@@ -461,10 +485,15 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
         </Link>
         {ep && (
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {upscaling && (
+              <span className="hidden items-center gap-1.5 text-[12px] text-muted-foreground sm:inline-flex" aria-live="polite">
+                <Loader2 className="size-3 animate-spin" /> Upscaling to 1080p
+              </span>
+            )}
             {filmOut && film && (
               <Button asChild variant="outline" size="sm">
-                <a href={downloadHref(filmOut.url, downloadName(film, filmOut, 0))} download>
-                  <Download /> <span className="hidden sm:inline">Download</span>
+                <a href={downloadHref(filmOut.url, downloadName(film, filmOut, 0))} download aria-label={upscaled ? "Download (1080p)" : "Download"}>
+                  <Download /> <span className="hidden sm:inline">{upscaled ? "Download 1080p" : "Download"}</span>
                 </a>
               </Button>
             )}
@@ -489,6 +518,14 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
                 {ep.plan?.previous && ep.status !== "rendering" && (
                   <DropdownMenuItem onClick={() => run("undo", "Back to the version before")}>
                     <Undo2 /> Undo the last change
+                  </DropdownMenuItem>
+                )}
+                {view?.upscale && !upscaled && (
+                  <DropdownMenuItem disabled={upscaling || action.isPending} onClick={() => run("upscale", "Upscaling to 1080p — the download switches to it when it's done")}>
+                    <MonitorUp /> {upscaling ? "Upscaling to 1080p…" : "Upscale to 1080p"}
+                    <span className="ml-auto pl-3 font-mono text-[11px] text-muted-foreground tabular-nums">
+                      {view.upscale.demo ? "Demo" : view.upscale.costUsd === null ? "" : `≈ ${usd(view.upscale.costUsd)}`}
+                    </span>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem variant="destructive" onClick={() => setTimeout(() => setConfirm(true))}>
@@ -534,8 +571,9 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
                 <h1 className="font-heading text-[30px] leading-tight text-balance">{ep.title}</h1>
               )}
               <p className="mt-1 text-[13px] text-muted-foreground">
-                {getStyle(ep.settings.styleId).name} · {ep.settings.aspect === "9:16" ? "Vertical" : "Horizontal"} · {ep.settings.animation === "frames" ? "Frame by frame" : "Fully animated"}
-                {ep.script.blocks.length > 0 && ` · ${formatLength(ep.script.blocks.reduce((n, b) => n + b.seconds, 0))}`}
+                {ep.settings.styleRefs.length ? "Your own style" : getStyle(ep.settings.styleId).name} · {ep.settings.aspect === "9:16" ? "Vertical" : "Horizontal"} ·{" "}
+                {ep.settings.animation === "frames" ? "Frame by frame" : "Fully animated"}
+                {ep.script.blocks.length > 0 && ` · ${formatLength(view.scenes.length ? view.scenes.reduce((n, s) => n + s.seconds, 0) : ep.script.blocks.reduce((n, b) => n + b.seconds, 0))}`}
                 {view.spentUsd > 0 && <span className="font-mono"> · ≈ {usd(view.spentUsd)} spent</span>}
               </p>
             </div>
@@ -584,7 +622,9 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this episode?</AlertDialogTitle>
-            <AlertDialogDescription>It&apos;s removed from {view?.channel ? "the channel" : "your explainers"}. Its pictures, clips and video stay in your Library.</AlertDialogDescription>
+            <AlertDialogDescription>
+              It&apos;s removed from {view?.channel ? "the channel" : "your explainers"}{ep?.status === "rendering" ? ", and what's still rendering stops" : ""}. Its finished pictures, clips and video stay in your Library.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

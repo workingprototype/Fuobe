@@ -1166,6 +1166,7 @@ function toCard(r: EpisodeRow): EpisodeCard {
     status: ep.status,
     styleId: ep.settings.styleId,
     ownStyle: ep.settings.styleRefs.length > 0,
+    styleRef: ep.settings.styleRefs[0] ?? null,
     aspect: ep.settings.aspect,
     seconds: (timed ? Object.values(timed).reduce((a, b) => a + b, 0) : totalSeconds(ep.script.blocks)) || ep.settings.length,
     favorite: ep.favorite,

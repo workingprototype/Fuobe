@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { fileToSlot } from "@/components/studio/media-slot";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import { useElements } from "@/lib/api";
 import type { NarratorVoice, PickerData } from "@/lib/catalog/faceless";
@@ -96,9 +97,17 @@ export function NarratorList({ engine, voices, value, onChange }: { engine: Engi
   const p = usePlayer();
   const list = voices.filter((v) => !q || `${v.name} ${v.hint ?? ""}`.toLowerCase().includes(q.toLowerCase()));
   const own = value?.kind === "sample" && !saved.some((e) => e.references[0] === value.url) ? value : null;
+  // One Tab stop for the whole list: the picked voice, else the first one shown.
+  const shown: NarratorVoice[] = [
+    ...(engine === "cloud" ? list.map((v): NarratorVoice => ({ kind: "preset", id: v.id })) : []),
+    ...saved.map((e): NarratorVoice => ({ kind: "sample", url: e.references[0] })),
+    ...(own ? [own] : []),
+  ];
+  const picked = shown.some((v) => sameVoice(value, v));
 
   const row = (key: string, v: NarratorVoice, name: string, hint: string | undefined, sample: () => Promise<string | null>) => {
     const active = sameVoice(value, v);
+    const stop = active || (!picked && !!shown[0] && sameVoice(shown[0], v));
     return (
       <div key={key} className={cn("flex items-center gap-1.5 rounded-lg pl-1.5 transition-colors hover:bg-accent", active && "bg-brand-faint hover:bg-brand-faint-hover")}>
         <PlayButton active={p.playing === key} loading={p.loading === key} onClick={() => void p.toggle(key, sample)} label={name} />
@@ -106,6 +115,7 @@ export function NarratorList({ engine, voices, value, onChange }: { engine: Engi
           type="button"
           role="radio"
           aria-checked={active}
+          tabIndex={radioTab(stop)}
           onClick={() => onChange(v)}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1.5 pr-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
@@ -120,7 +130,13 @@ export function NarratorList({ engine, voices, value, onChange }: { engine: Engi
   };
 
   return (
-    <div className="space-y-3" role="radiogroup" aria-label="Narrator voice">
+    <div
+      className="space-y-3"
+      role="radiogroup"
+      aria-label="Narrator voice"
+      // The arrow keys move between voices, except while typing in the search box.
+      onKeyDown={(e) => !(e.target as HTMLElement).closest("input, textarea") && radioKeys(e)}
+    >
       {engine === "cloud" && (
         <div>
           <div className="flex items-center justify-between gap-2 px-1 pb-1.5">

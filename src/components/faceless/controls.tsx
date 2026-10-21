@@ -114,6 +114,13 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
           <span className="min-w-0">{data.error}</span>
         </span>
       )}
+      {!data.error &&
+        data.notes?.map((n) => (
+          <span key={n} className="inline-flex min-w-0 items-start gap-1 text-[12px] text-muted-foreground">
+            <Info className="mt-0.5 size-3 shrink-0" />
+            <span className="min-w-0">{n}</span>
+          </span>
+        ))}
     </div>
   );
 }

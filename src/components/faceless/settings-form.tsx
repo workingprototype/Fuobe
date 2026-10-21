@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { fileToList, SlotPreview, type SlotValue } from "@/components/studio/media-slot";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useElements } from "@/lib/api";
 import {
   ANIMATION_MODES,
@@ -20,8 +21,8 @@ import { Section, Segmented, ToggleRow } from "./controls";
 import { NarratorList } from "./narrator";
 import { StyleGrid } from "./style-art";
 
-/** Up to 3 style reference images (they replace the preset). */
-export function StyleRefs({ value, onChange }: { value: string[]; onChange: (urls: string[]) => void }) {
+/** Up to 3 style reference images (they replace the preset); `max` is what the engine's picture model reads. */
+export function StyleRefs({ value, onChange, max = MAX_STYLE_REFS }: { value: string[]; onChange: (urls: string[]) => void; max?: number }) {
   const [list, setList] = useState<SlotValue[]>(() => value.map((url) => ({ ref: url, preview: url, kind: "image" })));
   const sync = setList;
   // Finished uploads become the settings' references.
@@ -47,7 +48,7 @@ export function StyleRefs({ value, onChange }: { value: string[]; onChange: (url
           </button>
         </div>
       ))}
-      {list.length < MAX_STYLE_REFS && (
+      {list.length < max && (
         <label className="flex size-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-border-strong text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary hover:bg-brand-faint hover:text-brand-text focus-within:ring-2 focus-within:ring-ring">
           <Plus className="size-4" />
           Add image
@@ -57,7 +58,7 @@ export function StyleRefs({ value, onChange }: { value: string[]; onChange: (url
             multiple
             className="sr-only"
             onChange={(e) => {
-              const files = [...(e.target.files ?? [])].slice(0, MAX_STYLE_REFS - list.length);
+              const files = [...(e.target.files ?? [])].slice(0, max - list.length);
               e.target.value = "";
               for (const f of files) fileToList(f, sync, "image");
             }}
@@ -124,6 +125,7 @@ export function EpisodeSettingsForm({
   styleIds: string[];
 }) {
   const [own, setOwn] = useState(value.styleRefs.length > 0);
+  const maxRefs = picker.maxStyleRefs?.[value.engine] ?? MAX_STYLE_REFS;
   const videos = picker.videoModels.filter((m) => m.engine === value.engine);
   const video = videos.find((m) => m.id === value.videoModel) ?? videos.find((m) => m.id === ENGINE_MODELS[value.engine].video) ?? videos[0];
   const resolution = value.resolution && video?.resolutions.includes(value.resolution) ? value.resolution : (DEFAULT_RESOLUTION[video?.id ?? ""]?.[value.animation] ?? video?.resolutions[0]);
@@ -136,7 +138,7 @@ export function EpisodeSettingsForm({
       )}
 
       <Section title="Animation">
-        <div role="radiogroup" aria-label="Animation" className="grid gap-2 sm:grid-cols-2">
+        <div role="radiogroup" aria-label="Animation" onKeyDown={radioKeys} className="grid gap-2 sm:grid-cols-2">
           {ANIMATION_MODES.map((m) => {
             const on = value.animation === m.id;
             return (
@@ -145,6 +147,7 @@ export function EpisodeSettingsForm({
                 type="button"
                 role="radio"
                 aria-checked={on}
+                tabIndex={radioTab(on)}
                 onClick={() => onChange({ animation: m.id, resolution: undefined })}
                 className={cn(
                   "flex items-start gap-3 rounded-xl border p-3 text-left transition-[border-color,box-shadow] outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -156,7 +159,7 @@ export function EpisodeSettingsForm({
                 </span>
                 <span className="min-w-0">
                   <span className="block text-[14px] font-medium">{m.label}</span>
-                  <span className="block text-[12px] leading-snug text-muted-foreground">{m.copy}</span>
+                  <span className="block text-[12px] leading-snug text-muted-foreground">{value.engine === "open" ? m.openCopy : m.copy}</span>
                 </span>
               </button>
             );
@@ -180,7 +183,7 @@ export function EpisodeSettingsForm({
           <ToggleRow label="Subtitles" hint="Burned into the video, timed to the voice" checked={value.subtitles} onChange={(subtitles) => onChange({ subtitles })} />
           <ToggleRow
             label="Background music"
-            hint={value.engine === "cloud" ? "An instrumental bed under the voice (mixed by ComfyUI: the cloud mixer takes one track)" : "An instrumental bed under the voice (ACE-Step)"}
+            hint={value.engine === "cloud" ? "An instrumental bed under the voice, as long as the film (Sonilo)" : "An instrumental bed under the voice (ACE-Step, up to 4 minutes)"}
             checked={value.music}
             onChange={(music) => onChange({ music })}
           />
@@ -202,8 +205,11 @@ export function EpisodeSettingsForm({
         />
         {own ? (
           <div className="space-y-2">
-            <StyleRefs value={value.styleRefs} onChange={(styleRefs) => onChange({ styleRefs })} />
-            <p className="text-[12px] text-muted-foreground">Up to 3 images in the look you want: palette, technique and texture are matched, nothing is copied.</p>
+            <StyleRefs key={value.engine} value={value.styleRefs.slice(0, maxRefs)} onChange={(styleRefs) => onChange({ styleRefs })} max={maxRefs} />
+            <p className="text-[12px] text-muted-foreground">
+              Up to {maxRefs} images in the look you want: palette, technique and texture are matched, nothing is copied.
+              {value.engine === "open" && maxRefs < MAX_STYLE_REFS && " (The open-source picture model reads two.)"}
+            </p>
           </div>
         ) : (
           <StyleGrid ids={styleIds} value={value.styleId} onChange={(styleId) => onChange({ styleId })} />
@@ -237,8 +243,9 @@ export function EpisodeSettingsForm({
           )}
           <p className="text-[12px] text-muted-foreground">
             {value.engine === "cloud"
-              ? `Pictures: Nano Banana Pro · Video: ${video?.name ?? "Gemini Omni Flash"} · Voice: ElevenLabs v4 (Chatterbox for your own voice) · Subtitles: Auto Subtitle`
-              : "Pictures: Z-Image Turbo · Video: Wan 2.2 Lightning · Voice: Chatterbox · Music: ACE-Step · Subtitles: Qwen3-ASR + burn-in"}
+              ? `Pictures: Nano Banana Pro · Video: ${video?.name ?? "Gemini Omni Flash"} · Voice: ElevenLabs v4 (Chatterbox for your own voice), timed word by word by ElevenLabs forced alignment · Music: Sonilo · Subtitles: Auto Subtitle`
+              : "Pictures: Z-Image Turbo (Qwen-Image-Edit with your images) · Video: Wan 2.2 Lightning · Voice: Chatterbox, timed by Qwen3-ASR · Music: ACE-Step · Subtitles: Qwen3-ASR + burn-in"}
+            {" "}Each scene is cut to where its lines are spoken.
           </p>
         </CollapsibleContent>
       </Collapsible>

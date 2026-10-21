@@ -10,6 +10,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NotFoundState } from "@/components/empty-state";
 import { EngineSwitch } from "@/components/studio/engine-switch";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useEngine } from "@/lib/api";
 import {
   defaultVoice,
@@ -25,7 +26,7 @@ import {
 } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
 import { ChannelAvatar } from "./cards";
-import { EstimateLine, Section, Segmented } from "./controls";
+import { EstimateLine, Section, Segmented, ToggleRow } from "./controls";
 import { pendingScriptKey } from "./faceless-home";
 import { suggestTopics, useChannel, useCreateEpisode, useEstimate } from "./hooks";
 import { EpisodeSettingsForm } from "./settings-form";
@@ -72,6 +73,9 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
   const [scriptMode, setScriptMode] = useState<"ai" | "pasted">("ai");
   const [script, setScript] = useState("");
   const [draft, setDraft] = useState<EpisodeSettings | null>(null);
+  // The first episode sets the channel's look; later ones only when ticked.
+  const [saveLook, setSaveLook] = useState<boolean | null>(null);
+  const keepLook = saveLook ?? data?.episodes.length === 0;
   const file = useRef<HTMLInputElement>(null);
   const ownId = useId();
   const scriptId = useId();
@@ -107,10 +111,13 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
     return { ...draft, engine, voice, videoModel: draft.engine === engine ? draft.videoModel : undefined, resolution: draft.engine === engine ? draft.resolution : undefined };
   }, [draft, engine, genre]);
 
-  const loadTopics = async (r: number, avoid: string[] = []) => {
+  // Every topic shown so far: "Generate new" asks for others.
+  const shown = useRef<string[]>([]);
+  const loadTopics = async (r: number) => {
     setLoadingTopics(true);
     try {
-      const res = await suggestTopics({ channelId, engine, round: r, avoid });
+      const res = await suggestTopics({ channelId, engine, round: r, avoid: shown.current.slice(-30) });
+      shown.current = [...new Set([...shown.current, ...res.topics.map((t) => t.title)])];
       setTopics(res.topics);
       setOffline(res.offline);
       setPicked(null);
@@ -146,7 +153,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
     if (scriptMode === "pasted" && !script.trim()) return void toast("Paste your script, or let it be written for you", { id: "faceless-blocker" });
     if (settings.engine === "open" && settings.voice?.kind !== "sample" && estimate.data?.error) return void toast(estimate.data.error, { id: "faceless-blocker" });
     create.mutate(
-      { channelId, topic: topic || script.trim().slice(0, 120), script: scriptMode === "pasted" ? script : undefined, settings },
+      { channelId, topic: topic || script.trim().slice(0, 120), script: scriptMode === "pasted" ? script : undefined, settings, saveLook: keepLook },
       {
         onSuccess: (ep) => router.push(`/faceless/${channelId}/${ep.id}`),
         onError: (e) => toast.error((e as Error).message),
@@ -201,23 +208,25 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
                   onClick={() => {
                     const r = round + 1;
                     setRound(r);
-                    void loadTopics(r, topics?.map((t) => t.title));
+                    void loadTopics(r);
                   }}
                 >
                   <RefreshCw className={cn(loadingTopics && "animate-spin")} /> Generate new topic suggestions
                 </Button>
               </div>
-              <div role="radiogroup" aria-label="Suggested topics" className="grid gap-2.5 sm:grid-cols-2">
+              <div role="radiogroup" aria-label="Suggested topics" onKeyDown={radioKeys} className="grid gap-2.5 sm:grid-cols-2">
                 {loadingTopics && !topics
                   ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[76px] rounded-xl" />)
-                  : topics?.map((t) => {
+                  : topics?.map((t, i) => {
                       const on = picked === t.title && !own.trim();
+                      const anyOn = !!picked && !own.trim() && topics.some((x) => x.title === picked);
                       return (
                         <button
                           key={t.title}
                           type="button"
                           role="radio"
                           aria-checked={on}
+                          tabIndex={radioTab(anyOn ? on : i === 0)}
                           onClick={() => {
                             setPicked(t.title);
                             setOwn("");
@@ -318,6 +327,15 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
             </Section>
 
             <EpisodeSettingsForm kind="faceless" value={settings} onChange={(p) => setDraft((d) => ({ ...d!, ...p, engine }))} picker={picker} styleIds={FACELESS_STYLE_IDS} />
+
+            <div className="rounded-xl border p-3">
+              <ToggleRow
+                label="Save as the channel's look"
+                hint="New episodes start with this style, narrator, format and music. Leave it off to try something just for this episode."
+                checked={keepLook}
+                onChange={setSaveLook}
+              />
+            </div>
           </div>
         )}
       </main>

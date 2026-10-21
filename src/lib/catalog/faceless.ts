@@ -1675,7 +1675,8 @@ export function defaultSettings(engine: Engine, genre: GenreInfo, o: { explainer
     animation: "animated",
     aspect: "16:9",
     subtitles: true,
-    music: engine === "open",
+    // A music bed is on by default, as on Higgsfield (both engines mix it under the voice).
+    music: true,
     styleId: genre.style,
     styleRefs: [],
     voice: defaultVoice(engine, genre, o.explainer),
@@ -1849,8 +1850,9 @@ export interface EpisodeCard {
   title: string;
   status: EpisodeStatus;
   styleId: string;
-  /** Made with the user's own style references (not a preset). */
+  /** Made with the user's own style references (not a preset), and the first of them. */
   ownStyle: boolean;
+  styleRef: string | null;
   aspect: EpisodeAspect;
   seconds: number;
   favorite: boolean;

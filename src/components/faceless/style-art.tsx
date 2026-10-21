@@ -2,6 +2,7 @@
 
 import { Check } from "lucide-react";
 import { memo, useId } from "react";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { getStyle, type VisualStyle } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
 
@@ -285,13 +286,14 @@ export const StyleArt = memo(function StyleArt({ styleId, className }: { styleId
 });
 
 /** A selectable style card (radio). */
-export function StyleCard({ styleId, selected, onSelect, compact }: { styleId: string; selected: boolean; onSelect: () => void; compact?: boolean }) {
+export function StyleCard({ styleId, selected, onSelect, compact, tabStop }: { styleId: string; selected: boolean; onSelect: () => void; compact?: boolean; tabStop?: boolean }) {
   const s = getStyle(styleId);
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
+      tabIndex={radioTab(tabStop ?? selected)}
       onClick={onSelect}
       className={cn(
         "group/style relative min-w-0 overflow-hidden rounded-xl border bg-background text-left transition-[box-shadow,border-color] outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -314,12 +316,13 @@ export function StyleCard({ styleId, selected, onSelect, compact }: { styleId: s
   );
 }
 
-/** The style grid (12 Faceless or 22 Explainer styles), a radio group. */
+/** The style grid (12 Faceless or 22 Explainer styles), a radio group: one Tab stop, the arrow keys pick. */
 export function StyleGrid({ ids, value, onChange, compact, className }: { ids: string[]; value: string; onChange: (id: string) => void; compact?: boolean; className?: string }) {
+  const picked = ids.includes(value);
   return (
-    <div role="radiogroup" aria-label="Visual style" className={cn("grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4", className)}>
-      {ids.map((id) => (
-        <StyleCard key={id} styleId={id} selected={value === id} onSelect={() => onChange(id)} compact={compact} />
+    <div role="radiogroup" aria-label="Visual style" onKeyDown={radioKeys} className={cn("grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4", className)}>
+      {ids.map((id, i) => (
+        <StyleCard key={id} styleId={id} selected={value === id} tabStop={picked ? value === id : i === 0} onSelect={() => onChange(id)} compact={compact} />
       ))}
     </div>
   );

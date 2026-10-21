@@ -192,8 +192,10 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
         }
         room--;
         setSources((xs) => [...xs, { kind: "text", name: f.name, text }]);
+      } else if (/\.(pdf|docx?|odt|rtf|pages|pptx?|key)$/i.test(f.name) || /pdf|word|officedocument|opendocument|rtf/.test(f.type)) {
+        toast.error(`${f.name}: PDF and Word files aren't read yet — save it as .txt, or paste the text into the prompt`);
       } else {
-        toast.error(`${f.name}: only images and documents are supported`);
+        toast.error(`${f.name}: add an image (PNG, JPEG, WebP) or a text document (.txt, .md, .csv)`);
       }
     }
   };
@@ -337,9 +339,12 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
                   <div className="space-y-2">
                     <p className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">Animation</p>
                     <Segmented label="Animation" value={settings.animation} options={ANIMATION_MODES.map((m) => ({ value: m.id, label: m.label }))} onChange={(animation) => set({ animation, resolution: undefined })} />
-                    <p className="text-[12px] text-muted-foreground">{ANIMATION_MODES.find((m) => m.id === settings.animation)?.copy}</p>
+                    <p className="text-[12px] text-muted-foreground">{(() => {
+                      const m = ANIMATION_MODES.find((x) => x.id === settings.animation);
+                      return engine === "open" ? m?.openCopy : m?.copy;
+                    })()}</p>
                   </div>
-                  <ToggleRow label="Background music" hint={engine === "cloud" ? "Mixed under the voice by ComfyUI (the cloud mixer takes one track)" : "An ACE-Step instrumental bed"} checked={settings.music} onChange={(music) => set({ music })} />
+                  <ToggleRow label="Background music" hint={engine === "cloud" ? "A Sonilo instrumental bed under the voice, as long as the film" : "An ACE-Step instrumental bed (up to 4 minutes)"} checked={settings.music} onChange={(music) => set({ music })} />
                   <ToggleRow label="Review the script first" hint="Edit the scenes before anything renders" checked={review} onChange={setReview} />
                 </PopoverContent>
               </Popover>

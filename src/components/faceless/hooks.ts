@@ -50,7 +50,13 @@ export function useChannel(id: string) {
     queryKey: ["faceless", "channel", id],
     queryFn: async () => json<{ channel: FacelessChannel; episodes: EpisodeCard[] }>(await fetch(`/api/faceless/channels/${id}`)),
     retry: (n, e) => !/not found/i.test((e as Error).message) && n < 1,
-    refetchInterval: (q) => (q.state.data?.episodes.some((e) => inFlight(e.status)) ? 3000 : false),
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (!d) return false;
+      // An avatar being drawn, or a new channel's name on its way from the LLM.
+      if (d.channel.avatarJob || Date.now() - d.channel.createdAt < 20_000) return 2500;
+      return d.episodes.some((e) => inFlight(e.status)) ? 3000 : false;
+    },
   });
 }
 
@@ -90,7 +96,7 @@ export const suggestTopics = (b: { channelId?: string; idea?: string; genre?: Fa
 export function useCreateEpisode() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { channelId: string; topic: string; script?: string; settings: EpisodeSettings }) => send<FacelessEpisode>("/api/faceless/episodes", "POST", b),
+    mutationFn: (b: { channelId: string; topic: string; script?: string; settings: EpisodeSettings; saveLook?: boolean }) => send<FacelessEpisode>("/api/faceless/episodes", "POST", b),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["faceless"] }),
   });
 }
@@ -119,12 +125,15 @@ export function useEpisode(id: string) {
     retry: (n, e) => !/not found/i.test((e as Error).message) && n < 1,
     refetchInterval: (q) => {
       const s = q.state.data?.episode.status;
+      const up = q.state.data?.upscaled?.status;
+      if (up === "queued" || up === "running") return connected ? 8000 : 2000;
       if (!s || !inFlight(s)) return false;
       return s === "writing" ? 1500 : connected ? 8000 : 2000;
     },
   });
   useEffect(() => {
-    ids.current = new Set(Object.values(q.data?.episode.plan?.ids ?? {}));
+    const plan = q.data?.episode.plan;
+    ids.current = new Set([...Object.values(plan?.ids ?? {}), ...(plan?.upscaled ? [plan.upscaled] : [])]);
   }, [q.data]);
   return q;
 }
@@ -148,7 +157,7 @@ export function useUpdateEpisode(id: string) {
 }
 
 export function useEpisodeAction(id: string) {
-  return useEpisodeMutation(id, (action: "render" | "retry" | "rewrite" | "undo") => send<EpisodeView>(`/api/faceless/episodes/${id}/${action}`, "POST"));
+  return useEpisodeMutation(id, (action: "render" | "retry" | "rewrite" | "undo" | "upscale") => send<EpisodeView>(`/api/faceless/episodes/${id}/${action}`, "POST"));
 }
 
 export interface ChangeDraft {
