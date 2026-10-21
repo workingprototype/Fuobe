@@ -14,13 +14,10 @@ import { STATUS_LABEL, type CuratedMoodboard, type Moodboard } from "./logic";
 export function CuratedCover({ m, className }: { m: Pick<CuratedMoodboard, "name" | "hue" | "preview" | "tone">; className?: string }) {
   return (
     <DrawnTile hue={m.hue} tone={m.tone ?? "plain"} className={className}>
-      {m.preview && (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={m.preview} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />
-          <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/60 to-transparent" />
-        </>
-      )}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {m.preview && <img src={m.preview} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" />}
+      {/* A scrim under the name, so it reads on light covers too (pastel washes, live previews). */}
+      {(m.preview || m.name) && <span className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/60 to-transparent" />}
       {m.name && <span className="absolute inset-x-2 bottom-2 font-heading text-[19px] leading-tight text-white drop-shadow-sm">{m.name}</span>}
     </DrawnTile>
   );

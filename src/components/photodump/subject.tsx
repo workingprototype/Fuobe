@@ -91,7 +91,7 @@ export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolea
         </div>
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
         <p className="text-[11.5px] text-muted-foreground tabular-nums">
-          {photos.length}/{MAX_PHOTOS} photos · PNG, JPG or paste
+          {photos.length}/{MAX_PHOTOS} photos · PNG, JPG, WebP or paste
         </p>
         <p className="text-[12px] text-muted-foreground">
           Or <Link href="/character-sheet" className="text-brand-text hover:underline">build one with Character Sheet</Link>, then pick it here.

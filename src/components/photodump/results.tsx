@@ -199,7 +199,7 @@ export function DownloadAll({ items, label = "Download" }: { items: Generation[]
       )}
     >
       <Download className="size-3.5" />
-      {available === total ? `${label} all` : `${label} (${available} /${total})`}
+      {available === total ? `${label} all` : `${label} (${available}/${total})`}
     </a>
   );
 }
