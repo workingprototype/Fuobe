@@ -208,6 +208,9 @@ const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
   { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
   { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
   { table: "canvases", cols: ["graph_json"] },
+  // Faceless / Explainer: a channel's avatar, style references and voice samples, episode sources.
+  { table: "faceless_channels", cols: ["avatar_url", "reference_json", "settings_json"] },
+  { table: "faceless_episodes", cols: ["settings_json", "sources_json"] },
 ];
 
 /** Whether anything still refers to this stored file (see ASSET_REFS). */

@@ -28,11 +28,11 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/faceless/e
   });
 }
 
-/** Deletes the episode (its videos stay in the Library). */
+/** Deletes the episode and stops what it still renders (its finished videos stay in the Library). */
 export async function DELETE(_req: Request, ctx: RouteContext<"/api/faceless/episodes/[id]">) {
   return handle(async () => {
     const { id } = await ctx.params;
-    deleteEpisode(id);
+    await deleteEpisode(id);
     return new Response(null, { status: 204 });
   });
 }

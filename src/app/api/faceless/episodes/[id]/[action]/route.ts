@@ -1,4 +1,4 @@
-import { episodeView, handle, renderEpisode, retryEpisode, rewriteEpisode, undoChange } from "@/server/faceless";
+import { episodeView, handle, renderEpisode, retryEpisode, rewriteEpisode, undoChange, upscaleEpisode } from "@/server/faceless";
 
 const ACTIONS = {
   /** Render the reviewed script. */
@@ -9,6 +9,8 @@ const ACTIONS = {
   rewrite: rewriteEpisode,
   /** Go back to the version before the last change. */
   undo: undoChange,
+  /** Upscale the finished film to 1080p (cloud). */
+  upscale: upscaleEpisode,
 } as const;
 
 export async function POST(_req: Request, ctx: RouteContext<"/api/faceless/episodes/[id]/[action]">) {

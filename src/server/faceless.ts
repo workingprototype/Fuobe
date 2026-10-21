@@ -11,10 +11,13 @@ import {
   defaultSettings,
   ENGINE_MODELS,
   estimateGraph,
-  finalKey,
+  EXPLAINER_MAX,
+  EXPLAINER_MIN,
   genreInfo,
   getStyle,
   MAX_SCRIPT,
+  MAX_SOURCES,
+  musicLength,
   narrationText,
   normalizeBlocks,
   OFFLINE_NOTE,
@@ -24,17 +27,24 @@ import {
   parseTopics,
   parseVisuals,
   placeholderBlocks,
+  plannedTiming,
   planRerun,
-  planRetry,
   previewLine,
+  resolveModels,
+  sceneSpans,
+  sceneTiming,
   scriptBrief,
   scriptSystem,
   splitScript,
+  spokenTimes,
+  styleRefLimit,
+  TIMING_PARTS,
   topicsBrief,
   topicsSystem,
   totalSeconds,
   visualsBrief,
   visualsSystem,
+  withTiming,
   wordsFor,
   youtubeKind,
   YOUTUBE_ERROR,
@@ -58,11 +68,11 @@ import {
   type NarratorVoice,
   type ScriptBlock,
   type StillEdits,
+  type TimedText,
   type TopicIdea,
 } from "@/lib/catalog/faceless";
 import { routesFor } from "@/lib/catalog/plan";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
-import { createPipeline } from "./chains";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -74,14 +84,19 @@ import { fileUrl, saveFile } from "./storage";
 
 /**
  * Faceless Studio and the Explainer on the server: channels (genre, saved style, narrator, aspect,
- * subtitles), episodes (topic → script → review → render), the render itself as chained generations
- * (createPipeline over the graph from src/lib/catalog/faceless.ts), retries, block changes from the
- * timeline editor (re-run that block's steps and everything after them) with Undo, voice previews,
- * topic suggestions, link summaries and estimates.
+ * subtitles, a name and an avatar made for them), episodes (topic → script → review → render), the
+ * render itself as chained generations over the graph from src/lib/catalog/faceless.ts, retries,
+ * block changes from the timeline editor (re-run that block's steps and everything after them) with
+ * Undo, "Upscale to 1080p", voice previews, topic suggestions, link summaries and estimates.
+ *
+ * A render runs in two stages. Stage one is the pictures, the narration and its word timings. Once the
+ * narration is timed, `advance` cuts every scene to where its lines are spoken and creates stage two:
+ * the clips, the joins, the music, the mix and the subtitles. Both stages live in the generations
+ * table, so they survive restarts; stage two is created by whoever looks first: a read of the episode,
+ * or the background sweep (ensureFacelessRunner, started at boot by src/instrumentation.ts).
  *
  * Writing a script runs in this process (the install's LLM through the "llm" provider, or the offline
- * writer); a restart while it writes leaves the episode "write-failed" with a Try again. Rendering lives
- * in the generations table, so it survives restarts like any chained job.
+ * writer); a restart while it writes leaves the episode "write-failed" with a Try again.
  */
 
 export class FacelessError extends Error {
@@ -102,6 +117,7 @@ interface ChannelRow {
   idea: string;
   genre: string;
   avatar_url: string | null;
+  avatar_job: string | null;
   reference_json: string | null;
   settings_json: string;
   created_at: number;
@@ -131,6 +147,7 @@ const toChannel = (r: ChannelRow): FacelessChannel => ({
   idea: r.idea,
   genre: genreInfo(r.genre).id,
   avatarUrl: r.avatar_url,
+  avatarJob: r.avatar_job ?? null,
   reference: r.reference_json ? (JSON.parse(r.reference_json) as ChannelReference) : null,
   settings: JSON.parse(r.settings_json) as ChannelSettings,
   createdAt: r.created_at,
@@ -175,8 +192,21 @@ function mustEpisode(id: string): FacelessEpisode {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export interface AskOptions {
+  /** Hears why there's no answer (the LLM failed, or took too long). */
+  onError?: (msg: string) => void;
+  /** Stops waiting (and cancels the LLM's job): the episode was deleted. */
+  signal?: AbortSignal;
+  /** How long to wait for the answer (default 8 minutes: a script on a slow local model). */
+  timeoutMs?: number;
+}
+
+/** Channel names and topic suggestions are waited for: a slow model gives way to the offline wording. */
+const NAME_TIMEOUT_MS = 15_000;
+const TOPICS_TIMEOUT_MS = 25_000;
+
 /** One answer from the engine's text model, or null (no LLM, AI helper off, demo mode on, or it failed: `onError` hears why). */
-export async function askLlm(engine: Engine, system: string, user: string, onError?: (msg: string) => void): Promise<string | null> {
+export async function askLlm(engine: Engine, system: string, user: string, o: AskOptions = {}): Promise<string | null> {
   if (getSetting("demoMode") === "on") return null;
   const model = getModel(ENGINE_MODELS[engine].write);
   const route = model?.routes.find((r) => r.op === "write");
@@ -187,20 +217,24 @@ export async function askLlm(engine: Engine, system: string, user: string, onErr
   try {
     const { externalId } = await llm.submit({ generationId: `faceless_${nanoid(6)}`, model, route, input: { prompt: user, extra: { system } } });
     const ctx = { externalId, meta: {}, route, model, createdAt: Date.now() };
-    const deadline = Date.now() + 8 * 60_000;
+    const deadline = Date.now() + (o.timeoutMs ?? 8 * 60_000);
     while (Date.now() < deadline) {
       await sleep(350);
+      if (o.signal?.aborted) {
+        await llm.cancel?.(ctx).catch(() => {});
+        return null;
+      }
       const r = await llm.poll(ctx);
       if (r.state === "succeeded") return r.outputs[0]?.text?.trim() || null;
       if (r.state === "failed") {
-        onError?.(r.error);
+        o.onError?.(r.error);
         return null;
       }
     }
-    await llm.cancel?.(ctx);
-    onError?.("The LLM took too long");
+    await llm.cancel?.(ctx).catch(() => {});
+    o.onError?.("The LLM took too long");
   } catch (e) {
-    onError?.((e as Error).message);
+    o.onError?.((e as Error).message);
   }
   return null;
 }
@@ -213,8 +247,21 @@ const ChannelDefaults = (engine: Engine, genre: FacelessGenre): ChannelSettings 
   return { engine, styleId: s.styleId, styleRefs: [], voice: s.voice, aspect: s.aspect, subtitles: s.subtitles, music: s.music, animation: s.animation, length: s.length };
 };
 
+/** A finished avatar becomes the channel's picture (whoever is watching); a failed one is let go. */
+function refreshAvatar(r: ChannelRow): ChannelRow {
+  if (!r.avatar_job) return r;
+  const g = getGeneration(r.avatar_job, { includeDeleted: true });
+  if (g && (g.status === "queued" || g.status === "running")) return r;
+  const url = g?.status === "succeeded" ? (g.outputs.find((o) => o.kind === "image")?.url ?? null) : null;
+  const next = { ...r, avatar_job: null, avatar_url: url ?? r.avatar_url };
+  db().prepare("UPDATE faceless_channels SET avatar_url = ?, avatar_job = NULL WHERE id = ? AND avatar_job = ?").run(next.avatar_url, r.id, r.avatar_job);
+  return next;
+}
+
+const channelRow = (id: string) => db().prepare("SELECT * FROM faceless_channels WHERE id = ?").get(id) as ChannelRow | undefined;
+
 export function listChannels(): FacelessChannel[] {
-  const rows = db().prepare("SELECT * FROM faceless_channels ORDER BY updated_at DESC").all() as ChannelRow[];
+  const rows = (db().prepare("SELECT * FROM faceless_channels ORDER BY updated_at DESC").all() as ChannelRow[]).map(refreshAvatar);
   const counts = new Map(
     (db().prepare("SELECT channel_id, COUNT(*) AS n FROM faceless_episodes WHERE channel_id IS NOT NULL GROUP BY channel_id").all() as { channel_id: string; n: number }[]).map((r) => [r.channel_id, r.n]),
   );
@@ -229,8 +276,8 @@ export function listChannels(): FacelessChannel[] {
 }
 
 export function getChannel(id: string): FacelessChannel | null {
-  const r = db().prepare("SELECT * FROM faceless_channels WHERE id = ?").get(id) as ChannelRow | undefined;
-  return r ? toChannel(r) : null;
+  const r = channelRow(id);
+  return r ? toChannel(refreshAvatar(r)) : null;
 }
 
 /** Title and thumbnail of a YouTube link (oEmbed, through the SSRF-safe fetch); the thumbnail is saved as an upload. */
@@ -254,26 +301,33 @@ async function readReference(url: string): Promise<ChannelReference> {
   return ref;
 }
 
+declare global {
+  var __fuobeFacelessNaming: Map<string, Promise<void>> | undefined;
+}
+const naming = () => (globalThis.__fuobeFacelessNaming ??= new Map<string, Promise<void>>());
+
+/** Wait for a new channel's name and avatar to be started (tests). */
+export const channelReady = (id: string) => naming().get(id) ?? Promise.resolve();
+
+const NAME_SYSTEM = "You name YouTube channels. Reply with the name only: 2–4 words, memorable, no quotes, no emoji.";
+
+/**
+ * A new channel is there straight away with a name taken from the idea; the LLM's name replaces it when
+ * it answers (within 15 s, and only while the channel still has the first name), then the avatar is drawn.
+ */
 export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string }): Promise<FacelessChannel> {
   const idea = input.idea.trim();
   if (!idea) throw new FacelessError("Describe the channel first");
   const reference = input.reference?.trim() ? await readReference(input.reference) : null;
-  let name = input.name?.trim() || null;
-  if (!name) {
-    const answer = await askLlm(
-      input.engine,
-      "You name YouTube channels. Reply with the name only: 2–4 words, memorable, no quotes, no emoji.",
-      `Channel idea: ${idea}\nGenre: ${genreInfo(input.genre).label}`,
-    );
-    name = answer?.split("\n")[0].replace(/^["'“”]+|["'“”.]+$/g, "").trim().slice(0, 60) || null;
-  }
+  const given = input.name?.trim().slice(0, 60) || null;
   const now = Date.now();
   const row: ChannelRow = {
     id: nanoid(10),
-    name: name || channelName(idea),
+    name: given ?? channelName(idea),
     idea: idea.slice(0, 500),
     genre: input.genre,
     avatar_url: null,
+    avatar_job: null,
     reference_json: reference ? JSON.stringify(reference) : null,
     settings_json: JSON.stringify(ChannelDefaults(input.engine, input.genre)),
     created_at: now,
@@ -282,6 +336,19 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
   db()
     .prepare(`INSERT INTO faceless_channels (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
     .run(row);
+  const job = (async () => {
+    if (!given) {
+      const answer = await askLlm(input.engine, NAME_SYSTEM, `Channel idea: ${idea}\nGenre: ${genreInfo(input.genre).label}`, { timeoutMs: NAME_TIMEOUT_MS });
+      const name = answer?.split("\n")[0].replace(/^["'“”]+|["'“”.]+$/g, "").trim().slice(0, 60);
+      if (name) db().prepare("UPDATE faceless_channels SET name = ? WHERE id = ? AND name = ?").run(name, row.id, row.name);
+    }
+    try {
+      if (channelRow(row.id)) makeAvatar(row.id);
+    } catch {
+      // No picture model can run right now: the channel shows its initials, and "Draw an avatar" is there.
+    }
+  })().finally(() => naming().delete(row.id));
+  naming().set(row.id, job);
   return toChannel(row);
 }
 
@@ -295,7 +362,10 @@ export async function updateChannel(
   if (patch.name !== undefined) fields.name = patch.name.trim().slice(0, 60) || cur.name;
   if (patch.idea !== undefined) fields.idea = patch.idea.trim().slice(0, 500) || cur.idea;
   if (patch.genre) fields.genre = patch.genre;
-  if (patch.avatarUrl !== undefined) fields.avatar_url = patch.avatarUrl;
+  if (patch.avatarUrl !== undefined) {
+    fields.avatar_url = patch.avatarUrl;
+    fields.avatar_job = null;
+  }
   if (patch.reference !== undefined) fields.reference_json = patch.reference ? JSON.stringify(await readReference(patch.reference)) : null;
   if (patch.settings) fields.settings_json = JSON.stringify({ ...cur.settings, ...patch.settings });
   const keys = Object.keys(fields);
@@ -307,16 +377,20 @@ export async function updateChannel(
   return getChannel(id)!;
 }
 
-/** Deletes the channel and its episodes; their videos stay in the Library. */
-export function deleteChannel(id: string): void {
-  if (!getChannel(id)) throw new FacelessError("Channel not found", 404);
+/** Deletes the channel and its episodes, stopping whatever they still render; finished videos stay in the Library. */
+export async function deleteChannel(id: string): Promise<void> {
+  const c = channelRow(id);
+  if (!c) throw new FacelessError("Channel not found", 404);
+  const episodes = (db().prepare("SELECT * FROM faceless_episodes WHERE channel_id = ?").all(id) as EpisodeRow[]).map(toEpisode);
+  const stops = [...episodes.flatMap(stopEpisode), ...(c.avatar_job ? [cancelGeneration(c.avatar_job)] : [])];
   db().transaction(() => {
     db().prepare("DELETE FROM faceless_episodes WHERE channel_id = ?").run(id);
     db().prepare("DELETE FROM faceless_channels WHERE id = ?").run(id);
   })();
+  await Promise.all(stops);
 }
 
-/** A channel avatar in the channel's style (one picture generation). */
+/** A channel avatar in the channel's style (one picture generation); it becomes the channel's picture when it's done. */
 export function makeAvatar(id: string): Generation {
   const c = getChannel(id);
   if (!c) throw new FacelessError("Channel not found", 404);
@@ -329,6 +403,7 @@ export function makeAvatar(id: string): Generation {
     params: { aspectRatio: "1:1", numOutputs: 1 },
     title: `${c.name} · avatar`,
   });
+  db().prepare("UPDATE faceless_channels SET avatar_job = ? WHERE id = ?").run(g.id, id);
   return g;
 }
 
@@ -338,19 +413,24 @@ export function makeAvatar(id: string): Generation {
 export async function suggestTopics(input: { idea: string; genre: FacelessGenre; engine: Engine; avoid?: string[]; count?: number; round?: number; reference?: string }): Promise<{ topics: TopicIdea[]; offline: boolean }> {
   const count = Math.max(4, Math.min(6, input.count ?? 5));
   const genre = genreInfo(input.genre);
-  const answer = await askLlm(input.engine, topicsSystem, topicsBrief({ idea: input.idea, genre, count, avoid: input.avoid, reference: input.reference }));
+  const answer = await askLlm(input.engine, topicsSystem, topicsBrief({ idea: input.idea, genre, count, avoid: input.avoid, reference: input.reference }), { timeoutMs: TOPICS_TIMEOUT_MS });
   const topics = answer ? parseTopics(answer).slice(0, count) : [];
   if (topics.length >= 3) return { topics, offline: false };
-  return { topics: offlineTopics(input.idea, genre.id, count, input.round ?? 0), offline: true };
+  return { topics: offlineTopics(input.idea, genre.id, count, input.round ?? 0, input.avoid), offline: true };
 }
 
 // ---------------------------------------------------------------------------
 // Episodes: create, write, review
 
-declare global {
-  var __fuobeFacelessWriting: Map<string, Promise<void>> | undefined;
+interface WritingJob {
+  job: Promise<void>;
+  abort: AbortController;
 }
-const writing = () => (globalThis.__fuobeFacelessWriting ??= new Map<string, Promise<void>>());
+
+declare global {
+  var __fuobeFacelessWriting: Map<string, WritingJob> | undefined;
+}
+const writing = () => (globalThis.__fuobeFacelessWriting ??= new Map<string, WritingJob>());
 
 export interface EpisodeInput {
   kind: "faceless" | "explainer";
@@ -362,6 +442,8 @@ export interface EpisodeInput {
   sources?: ExplainerSource[];
   /** Explainer: render as soon as the script is written (no review step). */
   autoRender?: boolean;
+  /** Save this episode's look and sound as the channel's (default: only for a channel's first episode). */
+  saveLook?: boolean;
 }
 
 function cleanSettings(s: EpisodeSettings): EpisodeSettings {
@@ -371,9 +453,9 @@ function cleanSettings(s: EpisodeSettings): EpisodeSettings {
   }
   return {
     ...s,
-    styleRefs: s.styleRefs.slice(0, 3),
+    styleRefs: s.styleRefs.slice(0, styleRefLimit(s.engine, getModel)),
     elements: [...new Set(s.elements)].slice(0, 8),
-    length: Math.max(15, Math.min(600, Math.round(s.length))),
+    length: Math.max(EXPLAINER_MIN, Math.min(EXPLAINER_MAX, Math.round(s.length))),
   };
 }
 
@@ -385,7 +467,7 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
   const channel = input.channelId ? getChannel(input.channelId) : null;
   if (input.channelId && !channel) throw new FacelessError("Channel not found", 404);
   const settings = cleanSettings(input.settings);
-  const sources = (input.sources ?? []).slice(0, 3);
+  const sources = (input.sources ?? []).slice(0, MAX_SOURCES);
   settings.sourceImages = sources.filter((s): s is Extract<ExplainerSource, { kind: "image" }> => s.kind === "image").map((s) => s.url);
   const now = Date.now();
   const title = (topic || pasted).replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
@@ -405,11 +487,11 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     created_at: now,
     updated_at: now,
   };
+  const first = channel ? !(db().prepare("SELECT 1 FROM faceless_episodes WHERE channel_id = ? LIMIT 1").get(channel.id) as unknown) : false;
   db()
     .prepare(`INSERT INTO faceless_episodes (${Object.keys(row).join(", ")}) VALUES (${Object.keys(row).map((k) => `@${k}`).join(", ")})`)
     .run(row);
-  if (channel) {
-    // The channel remembers the latest look and voice.
+  if (channel && (input.saveLook ?? first)) {
     void updateChannel(channel.id, {
       settings: { engine: settings.engine, styleId: settings.styleId, styleRefs: settings.styleRefs, voice: settings.voice, aspect: settings.aspect, subtitles: settings.subtitles, music: settings.music, animation: settings.animation, length: settings.length },
     });
@@ -420,29 +502,32 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
 
 /** Write (or split) the script in the background; the episode moves to review, or straight to rendering. */
 function startWriting(id: string, pasted: string, autoRender: boolean): Promise<void> {
+  const abort = new AbortController();
   const job = (async () => {
     try {
-      await writeScript(id, pasted);
+      await writeScript(id, pasted, abort.signal);
     } catch (e) {
-      updateEpisodeRow(id, { status: "write-failed", error: (e as Error).message || "Couldn't write the script" });
+      if (!abort.signal.aborted && episodeRow(id)) updateEpisodeRow(id, { status: "write-failed", error: (e as Error).message || "Couldn't write the script" });
       return;
     }
-    if (!autoRender) return;
+    if (!autoRender || abort.signal.aborted || !episodeRow(id)) return;
     try {
       renderEpisode(id);
     } catch (e) {
       // The script is there: show it with what's in the way (a missing voice, an engine that isn't connected).
       updateEpisodeRow(id, { status: "review", error: (e as Error).message });
     }
-  })().finally(() => writing().delete(id));
-  writing().set(id, job);
+  })().finally(() => {
+    if (writing().get(id)?.abort === abort) writing().delete(id);
+  });
+  writing().set(id, { job, abort });
   return job;
 }
 
 /** Wait for a script that's being written (tests, and the API's `?wait=1`). */
-export const scriptWritten = (id: string) => writing().get(id) ?? Promise.resolve();
+export const scriptWritten = (id: string) => writing().get(id)?.job ?? Promise.resolve();
 
-async function writeScript(id: string, pasted: string): Promise<void> {
+async function writeScript(id: string, pasted: string, signal: AbortSignal): Promise<void> {
   const ep = mustEpisode(id);
   const genre = genreInfo(ep.channelId ? (getChannel(ep.channelId)?.genre ?? "education") : "education");
   const channel = ep.channelId ? getChannel(ep.channelId) : null;
@@ -456,11 +541,11 @@ async function writeScript(id: string, pasted: string): Promise<void> {
     .map((e) => ({ handle: e.handle, kind: e.kind, description: e.description }));
   const textSources = ep.sources.flatMap((x) => (x.kind === "text" ? [`${x.name}: ${x.text.slice(0, 6000)}`] : x.kind === "link" ? [`${x.title ?? x.url} (${x.url}): ${x.text.slice(0, 6000)}`] : []));
   let failure = "";
-  const onError = (m: string) => (failure = m);
+  const ask = { onError: (m: string) => (failure = m), signal };
   let script: EpisodeScript;
   if (pasted) {
     const blocks = splitScript(pasted);
-    const answer = await askLlm(s.engine, visualsSystem, visualsBrief(blocks, style.name, ep.topic || pasted.slice(0, 200)), onError);
+    const answer = await askLlm(s.engine, visualsSystem, visualsBrief(blocks, style.name, ep.topic || pasted.slice(0, 200)), ask);
     const visuals = answer ? parseVisuals(answer, blocks.length) : null;
     script = {
       source: "pasted",
@@ -481,7 +566,7 @@ async function writeScript(id: string, pasted: string): Promise<void> {
       sources: textSources,
       auto,
     });
-    const answer = await askLlm(s.engine, scriptSystem, brief, onError);
+    const answer = await askLlm(s.engine, scriptSystem, brief, ask);
     const parsed = answer ? parseScript(answer) : null;
     if (parsed?.blocks.length) {
       script = { source: "ai", title: parsed.title ?? undefined, blocks: parsed.blocks };
@@ -491,7 +576,7 @@ async function writeScript(id: string, pasted: string): Promise<void> {
       script = { source: "ai", blocks, offline: true, note: failure ? `${OFFLINE_NOTE} (${failure})` : OFFLINE_NOTE };
     }
   }
-  if (!episodeRow(id)) return;
+  if (signal.aborted || !episodeRow(id)) return;
   updateEpisodeRow(id, {
     status: "review",
     error: null,
@@ -503,7 +588,7 @@ async function writeScript(id: string, pasted: string): Promise<void> {
 /** Write the script again (after a failure, or for a fresh draft). */
 export function rewriteEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
-  if (ep.status === "rendering" || ep.status === "done") throw new FacelessError("This episode is already rendered — change scenes in the timeline instead", 409);
+  if (ep.status === "rendering" || ep.status === "done" || ep.plan) throw new FacelessError("This episode is already rendered — change scenes in the timeline instead", 409);
   if (writing().has(id)) return ep;
   updateEpisodeRow(id, { status: "writing", error: null });
   startWriting(id, ep.script.source === "pasted" ? ep.script.blocks.map((b) => b.narration).join(" ") : "", false);
@@ -529,9 +614,23 @@ export function updateEpisode(id: string, patch: { title?: string; favorite?: bo
   return mustEpisode(id);
 }
 
-export function deleteEpisode(id: string): void {
-  mustEpisode(id);
+/** Stop an episode: the script writer, and every step still queued or running (now, and the version Undo keeps). */
+function stopEpisode(ep: FacelessEpisode): Promise<void>[] {
+  const w = writing().get(ep.id);
+  if (w) {
+    w.abort.abort();
+    writing().delete(ep.id);
+  }
+  const ids = new Set([...Object.values(ep.plan?.ids ?? {}), ...Object.values(ep.plan?.previous?.ids ?? {}), ...(ep.plan?.upscaled ? [ep.plan.upscaled] : [])]);
+  return [...ids].map((g) => cancelGeneration(g).catch(() => {}));
+}
+
+/** Deletes the episode and stops what it still renders; its finished pictures, clips and videos stay in the Library. */
+export async function deleteEpisode(id: string): Promise<void> {
+  const ep = mustEpisode(id);
+  const stops = stopEpisode(ep);
   db().prepare("DELETE FROM faceless_episodes WHERE id = ?").run(id);
+  await Promise.all(stops);
 }
 
 // ---------------------------------------------------------------------------
@@ -595,60 +694,16 @@ function buildGraph(ep: FacelessEpisode, blocks = ep.script.blocks, stillEdits?:
   }
 }
 
-/**
- * Cloud episodes with a music bed are mixed by the open mixer (the cloud soundtrack tool takes one
- * track): it must run the way the rest does.
- */
-function checkMusicMix(ep: FacelessEpisode, graph: GraphStep[]): void {
-  if (ep.settings.engine !== "cloud" || !ep.settings.music) return;
-  const mix = graph.find((s) => s.key === "mix")!;
-  if (engineMode() === "cloud") throw new FacelessError("A music bed is mixed under the voice by the open-source mixer, and this install is set to cloud APIs only — turn music off", 422);
-  const mixDemo = runsAsDemo(mix.request.modelId, "mux");
-  const videoDemo = runsAsDemo(graph.find((s) => s.part === "clip")!.request.modelId, "i2v");
-  if (mixDemo && !videoDemo) throw new FacelessError("A music bed is mixed under the voice by ComfyUI (the cloud soundtrack tool takes one track) — start ComfyUI, or turn music off", 422);
-}
+/** The episode's graph as it renders now: its blocks at their film lengths (once timed) and its picture edits. */
+const currentGraph = (ep: FacelessEpisode, blocks = ep.script.blocks) => buildGraph(ep, withTiming(blocks, ep.plan?.timing), ep.plan?.stillEdits);
 
-function toPipelineSteps(graph: GraphStep[]) {
-  return graph.map((s) => ({ key: s.key, request: { ...s.request, step: s.request.step ?? { label: s.label, index: 0, of: 1 } }, after: s.after, chain: s.chain }));
-}
+const previewStep = (s: GraphStep) => previewChained({ ...s.request, ...(s.chain && { chain: s.chain }) }, s.after?.length ?? 0);
 
-/** Start the render: every step as a chained generation (validated as a whole before anything is created). */
-export function renderEpisode(id: string): FacelessEpisode {
-  const ep = mustEpisode(id);
-  if (ep.status === "writing") throw new FacelessError("The script is still being written", 409);
-  if (ep.status === "rendering") throw new FacelessError("This episode is already rendering", 409);
-  if (ep.plan) throw new FacelessError(ep.status === "done" ? "This episode is done — change scenes in the timeline" : "This episode already rendered — use Retry", 409);
-  const blocks = normalizeBlocks(ep.script.blocks);
-  if (!blocks.length) throw new FacelessError("The script has no scenes yet");
-  const ready = { ...ep, script: { ...ep.script, blocks } };
-  const graph = buildGraph(ready, blocks);
-  checkMusicMix(ready, graph);
-  let pipeline: ReturnType<typeof createPipeline>;
-  try {
-    pipeline = createPipeline(toPipelineSteps(graph));
-  } catch (e) {
-    throw new FacelessError((e as Error).message, 422);
-  }
-  const plan: EpisodePlan = {
-    batchId: pipeline.batchId,
-    ids: Object.fromEntries(Object.entries(pipeline.byKey).map(([k, g]) => [k, g.id])),
-    changes: [],
-  };
-  updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify(plan), script_json: JSON.stringify(ready.script) });
-  return mustEpisode(id);
-}
-
-/**
- * Create the `rerun` steps of a graph again, waiting on the new ones or on the current generations of
- * the steps that are kept. Everything is previewed first, so a bad step creates nothing.
- */
-function relaunch(graph: GraphStep[], ids: Record<string, string>, rerun: string[], batchId: string): Record<string, string> {
-  const todo = new Set(rerun);
-  const steps = graph.filter((s) => todo.has(s.key));
-  for (const s of graph) if (!todo.has(s.key) && !ids[s.key]) throw new FacelessError(`“${s.label}” has no result to reuse — try again`, 409);
+/** Every step checked with placeholders for what earlier steps make, and one mode for all: nothing is created when one can't run. */
+function validate(steps: GraphStep[]): void {
   const previews = steps.map((s) => {
     try {
-      return { key: s.key, label: s.label, ...previewChained({ ...s.request, ...(s.chain && { chain: s.chain }) }, s.after?.length ?? 0) };
+      return { label: s.label, ...previewStep(s) };
     } catch (e) {
       throw new FacelessError(`${s.label}: ${(e as Error).message}`, 422);
     }
@@ -656,6 +711,21 @@ function relaunch(graph: GraphStep[], ids: Record<string, string>, rerun: string
   const demo = previews.find((p) => p.demo);
   const real = previews.find((p) => !p.demo);
   if (demo && real) throw new FacelessError(`${demo.label} would run as a demo (${demo.model.name} isn't connected) while ${real.label} runs for real — connect it in Settings, or turn on demo mode`, 422);
+}
+
+/**
+ * Create the `rerun` steps of a graph, waiting on the new ones or on the current generations of the
+ * steps they reuse. They're all checked first, so a bad step creates nothing.
+ */
+function relaunch(graph: GraphStep[], ids: Record<string, string>, rerun: string[], batchId: string): Record<string, string> {
+  const todo = new Set(rerun);
+  const steps = graph.filter((s) => todo.has(s.key));
+  for (const s of steps) {
+    for (const a of s.after ?? []) {
+      if (!todo.has(a) && !ids[a]) throw new FacelessError(`“${graph.find((x) => x.key === a)?.label ?? a}” has no result to reuse — try again`, 409);
+    }
+  }
+  validate(steps);
   const next = { ...ids };
   const made: Generation[] = [];
   try {
@@ -672,25 +742,130 @@ function relaunch(graph: GraphStep[], ids: Record<string, string>, rerun: string
   return next;
 }
 
+/** Only the steps the graph has (a re-timed scene may have fewer shots, a refolded join other keys). */
+const prune = (ids: Record<string, string>, graph: GraphStep[]) => {
+  const keys = new Set(graph.map((s) => s.key));
+  return Object.fromEntries(Object.entries(ids).filter(([k]) => keys.has(k)));
+};
+
+const partOf = (graph: GraphStep[]) => {
+  const m = new Map(graph.map((s) => [s.key, s.part]));
+  return (k: string) => m.get(k)!;
+};
+
+/**
+ * Start `changed` and everything after it. While the scenes aren't timed yet (the first render), or
+ * when the narration is read again, only the pictures, the narration and its timing start now: the
+ * rest waits for `advance`, which cuts the scenes to the new timing first.
+ */
+function launch(ep: FacelessEpisode, graph: GraphStep[], ids: Record<string, string>, changed: string[], batchId: string): { ids: Record<string, string>; awaiting: boolean; started: number } {
+  const { rerun } = planRerun(graph, changed);
+  const part = partOf(graph);
+  const needsTiming = !ep.plan?.timing || !!ep.plan.awaiting || rerun.includes("words");
+  if (!needsTiming) return { ids: prune(relaunch(graph, ids, rerun, batchId), graph), awaiting: false, started: rerun.length };
+  const now = rerun.filter((k) => TIMING_PARTS.has(part(k)));
+  const next = relaunch(graph, ids, now, batchId);
+  for (const k of rerun) if (!TIMING_PARTS.has(part(k))) delete next[k];
+  return { ids: prune(next, graph), awaiting: true, started: now.length };
+}
+
+/** The narration's timed words: forced alignment or ASR cues (null for a demo transcript or none). */
+function narrationCues(ep: FacelessEpisode): TimedText[] | null {
+  const words = getGeneration(ep.plan?.ids.words ?? "", { includeDeleted: true });
+  const out = words?.status === "succeeded" ? words.outputs.find((o) => o.kind === "text") : undefined;
+  if (!out || out.meta?.demo) return null;
+  return Array.isArray(out.meta?.cues) ? (out.meta.cues as TimedText[]) : null;
+}
+
+/**
+ * Stage two: the narration is timed, so each scene is cut to where its lines are spoken (sceneTiming),
+ * then the clips, joins, music, mix and subtitles are created. After a change, scenes whose length moved
+ * by more than RETIME_TOLERANCE are animated again; the others keep their clips. Without usable
+ * timings (a demo transcript) the scenes keep their planned lengths.
+ */
+function advance(ep: FacelessEpisode): FacelessEpisode {
+  const plan = ep.plan!;
+  const blocks = ep.script.blocks;
+  const video = getModel(resolveModels(ep.settings, narrationText(blocks).length, getModel).video);
+  const cues = narrationCues(ep);
+  const spoken = cues ? spokenTimes(blocks, cues) : null;
+  const timing = spoken ? sceneTiming(blocks, spoken, video, plan.timing) : (plan.timing ?? plannedTiming(blocks, video));
+  const graph = buildGraph(ep, withTiming(blocks, timing), plan.stillEdits);
+  const part = partOf(graph);
+  const status = statusMap(plan.ids);
+  const moved = new Set(blocks.filter((b) => plan.timing?.[b.id] !== timing[b.id]).map((b) => b.id));
+  const changed = graph
+    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || (s.part === "clip" && moved.has(blocks[s.block!].id)))
+    .map((s) => s.key);
+  // A bed that no longer covers the film is made again.
+  const music = graph.find((s) => s.key === "music");
+  if (music && plan.ids.music && !changed.includes("music")) {
+    const had = getGeneration(plan.ids.music, { includeDeleted: true })?.request.params?.duration ?? 0;
+    if (had < (music.request.params?.duration ?? 0)) changed.push("music");
+  }
+  const rerun = planRerun(graph, changed).rerun.filter((k) => !TIMING_PARTS.has(part(k)));
+  const ids = prune(relaunch(graph, plan.ids, rerun, plan.batchId), graph);
+  const next: EpisodePlan = { ...plan, ids, timing, untimed: !spoken, awaiting: false };
+  updateEpisodeRow(ep.id, { status: "rendering", error: null, plan_json: JSON.stringify(next) });
+  return mustEpisode(ep.id);
+}
+
+/** Start the render: the whole graph is checked first, then stage one (pictures, narration, its timing) starts. */
+export function renderEpisode(id: string): FacelessEpisode {
+  const ep = mustEpisode(id);
+  if (ep.status === "writing") throw new FacelessError("The script is still being written", 409);
+  if (ep.status === "rendering") throw new FacelessError("This episode is already rendering", 409);
+  if (ep.plan) throw new FacelessError(ep.status === "done" ? "This episode is done — change scenes in the timeline" : "This episode already rendered — use Retry", 409);
+  const blocks = normalizeBlocks(ep.script.blocks);
+  if (!blocks.length) throw new FacelessError("The script has no scenes yet");
+  const ready = { ...ep, script: { ...ep.script, blocks } };
+  const graph = buildGraph(ready, blocks);
+  validate(graph);
+  const batchId = nanoid(10);
+  const { ids, awaiting } = launch(ready, graph, {}, graph.map((s) => s.key), batchId);
+  const plan: EpisodePlan = { batchId, ids, awaiting, changes: [] };
+  updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify(plan), script_json: JSON.stringify(ready.script) });
+  ensureFacelessRunner();
+  return mustEpisode(id);
+}
+
 const statusMap = (ids: Record<string, string>) =>
-  Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, getGeneration(id)?.status])) as Record<string, string | undefined>;
+  Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, getGeneration(id, { includeDeleted: true })?.status])) as Record<string, string | undefined>;
 
 /** Redo the steps that failed (and what waited on them); finished steps are kept. */
 export function retryEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
   if (!ep.plan) return renderEpisode(id);
-  const graph = buildGraph(ep, ep.script.blocks, ep.plan.stillEdits);
+  const graph = currentGraph(ep);
   const status = statusMap(ep.plan.ids);
   if (Object.values(status).some((s) => s === "queued" || s === "running")) {
     // Steps still waiting on a failed one fail on the runner's next tick; retry those too.
     const live = graph.filter((s) => status[s.key] === "queued" || status[s.key] === "running");
     if (live.some((s) => !s.after?.length || s.after.some((a) => status[a] !== "failed" && status[a] !== "canceled"))) throw new FacelessError("Still rendering — retry once it stops", 409);
   }
-  const plan = planRetry(graph, Object.fromEntries(Object.entries(status).map(([k, v]) => [k, v === "queued" || v === "running" ? "failed" : v])));
-  if (!plan.rerun.length) return ep;
-  for (const k of plan.rerun) if (ep.plan.ids[k]) void cancelGeneration(ep.plan.ids[k]);
-  const ids = relaunch(graph, ep.plan.ids, plan.rerun, ep.plan.batchId);
-  updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify({ ...ep.plan, ids } satisfies EpisodePlan) });
+  const part = partOf(graph);
+  const broken = graph
+    .filter((s) => {
+      const st = status[s.key];
+      // Steps still to come after the timing aren't broken: advance makes them.
+      if (!st) return !ep.plan!.awaiting || TIMING_PARTS.has(part(s.key));
+      return st === "failed" || st === "canceled" || st === "queued" || st === "running";
+    })
+    .map((s) => s.key);
+  if (!broken.length && !ep.plan.awaiting) return ep;
+  for (const k of planRerun(graph, broken).rerun) if (ep.plan.ids[k]) void cancelGeneration(ep.plan.ids[k]);
+  const { ids, awaiting, started } = launch(ep, graph, ep.plan.ids, broken, ep.plan.batchId);
+  updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify({ ...ep.plan, ids, awaiting } satisfies EpisodePlan) });
+  ensureFacelessRunner();
+  // Everything before the timing is there (it was stage two that couldn't start): start it now.
+  if (awaiting && !started) {
+    try {
+      return advance(mustEpisode(id));
+    } catch (e) {
+      updateEpisodeRow(id, { status: "failed", error: (e as Error).message });
+      throw e instanceof FacelessError ? e : new FacelessError((e as Error).message, 422);
+    }
+  }
   return mustEpisode(id);
 }
 
@@ -706,7 +881,7 @@ export interface ChangeInput {
   narration?: string[];
 }
 
-/** The blocks, picture edits and graph a change would render. */
+/** The blocks, picture edits and graph a change would render, and the steps it touches. */
 function changed(ep: FacelessEpisode, c: ChangeInput) {
   if (!ep.plan) throw new FacelessError("Render the episode first", 409);
   const ids = c.blocks.filter((b) => ep.script.blocks.some((x) => x.id === b));
@@ -716,7 +891,6 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
   const stillEdits: StillEdits = { ...ep.plan.stillEdits };
   if (c.part === "narration") {
     if (!c.narration || c.narration.length !== ids.length || c.narration.some((n) => !n.trim())) throw new FacelessError("Write the new lines for each scene");
-    // The block keeps its length (its clips are reused); lines that no longer fit are flagged in the editor.
     blocks = blocks.map((b) => (ids.includes(b.id) ? { ...b, narration: c.narration![ids.indexOf(b.id)].replace(/\s+/g, " ").trim() } : b));
   } else {
     if (!instruction) throw new FacelessError(c.part === "picture" ? "Describe what to change in the picture" : "Describe the new movement");
@@ -732,11 +906,13 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
       blocks = blocks.map((b) => (ids.includes(b.id) && !stillEdits[b.id] ? { ...b, visual: `${b.visual}. ${instruction}` } : b));
     }
   }
-  const graph = buildGraph(ep, blocks, stillEdits);
+  const graph = buildGraph(ep, withTiming(blocks, ep.plan.timing), stillEdits);
   // Steps that failed earlier are redone with the change, so the new version can finish.
   const status = statusMap(ep.plan.ids);
-  const broken = graph.filter((s) => !status[s.key] || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
-  return { graph, blocks, stillEdits, plan: planRerun(graph, [...changedKeys(graph, ids, c.part), ...broken]), ids };
+  const part = partOf(graph);
+  const broken = graph.filter((s) => (!status[s.key] && (!ep.plan!.awaiting || TIMING_PARTS.has(part(s.key)))) || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
+  const keys = [...changedKeys(graph, ids, c.part), ...broken];
+  return { graph, blocks, stillEdits, keys, plan: planRerun(graph, keys), ids };
 }
 
 export function previewChange(id: string, c: ChangeInput): ChangePreview {
@@ -744,102 +920,225 @@ export function previewChange(id: string, c: ChangeInput): ChangePreview {
   const { graph, plan } = changed(ep, c);
   const est = estimateGraph(graph, getModel, plan.rerun);
   const demo = plan.rerun.some((k) => {
-    const s = graph.find((x) => x.key === k)!;
     try {
-      return previewChained({ ...s.request, ...(s.chain && { chain: s.chain }) }, s.after?.length ?? 0).demo;
+      return previewStep(graph.find((x) => x.key === k)!).demo;
     } catch {
       return false;
     }
   });
-  return { rerun: plan.rerun, labels: plan.rerun.map((k) => graph.find((s) => s.key === k)!.label), costUsd: est.unknown ? null : est.total, demo };
+  return {
+    rerun: plan.rerun,
+    labels: plan.rerun.map((k) => graph.find((s) => s.key === k)!.label),
+    costUsd: est.unknown ? null : est.total,
+    demo,
+    ...(plan.rerun.includes("words") && { retime: true }),
+  };
 }
 
 /** Re-run what the change touches (that block's steps, the joins after it, the mix, the subtitles); Undo keeps the version before. */
 export function applyChange(id: string, c: ChangeInput): FacelessEpisode {
   const ep = mustEpisode(id);
   if (ep.status === "rendering") throw new FacelessError("Wait for the current render to finish before changing scenes", 409);
-  const { graph, blocks, stillEdits, plan, ids } = changed(ep, c);
+  const { graph, blocks, stillEdits, keys, plan, ids } = changed(ep, c);
   const est = estimateGraph(graph, getModel, plan.rerun);
-  const next = relaunch(graph, ep.plan!.ids, plan.rerun, ep.plan!.batchId);
-  const final = getGeneration(ep.plan!.ids[finalKey(graph)] ?? "");
+  const next = launch({ ...ep, script: { ...ep.script, blocks } }, graph, ep.plan!.ids, keys, ep.plan!.batchId);
+  const final = getGeneration(ep.plan!.ids[finalKeyOf(ep)] ?? "");
+  const p = ep.plan!;
   const updated: EpisodePlan = {
-    ...ep.plan!,
-    ids: next,
+    ...p,
+    ids: next.ids,
+    awaiting: next.awaiting,
     stillEdits,
-    previous: { ids: ep.plan!.ids, blocks: ep.script.blocks, stillEdits: ep.plan!.stillEdits },
-    lastFinal: final?.status === "succeeded" ? final.id : ep.plan!.lastFinal,
-    changes: [...ep.plan!.changes, { at: Date.now(), blocks: ids, part: c.part, instruction: c.part === "narration" ? (c.narration ?? []).join(" / ") : (c.instruction ?? ""), costUsd: est.unknown ? null : est.total }].slice(-50),
+    previous: { ids: p.ids, blocks: ep.script.blocks, stillEdits: p.stillEdits, timing: p.timing, untimed: p.untimed, awaiting: p.awaiting },
+    lastFinal: final?.status === "succeeded" ? final.id : p.lastFinal,
+    // A new version: its upscale is made again on request.
+    upscaled: undefined,
+    changes: [...p.changes, { at: Date.now(), blocks: ids, part: c.part, instruction: c.part === "narration" ? (c.narration ?? []).join(" / ") : (c.instruction ?? ""), costUsd: est.unknown ? null : est.total }].slice(-50),
   };
   updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify(updated), script_json: JSON.stringify({ ...ep.script, blocks }) });
+  ensureFacelessRunner();
   return mustEpisode(id);
 }
 
-/** Back to the version before the last change (its generations are still there; nothing is refunded). */
+/** Back to the version before the last change: the newer steps still running are stopped (nothing is refunded). */
 export function undoChange(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
   const prev = ep.plan?.previous;
   if (!prev) throw new FacelessError("Nothing to undo", 409);
   for (const [k, gid] of Object.entries(ep.plan!.ids)) if (prev.ids[k] !== gid) void cancelGeneration(gid);
-  const plan: EpisodePlan = { ...ep.plan!, ids: prev.ids, stillEdits: prev.stillEdits, previous: undefined, lastFinal: undefined };
-  updateEpisodeRow(id, { status: "rendering", plan_json: JSON.stringify(plan), script_json: JSON.stringify({ ...ep.script, blocks: prev.blocks }) });
+  const changes = [...ep.plan!.changes];
+  const last = changes.map((x) => !x.undone).lastIndexOf(true);
+  if (last >= 0) changes[last] = { ...changes[last], undone: true };
+  const plan: EpisodePlan = {
+    ...ep.plan!,
+    ids: prev.ids,
+    stillEdits: prev.stillEdits,
+    timing: prev.timing,
+    untimed: prev.untimed,
+    awaiting: prev.awaiting,
+    previous: undefined,
+    lastFinal: undefined,
+    upscaled: undefined,
+    changes,
+  };
+  updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify(plan), script_json: JSON.stringify({ ...ep.script, blocks: prev.blocks }) });
   return mustEpisode(id);
 }
 
 // ---------------------------------------------------------------------------
-// Reading
+// Upscale to 1080p
+
+/** SeedVR2 bills per megapixel of output video: 1920 × 1080 at the clips' 24 fps. */
+const UPSCALE_FPS = 24;
+const UPSCALE_MP = (1920 * 1080) / 1e6;
+
+function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscale"] {
+  const modelId = ENGINE_MODELS[ep.settings.engine].upscale;
+  const model = modelId ? getModel(modelId) : undefined;
+  if (!model) return null;
+  const demo = runsAsDemo(model.id, "upscale-video");
+  const p = model.pricing;
+  const costUsd = demo ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
+  return { costUsd, demo };
+}
+
+/** "Upscale to 1080p": one upscale step on the finished film, offered as the download once it's done. */
+export function upscaleEpisode(id: string): FacelessEpisode {
+  const ep = mustEpisode(id);
+  const modelId = ENGINE_MODELS[ep.settings.engine].upscale;
+  if (!modelId) throw new FacelessError("Upscaling runs on the cloud engine: the open-source upscaler holds every frame of the film in memory", 422);
+  const final = finalOf(ep);
+  if (!ep.plan || !final) throw new FacelessError("Wait for the episode to finish first", 409);
+  const had = ep.plan.upscaled ? getGeneration(ep.plan.upscaled) : null;
+  if (had && had.status !== "failed" && had.status !== "canceled") return ep;
+  let g: Generation;
+  try {
+    [g] = createGenerations(
+      { feature: ep.kind, modelId, op: "upscale-video", params: { resolution: "1080p" }, chain: [{ slot: "video" }], title: `${ep.title} · 1080p`, batchTitle: ep.title, step: { label: "Upscale to 1080p", index: 0, of: 1 } },
+      { batchId: ep.plan.batchId, dependsOn: final.id },
+    );
+  } catch (e) {
+    throw new FacelessError((e as Error).message, 422);
+  }
+  updateEpisodeRow(id, { plan_json: JSON.stringify({ ...ep.plan, upscaled: g.id } satisfies EpisodePlan) });
+  return mustEpisode(id);
+}
+
+// ---------------------------------------------------------------------------
+// Reading, and the sweep that starts stage two
+
+/** The step whose output is the finished episode. */
+const finalKeyOf = (ep: FacelessEpisode) => (ep.settings.subtitles ? "captions" : "mix");
 
 function finalOf(ep: FacelessEpisode): Generation | null {
-  if (!ep.plan) return null;
-  const key = ep.plan.ids.captions ? "captions" : "mix";
-  const g = getGeneration(ep.plan.ids[key] ?? "");
+  if (!ep.plan || ep.plan.awaiting) return null;
+  const g = getGeneration(ep.plan.ids[finalKeyOf(ep)] ?? "");
   return g?.status === "succeeded" ? g : null;
 }
 
-/** The episode's status from its generations (saved when it changes). */
-function settle(ep: FacelessEpisode, gens: Map<string, Generation | null>): EpisodeStatus {
+const brokenMessage = (g: Generation | null) =>
+  !g ? "A step was deleted — retry to make it again" : g.status === "canceled" ? "A step was cancelled — retry to make it again" : (g.error ?? "A step didn't finish — retry it");
+
+/**
+ * The episode's status from its generations (saved when it changes). Once stage one has finished, the
+ * first look starts stage two (advance).
+ */
+function settle(ep: FacelessEpisode, gens?: Map<string, Generation | null>): FacelessEpisode {
   if (ep.status === "writing" && !writing().has(ep.id)) {
     // A restart while the script was being written.
-    updateEpisodeRow(ep.id, { status: "write-failed", error: "Interrupted while writing the script — try again" });
-    return "write-failed";
+    const error = "Interrupted while writing the script — try again";
+    updateEpisodeRow(ep.id, { status: "write-failed", error });
+    return { ...ep, status: "write-failed", error };
   }
-  if (!ep.plan || ep.status === "writing" || ep.status === "write-failed" || ep.status === "review") return ep.status;
-  const list = Object.entries(ep.plan.ids).map(([k, id]) => [k, gens.get(id) ?? null] as const);
-  const final = list.find(([k]) => k === (ep.plan!.ids.captions ? "captions" : "mix"))?.[1];
+  if (!ep.plan || ep.status === "writing" || ep.status === "write-failed" || ep.status === "review") return ep;
+  const read = (id: string) => (gens?.has(id) ? gens.get(id)! : getGeneration(id, { includeDeleted: true }));
+  const list = Object.entries(ep.plan.ids).map(([k, id]) => [k, read(id)] as const);
   const active = list.some(([, g]) => g && (g.status === "queued" || g.status === "running"));
   const broken = list.find(([, g]) => !g || g.status === "failed" || g.status === "canceled");
-  const status: EpisodeStatus = final?.status === "succeeded" ? "done" : !active && broken ? "failed" : "rendering";
-  const error = status === "failed" ? (broken?.[1]?.error ?? "A step was deleted — retry to make it again") : null;
+  let status: EpisodeStatus;
+  let error: string | null = null;
+  if (ep.plan.awaiting) {
+    if (!active && !broken && ep.status !== "failed") {
+      try {
+        return settle(advance(ep));
+      } catch (e) {
+        status = "failed";
+        error = (e as Error).message;
+      }
+    } else status = active ? "rendering" : "failed";
+    if (status === "failed") error ??= ep.status === "failed" && !broken ? ep.error : brokenMessage(broken?.[1] ?? null);
+  } else {
+    const final = list.find(([k]) => k === finalKeyOf(ep))?.[1];
+    status = final?.status === "succeeded" ? "done" : !active && broken ? "failed" : "rendering";
+    if (status === "failed") error = brokenMessage(broken![1]);
+  }
   if (status !== ep.status || error !== ep.error) updateEpisodeRow(ep.id, { status, error });
-  return status;
+  return { ...ep, status, error };
+}
+
+declare global {
+  var __fuobeFacelessRunner: { timer: NodeJS.Timeout; tick: () => void } | undefined;
+}
+
+const SWEEP_MS = 2000;
+
+/** Episodes whose stage one has finished get stage two, even when nobody has them open. */
+function sweep(): void {
+  const rows = db().prepare("SELECT * FROM faceless_episodes WHERE status = 'rendering' AND plan_json LIKE '%\"awaiting\":true%'").all() as EpisodeRow[];
+  for (const r of rows) {
+    try {
+      settle(toEpisode(r));
+    } catch (e) {
+      console.warn(`[faceless] couldn't continue ${r.id}: ${(e as Error).message}`);
+    }
+  }
+}
+
+/** Start the background sweep (once per process: at boot, and whenever a render starts). */
+export function ensureFacelessRunner(): void {
+  const cur = globalThis.__fuobeFacelessRunner;
+  if (cur) {
+    // After a dev hot reload, point the timer at this module's code.
+    cur.tick = sweep;
+    return;
+  }
+  const state = { tick: sweep, timer: setInterval(() => globalThis.__fuobeFacelessRunner?.tick(), SWEEP_MS) };
+  state.timer.unref?.();
+  globalThis.__fuobeFacelessRunner = state;
 }
 
 const stepProgress = (g: Generation | null) => (!g ? 0 : g.status === "succeeded" ? 1 : g.status === "running" ? Math.max(0.05, Math.min(0.95, g.progress ?? 0.1)) : 0);
 
 export function episodeView(id: string): EpisodeView {
-  const ep = mustEpisode(id);
+  const current = settle(mustEpisode(id));
   const gens = new Map<string, Generation | null>();
-  for (const gid of Object.values(ep.plan?.ids ?? {})) gens.set(gid, getGeneration(gid));
-  const status = settle(ep, gens);
-  const current = { ...ep, status, error: status === ep.status ? ep.error : (episodeRow(id)?.error ?? null) };
+  for (const gid of Object.values(current.plan?.ids ?? {})) gens.set(gid, getGeneration(gid));
   let graph: GraphStep[] = [];
   try {
-    if (current.script.blocks.length) graph = buildEpisodeGraph({ ...graphInputSafe(current), blocks: current.script.blocks, stillEdits: ep.plan?.stillEdits }, getModel);
+    if (current.script.blocks.length) graph = buildEpisodeGraph({ ...graphInputSafe(current), blocks: withTiming(current.script.blocks, current.plan?.timing), stillEdits: current.plan?.stillEdits }, getModel);
   } catch {
     graph = [];
   }
-  const steps = graph.map((s) => ({ key: s.key, part: s.part, block: s.block, label: s.label, generation: ep.plan?.ids[s.key] ? (gens.get(ep.plan.ids[s.key]) ?? null) : null }));
+  const plan = current.plan;
+  const steps = graph.map((s) => ({ key: s.key, part: s.part, block: s.block, label: s.label, generation: plan?.ids[s.key] ? (gens.get(plan.ids[s.key]) ?? null) : null }));
   const final = finalOf(current);
-  const previousFinal = !final && ep.plan?.lastFinal ? getGeneration(ep.plan.lastFinal) : null;
+  const previousFinal = !final && plan?.lastFinal ? getGeneration(plan.lastFinal) : null;
   const spent = [...gens.values()].reduce((n, g) => n + (g && g.status !== "failed" && g.status !== "canceled" ? (g.costUsd ?? 0) : 0), 0);
+  const spans = sceneSpans(graph, current.script.blocks.length);
+  const upscaled = plan?.upscaled ? getGeneration(plan.upscaled) : null;
   return {
     episode: current,
     channel: current.channelId ? getChannel(current.channelId) : null,
     steps,
     final,
     previousFinal: previousFinal?.status === "succeeded" ? previousFinal : null,
-    progress: steps.length && ep.plan ? steps.reduce((n, s) => n + stepProgress(s.generation), 0) / steps.length : 0,
+    progress: steps.length && plan ? steps.reduce((n, s) => n + stepProgress(s.generation), 0) / steps.length : 0,
     spentUsd: Math.round(spent * 100) / 100,
     estimate: graph.length ? estimateGraph(graph, getModel) : null,
+    scenes: current.script.blocks.map((b, i) => ({ id: b.id, start: spans[i]?.start ?? 0, seconds: spans[i]?.seconds ?? b.seconds })),
+    timing: plan?.timing && !plan.untimed ? "narration" : "planned",
+    upscaled,
+    upscale: final ? upscaleOffer(current, spans.reduce((n, s) => n + s.seconds, 0)) : null,
   };
 }
 
@@ -853,25 +1152,26 @@ function graphInputSafe(ep: FacelessEpisode): GraphInput {
 }
 
 function toCard(r: EpisodeRow): EpisodeCard {
-  const ep = toEpisode(r);
+  const ep = settle(toEpisode(r));
   const ids = Object.values(ep.plan?.ids ?? {});
   const gens = new Map(ids.map((id) => [id, getGeneration(id)] as const));
-  const status = ep.plan ? settle(ep, gens) : settle(ep, new Map());
-  const final = ep.plan ? (gens.get(ep.plan.ids.captions ?? ep.plan.ids.mix ?? "") ?? null) : null;
+  const final = finalOf(ep);
   const firstStill = ep.plan ? (gens.get(ep.plan.ids[`still-${ep.script.blocks[0]?.id}`] ?? "") ?? null) : null;
+  const timed = ep.plan?.timing;
   return {
     id: ep.id,
     channelId: ep.channelId,
     kind: ep.kind,
     title: ep.title,
-    status,
+    status: ep.status,
     styleId: ep.settings.styleId,
+    ownStyle: ep.settings.styleRefs.length > 0,
     aspect: ep.settings.aspect,
-    seconds: totalSeconds(ep.script.blocks) || ep.settings.length,
+    seconds: (timed ? Object.values(timed).reduce((a, b) => a + b, 0) : totalSeconds(ep.script.blocks)) || ep.settings.length,
     favorite: ep.favorite,
-    poster: final?.status === "succeeded" ? final : null,
+    poster: final,
     still: firstStill?.status === "succeeded" ? firstStill : null,
-    updating: status === "rendering" && !!ep.plan?.lastFinal,
+    updating: ep.status === "rendering" && !!ep.plan?.lastFinal,
     progress: ids.length ? [...gens.values()].reduce((n, g) => n + stepProgress(g ?? null), 0) / ids.length : 0,
     createdAt: ep.createdAt,
   };
@@ -907,7 +1207,6 @@ export function listEpisodes(o: { channelId?: string; kind?: "faceless" | "expla
 export function estimateEpisode(input: { kind: "faceless" | "explainer"; settings: EpisodeSettings; blocks?: Partial<ScriptBlock>[]; genre?: FacelessGenre }): EstimateResult {
   const settings = { ...input.settings, styleRefs: input.settings.styleRefs.slice(0, 3) };
   const blocks = input.blocks?.length ? normalizeBlocks(input.blocks) : placeholderBlocks(settings.auto ? AUTO_SECONDS : settings.length);
-  const seconds = totalSeconds(blocks);
   const fake: FacelessEpisode = {
     id: "estimate",
     channelId: null,
@@ -928,13 +1227,13 @@ export function estimateEpisode(input: { kind: "faceless" | "explainer"; setting
   try {
     graph = buildEpisodeGraph({ ...graphInputSafe(fake), genre: genreInfo(input.genre) }, getModel);
   } catch (e) {
-    return { estimate: { total: 0, parts: {}, unknown: true }, demo: true, seconds, blocks: blocks.length, error: (e as Error).message };
+    return { estimate: { total: 0, parts: {}, unknown: true }, demo: true, seconds: totalSeconds(blocks), blocks: blocks.length, error: (e as Error).message };
   }
+  const seconds = sceneSpans(graph, blocks.length).reduce((n, s) => n + s.seconds, 0);
   let error: string | undefined;
   let demo = false;
   try {
     cleanSettings(settings);
-    checkMusicMix(fake, graph);
     if (settings.engine === "open" && settings.voice?.kind !== "sample" && !runsAsDemo(ENGINE_MODELS.open.narration, "tts")) {
       error = "Pick the narrator's voice: record or upload 10–60 s of speech, or use one of your saved voices";
     }
@@ -948,13 +1247,26 @@ export function estimateEpisode(input: { kind: "faceless" | "explainer"; setting
     if (seen.has(k)) continue;
     seen.add(k);
     try {
-      const p = previewChained({ ...s.request, ...(s.chain && { chain: s.chain }) }, s.after?.length ?? 0);
-      demo ||= p.demo;
+      demo ||= previewStep(s).demo;
     } catch (e) {
       error ??= `${s.label}: ${(e as Error).message}`;
     }
   }
-  return { estimate: estimateGraph(graph, getModel), demo, seconds, blocks: blocks.length, ...(error && { error }) };
+  return { estimate: estimateGraph(graph, getModel), demo, seconds, blocks: blocks.length, ...(error && { error }), ...notesFor(settings, seconds) };
+}
+
+/** What the render will do differently from what was asked (nothing that stops it). */
+function notesFor(settings: EpisodeSettings, seconds: number): { notes?: string[] } {
+  const notes: string[] = [];
+  const m = resolveModels(settings, 0, getModel);
+  const limit = styleRefLimit(settings.engine, getModel);
+  if (settings.styleRefs.length > limit) notes.push(`The open-source picture model follows the first ${limit} style references.`);
+  if (settings.engine === "open" && settings.styleRefs.length && settings.sourceImages?.length) notes.push("Your style references set the look; the attached images aren't used for the open-source pictures.");
+  if (m.music) {
+    const max = musicLength(getModel(m.music), Number.MAX_SAFE_INTEGER);
+    if (seconds > max) notes.push(`The music bed is at most ${Math.floor(max / 60)} min ${max % 60 ? `${max % 60} s ` : ""}long, so the last ${Math.ceil(seconds - max)} s play without music.`);
+  }
+  return notes.length ? { notes } : {};
 }
 
 /** A short sample of a premade narrator (one cheap speech generation, reused once made). */
@@ -1010,6 +1322,7 @@ export async function summarizeLink(url: string, engine: Engine): Promise<Extrac
     engine,
     "You summarise web pages for a video script writer. Reply with the key facts, numbers, names and explanations as short plain sentences (at most 250 words). No preamble.",
     `Page: ${title ?? url}\n\n${text.slice(0, 24_000)}`,
+    { timeoutMs: 2 * 60_000 },
   );
   return { kind: "link", url: res.url, title: title?.slice(0, 160), text: (summary ?? text).slice(0, 6000) };
 }
@@ -1025,9 +1338,12 @@ export const VoiceSchema = z.union([
 export const GenreSchema = z.enum(["education", "history", "kids", "storytelling"]);
 export const EngineSchema = z.enum(["cloud", "open"]);
 
+/** The research's message for a length outside Auto / 15–600 s. */
+export const DURATION_ERROR = "Duration must be Auto or a whole number of seconds between 15 and 600";
+
 export const SettingsSchema = z.object({
   engine: EngineSchema,
-  length: z.number().int().min(15).max(600),
+  length: z.number(DURATION_ERROR).int(DURATION_ERROR).min(EXPLAINER_MIN, DURATION_ERROR).max(EXPLAINER_MAX, DURATION_ERROR),
   animation: z.enum(["animated", "frames"]),
   aspect: z.enum(["16:9", "9:16"]),
   subtitles: z.boolean(),

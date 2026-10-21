@@ -8,6 +8,8 @@ const Create = z.object({
   topic: z.string().max(MAX_TOPIC, "Keep the topic under 5,000 characters"),
   script: z.string().max(MAX_SCRIPT, "That script is too long to narrate. Shorten it and try again.").optional(),
   settings: SettingsSchema,
+  /** Save this episode's look and sound as the channel's (default: only for its first episode). */
+  saveLook: z.boolean().optional(),
 });
 
 /** Episodes, newest first (`?channel=` for one channel). */
@@ -24,6 +26,6 @@ export async function POST(request: Request) {
   return handle(async () => {
     const input = await body(request, Create, "Pick a topic and the video settings");
     if (!FACELESS_LENGTHS.includes(input.settings.length)) throw new FacelessError("Choose one of the offered video lengths");
-    return Response.json(createEpisode({ kind: "faceless", channelId: input.channelId, topic: input.topic, script: input.script, settings: input.settings }), { status: 201 });
+    return Response.json(createEpisode({ kind: "faceless", channelId: input.channelId, topic: input.topic, script: input.script, settings: input.settings, saveLook: input.saveLook }), { status: 201 });
   });
 }

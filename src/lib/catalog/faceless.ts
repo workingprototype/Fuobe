@@ -563,8 +563,8 @@ export interface EngineModels {
   captionsUseWords: boolean;
   /** Pictures that show the subject of attached images, when the still model can't read images. */
   sourceStill?: string;
-  /** "Upscale to 1080p" on a finished episode. */
-  upscale: string;
+  /** "Upscale to 1080p" on a finished episode (cloud: SeedVR2; the open 4× upscaler holds every frame in memory, so none). */
+  upscale?: string;
   write: string;
 }
 
@@ -610,7 +610,6 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     align: "oss-qwen3-asr",
     captionsUseWords: true,
     sourceStill: "oss-qwen-edit",
-    upscale: "oss-upscale-video-esrgan",
     write: "oss-text-llm",
   },
 };
@@ -651,10 +650,12 @@ export type ModelLookup = (id: string) => ModelDef | undefined;
 export function shotsFor(seconds: number, durations: number[] | undefined, range?: [number, number]): number[] {
   const need = Math.max(1, Math.round(seconds));
   if (range) {
+    // Any whole length in the range: split as evenly as possible, so the shots add up to the block (11 → 6 + 5).
     const [lo, hi] = range;
     const n = Math.ceil(need / hi);
-    const base = Math.max(lo, Math.ceil(need / n));
-    return Array.from({ length: n }, () => Math.min(hi, base));
+    const base = Math.floor(need / n);
+    const extra = need - base * n;
+    return Array.from({ length: n }, (_, i) => Math.min(hi, Math.max(lo, base + (i < extra ? 1 : 0))));
   }
   const ds = [...new Set(durations?.length ? durations : [5])].filter((d) => d > 0).sort((a, b) => a - b);
   const max = ds[ds.length - 1];
@@ -750,15 +751,22 @@ export interface GraphInput {
 
 export interface ResolvedModels {
   still: string;
+  /** "edit": the pictures are drawn from attached source images by an edit model (open engine). */
+  stillOp?: "edit";
   video: string;
   resolution: string;
   narration: string;
   music: string | null;
+  /** Brings the bed down under the voice before the mix (cloud). */
+  level: string | null;
   mux: string;
   join: string;
   joinMax: number;
   captions: string | null;
-  transcribe: string | null;
+  /** Word timings of the narration: the scenes are cut to them. */
+  align: string;
+  /** The captions are burned from those timings (open engine). */
+  captionsUseWords: boolean;
 }
 
 /** Which models an episode runs on, from its engine and settings. */
@@ -770,17 +778,22 @@ export function resolveModels(settings: EpisodeSettings, narrationChars: number,
   const wanted = settings.resolution && offered.includes(settings.resolution) ? settings.resolution : (DEFAULT_RESOLUTION[video]?.[settings.animation] ?? videoDef?.defaults?.resolution ?? offered[0] ?? "720p");
   const sample = settings.voice?.kind === "sample";
   const narration = settings.engine === "open" ? m.narration : sample ? m.cloneNarration : narrationChars > m.narrationMaxChars ? m.longNarration : m.narration;
+  // Style references win; attached source images otherwise go to a model that reads them.
+  const fromSources = !settings.styleRefs.length && !!settings.sourceImages?.length && !!m.sourceStill;
   return {
-    still: settings.styleRefs.length ? m.styleStill : m.still,
+    still: settings.styleRefs.length ? m.styleStill : fromSources ? m.sourceStill! : m.still,
+    ...(fromSources && { stillOp: "edit" as const }),
     video,
     resolution: wanted,
     narration,
     music: settings.music ? m.music : null,
+    level: settings.music ? (m.levelMusic ?? null) : null,
     mux: settings.music ? m.mixMusic : m.mux,
     join: m.join,
     joinMax: m.joinMax,
     captions: settings.subtitles ? m.captions : null,
-    transcribe: settings.subtitles ? (m.transcribe ?? null) : null,
+    align: m.align,
+    captionsUseWords: m.captionsUseWords,
   };
 }
 
@@ -819,16 +832,25 @@ const pick = (lookup: ModelLookup, id: string) => {
   return m;
 };
 
-/** Music beds come in fixed lengths: the shortest that covers the film, else the longest there is. */
+/**
+ * How long the music bed is: as long as the film (plus a second) for models that make any length up to
+ * their limit (MUSIC_MAX), else the shortest fixed length that covers it, else the longest there is.
+ */
 export function musicLength(model: ModelDef | undefined, seconds: number): number {
+  const max = model ? MUSIC_MAX[model.id] : undefined;
+  if (max) return Math.min(max, Math.max(10, Math.ceil(seconds) + 1));
   const ds = [...(model?.options.durations ?? [])].sort((a, b) => a - b);
   if (!ds.length) return Math.ceil(seconds);
   return ds.find((d) => d >= seconds) ?? ds[ds.length - 1];
 }
 
+/** Seconds of film a block's shots make (its planned or timed length, rounded up to what the model makes). */
+export const filmSeconds = (seconds: number, video: ModelDef | undefined) => blockShots(seconds, video).reduce((a, c) => a + c, 0);
+
 /**
  * Every step of an episode render, in dependency order. Pure: the server turns it into chained
- * generations (createPipeline), the editor uses it to work out what a change re-runs.
+ * generations, the editor uses it to work out what a change re-runs. Blocks carry their length: the
+ * planned one, or (once the narration is timed, see sceneTiming) the length cut to their lines.
  */
 export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): GraphStep[] {
   const { settings, blocks, feature } = input;
@@ -844,62 +866,58 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
   const steps: GraphStep[] = [];
   const n = blocks.length;
   const clipKeys: string[] = [];
-  const sources = (settings.sourceImages ?? []).slice(0, 3);
+  const sources = (settings.sourceImages ?? []).slice(0, MAX_SOURCES);
   const refs = settings.styleRefs.slice(0, MAX_STYLE_REFS);
   const stillDef = pick(lookup, models.still);
+  const maxImages = stillDef.options.maxImages ?? 1;
   // Reference images go where the still model reads them: a style-reference model takes only the style
-  // images; a multi-reference model (Nano Banana Pro) takes them and the sources; a plain t2i model none.
+  // images; a multi-reference model (Nano Banana Pro) takes them and the sources; an edit model (open,
+  // with sources) the sources; a plain t2i model none.
   const takesRefs = stillDef.routes.some((r) => r.op === "edit") || !!stillDef.options.maxImages;
-  const maxRefs = stillDef.options.maxImages ?? 1;
-  const stillImages = !takesRefs ? [] : stillDef.engine === "open" && refs.length ? refs.slice(0, maxRefs) : [...refs, ...sources].slice(0, maxRefs);
-  const refCount = Math.min(refs.length, stillImages.length);
+  const stillImages =
+    models.stillOp === "edit" ? sources.slice(0, maxImages) : !takesRefs ? [] : stillDef.engine === "open" && refs.length ? refs.slice(0, maxImages) : [...refs, ...sources].slice(0, maxImages);
+  const refCount = models.stillOp === "edit" ? 0 : Math.min(refs.length, stillImages.length);
 
   blocks.forEach((b, i) => {
     const edit = input.stillEdits?.[b.id];
     const stillKey = `still-${b.id}`;
-    if (edit) {
-      steps.push({
-        key: stillKey,
-        part: "still",
-        block: i,
-        label: `Scene ${i + 1} · picture`,
-        request: {
-          ...base,
-          modelId: ENGINE_MODELS[settings.engine].editStill,
-          op: "edit",
-          prompt: `${clean(edit.instruction)}. Keep everything else the same: the art style, composition, characters and colours.`,
-          inputs: { images: [edit.source] },
-          params: { aspectRatio: ar, numOutputs: 1 },
-          step: { label: `Scene ${i + 1} · picture`, index: i, of: n },
-        },
-      });
-    } else {
-      steps.push({
-        key: stillKey,
-        part: "still",
-        block: i,
-        label: `Scene ${i + 1} · picture`,
-        request: {
-          ...base,
-          modelId: models.still,
-          prompt: stillPrompt(style, b, { aspect: ar, refs: refCount, sources: stillImages.length - refCount }),
-          ...(stillImages.length && { inputs: { images: stillImages } }),
-          params: { aspectRatio: ar, numOutputs: 1 },
-          step: { label: `Scene ${i + 1} · picture`, index: i, of: n },
-        },
-      });
-    }
+    const label = `Scene ${i + 1} · picture`;
+    steps.push({
+      key: stillKey,
+      part: "still",
+      block: i,
+      label,
+      request: edit
+        ? {
+            ...base,
+            modelId: ENGINE_MODELS[settings.engine].editStill,
+            op: "edit",
+            prompt: `${clean(edit.instruction)}. Keep everything else the same: the art style, composition, characters and colours.`,
+            inputs: { images: [edit.source] },
+            params: { aspectRatio: ar, numOutputs: 1 },
+            step: { label, index: i, of: n },
+          }
+        : {
+            ...base,
+            modelId: models.still,
+            ...(models.stillOp && { op: models.stillOp }),
+            prompt: stillPrompt(style, b, { aspect: ar, refs: refCount, sources: stillImages.length - refCount }),
+            ...(stillImages.length && { inputs: { images: stillImages } }),
+            params: { aspectRatio: ar, numOutputs: 1 },
+            step: { label, index: i, of: n },
+          },
+    });
     const shots = blockShots(b.seconds, videoDef);
     shots.forEach((secs, s) => {
       const key = `clip-${b.id}-${s + 1}`;
       clipKeys.push(key);
-      const label = shots.length > 1 ? `Scene ${i + 1} · clip ${s + 1} of ${shots.length}` : `Scene ${i + 1} · clip`;
+      const clipLabel = shots.length > 1 ? `Scene ${i + 1} · clip ${s + 1} of ${shots.length}` : `Scene ${i + 1} · clip`;
       steps.push({
         key,
         part: "clip",
         block: i,
         shot: s,
-        label,
+        label: clipLabel,
         seconds: secs,
         after: [stillKey],
         chain: [{ slot: "images", position: "first" }],
@@ -916,7 +934,7 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
             // The narration replaces the clip's own sound.
             ...(videoDef.options.audio === true && { generateAudio: false }),
           },
-          step: { label, index: i, of: n },
+          step: { label: clipLabel, index: i, of: n },
         },
       });
     });
@@ -946,9 +964,9 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
     }
   }
   const film = levels.length ? "join" : clipKeys[0];
-  const filmSeconds = blocks.reduce((t, b) => t + blockShots(b.seconds, videoDef).reduce((a, c) => a + c, 0), 0);
+  const length = blocks.reduce((t, b) => t + filmSeconds(b.seconds, videoDef), 0);
 
-  // The voice-over, read in one take.
+  // The voice-over, read in one take, then timed word by word.
   const narrationDef = pick(lookup, models.narration);
   const voice = settings.voice;
   const sample = voice?.kind === "sample" ? voice.url : narrationDef.options.voiceClone && !narrationDef.options.voices?.length ? input.fallbackVoice : undefined;
@@ -967,69 +985,85 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
       step: { label: "Narration", index: n, of: n },
     },
   });
+  // Forced alignment reads the known script with the recording; an ASR just listens.
+  const alignDef = pick(lookup, models.align);
+  const alignReadsText = alignDef.routes.some((r) => r.op === "transcribe" && typeof r.map?.prompt === "string");
+  steps.push({
+    key: "words",
+    part: "words",
+    label: "Narration timing",
+    after: ["narration"],
+    chain: [{ slot: "audio" }],
+    request: { ...base, modelId: models.align, op: "transcribe", ...(alignReadsText && { prompt: voiceText }), step: { label: "Narration timing", index: n, of: n } },
+  });
 
   if (models.music) {
     const musicDef = pick(lookup, models.music);
+    const bed = musicLength(musicDef, length);
     steps.push({
       key: "music",
       part: "music",
       label: "Music bed",
-      seconds: musicLength(musicDef, filmSeconds),
+      seconds: bed,
       request: {
         ...base,
         modelId: models.music,
         op: "music",
         prompt: musicPrompt(input.genre, style),
-        params: { duration: musicLength(musicDef, filmSeconds), numOutputs: 1, ...(settings.engine === "open" && { extra: { lyrics: "[Instrumental]" } }) },
+        params: { duration: bed, numOutputs: 1, ...(settings.engine === "open" && { extra: { lyrics: "[Instrumental]" } }) },
         step: { label: "Music", index: n, of: n },
       },
     });
+    if (models.level) {
+      steps.push({
+        key: "level",
+        part: "music",
+        label: "Music level",
+        after: ["music"],
+        chain: [{ slot: "audio" }],
+        request: { ...base, modelId: models.level, op: "level", params: { extra: { integrated_loudness: BED_LUFS } }, step: { label: "Music level", index: n, of: n } },
+      });
+    }
   }
 
   const muxDef = pick(lookup, models.mux);
-  const mixAfter = models.music ? [film, "narration", "music"] : [film, "narration"];
+  // A timeline mixer (fal compose) places every track for the film's length.
+  const timeline = muxDef.routes.some((r) => r.op === "mux" && !!r.map?.tracks);
+  const bed = models.level ? "level" : "music";
+  const mixLabel = models.music ? "Mixing voice and music" : "Mixing";
   steps.push({
     key: "mix",
     part: "mix",
-    label: models.music ? "Voice and music" : "Voice-over",
-    seconds: filmSeconds,
-    after: mixAfter,
+    label: mixLabel,
+    seconds: length,
+    after: models.music ? [film, "narration", bed] : [film, "narration"],
     chain: models.music ? [{ slot: "video" }, { slot: "audio" }, { slot: "audio2" }] : [{ slot: "video" }, { slot: "audio" }],
     request: {
       ...base,
       modelId: models.mux,
       op: "mux",
-      ...(muxDef.engine === "open" && models.music && { params: { extra: { backgroundVolumeDb: -14 } } }),
+      params: { ...(timeline && { duration: length }), ...(muxDef.engine === "open" && models.music && { extra: { backgroundVolumeDb: BED_DB } }) },
       ...(!models.captions && { title: input.title }),
-      step: { label: models.music ? "Voice and music" : "Voice-over", index: n, of: n },
+      step: { label: mixLabel, index: n, of: n },
     },
   });
 
   if (models.captions) {
-    if (models.transcribe) {
-      steps.push({
-        key: "words",
-        part: "words",
-        label: "Caption timing",
-        after: ["narration"],
-        chain: [{ slot: "audio" }],
-        request: { ...base, modelId: models.transcribe, op: "transcribe", step: { label: "Caption timing", index: n, of: n } },
-      });
-    }
+    const words = models.captionsUseWords;
     const vertical = ar === "9:16";
     steps.push({
       key: "captions",
       part: "captions",
       label: "Subtitles",
-      seconds: filmSeconds,
-      after: models.transcribe ? ["mix", "words"] : ["mix"],
-      chain: models.transcribe ? [{ slot: "video" }, { slot: "prompt" }] : [{ slot: "video" }],
+      seconds: length,
+      after: words ? ["mix", "words"] : ["mix"],
+      chain: words ? [{ slot: "video" }, { slot: "prompt" }] : [{ slot: "video" }],
       request: {
         ...base,
         modelId: models.captions,
         op: "captions",
         title: input.title,
-        params: models.transcribe ? { extra: { fontSize: vertical ? 4 : 6, wordsPerCaption: vertical ? 3 : 5 } } : { extra: { words_per_subtitle: vertical ? 3 : 5 } },
+        params: words ? { extra: { fontSize: vertical ? 4 : 6, wordsPerCaption: vertical ? 3 : 5 } } : { extra: { words_per_subtitle: vertical ? 3 : 5 } },
         step: { label: "Subtitles", index: n, of: n },
       },
     });
@@ -1053,6 +1087,140 @@ export function descendants(graph: Pick<GraphStep, "key" | "after">[], keys: Ite
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Timing: every scene cut to where its lines are spoken
+
+/**
+ * The steps rendered before the scenes are timed: the pictures, the narration and its word timings.
+ * The clips (and everything after them) wait until the narration is timed (sceneTiming).
+ */
+export const TIMING_PARTS: ReadonlySet<StepPart> = new Set<StepPart>(["still", "narration", "words"]);
+
+/** A scene is cut this long before the next one's lines start; the last one runs this long past its last word. */
+export const SCENE_LEAD = 0.2;
+export const SCENE_TAIL = 1;
+/** A change keeps a scene's clips when its new length is within this of the old one (the next scene absorbs the rest). */
+export const RETIME_TOLERANCE = 1;
+
+/** A timed stretch of the narration: a word, a phrase or a caption line (transcript cues). */
+export interface TimedText {
+  start: number;
+  end: number;
+  text: string;
+}
+
+const token = (w: string) =>
+  w
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+const tokens = (s: string) => s.split(/\s+/).map(token).filter(Boolean);
+
+/** Where the narration's blocks start (null: a block without lines) and where its last word ends, in seconds. */
+export interface SpokenTimes {
+  starts: (number | null)[];
+  end: number;
+}
+
+/**
+ * When each block's lines are spoken, from the narration's timings: the script's words matched in
+ * order against the timed words (forced alignment gives every word; an ASR may hear some differently,
+ * and those are interpolated). Null when the timings can't be this narration (fewer than half the
+ * words match, e.g. a demo transcript).
+ */
+export function spokenTimes(blocks: Pick<ScriptBlock, "narration">[], cues: TimedText[]): SpokenTimes | null {
+  const heard: { w: string; start: number; end: number }[] = [];
+  for (const c of cues) {
+    if (!Number.isFinite(c.start) || !Number.isFinite(c.end) || c.end < c.start || typeof c.text !== "string") continue;
+    const ws = tokens(c.text);
+    const step = (c.end - c.start) / Math.max(1, ws.length);
+    ws.forEach((w, j) => heard.push({ w, start: c.start + step * j, end: c.start + step * (j + 1) }));
+  }
+  const script = blocks.flatMap((b, i) => tokens(b.narration).map((w) => ({ w, block: i })));
+  if (!heard.length || !script.length) return null;
+  const at: (number | null)[] = script.map(() => null);
+  const endAt: (number | null)[] = script.map(() => null);
+  let p = 0;
+  for (let i = 0; i < script.length; i++) {
+    for (let q = p; q < Math.min(heard.length, p + 6); q++) {
+      if (heard[q].w !== script[i].w) continue;
+      // Skipping heard words is only safe when the next word agrees too (a common word further on isn't a match).
+      if (q > p && i + 1 < script.length && q + 1 < heard.length && heard[q + 1].w !== script[i + 1].w) continue;
+      at[i] = heard[q].start;
+      endAt[i] = heard[q].end;
+      p = q + 1;
+      break;
+    }
+  }
+  const known = at.flatMap((t, i) => (t === null ? [] : [i]));
+  if (known.length < Math.max(1, script.length * 0.5)) return null;
+  const first = known[0];
+  const last = known[known.length - 1];
+  const pace = last > first ? (at[last]! - at[first]!) / (last - first) : 0.4;
+  // Words nobody heard: in proportion between the words around them.
+  let prev = -1;
+  for (const k of known) {
+    for (let i = prev + 1; i < k; i++) {
+      at[i] = prev < 0 ? Math.max(0, at[k]! - (k - i) * pace) : at[prev]! + ((at[k]! - at[prev]!) * (i - prev)) / (k - prev);
+    }
+    prev = k;
+  }
+  for (let i = last + 1; i < script.length; i++) at[i] = at[last]! + (i - last) * pace;
+  const starts: (number | null)[] = blocks.map(() => null);
+  script.forEach((s, i) => {
+    if (starts[s.block] === null) starts[s.block] = at[i];
+  });
+  const end = endAt[last]! + (script.length - 1 - last) * pace;
+  return { starts, end };
+}
+
+/**
+ * How many seconds of film each block gets: the span of its lines in the narration, made with the video
+ * model's shots. Each scene is measured from where the film is so far, so a shot's rounding is absorbed
+ * by the next scene and picture and voice stay together over the whole film. Blocks without lines keep
+ * their own length (carved out of the scene before them). With `current` (a re-timing after a change),
+ * a scene keeps its length — and its clips — when the new one is within RETIME_TOLERANCE.
+ */
+export function sceneTiming(blocks: ScriptBlock[], spoken: SpokenTimes, video: ModelDef | undefined, current?: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  let film = 0;
+  blocks.forEach((b, i) => {
+    let want = b.seconds;
+    if (spoken.starts[i] !== null) {
+      let k = i + 1;
+      let quiet = 0;
+      while (k < blocks.length && spoken.starts[k] === null) quiet += blocks[k++].seconds;
+      const until = k < blocks.length ? spoken.starts[k]! - SCENE_LEAD : spoken.end + SCENE_TAIL;
+      want = until - quiet - film;
+    }
+    want = Math.max(MIN_BLOCK, want);
+    const keep = current?.[b.id];
+    const secs = keep !== undefined && keep >= MIN_BLOCK && Math.abs(keep - want) <= RETIME_TOLERANCE ? keep : filmSeconds(want, video);
+    out[b.id] = secs;
+    film += secs;
+  });
+  return out;
+}
+
+/** The planned lengths as film (no word timings to cut to). */
+export const plannedTiming = (blocks: ScriptBlock[], video: ModelDef | undefined): Record<string, number> => Object.fromEntries(blocks.map((b) => [b.id, filmSeconds(b.seconds, video)]));
+
+/** Blocks with their film lengths (once the narration is timed). */
+export const withTiming = (blocks: ScriptBlock[], timing: Record<string, number> | undefined): ScriptBlock[] =>
+  timing ? blocks.map((b) => (timing[b.id] !== undefined ? { ...b, seconds: timing[b.id] } : b)) : blocks;
+
+/** Where each scene sits in the film, from the graph's clips (what the film really is). */
+export function sceneSpans(graph: Pick<GraphStep, "part" | "block" | "seconds">[], count: number): { start: number; seconds: number }[] {
+  const secs = Array.from({ length: count }, () => 0);
+  for (const s of graph) if (s.part === "clip" && s.block !== undefined && s.block < count) secs[s.block] += s.seconds ?? 0;
+  let t = 0;
+  return secs.map((seconds) => {
+    const start = t;
+    t += seconds;
+    return { start, seconds };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,7 +1325,7 @@ export const PART_LABELS: Record<StepPart, string> = {
   narration: "Narration",
   music: "Music",
   mix: "Mixing",
-  words: "Caption timing",
+  words: "Timing",
   captions: "Subtitles",
 };
 
@@ -1249,6 +1417,12 @@ const OFFLINE_TOPICS: Record<FacelessGenre, [string, string][]> = {
     ["Myths about {s}, busted", "What's true, what isn't, and why."],
     ["{S} explained in three minutes", "Everything you need, nothing you don't."],
     ["What nobody tells you about {s}", "The part the textbooks skip."],
+    ["The biggest mistakes people make with {s}", "And the easy way to avoid them."],
+    ["Where {s} came from", "The origin story, in plain words."],
+    ["{S}: a beginner's guide", "Start here if you know nothing yet."],
+    ["Why {s} matters more than you think", "The everyday impact, made visible."],
+    ["The future of {s}", "What changes next, and what stays."],
+    ["{S} by the numbers", "The figures that tell the real story."],
   ],
   history: [
     ["The untold beginning of {s}", "Where it really started."],
@@ -1257,6 +1431,12 @@ const OFFLINE_TOPICS: Record<FacelessGenre, [string, string][]> = {
     ["The rise and fall of {s}", "From the first spark to the end."],
     ["{S}: the mystery historians still argue about", "The evidence, and the theories."],
     ["A day in the life during {s}", "What it was really like to be there."],
+    ["The forgotten people of {s}", "Names that deserve to be remembered."],
+    ["The biggest mistake in the history of {s}", "One decision, and its price."],
+    ["{S} in five turning points", "The moments that decided everything."],
+    ["What really caused {s}?", "The causes behind the headlines."],
+    ["Myths and truths about {s}", "Separating legend from the record."],
+    ["The legacy of {s}", "What it left behind, and where to see it today."],
   ],
   kids: [
     ["Let's learn about {s}!", "A bright, friendly first look."],
@@ -1265,6 +1445,12 @@ const OFFLINE_TOPICS: Record<FacelessGenre, [string, string][]> = {
     ["Why is {s} so amazing?", "Fun facts to share at dinner."],
     ["Counting with {s}", "One, two, three — let's go!"],
     ["Bedtime story: {s}", "A calm story to end the day."],
+    ["The colours of {s}", "Spot every colour together."],
+    ["{S}: true or false?", "A fun quiz with big surprises."],
+    ["A day with {s}", "Follow along from morning to night."],
+    ["Let's draw {s}!", "Easy shapes, step by step."],
+    ["The ABCs of {s}", "A letter for every fun fact."],
+    ["Super silly facts about {s}", "Giggles guaranteed."],
   ],
   storytelling: [
     ["The legend of {s}", "An old tale, told from the beginning."],
@@ -1273,22 +1459,38 @@ const OFFLINE_TOPICS: Record<FacelessGenre, [string, string][]> = {
     ["{S}: a story told in one night", "From dusk to dawn, one story."],
     ["The map that led to {s}", "A journey nobody expected to finish."],
     ["When {s} came back", "Some things don't stay gone."],
+    ["The keeper of {s}", "Someone has guarded it for a hundred years."],
+    ["The promise of {s}", "A vow that could not be broken."],
+    ["Lost in {s}", "Finding the way home took everything."],
+    ["The thief who stole {s}", "A heist nobody saw coming."],
+    ["One stormy night: {s}", "One night, one choice, one storm."],
+    ["The final chapter of {s}", "How it all ends."],
   ],
 };
 
 const fill = (t: string, s: string) => t.replaceAll("{S}", capital(s)).replaceAll("{s}", s);
 
-/** Topic suggestions without an LLM: templates per genre around the channel's subject; each round starts one further. */
-export function offlineTopics(idea: string, genre: FacelessGenre, count = 5, round = 0): TopicIdea[] {
+/**
+ * Topic suggestions without an LLM: 12 templates per genre around the channel's subject. Titles in
+ * `avoid` (the ones already shown) are left out, so "Generate new" brings new ones until the templates
+ * run out; without `avoid`, each round pages on by `count`.
+ */
+export function offlineTopics(idea: string, genre: FacelessGenre, count = 5, round = 0, avoid: string[] = []): TopicIdea[] {
   const s = subjectOf(idea);
   // "The rise and fall of {s}" for a channel about the rise and fall of empires would say it twice.
   const lead = (t: string) => t.split("{")[0].replace(/^the\s+/i, "").trim().toLowerCase();
-  const all = OFFLINE_TOPICS[genre] ?? OFFLINE_TOPICS.education;
-  const list = all.filter(([t]) => !lead(t) || !s.toLowerCase().includes(lead(t)));
-  return Array.from({ length: Math.min(count, list.length) }, (_, i) => {
-    const [title, hook] = list[(i + round) % list.length];
-    return { title: fill(title, s), hook };
-  });
+  const all = (OFFLINE_TOPICS[genre] ?? OFFLINE_TOPICS.education)
+    .filter(([t]) => !lead(t) || !s.toLowerCase().includes(lead(t)))
+    .map(([title, hook]) => ({ title: fill(title, s), hook }));
+  const seen = new Set(avoid.map((t) => t.trim().toLowerCase()));
+  const fresh = all.filter((t) => !seen.has(t.title.toLowerCase()));
+  const n = Math.min(count, all.length);
+  if (!seen.size) {
+    const start = (round * count) % all.length;
+    return Array.from({ length: n }, (_, i) => all[(start + i) % all.length]);
+  }
+  // Every template shown already: start over with the ones shown longest ago.
+  return [...fresh, ...all.filter((t) => seen.has(t.title.toLowerCase()))].slice(0, n);
 }
 
 export const scriptSystem = `You write scripts for faceless videos: one narrator speaking over illustrated scenes, no presenter on camera.
@@ -1485,7 +1687,12 @@ export function defaultSettings(engine: Engine, genre: GenreInfo, o: { explainer
 export interface PickerData {
   voices: { id: string; name: string; hint?: string }[];
   videoModels: { id: string; name: string; engine: Engine; resolutions: string[] }[];
+  /** How many style references each engine's picture model reads (the open one takes 2). */
+  maxStyleRefs: Record<Engine, number>;
 }
+
+/** Style references an engine's picture model reads. */
+export const styleRefLimit = (engine: Engine, lookup: ModelLookup) => Math.min(MAX_STYLE_REFS, lookup(ENGINE_MODELS[engine].styleStill)?.options.maxImages ?? MAX_STYLE_REFS);
 
 export function pickerData(lookup: ModelLookup): PickerData {
   const voices = lookup(ENGINE_MODELS.cloud.narration)?.options.voices ?? [];
@@ -1495,7 +1702,11 @@ export function pickerData(lookup: ModelLookup): PickerData {
       return m ? [{ id, name: m.name, engine, resolutions: m.options.resolutions ?? [] }] : [];
     }),
   );
-  return { voices: voices.map((v) => ({ id: v.id, name: v.name, ...(v.hint && { hint: v.hint }) })), videoModels };
+  return {
+    voices: voices.map((v) => ({ id: v.id, name: v.name, ...(v.hint && { hint: v.hint }) })),
+    videoModels,
+    maxStyleRefs: { cloud: styleRefLimit("cloud", lookup), open: styleRefLimit("open", lookup) },
+  };
 }
 
 /** A short line the narrator reads for a voice preview. */
@@ -1522,6 +1733,8 @@ export interface FacelessChannel {
   idea: string;
   genre: FacelessGenre;
   avatarUrl: string | null;
+  /** An avatar being drawn (it becomes avatarUrl once it's done, whoever is watching). */
+  avatarJob: string | null;
   reference: ChannelReference | null;
   settings: ChannelSettings;
   createdAt: number;
@@ -1551,6 +1764,8 @@ export interface EpisodeChange {
   part: ChangePart;
   instruction: string;
   costUsd: number | null;
+  /** Undone (the version before it is back). */
+  undone?: boolean;
 }
 
 export type StillEdits = Record<string, { source: string; instruction: string }>;
@@ -1561,10 +1776,21 @@ export interface EpisodePlan {
   ids: Record<string, string>;
   /** Picture edits the current version was made with. */
   stillEdits?: StillEdits;
+  /** Each scene's length in the film, cut to where its lines are spoken (set once the narration is timed). */
+  timing?: Record<string, number>;
+  /** The scenes follow the planned lengths: the narration's timings couldn't be read (a demo transcript, say). */
+  untimed?: boolean;
+  /**
+   * The pictures, the narration and its timing are rendering; the clips, joins, music, mix and subtitles
+   * are created once the narration is timed (stage two).
+   */
+  awaiting?: boolean;
   /** The version before the last change (Undo). */
-  previous?: { ids: Record<string, string>; blocks: ScriptBlock[]; stillEdits?: StillEdits };
+  previous?: { ids: Record<string, string>; blocks: ScriptBlock[]; stillEdits?: StillEdits; timing?: Record<string, number>; untimed?: boolean; awaiting?: boolean };
   /** The last finished film, shown while a change renders. */
   lastFinal?: string;
+  /** "Upscale to 1080p": the upscaled copy of the finished film. */
+  upscaled?: string;
   changes: EpisodeChange[];
 }
 
@@ -1605,6 +1831,14 @@ export interface EpisodeView {
   /** What the current version cost so far, and the render's estimate. */
   spentUsd: number;
   estimate: CostBreakdown | null;
+  /** Where each scene sits in the film (by block index), from its clips. */
+  scenes: { id: string; start: number; seconds: number }[];
+  /** "narration": the scenes are cut to the spoken lines; "planned": to the planned lengths (not timed yet, or no timings). */
+  timing: "narration" | "planned";
+  /** The 1080p copy ("Upscale to 1080p"), once asked for. */
+  upscaled: Generation | null;
+  /** What "Upscale to 1080p" would cost (null: not offered on this engine). */
+  upscale: { costUsd: number | null; demo: boolean } | null;
 }
 
 /** One item in the Explainer's history or a channel's episode list. */
@@ -1615,6 +1849,8 @@ export interface EpisodeCard {
   title: string;
   status: EpisodeStatus;
   styleId: string;
+  /** Made with the user's own style references (not a preset). */
+  ownStyle: boolean;
   aspect: EpisodeAspect;
   seconds: number;
   favorite: boolean;
@@ -1634,6 +1870,8 @@ export interface EstimateResult {
   seconds: number;
   blocks: number;
   error?: string;
+  /** Things to know that don't stop the render (a music bed shorter than the film, images a model can't read). */
+  notes?: string[];
 }
 
 export interface ChangePreview {
@@ -1641,4 +1879,6 @@ export interface ChangePreview {
   labels: string[];
   costUsd: number | null;
   demo: boolean;
+  /** The narration is read again: scenes whose timing moves by more than a second are animated again too (priced once it's timed). */
+  retime?: boolean;
 }
