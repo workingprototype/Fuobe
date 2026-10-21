@@ -15,7 +15,7 @@ _Last updated: 2026-10-21 (round 3). The research behind this is in [`docs/resea
 
 ## 1. What has been verified
 
-Browser e2e on the merged build: `<pending>`
+Browser e2e on the merged build (production build, demo mode, commit 6b10887): ✅ all seven scripts in `tests/e2e/` pass — `no-horizontal-scroll.mjs` (all 80 routes fit 390 px, light and dark), `shell.mjs`, `layers.mjs`, `canvas-smoke.mjs`, `cinema-shortcuts.mjs`, `composer-flows.mjs` (30 checks: first paint of hub modes, typing before hydration, paste attaches once, cancelled uploads stay removed, drop rules, the phone toolbar on 23 studios) and `assist-flows.mjs` (skills upload, mode picker, phone sheet).
 
 Checks on the merged branch `claude/fuobe-parity-3` (commit c522288):
 
