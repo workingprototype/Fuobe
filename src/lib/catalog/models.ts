@@ -1138,6 +1138,33 @@ const local: ModelDef[] = [
     options: {},
     hidden: true,
   },
+  // Marketing joins that keep the voice (UGC presenter, Click to Ad, Ad Multiplier): oss-join-clips drops every
+  // soundtrack and plays all frames at one rate, so a 25 fps presenter joined to 16 fps Wan clips came out silent
+  // and slowed down. These resample every clip to 25 fps and keep one clip's own sound.
+  o({
+    id: "oss-join-sound1",
+    name: "Join clips (keep the first clip's sound)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Join 2–3 clips at their real speed; the soundtrack is the first clip's own sound · CPU",
+    routes: [comfy("concat", "video-concat-sound1-{n}", "VHS loader at 25 fps; clip 1's sound from the start")],
+    options: { aspectRatios: ["auto", ...VID_AR], resolutions: ["480p", "720p", "1080p"] },
+    defaults: { aspectRatio: "9:16", resolution: "480p" },
+    hidden: true,
+  }),
+  o({
+    id: "oss-join-sound2",
+    name: "Join clips (keep the second clip's sound)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Join 2–3 clips at their real speed; the second clip's own sound starts where the first clip ends · CPU",
+    routes: [comfy("concat", "video-concat-sound2-{n}", "VHS loader at 25 fps; silence for clip 1, then clip 2's sound")],
+    options: { aspectRatios: ["auto", ...VID_AR], resolutions: ["480p", "720p", "1080p"] },
+    defaults: { aspectRatio: "9:16", resolution: "480p" },
+    hidden: true,
+  }),
 ];
 
 export const MODELS: ModelDef[] = [...cloud, ...open, ...local];
