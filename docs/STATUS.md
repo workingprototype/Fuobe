@@ -1,6 +1,6 @@
 # Fuobe — project status
 
-_Last updated: 2026-10-17 (second round). The research behind this is in [`docs/research/`](research/README.md); the Higgsfield inventory it is measured against is [`higgsfield-inventory.md`](research/higgsfield-inventory.md)._
+_Last updated: 2026-10-21 (round 3). The research behind this is in [`docs/research/`](research/README.md); the Higgsfield inventory it is measured against is [`higgsfield-inventory.md`](research/higgsfield-inventory.md), deepened for round 3 by [`higgsfield-studios.md`](research/higgsfield-studios.md), [`higgsfield-image-studios.md`](research/higgsfield-image-studios.md) and [`higgsfield-marketing-agents.md`](research/higgsfield-marketing-agents.md)._
 
 **Legend**
 
@@ -11,126 +11,244 @@ _Last updated: 2026-10-17 (second round). The research behind this is in [`docs/
 | 🟡 | **Partial**: works, but approximates Higgsfield or misses part of the feature |
 | ⬜ | **Not started** |
 
-**What "verified" can't cover on this machine:** there are no paid API keys and no GPU here. Every cloud model call and every open-source output is therefore 🟢 at best: request shapes come from the providers' own schemas and every ComfyUI graph is accepted by a real ComfyUI. The only real outputs so far come from the tools that need no model weights (joining clips, palette match), which ran on a CPU ComfyUI here.
+**What "verified" can't cover on this machine:** there are no paid API keys and no GPU here. Every cloud model call and every open-source model output is therefore 🟢 at best: request shapes come from the providers' own schemas, and every ComfyUI graph is accepted by a real ComfyUI. The real outputs come from the tools that need no model weights, which ran on a CPU ComfyUI here: joining clips, palette match, trim, cutting a segment, adding a soundtrack (one track, or a voice over a background bed), caption burn-in, the dub voice timeline, joins that keep a clip's sound, extract frame and VHS meta-batch passes. App features that need no model (the library, live updates, sign-in, the Layers editor, browser color grading) are verified in the browser.
 
 ## 1. What has been verified
 
+Browser e2e on the merged build: `<pending>`
+
+Checks on the merged branch `claude/fuobe-parity-3` (commit c522288):
+
 | check | result |
 |---|---|
-| `pnpm typecheck`, `pnpm lint` | clean (one pre-existing unused-variable warning in `scripts/comfy/library.spec.mjs`) |
-| `pnpm test` (Vitest, 17 files, 108 tests) | pass. Covers payload mapping, operation inference, batching, cost estimates, ComfyUI bindings and LoRA injection, catalog integrity, engine mode, @mentions, masks (PNG codec, white/black/alpha), the Higgsfield adapter, multi-shot and draft mode, audio routing, training jobs, storyboard chaining, open-engine motion paths, the Assist agent loop (Claude, Ollama and offline), chained jobs (open multi-shot, storyboard films, Kling extend, join batching), Motion Mix, sign-in and API tokens, and the MCP server |
-| `pnpm build` | passes (170 pages) |
-| Demo mode, browser (headless Chromium, desktop + 390px mobile) | ✅ every studio queues, shows progress, lands in the feed and opens in the viewer. Also checked this round: @mentions, inpaint + compare, Director and Soul style pickers, color grading with PNG/WebM export, multi-shot editor, draft → finalize, speech / mic voice clone / dialogue / translate, the train dialog, storyboard chaining, and Assist (plan → approve → results, decline, mobile) |
-| ComfyUI engine, live server | ✅ `pnpm test:e2e:comfyui` against ComfyUI 0.41 (CPU): upload → bindings → `/prompt` → websocket/`/history` → download → library |
-| ComfyUI workflow library | ✅ 73/73 workflows accepted by `POST /prompt` with no `node_errors` against real node definitions. Placeholder weights: graph structure, input names, types and file references are verified, **not output quality** |
-| New open models through the app | ✅ every model added this round (Chatterbox ×4, IndexTTS-2, VACE extend/reframe, Wan-Move, Bernini-R, BiRefNet/SAM 3 matte, DA3/VDA depth, Qwen relight/next-scene) went through Fuobe's own submit path into a live ComfyUI and was accepted. Spot checks: Wan-Move tracks (49 points at 832×464), reframe at 480×848, dialogue SPEAKER script, Chatterbox language field |
-| AI-Toolkit training | ✅ end to end against a fake AI-Toolkit job API: dataset written, job created and started, progress polled, LoRA copied to the ComfyUI loras folder, element marked trained |
-| Assist agent | ✅ loop tested with a scripted model (approval pause/resume, one tool-result message per turn, decline via new message, auto-run, `max_tokens` cut-off, invalid input, refusal, busy guard) and the real Claude request built through the SDK against a stubbed `fetch` (adaptive thinking, effort, server-side fallback beta, strict tools, cached system prompt, base64 images). **No live Claude call yet**: needs an Anthropic key |
-| Real runs on CPU ComfyUI (no weights needed) | ✅ Join clips: 2 and 3 sample clips joined through the app (UI and API); frame counts, size and frame rate checked with ffprobe (3 × 96 frames → 288 frames at the clips' 24 fps). Palette match: an image (average colour moved from blue to the warm reference) and a video |
-| Sign-in and API tokens | ✅ with curl against the dev server: open when no password; with one, 401 for API calls and a redirect to /login for pages; cookie and bearer token accepted; a token can't mint tokens; wrong passwords rejected; removing the password reopens it. Browser: set password, create token, sign out, wrong/right password, redirect back |
-| MCP server | ✅ with the official MCP Inspector CLI as the client: initialize, tools/list, estimate_cost, generate and check_generations against the running app |
-| Assist on Ollama | 🟢 tested against a fake Ollama server (request and tool-call mapping both ways). No real Ollama run: model downloads aren't reachable from this environment |
-| Cloud providers (fal / Replicate / Higgsfield) | 🟢 100 cloud models built from the providers' schemas. **No live paid run yet** |
+| `pnpm typecheck`, `pnpm lint` | clean. Lint has 0 errors and one old warning (unused `WAN_NEG_EN` in `scripts/comfy/library.spec.mjs`) |
+| `pnpm test` (Vitest, 79 files, 1128 tests) | pass. New this round: pipelines and chain slots (stems, `audio2`, `audios`, `prompt`), the LLM provider (cue translation in batches, Ollama fallback), runner timeouts and restarts, structured outputs (text with cues, 3D, layers, stems), payload mapping for the new FieldMap keys (palettes, try-on, reference clips, compose tracks), the Library (Trash, folders, bulk, zip read back by Python's `zipfile`, cursor paging), the live stream reducers, security (cross-site, host allowlist, remote-fetch SSRF guard, login throttle, safe redirect), every new studio's planner and API (Cinema, Canvas, Layers, Shorts, Mixed Media, image studios, marketing, Faceless/Explainer, dub, Katana, captions, 3D, Virality), ComfyUI bindings of every new workflow through `prepareWorkflow`, Assist skills/projects/memory/modes, the streamed Claude request (against an SSE fake), and MCP 1.1.0 |
+| `pnpm build` | passes |
+| ComfyUI workflow library | ✅ 115/115 workflows accepted by `POST /prompt` with no `node_errors` against a live CPU ComfyUI v0.41 with zero-byte placeholder weights. This checks graph structure, input names, types and file references, **not output quality**. `lipsync-latentsync16` and `sfx-thinksound` were validated on a separate isolated worker (port 8189) |
+| Real CPU runs through the production build (`tests/e2e/comfyui-selftest.mjs`) | ✅ uploads → `POST /api/generations` → ComfyUI → stored output, each checked with ffprobe: add a soundtrack (one track, and voice over a background bed), trim, cut a resampled segment, caption burn-in and a 3-pass VHS meta-batch, including 20 s 640x360 30 fps clips. Captions are drawn on their cues and absent in the gaps |
+| Other real CPU runs this round (package branches) | ✅ Dub voice timeline: three tones placed at 1 / 4.5 / 9 s on a 12 s track (ffprobe 12.0 s, silencedetect found them at 1.00, 4.50 and 9.00 s). Joins that keep a clip's sound: `sound2-3` gave 8.92 s, 223 frames at 25 fps, silent until 2.96 s and then the voiced clip's tone; `sound1-2` 5.96 s with sound from 0. Extract frame: first, middle and last frame of a fixture clip. Memory: soundtrack mux of 600 frames +0.01 GB RSS (the picture is stream-copied, bit-identical); chunked caption burn-in under RAM pressure +0.50 GB for 20 s and +0.45 GB for 40 s (the old one-batch graph: +5.16 GB) |
+| Live updates | ✅ in dev and production: a 3.5 s demo image shows 3.8 s after the POST (was 4.6–5.2 s with polling). One stream per browser, shared by tabs (Web Locks + BroadcastChannel) |
+| Runner and security fixes | ✅ each with a regression test: provider timeouts (45 min running, 4 h queued) with poll-before-timeout, cancel during submit, boot-time runner, interrupted-submit sweep, demo/real mix refused, 210 MB uploads through the sign-in proxy, cross-site writes refused, Host allowlist on password-less installs, SSRF-safe remote fetch, login throttle, safe `?next=` redirect, matcher keeping only root SVGs public |
+| Demo-mode browser passes (each package branch, before the merge; headless Chromium, 1440 and 390 px, light and dark) | ✅ Layers: `tests/e2e/layers.mjs` (5 checks) plus scratch flows (Angles, Edit text, geometry, full-detail export, Compare after Expand, failures). Shorts + Mixed Media: 40 checks (one session per double-click, crop note, take picker keys, retry). Image studios: Photodump retry inside its batch, Fashion retry, signature routing and Reuse, `?create=1`, Save as character once. Marketing: Click to Ad kit progress and brand kit, @mentions, grid order, baked formats, auto-composited open posters. Faceless: channel in 678 ms, topics, script review autosave, render to the end, timeline change + Undo, delete stops 8 steps, Explainer 30 s render. av-tools: 112 page loads (14 pages × both engines × 2 widths × 2 themes), dub review flush, Katana cuts, captions per burner. Assist: 51 checks plus `tests/e2e/assist-flows.mjs` 6/6. Canvas: `tests/e2e/canvas-smoke.mjs` incl. 60 nodes at 19 ms keystroke → paint. Cinema: `tests/e2e/cinema-shortcuts.mjs`. Composer: `tests/e2e/composer-flows.mjs`. Shell: `tests/e2e/shell.mjs`. Phone layout: `tests/e2e/no-horizontal-scroll.mjs` fit 55 routes in light and dark |
+| LLM text steps (translate, write) | 🟢 tested against a stand-in Ollama server and a stubbed Claude API. No live Claude or Ollama run |
+| Assist on Claude | 🟢 the streamed request (adaptive thinking, betas, cached system blocks, max_tokens per effort) is built through the SDK against an SSE fake. **No live Claude call yet**: needs an Anthropic key |
+| Assist on Ollama | 🟢 tested against a fake Ollama server (round 2). Model downloads aren't reachable from this environment |
+| Cloud providers (fal / Replicate / Higgsfield) | 🟢 157 cloud models (plus 10 hidden helpers used by chains) built from the providers' schemas; structured outputs tested on stubbed responses. **No live paid run yet** |
+| MCP server | ✅ 1.1.0 tools and prompts by unit tests; the round-2 run with the official MCP Inspector CLI (initialize, tools/list, estimate_cost, generate, check_generations) still applies |
+| AI-Toolkit training | ✅ end to end against a fake AI-Toolkit job API (round 2); the new style-LoRA preset (moodboards) by unit tests |
+| Sign-in and API tokens | ✅ curl and browser checks (round 2); the new throttle and Host checks by unit tests |
 
 ## 2. Feature matrix vs Higgsfield
+
+Model names are the defaults first, then the alternatives. "Demo" outputs are labelled in the UI; every row below was clicked through in demo mode.
 
 ### Create
 
 | Higgsfield feature | Fuobe | Cloud route | Open-source route | Notes |
 |---|---|---|---|---|
-| Create Image (multi-model) | 🟢 | 51 image models incl. Nano Banana Pro/2, Seedream 5, GPT Image 2.5, FLUX.3, FLUX.2 Pro, Kontext, Ideogram 4.5, Recraft 4.1, Qwen Image 3, Wan 2.7, Z-Image, Imagen 4 | Z-Image Turbo, Qwen-Image 2512, FLUX.2 dev, FLUX.1 Krea/dev/schnell, HiDream, SDXL | Batch ×1–4, aspect ratios, quality tiers, seeds, negative prompts, references |
-| Higgsfield Soul 2.0 / Soul Cinema / Soul v1 | 🟢 cloud · 🟡 open | Higgsfield's own API (`higgsfield` provider) with the Soul style picker | FLUX.1 Krea / Z-Image as the closest open look | Needs a Higgsfield API key |
-| Soul ID (character training) | 🟢 | Higgsfield Soul ID (Soul 2.0, Soul Cinema) → `custom_reference_id`; fal Z-Image Turbo LoRA trainer | AI-Toolkit job on your GPU → Z-Image Turbo LoRA copied into ComfyUI | Train from an element's photos. A trained element is used automatically when @mentioned on its model. Training kit download and "attach a LoRA trained elsewhere" also work |
-| Elements (@characters, locations, props, styles) | ✅ | Reference images with a legend; video switches to reference-to-video | Same, plus LoRA + trigger word for trained elements | `/elements`; @ menu with highlighting in every composer and in shots |
-| Create Video (multi-model) | 🟢 | 82 video models: Seedance 2.5/2.0, Kling 3.0/O3/2.6, Veo 3.1, Wan 3.0/2.7/2.6, MiniMax H3, Hailuo, FLUX.3 Video, LTX 2.5, PixVerse V6, Vidu Q3, Luma Ray 3.2, Higgsfield Cinema Studio 4.0, Genjutsu, Grok Imagine Video, Happy Horse… | Wan 2.2 14B (+Lightning), Wan 2.2 5B, LTX-2.5/2, HunyuanVideo 1.5, Wan VACE | Text, image, start+end frame, references, native audio, durations, resolutions |
+| Create Image (multi-model) | 🟢 | 56 image models: Nano Banana Pro / 2 / 2.1, Seedream 5.0 Pro / Lite, GPT Image 2.5 Flare / Sunburst, FLUX.3, FLUX.2 [pro], Kontext [max], Ideogram 4.5 / 3.0, Recraft V4.1 / Pro, Qwen Image 3, Wan 2.7 Image, Z-Image Turbo, Imagen 4, Grok Imagine Image 2.0 | Z-Image Turbo, Qwen-Image 2512 (+ Lightning), FLUX.2 [dev] (+ Turbo), FLUX.1 Krea / dev / schnell, HiDream, SDXL | Batch ×1–4, aspect ratios, quality tiers, seeds, negative prompts, references. The Image studio lists text-to-image models only; edit tools live in Edit |
+| Soul 2.0 / Soul Cinema / Soul v1 | 🟢 cloud · 🟡 open | Higgsfield's own API with the Soul style picker | Each preset's description as a prompt template on any open model | Needs a Higgsfield key for the real look. Soul Cinema has one fixed look and no presets, so a look is described in words there |
+| Soul presets (without a key) | 🟢 | `style_id` on the preset's own Soul model; the description in words elsewhere | The description as a prompt template | 106 Soul + 33 Soul 2.0 presets with Higgsfield's ids and categories, generated from the research (`scripts/gen-higgsfield-presets.py`, part of `pnpm gen:catalog`). Used when there is no key, the live list is empty or it fails; live previews are added when a key is set |
+| Soul ID (character training) | 🟢 | Higgsfield Soul ID (Soul 2.0, Soul Cinema) → `custom_reference_id`; fal Z-Image Turbo LoRA trainer | AI-Toolkit job on your GPU → Z-Image Turbo LoRA copied into ComfyUI | Train from an element's photos. A trained element is used when @mentioned on its model |
+| Moodboards | 🟢 | Recraft V4 Styles makes a style from the board's 10 most representative images; the returned `style_id` is reused by "Recraft V4 Styles · saved style". Otherwise the images go as style references on Nano Banana Pro. Curated looks: Soul 2.0 `style_id`. Also Krea 2 Style Reference, FLUX1.1 [pro] (Ultra) Redux | Qwen-Image-Edit Style Reference from 1–2 collages (default), FLUX.2 [klein] / Krea 2 / USO style reference; a Z-Image Turbo style LoRA through AI-Toolkit | `/moodboards` and a Moodboard chip in the Image studio. 5–80 images, ≥256 px, name ≤100 characters, quality meter; status follows the cover job. The `style_id` round trip is tested with a stubbed fal response only |
+| Soul HEX / Color Transfer | 🟢 | Native palettes on Recraft V4.1 / Pro (≤10 colours + background) and Ideogram 3.0; the palette slug on Cinema Studio 4.0; the hex list in the prompt on every other model | Z-Image Turbo · Palette (hex prompt + ColorTransfer lock to a swatch the server renders); other open models get an optional palette-lock step (`oss-palette-image`) | Color signature chip in the Image studio: the 50 Cinema Studio palettes, Upload & Create (k-means over ≤20 photos in a Web Worker), manual editor (≤12 colours, EyeDropper, Use as background). The user's words stay the prompt; Reuse restores the picks |
+| Elements (@characters, locations, props, styles, voices) | ✅ app · 🟢 outputs | Reference images with a legend; video switches to reference-to-video | Same, plus LoRA + trigger word for trained elements | `/elements`; @ menu in every composer and in shots. The mention → reference/LoRA mapping is verified; the outputs need a key or a GPU |
+| Create Video (multi-model) | 🟢 | 65 video models in all: Seedance 2.5 / 2.0, Kling 3.0 / O3 / O1 / 2.6 / 2.5, Veo 3.1 (Fast, Lite), Gemini Omni Flash 1.1, Wan 3.0 / Prime / 2.7 / 2.6 / 2.5, MiniMax H3 / H3 Max / Hailuo, FLUX.3 Video, LTX 2.5, PixVerse V6, Vidu Q3, Luma Ray 3.2, Cinema Studio 4.0, Grok Imagine Video 1.5, Happy Horse 1.1, Genjutsu | Wan 2.2 14B (+ Lightning), Wan 2.2 5B, LTX-2.5 / 2, HunyuanVideo 1.5, Wan VACE | Text, image, start + end frame, references, native audio. Reference clips (`inputs.videos` / `inputs.audios`) go to Seedance 2.5 / 2.0, Cinema Studio 4.0, Wan 3.0, MiniMax H3 and Gemini Omni; models that only read images say so |
 | Start & end frame | 🟢 | Kling, Veo, Seedance, Wan, MiniMax, PixVerse, FLUX.3 | Wan 2.2 FLF2V | |
-| Camera motions (DoP presets) | 🟢 | 108 presets on any video model | Wan 2.2 + 18 camera LoRAs, 11 moves via Wan Fun Camera, the rest prompt-only | |
-| Mix (two motions or effects at once) | 🟢 | The second preset's description joins the prompt, worded by its strength | Both presets' LoRAs stacked, each scaled by its strength | Mix chip with a strength slider per preset |
-| Effects / viral presets | 🟢 | 255 effects | 35 with dedicated LoRAs, the rest prompt-only | Most open effect LoRAs target Wan 2.1 I2V; **quality needs a GPU check** |
-| Multi-shot | 🟢 | Kling 3.0/O3 native `multi_prompt`; Seedance, Wan 2.6, Cinema Studio get the shots written into the prompt | Each shot renders as its own clip on the open model (Wan 2.2, LTX, HunyuanVideo), then the clips are joined (the join step ✅ on CPU) | Off / Auto / Custom shot editor; open models have no Auto |
-| Seedance draft mode | 🟢 | Seedance 2.5 480p draft → "Render 1080p" (finalize) | — | |
-| Cinema Studio 4.0 / Director controls | 🟡 | Higgsfield Cinema Studio 4.0 model with genre, era, light, lens, aperture, camera move and grade controls | — | The model and its controls work; Higgsfield's separate Cinema Studio **workspace** (scene list, timeline) ⬜ |
-| Genjutsu, Marketing & Ads Studio | 🟡 | Higgsfield models with their look/template pickers | — | Single-generation UI; no dedicated multi-step studio pages |
+| Camera motions (DoP presets) | 🟢 | 108 presets on any video model | Wan 2.2 with camera LoRAs on 18 motions, 11 moves via Wan 2.2 Fun Camera, the rest prompt-only | Procedural previews show each move's parallax |
+| Mix (two motions or effects) | 🟢 | The second preset's description joins the prompt, worded by its strength | Both presets' LoRAs stacked, each scaled by its strength | |
+| Effects / Visual Effects / viral presets | 🟢 | 255 effects on any video model | 35 with dedicated LoRAs, the rest prompt-only | Most open effect LoRAs target Wan 2.1 I2V; **quality needs a GPU check** |
+| Multi-shot | 🟢 | Kling 3.0 / O3 native `multi_prompt`; Seedance, Wan 2.6, Cinema Studio get the shots written into the prompt | One clip per shot on the open model, then joined (the join ✅ on CPU) | Off / Auto / Custom; open models have no Auto |
+| Seedance draft mode | 🟢 | Seedance 2.5 480p draft → "Render 1080p" | — | |
+| Cinema Studio 4.0 workspace | 🟢 | Cinema Studio 4.0 (Higgsfield) with native Director fields (genre, era, pacing, light, camera body, lens, aperture, move, palette). With no Higgsfield key or another model picked: Seedance 2.5, Kling 3.0 or Veo 3.1 with the panel compiled into the prompt | Wan 2.2 14B Lightning; a camera LoRA or Fun Camera when there is a start frame; palette lock chained after it (`oss-palette-video`) | `/cinema`, `/cinema/[id]`: projects with cover and cost cap, nested scenes (colour, pin, order), feed (Square / Masonry / List, filters, multi-select), prompt bar (@ elements, # 33 camera moves, references, 4–30 s, batch 1–4), Director's Panel (50 palettes + editor, 7 lighting presets + a 2-light rig, Emotion Wheel), retry as a unit, Trash with Undo, live updates |
+| Cinema Studio Extend (forward / backward) and Edit | 🟡 | Extend: Seedance 2.5 extension. Backward ("prequel"): extract frame → edit a still → start/end-frame clip. Edit: Seedance 2.5 edit (Kling O3 without a Higgsfield key) | Prequel the same way on Wan 2.2; edit with Wan 2.2 Fun VACE restyle | The prequel is a 3-step approximation. Cinema Studio 4.0 is capped at 720p on the public API |
+| Cinema Studio image mode and grid | 🟢 | Camera stills (camera, lens, focal length required) on Nano Banana Pro, Seedream 5.0 Pro, Soul Cinema; grids 2×2 / 3×3 / 4×4 (freeform, zooms, shots, next / previous shots) as one sheet | Z-Image Turbo / Qwen-Image stills; Z-Image Turbo · Grid sheet | The sheet is cut into tiles in the browser and stored as uploads. 3D scene / recomposition ⬜ |
+| Cinema AI Director + Project Brief | 🟢 | Claude | Ollama, or an offline storyboard writer | Writes prompts and shot breakdowns into the prompt bar, answers craft questions; never starts a generation. The brief is prepended to every prompt |
+| Genjutsu (motion transfer, object swap, restyle) | 🟢 cloud · ⬜ open | Higgsfield Genjutsu models with their look picker | — (Motion control and Shorts restyle on Wan are the closest) | Genjutsu Restyle needs a look; the list comes live from Higgsfield |
 | Motion Control | 🟢 | Kling 3.0 Motion Control | Wan Animate 2, Wan 2.2 Fun Control | `/motion-control` |
-| Edit Video | 🟢 | Kling O3/O1, Gemini Omni, Wan 2.7, Luma Ray 3.2 | Wan 2.2 Fun Control (approximation) | `/video-edit` |
-| Extend video | 🟢 | Seedance 2.5 extension, MiniMax H3 Max, PixVerse V6, FLUX.3, Veo 3.1; Kling (7 models) via last frame → Kling image-to-video → join (fal FFmpeg) | Wan 2.2 Fun VACE extend | `/extend`, "Extend" tile action |
-| Reframe video | 🟢 | Luma Ray 3.2, LTX, hosted Wan VACE | Wan 2.2 Fun VACE reframe | `/reframe` |
-| Draw to Video | 🟢 | Annotated first frame + instructions on any i2v model | Wan-Move: brush strokes become motion paths | Paint tools in the Video studio |
-| Video tools: remove background, relight, depth | 🟢 | BiRefNet video, Bria, Video Depth Anything, LightX relight | BiRefNet / SAM 3 matte, Bernini-R relight, Depth Anything 3 / VDA | `/video-tools` |
-| Join clips, match colours of a video | ✅ open · 🟢 cloud | fal FFmpeg merge (cloud only joins) | ComfyUI concat and palette transfer, both run for real on CPU here | Video tools tabs |
-| Storyboards (Popcorn) | 🟢 | Nano Banana Pro, each frame made from the previous one | Z-Image / Qwen-Image-Edit, then Qwen-Image-Edit + next-scene LoRA | `/storyboard`: up to 8 frames, scene by scene or split from one idea, character/look references; per-frame Animate / Edit |
-| Storyboard → film (keyframes to video) | 🟢 | Seedance 2.5: each frame animated toward the next (start + end frame), clips joined | Wan 2.2 Lightning start/end frame, joined on ComfyUI | "Make the film" on a board; the film and its shots show under it |
-| Shorts Studio, Cinema Studio workspace (scene list + timeline) | ⬜ | | | |
+| Edit Video | 🟢 | Kling O3 / O1, Kling O3 4K Edit, Gemini Omni Flash 1.1, Seedance 2.5, Wan 2.7, Luma Ray 3.2, FLUX.3 Video, Happy Horse Video Edit, Lucy Edit Pro, Runway Aleph 2, Grok Imagine Video Edit, LTX 2.3 Reference Restyle | Wan 2.2 Fun Control, Wan 2.2 Fun VACE restyle | `/video-edit` |
+| Extend video | 🟢 | Seedance 2.5, MiniMax H3 Max, PixVerse V6, FLUX.3, Veo 3.1; Kling via last frame → image-to-video → join | Wan 2.2 Fun VACE extend; the last frame comes from the open Extract frame workflow (✅ on CPU) | `/extend`, "Extend" tile action |
+| Reframe video | 🟢 | Luma Ray 3.2, LTX Reframe, hosted Wan VACE | Wan 2.2 Fun VACE reframe | `/reframe` |
+| Draw to Video | 🟢 | Annotated first frame + instructions on any image-to-video model | Wan-Move: brush strokes become motion paths | Paint tools in the Video studio |
+| Shorts Studio | 🟢 | Gemini Omni Flash (default), Kling O3 4K Edit and Happy Horse Video Edit (both read references), Lucy Edit Pro, Runway Aleph 2, LTX 2.3 Reference Restyle, Wan 2.7. Per segment: trim → centre-crop to 9:16 / 16:9 when needed (fal `scale-video`) → restyle; joined, then the original sound muxed back | Cut a resampled segment (≤81 frames at 16 fps) → restyle its first frame with Qwen-Image-Edit 2511 → Wan 2.2 Fun VACE restyle with depth → join → mux | `/shorts`, `/shorts/[id]`: 44 presets plus custom presets from ≤10 references; MP4 / MOV (WebM headers are read too), 4 s–2 min, ≤200 MB; segments with takes, Regenerate, Stitch again, Download full video or parts; prices per resolution. Cutting, joining and muxing ✅ on CPU; the restyle needs a GPU or a key |
+| Mixed Media | 🟡 cloud · 🟢 open | Trim → LTX 2.3 Reference Restyle anchored on a Nano Banana 2 preview still → original sound | Z-Image Turbo img2img + Fun Union ControlNet per frame at 4–24 fps (VHS meta-batch) | `/mixed-media`: 33 presets with per-preset settings, preview frame, History with Try again. The cloud route is a video-to-video restyle, not Higgsfield's per-frame stylization. Meta-batch passes ✅ on CPU (self-test graph) |
+| Storyboards (Popcorn) | 🟢 | Nano Banana Pro, each frame made from the previous one | Z-Image / Qwen-Image-Edit, then Qwen-Image-Edit + next-scene LoRA | `/storyboard`: up to 8 frames; the board is named after the idea |
+| Storyboard → film | 🟢 | Seedance 2.5 start + end frame per pair, clips joined | Wan 2.2 Lightning start/end frame, joined on ComfyUI | "Make the film" once every frame is done |
 
 ### Edit & apps
 
-| Higgsfield feature | Fuobe | Notes |
-|---|---|---|
-| Edit image (instruction edit) | 🟢 | Any edit model, up to 14 references (cloud) / 3 (open) |
-| Inpaint / Draw to Edit | 🟢 | `/inpaint` and paint tools in Edit: masks go to native inpaint routes (GPT Image, Ideogram, FLUX Fill, Z-Image) in each API's mask convention; models without a mask input get a red-tinted copy and instructions; drawings and notes become instruction images. Before/after compare slider in the viewer (C) |
-| Color Grading | ✅ | `/color-grade`: free, runs in the browser (WebGL). Higgsfield's Natural / Split Tone / Soft Skin / Old Lens / 16mm looks plus seven film looks, full manual controls, hold to compare, PNG/WebM export into the library |
-| Expand (outpaint), Upscale image/video | 🟢 | Topaz, SeedVR2, Recraft Crisp (cloud); FLUX Fill outpaint, ESRGAN, SeedVR2 (open) |
-| Relight, Angles, Skin Enhancer, Headshots, Try-On, Packshot, Face/Character Swap… | 🟢 | 121 apps: 119 on both engines, 2 open-only. Relight uses the Relight LoRA on the open engine. New: Match Lighting (relight from a reference photo), Match Colors (palette of a reference; open version ✅ on CPU), AI Influencer |
-| Approximated apps | 🟡 | 17 apps carry an explicit `parity` note shown on the app page (e.g. Virality Predictor, Click to Ad) |
-| Layers, Photodump, Moodboards, Soul HEX | ⬜ | |
+| Higgsfield feature | Fuobe | Cloud route | Open-source route | Notes |
+|---|---|---|---|---|
+| Edit image (instruction edit) | 🟢 | Any edit model, up to 14 references (Nano Banana Pro, Seedream 5.0, GPT Image 2.5, FLUX.2 / Kontext, Qwen Image 3…) | Qwen-Image-Edit 2511, FLUX.1 Kontext [dev], FLUX.2 [dev] (up to 3 references) | `/edit`. New tools: Bria Extract Object, Ideogram Remove Background, Recraft Vectorize, Image to SVG (VTracer) |
+| Inpaint / Draw to Edit | 🟢 | Native mask routes (GPT Image, Ideogram, FLUX Fill [pro], Z-Image) in each API's convention; a red-tinted copy + instructions elsewhere | FLUX.1 Fill [dev] | `/inpaint`, compare slider in the viewer |
+| Layers | ✅ editor · 🟢 AI tools | Decompose: Seedream 5.0 Layers (default), Seedream 5.0 Flash Layers, Qwen-Image Layered (hosted). Edit text: Ideogram 3.0 Text Layers detects, Nano Banana Pro or Seedream 5.0 Pro edits. Background: BiRefNet, Ideogram. Regional edit: Seedream 5.0 Pro, Nano Banana Pro. Upscale: Topaz, SeedVR2, Recraft Crisp. Relight, Expand: Nano Banana Pro. Angles: Qwen Multiple Angles | Qwen-Image-Layered (a named element runs on Layered-Control), Qwen-Image-Edit 2511 (typed text lines, regional edit, angles), RMBG, FLUX Kontext, ESRGAN / SeedVR2, Qwen relight, FLUX Fill | `/layers`, `/layers/[id]`: canvas (move, resize, rotate, masks), Layers panel, per-layer prompt with revisions, history and versions, Compare, Cropped / Positioned zips and PNG at full detail, Copy JSON, Color grading (WebGL); phones get a read-only view. "Open in Layers" on every image result. The editor and the browser-built downloads ran end to end on demo layers. Not built: open-source text detection, the Inpaint and Enhancer tools, comments, Save as Element |
+| Color Grading (free, in the browser) | ✅ | — (WebGL in the browser) | same | `/color-grade`: Higgsfield's five looks plus seven film looks, manual controls, PNG / WebM export into the library; looks preview on a bundled sample before an upload |
+| Expand (outpaint), Upscale image | 🟢 | Topaz, SeedVR2, Recraft Crisp | FLUX Fill outpaint, 4x ESRGAN, SeedVR2 | `/upscale` |
+| Upscale video (+ FPS boost, SDR→HDR, pro codecs) | 🟡 | Topaz Video, SeedVR2 Video | SeedVR2, ESRGAN video | Upscaling only. FPS boost, SDR→HDR and ProRes / EXR output ⬜ (a RIFE model is in the open catalog, but no studio offers it) |
+| Video tools: remove background, relight, depth | 🟢 | BiRefNet video, Bria video, Video Depth Anything, LightX relight | BiRefNet / SAM 3 matte, Bernini-R relight, Depth Anything 3 / VDA | `/video-tools`. Remove object ⬜ (Edit video with a prompt is the closest) |
+| Join clips, match colours of a video (Color Palette) | ✅ open · 🟢 cloud | fal FFmpeg merge (cloud only joins); Match Colors app re-grades with Nano Banana Pro | ComfyUI concat and palette transfer, both run for real on CPU | Video tools tabs |
+| Trim video | ✅ open · 🟢 cloud | fal `trim-video` | Trim Video (core nodes, keeps the audio) | Video tools → Trim: filmstrip + in/out picker. Ran on CPU through the production build |
+| Captions (transcribe, edit, burn in) | ✅ open burn-in and cue editing · 🟢 transcription and cloud burn-in | Transcribe: ElevenLabs Scribe v2 (also Wizper, Whisper). Burn: VEED Subtitles (your edited lines as SRT) or Auto Subtitle (quick karaoke, ignores edits) | Transcribe: Qwen3-ASR 0.6B + ForcedAligner. Burn: Fuobe's chunked core-node burn-in (`oss-captions-burnin`); Whisper captions with `NC_PACKS=1` | Video tools → Captions: cue editor (text, timing, split / merge / insert / remove, undo), import .srt / .vtt, 6 styles incl. karaoke with a live preview, export .srt / .vtt. Each burner shows only the controls it supports |
+| Image to 3D / product spin | 🟢 | Hunyuan3D 3.1 Pro (default) / Rapid, TRELLIS.2, Tripo H3.1, Meshy 7.1 | TRELLIS.2 (textured GLB + turntable MP4, MIT), Hunyuan3D 2.1 (shape only, territory-restricted licence) | `/image-to-3d` and an app: orbitable GLB viewer, downloads, turntable (TRELLIS.2's, or recorded in the browser for mesh-only models), "Animate the spin" |
+| Try-On, Angles, Product Shot apps | 🟢 | FASHN Try-On 1.6 (also Google, Leffa); Qwen Multiple Angles (rotate / tilt / zoom); Bria Product Shot | FLUX.2 [klein] 4B + try-on LoRA; Qwen-Image-Edit 2511 + Multiple-Angles LoRA; Qwen-Image-Edit 2509 + White_to_Scene LoRA | The old approximation notes are gone; the notes now say what the open route runs. Try-on needs the person and the garment |
+| Relight, Skin Enhancer, Headshots, Packshot, Face/Character Swap, Transitions… | 🟢 | 123 apps: 121 on both engines, 2 open-only | Relight LoRA, ReActor, Qwen-Image-Edit… | Match Lighting, Match Colors, Hook Frame (the old "Virality Predictor" app, which now redirects to `/virality`) |
+| Approximated apps | 🟡 | — | — | 17 apps are marked as approximations on their page (e.g. one silent clip where Higgsfield beat-matches several), out of 41 with a parity note (what the Fuobe or open version does differently) |
 
 ### Characters, lipsync, audio
 
-| Higgsfield feature | Fuobe | Notes |
-|---|---|---|
-| Lipsync Studio / talking avatars | 🟢 | Kling Avatar 2.0/1, OmniHuman 2/1.5, InfiniteTalk, Sync Lipsync (cloud); InfiniteTalk, Wan 2.2 S2V (open) |
-| Text to speech + voice picker | 🟢 | ElevenLabs v3 / v4 / v4 Turbo / Multilingual v2 with the 21 premade voices and stability/similarity/style/speed sliders; open Chatterbox Multilingual (23 languages) and IndexTTS-2 |
-| Voice cloning | 🟢 | Zero-shot from a recording (in-browser mic → WAV) or upload: Chatterbox, IndexTTS-2. Voices can be saved as Voice elements |
-| Dialogue (two or more speakers) | 🟢 | ElevenLabs Dialogue with a per-line script; open Chatterbox Dialogue with two cloned speakers |
-| Voice change | 🟢 | ElevenLabs Voice Changer, Chatterbox VC |
-| Translate & dub | 🟢 cloud · ⬜ open | HeyGen (lip-synced), ElevenLabs Dubbing. No open dubbing pipeline |
-| Sound effects, music, sound for video | 🟢 | ElevenLabs SFX/Music, MMAudio (cloud); ACE-Step 1.5, MMAudio (open). No open SFX model |
-| AI Influencer | 🟢 | App: Higgsfield's character-sheet endpoint (human or creature looks) or a character-sheet prompt on Z-Image Turbo. "Save as character" on any image tile makes it an @element |
+| Higgsfield feature | Fuobe | Cloud route | Open-source route | Notes |
+|---|---|---|---|---|
+| Soul Cast (AI actor builder) | 🟢 | Soul 2.0, else Nano Banana Pro | Z-Image Turbo · Soul Cast sheet (4 views), Z-Image Turbo | The 17 fields from the research; saved as a character element. In Cinema Studio and Character Sheet |
+| Soul Location | 🟢 | Soul Cinema, Nano Banana Pro, Seedream 5.0 Pro; extra views | Z-Image Turbo, Qwen-Image | Saved as a location element, then @mentioned in shots |
+| Character Sheet | 🟢 | From Reference (1–5 photos): Nano Banana Pro. Build from scratch: Soul 2.0 with a key, else Nano Banana Pro. From a description: the AI Influencer app | Qwen-Image-Edit 2511 (≤3 photos); Soul Cast sheet workflow | `/character-sheet`; Save as character. On the open engine the photo's shape is kept (aspect off) |
+| AI Influencer Studio | 🟡 | Higgsfield's AI Influencer character sheet | Soul Cast sheet workflow | An app plus Character Sheet's "From a description". Higgsfield's game-style builder (19 categories, blendable creature types) is not reproduced |
+| Lipsync Studio / talking avatars | 🟢 | Kling Avatar 2.0 / AI Avatar, OmniHuman 2 / 1.5, InfiniteTalk (hosted), Sync Lipsync 3 / 2 Pro | InfiniteTalk (+ Long), Wan 2.2 S2V, InfiniteTalk Lip Re-sync (video, ≤40 s per job), LatentSync 1.6 (isolated worker) | `/lipsync`: "Add a portrait or a video" |
+| Text to speech + voice picker | 🟢 | ElevenLabs v3 / v4 / v4 Turbo / Multilingual v2 (21 premade voices), Inworld TTS 1.5 Max (113 voices), MiniMax Speech 2.8 HD, Seed Audio 1.0 | Chatterbox Multilingual (23 languages), IndexTTS-2 | Sliders per model |
+| Voice cloning | 🟢 | Chatterbox and IndexTTS-2 (hosted) | Chatterbox, IndexTTS-2 | From a mic recording or an upload; saved as Voice elements |
+| Dialogue | 🟢 | ElevenLabs Dialogue | Chatterbox Dialogue | |
+| Voice change | 🟢 | ElevenLabs Voice Changer, Chatterbox VC (hosted) | Chatterbox Voice Conversion | |
+| Translate & dub | 🟢 both | One shot: HeyGen Translate / Translate Speed, ElevenLabs Dubbing. Step by step: ElevenLabs Voice Isolation → Scribe v2 → Claude → review → ElevenLabs v4 per take → fal compose (each take at its cue) → extract the track → Chatterbox VC (the speaker's voice) → Sync Lipsync 3 | MelBand RoFormer stems + Qwen3-ASR 1.7B cues (one job) → local LLM → review → Chatterbox per take in the cloned voice → voice timeline (core nodes) → InfiniteTalk lip re-sync → mux over the background stem (−3 dB) | Audio → Translate: spoken language + up to 8 targets, prices before Translate and Voice, autosaved cue editor, lip re-sync toggle, Voice again. The voice follows the reviewed cue times and the video keeps its length. The timeline step ✅ on CPU. **Cloud step by step keeps the voice only** (no background stem) |
+| Sound effects | 🟢 | Mirelo SFX 2.0 (default, Higgsfield's model), Sonilo SFX 1.1, Stable Audio 3 SFX, Stable Audio 2.5, CassetteAI, Seed Audio 1.0, ElevenLabs SFX | Stable Audio 3 Small SFX (default; Stability Community licence, free under US$1M revenue), Stable Audio Open 1.0, HunyuanVideo-Foley, MMAudio (non-commercial), ThinkSound (isolated worker) | Audio → Sound effects |
+| Music | 🟢 | Sonilo Music 1.1 (default, Higgsfield's model), Lyria 3 / Pro, MiniMax Music 2.5, Stable Audio 3 Music, Mureka 9.5, ElevenLabs Music | ACE-Step 1.5 | Audio → Music |
+| Sound for a video | 🟢 | Mirelo SFX 2.0 for video (default), MMAudio | HunyuanVideo-Foley fed the clip's frames (default; as long as the clip, ≤30 s), MMAudio | Audio → Sound for video. HunyuanVideo-Foley's licence excludes the EU, UK and South Korea |
+| Transcription and voice separation | 🟢 | ElevenLabs Scribe v2, Wizper, Whisper; Demucs stems, ElevenLabs Voice Isolation | Qwen3-ASR; MelBand RoFormer + Qwen3-ASR | Text results carry timed cues (saved as .srt); stems carry `meta.stem`. Used by captions, dubbing and Faceless |
+| Text steps (translate, write) | 🟢 | Claude (`text-llm`) | A local model on Ollama (`oss-text-llm`, never calls Claude) | Translations keep the cue timing (numbered batches of 30, then 10, then line by line). Settings → Prompt enhancement → Offline rewriter (`FUOBE_ENHANCE_PROVIDER=none`) turns text steps off |
 
-### Platform
+### Studios & marketing
 
-| Higgsfield feature | Fuobe | Notes |
-|---|---|---|
-| Supercomputer / Assist agent | 🟢 | `/assist`: describe the whole job; the agent looks up models, writes prompts, shows a plan card with the estimated cost, runs it when you approve ("Ask first", or auto-run), waits for results, looks at them and chains steps (image → animate, storyboards, @elements, your earlier outputs). Runs on Claude, on a local Ollama model (tool calling), or an offline rule-based planner |
-| Assets library, favorites, search, reuse, hand-offs, download | ✅ | |
-| Live progress, cancel, retry, failure messages | ✅ | |
-| Engine choice (open only, paid only, both) | ✅ | Settings → Engine mode, or `FUOBE_ENGINE_MODE` |
-| Credits / pricing | 🟡 | Bring your own key: live cost estimates per run (and per Assist plan); "Free" for open source; no billing |
-| Sign-in | ✅ | Optional password (Settings → Security or `FUOBE_PASSWORD`) for every page and API call, plus API tokens for scripts and agents |
-| Accounts, teams, sharing, community feed, contests | ⬜ | Single-user and self-hosted today |
-| MCP (other agents use the studio) | ✅ | `/api/mcp`: search models, estimate cost, generate, storyboards, results. Settings shows the `claude mcp add` command |
-| Canvas (node workflows), plugins | 🟡 / ⬜ | ComfyUI itself is the node canvas for the open engine; no in-app canvas |
-| Public API | 🟢 | The REST API and MCP endpoint, protected by the password / API tokens once a password is set |
+| Higgsfield feature | Fuobe | Cloud route | Open-source route | Notes |
+|---|---|---|---|---|
+| Brand kit + products | 🟢 | Website research needs no model; Claude fills the soft fields (tone, audience, selling points) | Ollama, or offline heuristics | Reads HTML meta, OpenGraph, JSON-LD, Shopify `/products.json`, CSS colours, Google fonts, logo, hero images and socials through the SSRF-safe fetch; 14 rotating research labels, Cancel / Retry. Manual path with k-means colours. Products from a link or an upload. The scraper ran against local fixture shops, not real sites |
+| Marketing Studio | 🟢 | Per format: Bria Product Shot / Nano Banana Pro / GPT Image 2.5 / Product Photography (product shots), GPT Image 2.5 / Ideogram 4.5 / 3.0 / Recraft V4.1 (ads, posters, listings), Marketing Studio Image (Higgsfield, with a key), Seedance 2.5 / Kling O3 / Gemini Omni (motion), OmniHuman 2 / Kling Avatar (UGC). UGC chain: ElevenLabs v4 → Nano Banana Pro still → OmniHuman 2 presenter → Auto Subtitle → Seedance 2.5 hook and b-roll → joined | Qwen-Image / Qwen-Image-Edit stills (words set in the browser), Wan 2.2 Lightning motion; UGC: Chatterbox (voice sample needed) → Qwen-Image-Edit → InfiniteTalk → caption burn-in → joins that keep the voice | `/marketing`: 84 Fuobe templates in 11 formats with procedural previews, 9 hooks and 14 settings, product / avatar / reference slots, brand kit chip, live price, Run again. Higgsfield's library has 1,074 templates; Fuobe ships its own set |
+| Click to Ad / Link to Video Ad | 🟢 | Same UGC models, or product-only shots; 9:16, ≤12 s, voiceover and captions | Same open UGC chain | `/marketing/click-to-ad`: link → "Building your product kit" → 10 styles → script (Claude, Ollama or an offline writer within the word budget). The product joins its site's brand kit, so logo and colours persist. The two old parity apps now open this flow. No logo end card in the video |
+| Ads Studio | 🟢 | Higgsfield Ads Studio one-shot (with a key), or Fuobe: Claude copy (angle, headline, body, CTA) + Nano Banana Pro visual + compositing in the browser | Qwen-Image-Edit / Qwen-Image visual + the same compositing; Ollama or rule-based copy | `/ads`, `/ads/[brandId]`: brands, up to 10 products × up to 20 ads, 1:1 / 4:5 / 9:16 with logo, colours and Google fonts, editor, Download all (zip built in the browser), brand chat with @product mentions and priced proposals |
+| Ad Multiplier | 🟢 | Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash. Hook / CTA: first or last frame → image-to-video → joined around the original | Wan 2.2 Animate + the original sound muxed back; hook / CTA on Wan 2.2 Lightning, joined keeping the reference's sound | `/ads/multiplier`: 4–30 s reference, up to 20 @image_N, Prompt or Change hook / Change CTA, 480p / 720p / 1080p (open ≤720p), 1–4 versions, live estimate |
+| Faceless Studio | 🟢 | Nano Banana Pro stills, Gemini Omni Flash clips (Seedance 2.5 in Advanced), ElevenLabs v4 / Multilingual v2 or a Chatterbox clone, ElevenLabs forced alignment, Sonilo music levelled to −28 LUFS and mixed by fal FFmpeg compose, Auto Subtitle; Upscale to 1080p with SeedVR2 | Z-Image Turbo or Qwen-Image-Edit Style Reference stills, Wan 2.2 Lightning, Chatterbox (voice sample needed), ACE-Step (≤240 s) mixed by the soundtrack workflow, Qwen3-ASR timings + caption burn-in | `/faceless`: channels (genre, idea, YouTube reference, saved look and sound, avatar), topics, 1–5 min, 12 styles or 3 style references, narrator, script review, then a two-stage render (stills + narration + word timings, then each scene cut to where its lines are spoken). Timeline editor: change a scene's picture, motion or the narration, see the price, Undo. Deleting stops the render |
+| Higgsfield Explainer | 🟢 | Same pipeline as Faceless | Same; stills drawn from your source images with Qwen-Image-Edit | `/explainer`: 22 styles, up to 3 sources (images, .txt / .md, a summarised link), Auto / 20 s–10 min / Manual 15–600 s, History. PDF and Word sources aren't read |
+| Katana | 🟢 | Per segment: cut → first frame → your subject put in (Nano Banana Pro) → motion with Kling O3 edit, Genjutsu Motion Transfer or Kling 3.0 Motion Control; joined at the original cut times over the original soundtrack | Same chain with Qwen-Image-Edit, Wan 2.2 Animate / Fun Control | `/katana` plus a `katana` Assist / MCP tool and a skill. Scene cuts found in the browser and refined to a frame; Retry failed steps; Run again |
+| Virality Predictor | 🟡 | — | — | `/virality` runs a clearly labelled heuristic check of the first 3 seconds in the browser and shows no score. Higgsfield's output matches Meta's TRIBE v2 (CC BY-NC); its worker contract is in [`docs/workers/tribe-v2.md`](workers/tribe-v2.md), but Fuobe doesn't host it |
+| Photodump Studio / Instadump | 🟢 | Soul 2.0 + Soul ID with a key, else Nano Banana Pro or Seedream 5.0 Pro | The character's Z-Image Turbo LoRA when trained, else Qwen-Image-Edit 2511 | `/photodump`: 9 Soul 2.0 packs + 5 Instadump packs (one Fuobe prompt per photo), Create pack from ≤15 photos, a selfie (≤20 MB) or a character, Download all, Animate, Edit, Retry a failed photo inside its run |
+| Fashion Factory | 🟢 | Soul 2.0 / Nano Banana Pro base shots, FASHN try-on (Nano Banana Pro as the alternative), Nano Banana Pro photoset | Z-Image Turbo (+ character LoRA), FLUX.2 [klein] try-on, Qwen-Image-Edit photoset | `/fashion-factory`: 6 templates, the 5 steps with Higgsfield's copy; progress survives a reload |
+| Canvas (node workflows) | 🟢 | Any cloud model on a node | Any open model on a node | `/canvas`, `/canvas/[id]` on @xyflow/react: 13 node types (text prompt, image / video / audio input, element, model, join, extract frame, upscale, remove background, speech, output / compare, note), typed edges, Run node / selected / all, fresh results reused, pins, autosave, phone node list. 5 templates, each in a cloud and an all-open-source version. No pages, multiplayer, comments or tables |
+
+### Platform & agents
+
+| Higgsfield feature | Fuobe | Cloud route | Open-source route | Notes |
+|---|---|---|---|---|
+| Supercomputer / Assist agent | 🟢 | Claude (claude-opus-5-5 by default; Manual offers sonnet-5-5, haiku-5-5 and fable-5-1 with an effort level) | Ollama tool calling, or the offline rule-based planner | `/assist`: plans, prices, asks first (or auto-runs), chains steps with `after`. Modes Free / Smart / Manual; each chat's context is frozen when it starts and later changes arrive as "Context update" messages |
+| Assist skills | ✅ app · 🟢 with an LLM | Loaded into Claude's context with `/name` or `load_skill` | Same on Ollama; the offline planner uses their hints | 20 built-in SKILL.md playbooks in `skills/`; create, edit, duplicate, download, turn on / off, upload .md / .zip / .skill (bounded unzip). Also offered as MCP prompts |
+| Assist projects | ✅ app · 🟢 with an LLM | — | — | Instructions, colour, up to 20 sources (links and PDFs fetched safely, files with PDF text, elements, notes), project skills, chats per project, an Assets tab |
+| Assist memory | ✅ app · 🟢 with an LLM | — | — | 8 categories, add / edit / delete, import from other assistants, per project or across all chats; the `remember` tool asks first |
+| Studio jobs from Assist and MCP | 🟢 | `split_layers`, `restyle_footage`, `dub_video`, `faceless_episode`, `create_ads`, `add_captions`, `katana` | Same on the open engine (`faceless_episode` needs a voice sample there) | Each runs as a `createPipeline` job and is priced on the approval card first. They don't open a studio session yet (see §3) |
+| AI Employees, Apps builder, Websites, Games, 3D Jutsu, connectors (Slack, Drive, Notion…) | ⬜ | — | — |  |
+| MCP (other agents use the studio) | ✅ | — | — | `/api/mcp` 1.1.0: search_models, estimate_cost, estimate_job, generate, create_storyboard, check_generations, list_recent, list_elements, list_skills, load_skill, read_source, remember and the studio tools; prompts built from the enabled skills |
+| CLI + skills (`npx skills add …`) | ⬜ | — | — | Skills are SKILL.md files that MCP clients receive as prompts; there is no Fuobe CLI |
+| Plugins (Photoshop, Figma, Blender, After Effects, DaVinci) | ⬜ | — | — |  |
+| Assets library | ✅ | — | — | `/library`: Square / Masonry / List, Fit / Fill, card size, split by date; tabs All / Images / Videos / Audio / Text / 3D / Favorites / Uploads / Trash; filters by model, date and status; batch stacks; select mode with a bulk bar (zip, like, move, delete); folders with colours and drag and drop; Reuse, hand-offs (Animate, Extend, Lipsync, Open in Layers…) and downloads. Missing: nested folders, pins, review status, projects in the library |
+| Trash | ✅ | — | — | Delete moves to the Trash with Undo (feed, viewer, Library, Cinema); 30 days, Restore, Delete forever (asks first), Empty trash; purged at startup and then daily; files still used elsewhere are kept |
+| Live progress, cancel, retry, failure messages | ✅ | — | — | Results arrive over one server-sent-events stream per browser; polling slows to every 10 s while it's connected (1.5 s without it) |
+| Text, 3D and layer results | ✅ | — | — | Shown in the feed, viewer and Library: text with cue timings (copy, .txt / .srt / .vtt), .glb in `@google/model-viewer` (loaded on demand), layers as a composite with a named list |
+| Engine choice (open only, paid only, both) | ✅ | — | — | Settings → Engine mode, or `FUOBE_ENGINE_MODE` |
+| Credits / pricing | 🟡 | — | — | Bring your own key: live cost estimates per run, per pipeline step, per Assist plan; prices per resolution and per input + output second where the API bills that way; a cost cap per Cinema project; "Free" for open source. No billing |
+| Sign-in and security | ✅ | — | — | Optional password (`FUOBE_PASSWORD`) and API tokens; cross-site writes refused; Host allowlist on password-less installs (`FUOBE_ALLOWED_ORIGINS`); remote URLs fetched only from public addresses (`FUOBE_ALLOW_PRIVATE_URLS=1` for a LAN); login throttle (`FUOBE_TRUST_PROXY=1` behind a proxy) |
+| Accounts, teams, sharing, community feed, contests, Academy | ⬜ | — | — | Single-user and self-hosted today |
+| Content checks (IP / face eligibility), browser notifications | ⬜ | — | — |  |
+| Public API | 🟢 | — | — | The REST API (incl. `GET /api/generations/stream`) and the MCP endpoint, behind the password / API tokens once a password is set |
 
 ## 3. Known issues and caveats
 
-- **Paid providers are untested with real keys.** Field names come from the providers' schemas (fal OpenAPI, Replicate, Higgsfield's API docs), but the first live runs may surface model-specific quirks. The picker marks models whose provider isn't connected as "demo".
-- **Open-source quality is unverified.** Every workflow is structurally validated, none has run with real weights. Expect to tune steps/CFG per model on a GPU. The same goes for AI-Toolkit training (verified against a fake job API, not a real training run).
-- **The Assist agent hasn't talked to a live model.** The Claude request and the loop are tested with a stub and Ollama with a fake server; the first real conversations may need prompt tuning, and small local models follow tool instructions less reliably. Claude is used only when an Anthropic key is set, and on "open source only" installs only when Prompt enhancement is explicitly set to Claude.
-- **Chained jobs run one after another.** A storyboard film waits for its frames, then its clips, then the join, so it takes as long as the slowest steps added up. A failed step fails the steps after it (retry it, then press Make the film again).
-- **Higgsfield controls/templates:** the Soul style, Genjutsu look and Marketing Studio template lists are fetched live from Higgsfield. Without a key the pickers stay empty and ask for one; Genjutsu Restyle, which requires a look, can't run until then.
-- **Sign-in is off by default.** Until a password is set, anyone who can reach the server can use it (and your keys). Settings warns about this. It is single-user: no roles or per-user libraries. `comfyLorasDir` and `aiToolkitDatasetDir` make the server write files to the paths you set, so set a password before exposing Fuobe beyond your machine.
+Most important first.
+
+**Not run for real (no keys, no GPU)**
+- **Paid providers are untested with real keys.** That now includes the round-3 response shapes Fuobe reads: Seedream layer boxes, Recraft's returned `style_id`, transcript cues, 3D files, Demucs stems, and the fal FFmpeg tools (compose `tracks`, loudnorm, forced alignment, `scale-video` crop, extract-audio). Two behaviours are assumptions from the docs: fal compose cuts an audio keyframe at its `duration`, and it renders an audio-only timeline over a still. Cloud `join-clips` is assumed to keep each clip's audio.
+- **Open-source quality is unverified.** Round 3 added about 165 GB of new model files (plus about 9 GB that nodes download on first use) that have never run here. Whole open chains (a UGC presenter film, a Faceless episode, a dub with lip re-sync, a Shorts restyle) ran only on the demo provider. The try-on single-garment graph and the new InfiniteTalk sizing are checked by `/prompt` validation only; ThinkSound's packages are installed on the isolated worker but never ran.
+- **Assist hasn't talked to a live model.** The streamed Claude call is tested against an SSE fake and Ollama against a fake server. Skills, projects and memory work end to end with the offline planner only. Small local models follow tool instructions less reliably.
+
+**Gaps that change what a user gets**
+- **Assist / MCP studio tools always use their pipeline fallback.** `STUDIO_ROUTES` in `src/server/assist/studio-tools.ts` is empty, so a `dub_video` or `split_layers` job lands in the Library, not as a dub session or a Layers project. The `katana` tool is in the tool list but isn't named in Assist's system prompt or the MCP instructions. Several skills still link to stand-in pages: `faceless-video` → `/storyboard`, `katana` and `ad-multiplier` → `/video-edit`, `marketing-studio-cards` → `/apps/app-ad-creative`, `character-sheet` → `/elements`.
+- **Cloud step-by-step dubbing keeps the voice only.** Its soundtrack step (`merge-audio-video`) takes one track, so the background music and effects are lost. The open route mixes the background stem back in. (`ffmpeg-compose`, which Faceless uses, could carry both.)
+- **Mixed Media on the cloud is a video-to-video restyle**, not Higgsfield's per-frame pipeline. A real one needs a per-index chain slot, an images-to-video tool and splitting renders above 200 frames.
+- **Open-engine limits.** Music beds stop at 240 s (ACE-Step; there is no open audio concat or loop). Open "Frame by frame" in Faceless is a slow-camera image-to-video, not a pan. The joins that keep a clip's sound hold every frame in RAM at 25 fps (about 1 GB per 8 s at 480x848). Open video upscaling decodes the whole film (about 38 GB for 30 s at 480p), so Faceless offers Upscale to 1080p on the cloud only. InfiniteTalk lip re-sync is capped at 40 s per job (for dubs, the whole source length). Whisper captions refuse clips that need more than half the server's RAM (the estimate isn't measured).
+- **Qwen-Image-Edit keeps the first image's shape** on the open engine. Photodump, Fashion Factory and Character Sheet turn the aspect picker off and say so; the open Character Sheet asks for a landscape photo first.
+- **Layers:** text detection is cloud only (no open OCR model; on the open engine you type the lines to change). A decomposition that finishes while the editor is closed is laid out only when the project is opened (the server can't decode PNG alpha). Upscale doesn't resize the document; downloads use the layers' detail instead.
+- **Cinema Studio:** Cinema Studio 4.0 runs at up to 720p through the public API. Open routes take no reference clips. 3D recomposition, collaboration and community publishing are out of scope. Spend uses the estimate stored at creation for takes deleted for good, so it can be slightly over-counted.
+- **Shorts Studio:** the 9:16 crop is a plain centre crop (no subject tracking). Kling O3 4K's 720 px minimum input isn't checked. The one-submit-per-click guard (`requestId`) is in memory, so a restart forgets it.
+- **Marketing:** Click to Ad videos have no logo end card (the logo is used by the Ads Studio compositor and the brand line in prompts). Brand kits are matched by host and port, so one site on two ports gets two kits. An Ad Multiplier reference whose header Fuobe can't read (e.g. WebM) gets a picture-only join.
+- **Faceless / Explainer:** one narration take per episode, re-timed to the scenes; stage two waits for it, so a first render takes a few seconds longer and a narration change takes two passes. Every new channel draws an avatar (about $0.15 on the cloud). Scripts over 64 KB are flushed without keepalive, so the last edit may not survive closing the tab. PDF and Word sources aren't read (Assist projects can read PDFs).
+- **Formats the header reader doesn't know** (WebM, MKV, Ogg on the open engine) fall back to coarse defaults: caption windows to the millisecond, InfiniteTalk at 16:9 and its frame cap, a mux bed as long as the longest known track. Shorts and Mixed Media read WebM headers themselves.
+
+**Library, data and security**
+- Helper steps (features `shorts-step`, `mixed-media-step` and other chain steps) are listed in the Library; there is no filter that hides them yet.
+- Uploads can't be deleted (they need an in-use check first). Folders are flat.
+- `ASSET_REFS` (the tables a permanent delete checks before removing an output file) doesn't list `dub_sessions` or `katana_jobs`. If a dub or Katana job started from a *generated* clip and every generation that used that clip is later deleted for good, the job's row points at a missing file. Uploads are never removed by a permanent delete.
+- Without Web Locks (plain `http://` on a LAN IP) each visible tab reads its own live stream; six or more visible windows on one host could hit the browser's connection limit.
+- **Sign-in is off by default.** Without a password Fuobe answers only on local addresses and names in `FUOBE_ALLOWED_ORIGINS`, but anyone who can reach it can use it (and your keys). With a password, a page that rebinds DNS can still post password guesses; the throttle caps that at roughly 15–20 a minute. Without `FUOBE_TRUST_PROXY=1` behind a reverse proxy, all visitors share one throttle (slowed, never locked out). `comfyLorasDir` and `aiToolkitDatasetDir` make the server write files where you point them.
+- `MAX_INLINE_TEXT` caps a result's inline text at 64,000 characters; `meta.cues` of a very long transcript stays inline.
+- The first routing check after the Ollama or ComfyUI URL changes can hold a request for up to 1.5 s when the host doesn't answer.
+- Unknown Cinema, Canvas and Assist project ids show a not-found state with HTTP 200; only `/apps/<unknown>` returns a real 404.
+
+**UI leftovers (small)**
+- Canvas: keystroke → paint is 19 ms at 60 nodes and 29 ms at 120 (target 16 ms). Element nodes don't follow a later rename of their element.
+- Video tools → Trim and the Ad Multiplier use simple in/out pickers, not the shared `VideoTrimmer`. `options.sourceLanguages` (spoken language for transcribe models) has no picker.
+- Some buttons still call `navigator.clipboard` directly and fail on plain-http LAN origins (feed, viewer, result actions, attach menu, Cinema workspace / feed / projects, Layers top bar); `copyText` in `src/lib/clipboard.ts` is the fix. Studio pages nest a second `<main>`.
+- The Edit studio shows prompt suggestions for promptless models (e.g. FASHN). Inpaint's blocker after a new image still asks to add an image. The Video Background Remover app's note says Fuobe has no video matting model; Video tools → Remove background does whole videos. On narrow Assist tiles a "Demo" badge can overlap the "TEXT" label.
+- The files route logged "ReadableStream is already closed" once when a crashed test browser dropped its connections; not reproduced.
+
+**Environment and licences**
+- **Licences:** FLUX.1 / FLUX.2 [dev], inswapper (ReActor), MMAudio weights, USO's FLUX.1 base, ComfyUI-Whisper (opt-in with `NC_PACKS=1`) and TRIBE v2 are non-commercial. HunyuanVideo-Foley and Hunyuan3D 2.1 exclude the EU, UK and South Korea. Stable Audio 3 uses the Stability Community licence (free under US$1M revenue); Krea 2 has its own community licence. See `research/comfyui-oss.md`, `-2.md` and `-3.md`.
 - **Wan 2.1 LoRAs on Wan 2.2:** most viral-effect LoRAs were trained for Wan 2.1 I2V; some may need a lower strength or only the low-noise expert.
-- **Licenses:** FLUX.1/FLUX.2 [dev], inswapper (ReActor), MMAudio weights and some LoRAs are non-commercial. See `research/comfyui-oss.md` and `research/comfyui-oss-2.md`.
-- **Sunsets:** Sora 2's API was retired (2026-09-24) so it isn't offered; Veo 3.1 on fal ends 2026-11-17 (Replicate route present).
-- **Dev server:** after adding routes the Turbopack cache can get stuck in a reload loop. `pnpm dev:clean` clears `.next` and restarts.
-- **Headless Chromium has no H.264**, so video checks here used WebM; MP4 playback is unaffected in normal browsers.
+- **Sunsets:** Sora 2's API was retired (2026-09-24), so it isn't offered; Veo 3.1 on fal ends 2026-11-17 (the Replicate route stays).
+- **Headless Chromium has no H.264**, so video checks here used WebM and demo MP4 thumbnails look blank in screenshots; MP4 playback is unaffected in normal browsers.
+- **Dev server:** after adding routes, or after an edit to `globals.css`, Turbopack's cache can get stuck or serve stale styles. `pnpm dev:clean` clears `.next` and restarts.
 
 ## 4. What's next (prioritized)
 
-1. **Live-key smoke test** of the top cloud models (Nano Banana Pro, Seedream 5, Kling 3.0, Seedance 2.5, Veo 3.1, Soul 2.0, ElevenLabs), a Kling extend and a cloud storyboard film, and a first real Assist conversation on Claude and on Ollama; fix any schema surprises.
-2. **GPU run** of the starter open set (Z-Image Turbo, Qwen-Image-Edit 2511, Wan 2.2 Lightning, InfiniteTalk, Chatterbox), an open multi-shot film and a real AI-Toolkit training; tune defaults and record timings/VRAM.
-3. Cinema Studio workspace (scene list + timeline) and Shorts Studio, built on chained jobs.
-4. Accounts: several users with their own libraries, shareable links, a community feed.
-5. Real preview media for apps/motions/effects (currently gradient cards).
+1. **Live-key smoke test** of the round-3 cloud routes with the highest risk: Seedream 5.0 Layers, Recraft V4 Styles (style id), FASHN, Mirelo SFX / Sonilo, Scribe v2, Auto Subtitle / VEED, Hunyuan3D 3.1, Gemini Omni Flash edit, the fal FFmpeg tools (compose, loudnorm, forced alignment, scale-video, extract-audio), HeyGen / ElevenLabs dubbing, Higgsfield Cinema Studio 4.0 with reference clips, Ads Studio and Soul 2.0 + Soul ID; then a first real Assist conversation on Claude and on Ollama, with a skill and a project. Fix any schema surprises.
+2. **GPU run** of the round-3 open set: Qwen-Image-Layered, Qwen-Image-Edit Style Reference, Z-Image Turbo · Palette, Wan 2.2 Fun VACE restyle, Z-Image Mixed Media, Stable Audio 3, MelBand + Qwen3-ASR, Chatterbox, InfiniteTalk lip re-sync, TRELLIS.2 and the FLUX.2 [klein] try-on; then one whole open UGC film, Faceless episode and dub. Record VRAM and timings and tune defaults.
+3. **Wire Assist and MCP into the studios:** register the `STUDIO_ROUTES` adapters (Layers, Shorts, dub / captions, Ads, Faceless) so jobs open as real sessions; name `katana` in the system prompt and MCP instructions; point the skills' `studio:` links at `/faceless`, `/katana`, `/ads/multiplier`, `/marketing` and `/character-sheet`.
+4. **Close the engine seams:** the cloud dub background through `ffmpeg-compose`; a per-frame cloud Mixed Media pipeline; an open audio concat / loop (music beyond 240 s) and an open pan / zoom workflow for Frame by frame; an open OCR model for Layers; a logo end card for Click to Ad.
+5. **Library:** hide `*-step` helper generations by default, nested folders and pins, deleting uploads safely, and `ASSET_REFS` entries for the dub and Katana tables.
+6. **UI clean-up:** the shared `VideoTrimmer` in Trim and the Ad Multiplier, a spoken-language picker for transcription, `copyText` everywhere, real 404s for unknown project ids.
+7. **Virality Predictor:** an optional, clearly non-commercial TRIBE v2 worker (`docs/workers/tribe-v2.md`).
+8. **Accounts:** several users with their own libraries, shareable links, a community feed.
+9. **Real preview media** for apps, motions, effects and studio presets (the previews are procedural today).
 
 ## 5. How to reproduce the checks
 
 ```bash
+pnpm install
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
-# open-source engine against a live ComfyUI (no model weights needed):
-bash scripts/comfy/start-comfyui.sh            # or point COMFYUI_URL at your own server
-pnpm dev & pnpm test:e2e:comfyui http://localhost:3000
-# re-export + re-validate the workflow library:
-cd scripts/comfy && npm install && npm run all
 ```
+
+Browser checks need the app running (`pnpm dev`, or `pnpm build && pnpm start`); demo mode with no keys is fine. They use Playwright: the repo's `playwright` / `playwright-core` if it resolves, else a global install, and `$CHROMIUM_PATH` or the newest `/opt/pw-browsers/chromium-*`.
+
+```bash
+pnpm test:e2e:mobile http://localhost:3000            # tests/e2e/no-horizontal-scroll.mjs: every route at 390 px, light and dark (--light / --dark, --routes=/a,/b)
+pnpm test:e2e:shell http://localhost:3000             # tests/e2e/shell.mjs: phone drawer, collapsed groups, settings deep link, keyboard Show more
+node tests/e2e/composer-flows.mjs http://localhost:3000   # first paint, typing before hydration, paste once, upload cancel, phone toolbar
+node tests/e2e/layers.mjs http://localhost:3000           # Layers regressions (projects page, deep links, edits during a save, open-engine Control)
+node tests/e2e/canvas-smoke.mjs http://localhost:3000 --perf=60   # save on leave, rename, trash → re-run, keystroke timing
+node tests/e2e/cinema-shortcuts.mjs http://localhost:3000 # Ctrl/Cmd+Enter only from the prompt bar
+node tests/e2e/assist-flows.mjs http://localhost:3000     # skills menu, remember, projects, skill upload, modes, phone sheet
+```
+
+The open-source engine against a live ComfyUI (no model weights needed):
+
+```bash
+bash scripts/comfy/install-comfyui.sh           # ComfyUI v0.41 + 14 custom node packs at pinned commits (CPU; NC_PACKS=1 adds ComfyUI-Whisper)
+bash scripts/comfy/start-comfyui.sh             # 127.0.0.1:8188, or point COMFYUI_URL at your own server
+pnpm build && pnpm start &
+pnpm test:e2e:comfyui http://localhost:3000     # tests/e2e/comfyui-selftest.mjs: self-tests, mux (one track and voice + bed), meta-batch, trim, segment, captions; a 600-frame clip with RSS sampling; ffprobe/ffmpeg checks when installed
+```
+
+Re-export and re-validate the workflow library (needs ComfyUI running; never runs a model):
+
+```bash
+cd scripts/comfy && npm install                 # playwright-core only
+npm run all                                     # export → build → validate every workflow
+npm run build -- <ids> && node validate-workflows.mjs <ids>   # single workflows; always pass ids in a fresh checkout without build/raw/
+ISO_DIR=/srv/comfyui-isolated bash install-isolated-worker.sh # optional second ComfyUI for LatentSync 1.6 and ThinkSound (port 8189)
+COMFYUI_URL=http://127.0.0.1:8189 COMFYUI_MODELS_DIR=$HOME/ComfyUI/models node validate-workflows.mjs lipsync-latentsync16 sfx-thinksound --shared
+```
+
+`node scripts/gen-demo-3d.mjs` regenerates the demo GLB and turntable (needs ffmpeg); `pnpm gen:catalog` regenerates the catalog from `docs/research/*.json`.

@@ -1,14 +1,22 @@
 # Fuobe
 
 **An open-source AI image, video and audio studio — a 1:1 alternative to Higgsfield.**
-Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
+Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
-- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Runs on Claude or a local Ollama model
-- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`
-- **Studios:** Image · Video (text, image, start/end frame, references, multi-shot, draft mode) · Edit · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · Apps · Lipsync & avatars · Motion control · Edit / Extend / Reframe video · Video tools (matte, relight, depth, join clips, match colors) · Audio (speech with voice picker and cloning, dialogue, voice change, translate, SFX, music, sound for video) · Library
+- **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local Ollama model, or an offline planner
+- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs (layers, restyle, dub, faceless episode, ads, captions, Katana) and the skills as prompts
+- **Create:** Image · Video (text, image, start/end frame, reference images and clips, multi-shot, draft mode) · Edit · **Layers** (split a flat image into editable layers, edit text, regional edits, cropped or positioned zips) · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · **Canvas** (wire prompts, files and models into node workflows; every template in a cloud and an open-source version) · Apps
+- **Studios:**
+  - **Cinema Studio** — projects and scenes, Director's Panel (camera, lens, 50 palettes, lighting rig, Emotion Wheel), # camera moves, AI Director, image grids, Soul Cast and Soul Location
+  - **Shorts Studio** — restyle up to 2 minutes of your own footage with 44 looks (or your own references), in segments you can regenerate, stitched back under your sound; **Mixed Media** — 33 looks for 1–10 s clips with per-preset settings and a preview frame
+  - **Marketing Studio** (84 templates), **Click to Ad**, **Ads Studio** (brand kit from your website, up to 20 ads per product in 1:1 / 4:5 / 9:16) and **Ad Multiplier**
+  - **Moodboards**, **Color signature** (Soul HEX palettes), **Photodump / Instadump**, **Fashion Factory**, **Character Sheet**
+  - **Faceless Studio** and **Explainer** — channels, scripts, narrated and subtitled episodes with a timeline editor
+  - **Translate & dub** (your voice, lip-synced, over the original background on the open engine), **Captions** (transcribe, edit, burn in), **Trim**, **Katana** (recreate a reference edit with your subject), **Image to 3D**, Lipsync & avatars, Motion control, Edit / Extend / Reframe video, Video tools (matte, relight, depth, join clips, match colors), Upscale, Audio (speech with voice picker and cloning, dialogue, voice change, sound effects, music, sound for video), and a Virality predictor (a labelled heuristic)
+- **Library:** all your results (images, videos, audio, text, 3D) with layouts, filters, folders, bulk zip download and a Trash with 30-day restore; results arrive live
 - **Elements:** save characters, locations, props, styles and voices once, then `@mention` them in any prompt; train a character (Soul ID, a fal LoRA, or AI-Toolkit on your GPU) for a consistent face
-- **Catalog:** 100 cloud models + 49 open-source models, 121 apps, 108 camera motions (mix any two), 255 effects
-- **Open-source engine:** 73 API-format ComfyUI workflows exported from the official templates or community packs and validated against real ComfyUI node definitions, plus 170 researched LoRAs (camera moves, VFX) wired into the presets
+- **Catalog:** 157 cloud models + 73 open-source models (plus 32 hidden helper models: chain steps, self-tests, browser tools), 123 apps, 108 camera motions (mix any two), 255 effects
+- **Open-source engine:** 115 API-format ComfyUI workflows (official templates, community packs and hand-built graphs) validated against real ComfyUI node definitions, plus 43 researched LoRAs (camera moves, VFX) attached to 55 motion, effect and app presets
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
 > Project status, what works, what's verified and what's left: **[docs/STATUS.md](docs/STATUS.md)** (also in-app at `/status`).
@@ -25,7 +33,7 @@ Open **Settings** and pick an **Engine mode**:
 | Engine mode | What the install offers | Needs |
 |---|---|---|
 | **Open source + paid APIs** (default) | A Cloud / Open source switch in every studio | A paid-API key and/or a ComfyUI server |
-| **Open source only** | Only open-weight models on your ComfyUI; paid models are hidden and rejected by the server, and prompt enhancement never calls a paid API on its own | A ComfyUI server |
+| **Open source only** | Only open-weight models on your ComfyUI; paid models are hidden and rejected by the server, and text steps never call a paid API on their own | A ComfyUI server |
 | **Paid APIs only** | Only hosted frontier models; open-source models are hidden and rejected | A fal.ai or Replicate key |
 
 The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect what you have:
@@ -34,48 +42,84 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 |---|---|---|
 | A [fal.ai](https://fal.ai/dashboard/keys) key | `fal.ai API key` (or `FAL_KEY`) | Every cloud model and cloud app |
 | A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal`, `replicate` or `higgsfield`) picks which one goes first |
-| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
-| A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`) | Every open-source model, app, motion and effect |
-| An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent, prompt **Enhance** and storyboard splitting with Claude |
-| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`) | Local prompt enhancement, storyboard splitting and the Assist agent (tool calling) |
-| AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character LoRAs from an element's photos; the result is copied into ComfyUI and used whenever you @mention the character |
+| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1 with live presets, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, Ads Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
+| A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`; `COMFYUI_TOKEN` if it sits behind a proxy) | Every open-source model, app, motion, effect and studio route |
+| An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent (Smart and Manual modes), text steps (translate, write, scripts, ad copy, brand research), prompt **Enhance** and storyboard splitting with Claude |
+| Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`; `FUOBE_ENHANCE_PROVIDER`) | The same text steps and the Assist agent on a local model (tool calling) |
+| AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character and style LoRAs from an element's photos or a moodboard; the result is copied into ComfyUI and used whenever you @mention it |
 
-Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user. Before you open it to a network, set a password (**Settings → Security**, or `FUOBE_PASSWORD`): every page and API call then needs a sign-in or an API token (`Authorization: Bearer fuobe_…`), which you create on the same page for scripts and MCP clients:
+Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user.
+
+### Self-hosting and security
+
+Before you open Fuobe to a network, set a password (**Settings → Security**, or `FUOBE_PASSWORD`): every page and API call then needs a sign-in or an API token (`Authorization: Bearer fuobe_…`), which you create on the same page for scripts and MCP clients:
 
 ```bash
 claude mcp add --transport http fuobe http://localhost:3000/api/mcp --header "Authorization: Bearer fuobe_…"
 ```
 
+| Variable | What it does |
+|---|---|
+| `FUOBE_PASSWORD` | Turns sign-in on; a password set this way can't be changed from Settings |
+| `FUOBE_ALLOWED_ORIGINS` | Extra hosts Fuobe is reached at, comma-separated. Without a password, Fuobe answers only on IP addresses, localhost, single-label and LAN names (`.local`, `.lan`, `.home.arpa`, `.internal`) and the machine's hostname; add any other domain (a reverse proxy, a tunnel, a Tailscale name), or `*` to turn the check off. Also counts as "same site" for the cross-site write check behind a proxy that forwards neither Host nor X-Forwarded-Host |
+| `FUOBE_TRUST_PROXY=1` | Behind a reverse proxy: trust the last `X-Forwarded-For` hop, so wrong passwords lock out only that visitor (60 s). Without it, everyone shares one limit: slowed to one attempt every 4 s, never locked |
+| `FUOBE_ALLOW_PRIVATE_URLS=1` | Let inputs, product links and project sources be fetched from private / LAN addresses (they are refused by default) |
+| `FUOBE_DATA_DIR` | Where the database, files and `auth.json` live (default `./data`) |
+| `FUOBE_DEMO_MODE` | `auto` (default: demo outputs only when a model's provider isn't connected), `on` or `off` |
+| `FUOBE_SKILLS_DIR` | Where Assist's built-in skills are read from (default `./skills`) |
+| `FUOBE_ENGINE_MODE`, `FUOBE_CLOUD_PROVIDER`, `FUOBE_ENHANCE_PROVIDER` | The Settings choices above |
+| `OPENAI_API_KEY`, `GEMINI_API_KEY` | Read into Settings; no feature uses them yet |
+
+Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only from public addresses unless `FUOBE_ALLOW_PRIVATE_URLS=1`.
+
 ### Setting up the open-source engine
 
-1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB).
+1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 14 custom node packs at the commits Fuobe was validated with (`NC_PACKS=1` adds the non-commercial ComfyUI-Whisper).
 2. Open **ComfyUI workflows** in Fuobe. Each workflow lists the model files it needs, which are already installed (✓) and a **Copy install commands** button that produces the exact `wget` / `git clone` lines.
 3. Switch the engine toggle (top-right of every studio) to **Open source**.
+
+LatentSync 1.6 and ThinkSound are optional and run on a separate, isolated ComfyUI (`scripts/comfy/install-isolated-worker.sh`, port 8189); see [`scripts/comfy/README.md`](scripts/comfy/README.md). Open dubbing, Faceless and UGC narration clone a voice with Chatterbox, so they need a voice sample (record or upload one).
 
 To check a ComfyUI connection end to end without downloading any models:
 
 ```bash
 pnpm dev &
-pnpm test:e2e:comfyui http://localhost:3000   # runs two weight-free workflows through the full pipeline
+pnpm test:e2e:comfyui http://localhost:3000   # runs the weight-free workflows through the full pipeline (mux, trim, segment, captions, meta-batch), checked with ffprobe when installed
 ```
 
 ## Development
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest
+pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (79 files, 1128 tests)
 pnpm build                                  # production build
-pnpm gen:catalog                            # regenerate cloud models, Higgsfield models, LoRA map and icon map from docs/research/*.json
-pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading
+pnpm gen:catalog                            # regenerate cloud models, Higgsfield models and presets, LoRA map and icon map from docs/research/*.json
+pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading or serves stale CSS
+node scripts/gen-demo-3d.mjs                # regenerate the demo GLB and turntable (needs ffmpeg)
 ```
 
-- `docs/ARCHITECTURE.md` — how requests flow from the composer to providers and back
-- `docs/research/` — the research this is built on (Higgsfield inventory and API, paid model APIs, ComfyUI equivalents, workflow library, Liner UI language)
+Browser checks (the app must be running; demo mode is fine; Playwright and Chromium are picked up from the repo, a global install or `$CHROMIUM_PATH`):
+
+```bash
+pnpm test:e2e:mobile [url] [--light|--dark]    # no route may scroll sideways at 390 px (every route, hub mode and sample id)
+pnpm test:e2e:shell [url]                      # sidebar drawer, collapsed groups, settings deep links, keyboard Show more
+pnpm test:e2e:comfyui [url]                    # the open engine against a live ComfyUI
+node tests/e2e/composer-flows.mjs [url]        # first paint, typing before hydration, paste, upload cancel, phone toolbar
+node tests/e2e/layers.mjs [url]                # Layers regressions
+node tests/e2e/canvas-smoke.mjs [url] --perf=60  # Canvas save, rename, trash → re-run, keystroke timing
+node tests/e2e/cinema-shortcuts.mjs [url]      # Ctrl/Cmd+Enter only from Cinema's prompt bar
+node tests/e2e/assist-flows.mjs [url]          # skills, memory, projects, skill upload, modes, phone sheet
+```
+
+- `docs/ARCHITECTURE.md` — how requests flow from the composer to providers and back, pipelines, live updates, security, each studio's modules
+- `docs/research/` — the research this is built on (Higgsfield inventory, studios, image studios, marketing and agents, API; paid model APIs parts 1–3; ComfyUI equivalents parts 1–3; workflow library; Liner UI language)
+- `docs/workers/tribe-v2.md` — the optional, non-commercial TRIBE v2 worker contract for the Virality predictor
 - `scripts/comfy/` — the pipeline that exports and validates the ComfyUI workflow library
+- `skills/` — Assist's built-in skills (`<name>/SKILL.md` with frontmatter: name, title, description, when_to_use, icon, studio, tags, offline hints)
 
 ## Tech
 
-Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · WebGL · Vitest · Playwright.
+Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shadcn/ui (Radix) · TanStack Query · SQLite (better-sqlite3) · zod · fal.ai queue API · Replicate predictions API · Higgsfield API · ComfyUI HTTP + WebSocket API · Anthropic SDK (Claude) · Ollama · @xyflow/react (Canvas) · @google/model-viewer + three (3D) · unpdf (PDF text) · cmdk · WebGL · server-sent events · Vitest · Playwright.
 
 ## License notes
 
-Fuobe's code is open source. Model weights have their own licenses: several open models used here are **non-commercial** (FLUX.1/FLUX.2 [dev], inswapper, MMAudio weights, some LoRAs) — the Workflows page and `docs/research/comfyui-oss.md` list each license. Cloud models are billed by your provider.
+Fuobe's code is open source. Model weights have their own licenses: several open models used here are **non-commercial** (FLUX.1/FLUX.2 [dev], inswapper, MMAudio weights, USO's FLUX.1 base, some LoRAs, ComfyUI-Whisper's node code, TRIBE v2), HunyuanVideo-Foley and Hunyuan3D 2.1 exclude the EU, UK and South Korea, and Stable Audio 3 is free under US$1M revenue (Stability Community licence). The Workflows page and `docs/research/comfyui-oss*.md` list each license. Cloud models are billed by your provider.
