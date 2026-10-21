@@ -179,7 +179,7 @@ export function KatanaStudio() {
               title="Segments"
               aside={
                 <span className="text-[12px] text-muted-foreground">
-                  {segments?.length ?? 0} × up to {m.max} s
+                  {scanning !== null && !cuts ? "…" : (segments?.length ?? 0)} × up to {m.max} s
                 </span>
               }
             >

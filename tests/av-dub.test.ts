@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { cueReducer, cueProblems, formatCueTime, normalizeCues, parseCueTime } from "@/lib/av/cue-edit";
-import { BLANK_FRAME, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, reviewCues, spokenText, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { BLANK_FRAME, crowdedLines, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, priceLine, reviewCues, spokenText, voiceSteps, type DubSessionView } from "@/lib/av/dub";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
@@ -88,6 +88,16 @@ describe("dub pipeline DAGs", () => {
     { start: 12, end: 15, text: "Esto es una prueba" },
     { start: 24, end: 26, text: "Adiós" },
   ];
+
+  it("flags takes whose words won't fit before the next one starts", () => {
+    const tight = [
+      { start: 0, end: 1, text: "Una frase demasiado larga para un segundo, de verdad que sí" },
+      { start: 1.6, end: 3, text: "Corta" },
+      { start: 10, end: 12, text: "Bien" },
+    ];
+    expect(crowdedLines(tight, 14)).toEqual([0]);
+    expect(crowdedLines(cues, 30)).toEqual([]);
+  });
 
   it("phrases: lines a breath apart are one take, pauses split takes, lines past the end are dropped", () => {
     expect(dubPhrases(cues)).toEqual([
@@ -287,6 +297,32 @@ describe("dub sessions (demo mode)", () => {
     expect(g.request.params?.targetLanguage).toBe("Spanish");
     expect(languageStage(dub.dubView(dub.getDubSession(s.id)!) as DubSessionView, "es")).toBe("done");
     expect(dub.listDubSessions().map((x) => x.id)).toContain(s.id);
+  });
+
+  it("prices the voice before it runs: per-minute steps for the video's length, unpriced ones named", () => {
+    setSetting("falKey", "test-key");
+    try {
+      const lines = [
+        { start: 2, end: 4, text: "Hola a todos" },
+        { start: 12, end: 15, text: "Esto es una prueba" },
+      ];
+      const steps = voiceSteps({ engine: "cloud", video: "/api/files/uploads/clip.mp4", lang: "es", cues: lines, voiceRef: "/api/files/uploads/voice.mp3", duration: 30 });
+      const p = dub.priceSteps("cloud", steps, 30);
+      expect(p.demo).toBe(false);
+      expect(p.steps).toBe(6);
+      // Sync Lipsync 3 at $8 a minute is $4 for 30 s, ElevenLabs $0.08 a take; compose, soundtrack and voice conversion add cents.
+      expect(p.costUsd).toBeCloseTo(4 + 2 * 0.08 + 2 * 0.006 + 0.0075, 2);
+      expect(p.unpriced).toEqual([]);
+      expect(priceLine(p)).toBe("≈ $4.18");
+      // Without lip re-sync it's the takes and cents.
+      expect(dub.priceSteps("cloud", voiceSteps({ engine: "cloud", video: "/api/files/uploads/clip.mp4", lang: "es", cues: lines, voiceRef: "/v.mp3", duration: 30, lipsync: false }), 30).costUsd).toBeLessThan(0.2);
+      // A model without a listed price is named next to the estimate.
+      expect(priceLine({ engine: "cloud", costUsd: 0.5, unpriced: ["Claude"], demo: false, steps: 3 })).toBe("≈ $0.50 + Claude");
+    } finally {
+      setSetting("falKey", "");
+    }
+    expect(priceLine({ engine: "open", costUsd: 0, unpriced: [], demo: false, steps: 4 })).toBe("Free on your GPU");
+    expect(priceLine({ engine: "cloud", costUsd: 0, unpriced: [], demo: true, steps: 4 })).toBe("Demo · free");
   });
 
   it("removing a dub stops the steps that haven't finished (nothing more is spent)", async () => {
