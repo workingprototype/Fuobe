@@ -73,6 +73,15 @@ describe("av-tools workflows", () => {
     for (const n of ["4", "8"]) expect(r.workflow[n].inputs.filename_prefix).toBe("fuobe/gen1");
   });
 
+  it("Foley with no length asked for covers the whole clip (its header's length)", async () => {
+    const r = await prepare("v2a-hunyuan-foley", "v2a", { video: "clip.mp4", prompt: "rain on a window" });
+    expect(r.workflow["3"].inputs.duration).toBe(6);
+    expect(r.workflow["5"].inputs.frame_load_cap).toBe(computeFrames(6, 8, 4, 481));
+    // The model offers no length to pick, so nothing overrides it.
+    expect(getModel("oss-hunyuan-foley-video")!.options.durations).toBeUndefined();
+    expect(getModel("oss-hunyuan-foley-video")!.defaults?.duration).toBeUndefined();
+  });
+
   it("Voice timeline: every line at its cue on silence as long as the video, cut where the next starts", async () => {
     const timeline = { length: 30, clips: [{ start: 0, duration: 6 }, { start: 6, duration: 18 }, { start: 24, duration: 6 }] };
     const r = await prepare("audio-timeline", "timeline", { audios: ["l0.flac", "l1.flac", "l2.flac"], duration: 30, extra: { timeline } });

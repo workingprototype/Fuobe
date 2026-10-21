@@ -1,4 +1,4 @@
-import { APPS as RAW_APPS } from "./apps";
+import { APP_ALIASES, APPS as RAW_APPS } from "./apps";
 import { EFFECTS as RAW_EFFECTS, MOTIONS as RAW_MOTIONS } from "./motions";
 import { MODELS } from "./models";
 import { LLM_MODELS } from "./llm-models";
@@ -91,7 +91,7 @@ export function getModel(id: string): ModelDef | undefined {
 }
 
 export function getPreset(id: string): Preset | undefined {
-  return presetIndex.get(id);
+  return presetIndex.get(id) ?? (APP_ALIASES[id] ? presetIndex.get(APP_ALIASES[id]) : undefined);
 }
 
 export function modelsFor(opts: { kind?: MediaKind; ops?: Operation[]; engine?: Engine | "all" }): ModelDef[] {

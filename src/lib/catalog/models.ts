@@ -864,11 +864,11 @@ const open: ModelDef[] = [
     vendor: "Tencent",
     family: "hunyuan",
     kind: "video",
-    tagline: "48 kHz foley in sync with your clip, laid under the untouched picture · 12 GB GPU · licence excludes the EU, UK and South Korea",
+    tagline: "48 kHz foley in sync with your whole clip (up to 30 s), laid under the untouched picture · 12 GB GPU · licence excludes the EU, UK and South Korea",
     badges: ["new"],
-    routes: [comfy("v2a", "v2a-hunyuan-foley", "frames at 8 fps → HunyuanFoleySampler; picture stream-copied")],
-    options: { durations: [4, 8, 10, 15, 20, 30], seed: true, negativePrompt: true },
-    defaults: { duration: 8 },
+    // No length to pick: the sound is as long as the clip (the provider reads it from the MP4 header).
+    routes: [comfy("v2a", "v2a-hunyuan-foley", "frames at 8 fps → HunyuanFoleySampler; picture stream-copied; sound as long as the clip")],
+    options: { seed: true, negativePrompt: true },
   }),
   o({
     id: "oss-mmaudio-sfx",

@@ -104,6 +104,12 @@ const opt = (key: string, label: string, choices: [string, string][]): PresetOpt
   choices: choices.map(([l, p]) => ({ value: slug(l), label: l, prompt: p })),
 });
 
+/**
+ * Old app ids still stored on generations (their Reuse / Retry look the preset up by id): the app they
+ * became. The Virality Predictor app is the Hook Frame app since /virality took its name and URL.
+ */
+export const APP_ALIASES: Record<string, string> = { "app-virality-predictor": "app-hook-frame" };
+
 export const APPS: Preset[] = [
   // ---------------- Identity & people
   app({

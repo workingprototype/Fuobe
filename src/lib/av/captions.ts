@@ -148,7 +148,9 @@ export function burnRequest(o: { route: BurnRoute; video: string; cues: Cue[]; l
   const style = styleById(o.look.style);
   const color = o.look.color ?? style.color;
   const cues = upper(o.cues.filter((c) => c.text.trim()), style.upper);
-  const base = { feature: CAPTIONS_FEATURE, modelId: BURN_MODELS[o.route], op: "captions" as const, inputs: { video: o.video } };
+  // The feed names it by the style (Captions · Karaoke) rather than "Captions · VEED Subtitles".
+  const title = `Captions · ${o.route === "auto" ? "Quick karaoke" : style.name}`;
+  const base = { feature: CAPTIONS_FEATURE, modelId: BURN_MODELS[o.route], op: "captions" as const, inputs: { video: o.video }, title };
   if (o.route === "open") {
     if (!cues.length) throw new Error("There are no lines to burn in");
     return {

@@ -92,6 +92,15 @@ describe("caption style → burn params", () => {
     expect(CAPTION_STYLES.filter((s) => burnPricePerMinute("veed", s.id) === 0.2).map((s) => s.id)).toEqual(["karaoke", "boxed", "neon"]);
     expect(burnPricePerMinute("veed", "clean")).toBe(0.1);
     expect(burnPricePerMinute("open", "karaoke")).toBe(0);
+    // The feed names a burn by its style.
+    expect(burnRequest({ route: "open", video: "/v.mp4", cues, look: look({ style: "karaoke" }) }).title).toBe("Captions · Karaoke");
+    expect(burnRequest({ route: "auto", video: "/v.mp4", cues: [], look: look() }).title).toBe("Captions · Quick karaoke");
+  });
+
+  it("an old app id still finds its app (generations made before the rename keep Reuse and Retry)", () => {
+    expect(getPreset("app-virality-predictor")?.id).toBe("app-hook-frame");
+    expect(getPreset("app-hook-frame")?.name).toBe("Hook Frame");
+    expect(getPreset("app-nope")).toBeUndefined();
   });
 });
 

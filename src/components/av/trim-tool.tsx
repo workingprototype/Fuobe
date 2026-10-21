@@ -43,6 +43,7 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
         op: "trim",
         inputs: { video: video.ref },
         params: { startTime: Math.round(range[0] * 100) / 100, endTime: Math.round(range[1] * 100) / 100 },
+        title: `Trim · ${formatCueTime(range[0])}–${formatCueTime(range[1])}`,
       },
       { onSuccess: () => toast.success("Trimming"), onError: (e) => toast.error((e as Error).message) },
     );

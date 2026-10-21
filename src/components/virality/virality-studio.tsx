@@ -10,8 +10,8 @@ import { Progress } from "@/components/ui/progress";
 import type { SlotValue } from "@/components/studio/media-slot";
 import { MediaDrop } from "@/components/av/media-drop";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { uploadFile, useEngine } from "@/lib/api";
-import { HOOK_SECONDS, hookSignals, hookSummary, SILENCE_DB, VIRALITY_PARITY, type HookSignal, type SignalId, type Verdict } from "@/lib/av/virality";
+import { uploadFile } from "@/lib/api";
+import { HOOK_SECONDS, hookSignals, hookSummary, SILENCE_DB, TRIBE_WORKER, VIRALITY_PARITY, type HookSignal, type SignalId, type Verdict } from "@/lib/av/virality";
 import { cn } from "@/lib/utils";
 import { measureHook, type HookMeasure } from "./measure";
 
@@ -84,7 +84,7 @@ export function ViralityStudio() {
 }
 
 function ParityNote() {
-  const [engine] = useEngine();
+  // The page has no engine switch, so both routes are spelled out.
   return (
     <aside className="rounded-2xl border bg-muted/40 p-3 text-[13px] sm:p-4" aria-labelledby="virality-parity">
       <div className="flex items-start gap-2.5">
@@ -94,7 +94,33 @@ function ParityNote() {
             {VIRALITY_PARITY.title}
           </p>
           <p className="text-pretty text-muted-foreground">{VIRALITY_PARITY.body}</p>
-          <p className="text-pretty text-muted-foreground">{engine === "open" ? VIRALITY_PARITY.open : VIRALITY_PARITY.cloud}</p>
+          <p className="text-pretty text-muted-foreground">{VIRALITY_PARITY.cloud}</p>
+          <p className="text-pretty text-muted-foreground">{VIRALITY_PARITY.open}</p>
+          <details className="group pt-1">
+            <summary className="cursor-pointer text-[12px] font-medium text-foreground marker:text-muted-foreground">Run TRIBE v2 yourself (non-commercial)</summary>
+            <div className="mt-2 space-y-2 text-[12px] text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Worker:</span> <span className="font-mono break-words">{TRIBE_WORKER.endpoint}</span>
+              </p>
+              <div>
+                <p className="font-medium text-foreground">It returns</p>
+                <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                  {TRIBE_WORKER.output.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="font-medium text-foreground">It needs</p>
+                <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
+                  {TRIBE_WORKER.needs.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              </div>
+              <p>{TRIBE_WORKER.status} The full contract is in docs/workers/tribe-v2.md.</p>
+            </div>
+          </details>
         </div>
       </div>
     </aside>

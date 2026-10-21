@@ -493,12 +493,18 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     if (input.endTime !== undefined && input.endTime <= start) throw new ProviderError("The end time must be after the start time");
     if (clipLength && start >= clipLength) throw new ProviderError(`The start time is past the end of the clip (it is ${seconds(clipLength)} s long)`);
   }
-  const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : input.duration;
+  // Sound for a video with no length asked for: as long as the clip (up to 30 s, and what the frame cap holds).
+  const soundLength =
+    ctx.op === "v2a" && b.duration && input.endTime === undefined && !input.duration && clipLength
+      ? Math.min(30, Number(manifest.limits?.maxFrames ?? Infinity) / fps, Math.ceil(clipLength * 10) / 10)
+      : undefined;
+  const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : (input.duration ?? soundLength);
   if (b.startTime && input.startTime !== undefined) values.startTime = start;
   if (b.startFrame && input.startTime !== undefined) values.startFrame = Math.round(start * fps);
   if (b.duration) {
     if (input.endTime !== undefined) values.duration = span;
     else if (input.duration) values.duration = input.duration;
+    else if (soundLength) values.duration = soundLength;
     else if (ctx.op === "trim") values.duration = 0; // from the start time to the end
   }
   if (b.width || b.height) {

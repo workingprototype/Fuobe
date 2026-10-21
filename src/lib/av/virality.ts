@@ -27,6 +27,23 @@ export const VIRALITY_PARITY = {
   open: "Open engine: TRIBE v2 can run on your own GPU as an optional, non-commercial worker; Fuobe doesn't bundle it.",
 };
 
+/** The optional TRIBE v2 worker's contract (docs/workers/tribe-v2.md), as the page summarises it. */
+export const TRIBE_WORKER = {
+  endpoint: "POST {TRIBE_URL}/analyze · multipart field “video” (MP4, up to 60 s)",
+  output: [
+    "engagement: one value per second, 0–100",
+    "peak_t / peak_val: the strongest second",
+    "hook_score: mean engagement over 0–3 s",
+    "regions: visual, attention, auditory, language and default mode (focus drift, lower is better), per second",
+  ],
+  needs: [
+    "facebook/tribev2 weights — CC BY-NC 4.0, non-commercial use only",
+    "Llama-3.2-3B (gated on Hugging Face: accept Meta's licence, give the worker a token)",
+    "V-JEPA2 and Wav2Vec-BERT (TRIBE v2's video and audio encoders) on your own GPU",
+  ],
+  status: "Documented only: Fuobe has no TRIBE_URL setting yet, so this page keeps its browser heuristics.",
+};
+
 export type Verdict = "strong" | "ok" | "weak" | "unknown";
 
 export type SignalId = "motion" | "change" | "faces" | "text" | "sound" | "contrast" | "format";
