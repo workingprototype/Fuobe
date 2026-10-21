@@ -163,7 +163,7 @@ describe("open joins keep the voice", () => {
 describe("the sound-keeping join workflows", () => {
   it("are in the library, validated, and bind every clip, the size and the frame rate", async () => {
     const byId = new Map(loadManifest().workflows.map((w) => [w.id, w]));
-    for (const id of ["video-concat-sound1-2", "video-concat-sound1-3", "video-concat-sound2-2", "video-concat-sound2-3"]) {
+    for (const id of ["video-concat-sound1-2", "video-concat-sound1-3", "video-concat-sound1-4", "video-concat-sound2-2", "video-concat-sound2-3", "video-concat-sound2-4"]) {
       expect(byId.get(id)?.validated, id).toBe(true);
       expect(byId.get(id)?.defaults.fps, id).toBe(25);
     }

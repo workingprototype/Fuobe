@@ -1571,7 +1571,7 @@ export const SPEC = [
   })),
   // ---- marketing (Wave B): join clips and keep one clip's sound (UGC presenter, Click to Ad, Ad Multiplier) ----
   ...[1, 2].flatMap((sound) =>
-    [2, 3].map((n) => ({
+    [2, 3, 4].map((n) => ({
       id: `video-concat-sound${sound}-${n}`,
       title: `Join ${n} clips at one frame rate, keeping clip ${sound}'s sound${sound === 2 ? ' (it starts where clip 1 ends)' : ''}`,
       capability: 'concat',
