@@ -52,22 +52,29 @@ export function unzip(buf: Buffer, limits: { maxEntries?: number; maxFileBytes?:
     p += 46 + nameLen + extraLen + commentLen;
     if (name.endsWith("/")) continue;
     if (flags & 0x1) throw new ZipError("The archive is password-protected");
-    if (size > maxFile) throw new ZipError(`${name} is over ${Math.round(maxFile / 1_000_000)} MB`);
-    total += size;
-    if (total > maxTotal) throw new ZipError(`The archive unpacks to more than ${Math.round(maxTotal / 1_000_000)} MB`);
+    const tooBig = () => new ZipError(`${name} is over ${Math.round(maxFile / 1_000_000)} MB`);
+    const tooMuch = () => new ZipError(`The archive unpacks to more than ${Math.round(maxTotal / 1_000_000)} MB`);
+    // The declared size rejects honest big archives early; the bytes actually inflated (below) are what count.
+    if (size > maxFile) throw tooBig();
+    if (total + size > maxTotal) throw tooMuch();
     if (local + 30 > buf.length || buf.readUInt32LE(local) !== LOCAL) throw new ZipError("The archive is damaged (local header)");
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
     const raw = buf.subarray(start, start + compressed);
     let data: Buffer;
     if (method === 0) data = Buffer.from(raw);
     else if (method === 8) {
+      // Never inflate past what's left of either cap, whatever the headers claim.
+      const room = Math.min(maxFile, maxTotal - total);
       try {
-        data = zlib.inflateRawSync(raw, { maxOutputLength: maxFile + 1 });
-      } catch {
+        data = zlib.inflateRawSync(raw, { maxOutputLength: room + 1 });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ERR_BUFFER_TOO_LARGE") throw room < maxFile ? tooMuch() : tooBig();
         throw new ZipError(`Couldn't unpack ${name}`);
       }
     } else throw new ZipError(`${name} uses a compression method Fuobe can't read (${method})`);
-    if (data.length > maxFile) throw new ZipError(`${name} is over ${Math.round(maxFile / 1_000_000)} MB`);
+    if (data.length > maxFile) throw tooBig();
+    total += data.length;
+    if (total > maxTotal) throw tooMuch();
     out.push({ name, data });
   }
   return out;

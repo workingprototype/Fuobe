@@ -5,7 +5,7 @@ import { getSkill, skillFile } from "../skills";
 import { canUseSkill, skillsFor } from "./context";
 import { defineTool } from "./define";
 import { addMemory, deleteMemory } from "./memory";
-import { getProject, sourceText } from "./projects";
+import { getProject, listProjects, sourceText } from "./projects";
 
 /** Tools for Skills, Memory and Projects (Supercomputer's "load skill", "use and update memory", "project assets"). */
 
@@ -95,15 +95,30 @@ const remember = defineTool({
 
 const readSource = defineTool({
   name: "read_source",
-  description: "Read the full text of one of this project's sources (a page, a document, a note) by the id shown in the project's source list. Only works inside a project.",
+  description:
+    "Read the full text of one of this project's sources (a page, a document, a note) by the id shown in the project's source list. Only works inside a project. Over MCP (no chat), pass project_id too; leave out id to list the projects and their sources.",
   schema: z.object({
-    id: z.string().describe("The source id from the context, e.g. Ab3dE9xK1q."),
+    id: z.string().optional().describe("The source id from the context, e.g. Ab3dE9xK1q."),
+    project_id: z.string().optional().describe("Over MCP only: the project the source belongs to (a chat always reads its own project)."),
   }),
-  async run({ id }, ctx) {
-    const projectId = ctx.thread?.projectId;
-    if (!projectId || !getProject(projectId)) return { content: "This chat isn't in a project, so it has no sources.", isError: true };
-    const s = sourceText(projectId, id.replace(/^\[|\]$/g, ""));
-    if (!s) return { content: `No source ${id} in this project.`, isError: true };
+  async run({ id, project_id }, ctx) {
+    // A chat reads only its own project's sources; MCP names the project.
+    const projectId = ctx.thread ? ctx.thread.projectId : project_id?.trim() || null;
+    const project = projectId ? getProject(projectId) : null;
+    const sourceId = id?.replace(/^\[|\]$/g, "").trim();
+    if (!ctx.thread && (!project || !sourceId)) {
+      if (projectId && !project) return { content: `No project ${projectId}. Call read_source without arguments to list them.`, isError: true };
+      const list = project ? [project] : listProjects();
+      return {
+        content: JSON.stringify(
+          list.map((p) => ({ project_id: p.id, name: p.name, sources: p.sources.map((x) => ({ id: x.id, kind: x.kind, title: x.title, ...(x.url && { url: x.url }), ...(x.chars && { chars: x.chars }), ...(x.status === "error" && { error: x.error }) })) })),
+        ),
+      };
+    }
+    if (!project) return { content: "This chat isn't in a project, so it has no sources.", isError: true };
+    if (!sourceId) return { content: `Pass the id of a source: ${project.sources.map((x) => `${x.id} (${x.title})`).join(", ") || "this project has none"}.`, isError: true };
+    const s = sourceText(project.id, sourceId);
+    if (!s) return { content: `No source ${sourceId} in this project.`, isError: true };
     if (!s.text) return { content: JSON.stringify({ title: s.source.title, kind: s.source.kind, url: s.source.url, note: s.source.error ?? "This source has no text: pass its URL as an input instead." }) };
     return {
       content: `# ${s.source.title}${s.source.url ? `\n${s.source.url}` : ""}\n\n${s.text}`,

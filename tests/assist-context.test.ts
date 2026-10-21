@@ -410,6 +410,23 @@ describe("MCP", () => {
     const ls = (await rpc("tools/call", { name: "load_skill", arguments: { name: "narration" } })) as { result: { content: { text: string }[] } };
     expect(ls.result.content[0].text).toMatch(/^# Narration \(\/narration\)/);
   });
+
+  it("read_source over MCP lists the projects' sources, then reads one by project and id", async () => {
+    const p = projects.createProject({ name: "MCP brief" });
+    const note = await projects.addSource(p.id, { kind: "text", text: "Tone\nWarm and plain." });
+    type Call = { result: { content: { text: string }[]; isError: boolean } };
+    const listed = (await rpc("tools/call", { name: "read_source", arguments: {} })) as Call;
+    expect(listed.result.isError).toBe(false);
+    const all = JSON.parse(listed.result.content[0].text) as { project_id: string; sources: { id: string; title: string }[] }[];
+    expect(all.find((x) => x.project_id === p.id)?.sources).toEqual([expect.objectContaining({ id: note.id, title: "Tone" })]);
+    const read = (await rpc("tools/call", { name: "read_source", arguments: { project_id: p.id, id: note.id } })) as Call;
+    expect(read.result.isError).toBe(false);
+    expect(read.result.content[0].text).toMatch(/^# Tone[\s\S]*Warm and plain\.$/);
+    expect(await rpc("tools/call", { name: "read_source", arguments: { project_id: "nope", id: note.id } })).toMatchObject({ result: { isError: true } });
+    // In a chat outside a project there is still nothing to read, whatever project_id says.
+    const chat = await tools.executeTool("read_source", { id: note.id, project_id: p.id }, { engine: "cloud", thread: { id: "t", projectId: null, skills: [], loadSkill: () => {} } });
+    expect(chat).toMatchObject({ isError: true, content: expect.stringMatching(/isn't in a project/) });
+  });
 });
 
 const video = "/api/files/uploads/2026-10-19/clip.mp4";

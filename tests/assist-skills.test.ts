@@ -2,6 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   contextUpdate,
@@ -269,6 +270,44 @@ describe("skills on the server", () => {
   it("caps what an archive may unpack to", () => {
     const big = zipStored([{ name: "SKILL.md", data: Buffer.alloc(3_000_000, 65) }]);
     expect(() => unzip(big)).toThrow(/over 2 MB/);
+  });
+
+  it("counts the bytes it inflates, not the sizes the headers claim", () => {
+    // A crafted archive: 10 deflated entries of 1.5 MB each that all claim to be 10 bytes.
+    const entries = Array.from({ length: 10 }, (_, k) => ({ name: Buffer.from(`f${k}.md`), data: zlib.deflateRawSync(Buffer.alloc(1_500_000, 65)) }));
+    const parts: Buffer[] = [];
+    const central: Buffer[] = [];
+    let offset = 0;
+    for (const e of entries) {
+      const lh = Buffer.alloc(30);
+      lh.writeUInt32LE(0x04034b50, 0);
+      lh.writeUInt16LE(8, 8);
+      lh.writeUInt32LE(e.data.length, 18);
+      lh.writeUInt32LE(10, 22);
+      lh.writeUInt16LE(e.name.length, 26);
+      const ch = Buffer.alloc(46);
+      ch.writeUInt32LE(0x02014b50, 0);
+      ch.writeUInt16LE(8, 10);
+      ch.writeUInt32LE(e.data.length, 20);
+      ch.writeUInt32LE(10, 24);
+      ch.writeUInt16LE(e.name.length, 28);
+      ch.writeUInt32LE(offset, 42);
+      parts.push(lh, e.name, e.data);
+      central.push(ch, e.name);
+      offset += 30 + e.name.length + e.data.length;
+    }
+    const dir = Buffer.concat(central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(dir.length, 12);
+    end.writeUInt32LE(offset, 16);
+    const bomb = Buffer.concat([...parts, dir, end]);
+    expect(bomb.length).toBeLessThan(100_000);
+    expect(() => unzip(bomb)).toThrow(/unpacks to more than 8 MB/);
+    expect(unzip(bomb, { maxTotalBytes: 20_000_000 })).toHaveLength(10);
+    expect(() => unzip(bomb, { maxFileBytes: 1_000_000 })).toThrow(/f0\.md is over 1 MB/);
   });
 });
 
