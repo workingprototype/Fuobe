@@ -210,6 +210,31 @@ describe("brand kits", () => {
     expect((await productRoute.DELETE(json("DELETE"), params({ id: p.id }))).status).toBe(204);
   });
 
+  it("reads a product link on a new site into a new brand kit named after the product's brand", async () => {
+    // A second shop (another host:port): no kit yet, so one is made from the page.
+    const other = http.createServer((req, res) => {
+      const body = req.url === "/products/barrier-cream" ? local(fx("product-page.html")) : req.url?.endsWith(".jpg") ? PNG : "";
+      res.writeHead(body ? 200 : 404, { "Content-Type": req.url?.endsWith(".jpg") ? "image/jpeg" : "text/html" });
+      res.end(body);
+    });
+    await new Promise<void>((r) => other.listen(0, "127.0.0.1", r));
+    try {
+      const url = `http://127.0.0.1:${(other.address() as AddressInfo).port}/products/barrier-cream`;
+      const r = await (await readRoute.POST(json("POST", { url, withBrand: true }))).json();
+      expect(r.products[0]).toMatchObject({ name: "Barrier Cream", brandId: r.brandId });
+      const kit = brand.getBrand(r.brandId)!;
+      expect(kit).toMatchObject({ name: "Dew Theory", status: "ready", source: "website" });
+      expect(kit.website).toBe(new URL(url).origin + "/");
+      // The same link again is a duplicate in that kit, not a second product.
+      const again = await (await readRoute.POST(json("POST", { url, withBrand: true }))).json();
+      expect(again.duplicate?.name).toBe("Barrier Cream");
+      expect(brand.listProducts(r.brandId)).toHaveLength(1);
+      brand.deleteBrand(r.brandId);
+    } finally {
+      other.close();
+    }
+  });
+
   it("keeps a product page's logo and colours in the site's brand kit (made once, then matched by host)", () => {
     const bits = { name: "Dew Theory", logo: upload("logo.png"), colors: ["#112233", "#445566"], fonts: { heading: "Fraunces" } };
     const made = brand.kitForSite("https://www.dewtheory.example/products/barrier-cream", bits);

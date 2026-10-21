@@ -1308,7 +1308,7 @@ export interface LinkRead {
 
 const siteHost = (url: string | undefined) => {
   try {
-    return url ? new URL(url).hostname.replace(/^www\./, "").toLowerCase() : "";
+    return url ? new URL(url).host.replace(/^www\./, "").toLowerCase() : "";
   } catch {
     return "";
   }
@@ -1390,7 +1390,9 @@ export async function readProductLink(input: { url: string; brandId?: string | n
         ? saveFile({ data: Buffer.from(facts.svgLogo), contentType: "image/svg+xml", name: `${facts.host}-logo.svg`, source: "upload" }).url
         : await firstSaved(facts.logos, { allowSvg: true, minBytes: 300 });
       const f = extractFonts(page.text, css);
-      brand = { name: facts.organization?.name ?? facts.name, logo: logo ?? undefined, colors: extractColors(css, facts.themeColor), fonts: { heading: f.heading, body: f.body } };
+      // A product page's title is the product ("Dew Theory Barrier Cream – 50 ml"): the product's own brand names the kit first.
+      const productBrand = drafts.find((d) => d.brand)?.brand;
+      brand = { name: facts.organization?.name ?? productBrand ?? facts.name, logo: logo ?? undefined, colors: extractColors(css, facts.themeColor), fonts: { heading: f.heading, body: f.body } };
     }
     // A product read with its brand (and no brand chosen) joins the kit for that site, made now if there's none,
     // so the logo and colours stay with the product and reach every flow that uses it.
