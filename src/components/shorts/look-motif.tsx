@@ -63,7 +63,7 @@ const MOTIFS: Record<string, Motif> = {
   "mixed-layer-mixed-media": { kind: "collage" },
   "mixed-sketch": { kind: "pencil" },
   "mixed-canvas": { kind: "watercolor" },
-  "mixed-flash-comic": { kind: "burst", text: "FLASH" },
+  "mixed-flash-comic": { kind: "burst", text: "WHAM" },
   "mixed-overexposed": { kind: "grade", filter: "brightness(1.45) contrast(1.25) saturate(0.8)" },
   "mixed-paper": { kind: "paper" },
   "mixed-noir": { kind: "noir" },
@@ -72,9 +72,9 @@ const MOTIFS: Record<string, Motif> = {
   "mixed-tracking": { kind: "tracking" },
   "mixed-windows": { kind: "desktop" },
   "mixed-acid": { kind: "grade", filter: "hue-rotate(110deg) saturate(2.2) contrast(1.2)" },
-  "mixed-palette": { kind: "collage" },
+  "mixed-palette": { kind: "watercolor" },
   "mixed-comic": { kind: "comic", text: "POW!" },
-  "mixed-multiverse": { kind: "fragments" },
+  "mixed-multiverse": { kind: "grade", filter: "hue-rotate(140deg) saturate(1.6) contrast(1.1)" },
   "mixed-fragments": { kind: "fragments" },
   "mixed-vintage": { kind: "paper" },
   "mixed-magazine": { kind: "magazine" },
@@ -83,14 +83,14 @@ const MOTIFS: Record<string, Motif> = {
   "mixed-marble": { kind: "marble" },
   "mixed-toxic": { kind: "grade", filter: "hue-rotate(80deg) saturate(2.4) contrast(1.3)" },
   "mixed-ultraviolet": { kind: "grade", filter: "hue-rotate(250deg) saturate(1.8) contrast(1.2) brightness(0.9)" },
-  "mixed-akrill": { kind: "collage" },
+  "mixed-akrill": { kind: "pop" },
   "mixed-two-color": { kind: "grade", filter: "grayscale(1) contrast(2.2)" },
   "mixed-origami": { kind: "origami" },
   "mixed-random-glow": { kind: "particles" },
-  "mixed-cannabis": { kind: "magazine" },
+  "mixed-cannabis": { kind: "grade", filter: "hue-rotate(85deg) saturate(1.7) contrast(1.1) blur(0.6px)" },
   "mixed-bubbles": { kind: "bubbles" },
   "mixed-cold-vision": { kind: "grade", filter: "hue-rotate(190deg) saturate(1.3) contrast(1.25) brightness(0.92)" },
-  "mixed-modern": { kind: "origami" },
+  "mixed-modern": { kind: "grade", filter: "saturate(0.35) contrast(1.15) brightness(1.1)" },
   "mixed-lava": { kind: "grade", filter: "sepia(0.6) hue-rotate(-30deg) saturate(2.2) contrast(1.2)" },
   "mixed-ocean": { kind: "grade", filter: "sepia(0.3) hue-rotate(160deg) saturate(1.6)" },
 };
@@ -123,7 +123,7 @@ const grain = (u: string) => (
 );
 
 function TypeMotif({ style, text, hue, u }: { style: Extract<Motif, { kind: "type" }>["style"]; text: string; hue: number; u: string }) {
-  const font = { fontFamily: "var(--font-heading, system-ui), system-ui, sans-serif", fontWeight: 900 } as const;
+  const font = { fontFamily: "var(--font-sans, system-ui), system-ui, sans-serif", fontWeight: 900 } as const;
   if (style === "sticker")
     return (
       <Svg>
@@ -189,7 +189,7 @@ function TypeMotif({ style, text, hue, u }: { style: Extract<Motif, { kind: "typ
   return (
     <Svg>
       {words.map((w, i) => (
-        <text key={w} x="40" y={30 + i * 16} textAnchor="middle" fontSize="17" textLength="66" lengthAdjust="spacingAndGlyphs" fill={i === 1 ? ink(hue, 0.85, 0.2) : "#fff"} opacity="0.95" style={{ ...font, letterSpacing: -0.5 }}>
+        <text key={w} x="40" y={30 + i * 17} textAnchor="middle" fontSize="15" textLength="64" lengthAdjust="spacingAndGlyphs" fill={i === 1 ? ink(hue, 0.85, 0.2) : "#fff"} opacity="0.95" style={{ ...font, letterSpacing: -0.5 }}>
           {w}
         </text>
       ))}

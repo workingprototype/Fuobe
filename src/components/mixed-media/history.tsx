@@ -72,6 +72,8 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
           const out = g.status === "succeeded" ? g.outputs.find((o) => o.kind === "video") : undefined;
           const state = chainState(renderSteps(chain));
           const retrying = actions.retry.isPending && actions.retry.variables?.id === g.id;
+          const heading = g.status === "canceled" ? "Canceled" : state.status === "failed" ? state.label : "Couldn't render this one";
+          const reason = state.error ?? g.error;
           return (
             <div key={g.id} className="min-w-0">
               <div className="relative aspect-square overflow-hidden rounded-xl bg-muted">
@@ -83,8 +85,8 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
                   <PendingTile g={state.status === "working" ? (chain.find((x) => x.status !== "succeeded") ?? g) : g} ratio={1} />
                 ) : (
                   <div className="flex size-full flex-col justify-center gap-1 border border-dashed p-3">
-                    <p className="text-[13px] font-medium">{g.status === "canceled" ? "Canceled" : state.status === "failed" ? state.label : "Couldn't render this one"}</p>
-                    {(state.error ?? g.error) && <p className="line-clamp-4 text-[12px] break-words text-muted-foreground">{state.error ?? g.error}</p>}
+                    <p className="text-[13px] font-medium">{heading}</p>
+                    {reason && reason !== heading && <p className="line-clamp-4 text-[12px] break-words text-muted-foreground">{reason}</p>}
                     <button
                       type="button"
                       onClick={() => retry(g.id)}
