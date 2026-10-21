@@ -394,6 +394,29 @@ describe("studio tools", () => {
   });
 });
 
+describe("a project's assets", () => {
+  it("are the finished results of its chats, newest first, with the chat each came from", async () => {
+    const p = projects.createProject({ name: "Assets project" });
+    const t = agent.createThread({ engine: "cloud", agent: "offline", projectId: p.id, autoApprove: true });
+    agent.addMessage(t.id, "Two stills of a red kite");
+    const gen = { summary: "Kites", jobs: [{ model_id: "nano-banana-pro", prompt: "a red kite", outputs: 2 }] };
+    await agent.run(t.id, scripted(reply([use("u1", "generate", gen)], "tool_use"), reply([text("Started.")], "end_turn")).call);
+    const ids = agent.getThread(t.id)!.thread.items.flatMap((i) => (i.role === "generations" ? i.ids : []));
+    expect(ids.length).toBeGreaterThan(0);
+    // Not finished yet: nothing to show.
+    db().prepare("UPDATE generations SET status = 'running' WHERE id IN (" + ids.map(() => "?").join(",") + ")").run(...ids);
+    expect(agent.projectAssets(p.id)).toEqual([]);
+    db()
+      .prepare("UPDATE generations SET status = 'succeeded', outputs_json = ? WHERE id = ?")
+      .run(JSON.stringify([{ url: "/samples/previews/city.svg", contentType: "image/svg+xml" }]), ids[0]);
+    const assets = agent.projectAssets(p.id);
+    expect(assets).toHaveLength(1);
+    expect(assets[0]).toMatchObject({ chatId: t.id, chatTitle: "Two stills of a red kite", generation: { id: ids[0], status: "succeeded" } });
+    // A chat outside the project doesn't count.
+    expect(agent.projectAssets("nope")).toEqual([]);
+  });
+});
+
 describe("MCP", () => {
   const rpc = (method: string, params?: unknown) => handleMcp({ jsonrpc: "2.0", id: 7, method, params });
 

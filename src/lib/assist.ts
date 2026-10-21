@@ -536,6 +536,10 @@ export const PROJECT_COLORS = ["iris", "sky", "teal", "lime", "amber", "rose", "
 export type ProjectColor = (typeof PROJECT_COLORS)[number];
 /** Hues for the project swatches (oklch), matching the Library's folder colours. */
 export const PROJECT_HUE: Record<ProjectColor, number> = { iris: 280, sky: 230, teal: 185, lime: 130, amber: 75, rose: 15, slate: 260 };
+/** The swatch colours: the same lightness for all, and slate nearly grey (a low chroma) so it doesn't read as another blue. */
+export const PROJECT_SWATCH: Record<ProjectColor, string> = Object.fromEntries(
+  Object.entries(PROJECT_HUE).map(([c, h]) => [c, `oklch(0.68 ${c === "slate" ? 0.025 : 0.13} ${h})`]),
+) as Record<ProjectColor, string>;
 
 export type SourceKind = "link" | "file" | "image" | "video" | "audio" | "element" | "text";
 

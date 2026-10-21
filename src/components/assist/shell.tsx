@@ -1,30 +1,20 @@
 "use client";
 
-import { Brain, FolderPlus, MessageSquarePlus, MessagesSquare, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Brain, FolderPlus, MessageSquarePlus, MessagesSquare, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useDeferredValue, useState } from "react";
-import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PROJECT_HUE, type AssistProject, type AssistThreadSummary } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useChatActions, useChats, useProjects } from "./hooks";
+import { ChatMenu } from "./chat-menu";
+import { useChats, useProjects } from "./hooks";
 import { ProjectDialog } from "./project-dialog";
+import { ProjectDot } from "./project-dot";
 
 /**
  * Assist's own sidebar (Supercomputer's): New chat, Search, Skills, Memory, Projects and Chats.
@@ -58,7 +48,7 @@ export function RailButton({ className }: { className?: string }) {
         <TooltipContent>Chats, projects, skills and memory</TooltipContent>
       </Tooltip>
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="w-[min(86vw,320px)] gap-0 p-0" aria-describedby={undefined}>
+        <SheetContent side="left" className="w-[min(86vw,320px)] gap-0 p-0" aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
           <SheetTitle className="sr-only">Assist</SheetTitle>
           <SheetDescription className="sr-only">Chats, projects, skills and memory</SheetDescription>
           <Suspense fallback={<RailSkeleton />}>
@@ -95,9 +85,7 @@ function RailLink({ href, icon: Icon, label, active, onNavigate }: { href: strin
   );
 }
 
-export function ProjectDot({ project, className }: { project: Pick<AssistProject, "color">; className?: string }) {
-  return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full bg-[oklch(0.68_0.13_var(--p-hue))]", className)} style={{ "--p-hue": PROJECT_HUE[project.color] } as React.CSSProperties} />;
-}
+export { ProjectDot };
 
 function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname() ?? "";
@@ -108,23 +96,11 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
   const q = useDeferredValue(query.trim());
   const chats = useChats(q ? { q } : { project: "none" });
   const projects = useProjects();
-  const actions = useChatActions();
   const [creating, setCreating] = useState(false);
-  const [doomed, setDoomed] = useState<AssistThreadSummary | null>(null);
-
-  const remove = async (t: AssistThreadSummary) => {
-    try {
-      await actions.remove(t.id);
-      if (t.id === current) router.replace("/assist", { scroll: false });
-      toast("Chat deleted", { duration: 1500 });
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="space-y-2 p-3 pb-2">
+      <div className={cn("space-y-2 p-3 pb-2", onNavigate && "pt-12")}>
         <Button asChild variant="outline" className="h-9 w-full justify-start rounded-full">
           <Link href="/assist" onClick={onNavigate}>
             <MessageSquarePlus /> New chat
@@ -220,13 +196,11 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
                         </span>
                       )}
                     </Link>
-                    <button
-                      onClick={() => setDoomed(t)}
-                      className="absolute top-1/2 right-1 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-100 hover:text-destructive focus-visible:opacity-100 sm:opacity-0 sm:group-hover/chat:opacity-100"
-                      aria-label={`Delete ${t.title}`}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    <ChatMenu
+                      chat={t}
+                      onDeleted={() => t.id === current && router.replace("/assist", { scroll: false })}
+                      className="absolute top-1/2 right-1 size-7 -translate-y-1/2 opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 sm:opacity-0 sm:group-hover/chat:opacity-100"
+                    />
                   </li>
                 );
               })}
@@ -236,20 +210,6 @@ function Rail({ onNavigate }: { onNavigate?: () => void }) {
           )}
         </section>
       </div>
-      <AlertDialog open={!!doomed} onOpenChange={(o) => !o && setDoomed(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
-            <AlertDialogDescription>“{doomed?.title}” and its messages are removed. Everything it made stays in your Library.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => doomed && void remove(doomed)}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <ProjectDialog
         open={creating}
         onOpenChange={setCreating}

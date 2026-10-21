@@ -15,6 +15,7 @@ import {
   type AssistModeChoice,
 } from "@/lib/assist";
 import { cn } from "@/lib/utils";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 
 const KEY = "fuobe:assist-mode";
 
@@ -74,24 +75,96 @@ export function modeChipLabel(c: AssistModeChoice | null, can?: AssistAvailabili
 
 const MODE_ICON = { smart: Sparkles, free: Cpu, manual: Gauge } as const;
 
-/** Supercomputer's Free / Smart / Manual, on Fuobe's agents (Claude, Ollama, the offline planner). */
-export function ModePicker({ value, onChange, availability: can, disabled }: { value: AssistModeChoice | null; onChange: (c: AssistModeChoice) => void; availability?: AssistAvailability; disabled?: boolean }) {
+const sameChoice = (a: AssistModeChoice | null, b: AssistModeChoice | null) =>
+  (a?.mode ?? null) === (b?.mode ?? null) && (a?.agent ?? null) === (b?.agent ?? null) && (a?.model ?? null) === (b?.model ?? null) && (a?.effort ?? null) === (b?.effort ?? null);
+
+interface ModelOption {
+  key: string;
+  on: boolean;
+  disabled?: boolean;
+  pick: Partial<AssistModeChoice>;
+  icon: typeof Bot;
+  title: React.ReactNode;
+  hint: string;
+}
+
+/**
+ * Supercomputer's Free / Smart / Manual, on Fuobe's agents (Claude, Ollama, the offline planner).
+ * With `applyOnClose` (an existing chat) choices are kept in the menu and sent once when it
+ * closes, so trying the tabs doesn't switch the chat at every click. Smart needs Claude: without
+ * an Anthropic key it can't be picked (and a saved Smart shows as the Free it runs as).
+ */
+export function ModePicker({
+  value,
+  onChange,
+  availability: can,
+  disabled,
+  applyOnClose,
+}: {
+  value: AssistModeChoice | null;
+  onChange: (c: AssistModeChoice) => void;
+  availability?: AssistAvailability;
+  disabled?: boolean;
+  applyOnClose?: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const mode = value?.mode ?? can?.defaultMode ?? "smart";
+  const [draft, setDraft] = useState<AssistModeChoice | null>(null);
+  const shown = (applyOnClose && open ? draft : null) ?? value;
+  const smartOff = !!can && !can.claude;
+  const picked = shown?.mode ?? can?.defaultMode ?? "smart";
+  const mode = picked === "smart" && smartOff ? "free" : picked;
+  // The label, its aria-label and the icon all come from this one resolved value.
+  const resolved: AssistModeChoice = { ...(shown ?? {}), mode };
+  const label = modeChipLabel(resolved, can);
   const Icon = MODE_ICON[mode];
-  const agent: AssistAgent = value?.agent ?? "claude";
-  const set = (patch: Partial<AssistModeChoice>) => onChange({ ...(value ?? { mode }), ...patch } as AssistModeChoice);
+  const agent: AssistAgent = shown?.agent ?? "claude";
+  const set = (patch: Partial<AssistModeChoice>) => {
+    const next = { ...resolved, ...patch } as AssistModeChoice;
+    if (applyOnClose) setDraft(next);
+    else onChange(next);
+  };
+  const onOpenChange = (o: boolean) => {
+    if (o) setDraft(value);
+    else if (applyOnClose && draft && !sameChoice(draft, value)) onChange(draft);
+    setOpen(o);
+  };
+  const pending = applyOnClose && open && draft && !sameChoice(draft, value);
+
+  const models: ModelOption[] = [
+    ...CLAUDE_MODELS.map((m) => ({
+      key: m.id,
+      on: agent === "claude" && (shown?.model ?? DEFAULT_CLAUDE_MODEL) === m.id,
+      disabled: !can?.claude,
+      pick: { agent: "claude" as const, model: m.id },
+      icon: Bot,
+      title: <span className="block text-[13px] font-medium">{m.label}</span>,
+      hint: m.hint,
+    })),
+    ...(can?.ollamaModels.length ? can.ollamaModels : can?.ollama ? [can.ollamaModel] : []).map((name) => ({
+      key: `ollama:${name}`,
+      on: agent === "ollama" && (shown?.model ?? can?.ollamaModel) === name,
+      pick: { agent: "ollama" as const, model: name, effort: null },
+      icon: Cpu,
+      title: <span className="block truncate font-mono text-[12px]">{name}</span>,
+      hint: "Local, through Ollama · free",
+    })),
+    { key: "offline", on: agent === "offline", pick: { agent: "offline", model: null, effort: null }, icon: Gauge, title: <span className="block text-[13px] font-medium">Offline planner</span>, hint: "Rules, no LLM — simple requests only" },
+  ];
+  // One Tab stop per group: the picked option, or the first one that can be picked.
+  const modelStop = models.find((m) => m.on && !m.disabled)?.key ?? models.find((m) => !m.disabled)?.key;
+  const effort = shown?.effort ?? DEFAULT_EFFORT;
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
           disabled={disabled}
           className="inline-flex h-8 max-w-[11rem] shrink-0 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground transition-colors hover:bg-accent disabled:opacity-50"
-          aria-label={`Mode: ${modeChipLabel(value, can)}`}
+          aria-label={`Mode: ${label}`}
         >
           <Icon className="size-3.5 shrink-0" />
-          <span className="truncate">{modeChipLabel(value ?? { mode }, can)}</span>
+          <span className="truncate">{label}</span>
           <ChevronDown className="size-3 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -105,28 +178,34 @@ export function ModePicker({ value, onChange, availability: can, disabled }: { v
             , so every chat uses the offline planner.
           </p>
         )}
-        <div role="radiogroup" aria-label="Mode" className="grid grid-cols-3 gap-1 rounded-full bg-muted p-0.5">
-          {ASSIST_MODES.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="radio"
-              aria-checked={mode === m.id}
-              onClick={() => set({ mode: m.id, ...(m.id === "manual" && !value?.agent && { agent: can?.claude ? "claude" : can?.ollama ? "ollama" : "offline" }) })}
-              className={cn("h-8 rounded-full text-[13px] font-medium transition-colors", mode === m.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground")}
-            >
-              {m.label}
-            </button>
-          ))}
+        <div role="radiogroup" aria-label="Mode" onKeyDown={radioKeys} className="grid grid-cols-3 gap-1 rounded-full bg-muted p-0.5">
+          {ASSIST_MODES.map((m) => {
+            const off = m.id === "smart" && smartOff;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="radio"
+                aria-checked={mode === m.id}
+                tabIndex={radioTab(mode === m.id)}
+                disabled={off}
+                title={off ? "Needs an Anthropic API key (Settings)" : undefined}
+                onClick={() => set({ mode: m.id, ...(m.id === "manual" && !shown?.agent && { agent: can?.claude ? "claude" : can?.ollama ? "ollama" : "offline" }) })}
+                className={cn("h-8 rounded-full text-[13px] font-medium transition-colors disabled:opacity-45", mode === m.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground enabled:hover:text-foreground")}
+              >
+                {m.label}
+              </button>
+            );
+          })}
         </div>
         <p className="mt-2 px-1 text-[12px] text-muted-foreground">{ASSIST_MODES.find((m) => m.id === mode)?.hint}</p>
-        {mode === "smart" && !can?.claude && (
+        {smartOff && (
           <p className="mt-2 px-1 text-[12px] text-warning">
-            Needs an Anthropic API key —{" "}
+            Smart and the Claude models need an Anthropic API key —{" "}
             <Link href="/settings#keys" className="underline underline-offset-2">
               add one in Settings
             </Link>
-            . Until then chats run in Free.
+            .
           </p>
         )}
         {mode === "free" && (
@@ -142,81 +221,39 @@ export function ModePicker({ value, onChange, availability: can, disabled }: { v
         )}
         {mode === "manual" && (
           <div className="mt-3 space-y-3">
-            {!can?.claude && (
-              <p className="px-1 text-[12px] text-muted-foreground">
-                Claude models need an Anthropic API key —{" "}
-                <Link href="/settings#keys" className="underline underline-offset-2">
-                  Settings
-                </Link>
-                .
-              </p>
-            )}
-            <div role="radiogroup" aria-label="Model" className="space-y-1">
-              {CLAUDE_MODELS.map((m) => {
-                const on = agent === "claude" && (value?.model ?? DEFAULT_CLAUDE_MODEL) === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={on}
-                    disabled={!can?.claude}
-                    onClick={() => set({ agent: "claude", model: m.id })}
-                    className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent", on && "bg-brand-faint hover:bg-brand-faint-hover")}
-                  >
-                    <Bot className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[13px] font-medium">{m.label}</span>
-                      <span className="block text-[11px] text-muted-foreground">{m.hint}</span>
-                    </span>
-                  </button>
-                );
-              })}
-              {(can?.ollamaModels.length ? can.ollamaModels : can?.ollama ? [can.ollamaModel] : []).map((name) => {
-                const on = agent === "ollama" && (value?.model ?? can?.ollamaModel) === name;
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    role="radio"
-                    aria-checked={on}
-                    onClick={() => set({ agent: "ollama", model: name, effort: null })}
-                    className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent", on && "bg-brand-faint hover:bg-brand-faint-hover")}
-                  >
-                    <Cpu className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[12px]">{name}</span>
-                      <span className="block text-[11px] text-muted-foreground">Local, through Ollama · free</span>
-                    </span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                role="radio"
-                aria-checked={agent === "offline"}
-                onClick={() => set({ agent: "offline", model: null, effort: null })}
-                className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent", agent === "offline" && "bg-brand-faint hover:bg-brand-faint-hover")}
-              >
-                <Gauge className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium">Offline planner</span>
-                  <span className="block text-[11px] text-muted-foreground">Rules, no LLM — simple requests only</span>
-                </span>
-              </button>
+            <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="space-y-1">
+              {models.map((m) => (
+                <button
+                  key={m.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={m.on}
+                  tabIndex={m.key === modelStop ? 0 : -1}
+                  disabled={m.disabled}
+                  onClick={() => set(m.pick)}
+                  className={cn("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:hover:bg-transparent", m.on && "bg-brand-faint hover:bg-brand-faint-hover")}
+                >
+                  <m.icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    {m.title}
+                    <span className="block text-[11px] text-muted-foreground">{m.hint}</span>
+                  </span>
+                </button>
+              ))}
             </div>
             {agent === "claude" && (
               <div>
                 <p className="mb-1.5 px-1 text-[12px] font-medium">Effort</p>
-                <div role="radiogroup" aria-label="Effort" className="grid grid-cols-5 gap-0.5 rounded-full bg-muted p-0.5">
+                <div role="radiogroup" aria-label="Effort" onKeyDown={radioKeys} className="grid grid-cols-5 gap-0.5 rounded-full bg-muted p-0.5">
                   {ASSIST_EFFORTS.map((e) => (
                     <button
                       key={e.id}
                       type="button"
                       role="radio"
-                      aria-checked={(value?.effort ?? DEFAULT_EFFORT) === e.id}
+                      aria-checked={effort === e.id}
+                      tabIndex={radioTab(effort === e.id)}
                       onClick={() => set({ effort: e.id })}
-                      className={cn("h-7 rounded-full text-[12px] font-medium transition-colors", (value?.effort ?? DEFAULT_EFFORT) === e.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground")}
+                      className={cn("h-7 rounded-full text-[12px] font-medium transition-colors", effort === e.id ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground")}
                     >
                       {e.label}
                     </button>
@@ -227,6 +264,7 @@ export function ModePicker({ value, onChange, availability: can, disabled }: { v
             )}
           </div>
         )}
+        {pending && <p className="mt-3 border-t px-1 pt-2 text-[11px] text-muted-foreground">Applies to this chat when you close this menu.</p>}
       </PopoverContent>
     </Popover>
   );

@@ -10,8 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { PROJECT_COLORS, PROJECT_HUE, PROJECT_LIMITS, type AssistProject, type ProjectColor } from "@/lib/assist";
+import { PROJECT_COLORS, PROJECT_LIMITS, PROJECT_SWATCH, type AssistProject, type ProjectColor } from "@/lib/assist";
 import { cn } from "@/lib/utils";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useProjectActions, useSkills } from "./hooks";
 import { SkillIcon } from "./skill-icon";
 
@@ -78,7 +79,7 @@ function Form({ project, onDone }: { project?: AssistProject; onDone: (p?: Assis
           <div className="flex items-center gap-3">
             <Input id={ids.name} value={name} onChange={(e) => setName(e.target.value)} maxLength={PROJECT_LIMITS.name} placeholder="e.g. Spring campaign, Cooking channel" autoFocus={!project} />
           </div>
-          <div role="radiogroup" aria-label="Colour" className="flex flex-wrap gap-2 pt-1">
+          <div role="radiogroup" aria-label="Colour" onKeyDown={radioKeys} className="flex flex-wrap gap-2 pt-1">
             {PROJECT_COLORS.map((c) => (
               <button
                 key={c}
@@ -86,9 +87,10 @@ function Form({ project, onDone }: { project?: AssistProject; onDone: (p?: Assis
                 role="radio"
                 aria-checked={color === c}
                 aria-label={c}
+                tabIndex={radioTab(color === c)}
                 onClick={() => setColor(c)}
-                className={cn("grid size-7 place-items-center rounded-full bg-[oklch(0.68_0.13_var(--p-hue))] ring-offset-2 ring-offset-background transition", color === c && "ring-2 ring-primary")}
-                style={{ "--p-hue": PROJECT_HUE[c] } as React.CSSProperties}
+                className={cn("grid size-7 place-items-center rounded-full ring-offset-2 ring-offset-background transition", color === c && "ring-2 ring-primary")}
+                style={{ backgroundColor: PROJECT_SWATCH[c] }}
               >
                 {color === c && <Check className="size-3.5 text-white" />}
               </button>

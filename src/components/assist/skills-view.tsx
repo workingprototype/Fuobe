@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { SKILL_LIMITS, SKILL_NAME_RE, skillSlug, type Skill, type SkillSummary } from "@/lib/assist";
 import { cn } from "@/lib/utils";
+import { radioKeys } from "@/components/studio/radio-keys";
 import { useSkill, useSkillActions, useSkills, type SkillForm } from "./hooks";
 import { RailButton } from "./shell";
 import { SKILL_ICONS, SkillIcon } from "./skill-icon";
@@ -463,9 +464,19 @@ function EditorForm({ skill, onClose, onSaved }: { skill: Skill | null; onClose:
         </div>
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Icon</legend>
-          <div role="radiogroup" aria-label="Icon" className="flex flex-wrap gap-1.5">
-            {ICON_CHOICES.map((i) => (
-              <button key={i} type="button" role="radio" aria-checked={form.icon === i} aria-label={i} onClick={() => set({ icon: i })} className={cn("rounded-xl p-0.5 ring-offset-2 ring-offset-background", form.icon === i && "ring-2 ring-primary")}>
+          <div role="radiogroup" aria-label="Icon" onKeyDown={radioKeys} className="flex flex-wrap gap-1.5">
+            {ICON_CHOICES.map((i, k) => (
+              <button
+                key={i}
+                type="button"
+                role="radio"
+                aria-checked={form.icon === i}
+                aria-label={i}
+                // One Tab stop: the picked icon, or the first while none is picked.
+                tabIndex={form.icon === i || (k === 0 && !ICON_CHOICES.some((c) => c === form.icon)) ? 0 : -1}
+                onClick={() => set({ icon: i })}
+                className={cn("rounded-xl p-0.5 ring-offset-2 ring-offset-background", form.icon === i && "ring-2 ring-primary")}
+              >
                 <SkillIcon name={form.name || "new"} icon={i} size="sm" className="size-8" />
               </button>
             ))}

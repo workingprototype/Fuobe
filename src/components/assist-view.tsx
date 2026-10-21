@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { Viewer } from "@/components/studio/viewer";
 import { AssistComposer } from "@/components/assist/composer";
+import { ChatMenu } from "@/components/assist/chat-menu";
 import { useChatActions, useChats, useProjects, useSkills } from "@/components/assist/hooks";
 import { ModePicker, useModeChoice } from "@/components/assist/mode-picker";
 import { ProjectDot, RailButton } from "@/components/assist/shell";
@@ -168,6 +169,7 @@ export function AssistView() {
               <MessageSquarePlus /> <span className="hidden sm:inline">New chat</span>
             </Button>
           )}
+          {thread && <ChatMenu chat={thread} onDeleted={() => go(null)} />}
         </div>
       </header>
 
@@ -234,6 +236,7 @@ export function AssistView() {
                         value={{ mode: thread.mode ?? "smart", agent: thread.agent, model: thread.model, effort: thread.effort }}
                         availability={can}
                         disabled={thread.status === "running"}
+                        applyOnClose
                         onChange={(c) => void actions.patch(thread.id, { mode: c }).catch((e) => toast.error((e as Error).message))}
                       />
                       <AskFirst checked={!thread.autoApprove} onChange={(v) => void assist.setAutoApprove(thread.id, !v)} />

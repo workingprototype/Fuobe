@@ -20,7 +20,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import { NotFoundState } from "@/components/empty-state";
+import { ErrorState, NotFoundState } from "@/components/empty-state";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,13 +41,16 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { MediaThumb } from "@/components/studio/feed";
+import { Viewer } from "@/components/studio/viewer";
 import { AssistComposer } from "@/components/assist/composer";
 import { chatSkills, NewChatControls, SkillStarters } from "@/components/assist-view";
 import { useElements, useEngine } from "@/lib/api";
 import { MAX_PROJECT_SOURCES, type AssistProject, type ProjectSource, type SourceKind } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useChatActions, useChats, useProject, useProjectActions, useSkills } from "./hooks";
+import { ChatMenu } from "./chat-menu";
+import { useChatActions, useChats, useProject, useProjectActions, useProjectAssets, useSkills } from "./hooks";
 import { MemoryView } from "./memory-view";
 import { useModeChoice } from "./mode-picker";
 import { ProjectDialog } from "./project-dialog";
@@ -65,7 +68,11 @@ export function ProjectView({ id }: { id: string }) {
         <Skeleton className="h-28 rounded-composer" />
       </div>
     );
-  if (!project.data) return <NotFoundState title="No such project">It may have been deleted. Its chats are with your other chats in Assist.</NotFoundState>;
+  if (!project.data) {
+    const status = (project.error as { status?: number } | null)?.status;
+    if (project.error && status !== 404) return <ErrorState error={project.error} retry={() => void project.refetch()} />;
+    return <NotFoundState title="No such project">It may have been deleted. Its chats are with your other chats in Assist.</NotFoundState>;
+  }
   return <Project p={project.data} />;
 }
 
@@ -83,6 +90,7 @@ function Project({ p }: { p: AssistProject }) {
   const [settings, setSettings] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [draft, setDraft] = useState({ key: 0, text: "" });
+  const [tab, setTab] = useState("chats");
 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
@@ -131,10 +139,13 @@ function Project({ p }: { p: AssistProject }) {
             {!chats.data?.threads.length && <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />}
           </div>
         </div>
-        <Tabs defaultValue="chats" className="mt-10 gap-4">
+        <Tabs value={tab} onValueChange={setTab} className="mt-10 gap-4">
           <TabsList>
             <TabsTrigger value="chats" className="px-3">
               Chats <span className="font-mono text-[11px] text-muted-foreground">{chats.data?.threads.length || ""}</span>
+            </TabsTrigger>
+            <TabsTrigger value="assets" className="px-3">
+              Assets
             </TabsTrigger>
             <TabsTrigger value="sources" className="px-3">
               Sources <span className="font-mono text-[11px] text-muted-foreground">{p.sources.length || ""}</span>
@@ -149,17 +160,21 @@ function Project({ p }: { p: AssistProject }) {
             ) : chats.data?.threads.length ? (
               <ul className="divide-y rounded-2xl border bg-background">
                 {chats.data.threads.map((t) => (
-                  <li key={t.id}>
-                    <Link href={`/assist?c=${t.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent">
+                  <li key={t.id} className="relative">
+                    <Link href={`/assist?c=${t.id}`} className="flex items-center gap-3 py-3 pr-12 pl-4 transition-colors hover:bg-accent">
                       <span className="min-w-0 flex-1 truncate text-[14px]">{t.title}</span>
                       <span className="shrink-0 text-[12px] text-muted-foreground">{t.status === "running" ? "Working…" : t.status === "waiting" ? "Waiting for you" : timeAgo(t.updatedAt)}</span>
                     </Link>
+                    <ChatMenu chat={t} className="absolute top-1/2 right-2 -translate-y-1/2" />
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">No chats yet — start one above. It&apos;ll know this project&apos;s instructions and sources.</p>
             )}
+          </TabsContent>
+          <TabsContent value="assets">
+            <Assets p={p} active={tab === "assets"} />
           </TabsContent>
           <TabsContent value="sources">
             <Sources p={p} />
@@ -196,6 +211,51 @@ function Project({ p }: { p: AssistProject }) {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/** What the project's chats made: their finished results, newest first, opening in the viewer. */
+function Assets({ p, active }: { p: AssistProject; active: boolean }) {
+  const assets = useProjectAssets(p.id, active);
+  const [open, setOpen] = useState<{ at: number; i: number } | null>(null);
+  const list = assets.data ?? [];
+  const tiles = list.flatMap((a, at) => a.generation.outputs.map((o, i) => ({ a, at, o, i })));
+  if (assets.isLoading)
+    return (
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {Array.from({ length: 8 }, (_, i) => (
+          <Skeleton key={i} className="aspect-square rounded-xl" />
+        ))}
+      </div>
+    );
+  if (assets.isError) return <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">Couldn&apos;t load the assets: {(assets.error as Error).message}</p>;
+  if (!tiles.length) return <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-[13px] text-muted-foreground">Nothing made here yet — what this project&apos;s chats create shows up here.</p>;
+  const cur = open ? list[open.at] : null;
+  return (
+    <>
+      <p className="mb-3 text-[13px] text-muted-foreground">
+        {tiles.length} result{tiles.length === 1 ? "" : "s"} from this project&apos;s chats. Everything is in your Library too.
+      </p>
+      <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        {tiles.map(({ a, at, o, i }) => (
+          <li key={`${a.generation.id}-${i}`}>
+            <button onClick={() => setOpen({ at, i })} className="group relative block aspect-square w-full overflow-hidden rounded-xl bg-muted" aria-label={`Open ${a.generation.request.prompt?.slice(0, 60) || "result"} (from ${a.chatTitle})`}>
+              <MediaThumb output={o} g={a.generation} className="transition duration-300 group-hover:scale-[1.03]" />
+              {a.generation.provider === "mock" && <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-medium">Demo</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {open && cur && (
+        <Viewer
+          generation={cur.generation}
+          index={open.i}
+          onClose={() => setOpen(null)}
+          onPrev={open.at > 0 ? () => setOpen({ at: open.at - 1, i: 0 }) : undefined}
+          onNext={open.at < list.length - 1 ? () => setOpen({ at: open.at + 1, i: 0 }) : undefined}
+        />
+      )}
+    </>
   );
 }
 

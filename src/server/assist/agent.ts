@@ -262,6 +262,27 @@ export function getThread(id: string): AssistThreadView | null {
   return { thread: s.thread, generations };
 }
 
+/** What a project's chats made (its Assets tab): their finished generations, newest first, with the chat each came from. */
+export function projectAssets(projectId: string, limit = 120): { generation: Generation; chatId: string; chatTitle: string }[] {
+  const rows = db()
+    .prepare("SELECT t.id, t.title, t.items_json FROM assist_threads t JOIN assist_thread_state s ON s.thread_id = t.id WHERE s.project_id = ? ORDER BY t.updated_at DESC")
+    .all(projectId) as { id: string; title: string; items_json: string }[];
+  const seen = new Set<string>();
+  const out: { generation: Generation; chatId: string; chatTitle: string }[] = [];
+  for (const r of rows) {
+    for (const item of JSON.parse(r.items_json) as AssistItem[]) {
+      if (item.role !== "generations") continue;
+      for (const gid of item.ids) {
+        if (seen.has(gid)) continue;
+        seen.add(gid);
+        const g = getGeneration(gid);
+        if (g?.status === "succeeded" && g.outputs.length) out.push({ generation: g, chatId: r.id, chatTitle: r.title });
+      }
+    }
+  }
+  return out.sort((a, b) => b.generation.createdAt - a.generation.createdAt).slice(0, limit);
+}
+
 export function deleteThread(id: string): void {
   db().transaction(() => {
     db().prepare("DELETE FROM assist_threads WHERE id = ?").run(id);

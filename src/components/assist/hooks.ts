@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useHydrated } from "@/lib/api";
 import type {
   AssistAvailability,
   AssistMemory,
@@ -16,7 +17,7 @@ import type {
   Skill,
   SkillSummary,
 } from "@/lib/assist";
-import type { Engine } from "@/lib/catalog/types";
+import type { Engine, Generation } from "@/lib/catalog/types";
 
 /**
  * React Query hooks for Assist's skills, memory, projects and chat lists (/api/assist/**).
@@ -29,6 +30,16 @@ async function json<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw Object.assign(new Error(body.error ?? `Request failed (${res.status})`), { status: res.status });
   return body;
+}
+
+/**
+ * Until the page has hydrated, a query reads as loading: the first client render then matches the
+ * server's HTML even when another Suspense boundary already filled the cache with the same key.
+ */
+function useHydrationSafe<T extends UseQueryResult<unknown, Error>>(q: T): T {
+  const hydrated = useHydrated();
+  if (hydrated) return q;
+  return { ...q, data: undefined, error: null, status: "pending", isPending: true, isLoading: true, isFetching: true, isSuccess: false, isError: false, fetchStatus: "fetching" } as T;
 }
 
 const send = async <T,>(url: string, method: string, body?: unknown) =>
@@ -48,11 +59,13 @@ export function useChats(f: { project?: string | "none"; q?: string } = {}) {
   const sp = new URLSearchParams();
   if (f.project) sp.set("project", f.project);
   if (f.q?.trim()) sp.set("q", f.q.trim());
-  return useQuery({
-    queryKey: ["assist-chats", f.project ?? "all", f.q?.trim() ?? ""],
-    queryFn: async () => json<ChatList>(await fetch(`/api/assist${sp.size ? `?${sp}` : ""}`)),
-    staleTime: 5_000,
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-chats", f.project ?? "all", f.q?.trim() ?? ""],
+      queryFn: async () => json<ChatList>(await fetch(`/api/assist${sp.size ? `?${sp}` : ""}`)),
+      staleTime: 5_000,
+    }),
+  );
 }
 
 export function useChatActions() {
@@ -88,19 +101,23 @@ export function useChatActions() {
 // Skills
 
 export function useSkills() {
-  return useQuery({
-    queryKey: ["assist-skills"],
-    queryFn: async () => (await json<{ items: SkillSummary[] }>(await fetch("/api/assist/skills"))).items,
-    staleTime: 30_000,
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-skills"],
+      queryFn: async () => (await json<{ items: SkillSummary[] }>(await fetch("/api/assist/skills"))).items,
+      staleTime: 30_000,
+    }),
+  );
 }
 
 export function useSkill(name: string | null) {
-  return useQuery({
-    queryKey: ["assist-skills", name],
-    enabled: !!name,
-    queryFn: async () => json<Skill>(await fetch(`/api/assist/skills/${name}`)),
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-skills", name],
+      enabled: !!name,
+      queryFn: async () => json<Skill>(await fetch(`/api/assist/skills/${name}`)),
+    }),
+  );
 }
 
 export interface SkillForm {
@@ -160,10 +177,12 @@ export function useSkillActions() {
 export function useMemories(f: { scope: MemoryScope | "all"; projectId?: string | null }) {
   const sp = new URLSearchParams({ scope: f.scope });
   if (f.projectId) sp.set("project", f.projectId);
-  return useQuery({
-    queryKey: ["assist-memory", f.scope, f.projectId ?? null],
-    queryFn: async () => (await json<{ items: AssistMemory[] }>(await fetch(`/api/assist/memory?${sp}`))).items,
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-memory", f.scope, f.projectId ?? null],
+      queryFn: async () => (await json<{ items: AssistMemory[] }>(await fetch(`/api/assist/memory?${sp}`))).items,
+    }),
+  );
 }
 
 export function useMemoryActions() {
@@ -196,20 +215,42 @@ export function useMemoryActions() {
 // Projects
 
 export function useProjects() {
-  return useQuery({
-    queryKey: ["assist-projects"],
-    queryFn: async () => (await json<{ items: AssistProject[] }>(await fetch("/api/assist/projects"))).items,
-    staleTime: 10_000,
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-projects"],
+      queryFn: async () => (await json<{ items: AssistProject[] }>(await fetch("/api/assist/projects"))).items,
+      staleTime: 10_000,
+    }),
+  );
 }
 
 export function useProject(id: string | null) {
-  return useQuery({
-    queryKey: ["assist-projects", id],
-    enabled: !!id,
-    queryFn: async () => json<AssistProject>(await fetch(`/api/assist/projects/${id}`)),
-    retry: (n, e) => (e as { status?: number }).status !== 404 && n < 1,
-  });
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-projects", id],
+      enabled: !!id,
+      queryFn: async () => json<AssistProject>(await fetch(`/api/assist/projects/${id}`)),
+      retry: (n, e) => (e as { status?: number }).status !== 404 && n < 1,
+    }),
+  );
+}
+
+export interface ProjectAsset {
+  generation: Generation;
+  chatId: string;
+  chatTitle: string;
+}
+
+/** What a project's chats made (the Assets tab), refreshed when the tab is opened again. */
+export function useProjectAssets(id: string, enabled = true) {
+  return useHydrationSafe(
+    useQuery({
+      queryKey: ["assist-projects", id, "assets"],
+      enabled,
+      queryFn: async () => (await json<{ items: ProjectAsset[] }>(await fetch(`/api/assist/projects/${id}/assets`))).items,
+      staleTime: 10_000,
+    }),
+  );
 }
 
 export interface ProjectForm {
