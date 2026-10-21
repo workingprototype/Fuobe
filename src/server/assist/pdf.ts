@@ -3,7 +3,8 @@ import "server-only";
 /**
  * The text of a PDF (brand guides, briefs, scripts), page by page, for project sources. Runs
  * PDF.js through unpdf's serverless build (no worker, no canvas), stops once `maxChars` is read,
- * and reads at most `maxPages` pages so a huge document can't hold the request up.
+ * and reads at most `maxPages` pages so a huge document can't hold the request up. (This PDF.js
+ * no longer compiles fonts with eval, so there is no eval switch to turn off.)
  */
 
 export class PdfError extends Error {}
@@ -12,7 +13,7 @@ export async function pdfText(data: Buffer, opts: { maxChars: number; maxPages?:
   const { getDocumentProxy } = await import("unpdf");
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
   try {
-    pdf = await getDocumentProxy(new Uint8Array(data), { isEvalSupported: false, stopAtErrors: false });
+    pdf = await getDocumentProxy(new Uint8Array(data), { stopAtErrors: false });
   } catch (e) {
     const name = (e as { name?: string }).name;
     if (name === "PasswordException") throw new PdfError("This PDF is password-protected — remove the password and add it again");
