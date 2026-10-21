@@ -41,6 +41,8 @@ import {
   Scissors,
   Shapes,
   Smartphone,
+  Megaphone,
+  Target,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -116,6 +118,8 @@ const NAV: NavGroupDef[] = [
       { href: "/cinema", label: "Cinema Studio", icon: Clapperboard },
       { href: "/shorts", label: "Shorts Studio", icon: Smartphone },
       { href: "/mixed-media", label: "Mixed Media", icon: Shapes },
+      { href: "/marketing", label: "Marketing Studio", icon: Megaphone },
+      { href: "/ads", label: "Ads Studio", icon: Target },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },

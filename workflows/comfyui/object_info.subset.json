@@ -667,6 +667,71 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "AudioConcat": {
+    "input": {
+      "required": {
+        "audio1": [
+          "AUDIO",
+          {}
+        ],
+        "audio2": [
+          "AUDIO",
+          {}
+        ],
+        "direction": [
+          "COMBO",
+          {
+            "tooltip": "Whether to append audio2 after or before audio1.",
+            "default": "after",
+            "multiselect": false,
+            "options": [
+              "after",
+              "before"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "audio1",
+        "audio2",
+        "direction"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "AUDIO"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "AUDIO"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "AudioConcat",
+    "display_name": "Concatenate Audio",
+    "description": "Concatenates the audio1 to audio2 in the specified direction.",
+    "python_module": "comfy_extras.nodes_audio",
+    "category": "audio",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "join audio",
+      "combine audio",
+      "append audio"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "AudioEncoderEncode": {
     "input": {
       "required": {
@@ -8919,6 +8984,10 @@
           {
             "multiselect": false,
             "options": [
+              "fuobe_av_frame.mp4",
+              "fuobe_mkjoin_broll.mp4",
+              "fuobe_mkjoin_hook.mp4",
+              "fuobe_mkjoin_talk.mp4",
               "fuobe_real.mp4",
               "fuobe_real.wav",
               "fuobe_validate.mp4",
@@ -9186,6 +9255,10 @@
           {
             "multiselect": false,
             "options": [
+              "fuobe_av_frame.mp4",
+              "fuobe_mkjoin_broll.mp4",
+              "fuobe_mkjoin_hook.mp4",
+              "fuobe_mkjoin_talk.mp4",
               "fuobe_real.mp4",
               "fuobe_validate.mp4"
             ],
@@ -16399,6 +16472,10 @@
       "required": {
         "video": [
           [
+            "fuobe_av_frame.mp4",
+            "fuobe_mkjoin_broll.mp4",
+            "fuobe_mkjoin_hook.mp4",
+            "fuobe_mkjoin_talk.mp4",
             "fuobe_real.mp4",
             "fuobe_validate.mp4"
           ]

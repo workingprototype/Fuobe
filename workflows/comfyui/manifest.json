@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-18T07:15:22.469Z",
+  "generatedAt": "2026-10-21T14:06:47.188Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -6865,6 +6865,642 @@
       "license": "no model (ComfyUI core nodes)",
       "validated": true,
       "notes": "Hard-cut concatenation of 4 clips (video, video2, video3, video4) in order: LoadVideo -> ImageScale (lanczos, center crop to width x height) -> BatchImagesNode -> CreateVideo(fps). Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative."
+    },
+    {
+      "id": "video-concat-sound1-2",
+      "title": "Join 2 clips at one frame rate, keeping clip 1's sound",
+      "capability": "concat",
+      "file": "video-concat-sound1-2.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound1-2.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 2 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: clip 1's own sound from the start (a voiced presenter followed by silent b-roll, or a reference ad followed by a new CTA). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
+    },
+    {
+      "id": "video-concat-sound1-3",
+      "title": "Join 3 clips at one frame rate, keeping clip 1's sound",
+      "capability": "concat",
+      "file": "video-concat-sound1-3.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound1-3.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "8",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "8",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "7",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 3 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: clip 1's own sound from the start (a voiced presenter followed by silent b-roll, or a reference ad followed by a new CTA). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
+    },
+    {
+      "id": "video-concat-sound1-4",
+      "title": "Join 4 clips at one frame rate, keeping clip 1's sound",
+      "capability": "concat",
+      "file": "video-concat-sound1-4.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound1-4.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "video"
+          }
+        ],
+        "video4": [
+          {
+            "node": "10",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "8",
+            "input": "width"
+          },
+          {
+            "node": "11",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "8",
+            "input": "height"
+          },
+          {
+            "node": "11",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "7",
+            "input": "force_rate"
+          },
+          {
+            "node": "10",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 4 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: clip 1's own sound from the start (a voiced presenter followed by silent b-roll, or a reference ad followed by a new CTA). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
+    },
+    {
+      "id": "video-concat-sound2-2",
+      "title": "Join 2 clips at one frame rate, keeping clip 2's sound (it starts where clip 1 ends)",
+      "capability": "concat",
+      "file": "video-concat-sound2-2.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound2-2.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 2 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: silence as long as clip 1 (VHS_VideoInfoLoaded duration -> EmptyAudio), then clip 2's own sound (a silent hook clip, then the voiced presenter or the reference ad). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
+    },
+    {
+      "id": "video-concat-sound2-3",
+      "title": "Join 3 clips at one frame rate, keeping clip 2's sound (it starts where clip 1 ends)",
+      "capability": "concat",
+      "file": "video-concat-sound2-3.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound2-3.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "8",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "8",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "7",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 3 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: silence as long as clip 1 (VHS_VideoInfoLoaded duration -> EmptyAudio), then clip 2's own sound (a silent hook clip, then the voiced presenter or the reference ad). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
+    },
+    {
+      "id": "video-concat-sound2-4",
+      "title": "Join 4 clips at one frame rate, keeping clip 2's sound (it starts where clip 1 ends)",
+      "capability": "concat",
+      "file": "video-concat-sound2-4.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-sound2-4.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "video2": [
+          {
+            "node": "4",
+            "input": "video"
+          }
+        ],
+        "video3": [
+          {
+            "node": "7",
+            "input": "video"
+          }
+        ],
+        "video4": [
+          {
+            "node": "10",
+            "input": "video"
+          }
+        ],
+        "width": [
+          {
+            "node": "2",
+            "input": "width"
+          },
+          {
+            "node": "5",
+            "input": "width"
+          },
+          {
+            "node": "8",
+            "input": "width"
+          },
+          {
+            "node": "11",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "2",
+            "input": "height"
+          },
+          {
+            "node": "5",
+            "input": "height"
+          },
+          {
+            "node": "8",
+            "input": "height"
+          },
+          {
+            "node": "11",
+            "input": "height"
+          }
+        ],
+        "fps": [
+          {
+            "node": "1",
+            "input": "force_rate"
+          },
+          {
+            "node": "4",
+            "input": "force_rate"
+          },
+          {
+            "node": "7",
+            "input": "force_rate"
+          },
+          {
+            "node": "10",
+            "input": "force_rate"
+          },
+          {
+            "node": "21",
+            "input": "fps"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "22",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "22",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 640,
+        "height": 640,
+        "fps": 25
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "dimensionMultiple": 16
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "no model (ComfyUI core nodes + VideoHelperSuite loader)",
+      "validated": true,
+      "notes": "Hard-cut join of 4 clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: silence as long as clip 1 (VHS_VideoInfoLoaded duration -> EmptyAudio), then clip 2's own sound (a silent hook clip, then the voiced presenter or the reference ad). The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook's end). RAM grows with the total frame count at the target fps."
     },
     {
       "id": "storyboard-qwen-edit-2509-next-scene",

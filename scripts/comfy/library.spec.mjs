@@ -1569,6 +1569,33 @@ export const SPEC = [
       'Multi-shot recipe: storyboard panels (storyboard-qwen-edit-2509-next-scene) -> one wan22-i2v-14b-lightx2v job per shot (or wan22-flf2v-14b between panels N and N+1 for match cuts) -> this graph; add sound afterwards (v2a-mmaudio / music). ' +
       'All clips should share one fps (frames are concatenated, not retimed); audio tracks are dropped. Runs on CPU; RAM grows with total frame count. LTX-2.5 native multishot (ltx25-t2v/i2v with a shot-list prompt) is the one-pass alternative.',
   })),
+  // ---- marketing (Wave B): join clips and keep one clip's sound (UGC presenter, Click to Ad, Ad Multiplier) ----
+  ...[1, 2].flatMap((sound) =>
+    [2, 3, 4].map((n) => ({
+      id: `video-concat-sound${sound}-${n}`,
+      title: `Join ${n} clips at one frame rate, keeping clip ${sound}'s sound${sound === 2 ? ' (it starts where clip 1 ends)' : ''}`,
+      capability: 'concat',
+      handBuilt: `hand-built/video-concat-sound${sound}-${n}.json`,
+      bindings: {
+        ...Object.fromEntries(Array.from({ length: n }, (_, i) => [i === 0 ? 'video' : `video${i + 1}`, [b(String(1 + 3 * i), 'video')]])),
+        width: Array.from({ length: n }, (_, i) => b(String(2 + 3 * i), 'width')),
+        height: Array.from({ length: n }, (_, i) => b(String(2 + 3 * i), 'height')),
+        fps: [...Array.from({ length: n }, (_, i) => b(String(1 + 3 * i), 'force_rate')), b('21', 'fps')],
+      },
+      outputs: [{ node: '22', kind: 'video' }],
+      limits: { maxWidth: 1920, maxHeight: 1920, dimensionMultiple: 16 },
+      vramGb: 0,
+      license: 'no model (ComfyUI core nodes + VideoHelperSuite loader)',
+      notes:
+        `Hard-cut join of ${n} clips in order, each resampled to fps (VHS_LoadVideo force_rate, default 25 = InfiniteTalk's rate) so clips made at 16 fps (Wan) and 25 fps play at their real speed, ` +
+        'scaled and centre-cropped to width x height -> BatchImagesNode -> CreateVideo(fps) with a soundtrack: ' +
+        (sound === 1
+          ? 'clip 1\'s own sound from the start (a voiced presenter followed by silent b-roll, or a reference ad followed by a new CTA). '
+          : 'silence as long as clip 1 (VHS_VideoInfoLoaded duration -> EmptyAudio), then clip 2\'s own sound (a silent hook clip, then the voiced presenter or the reference ad). ') +
+        `The sound clip must have an audio track (VHS fails to extract audio otherwise); the other clips' sound is dropped. Marketing Studio UGC / Click to Ad / Ad Multiplier joins (src/server/marketing.ts). ` +
+        'Runs on CPU (verified on the shared ComfyUI with a 16 fps silent hook + a 25 fps voiced clip + 16 fps b-roll: the sound starts at the hook\'s end). RAM grows with the total frame count at the target fps.',
+    })),
+  ),
 
   // ---- storyboard ----------------------------------------------------------
   {
