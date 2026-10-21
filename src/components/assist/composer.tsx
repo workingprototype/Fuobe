@@ -6,9 +6,10 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { uploadFile } from "@/lib/api";
-import { slashQuery, slashSkills, type SkillSummary } from "@/lib/assist";
+import { insertSlash, pickSlash, slashQuery, slashSkills, type SkillSummary } from "@/lib/assist";
 import type { MediaKind } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { SkillIcon } from "./skill-icon";
@@ -50,6 +51,7 @@ export function AssistComposer({
   const [menuClosed, setMenuClosed] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const listId = useId();
   const uploading = files.some((f) => !f.url);
   const ready = text.trim().length > 0 && !uploading && !sending && !disabled;
@@ -110,19 +112,19 @@ export function AssistComposer({
     if (f.preview.startsWith("blob:")) release(f.preview);
   };
 
-  const pick = (s: SkillSummary) => {
-    if (!query) return;
-    const before = text.slice(0, query.start);
-    const after = text.slice(caret).replace(/^\S*/, "").replace(/^\s*/, "");
-    const next = `${before}/${s.name} ${after}`;
+  const place = (next: string, pos: number) => {
     setText(next);
-    const pos = before.length + s.name.length + 2;
     setCaret(pos);
-    setMenuIndex(0);
     requestAnimationFrame(() => {
       area.current?.focus();
       area.current?.setSelectionRange(pos, pos);
     });
+  };
+  const pick = (s: SkillSummary) => {
+    if (!query) return;
+    const r = pickSlash(text, caret, query.start, s.name);
+    setMenuIndex(0);
+    place(r.text, r.caret);
   };
 
   const unuse = (name: string) => {
@@ -146,6 +148,7 @@ export function AssistComposer({
 
   return (
     <div
+      ref={box}
       className="relative rounded-[20px] border bg-background p-2.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
@@ -153,33 +156,48 @@ export function AssistComposer({
         add(e.dataTransfer.files);
       }}
     >
-      {menuOpen && (
-        <div className="absolute inset-x-2 bottom-full z-30 mb-2 max-h-[min(18rem,42svh)] overflow-y-auto rounded-2xl border bg-popover p-1 shadow-strong" role="listbox" id={listId} aria-label="Skills">
-          <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-subtle-foreground">Skills</p>
-          {matches.map((s, i) => (
-            <button
-              key={s.name}
-              type="button"
-              role="option"
-              id={`${listId}-${s.name}`}
-              aria-selected={i === active}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setMenuIndex(i)}
-              onClick={() => pick(s)}
-              ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
-              className={cn("flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left", i === active && "bg-accent")}
-            >
-              <SkillIcon name={s.name} icon={s.icon} size="sm" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium">
-                  {s.title} <span className="font-mono text-[11px] font-normal text-muted-foreground">/{s.name}</span>
+      {/* The skill menu: a popover anchored to the composer, so it flips below when there's no room
+          above and is never clipped by the scrolling page or hidden under the header. Focus stays in
+          the message box, which drives the list (↑↓, Enter, Esc). */}
+      <Popover open={menuOpen} onOpenChange={(o) => !o && setMenuClosed(true)}>
+        <PopoverAnchor virtualRef={box} />
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={8}
+          collisionPadding={8}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => box.current?.contains(e.target as Node) && e.preventDefault()}
+          className="max-h-[min(18rem,var(--radix-popover-content-available-height))] w-[min(var(--radix-popover-trigger-width),40rem)] gap-0 overflow-y-auto rounded-2xl border bg-popover p-1 shadow-strong ring-0"
+        >
+          <div role="listbox" id={listId} aria-label="Skills">
+            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-subtle-foreground">Skills</p>
+            {matches.map((s, i) => (
+              <button
+                key={s.name}
+                type="button"
+                role="option"
+                id={`${listId}-${s.name}`}
+                aria-selected={i === active}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setMenuIndex(i)}
+                onClick={() => pick(s)}
+                ref={i === active ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+                className={cn("flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left", i === active && "bg-accent")}
+              >
+                <SkillIcon name={s.name} icon={s.icon} size="sm" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">
+                    {s.title} <span className="font-mono text-[11px] font-normal text-muted-foreground">/{s.name}</span>
+                  </span>
+                  <span className="block truncate text-[12px] text-muted-foreground">{s.description}</span>
                 </span>
-                <span className="block truncate text-[12px] text-muted-foreground">{s.description}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
       {files.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1">
           {files.map((f) => (
@@ -276,14 +294,10 @@ export function AssistComposer({
               <button
                 type="button"
                 onClick={() => {
-                  const next = text.startsWith("/") ? text : `/${text ? ` ${text}` : ""}`;
-                  setText(next);
-                  setCaret(1);
+                  // A new "/" after the skills already chosen, so another one is added (not swapped).
+                  const r = insertSlash(text, [...known.keys()]);
                   setMenuClosed(false);
-                  requestAnimationFrame(() => {
-                    area.current?.focus();
-                    area.current?.setSelectionRange(1, 1);
-                  });
+                  place(r.text, r.caret);
                 }}
                 className="hidden size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground sm:grid"
                 aria-label="Use a skill"

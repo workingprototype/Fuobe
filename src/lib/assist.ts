@@ -334,6 +334,39 @@ export function slashSkills(text: string, known: (name: string) => boolean): { s
   return { skills, text: rest };
 }
 
+/** Where the skill tokens at the start of a message end (after the space that follows them). */
+function skillTokensEnd(text: string, known: (name: string) => boolean): number {
+  let pos = /^\s*/.exec(text)![0].length;
+  for (;;) {
+    const m = /^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/.exec(text.slice(pos));
+    if (!m || !known(m[1])) return pos;
+    pos += m[0].length;
+    pos += /^\s*/.exec(text.slice(pos))![0].length;
+  }
+}
+
+/**
+ * The composer's "Use a skill" button: open a `/` after the skills already chosen (never inside
+ * one), keeping the rest of the message. A lone `/`, or the start of a skill's name, already there
+ * just gets the caret.
+ */
+export function insertSlash(text: string, names: readonly string[]): { text: string; caret: number } {
+  const pos = skillTokensEnd(text, (n) => names.includes(n));
+  const partial = /^\/([a-z0-9-]*)(?=\s|$)/.exec(text.slice(pos));
+  if (partial && names.some((n) => n.startsWith(partial[1]))) return { text, caret: pos + partial[0].length };
+  const head = text.slice(0, pos);
+  const gap = head && !/\s$/.test(head) ? " " : "";
+  const rest = text.slice(pos);
+  return { text: `${head}${gap}/${rest ? ` ${rest}` : ""}`, caret: pos + gap.length + 1 };
+}
+
+/** Put a picked skill in place of the `/partial` that starts at `start` (the caret is in or after it). */
+export function pickSlash(text: string, caret: number, start: number, name: string): { text: string; caret: number } {
+  const before = text.slice(0, start);
+  const after = text.slice(caret).replace(/^\S*/, "").replace(/^\s*/, "");
+  return { text: `${before}/${name} ${after}`, caret: before.length + name.length + 2 };
+}
+
 /** The `/partial` being typed at the caret, for the composer's skill menu (null when none). */
 export function slashQuery(text: string, caret: number): { start: number; query: string } | null {
   const before = text.slice(0, caret);

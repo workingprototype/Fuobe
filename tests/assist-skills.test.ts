@@ -8,9 +8,11 @@ import {
   contextUpdate,
   factMap,
   guessCategory,
+  insertSlash,
   parseFrontmatter,
   parseMemoryImport,
   parseSkillMd,
+  pickSlash,
   renderContext,
   skillSlug,
   slashQuery,
@@ -138,6 +140,29 @@ describe("/name in the composer", () => {
     expect(slashSkills("make /product-photoshoot", known)).toEqual({ skills: [], text: "make /product-photoshoot" });
     expect(slashSkills("/product-photoshoot", known)).toEqual({ skills: ["product-photoshoot"], text: "" });
   });
+  it("“Use a skill” adds a / after the chosen skills, and picking fills it in without touching them", () => {
+    const k = ["katana", "narration", "product-photoshoot"];
+    // The reviewer's case: /katana stays, narration is added.
+    const a = insertSlash("/katana make it pop", k);
+    expect(a).toEqual({ text: "/katana / make it pop", caret: 9 });
+    const q = slashQuery(a.text, a.caret)!;
+    expect(q).toEqual({ start: 8, query: "" });
+    const b = pickSlash(a.text, a.caret, q.start, "narration");
+    expect(b).toEqual({ text: "/katana /narration make it pop", caret: 19 });
+    expect(slashSkills(b.text, (n) => k.includes(n))).toEqual({ skills: ["katana", "narration"], text: "make it pop" });
+    // Empty box, plain text, a token without a trailing space, two tokens, a / already waiting.
+    expect(insertSlash("", k)).toEqual({ text: "/", caret: 1 });
+    expect(insertSlash("make it pop", k)).toEqual({ text: "/ make it pop", caret: 1 });
+    expect(insertSlash("/katana", k)).toEqual({ text: "/katana /", caret: 9 });
+    expect(insertSlash("/katana /narration hi", k)).toEqual({ text: "/katana /narration / hi", caret: 20 });
+    expect(insertSlash("/katana /nar hi", k)).toEqual({ text: "/katana /nar hi", caret: 12 });
+    expect(insertSlash("/katana / hi", k)).toEqual({ text: "/katana / hi", caret: 9 });
+    // An unknown /word is text, not a skill: the new / goes before it.
+    expect(insertSlash("/hello there", k)).toEqual({ text: "/ /hello there", caret: 1 });
+    // Picking while typing a partial replaces only that partial.
+    expect(pickSlash("/product-photoshoot /nar a bottle", 24, 20, "narration")).toEqual({ text: "/product-photoshoot /narration a bottle", caret: 31 });
+  });
+
   it("finds the /partial at the caret only at the start of the message", () => {
     expect(slashQuery("/pro", 4)).toEqual({ start: 0, query: "pro" });
     expect(slashQuery("/product-photoshoot /thu", 24)).toEqual({ start: 20, query: "thu" });

@@ -52,6 +52,7 @@ export function dynamicSamples(root, ids = {}) {
   const hubs = hubModePaths(root);
   const { patterns } = studioRoutes(root);
   const urls = [];
+  /** @type {Record<string, string[]>} */
   const byPattern = {};
   const generated = [];
   for (const p of patterns) {

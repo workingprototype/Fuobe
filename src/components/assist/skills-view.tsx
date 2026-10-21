@@ -102,7 +102,7 @@ function Skills() {
               if (f) void upload(f);
             }}
           />
-          <Button variant="outline" size="sm" onClick={() => file.current?.click()} disabled={uploading}>
+          <Button variant="outline" size="sm" onClick={() => file.current?.click()} disabled={uploading} aria-label="Upload a skill">
             {uploading ? <Loader2 className="animate-spin" /> : <Upload />} <span className="hidden sm:inline">Upload</span>
           </Button>
           <Button size="sm" onClick={() => setEditing("new")}>

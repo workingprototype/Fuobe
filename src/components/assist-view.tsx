@@ -164,7 +164,7 @@ export function AssistView() {
         <div className="flex shrink-0 items-center gap-1">
           {agentBadge}
           {id && (
-            <Button variant="ghost" size="sm" onClick={() => go(null)}>
+            <Button variant="ghost" size="sm" onClick={() => go(null)} aria-label="New chat">
               <MessageSquarePlus /> <span className="hidden sm:inline">New chat</span>
             </Button>
           )}

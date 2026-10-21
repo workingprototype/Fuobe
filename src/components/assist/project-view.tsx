@@ -92,7 +92,7 @@ function Project({ p }: { p: AssistProject }) {
         <ProjectDot project={p} className="ml-1" />
         <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">{p.name}</h1>
         <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setSettings(true)}>
+          <Button variant="ghost" size="sm" onClick={() => setSettings(true)} aria-label="Project settings">
             <Settings2 /> <span className="hidden sm:inline">Settings</span>
           </Button>
           <DropdownMenu>

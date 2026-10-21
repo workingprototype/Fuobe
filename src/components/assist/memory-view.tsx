@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, Check, ClipboardCopy, Download, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Brain, Check, ClipboardCopy, Import, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -26,6 +26,7 @@ import { copyText } from "@/lib/clipboard";
 import { guessCategory, MEMORY_CATEGORIES, MEMORY_HINTS, MEMORY_MAX_CHARS, parseMemoryImport, type AssistMemory, type AssistProject, type MemoryCategory, type MemoryScope } from "@/lib/assist";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { useMemories, useMemoryActions, useProjects } from "./hooks";
 import { ProjectDot, RailButton } from "./shell";
 
@@ -64,8 +65,8 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
           <RailButton />
           <h1 className="font-heading text-[22px] leading-none">Memory</h1>
           <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
-              <Download /> <span className="hidden sm:inline">Import</span>
+            <Button variant="outline" size="sm" onClick={() => setImporting(true)} aria-label="Import memories">
+              <Import /> <span className="hidden sm:inline">Import</span>
             </Button>
             <Button size="sm" onClick={() => setAdding(true)}>
               <Plus /> <span className="hidden sm:inline">Add a memory</span>
@@ -81,7 +82,7 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
             <p className="text-[13px] text-muted-foreground">Only this project&apos;s chats see these.</p>
             <div className="flex gap-1.5">
               <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
-                <Download /> Import
+                <Import /> Import
               </Button>
               <Button size="sm" onClick={() => setAdding(true)}>
                 <Plus /> Add
@@ -106,15 +107,18 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
               </SelectContent>
             </Select>
           )}
-          <div className="-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 scrollbar-none" role="radiogroup" aria-label="Category">
+          <div className="-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto px-1 scrollbar-none" role="radiogroup" aria-label="Category" onKeyDown={radioKeys}>
             {(["all", ...MEMORY_CATEGORIES] as const).map((c) => {
               const n = c === "all" ? (memories.data?.length ?? 0) : (counts.get(c) ?? 0);
-              if (c !== "all" && !n) return null;
+              // Empty categories are hidden, except the picked one (it stays the group's Tab stop).
+              if (c !== "all" && !n && category !== c) return null;
               return (
                 <button
                   key={c}
+                  type="button"
                   role="radio"
                   aria-checked={category === c}
+                  tabIndex={radioTab(category === c)}
                   onClick={() => setCategory(c)}
                   className={cn(
                     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
@@ -151,7 +155,7 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
               </EmptyHeader>
               <EmptyContent className="flex-row justify-center">
                 <Button variant="outline" onClick={() => setImporting(true)}>
-                  <Download /> Import
+                  <Import /> Import
                 </Button>
                 <Button onClick={() => setAdding(true)}>
                   <Plus /> Add a memory
@@ -246,16 +250,20 @@ function MemoryRow({ m, project }: { m: AssistMemory; project?: AssistProject })
   );
 }
 
-function CategorySelect({ value, onChange, id }: { value: MemoryCategory; onChange: (c: MemoryCategory) => void; id?: string }) {
+/** A memory's category: the trigger shows just the name; the list adds what each one is for. */
+function CategorySelect({ value, onChange, id, className, label = "Category" }: { value: MemoryCategory; onChange: (c: MemoryCategory) => void; id?: string; className?: string; label?: string }) {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as MemoryCategory)}>
-      <SelectTrigger id={id} size="sm" className="rounded-full" aria-label="Category">
-        <SelectValue />
+      <SelectTrigger id={id} size="sm" className={cn("max-w-full rounded-full", className)} aria-label={label}>
+        <SelectValue>{value}</SelectValue>
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="max-w-[min(22rem,calc(100vw-2rem))]">
         {MEMORY_CATEGORIES.map((c) => (
-          <SelectItem key={c} value={c}>
-            {c} <span className="text-[11px] text-muted-foreground">— {MEMORY_HINTS[c]}</span>
+          <SelectItem key={c} value={c} className="py-1.5">
+            <span className="flex min-w-0 flex-col items-start gap-0">
+              <span>{c}</span>
+              <span className="text-[11px] leading-snug whitespace-normal text-muted-foreground">{MEMORY_HINTS[c]}</span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -420,8 +428,10 @@ function ImportForm({ place, projects, onDone }: { place: Place; projects: Assis
               {items.map((it, i) => (
                 <li key={i} className={cn("flex items-start gap-3 px-3 py-2.5", !it.keep && "opacity-50")}>
                   <Checkbox className="mt-0.5" checked={it.keep} onCheckedChange={(v) => setItems((xs) => xs!.map((x, j) => (j === i ? { ...x, keep: !!v } : x)))} aria-label={`Import “${it.text}”`} />
-                  <p className="min-w-0 flex-1 text-[13px] break-words">{it.text}</p>
-                  <CategorySelect value={it.category} onChange={(c) => setItems((xs) => xs!.map((x, j) => (j === i ? { ...x, category: c } : x)))} />
+                  <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5 sm:flex-row sm:gap-3">
+                    <p className="w-full min-w-0 text-[13px] break-words sm:w-auto sm:flex-1">{it.text}</p>
+                    <CategorySelect className="shrink-0" label={`Category for “${it.text.slice(0, 40)}”`} value={it.category} onChange={(c) => setItems((xs) => xs!.map((x, j) => (j === i ? { ...x, category: c } : x)))} />
+                  </div>
                 </li>
               ))}
             </ul>
