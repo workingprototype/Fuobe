@@ -420,6 +420,14 @@ export function mixedPrompts(p: Pick<MixedPreset, "look" | "settings">, values: 
 
 export const denoiseFor = (values: MixedValues) => DENOISE[values.intensity] ?? DENOISE.balanced;
 
+/** "#c1121f" from a typed "#C1121F", "c1121f" or "#c12" (shorthand), else null. */
+export function parseHex(raw: string): string | null {
+  const v = raw.trim().replace(/^#/, "").toLowerCase();
+  if (/^[0-9a-f]{6}$/.test(v)) return `#${v}`;
+  if (/^[0-9a-f]{3}$/.test(v)) return `#${[...v].map((c) => c + c).join("")}`;
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Frames, frame rates and cost
 

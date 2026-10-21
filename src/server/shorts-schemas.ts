@@ -16,6 +16,8 @@ const source = z.object({
   name: z.string().max(200).optional(),
   duration: z.number().finite().positive().max(3600).optional(),
   fps: z.number().finite().positive().max(240).optional(),
+  width: z.number().int().positive().max(20000).optional(),
+  height: z.number().int().positive().max(20000).optional(),
 });
 
 export const ShortsBodySchema = z.object({

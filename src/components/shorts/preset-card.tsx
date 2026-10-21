@@ -5,6 +5,7 @@ import { memo } from "react";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import type { PresetPreview as Preview } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
+import { LookMotif } from "./look-motif";
 
 /**
  * A selectable look card (Shorts Studio and Mixed Media): the procedural preview from the
@@ -45,10 +46,12 @@ export const LookCard = memo(function LookCard({
     >
       <div className={cn("relative aspect-[4/5] w-full overflow-hidden rounded-lg bg-muted ring-offset-2 ring-offset-background transition-shadow", selected && "ring-2 ring-primary")}>
         <PresetPreview preview={preview} hue={hue} playing={playing} />
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/40 to-transparent" />
-        {badge && <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-black/45 px-1.5 text-[10px] font-medium text-white backdrop-blur">{badge}</span>}
+        {/* The preset's own motif (lettering, scribbles, paper, a grid…), so similar treatments read apart. */}
+        <LookMotif id={id} hue={hue} />
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 z-[7] h-12 bg-gradient-to-t from-black/40 to-transparent" />
+        {badge && <span className="absolute top-1.5 left-1.5 z-[8] rounded-[4px] bg-black/45 px-1.5 text-[10px] font-medium text-white backdrop-blur">{badge}</span>}
         {selected && (
-          <span className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-primary text-primary-foreground shadow-soft">
+          <span className="absolute top-1.5 right-1.5 z-[8] grid size-6 place-items-center rounded-full bg-primary text-primary-foreground shadow-soft">
             <Check className="size-3.5" />
           </span>
         )}

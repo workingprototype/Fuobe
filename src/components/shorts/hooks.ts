@@ -22,7 +22,7 @@ export const send = async <T>(url: string, method: string, body?: unknown) =>
 export interface ShortsBody {
   engine: Engine;
   presetId: string;
-  source: { url: string; name?: string; duration?: number };
+  source: { url: string; name?: string; duration?: number; width?: number; height?: number };
   range: ShortsRange;
   aspectRatio: ShortsRatio;
   language: string;
@@ -103,7 +103,7 @@ export function useShortsEstimate(body: ShortsBody | null) {
 export function useShortsSessions() {
   const qc = useQueryClient();
   const connected = useGenerationEvents((ev) => {
-    if (ev.type === "generation" && ev.generation.feature === "shorts") void qc.invalidateQueries({ queryKey: ["shorts", "sessions"] });
+    if (ev.type === "generation" && ev.generation.feature.startsWith("shorts")) void qc.invalidateQueries({ queryKey: ["shorts", "sessions"] });
   });
   return useQuery({
     queryKey: ["shorts", "sessions"],

@@ -80,7 +80,7 @@ export const SHORTS_MODELS: Record<Engine, string[]> = {
 
 /** The helper models of the pipeline. */
 export const SHORTS_TOOLS = {
-  cloud: { cut: "trim-video", trim: "trim-video", join: "join-clips", mux: "merge-audio-video", joinMax: 24 },
+  cloud: { cut: "trim-video", trim: "trim-video", fit: "scale-video", join: "join-clips", mux: "merge-audio-video", joinMax: 24 },
   open: { cut: "oss-segment", trim: "oss-trim", frame: "oss-qwen-edit", join: "oss-join-clips", mux: "oss-mux", joinMax: 4 },
 } as const;
 
@@ -200,6 +200,8 @@ export interface ShortsLook {
   type?: boolean;
   references?: string[];
   custom?: boolean;
+  /** A custom preset with words of its own (else the look is only its reference images). */
+  described?: boolean;
 }
 
 export function lookFromPreset(p: ShortsPreset): ShortsLook {
@@ -214,6 +216,7 @@ export function lookFromCustom(p: ShortsCustomPreset): ShortsLook {
     look: words ? `the look of the reference images: ${words}` : "the look of the reference images: their colours, textures, lighting and graphic style",
     references: p.references.slice(0, SHORTS.maxReferences),
     custom: true,
+    described: !!words,
   };
 }
 
@@ -282,6 +285,15 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 export function clipLengthProblem(m: { name: string; minSeconds?: number; maxSeconds?: number }, seconds: number): string | null {
   if (m.minSeconds && seconds < m.minSeconds - 0.01) return `${m.name} needs at least ${m.minSeconds} s`;
   if (m.maxSeconds && seconds > m.maxSeconds + 0.01) return `${m.name} takes up to ${m.maxSeconds} s`;
+  return null;
+}
+
+/** Higgsfield's upload rules for the picture: up to 4000 px on the long side, between 1:3 and 3:1. */
+export function clipShapeProblem(width?: number, height?: number): string | null {
+  if (!width || !height) return null;
+  if (Math.max(width, height) > SHORTS.maxDimension) return `This clip is ${width}×${height} — use one up to ${SHORTS.maxDimension} px on its long side`;
+  const r = width / height;
+  if (r > 3.01 || r < 1 / 3.01) return "Use a clip between 1:3 and 3:1";
   return null;
 }
 
@@ -366,10 +378,12 @@ export interface PlanStep {
 export interface ShortsPlanInput {
   engine: Engine;
   title: string;
-  source: { url: string; duration?: number; hasAudio?: boolean };
+  source: { url: string; duration?: number; hasAudio?: boolean; width?: number; height?: number };
   range: ShortsRange;
   look: ShortsLook;
   aspectRatio: ShortsRatio;
+  /** Cloud: the restyle model can be asked for the ratio itself; otherwise each cut is cropped to it first (it keeps its input's shape). */
+  reframes?: boolean;
   language: string;
   /** The restyle model (cloud: SHORTS_MODELS.cloud; open: oss-wan22-vace-restyle). */
   modelId: string;
@@ -382,10 +396,14 @@ export interface ShortsPlanInput {
 }
 
 export const SHORTS_FEATURE = "shorts";
+/** The steps in between (cuts, crops, first frames, joins, the sound): kept apart from the takes and the finished short. */
+export const SHORTS_STEP_FEATURE = "shorts-step";
 
 /** Keys of one take's steps. */
 export interface TakeKeys {
   cut: string;
+  /** Cloud: the cut cropped to the output ratio. */
+  fit?: string;
   frame?: string;
   look: string;
 }
@@ -403,6 +421,7 @@ export function refsFor(input: Pick<ShortsPlanInput, "engine" | "look" | "maxRef
 export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: number, suffix = ""): { steps: PlanStep[]; keys: TakeKeys } {
   const t = SHORTS_TOOLS[input.engine];
   const base = { feature: SHORTS_FEATURE, batchTitle: input.title };
+  const helper = { feature: SHORTS_STEP_FEATURE, batchTitle: input.title };
   const k = (what: string) => `${what}${seg.index}${suffix}`;
   const refs = refsFor(input);
   const seed = input.seed !== undefined ? { seed: input.seed } : {};
@@ -414,7 +433,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
         {
           key: keys.cut,
           request: {
-            ...base,
+            ...helper,
             modelId: t.cut,
             op: "trim",
             inputs: { video: input.source.url },
@@ -425,7 +444,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
         {
           key: keys.frame!,
           request: {
-            ...base,
+            ...helper,
             modelId: SHORTS_TOOLS.open.frame,
             op: "edit",
             prompt: firstFramePrompt(input.look, input.language, refs.length),
@@ -452,15 +471,33 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
       ],
     };
   }
-  const keys: TakeKeys = { cut: k("cut"), look: k("look") };
+  const fit = !input.reframes && needsFit(input.source, input.aspectRatio);
+  const keys: TakeKeys = { cut: k("cut"), ...(fit ? { fit: k("fit") } : {}), look: k("look") };
   const seconds = seg.end - seg.start;
   return {
     keys,
     steps: [
       {
         key: keys.cut,
-        request: { ...base, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: seg.start, endTime: seg.end }, step: segLabel(seg, total, "cut") },
+        request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: seg.start, endTime: seg.end }, step: segLabel(seg, total, "cut") },
       },
+      // The restyle keeps its input's shape: crop the cut to the output ratio first (centre crop, no AI, ≈ free).
+      ...(keys.fit
+        ? [
+            {
+              key: keys.fit,
+              request: {
+                ...helper,
+                modelId: SHORTS_TOOLS.cloud.fit,
+                op: "reframe" as const,
+                params: { aspectRatio: input.aspectRatio, extra: { ...fitSize(input.aspectRatio) } },
+                step: segLabel(seg, total, `crop to ${input.aspectRatio}`),
+              },
+              after: [keys.cut],
+              chain: [{ slot: "video" as const }],
+            },
+          ]
+        : []),
       {
         key: keys.look,
         request: {
@@ -474,11 +511,23 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
           params: { aspectRatio: input.aspectRatio, duration: r3(seconds), ...(input.resolution ? { resolution: input.resolution } : {}), ...seed },
           step: segLabel(seg, total, "restyle"),
         },
-        after: [keys.cut],
+        after: [keys.fit ?? keys.cut],
         chain: [{ slot: "video" }],
       },
     ],
   };
+}
+
+/** The size a cut is cropped to before a restyle that keeps its input's shape (1080 on the short side). */
+export function fitSize(ratio: ShortsRatio): { width: number; height: number } {
+  return ratio === "9:16" ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+}
+
+/** Whether a clip needs cropping to come out at `ratio` (an unknown shape is cropped: it's ≈ free). */
+export function needsFit(source: { width?: number; height?: number }, ratio: ShortsRatio): boolean {
+  if (!source.width || !source.height) return true;
+  const want = ratio === "9:16" ? 9 / 16 : 16 / 9;
+  return Math.abs(source.width / source.height - want) / want > 0.02;
 }
 
 /** Where a clip in a stitch comes from: an earlier step's output, or a finished file. */
@@ -492,6 +541,7 @@ export type ClipRef = { key: string } | { url: string };
 export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""): { steps: PlanStep[]; final?: string } {
   const t = SHORTS_TOOLS[input.engine];
   const base = { feature: SHORTS_FEATURE, batchTitle: input.title };
+  const helper = { feature: SHORTS_STEP_FEATURE, batchTitle: input.title };
   const steps: PlanStep[] = [];
   const params = input.engine === "open" ? { aspectRatio: input.aspectRatio, resolution: "480p" } : { aspectRatio: input.aspectRatio };
   // Each join step takes its clips either chained (key) or as files (url).
@@ -509,7 +559,7 @@ export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""
       steps.push({
         key,
         request: {
-          ...base,
+          ...helper,
           modelId: t.join,
           op: "concat",
           prompt: input.title,
@@ -528,7 +578,7 @@ export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""
     // Nothing to put back: the joined clip (or the single segment) is the short.
     if ("key" in picture) {
       const last = steps.find((s) => s.key === picture.key);
-      if (last) last.request = { ...last.request, title: input.title };
+      if (last) last.request = { ...last.request, feature: SHORTS_FEATURE, title: input.title };
       return { steps, final: picture.key };
     }
     return { steps, final: undefined };
@@ -547,7 +597,7 @@ export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""
     const key = `sound${suffix}`;
     steps.push({
       key,
-      request: { ...base, modelId: t.trim, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: input.range.end }, step: { label: "Original sound", index: 1100, of: 1000 } },
+      request: { ...helper, modelId: t.trim, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: input.range.end }, step: { label: "Original sound", index: 1100, of: 1000 } },
     });
     after.push(key);
     chain.push({ slot: "audio" });
@@ -578,6 +628,8 @@ export function planShorts(input: ShortsPlanInput): { segments: ShortsSegment[];
 export interface ShortsTake {
   /** The generations of this take's steps, by role. */
   cut: string;
+  /** Cloud: the cut cropped to the output ratio. */
+  fit?: string;
   frame?: string;
   look: string;
   createdAt: number;
@@ -607,7 +659,7 @@ export interface ShortsSession {
   look: ShortsLook;
   source: { url: string; name?: string; duration?: number; hasAudio?: boolean; width?: number; height?: number };
   range: ShortsRange;
-  settings: { aspectRatio: ShortsRatio; language: string; modelId: string; resolution?: string; maxRefs: number };
+  settings: { aspectRatio: ShortsRatio; language: string; modelId: string; resolution?: string; maxRefs: number; reframes?: boolean };
   segments: ShortsSessionSegment[];
   stitches: ShortsStitch[];
   createdAt: number;
@@ -627,6 +679,7 @@ export function sessionPlanInput(s: ShortsSession, seed?: number): ShortsPlanInp
     modelId: s.settings.modelId,
     maxRefs: s.settings.maxRefs,
     resolution: s.settings.resolution,
+    reframes: s.settings.reframes,
     ...(seed !== undefined ? { seed } : {}),
   };
 }
@@ -685,9 +738,10 @@ export function chainState(steps: { g?: Generation; label: string }[]): ChainSta
 }
 
 /** A take's steps with their labels. */
-export function takeSteps(t: Pick<ShortsTake, "cut" | "frame" | "look">, gens: Record<string, Generation>): { g?: Generation; label: string }[] {
+export function takeSteps(t: Pick<ShortsTake, "cut" | "fit" | "frame" | "look">, gens: Record<string, Generation>): { g?: Generation; label: string }[] {
   return [
     { g: gens[t.cut], label: "Cutting the segment" },
+    ...(t.fit ? [{ g: gens[t.fit], label: "Cropping the segment" }] : []),
     ...(t.frame ? [{ g: gens[t.frame], label: "Restyling the first frame" }] : []),
     { g: gens[t.look], label: "Restyling" },
   ];

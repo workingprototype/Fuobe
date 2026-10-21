@@ -27,6 +27,7 @@ const presetsRoute = await import("@/app/api/shorts/presets/route");
 const mixedRoute = await import("@/app/api/mixed-media/route");
 const mixedPreviewRoute = await import("@/app/api/mixed-media/preview/route");
 const mixedEstimateRoute = await import("@/app/api/mixed-media/estimate/route");
+const mixedRetryRoute = await import("@/app/api/mixed-media/retry/route");
 
 const json = (method: string, body?: unknown) =>
   new Request("http://x/api", { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -89,7 +90,10 @@ describe("Shorts sessions", () => {
       expect(est.costUsd!).toBeLessThan(1.25);
       expect(est.perSegmentUsd!).toBeGreaterThanOrEqual(0.6);
       expect(est.perSegmentUsd!).toBeLessThan(0.62);
-      expect(est.notes.join(" ")).toMatch(/keeps your clip's shape/);
+      // A 9:16 clip for a 9:16 short: nothing to crop. The same clip as a 16:9 short is centre-cropped first.
+      expect(est.notes.join(" ")).not.toMatch(/cropped/);
+      const wide = await shorts.estimateShorts(body({ aspectRatio: "16:9", source: { url: clip, duration: 12, width: 72, height: 128 } }) as never);
+      expect(wide.notes).toContain("Your 72×128 clip is centre-cropped to 16:9 before the restyle");
     } finally {
       setSetting("falKey", "");
     }
@@ -199,6 +203,23 @@ describe("Shorts sessions", () => {
     shorts.deleteSession(c.id);
   });
 
+  it("crops each cut to the output ratio before a restyle model that keeps its input's shape", async () => {
+    const s = await shorts.createSession(body({ aspectRatio: "16:9", range: { start: 0, end: 8 } }) as never);
+    expect(s.source).toMatchObject({ width: 72, height: 128 });
+    const take = s.segments[0].takes[0];
+    expect(take.fit).toEqual(expect.any(String));
+    expect(gens.getGeneration(take.fit!)).toMatchObject({ modelId: "scale-video", op: "reframe", request: { params: { aspectRatio: "16:9", extra: { width: 1920, height: 1080 } } } });
+    expect(dependsOn(take.fit!)).toEqual([take.cut]);
+    expect(dependsOn(take.look)).toEqual([take.fit]);
+    expect(shorts.sessionIds(s)).toContain(take.fit);
+    // A new take crops its cut too.
+    const again = shorts.regenerateSegment(s.id, 0).segments[0].takes[1];
+    expect(dependsOn(again.look)).toEqual([again.fit]);
+    expect(await settle(s.stitches[0].final)).toMatchObject({ status: "succeeded" });
+    await settle(again.look);
+    shorts.deleteSession(s.id);
+  });
+
   it("won't stitch while a segment is still rendering", async () => {
     const s = shorts.regenerateSegment(sessionId, 0);
     const take = s.segments[0].takes.at(-1)!.look;
@@ -251,6 +272,38 @@ describe("Shorts sessions", () => {
     const est = await shorts.estimateShorts(body({ presetId: p.id }) as never);
     expect(est.refsSent).toBe(0);
     expect(est.notes[0]).toMatch(/restyles from words only/);
+  });
+
+  it("reads WebM headers: a silent recording gets no soundtrack step (it would fail after the restyles were paid for)", async () => {
+    const webm = (name: string) => saveFile({ data: fs.readFileSync(path.join(__dirname, "fixtures", name)), contentType: "video/webm", source: "upload", name }).url;
+    const silent = webm("shorts-silent.webm");
+    expect(await shorts.probeSource(silent)).toMatchObject({ hasAudio: false, width: 96, height: 64 });
+    expect((await shorts.probeSource(webm("shorts-sound.webm"))).hasAudio).toBe(true);
+    const s = await shorts.createSession(body({ source: { url: silent, name: "screen.webm" }, range: { start: 0, end: 6 } }) as never);
+    expect(s.source.hasAudio).toBe(false);
+    const final = gens.getGeneration(s.stitches[0].final)!;
+    expect(final.op).toBe("v2v");
+    expect(Object.values(shorts.getSession(s.id).generations).some((g) => g.op === "mux")).toBe(false);
+    await settle(final.id);
+    // A file nobody can read counts as silent too.
+    const junk = saveFile({ data: Buffer.from("not a video"), contentType: "video/mp4", source: "upload", name: "x.mp4" }).url;
+    expect(await shorts.probeSource(junk)).toEqual({});
+    shorts.deleteSession(s.id);
+  });
+
+  it("checks the picture's size and shape, and custom presets on words-only models", async () => {
+    const big = await estimateRoute.POST(json("POST", body({ source: { url: "/api/files/placeholder.mp4", duration: 12, width: 7680, height: 4320 } })));
+    expect(big.status).toBe(400);
+    expect((await big.json()).error).toBe("This clip is 7680×4320 — use one up to 4000 px on its long side");
+    const tall = await estimateRoute.POST(json("POST", body({ source: { url: "/api/files/placeholder.mp4", duration: 12, width: 400, height: 1600 } })));
+    expect((await tall.json()).error).toBe("Use a clip between 1:3 and 3:1");
+    const bare = shorts.createCustomPreset({ references: [png] });
+    const words = await estimateRoute.POST(json("POST", body({ presetId: bare.id })));
+    expect(words.status).toBe(422);
+    expect((await words.json()).error).toBe("Gemini Omni Flash 1.1 restyles from words only — describe the look in your preset, or pick Kling O3 4K Edit or Happy Horse Video Edit");
+    const kling = await (await estimateRoute.POST(json("POST", body({ presetId: bare.id, modelId: "kling-o3-4k-edit" })))).json();
+    expect(kling.refsSent).toBe(1);
+    shorts.deleteCustomPreset(bare.id);
   });
 
   it("respects the engine mode", async () => {
@@ -312,6 +365,26 @@ describe("Mixed Media renders", () => {
     expect(items[1].request.params?.extra).toEqual({ preprocessor: "canny" });
     expect(dependsOn(final.id)).toEqual([items[1].id, items[0].id]);
     expect(await settle(final.id)).toMatchObject({ status: "succeeded", feature: "mixed-media" });
+  });
+
+  it("tries a failed render again with the same settings, from its first step", async () => {
+    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", range: { start: 1, end: 4 } }) as never);
+    // The restyle stops: the soundtrack step then fails with the generic "An earlier step didn't finish".
+    await gens.cancelGeneration(items[1].id);
+    expect(await settle(final.id)).toMatchObject({ status: "failed", error: "An earlier step didn't finish" });
+    const res = await mixedRetryRoute.POST(json("POST", { id: final.id, requestId: "mm-retry-0001" }));
+    expect(res.status).toBe(201);
+    const again = await res.json();
+    expect(again.items.map((g: Generation) => g.modelId)).toEqual(["trim-video", "ltx-2-3-restyle", "merge-audio-video"]);
+    expect(again.final.id).not.toBe(final.id);
+    expect(again.final.batchId).not.toBe(final.batchId);
+    // Same settings; the chained inputs are filled again by the new steps.
+    expect(again.items[1].request).toMatchObject({ prompt: items[1].request.prompt, params: items[1].request.params });
+    expect(again.items[1].request.inputs?.video).toBeUndefined();
+    expect(dependsOn(again.final.id)).toEqual([again.items[1].id, again.items[0].id]);
+    expect(await settle(again.final.id)).toMatchObject({ status: "succeeded" });
+    const gone = await mixedRetryRoute.POST(json("POST", { id: "nope" }));
+    expect(gone.status).toBe(404);
   });
 
   it("starts one render per request id", async () => {

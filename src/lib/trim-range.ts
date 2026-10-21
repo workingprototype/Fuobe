@@ -60,6 +60,36 @@ export function moveRange(r: TrimRange, delta: number, limits: TrimLimits): Trim
   return clampRange({ startTime: r.startTime + delta, endTime: r.endTime + delta }, limits, "move");
 }
 
+export type TrimHandle = "start" | "end" | "move";
+
+/**
+ * The selection after a key on one of the trimmer's sliders (the start handle, the end handle or the
+ * whole window), or null when the key isn't a slider key: arrows move 0.1 s (Shift ×10), Page Up /
+ * Page Down 5 s, Home / End go to the clip's ends. The min/max length and the clip's ends hold.
+ */
+export function trimKey(r: TrimRange, handle: TrimHandle, key: string, shift: boolean, limits: TrimLimits, step = 0.1): TrimRange | null {
+  const d = limits.duration;
+  const big = shift ? 10 : 1;
+  let delta: number | null = null;
+  let to: number | null = null;
+  if (key === "ArrowLeft" || key === "ArrowDown") delta = -step * big;
+  else if (key === "ArrowRight" || key === "ArrowUp") delta = step * big;
+  else if (key === "PageDown") delta = -5;
+  else if (key === "PageUp") delta = 5;
+  else if (key === "Home") to = 0;
+  else if (key === "End") to = d;
+  else return null;
+  if (handle === "move") return moveRange(r, to !== null ? (to === 0 ? -r.startTime : d - r.endTime) : delta!, limits);
+  const cur = handle === "start" ? r.startTime : r.endTime;
+  return setEdge(r, handle, to ?? cur + delta!, limits);
+}
+
+/** A typed time in seconds: "12.5", "12.5 s" or "0:12.5" (NaN when it isn't one). */
+export function parseTime(s: string): number {
+  const m = /^\s*(?:(\d+):)?(\d+(?:\.\d+)?)\s*s?\s*$/.exec(s);
+  return m ? Number(m[1] ?? 0) * 60 + Number(m[2]) : NaN;
+}
+
 function spoken(sec: number): string {
   if (sec >= 60 && sec % 60 === 0) return `${sec / 60} minute${sec === 60 ? "" : "s"}`;
   return `${Number.isInteger(sec) ? sec : sec.toFixed(1)} second${sec === 1 ? "" : "s"}`;

@@ -28,8 +28,10 @@ export interface SourceClip {
   uploading: boolean;
   error?: string;
   info?: SourceInfo;
-  /** Length as the browser read it (formats the server can't read). */
+  /** Length and size as the browser read them (formats the server can't read). */
   browserDuration?: number;
+  browserWidth?: number;
+  browserHeight?: number;
 }
 
 const VIDEO_TYPE = /^video\/(mp4|quicktime|webm|x-m4v)$/;
@@ -120,10 +122,19 @@ export function useSourceClip(maxBytes: number) {
     setClip(null);
   }, []);
 
-  const setBrowserDuration = useCallback((d: number) => setClip((c) => (c && d > 0 ? { ...c, browserDuration: d } : c)), []);
+  /** What the browser's player read (the trimmer's onMeta). */
+  const setBrowserMeta = useCallback(
+    (m: { duration: number; width?: number; height?: number }) =>
+      setClip((c) => (c && m.duration > 0 ? { ...c, browserDuration: m.duration, ...(m.width && m.height ? { browserWidth: m.width, browserHeight: m.height } : {}) } : c)),
+    [],
+  );
 
-  return { clip, pick, adopt, clear, setBrowserDuration };
+  return { clip, pick, adopt, clear, setBrowserMeta };
 }
 
 /** The clip's length: its header's, else what the browser read. */
 export const clipDuration = (c: SourceClip | null) => c?.info?.duration ?? c?.browserDuration;
+
+/** The clip's picture size: its header's, else what the browser read. */
+export const clipSize = (c: SourceClip | null): { width?: number; height?: number } =>
+  c?.info?.width && c.info.height ? { width: c.info.width, height: c.info.height } : { width: c?.browserWidth, height: c?.browserHeight };

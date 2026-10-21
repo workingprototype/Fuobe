@@ -4,10 +4,12 @@ import { getModel } from "@/lib/catalog";
 import { maxRefsFor, reframes, resolutionFor, sourceSeconds } from "@/lib/catalog/shorts-models";
 import {
   clipLengthProblem,
+  clipShapeProblem,
   customPresetName,
   getShortsPreset,
   lookFromCustom,
   lookFromPreset,
+  needsFit,
   planSegments,
   planShorts,
   planStitch,
@@ -35,6 +37,7 @@ import { getGeneration, previewChained } from "./generations";
 import { trashGenerations } from "./library";
 import { engineMode } from "./settings";
 import { readRef } from "./storage";
+import { probeWebm } from "./webm-probe";
 
 /**
  * Shorts Studio sessions: a clip cut into segments, each restyled (one or more takes, one of them
@@ -67,16 +70,28 @@ export interface SourceInfo {
   hasAudio?: boolean;
 }
 
-/** What the clip's header says (MP4 / MOV; other containers come back empty and the browser's numbers are used). */
+/**
+ * What the clip's header says (MP4 / MOV, and WebM / Matroska). A file neither reader knows comes
+ * back empty: the browser's numbers are used, and its sound counts as unknown (made without it).
+ */
 export async function probeSource(url: string): Promise<SourceInfo> {
   if (!url.startsWith("/api/files/")) throw new ShortsError("Upload the clip first");
   let info: MediaInfo | null = null;
+  let data: Buffer;
   try {
-    info = probeMedia((await readRef(url)).data);
+    data = (await readRef(url)).data;
   } catch {
     throw new ShortsError("That clip is gone — upload it again", 404);
   }
-  if (!info) return {};
+  try {
+    info = probeMedia(data);
+  } catch {
+    info = null;
+  }
+  if (!info) {
+    const webm = probeWebm(data);
+    return webm ? { duration: webm.duration, width: webm.width, height: webm.height, fps: webm.fps, hasAudio: webm.hasAudio } : {};
+  }
   return {
     duration: info.videoDuration ?? info.duration,
     width: info.width,
@@ -198,7 +213,8 @@ export function deleteCustomPreset(id: string): boolean {
 export interface ShortsBody {
   engine: Engine;
   presetId: string;
-  source: { url: string; name?: string; duration?: number };
+  /** width / height: what the browser read, for estimates made before the server has the file. */
+  source: { url: string; name?: string; duration?: number; width?: number; height?: number };
   range: ShortsRange;
   aspectRatio: ShortsRatio;
   language: string;
@@ -234,7 +250,7 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
   const look = lookFor(body.presetId);
   const info = opts.probe ? await probeSource(body.source.url) : {};
   const duration = info.duration ?? body.source.duration;
-  const problem = rangeProblem(body.range, duration);
+  const problem = rangeProblem(body.range, duration) ?? clipShapeProblem(info.width ?? body.source.width, info.height ?? body.source.height);
   if (problem) throw new ShortsError(problem);
   // Every segment has to be a clip the restyle model takes (a cut outside its window is paid for, then refused).
   const limits = sourceSeconds(modelId);
@@ -242,6 +258,11 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
     .map((s) => clipLengthProblem({ name: getModel(modelId)?.name ?? modelId, minSeconds: limits.min, maxSeconds: limits.max }, s.end - s.start))
     .find(Boolean);
   if (odd) throw new ShortsError(`${odd} per segment — pick another model`);
+  // A custom preset without words on a words-only model would restyle from nothing but "the look of the reference images".
+  if (look.custom && !look.described && body.engine === "cloud" && !maxRefsFor(modelId)) {
+    const readers = SHORTS_MODELS.cloud.filter((id) => maxRefsFor(id) > 0).map((id) => getModel(id)?.name ?? id);
+    throw new ShortsError(`${getModel(modelId)?.name ?? "This model"} restyles from words only — describe the look in your preset, or pick ${readers.join(" or ")}`, 422);
+  }
   const name = fileTitle(body.source.name);
   return {
     info,
@@ -249,7 +270,14 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
       engine: body.engine,
       title: name ? `${look.name} · ${name}` : `${look.name} short`,
       // Unknown sound (a container the header reader doesn't know) is treated as present.
-      source: { url: body.source.url, duration, hasAudio: info.hasAudio ?? true },
+      source: {
+        url: body.source.url,
+        duration,
+        // Sound we couldn't read counts as none: a soundtrack step fed a silent file fails after every restyle was paid for.
+        hasAudio: info.hasAudio ?? false,
+        width: info.width ?? body.source.width,
+        height: info.height ?? body.source.height,
+      },
       range: body.range,
       look,
       aspectRatio: body.aspectRatio,
@@ -257,6 +285,7 @@ async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ 
       modelId,
       maxRefs: maxRefsFor(modelId),
       resolution: resolutionFor(modelId),
+      reframes: body.engine === "open" || reframes(modelId),
     },
   };
 }
@@ -292,7 +321,8 @@ function notesFor(input: ShortsPlanInput): string[] {
   if (refs && input.engine === "cloud" && !input.maxRefs) notes.push(`${getModel(input.modelId)?.name ?? "This model"} restyles from words only — pick Kling O3 4K Edit or Happy Horse to use your reference images`);
   if (refs > SHORTS.openReferences && input.engine === "open") notes.push(`The open engine uses your first ${SHORTS.openReferences} reference images`);
   if (input.engine === "cloud") {
-    if (!reframes(input.modelId)) notes.push(`${getModel(input.modelId)?.name} keeps your clip's shape; the open engine crops to ${input.aspectRatio}`);
+    const { width: w, height: h } = input.source;
+    if (!input.reframes && w && h && needsFit(input.source, input.aspectRatio)) notes.push(`Your ${w}×${h} clip is centre-cropped to ${input.aspectRatio} before the restyle`);
   }
   return notes;
 }
@@ -330,9 +360,9 @@ export async function createSession(body: ShortsBody): Promise<ShortsSession> {
   const now = Date.now();
   const segments: ShortsSessionSegment[] = plan.segments.map((s, i) => {
     const t = plan.takes[i];
-    return { ...s, takes: [{ cut: id(t.cut), ...(t.frame ? { frame: id(t.frame) } : {}), look: id(t.look), createdAt: now }], primary: id(t.look) };
+    return { ...s, takes: [{ cut: id(t.cut), ...(t.fit ? { fit: id(t.fit) } : {}), ...(t.frame ? { frame: id(t.frame) } : {}), look: id(t.look), createdAt: now }], primary: id(t.look) };
   });
-  const takeKeys = new Set(plan.takes.flatMap((t) => [t.cut, t.look, ...(t.frame ? [t.frame] : [])]));
+  const takeKeys = new Set(plan.takes.flatMap((t) => [t.cut, t.look, ...(t.fit ? [t.fit] : []), ...(t.frame ? [t.frame] : [])]));
   const stitch: ShortsStitch = {
     ids: plan.steps.filter((s) => !takeKeys.has(s.key)).map((s) => id(s.key)),
     final: id(plan.final!),
@@ -347,7 +377,7 @@ export async function createSession(body: ShortsBody): Promise<ShortsSession> {
     look: input.look,
     source: { url: input.source.url, name: body.source.name, duration: input.source.duration, hasAudio: input.source.hasAudio, width: info.width, height: info.height },
     range: input.range,
-    settings: { aspectRatio: input.aspectRatio, language: input.language, modelId: input.modelId, resolution: input.resolution, maxRefs: input.maxRefs },
+    settings: { aspectRatio: input.aspectRatio, language: input.language, modelId: input.modelId, resolution: input.resolution, maxRefs: input.maxRefs, reframes: input.reframes },
     segments,
     stitches: [stitch],
     createdAt: now,
@@ -377,7 +407,7 @@ export async function createSession(body: ShortsBody): Promise<ShortsSession> {
 
 /** Every generation a session made. */
 export function sessionIds(s: ShortsSession): string[] {
-  const ids = [...s.segments.flatMap((g) => g.takes.flatMap((t) => [t.cut, t.look, ...(t.frame ? [t.frame] : [])])), ...s.stitches.flatMap((x) => [...x.ids, x.final])];
+  const ids = [...s.segments.flatMap((g) => g.takes.flatMap((t) => [t.cut, ...(t.fit ? [t.fit] : []), ...(t.frame ? [t.frame] : []), t.look])), ...s.stitches.flatMap((x) => [...x.ids, x.final])];
   return [...new Set(ids)];
 }
 
@@ -471,7 +501,13 @@ export function regenerateSegment(id: string, index: number): ShortsSessionView 
     throw new ShortsError((e as Error).message, 422);
   }
   const id_ = (k: string) => pipeline.byKey[k].id;
-  const next = { cut: id_(take.keys.cut), ...(take.keys.frame ? { frame: id_(take.keys.frame) } : {}), look: id_(take.keys.look), createdAt: Date.now() };
+  const next = {
+    cut: id_(take.keys.cut),
+    ...(take.keys.fit ? { fit: id_(take.keys.fit) } : {}),
+    ...(take.keys.frame ? { frame: id_(take.keys.frame) } : {}),
+    look: id_(take.keys.look),
+    createdAt: Date.now(),
+  };
   const segments = s.segments.map((g, i) => (i === index ? { ...g, takes: [...g.takes, next], primary: usable(g.primary) ? g.primary : next.look } : g));
   saveSession({ ...s, segments });
   return getSession(id);

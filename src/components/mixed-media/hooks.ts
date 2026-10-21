@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue } from "react";
 import type { MixedResolution, MixedValues } from "@/lib/catalog/mixed-media";
 import type { Engine, Generation } from "@/lib/catalog/types";
@@ -62,6 +62,29 @@ export function useWatchedGeneration(id: string | null) {
   });
 }
 
+/** Follow every step of a render (cut → restyle → sound), so a failed step shows its own error. */
+export function useWatchedChain(ids: string[]): (Generation | undefined)[] {
+  const qc = useQueryClient();
+  const connected = useGenerationEvents((ev) => {
+    if (ev.type === "generation" && ids.includes(ev.generation.id)) qc.setQueryData(["mixed-media", "generation", ev.generation.id], ev.generation);
+  });
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ["mixed-media", "generation", id],
+      queryFn: async () => send<Generation>(`/api/generations/${id}`, "GET"),
+      refetchInterval: (q: { state: { data?: Generation } }) => (active(q.state.data) ? (connected ? 5000 : 1200) : false),
+    })),
+  }).map((q) => q.data);
+}
+
+/** What each step of a render is doing, for chainState(). */
+export function renderSteps(chain: (Generation | undefined)[]): { g?: Generation; label: string }[] {
+  return chain.map((g) => ({
+    g,
+    label: !g ? "A step" : g.op === "trim" ? "Cutting the clip" : g.op === "mux" ? "Putting the sound back" : "Restyling",
+  }));
+}
+
 export function useMixedActions() {
   const qc = useQueryClient();
   const seed = (g: Generation) => qc.setQueryData(["mixed-media", "generation", g.id], g);
@@ -69,13 +92,21 @@ export function useMixedActions() {
     render: useMutation({
       mutationFn: (b: MixedBody) => send<{ final: Generation; items: Generation[] }>("/api/mixed-media", "POST", b),
       onSuccess: (r) => {
-        seed(r.final);
+        r.items.forEach(seed);
         void qc.invalidateQueries({ queryKey: ["generations"] });
       },
     }),
     preview: useMutation({
       mutationFn: (b: MixedBody) => send<Generation>("/api/mixed-media/preview", "POST", b),
       onSuccess: seed,
+    }),
+    /** Run a finished-or-failed render again with the same settings (History's "Try again"). */
+    retry: useMutation({
+      mutationFn: (v: { id: string; requestId?: string }) => send<{ final: Generation; items: Generation[] }>("/api/mixed-media/retry", "POST", v),
+      onSuccess: (r) => {
+        r.items.forEach(seed);
+        void qc.invalidateQueries({ queryKey: ["generations"] });
+      },
     }),
   };
 }

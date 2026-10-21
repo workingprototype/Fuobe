@@ -2,7 +2,7 @@
 
 import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { clampRange, clock, initialRange, moveRange, setEdge, thumbTimes, trimHint, type TrimLimits, type TrimRange } from "@/lib/trim-range";
+import { clampRange, clock, initialRange, moveRange, parseTime, setEdge, thumbTimes, trimHint, trimKey, type TrimLimits, type TrimRange } from "@/lib/trim-range";
 import { cn } from "@/lib/utils";
 
 export type { TrimRange } from "@/lib/trim-range";
@@ -306,29 +306,15 @@ export const VideoTrimmer = forwardRef<VideoTrimmerHandle, VideoTrimmerProps>(fu
   const onKey = (e: React.KeyboardEvent<HTMLElement>) => {
     const kind = e.currentTarget.dataset.trim as "start" | "end" | "move" | undefined;
     if (!range || !d || !kind) return;
-    const big = e.shiftKey ? 10 : 1;
-    let delta: number | null = null;
-    let to: number | null = null;
-    if (e.key === "ArrowLeft" || e.key === "ArrowDown") delta = -STEP * big;
-    else if (e.key === "ArrowRight" || e.key === "ArrowUp") delta = STEP * big;
-    else if (e.key === "PageDown") delta = -5;
-    else if (e.key === "PageUp") delta = 5;
-    else if (e.key === "Home") to = 0;
-    else if (e.key === "End") to = d;
-    else if (e.key === " " || e.key === "Enter") {
+    if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
       togglePlay();
       return;
-    } else return;
-    e.preventDefault();
-    if (kind === "move") {
-      const next = moveRange(range, to !== null ? (to === 0 ? -range.startTime : d - range.endTime) : delta!, limits);
-      commit(next, next.startTime);
-    } else {
-      const cur = kind === "start" ? range.startTime : range.endTime;
-      const next = setEdge(range, kind, to ?? cur + delta!, limits);
-      commit(next, kind === "start" ? next.startTime : next.endTime);
     }
+    const next = trimKey(range, kind, e.key, e.shiftKey, limits, STEP);
+    if (!next) return;
+    e.preventDefault();
+    commit(next, kind === "end" ? next.endTime : next.startTime);
   };
 
   const pct = (t: number) => (d ? `${(t / d) * 100}%` : "0%");
@@ -462,13 +448,9 @@ export const VideoTrimmer = forwardRef<VideoTrimmerHandle, VideoTrimmerProps>(fu
 function TimeField({ label, value, disabled, onCommit }: { label: string; value?: number; disabled?: boolean; onCommit: (t: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = draft ?? (value !== undefined ? value.toFixed(1) : "");
-  const parse = (s: string) => {
-    const m = /^\s*(?:(\d+):)?(\d+(?:\.\d+)?)\s*s?\s*$/.exec(s);
-    return m ? Number(m[1] ?? 0) * 60 + Number(m[2]) : NaN;
-  };
   const done = () => {
     if (draft !== null) {
-      const t = parse(draft);
+      const t = parseTime(draft);
       if (Number.isFinite(t)) onCommit(t);
     }
     setDraft(null);

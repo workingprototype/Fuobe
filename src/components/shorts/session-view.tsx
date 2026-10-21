@@ -20,6 +20,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MediaThumb } from "@/components/studio/result-media";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { Viewer } from "@/components/studio/viewer";
 import { chainState, formatSeconds, stitchCurrent, stitchSteps, takeSteps, type ChainState, type ShortsSessionSegment } from "@/lib/catalog/shorts";
 import type { Generation } from "@/lib/catalog/types";
@@ -348,21 +349,25 @@ function SegmentCard({
           )}
           {state.status === "done" && <p className="text-[13px] text-muted-foreground">Take {seg.takes.findIndex((t) => t.look === seg.primary) + 1} is in the full video.</p>}
           {seg.takes.length > 1 && (
-            <div role="radiogroup" aria-label={`Takes of segment ${index + 1}`} className="flex flex-wrap gap-1.5">
+            // Arrow keys move between the takes and pick them (radio pattern); the chosen take is the Tab stop.
+            // Only takes that can't be picked (still rendering, failed) are turned off, with the reason in their name.
+            <div role="radiogroup" aria-label={`Takes of segment ${index + 1}`} onKeyDown={radioKeys} className="flex flex-wrap gap-1.5">
               {seg.takes.map((t, ti) => {
                 const g = gens[t.look];
                 const v = videoOf(g);
                 const st = chainState(takeSteps(t, gens));
                 const chosen = seg.primary === t.look;
+                const why = st.status === "done" ? "" : st.status === "working" ? "still rendering" : st.status === "gone" ? "deleted" : "failed";
                 return (
                   <button
                     key={t.look}
                     type="button"
                     role="radio"
                     aria-checked={chosen}
-                    aria-label={`Take ${ti + 1}${st.status === "done" ? "" : ` (${st.status === "working" ? "rendering" : st.status})`}`}
-                    disabled={st.status !== "done" || chosen}
-                    onClick={() => onPrimary(t.look)}
+                    aria-label={`Take ${ti + 1}${why ? ` (${why})` : chosen ? " (in the full video)" : ""}`}
+                    tabIndex={radioTab(chosen)}
+                    disabled={st.status !== "done" && !chosen}
+                    onClick={() => !chosen && st.status === "done" && onPrimary(t.look)}
                     title={st.status === "done" ? (chosen ? "In the full video" : "Use this take") : st.status === "working" ? "Still rendering" : st.error}
                     className={cn(
                       "relative size-12 overflow-hidden rounded-lg bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default",

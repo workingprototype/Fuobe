@@ -4,7 +4,7 @@ import { RotateCcw, Save } from "lucide-react";
 import { useCallback, useId, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cleanValues, defaultValues, type MixedPreset, type MixedSetting, type MixedValues } from "@/lib/catalog/mixed-media";
+import { cleanValues, defaultValues, parseHex, type MixedPreset, type MixedSetting, type MixedValues } from "@/lib/catalog/mixed-media";
 
 /**
  * Per-preset advanced settings (Higgsfield's param_configs): colours (or "describe the colour"),
@@ -93,19 +93,47 @@ function ColorSetting({ s, value, onChange }: { s: Extract<MixedSetting, { type:
       ) : (
         <div className="flex items-center gap-2">
           <input id={id} type="color" value={value} onChange={(e) => onChange(e.target.value.toLowerCase())} className="h-8 w-10 cursor-pointer rounded-md border bg-background p-0.5" />
-          <input
-            aria-label={`${s.label} (hex)`}
-            value={value.toUpperCase()}
-            onChange={(e) => {
-              const v = e.target.value.trim();
-              if (/^#[0-9a-f]{6}$/i.test(v)) onChange(v.toLowerCase());
-            }}
-            maxLength={7}
-            className="h-8 w-24 rounded-lg border bg-background px-2 font-mono text-[12px] uppercase outline-none focus:border-primary focus:ring-2 focus:ring-brand-faint"
-          />
+          <HexField label={`${s.label} (hex)`} value={value} onChange={onChange} />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A hex code field you can type into: the draft is shown while editing, a complete code is applied
+ * as soon as it's typed ("#" optional), and leaving (or Escape) with an incomplete one puts the
+ * current colour back.
+ */
+function HexField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value.toUpperCase();
+  const invalid = draft !== null && draft.trim() !== "" && !parseHex(draft) && draft.replace(/^#/, "").length >= 6;
+  return (
+    <input
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      value={shown}
+      spellCheck={false}
+      autoComplete="off"
+      onChange={(e) => {
+        const v = e.target.value.slice(0, 7);
+        setDraft(v);
+        const hex = /^#?[0-9a-f]{6}$/i.test(v.trim()) ? parseHex(v) : null;
+        if (hex && hex !== value) onChange(hex);
+      }}
+      onBlur={() => {
+        const hex = draft !== null ? parseHex(draft) : null;
+        if (hex && hex !== value) onChange(hex);
+        setDraft(null);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") setDraft(null);
+      }}
+      maxLength={7}
+      className="h-8 w-24 rounded-lg border bg-background px-2 font-mono text-[12px] uppercase outline-none focus:border-primary focus:ring-2 focus:ring-brand-faint aria-invalid:border-destructive"
+    />
   );
 }
 

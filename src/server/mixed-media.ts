@@ -4,7 +4,9 @@ import {
   clampFps,
   cleanValues,
   getMixedPreset,
+  MIXED_FEATURE,
   MIXED_MODELS,
+  MIXED_STEP_FEATURE,
   mixedFrames,
   mixedRangeProblem,
   nearestResolution,
@@ -17,7 +19,8 @@ import { clipLengthProblem, type PlanStep } from "@/lib/catalog/shorts";
 import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
-import { previewChained } from "./generations";
+import { db } from "./db";
+import { getGeneration, previewChained } from "./generations";
 import { engineMode } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
 
@@ -84,7 +87,8 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
       title: name ? `${preset.name} · ${name}` : `${preset.name} mixed media`,
       preset,
       values: cleanValues(preset, body.values),
-      source: { url: body.source.url, duration, hasAudio: info.hasAudio ?? true },
+      // Sound we couldn't read counts as none (the soundtrack step would fail after the restyle was paid for).
+      source: { url: body.source.url, duration, hasAudio: info.hasAudio ?? false },
       range: body.range,
       fps,
       resolution: body.resolution,
@@ -141,6 +145,35 @@ export async function createMixed(body: MixedBody): Promise<{ final: Generation;
   const plan = planMixed(input);
   const p = run(plan.steps);
   return { final: p.byKey[plan.final], items: p.items };
+}
+
+/**
+ * Run a render again with the same settings (History's "Try again" after a failed step): its steps
+ * are made anew from their stored requests, waiting on each other as before.
+ */
+export function retryMixed(id: string): { final: Generation; items: Generation[] } {
+  const final = getGeneration(id);
+  if (!final || final.feature !== MIXED_FEATURE || !final.batchId) throw new ShortsError("This render no longer exists", 404);
+  const mode = engineMode();
+  if (mode !== "both" && mode !== final.engine) {
+    throw new ShortsError(mode === "open" ? "This install runs open-source models only (Settings → Engine mode)" : "This install runs cloud models only (Settings → Engine mode)", 422);
+  }
+  const rows = db()
+    .prepare("SELECT id, depends_on FROM generations WHERE batch_id = ? AND feature IN (?, ?) ORDER BY created_at ASC, id ASC")
+    .all(final.batchId, MIXED_FEATURE, MIXED_STEP_FEATURE) as { id: string; depends_on: string | null }[];
+  const deps = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
+  const steps: PlanStep[] = rows.map((r) => {
+    const g = getGeneration(r.id);
+    if (!g) throw new ShortsError("Part of this render was deleted — make it again from the editor", 409);
+    const { chain, ...request } = g.request;
+    const after = deps(r.depends_on);
+    // Chained inputs were filled in when the step ran: the new run fills them from the new steps.
+    const inputs = { ...request.inputs };
+    for (const c of chain ?? []) if (c.slot !== "images" && c.slot !== "videos" && c.slot !== "prompt") delete inputs[c.slot];
+    return { key: r.id, request: { ...request, inputs: Object.keys(inputs).length ? inputs : undefined }, ...(after.length ? { after, chain } : {}) };
+  });
+  const p = run(steps);
+  return { final: p.byKey[id], items: p.items };
 }
 
 /** One frame with the current settings. */

@@ -10,6 +10,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { useEngine } from "@/lib/api";
 import {
+  clipShapeProblem,
   rangeProblem,
   SHORTS,
   SHORTS_CATEGORIES,
@@ -29,7 +30,7 @@ import { useShortsActions, useShortsEstimate, useShortsPresets, useSubmitGuard, 
 import { CreateCard, CustomCard, LookCard } from "./preset-card";
 import { ShortsHistory } from "./history";
 import { ClipBar, ClipDrop, costText, Field, Segmented, Steps, tabKeys } from "./ui";
-import { clipDuration, useSourceClip } from "./use-source-clip";
+import { clipDuration, clipSize, useSourceClip } from "./use-source-clip";
 
 export type ModelChoice = RestyleModelInfo;
 
@@ -172,6 +173,7 @@ function Workspace({
           presetId={presetId}
           presetName={selectedName}
           customRefs={selectedCustom?.references.length ?? 0}
+          customDescribed={!!selectedCustom?.description.trim()}
           source={source}
           range={range}
           setRange={setRange}
@@ -287,6 +289,7 @@ function SetupPanel({
   presetId,
   presetName,
   customRefs,
+  customDescribed,
   source,
   range,
   setRange,
@@ -296,6 +299,8 @@ function SetupPanel({
   presetId: string | null;
   presetName?: string;
   customRefs: number;
+  /** The custom preset has words of its own (a words-only model has something to go on). */
+  customDescribed: boolean;
   source: ReturnType<typeof useSourceClip>;
   range: TrimRange | null;
   setRange: (r: TrimRange | null) => void;
@@ -305,17 +310,29 @@ function SetupPanel({
   const [ratio, setRatio] = useState<ShortsRatio>("9:16");
   const [language, setLanguage] = useState("auto");
   const [pickedModel, setModel] = useState<Record<Engine, string>>({ cloud: "", open: "" });
-  const modelId = pickedModel[engine] || models[0]?.id;
+  // A custom preset is its reference images: on cloud, start on the first model that reads them
+  // (Kling O3 4K Edit, then Happy Horse) unless a model was picked.
+  const refModel = models.find((m) => m.refs > 0)?.id;
+  const modelId = pickedModel[engine] || (customRefs > 0 && engine === "cloud" && refModel ? refModel : models[0]?.id);
   const model = models.find((m) => m.id === modelId);
   const duration = clipDuration(clip);
   const actions = useShortsActions();
   const presetType = SHORTS_PRESETS.find((p) => p.id === presetId)?.type;
 
+  const size = clipSize(clip);
   const shortsRange = range ? { start: range.startTime, end: range.endTime } : null;
-  const problem = shortsRange ? rangeProblem(shortsRange, duration) : null;
+  const problem = clipShapeProblem(size.width, size.height) ?? (shortsRange ? rangeProblem(shortsRange, duration) : null);
   const estimateBody: ShortsBody | null =
     presetId && shortsRange && !problem
-      ? { engine, presetId, source: { url: clip?.url ?? "/api/files/placeholder.mp4", name: clip?.name, duration }, range: shortsRange, aspectRatio: ratio, language, modelId }
+      ? {
+          engine,
+          presetId,
+          source: { url: clip?.url ?? "/api/files/placeholder.mp4", name: clip?.name, duration, ...(size.width && size.height ? { width: size.width, height: size.height } : {}) },
+          range: shortsRange,
+          aspectRatio: ratio,
+          language,
+          modelId,
+        }
       : null;
   const estimate = useShortsEstimate(estimateBody);
   const est = estimate.data;
@@ -330,13 +347,15 @@ function SetupPanel({
           ? "Reading the clip…"
           : problem
             ? problem
-            : clip.uploading
-              ? clip.progress < 1
-                ? `Uploading… ${Math.round(clip.progress * 100)}%`
-                : "Reading the clip…"
-              : estimate.error
-                ? (estimate.error as Error).message
-                : null;
+            : customRefs > 0 && engine === "cloud" && model && !model.refs && !customDescribed
+              ? "Describe the look in your preset, or pick a model that reads reference images"
+              : clip.uploading
+                ? clip.progress < 1
+                  ? `Uploading… ${Math.round(clip.progress * 100)}%`
+                  : "Reading the clip…"
+                : estimate.error
+                  ? (estimate.error as Error).message
+                  : null;
 
   const guard = useSubmitGuard();
   const [leaving, setLeaving] = useState(false);
@@ -403,7 +422,7 @@ function SetupPanel({
             max={SHORTS.maxSeconds}
             duration={clip.info?.duration}
             label="Part of the clip to restyle"
-            onMeta={(m) => source.setBrowserDuration(m.duration)}
+            onMeta={source.setBrowserMeta}
           />
         </div>
       )}
@@ -479,6 +498,12 @@ function SetupPanel({
           </span>
         </div>
         {est && !est.demo && engine === "cloud" && <p className="text-[12px] text-muted-foreground">You&apos;re only charged for the actual length.</p>}
+        {clip?.url && !clip.uploading && !clip.error && clip.info && clip.info.hasAudio === undefined && (
+          <p className="flex gap-1.5 text-[12px] leading-snug text-muted-foreground">
+            <Info className="mt-0.5 size-3.5 shrink-0" />
+            Couldn&apos;t read this clip&apos;s sound track — it&apos;s made without sound.
+          </p>
+        )}
         {est?.notes.map((n) => (
           <p key={n} className="flex gap-1.5 text-[12px] leading-snug text-muted-foreground">
             <Info className="mt-0.5 size-3.5 shrink-0" />

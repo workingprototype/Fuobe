@@ -3,6 +3,8 @@ import { getModel } from "@/lib/catalog";
 import {
   chainState,
   customPresetName,
+  fitSize,
+  needsFit,
   firstFramePrompt,
   formatSeconds,
   joinGroups,
@@ -28,6 +30,8 @@ import {
   type ShortsPlanInput,
 } from "@/lib/catalog/shorts";
 import { FX } from "@/lib/preset-cards";
+import { MOTIF_IDS } from "@/components/shorts/look-motif";
+import { MIXED_PRESETS } from "@/lib/catalog/mixed-media";
 
 const claymation = SHORTS_PRESETS.find((p) => p.name === "Claymation")!;
 const kinetic = SHORTS_PRESETS.find((p) => p.name === "Kinetic Type")!;
@@ -46,6 +50,12 @@ const input = (over: Partial<ShortsPlanInput> = {}): ShortsPlanInput => ({
 });
 
 describe("Shorts presets and catalog", () => {
+  it("gives every Shorts and Mixed Media preset its own motif on the card (lettering, scribbles, paper, grids…)", () => {
+    const ids = [...SHORTS_PRESETS, ...MIXED_PRESETS].map((p) => p.id);
+    expect(ids.filter((id) => !MOTIF_IDS.includes(id))).toEqual([]);
+    expect(MOTIF_IDS.filter((id) => !ids.includes(id))).toEqual([]);
+  });
+
   it("has Higgsfield's 44 presets with Fuobe's own descriptions and looks", () => {
     expect(SHORTS_PRESETS).toHaveLength(44);
     expect(new Set(SHORTS_PRESETS.map((p) => p.id)).size).toBe(44);
@@ -191,20 +201,23 @@ describe("Shorts segment planning", () => {
 });
 
 describe("Shorts pipeline shape", () => {
-  it("cloud: cut → restyle per segment, one join, then the original sound from the upload", () => {
+  it("cloud: cut → crop to the ratio → restyle per segment, one join, then the original sound from the upload", () => {
     const plan = planShorts(input());
     expect(plan.segments).toHaveLength(3);
     const by = Object.fromEntries(plan.steps.map((s) => [s.key, s]));
-    expect(Object.keys(by)).toEqual(["cut0", "look0", "cut1", "look1", "cut2", "look2", "join", "final"]);
+    expect(Object.keys(by)).toEqual(["cut0", "fit0", "look0", "cut1", "fit1", "look1", "cut2", "fit2", "look2", "join", "final"]);
     expect(by.cut1.request).toMatchObject({ modelId: "trim-video", op: "trim", inputs: { video: "/api/files/uploads/beach.mp4" }, params: { startTime: 10, endTime: 20 } });
-    expect(by.look1).toMatchObject({ after: ["cut1"], chain: [{ slot: "video" }], request: { modelId: "gemini-omni-flash", op: "v2v", params: { aspectRatio: "9:16", duration: 10 } } });
+    // The restyle model keeps its input's shape: the cut is centre-cropped to 9:16 first.
+    expect(by.fit1).toMatchObject({ after: ["cut1"], chain: [{ slot: "video" }], request: { modelId: "scale-video", op: "reframe", params: { aspectRatio: "9:16", extra: { width: 1080, height: 1920 } } } });
+    expect(by.look1).toMatchObject({ after: ["fit1"], chain: [{ slot: "video" }], request: { modelId: "gemini-omni-flash", op: "v2v", params: { aspectRatio: "9:16", duration: 10 } } });
     expect(by.look1.request.inputs).toBeUndefined();
     expect(by.join).toMatchObject({ after: ["look0", "look1", "look2"], request: { modelId: "join-clips", op: "concat" } });
     expect(by.join.chain).toHaveLength(3);
     // The whole clip was used: the upload itself carries the sound.
     expect(by.final).toMatchObject({ after: ["join"], chain: [{ slot: "video" }], request: { modelId: "merge-audio-video", op: "mux", inputs: { audio: "/api/files/uploads/beach.mp4" }, title: "Claymation · beach" } });
     expect(plan.final).toBe("final");
-    for (const s of plan.steps) expect(s.request).toMatchObject({ feature: "shorts", batchTitle: "Claymation · beach" });
+    // The takes and the finished short are "shorts"; the cuts, crops and joins in between are "shorts-step".
+    for (const s of plan.steps) expect(s.request).toMatchObject({ feature: /^(look|final)/.test(s.key) ? "shorts" : "shorts-step", batchTitle: "Claymation · beach" });
     expect(by.look2.request.step).toEqual({ label: "Segment 3 of 3 · restyle", index: 2, of: 3 });
   });
 
@@ -222,20 +235,37 @@ describe("Shorts pipeline shape", () => {
     const silent = planShorts(input({ source: { url: "/api/files/x.mp4", duration: 30, hasAudio: false } }));
     expect(silent.steps.map((s) => s.key)).not.toContain("final");
     expect(silent.final).toBe("join");
-    expect(silent.steps.find((s) => s.key === "join")!.request.title).toBe("Claymation · beach");
-    const one = planShorts(input({ source: { url: "/api/files/x.mp4", duration: 8, hasAudio: false }, range: { start: 0, end: 8 } }));
+    expect(silent.steps.find((s) => s.key === "join")!.request).toMatchObject({ title: "Claymation · beach", feature: "shorts" });
+    const one = planShorts(input({ source: { url: "/api/files/x.mp4", duration: 8, hasAudio: false, width: 1080, height: 1920 }, range: { start: 0, end: 8 } }));
     expect(one.steps.map((s) => s.key)).toEqual(["cut0", "look0"]);
     expect(one.final).toBe("look0");
+  });
+
+  it("crops only clips of another shape (or of an unknown one), and only for models that can't be asked for the ratio", () => {
+    const at = (width: number, height: number, aspectRatio: "9:16" | "16:9" = "9:16") =>
+      planTake(input({ aspectRatio, source: { url: "/api/files/x.mp4", duration: 30, hasAudio: true, width, height } }), { index: 0, start: 0, end: 5 }, 1).keys;
+    expect(at(1920, 1080).fit).toBe("fit0");
+    expect(at(1080, 1920).fit).toBeUndefined();
+    expect(at(720, 1280).fit).toBeUndefined();
+    expect(at(1920, 1080, "16:9").fit).toBeUndefined();
+    expect(at(1080, 1920, "16:9").fit).toBe("fit0");
+    expect(needsFit({}, "9:16")).toBe(true);
+    expect(fitSize("16:9")).toEqual({ width: 1920, height: 1080 });
+    const asked = planTake(input({ reframes: true }), { index: 0, start: 0, end: 5 }, 1);
+    expect(asked.keys.fit).toBeUndefined();
+    expect(asked.steps[1]).toMatchObject({ after: ["cut0"], request: { params: { aspectRatio: "9:16" } } });
+    expect(takeSteps({ cut: "c", fit: "f", look: "l" }, {}).map((s) => s.label)).toEqual(["Cutting the segment", "Cropping the segment", "Restyling"]);
   });
 
   it("sends references only to cloud models that take them, up to their limit", () => {
     const refs = Array.from({ length: 6 }, (_, i) => `/api/files/ref${i}.png`);
     const look = { ...lookFromPreset(claymation), references: refs };
     const words = planTake(input({ look }), { index: 0, start: 0, end: 5 }, 1);
-    expect(words.steps[1].request.inputs).toBeUndefined();
+    expect(words.steps.find((s) => s.key === words.keys.look)!.request.inputs).toBeUndefined();
     const kling = planTake(input({ look, modelId: "kling-o3-4k-edit", maxRefs: 4 }), { index: 0, start: 0, end: 5 }, 1);
-    expect(kling.steps[1].request.inputs?.images).toEqual(refs.slice(0, 4));
-    expect(kling.steps[1].request.prompt).toMatch(/Match the style of the reference images/);
+    const klingLook = kling.steps.find((s) => s.key === kling.keys.look)!;
+    expect(klingLook.request.inputs?.images).toEqual(refs.slice(0, 4));
+    expect(klingLook.request.prompt).toMatch(/Match the style of the reference images/);
   });
 
   it("open: segment (with its first frame) → restyled first frame → Wan VACE, joined 4 at a time", () => {
