@@ -511,17 +511,26 @@ Skills, memory and projects (your context below lists them):
 /** Models that take server-side fallbacks on a refusal ("default" routing). */
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]);
 
+/**
+ * Output room per reply: thinking plus a large generate or studio call. Extra and Max effort think
+ * longest, so they get the most; the cap only bounds a reply, it isn't spent.
+ */
+export const maxTokensFor = (effort: AssistEffort): number => (effort === "xhigh" || effort === "max" ? 64_000 : 32_000);
+
 export const claude: ModelCall = async ({ system, messages, tools, settings }) => {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
   const model = settings?.model && CLAUDE_MODELS.some((m) => m.id === settings.model) ? settings.model : DEFAULT_CLAUDE_MODEL;
   const fallback = FALLBACK_MODELS.has(model);
-  return client.beta.messages.create({
+  const effort = settings?.effort ?? DEFAULT_EFFORT;
+  // Streamed, so long thinking at high effort never runs into an HTTP timeout; only the final
+  // message is used (the UI shows the reply once it's complete).
+  const stream = client.beta.messages.stream({
     model,
-    max_tokens: 16000,
+    max_tokens: maxTokensFor(effort),
     // drop_block: a thinking block the API can't replay (a chat that switched models, or one from
     // before contexts were frozen) is dropped instead of failing the request.
     thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
-    output_config: { effort: settings?.effort ?? DEFAULT_EFFORT },
+    output_config: { effort },
     betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01"],
     ...(fallback && { fallbacks: "default" as const }),
     // The fixed instructions and the chat's frozen context are cached; so is the conversation so far.
@@ -533,6 +542,7 @@ export const claude: ModelCall = async ({ system, messages, tools, settings }) =
     tools,
     messages: await hydrate(messages),
   });
+  return stream.finalMessage();
 };
 
 type OllamaMessage = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: { function: { name: string; arguments: unknown } }[]; tool_name?: string };

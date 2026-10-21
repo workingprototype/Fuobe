@@ -183,12 +183,21 @@ describe("modes", () => {
       agent.addMessage(t.id, "Hi");
       const sent: { headers: Headers; body: Record<string, unknown> }[] = [];
       const realFetch = globalThis.fetch;
+      // The reply streams (server-sent events); the agent keeps the final message.
+      const sse = (events: Record<string, unknown>[]) => events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
       globalThis.fetch = (async (_url: string, init: RequestInit) => {
-        sent.push({ headers: new Headers(init.headers), body: JSON.parse(String(init.body)) });
-        return new Response(JSON.stringify({ id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", stop_sequence: null, stop_details: null, usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: "text", text: "Hello" }], stop_reason: "end_turn" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        sent.push({ headers: new Headers(init.headers), body });
+        const events = [
+          { type: "message_start", message: { id: "msg_1", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, stop_details: null, usage: { input_tokens: 1, output_tokens: 0 } } },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "", citations: null } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lo" } },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null, stop_details: null }, usage: { output_tokens: 2 } },
+          { type: "message_stop" },
+        ];
+        return new Response(sse(events), { status: 200, headers: { "content-type": "text/event-stream" } });
       }) as typeof fetch;
       try {
         await agent.run(t.id);
@@ -206,6 +215,10 @@ describe("modes", () => {
       expect(b.body).toMatchObject({ model: "claude-opus-5-5", output_config: { effort: "max" }, fallbacks: "default" });
       expect(b.headers.get("anthropic-beta")).toContain("server-side-fallback-2026-07-01");
       expect(b.body.system).toEqual(a.body.system);
+      // Streamed, with more room at Extra/Max effort.
+      expect(a.body).toMatchObject({ stream: true, max_tokens: 32_000 });
+      expect(b.body).toMatchObject({ stream: true, max_tokens: 64_000 });
+      expect(agent.getThread(t.id)!.thread.items.filter((i) => i.role === "assistant").map((i) => (i as { text: string }).text)).toEqual(["Hello", "Hello"]);
       const v = agent.getThread(t.id)!.thread;
       expect(v).toMatchObject({ mode: "manual", agent: "claude", model: "claude-opus-5-5", effort: "max" });
     } finally {
