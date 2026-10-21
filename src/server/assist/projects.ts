@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { MAX_PROJECT_SOURCES, PROJECT_COLORS, PROJECT_LIMITS, type AssistProject, type ProjectColor, type ProjectSource, type SourceKind } from "@/lib/assist";
 import { db } from "../db";
 import { getElement } from "../elements";
+import { PdfError, pdfText } from "./pdf";
 import { fetchRemote } from "../remote-fetch";
 import { readRef } from "../storage";
 import { deleteProjectMemories } from "./memory";
@@ -209,6 +210,10 @@ export type SourceInput =
 async function fetchLink(url: string): Promise<{ title: string; text: string }> {
   const res = await fetchRemote(url, { maxBytes: 4_000_000, timeoutMs: 20_000 });
   const type = res.contentType ?? "";
+  if (/application\/pdf/.test(type) || res.data.subarray(0, 5).toString("latin1") === "%PDF-") {
+    const pdf = await pdfText(res.data, { maxChars: PROJECT_LIMITS.sourceText });
+    return { title: pdf.title ?? "", text: pdf.text };
+  }
   const raw = res.data.toString("utf8");
   if (/html|xml/.test(type) || /^\s*</.test(raw)) return htmlToText(raw);
   if (TEXT_TYPE.test(type) || !type) return { title: "", text: raw };
@@ -248,15 +253,14 @@ export async function addSource(projectId: string, input: SourceInput): Promise<
       if (TEXT_TYPE.test(contentType) || /\.(md|txt|csv|json|srt|vtt|ya?ml)$/i.test(title)) {
         return insertSource(projectId, { kind: "file", title, url: input.url, element_id: null, content: data.toString("utf8"), status: "ready", error: null });
       }
-      return insertSource(projectId, {
-        kind: "file",
-        title,
-        url: input.url,
-        element_id: null,
-        content: null,
-        status: "error",
-        error: `Assist can't read ${/\.([a-z0-9]{1,8})$/i.exec(title)?.[1]?.toUpperCase() ?? contentType.split(";")[0]} files yet — paste the text as a note, or add a .txt or .md version`,
-      });
+      if (contentType.startsWith("application/pdf") || /\.pdf$/i.test(title)) {
+        // A PDF that can't be read is refused (not saved), so it doesn't take one of the 20 places.
+        const pdf = await pdfText(data, { maxChars: PROJECT_LIMITS.sourceText }).catch((e) => {
+          throw new ProjectError(e instanceof PdfError ? e.message : "Couldn't read that PDF — paste the text as a note instead", 422);
+        });
+        return insertSource(projectId, { kind: "file", title, url: input.url, element_id: null, content: pdf.text, status: "ready", error: null });
+      }
+      throw new ProjectError(`Assist can't read ${/\.([a-z0-9]{1,8})$/i.exec(title)?.[1]?.toUpperCase() ?? contentType.split(";")[0]} files — paste the text as a note, or add a PDF, .txt or .md version`, 415);
     }
     case "element": {
       const el = getElement(input.elementId);

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { addSource, ProjectError } from "@/server/assist/projects";
-import { contentTypeFor, saveFile } from "@/server/storage";
+import { contentTypeFor, deleteAsset, saveFile } from "@/server/storage";
 
 const MAX_BYTES = 25 * 1024 * 1024;
-/** Documents Assist can read (text) or keep as a reference (PDF), plus media it can pass on as inputs. */
+/** Documents Assist can read (text, Markdown, PDF), plus media it can pass on as inputs. */
 const ALLOWED = /^(text\/[\w.+-]+|application\/(json|pdf|xml|x-subrip|x-yaml|yaml)|image\/(png|jpeg|webp|gif)|video\/(mp4|webm|quicktime)|audio\/(mpeg|wav|x-wav|ogg|flac|mp4|webm))$/;
 const TEXT_EXT: Record<string, string> = { md: "text/markdown", markdown: "text/markdown", txt: "text/plain", csv: "text/csv", srt: "application/x-subrip", vtt: "text/vtt", json: "application/json", yml: "application/x-yaml", yaml: "application/x-yaml", pdf: "application/pdf" };
 
@@ -33,7 +33,13 @@ export async function POST(request: Request, ctx: RouteContext<"/api/assist/proj
       let name = file.name.replace(/[\\/]/g, "_").replace(/[^\w.\- ()]+/g, "_").slice(-120) || "file";
       if (!/\.[a-z0-9]{1,8}$/i.test(name)) name = `${name}.${Object.entries(TEXT_EXT).find(([, t]) => t === type)?.[0] ?? "bin"}`;
       const asset = saveFile({ data: Buffer.from(await file.arrayBuffer()), contentType: type, name, source: "upload" });
-      return Response.json(await addSource(projectId, { kind: "file", url: asset.url, name: file.name.slice(0, 160) }), { status: 201 });
+      try {
+        return Response.json(await addSource(projectId, { kind: "file", url: asset.url, name: file.name.slice(0, 160) }), { status: 201 });
+      } catch (e) {
+        // Refused (an unreadable PDF, the project is full): don't keep the upload.
+        deleteAsset(asset.id);
+        throw e;
+      }
     }
     const parsed = Json.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return Response.json({ error: "Add a link, a file, an element or a note" }, { status: 400 });

@@ -37,6 +37,31 @@ afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const md = (fm: string, body = "# Do it\n\n1. Step one.") => `---\n${fm}\n---\n\n${body}\n`;
 
+/** A small valid PDF: one page per entry, each line drawn with Helvetica (empty lines: no text layer). */
+function makePdf(pages: string[][], title?: string): Buffer {
+  const objs: string[] = [];
+  const kids = pages.map((_, i) => `${4 + i * 2} 0 R`).join(" ");
+  objs.push("<< /Type /Catalog /Pages 2 0 R >>");
+  objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+  objs.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  pages.forEach((lines, i) => {
+    const ops = lines.map((l, k) => `BT /F1 12 Tf 72 ${720 - k * 18} Td (${l.replace(/[()\\]/g, "\\$&")}) Tj ET`).join("\n");
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`);
+    objs.push(`<< /Length ${Buffer.byteLength(ops)} >>\nstream\n${ops}\nendstream`);
+  });
+  if (title) objs.push(`<< /Title (${title}) >>`);
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objs.forEach((o, i) => {
+    offsets.push(Buffer.byteLength(out));
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R${title ? ` /Info ${objs.length} 0 R` : ""} >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, "latin1");
+}
+
 describe("SKILL.md parsing and validation", () => {
   it("reads the frontmatter: quoted values, block scalars, lists and the offline map", () => {
     const fm = parseFrontmatter(`name: product-photos
@@ -344,6 +369,9 @@ describe("projects", () => {
       if (req.url === "/brand") {
         res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(`<html><head><title>Oatly-ish &amp; Co</title><meta name="description" content="Oat milk, playfully."><style>.x{}</style></head><body><nav>Menu</nav><h1>About us</h1><p>We make oat milk.</p><script>evil()</script><ul><li>Teal</li><li>Cream</li></ul></body></html>`);
+      } else if (req.url === "/guide.pdf") {
+        res.setHeader("content-type", "application/pdf");
+        res.end(makePdf([["Brand guide", "Teal and cream, rounded type."]], "Oat Brand Guide"));
       } else if (req.url === "/image") {
         res.setHeader("content-type", "image/png");
         res.end(Buffer.from([0x89, 0x50]));
@@ -409,6 +437,25 @@ describe("projects", () => {
     // A project that still lists a skill that has vanished (an old row) falls back too.
     db().prepare("UPDATE assist_projects SET skills_json = ? WHERE id = ?").run(JSON.stringify(["gone-skill"]), p.id);
     expect(canUseSkill("narration", p.id)).toBe(true);
+  });
+
+  it("reads PDFs (uploads and links) as text; an unreadable PDF is refused and takes no place", async () => {
+    const p = projects.createProject({ name: "Guides" });
+    const pdf = saveFile({ data: makePdf([["Brand guide", "Use teal (#1E9E8F) on cream."], ["Voice", "Playful, short sentences."]]), contentType: "application/pdf", name: "guide.pdf", source: "upload" });
+    const s = await projects.addSource(p.id, { kind: "file", url: pdf.url, name: "guide.pdf" });
+    expect(s).toMatchObject({ kind: "file", status: "ready", title: "guide.pdf" });
+    const text = projects.sourceText(p.id, s.id)!.text!;
+    expect(text).toContain("Use teal (#1E9E8F) on cream.");
+    expect(text.indexOf("Brand guide")).toBeLessThan(text.indexOf("Playful, short sentences."));
+    const link = await projects.addSource(p.id, { kind: "link", url: `${base}/guide.pdf` });
+    expect(link).toMatchObject({ kind: "link", status: "ready", title: "Oat Brand Guide" });
+    expect(link.excerpt).toContain("Teal and cream, rounded type.");
+    // No text layer (a scan) and not a PDF at all: refused with a reason, nothing saved.
+    const scan = saveFile({ data: makePdf([[]]), contentType: "application/pdf", name: "scan.pdf", source: "upload" });
+    await expect(projects.addSource(p.id, { kind: "file", url: scan.url, name: "scan.pdf" })).rejects.toThrow(/no text to read/);
+    const junk = saveFile({ data: Buffer.from("not a pdf"), contentType: "application/pdf", name: "junk.pdf", source: "upload" });
+    await expect(projects.addSource(p.id, { kind: "file", url: junk.url, name: "junk.pdf" })).rejects.toMatchObject({ status: 422 });
+    expect(projects.getProject(p.id)!.sources).toHaveLength(2);
   });
 
   it("deleting a project keeps its chats as personal chats and drops its memory", () => {
