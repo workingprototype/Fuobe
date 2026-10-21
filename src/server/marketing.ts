@@ -17,6 +17,7 @@ import {
   MULTIPLIER,
   MULTIPLIER_MODELS,
   multiplierResolution,
+  OPEN_SOUND_JOIN,
   multiplierText,
   settingById,
   shotPlan,
@@ -37,6 +38,7 @@ import {
   type RunFeature,
 } from "@/lib/catalog/marketing";
 import { routesFor } from "@/lib/catalog/plan";
+import { probeMedia } from "@/lib/media-probe";
 import type { ChainSlot, Engine, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
 import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
@@ -45,6 +47,7 @@ import { llmText } from "./enhance";
 import { createGenerations, listGenerations, previewChained, recordLocalGeneration } from "./generations";
 import { provider } from "./providers";
 import { engineMode } from "./settings";
+import { readRef } from "./storage";
 
 /**
  * Marketing Studio (templates → product shots, posters, ads, product motion, UGC presenters),
@@ -179,7 +182,8 @@ const fill = (s: string, product?: Product | null, brand?: BrandKit | null) =>
 function productLine(p?: Product | null): string {
   if (!p) return "";
   const pts = p.sellingPoints.slice(0, 2).join("; ");
-  return `The product is ${p.name}${p.description ? ` — ${p.description.slice(0, 160)}` : ""}${pts ? ` (${pts})` : ""}`;
+  const about = p.description?.replace(/\s+/g, " ").trim().slice(0, 160);
+  return `The product is ${p.name}${about ? ` — ${about}` : ""}${pts ? ` (${pts})` : ""}`;
 }
 
 const KEEP_PRODUCT = "Keep the product exactly as in the reference photo: its shape, proportions, label, logo, text and colours";
@@ -212,10 +216,11 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
   const productImages = input.productImages?.length ? input.productImages : (product?.images ?? []);
   const hasProduct = productImages.length > 0;
   const prompt = input.prompt?.trim() ?? "";
+  const website = input.website?.trim() || brand?.website || "";
   // Required inputs, in Higgsfield's words.
   if (f.product === "required" && !hasProduct) throw new PlanError(product ? `${product.name} has no images` : "Attach a product to generate");
   if (f.oneOf?.length) {
-    const has = { product: hasProduct, avatar: !!input.avatar, prompt: !!prompt, website: !!(input.website?.trim() || brand?.website) };
+    const has = { product: hasProduct, avatar: !!input.avatar, prompt: !!prompt, website: !!website };
     if (!f.oneOf.some((k) => has[k])) {
       throw new PlanError(f.id === "product-with-model" ? "Attach reference or product" : f.id === "poster" ? "Add a prompt or a product" : "Add a prompt, a product or a website");
     }
@@ -309,7 +314,7 @@ export function planMarketing(input: MarketingInput, ctx: PlanContext): RunPlan 
     const aspect = nearestAspect(input.aspectRatio ?? f.defaultAspect, model.options.aspectRatios);
     const refs = [...productImages.slice(0, 1), ...(input.reference ? [input.reference] : [])];
     const motionText = (extra?: string) =>
-      join(tpl ? fill(tpl.prompt, product, brand) : "A polished product commercial", extra, productLine(product), hasProduct && "The product stays exactly as in the first frame: same shape, label and colours", prompt, brandText, !hasProduct && input.website && `For the product at ${input.website}`);
+      join(tpl ? fill(tpl.prompt, product, brand) : "A polished product commercial", extra, productLine(product), hasProduct && "The product stays exactly as in the first frame: same shape, label and colours", prompt, brandText, !hasProduct && website && `For the product at ${website}`);
     const base = { feature, modelId, params: { aspectRatio: aspect } as GenerationRequest["params"] };
     // Open models make a few seconds per clip: longer motion is several shots from the product photo, joined.
     const shots = open ? shotPlan(want, model.options.durations) : [snapDuration(want, model.options.durations)];
@@ -493,10 +498,23 @@ function planPresenter(p: PresenterPlan): RunPlan {
     clips.push("broll");
   }
   if (clips.length > 1) {
+    // The open join keeps one clip's own sound: the captioned presenter's voice, after the hook when there is one
+    // (oss-join-clips drops every soundtrack and plays the 25 fps presenter at the hook's 16 fps).
+    const joinId = open ? (p.hook ? OPEN_SOUND_JOIN.second : OPEN_SOUND_JOIN.first) : M.join;
+    const joiner = need(joinId);
     steps.push({
       key: "film",
       label: "Final video",
-      request: { feature: p.feature, modelId: M.join, op: "concat", prompt: p.title, params: { aspectRatio: nearestAspect(aspect, need(M.join).options.aspectRatios) }, chain: clips.map(() => ({ slot: "videos" as const })), title: p.title, batchTitle: p.title },
+      request: {
+        feature: p.feature,
+        modelId: joinId,
+        op: "concat",
+        prompt: p.title,
+        params: { aspectRatio: nearestAspect(aspect, joiner.options.aspectRatios), ...(open && { resolution: nearestRes(p.quality ?? "480p", joiner) }) },
+        chain: clips.map(() => ({ slot: "videos" as const })),
+        title: p.title,
+        batchTitle: p.title,
+      },
       after: clips,
     });
   } else {
@@ -504,7 +522,6 @@ function planPresenter(p: PresenterPlan): RunPlan {
     c.request = { ...c.request, feature: p.feature, title: p.title, batchTitle: p.title };
   }
   if (open) p.notes.push("Open captions are timed from the script at a natural speaking pace");
-  if (open && clips.length > 1) p.notes.push("The open-source join keeps the picture; the hook and close-up play without the voiceover");
   p.meta.script = p.script;
   return { feature: p.feature, engine: p.engine, title: p.title, steps, finals: [steps[steps.length - 1].key === "film" ? "film" : "captions"], meta: p.meta, notes: p.notes };
 }
@@ -527,15 +544,61 @@ export interface ScriptInput {
   language?: string;
 }
 
-/** A natural script from facts alone, for installs with no LLM. */
+const countWords = (t: string) => t.split(/\s+/).filter(Boolean).length;
+const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** Words that tell the writer what to do ("mention", "highlight…"), dropped when the line is spoken as is. */
+const DIRECTIVE = String.raw`(?:mention|highlight|say|talk about|focus on|emphasi[sz]e|include|add|stress|call out|point out|note|tell (?:them|people|viewers))`;
+
+/**
+ * Custom-script instructions as lines the presenter can say: "highlight eco-friendly materials,
+ * mention free shipping over $40" → ["Eco-friendly materials.", "Free shipping over $40."].
+ */
+export function spokenInstructions(text: string | undefined): string[] {
+  if (!text?.trim()) return [];
+  return text
+    .split(new RegExp(String.raw`[;\n]+|,\s*(?:and\s+)?(?=${DIRECTIVE}\b)|\s+and\s+(?=${DIRECTIVE}\b)`, "i"))
+    .map((part) =>
+      part
+        .trim()
+        .replace(new RegExp(String.raw`^(?:please\s+)?(?:(?:make sure|be sure) (?:to|you)\s+)?${DIRECTIVE}(?:\s+that)?\s+`, "i"), "")
+        .replace(/[.!?,;:\s]+$/, ""),
+    )
+    .filter(Boolean)
+    .map((part) => `${capitalize(part)}.`);
+}
+
+/**
+ * A natural script from facts alone, for installs with no LLM, built to the word budget by priority:
+ * the call to action and the instructions always stay, the opener shortens, and selling points fill
+ * what's left — the middle gives way, never the end.
+ */
 export function heuristicScript(s: ScriptInput): string {
+  const budget = wordBudget(s.seconds);
   const name = s.product?.name ?? s.brand?.name ?? "this";
-  const points = [...(s.product?.sellingPoints ?? []), ...(s.brand?.sellingPoints ?? [])].map(sentence).filter(Boolean);
-  const opener = s.hook ? `Okay, that was not how I planned to start this, but I have to tell you about ${name}.` : `I didn't expect ${name} to become part of my every day, but here we are.`;
-  const body = points.length ? points.slice(0, 2).map((p, i) => (i === 0 ? `First, ${p.charAt(0).toLowerCase()}${p.slice(1)}.` : `And ${p.charAt(0).toLowerCase()}${p.slice(1)}.`)).join(" ") : `It just works, it looks great, and it makes my day a little easier.`;
-  const extra = s.instructions ? `${sentence(s.instructions)}.` : "";
-  const close = s.brand?.website ? `Go check out ${s.brand.name} — link's in my bio.` : `Honestly? Go try it for yourself.`;
-  return fitScript([opener, body, extra, close].filter(Boolean).join(" "), s.seconds);
+  const found = [...(s.product?.sellingPoints ?? []), ...(s.brand?.sellingPoints ?? [])].map(sentence).filter(Boolean);
+  const points = (found.length ? found : ["It just works, it looks great, and it makes my day a little easier"]).slice(0, 2).map((p) => `${capitalize(p)}.`);
+  // Longest first; the last of each list is the shortest form.
+  const openers = s.hook
+    ? [`Okay, that was not how I planned to start this, but I have to tell you about ${name}.`, `Okay, I have to tell you about ${name}.`, `Meet ${name}.`]
+    : [`I didn't expect ${name} to become part of my every day, but here we are.`, `I didn't expect to love ${name} this much.`, `Meet ${name}.`];
+  const closes = s.brand?.website ? [`Go check out ${s.brand.name} — link's in my bio.`, "Link's in my bio."] : ["Honestly? Go try it for yourself.", "Go try it today."];
+  let instructions = spokenInstructions(s.instructions);
+  let opener = openers[openers.length - 1];
+  let close = closes[closes.length - 1];
+  const used = () => countWords([opener, ...instructions, close].join(" "));
+  if (used() > budget) {
+    // Instructions longer than the ad: keep their first words, still ending on the call to action.
+    const room = Math.max(1, budget - countWords(opener) - countWords(close));
+    const words = instructions.join(" ").split(/\s+/).slice(0, room).join(" ").replace(/[,;:.!?\s]+$/, "");
+    instructions = words ? [`${words}.`] : [];
+    if (used() > budget) opener = "";
+  }
+  close = closes.find((c) => countWords([opener, ...instructions, c].join(" ")) <= budget) ?? close;
+  if (opener) opener = openers.find((o) => countWords([o, ...instructions, close].join(" ")) <= budget) ?? opener;
+  const middle: string[] = [];
+  for (const p of points) if (countWords([opener, ...instructions, ...middle, p, close].join(" ")) <= budget) middle.push(p);
+  return [opener, ...instructions, ...middle, close].filter(Boolean).join(" ");
 }
 
 /** The words the presenter says: the LLM when one is set up, else the heuristic. Always within the word budget. */
@@ -663,7 +726,16 @@ export function multiplierModel(input: Pick<MultiplierInput, "engine" | "modelId
   return need(id);
 }
 
-export function planMultiplier(input: MultiplierInput, ctx: { higgsfield: boolean; extractFrame?: boolean }): RunPlan {
+export interface MultiplierContext {
+  higgsfield: boolean;
+  extractFrame?: boolean;
+  /** The reference has a soundtrack (null or missing: its header couldn't be read). */
+  referenceSound?: boolean | null;
+  /** The reference's shape ("9:16"), from its header. */
+  referenceAspect?: string;
+}
+
+export function planMultiplier(input: MultiplierInput, ctx: MultiplierContext): RunPlan {
   const open = input.engine === "open";
   const start = Math.max(0, input.start ?? 0);
   const end = Math.min(input.duration, input.end ?? input.duration);
@@ -707,7 +779,11 @@ export function planMultiplier(input: MultiplierInput, ctx: { higgsfield: boolea
         },
         after: src.after,
       });
-      if (!trimmed) {
+      if (ctx.referenceSound === false) {
+        // A silent reference: nothing to lay back on.
+        const edit = steps[steps.length - 1];
+        edit.request = { ...edit.request, feature: "ad-multiplier", title, batchTitle: title };
+      } else if (!trimmed) {
         steps.push({ key: "sound", label: "Original sound", request: { feature: "ad-multiplier", modelId: M.mux, op: "mux", inputs: { audio: input.video }, title, batchTitle: title }, after: ["edit"], chain: [{ slot: "video" }] });
       } else {
         notes.push("Wan Animate makes the picture only; use the whole clip to keep its original sound");
@@ -744,7 +820,8 @@ export function planMultiplier(input: MultiplierInput, ctx: { higgsfield: boolea
   const title = [input.hook != null && "New hook", input.cta != null && "New CTA"].filter(Boolean).join(" + ");
   const frameModel = getModel(M.frame);
   const canExtract = !!frameModel && (ctx.extractFrame ?? true);
-  const clipParams = { duration: snapDuration(4, clipModel.options.durations), ...(clipModel.options.audio && { generateAudio: true }), resolution: nearestRes(resolution, clipModel) };
+  const clipAspect = nearestAspect(ctx.referenceAspect, clipModel.options.aspectRatios);
+  const clipParams = { duration: snapDuration(4, clipModel.options.durations), ...(clipModel.options.audio && { generateAudio: true }), resolution: nearestRes(resolution, clipModel), ...(clipAspect && { aspectRatio: clipAspect }) };
   const order: string[] = [];
   if (input.hook != null) {
     const start = input.firstFrame ?? images[0];
@@ -774,17 +851,30 @@ export function planMultiplier(input: MultiplierInput, ctx: { higgsfield: boolea
     }
     order.push("cta");
   }
-  const joiner = need(M.join);
+  // The open join keeps the reference's own sound (after the new hook when there is one); a reference whose
+  // header couldn't be read goes through the plain join, which keeps the picture only.
+  const keepSound = open && !!ctx.referenceSound;
+  const joiner = need(keepSound ? (input.hook != null ? OPEN_SOUND_JOIN.second : OPEN_SOUND_JOIN.first) : M.join);
   const stepKeys = order.filter((k) => k !== "original");
   // The original goes in as an input; its place among the chained clips follows from position first/last.
   const chain: ChainSlot[] = stepKeys.map((k) => ({ slot: "videos" as const, position: order.indexOf(k) < order.indexOf("original") ? ("first" as const) : ("last" as const) }));
   steps.push({
     key: "film",
     label: "Final video",
-    request: { feature: "ad-multiplier", modelId: joiner.id, op: "concat", prompt: title, inputs: trimmed ? undefined : { videos: [input.video] }, chain, title, batchTitle: title },
+    request: {
+      feature: "ad-multiplier",
+      modelId: joiner.id,
+      op: "concat",
+      prompt: title,
+      inputs: trimmed ? undefined : { videos: [input.video] },
+      ...(keepSound && { params: { aspectRatio: nearestAspect(ctx.referenceAspect, joiner.options.aspectRatios) ?? "auto", resolution: nearestRes(resolution, joiner) } }),
+      chain,
+      title,
+      batchTitle: title,
+    },
     after: stepKeys,
   });
-  if (open) notes.push("The open-source join keeps the picture; the joined ad plays without sound");
+  if (open && ctx.referenceSound == null) notes.push("This clip's soundtrack couldn't be read here, so the joined ad keeps the picture only");
   return { feature: "ad-multiplier", engine: input.engine, title, steps, finals: ["film"], meta, notes };
 }
 
@@ -878,13 +968,28 @@ function context(input: { productId?: string; brandId?: string }) {
   return { product, brand, higgsfield: higgsfieldReady() };
 }
 
-const presenterSeconds = (input: MarketingInput) => input.duration ?? FORMATS[input.format].durations?.default ?? 15;
+/** The shortest talking part a UGC film gets, however short the length asked for. */
+const MIN_TALK_SECONDS = 5;
+
+/**
+ * Seconds the presenter talks in a UGC film: the length asked for minus the hook clip before it and
+ * the product close-up after it, so the whole film comes out about as long as the Length setting.
+ */
+export function presenterSeconds(input: MarketingInput, ctx: { product?: Product | null }): number {
+  const f = FORMATS[input.format];
+  const want = input.duration ?? f.durations?.default ?? 15;
+  const tpl = input.templateId ? TEMPLATE_INDEX.get(input.templateId) : undefined;
+  const shot = snapDuration(4, need(UGC_MODELS[input.engine].clip).options.durations);
+  const hook = f.hookAndSetting && hookById(input.hookId === undefined ? tpl?.hook : input.hookId);
+  const broll = !!(input.productImages?.length || ctx.product?.images.length);
+  return Math.max(MIN_TALK_SECONDS, want - (hook ? shot : 0) - (broll ? shot : 0));
+}
 
 /** Marketing Studio: price a run (a stand-in script of the right length for UGC; no LLM call). */
 export function estimateMarketing(input: MarketingInput): RunEstimate {
   const ctx = context(input);
   const f = FORMATS[input.format];
-  const script = f.pipeline === "ugc" ? input.script?.trim() || Array(wordBudget(presenterSeconds(input))).fill("word").join(" ") : undefined;
+  const script = f.pipeline === "ugc" ? input.script?.trim() || Array(wordBudget(presenterSeconds(input, ctx))).fill("word").join(" ") : undefined;
   const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
   return estimatePlan(planMarketing(input, { ...ctx, script }), runs);
 }
@@ -896,9 +1001,10 @@ export async function runMarketing(input: MarketingInput): Promise<{ runs: Marke
   let script: string | undefined;
   if (f.pipeline === "ugc") {
     const hook = hookById(input.hookId === undefined ? tpl?.hook : input.hookId);
+    const seconds = presenterSeconds(input, ctx);
     script = input.script?.trim()
-      ? fitScript(input.script, presenterSeconds(input))
-      : (await writeScript({ product: ctx.product, brand: ctx.brand, seconds: presenterSeconds(input), hook: hook?.prompt, angle: tpl?.prompt, instructions: input.prompt })).script;
+      ? fitScript(input.script, seconds)
+      : (await writeScript({ product: ctx.product, brand: ctx.brand, seconds, hook: hook?.prompt, angle: tpl?.prompt, instructions: input.prompt })).script;
   }
   const plan = planMarketing(input, { ...ctx, script });
   const runs = f.pipeline === "image" ? 1 : Math.min(input.batch ?? 1, f.batch);
@@ -933,13 +1039,40 @@ export async function runClickToAd(input: ClickToAdInput): Promise<{ run: Market
   return { run: launch(plan, { ...input, script }), script };
 }
 
-export function estimateMultiplier(input: MultiplierInput): RunEstimate {
-  const plan = planMultiplier(input, { higgsfield: higgsfieldReady() });
+declare global {
+  var __fuobeClipFacts: Map<string, { sound: boolean | null; aspect?: string }> | undefined;
+}
+const clipFacts = () => (globalThis.__fuobeClipFacts ??= new Map());
+
+/** Whether a stored clip has a soundtrack, and its shape, from the file's own header (cached per file). */
+export async function referenceFacts(ref: string): Promise<{ sound: boolean | null; aspect?: string }> {
+  const cache = clipFacts();
+  const hit = cache.get(ref);
+  if (hit) return hit;
+  let facts: { sound: boolean | null; aspect?: string } = { sound: null };
+  try {
+    const info = probeMedia(new Uint8Array((await readRef(ref)).data));
+    if (info?.hasVideo) facts = { sound: info.hasAudio, aspect: info.width && info.height ? nearestAspect(`${info.width}:${info.height}`, ["9:16", "4:5", "3:4", "1:1", "4:3", "16:9", "21:9"]) : undefined };
+  } catch {
+    // Not readable here: the plan falls back to what works without knowing.
+  }
+  if (cache.size > 200) cache.clear();
+  cache.set(ref, facts);
+  return facts;
+}
+
+async function multiplierContext(input: MultiplierInput): Promise<MultiplierContext> {
+  const facts = await referenceFacts(input.video);
+  return { higgsfield: higgsfieldReady(), referenceSound: facts.sound, referenceAspect: facts.aspect };
+}
+
+export async function estimateMultiplier(input: MultiplierInput): Promise<RunEstimate> {
+  const plan = planMultiplier(input, await multiplierContext(input));
   return estimatePlan(plan, input.versions ?? 1);
 }
 
-export function runMultiplier(input: MultiplierInput): MarketingRun[] {
-  const plan = planMultiplier(input, { higgsfield: higgsfieldReady() });
+export async function runMultiplier(input: MultiplierInput): Promise<MarketingRun[]> {
+  const plan = planMultiplier(input, await multiplierContext(input));
   estimatePlan(plan);
   return Array.from({ length: input.versions ?? 1 }, () => launch(plan, { ...input, versions: 1 }));
 }
@@ -951,7 +1084,7 @@ export async function rerun(id: string): Promise<MarketingRun[]> {
   const input = r.meta.input;
   if (!input) throw new PlanError("This run can't be repeated — start it again from the form");
   if (r.feature === "click-to-ad") return [(await runClickToAd(ClickToAdBody.parse(input))).run];
-  if (r.feature === "ad-multiplier") return runMultiplier(MultiplierBody.parse(input));
+  if (r.feature === "ad-multiplier") return await runMultiplier(MultiplierBody.parse(input));
   return (await runMarketing(MarketingBody.parse(input))).runs;
 }
 

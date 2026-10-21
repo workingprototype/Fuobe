@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   const body = await readBody(request, MultiplierBody, "Add a reference video to recreate");
   if (body instanceof Response) return body;
   try {
-    return Response.json({ runs: runMultiplier(body) }, { status: 201 });
+    return Response.json({ runs: await runMultiplier(body) }, { status: 201 });
   } catch (e) {
     return failure(e);
   }

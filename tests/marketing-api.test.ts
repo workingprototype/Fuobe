@@ -191,8 +191,12 @@ describe("brand kits", () => {
     const again = await (await readRoute.POST(json("POST", { url: `${origin}/products/barrier-cream`, brandId }))).json();
     expect(again.duplicate.name).toBe("Barrier Cream");
 
+    // Read with its brand (Click to Ad), the product joins the site's own kit — here the researched one, which has it already.
     const shop = await (await readRoute.POST(json("POST", { url: `${origin}/products/maple-pecan-granola`, withBrand: true }))).json();
-    expect(shop.products[0]).toMatchObject({ name: "Maple Pecan Granola", price: 12.5, brandId: null });
+    expect(shop.brandId).toBe(brandId);
+    expect(shop.duplicate).toMatchObject({ name: "Maple Pecan Granola", price: 12.5, brandId });
+    expect(shop.brand).toMatchObject({ name: "Ember & Oat", logo: expect.stringMatching(/^\/api\/files\//) });
+    expect(brand.listProducts(brandId).filter((x) => x.name === "Maple Pecan Granola")).toHaveLength(1);
 
     const coll = await (await readRoute.POST(json("POST", { url: `${origin}/collections/skin`, limit: 2 }))).json();
     expect(coll.products.map((p: { name: string }) => p.name)).toEqual(["Night Serum", "Day Cream"]);
@@ -202,8 +206,24 @@ describe("brand kits", () => {
     const patched = await (await productRoute.PATCH(json("PATCH", { audience: "Sensitive skin", url: "dewtheory.example/cream" }), params({ id: p.id }))).json();
     expect(patched).toMatchObject({ audience: "Sensitive skin", url: "https://dewtheory.example/cream" });
     const unassigned = await (await productsRoute.GET(json("GET", undefined, "http://x/api/products?brand=none"))).json();
-    expect(unassigned.items.map((x: { name: string }) => x.name)).toEqual(expect.arrayContaining(["Maple Pecan Granola", "Night Serum"]));
+    expect(unassigned.items.map((x: { name: string }) => x.name)).toEqual(expect.arrayContaining(["Night Serum", "Day Cream"]));
     expect((await productRoute.DELETE(json("DELETE"), params({ id: p.id }))).status).toBe(204);
+  });
+
+  it("keeps a product page's logo and colours in the site's brand kit (made once, then matched by host)", () => {
+    const bits = { name: "Dew Theory", logo: upload("logo.png"), colors: ["#112233", "#445566"], fonts: { heading: "Fraunces" } };
+    const made = brand.kitForSite("https://www.dewtheory.example/products/barrier-cream", bits);
+    expect(made).toMatchObject({ name: "Dew Theory", website: "https://www.dewtheory.example/", status: "ready", logo: bits.logo, colors: bits.colors, fonts: { heading: "Fraunces" } });
+    expect(made.note).toMatch(/Made from a product page on dewtheory\.example/);
+    const again = brand.kitForSite("https://dewtheory.example/products/night-serum", { colors: ["#ffffff"], fonts: {} });
+    expect(again.id).toBe(made.id);
+    expect(again.colors).toEqual(bits.colors); // the kit's own colours win
+    // The kit reaches Click to Ad's video prompts through the product's brand.
+    const p = brand.createProduct({ name: "Barrier Cream", brandId: made.id, images: [upload()] });
+    const plan = mk.planClickToAd({ engine: "cloud", productId: p.id, styleId: "clean-minimal" }, { product: p, brand: brand.getBrand(made.id), script: "One two three four five six seven eight." });
+    expect(plan.meta.brandId).toBe(made.id);
+    expect(plan.steps.find((s) => s.key === "shot1")!.request.prompt).toMatch(/Brand: Dew Theory.*#112233/);
+    brand.deleteBrand(made.id);
   });
 
   it("plans Marketing Studio runs per format and engine", () => {

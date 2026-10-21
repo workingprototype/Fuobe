@@ -21,6 +21,7 @@ import { db } from "./db";
 import { llmText } from "./enhance";
 import { createGenerations, getGeneration, previewGeneration, recordLocalGeneration } from "./generations";
 import { provider } from "./providers";
+import { llmBackends } from "./providers/llm";
 import { engineMode } from "./settings";
 
 /**
@@ -284,7 +285,8 @@ export function estimateBatch(input: BatchInput): BatchEstimate {
     perAd,
     costUsd: perAd === null ? null : Math.round((perAd * total + copy * input.items.length) * 1000) / 1000,
     demo: p.demo,
-    copyBy: copy > 0 || p.demo ? "llm" : "rules",
+    // Who writes the words: an LLM this install can reach (as llmText picks one), else the rules.
+    copyBy: route === "fuobe" && llmBackends({ endpoint: "claude" }).length ? "llm" : "rules",
   };
 }
 
@@ -423,18 +425,21 @@ function settle(rows: CreativeRow[]): CreativeRow[] {
 }
 
 export function listCreatives(o: { brandId: string; batchId?: string; productId?: string; limit?: number }): AdCreative[] {
-  const where = ["brand_id = ?"];
+  const where = ["c.brand_id = ?"];
   const args: unknown[] = [o.brandId];
   if (o.batchId) {
-    where.push("batch_id = ?");
+    where.push("c.batch_id = ?");
     args.push(o.batchId);
   }
   if (o.productId) {
-    where.push("product_id = ?");
+    where.push("c.product_id = ?");
     args.push(o.productId);
   }
+  // Newest batch first; inside a batch, in the order the ads were asked for (product by product).
   const rows = db()
-    .prepare(`SELECT * FROM ad_creatives WHERE ${where.join(" AND ")} ORDER BY created_at DESC, position ASC LIMIT ?`)
+    .prepare(
+      `SELECT c.* FROM ad_creatives c LEFT JOIN ad_batches b ON b.id = c.batch_id WHERE ${where.join(" AND ")} ORDER BY COALESCE(b.created_at, c.created_at) DESC, c.batch_id, c.position ASC LIMIT ?`,
+    )
     .all(...args, Math.min(1000, o.limit ?? 400)) as CreativeRow[];
   return settle(rows).map(toCreative);
 }
@@ -559,10 +564,21 @@ export function offlineProposal(text: string, products: Pick<Product, "id" | "na
   direction = direction
     .replace(/\b(please|can you|could you|make|create|generate|write|me|some)\b/gi, " ")
     .replace(/\bfor (?:my|our|the|this) products?\b/gi, " ")
+    // A stray "@" (or an @mention that names no product) is not part of the direction.
+    .replace(/(?:\b(?:for|of|with|featuring)\s+)?(?<!\S)@\S*/gi, " ")
     .replace(/\s+([,.!?])/g, "$1")
     .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  // …nor a word left dangling once the products are gone ("playful for").
+  for (let prev = ""; prev !== direction; ) {
+    prev = direction;
+    direction = direction
+      .replace(/(?:^|\s+)(?:for|of|with|featuring|about|to|on|and|the|a|an)$/i, "")
+      .replace(/^and\b\s*/i, "")
+      .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+      .trim();
+  }
   return { count, productIds: ids, direction };
 }
 

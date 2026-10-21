@@ -124,6 +124,19 @@ export function researchLabel(p: Pick<BrandProgress, "index" | "startedAt"> | nu
   return { index: i, label: RESEARCH_LABELS[i] };
 }
 
+/**
+ * How far the research is (0–100) for the bar: the server's own step, eased forward over time during
+ * the writing stage so it keeps moving — and never goes back while the labels rotate.
+ */
+export function researchProgress(p: Pick<BrandProgress, "index" | "startedAt"> | null | undefined, now: number, settle = 25_000): number {
+  const total = RESEARCH_LABELS.length;
+  if (!p) return (1 / total) * 100;
+  const at = ((Math.min(p.index, total - 1) + 1) / total) * 100;
+  if (p.index < LLM_STAGE.from || p.index > LLM_STAGE.to) return at;
+  const end = ((LLM_STAGE.to + 1) / total) * 100;
+  return at + (end - at) * (1 - Math.exp(-Math.max(0, now - p.startedAt) / settle));
+}
+
 /** Click to Ad's product-kit labels. */
 export const KIT_LABELS = ["Connecting to website", "Extracting product images", "Finding brand colors", "Locating logo", "Processing details", "Finalizing product kit"] as const;
 
@@ -704,14 +717,33 @@ export const WORDS_PER_SECOND = 2.5;
 
 export const wordBudget = (seconds: number) => Math.max(6, Math.round(seconds * WORDS_PER_SECOND));
 
-/** Trim a script to its word budget at a sentence end when possible. */
+const wordsIn = (s: string) => s.split(" ").filter(Boolean).length;
+
+/**
+ * Trim a script to its word budget at sentence ends. The closing sentence (the call to action) stays
+ * when it takes at most half the budget: sentences give way from the middle, never the end.
+ */
 export function fitScript(script: string, seconds: number): string {
   const max = wordBudget(seconds);
-  const words = script.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  if (words.length <= max) return words.join(" ");
-  const cut = words.slice(0, max).join(" ");
-  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
-  return end > cut.length * 0.5 ? cut.slice(0, end + 1) : `${cut.replace(/[,;:\s]+$/, "")}.`;
+  const text = script.replace(/\s+/g, " ").trim();
+  if (wordsIn(text) <= max) return text;
+  const sentences = (text.match(/[^.!?]+(?:[.!?]+["”’']?|$)/g) ?? [text]).map((s) => s.trim()).filter(Boolean);
+  const last = sentences.length > 1 ? sentences[sentences.length - 1] : null;
+  const tail = last && wordsIn(last) <= max / 2 ? last : null;
+  const room = max - (tail ? wordsIn(tail) : 0);
+  const head: string[] = [];
+  let used = 0;
+  for (const s of tail ? sentences.slice(0, -1) : sentences) {
+    if (used + wordsIn(s) > room) break;
+    head.push(s);
+    used += wordsIn(s);
+  }
+  if (!head.length || used < room * 0.5) {
+    // The opening sentence alone runs past the budget: cut it at a word.
+    const cut = (tail ? sentences.slice(0, -1).join(" ") : text).split(" ").slice(0, room).join(" ").replace(/[,;:\s]+$/, "");
+    head.splice(0, head.length, /[.!?]$/.test(cut) ? cut : `${cut}.`);
+  }
+  return [...head, ...(tail ? [tail] : [])].join(" ");
 }
 
 export interface Cue {
@@ -821,6 +853,12 @@ export const UGC_MODELS = {
   cloud: { voice: "elevenlabs-v4", still: "nano-banana-pro", talk: "omnihuman-2", clip: "seedance-2-5", captions: "auto-subtitle", join: "join-clips", mux: "merge-audio-video", trim: "trim-video", frame: "extract-frame" },
   open: { voice: "oss-chatterbox", still: "oss-qwen-edit", talk: "oss-infinitetalk", clip: "oss-wan22-14b-fast", captions: "oss-captions-burnin", join: "oss-join-clips", mux: "oss-mux", trim: "oss-trim", frame: "oss-extract-frame" },
 } as const;
+
+/**
+ * Open joins that keep one clip's own sound (oss-join-clips drops every soundtrack): the first clip's
+ * from the start, or the second clip's starting where the first ends (a silent hook before the voice).
+ */
+export const OPEN_SOUND_JOIN = { first: "oss-join-sound1", second: "oss-join-sound2" } as const;
 
 /** The models the Ad Multiplier can recreate with, per engine (the first that's usable is the default). */
 export const MULTIPLIER_MODELS: Record<Engine, ModelChoice[]> = {

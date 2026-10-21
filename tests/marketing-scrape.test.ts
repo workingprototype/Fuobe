@@ -113,7 +113,9 @@ describe("products", () => {
       images: ["https://emberandoat.example/cdn/shop/products/maple-pecan.jpg", "https://cdn.example-shop.com/maple-pecan-2.jpg"],
       brand: "Ember & Oat",
     });
-    expect(ps[0].description).toBe("Crunchy clusters of organic oats, Oregon pecans and dark maple syrup. Vegan and gluten-free Only 6 grams of sugar per serving");
+    // List items stay on their own lines, so each becomes its own selling point.
+    expect(ps[0].description).toBe("Crunchy clusters of organic oats, Oregon pecans and dark maple syrup.\nVegan and gluten-free\nOnly 6 grams of sugar per serving");
+    expect(sellingPointsFrom(ps[0].description)).toEqual(["Crunchy clusters of organic oats, Oregon pecans and dark maple syrup", "Vegan and gluten-free", "Only 6 grams of sugar per serving"]);
     expect(ps[1].price).toBe(9);
     // A single product's JSON (/products/<handle>.json) has the same shape under "product".
     expect(shopifyProducts({ product: { title: "One", images: [] } }, "https://x.example")[0].name).toBe("One");

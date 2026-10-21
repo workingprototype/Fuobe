@@ -334,7 +334,26 @@ function offerOf(v: unknown): { price: number | null; currency: string | null } 
   return { price: priceOf(o.price ?? o.lowPrice ?? (o.priceSpecification as Json | undefined)?.price), currency: str(o.priceCurrency) || null };
 }
 
-const stripHtml = (s: string, max = 600) => clean(strip(s), max);
+/** Text from HTML with its line breaks kept (list items and paragraphs stay apart for selling points). */
+const stripHtml = (s: string, max = 600) =>
+  strip(s)
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, max)
+    .trim();
+
+/** Like clean(), but keeps line breaks (a product description's bullet lines). */
+const cleanLines = (s: string | undefined | null, max = 2000) =>
+  s
+    ? decodeEntities(s)
+        .split(/\r?\n/)
+        .map((line) => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, max)
+    : "";
 
 /** Products in JSON-LD (Product, ProductGroup, and Products inside an ItemList). */
 export function jsonLdProducts(blocks: Json[], base: string): ProductDraft[] {
@@ -1200,7 +1219,7 @@ function insertProduct(p: Omit<ProductDraft, "images"> & { sellingPoints?: strin
       id,
       brandId,
       clean(p.name, 140) || "Untitled product",
-      clean(p.description, 2000) || null,
+      cleanLines(p.description, 2000) || null,
       p.price ?? null,
       p.currency ? clean(p.currency, 8) : null,
       clean(p.audience, 300) || null,
@@ -1251,7 +1270,7 @@ export function updateProduct(id: string, patch: Partial<ProductInput>): Product
   const next = {
     brand_id: patch.brandId !== undefined ? patch.brandId : p.brandId,
     name: patch.name !== undefined ? clean(patch.name, 140) || p.name : p.name,
-    description: patch.description !== undefined ? clean(patch.description, 2000) || null : (p.description ?? null),
+    description: patch.description !== undefined ? cleanLines(patch.description, 2000) || null : (p.description ?? null),
     price: patch.price !== undefined ? patch.price : (p.price ?? null),
     currency: patch.currency !== undefined ? (patch.currency ? clean(patch.currency, 8) : null) : (p.currency ?? null),
     audience: patch.audience !== undefined ? clean(patch.audience, 300) || null : (p.audience ?? null),
@@ -1282,8 +1301,59 @@ export interface LinkRead {
   duplicate?: Product;
   /** Brand bits the page carries: Click to Ad's product kit shows the logo and colours. */
   brand: { name?: string; logo?: string; colors: string[]; fonts: { heading?: string; body?: string } };
+  /** The brand kit the products were added to (the site's own kit when read with its brand). */
+  brandId?: string;
   message?: string;
 }
+
+const siteHost = (url: string | undefined) => {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, "").toLowerCase() : "";
+  } catch {
+    return "";
+  }
+};
+
+/**
+ * The brand kit for a product page's site: the kit whose website is on the same host (missing logo,
+ * colours and fonts filled from the page), else a new ready kit made from what the page showed.
+ */
+export function kitForSite(pageUrl: string, bits: LinkRead["brand"]): BrandKit {
+  const host = siteHost(pageUrl);
+  const existing = listBrands().find((b) => b.status !== "researching" && siteHost(b.website) === host);
+  if (existing) {
+    const patch: Partial<BrandKitFields> = {};
+    if (!existing.logo && bits.logo) patch.logo = bits.logo;
+    if (!existing.colors.length && bits.colors.length) patch.colors = bits.colors;
+    if (!existing.fonts.heading && !existing.fonts.body && (bits.fonts.heading || bits.fonts.body)) patch.fonts = bits.fonts;
+    return Object.keys(patch).length ? (updateBrand(existing.id, patch) ?? existing) : existing;
+  }
+  const website = new URL(pageUrl).origin + "/";
+  const name = clean(bits.name, 80) || hostName(host);
+  const kit: StoredKit = {
+    ...emptyKit(name),
+    website,
+    logo: bits.logo,
+    colors: bits.colors.filter(isHex).slice(0, 8),
+    fonts: { heading: bits.fonts.heading, body: bits.fonts.body },
+    source: "website",
+    note: `Made from a product page on ${host}. Run the research for the rest of the brand kit (tone, audience, values…).`,
+  };
+  const id = nanoid(10);
+  const now = Date.now();
+  db()
+    .prepare("INSERT INTO brand_kits (id, name, website, status, progress_json, kit_json, chat_json, created_at, updated_at) VALUES (?, ?, ?, 'ready', NULL, ?, '[]', ?, ?)")
+    .run(id, name, website, JSON.stringify(kit), now, now);
+  return getBrand(id)!;
+}
+
+/** What Click to Ad shows for a kit: its own logo, colours and fonts, else the page's. */
+const kitBits = (kit: BrandKit, page: LinkRead["brand"]): LinkRead["brand"] => ({
+  name: kit.name,
+  logo: kit.logo ?? page.logo,
+  colors: kit.colors.length ? kit.colors : page.colors,
+  fonts: kit.fonts.heading || kit.fonts.body ? kit.fonts : page.fonts,
+});
 
 /**
  * Add products from a link ("Add product from link", Click to Ad): Shopify's product JSON when the
@@ -1311,6 +1381,25 @@ export async function readProductLink(input: { url: string; brandId?: string | n
     if (!drafts.length) throw new Error("Paste the product's link — a description alone is not enough.");
     const limit = Math.max(1, input.limit ?? 1);
     const facts = input.withBrand ? parseSite(page.text, page.url) : null;
+    // The page's brand bits (Click to Ad's product kit), read before the products so they can join that brand's kit.
+    let brand: LinkRead["brand"] = { colors: [], fonts: {} };
+    if (facts) {
+      const sheets = (await pool(facts.stylesheets.slice(0, 3), 3, (s) => fetchText(s, 2 * 1024 * 1024, 10_000))).filter((x): x is NonNullable<typeof x> => !!x).map((x) => x.text);
+      const css = [...facts.inlineCss, ...sheets];
+      const logo = facts.svgLogo
+        ? saveFile({ data: Buffer.from(facts.svgLogo), contentType: "image/svg+xml", name: `${facts.host}-logo.svg`, source: "upload" }).url
+        : await firstSaved(facts.logos, { allowSvg: true, minBytes: 300 });
+      const f = extractFonts(page.text, css);
+      brand = { name: facts.organization?.name ?? facts.name, logo: logo ?? undefined, colors: extractColors(css, facts.themeColor), fonts: { heading: f.heading, body: f.body } };
+    }
+    // A product read with its brand (and no brand chosen) joins the kit for that site, made now if there's none,
+    // so the logo and colours stay with the product and reach every flow that uses it.
+    const kit = facts && !brandId ? kitForSite(page.url, brand) : null;
+    const owner = brandId ?? kit?.id ?? null;
+    if (kit) {
+      const dup = listProducts(kit.id).find((p) => p.url === url || p.url === page.url);
+      if (dup) return { products: [], found: 1, duplicate: dup, brand: kitBits(kit, brand), brandId: kit.id, message: `«${dup.name}» is already among ${kit.name}'s products.` };
+    }
     const llm = softFieldsFrom(
       parseJsonObject(
         await llmText(
@@ -1326,23 +1415,14 @@ export async function readProductLink(input: { url: string; brandId?: string | n
     for (const d of drafts.slice(0, limit)) {
       const soft = llm.products?.find((x) => x.name.toLowerCase() === d.name.toLowerCase());
       const pics = (await pool(d.images.slice(0, 5), 4, (u) => saveRemoteImage(u))).filter((x): x is string => !!x);
-      products.push(insertProduct({ ...d, audience: soft?.audience, sellingPoints: soft?.sellingPoints?.length ? soft.sellingPoints : sellingPointsFrom(d.description) }, brandId, pics));
-    }
-    let brand: LinkRead["brand"] = { colors: [], fonts: {} };
-    if (facts) {
-      const sheets = (await pool(facts.stylesheets.slice(0, 3), 3, (s) => fetchText(s, 2 * 1024 * 1024, 10_000))).filter((x): x is NonNullable<typeof x> => !!x).map((x) => x.text);
-      const css = [...facts.inlineCss, ...sheets];
-      const logo = facts.svgLogo
-        ? saveFile({ data: Buffer.from(facts.svgLogo), contentType: "image/svg+xml", name: `${facts.host}-logo.svg`, source: "upload" }).url
-        : await firstSaved(facts.logos, { allowSvg: true, minBytes: 300 });
-      const f = extractFonts(page.text, css);
-      brand = { name: facts.organization?.name ?? facts.name, logo: logo ?? undefined, colors: extractColors(css, facts.themeColor), fonts: { heading: f.heading, body: f.body } };
+      products.push(insertProduct({ ...d, audience: soft?.audience, sellingPoints: soft?.sellingPoints?.length ? soft.sellingPoints : sellingPointsFrom(d.description) }, owner, pics));
     }
     const found = drafts.length;
     return {
       products,
       found,
-      brand,
+      brand: kit ? kitBits(getBrand(kit.id) ?? kit, brand) : brand,
+      brandId: owner ?? undefined,
       message: found > products.length ? `Found ${found} products on that page and added the first ${products.length}. Paste a product's own link to add another.` : undefined,
     };
   } finally {
