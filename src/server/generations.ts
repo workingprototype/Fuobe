@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { getModel, getPreset } from "@/lib/catalog";
 import { applyMentions } from "@/lib/catalog/elements";
+import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
@@ -216,6 +217,10 @@ const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
   { table: "products", cols: ["images_json"] },
   { table: "ad_creatives", cols: ["meta_json"] },
   { table: "marketing_runs", cols: ["meta_json"] },
+  // Image studios: a palette's thumbnail, a moodboard's images, collages and cover, an Instadump pack's photos.
+  { table: "palettes", cols: ["thumb_url"] },
+  { table: "moodboards", cols: ["images_json", "collages_json", "cover_url"] },
+  { table: "photodump_packs", cols: ["refs_json"] },
 ];
 
 /** Whether anything still refers to this stored file (see ASSET_REFS). */
@@ -293,8 +298,10 @@ setResolver((ids) =>
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
-  const model = getModel(original.modelId);
-  const req = model ? stripMotionPaths(applySketch(applyMentions(original, model, listElements()).request, model).request, model) : original;
+  // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
+  const worded = withSignatureWords(original);
+  const model = getModel(worded.modelId);
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   const plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {

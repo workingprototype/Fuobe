@@ -77,8 +77,19 @@ export function triggerFor(handle: string): string {
   return `${(consonants.length >= 3 ? consonants : base).slice(0, 6) || "elem"}fz`;
 }
 
-/** AI-Toolkit job config for a Z-Image Turbo character LoRA (docs/research/comfyui-oss-2.json → character-lora). */
-export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolder: string; outputFolder: string; steps?: number }) {
+/** What a dataset's captions say: a person ("photo of <trigger>") or a look ("<trigger> style"). */
+export function trainingCaption(kind: "character" | "style", trigger: string, description?: string | null): string {
+  const extra = description?.trim().replace(/[.\s]+$/, "");
+  return `${kind === "style" ? `${trigger} style` : `photo of ${trigger}`}${extra ? `, ${extra}` : ""}`;
+}
+
+/**
+ * AI-Toolkit job config for a Z-Image Turbo LoRA (docs/research/comfyui-oss-2.json → character-lora).
+ * `kind: "style"` is the style preset (a moodboard): fewer steps and samples of new scenes in the
+ * look, instead of portraits of the person.
+ */
+export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolder: string; outputFolder: string; steps?: number; kind?: "character" | "style" }) {
+  const style = opts.kind === "style";
   return {
     job: "extension",
     config: {
@@ -107,7 +118,7 @@ export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolde
             dtype: "bf16",
             cache_text_embeddings: true,
             ema_config: { use_ema: false },
-            steps: opts.steps ?? 2500,
+            steps: opts.steps ?? (style ? 1500 : 2500),
             timestep_type: "weighted",
           },
           model: {
@@ -127,7 +138,9 @@ export function aiToolkitJob(opts: { name: string; trigger: string; datasetFolde
             height: 1024,
             seed: 42,
             walk_seed: true,
-            prompts: [`photo of ${opts.trigger}, close-up portrait, natural window light`, `${opts.trigger} walking in a neon-lit street at night, full body`],
+            prompts: style
+              ? [`a city street at night, ${opts.trigger} style`, `a bowl of fruit on a wooden table, ${opts.trigger} style`, `a portrait of a woman in a garden, ${opts.trigger} style`]
+              : [`photo of ${opts.trigger}, close-up portrait, natural window light`, `${opts.trigger} walking in a neon-lit street at night, full body`],
             neg: "",
             guidance_scale: 1,
             sample_steps: 9,

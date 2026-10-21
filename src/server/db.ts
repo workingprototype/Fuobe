@@ -276,6 +276,32 @@ const MIGRATIONS: string[] = [
     generation_id TEXT,
     layout TEXT,
     meta_json TEXT,
+  // Image studios: colour signatures (Soul HEX; the 50 Cinema Studio palettes are seeded on first use), moodboards
+  // (reference sets with their cover job, Recraft style id and optional style LoRA element) and Instadump user packs.
+  `CREATE TABLE IF NOT EXISTS palettes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    colors_json TEXT NOT NULL,
+    background TEXT,
+    slug TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    thumb_url TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS palettes_source ON palettes(source, created_at DESC);
+  CREATE TABLE IF NOT EXISTS moodboards (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    images_json TEXT NOT NULL,
+    collages_json TEXT NOT NULL DEFAULT '[]',
+    engine TEXT NOT NULL,
+    generation_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    cover_url TEXT,
+    style_id TEXT,
+    element_id TEXT,
     error TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -294,6 +320,13 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS marketing_runs_feature ON marketing_runs(feature, created_at DESC);`,
+  CREATE INDEX IF NOT EXISTS moodboards_created ON moodboards(created_at DESC);
+  CREATE TABLE IF NOT EXISTS photodump_packs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    refs_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );`,
 ];
 
 declare global {

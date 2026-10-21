@@ -43,6 +43,10 @@ import {
   Smartphone,
   Megaphone,
   Target,
+  Images,
+  Camera,
+  Shirt,
+  UserRoundCog,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -120,6 +124,10 @@ const NAV: NavGroupDef[] = [
       { href: "/mixed-media", label: "Mixed Media", icon: Shapes },
       { href: "/marketing", label: "Marketing Studio", icon: Megaphone },
       { href: "/ads", label: "Ads Studio", icon: Target },
+      { href: "/moodboards", label: "Moodboards", icon: Images },
+      { href: "/photodump", label: "Photodump", icon: Camera },
+      { href: "/fashion-factory", label: "Fashion Factory", icon: Shirt },
+      { href: "/character-sheet", label: "Character Sheet", icon: UserRoundCog },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },

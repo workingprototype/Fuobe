@@ -10,6 +10,8 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
 import { handoffKey, mergeHandoff } from "@/lib/composer";
+import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
+import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
 import { ComposerBridgeCtx, useComposerBridge, type ComposerBridge } from "./attachments";
@@ -70,8 +72,11 @@ function initialDraft(
 
 /** Rebuild a composer draft from a past generation ("Reuse"). */
 function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft> {
-  const r = g.request;
-  const imgs = r.inputs?.images ?? [];
+  // A run styled by the Color signature / Moodboard chips comes back as it was before they routed it,
+  // with the picks on the chips (studios without the chips get the styled prompt instead).
+  const signed = config.signature ? reuseSignature(g.request) : null;
+  const r = signed ? { ...g.request, modelId: signed.modelId, params: signed.params } : config.signature ? g.request : withSignatureWords(g.request);
+  const imgs = signed ? signed.images : (r.inputs?.images ?? []);
   const imageKeys = config.slots.filter((s) => s.accept === "image" && s.key !== "endImage" && s.key !== "mask").map((s) => s.key);
   const slots: Draft["slots"] = {};
   imageKeys.forEach((k, i) => (slots[k] = slot(imgs[i])));
@@ -90,6 +95,7 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
     presetOptions: r.presetOptions ?? {},
     presetStrength: r.presetStrength,
     mix: r.mix,
+    signature: signed?.signature,
   };
 }
 
@@ -289,6 +295,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
           ))}
         </div>
       )}
+      {!hasItems && config.signature && <SoulPresetCards />}
 
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-overlay p-8">

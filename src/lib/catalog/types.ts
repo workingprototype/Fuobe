@@ -7,6 +7,7 @@
  * (fal, replicate, comfyui, ...). Presets (apps, camera motions, effects) sit on top
  * of models and add prompt templates, fixed inputs and LoRAs.
  */
+import type { SignatureRecord } from "./palettes";
 
 export type Engine = "cloud" | "open";
 
@@ -442,6 +443,12 @@ export interface GenerationRequest {
   title?: string;
   /** Server-set: the name of the batch it belongs to (an Assist plan's summary): the Library stack's title. */
   batchTitle?: string;
+  /**
+   * The Image studio's style signature (Color signature + Moodboard chips): what was picked, the
+   * sentences the server adds to the prompt (`prompt` keeps the user's own words), and the request as
+   * it was before the signature routed it (Reuse restores that). See src/lib/catalog/palettes.ts.
+   */
+  signature?: SignatureRecord;
 }
 
 export interface ChainSlot {

@@ -1,4 +1,5 @@
 import { getModel } from "@/lib/catalog";
+import { SIGNATURE_MODELS } from "@/lib/catalog/palettes";
 import type { Preset } from "@/lib/catalog/types";
 import type { StudioConfig } from "@/components/studio/studio-context";
 
@@ -16,6 +17,9 @@ export const IMAGE_STUDIO: StudioConfig = {
   slots: [],
   multiRef: { label: "Add ref", max: 8 },
   defaultModels: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
+  // Color signature + Moodboard chips, and the models they can move a request to.
+  signature: true,
+  extraModels: Object.values(SIGNATURE_MODELS),
   suggestions: [
     "Editorial portrait of a woman in a yellow raincoat, Tokyo crosswalk at dusk, 35mm film",
     "Isometric cozy reading nook with plants and warm lamp light, 3D render",

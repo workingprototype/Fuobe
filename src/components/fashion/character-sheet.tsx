@@ -1,0 +1,319 @@
+"use client";
+
+import { AtSign, Check, ImagePlus, Loader2, RotateCcw, Shuffle, Sparkles, UserRoundPlus, X } from "lucide-react";
+import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { PageHeader, PageShell } from "@/components/page-shell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { EngineSwitch } from "@/components/studio/engine-switch";
+import { fileToList, type SlotValue } from "@/components/studio/media-slot";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
+import { useRun, useRunPreview } from "@/components/photodump/hooks";
+import { ResultsGrid } from "@/components/photodump/results";
+import { RunLine } from "@/components/photodump/steps";
+import { useElements, useEngine, useGenerations, useSaveElement } from "@/lib/api";
+import { castFieldVisible, castNameFor, randomCast, SHEET_MAX_REFS, type CastAnswers, type CastFieldData } from "@/lib/catalog/packs";
+import type { Generation } from "@/lib/catalog/types";
+import { cn } from "@/lib/utils";
+
+type Mode = "reference" | "cast" | "describe";
+const MODES: [Mode, string][] = [
+  ["reference", "From Reference"],
+  ["cast", "Build from scratch"],
+  ["describe", "From a description"],
+];
+
+const fmt = (f: CastFieldData, v: string | number) => (f.format ? f.format.replace("{v}", String(v)) : String(v));
+
+function CastForm({ fields, values, set }: { fields: CastFieldData[]; values: CastAnswers; set: (patch: CastAnswers) => void }) {
+  const tabs = useMemo(() => [...new Set(fields.map((f) => f.tab))], [fields]);
+  const [tab, setTab] = useState(tabs[0]);
+  return (
+    <div className="space-y-4">
+      <div role="tablist" aria-label="Soul Cast" className="scrollbar-none flex gap-1 overflow-x-auto">
+        {tabs.map((t) => (
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("h-8 shrink-0 rounded-full px-3 text-[12.5px] font-medium transition-colors", tab === t ? "bg-brand-faint text-brand-text" : "bg-secondary text-secondary-foreground hover:bg-accent")}>
+            {t}
+          </button>
+        ))}
+      </div>
+      {fields
+        .filter((f) => f.tab === tab && castFieldVisible(f.key, values))
+        .map((f) => {
+          const v = values[f.key];
+          const multi = f.kind === "multi";
+          const chosen = (o: string | number) => (multi ? Array.isArray(v) && v.includes(String(o)) : v === o);
+          return (
+            <div key={f.key} className="space-y-2">
+              <p className="text-[13px] font-medium">{f.question ?? f.label}</p>
+              <div role={multi ? "group" : "radiogroup"} aria-label={f.label} onKeyDown={multi ? undefined : radioKeys} className="flex flex-wrap gap-1.5">
+                {f.options.map((o) => {
+                  const sel = chosen(o);
+                  return (
+                    <button
+                      key={String(o)}
+                      type="button"
+                      role={multi ? undefined : "radio"}
+                      aria-checked={multi ? undefined : sel}
+                      aria-pressed={multi ? sel : undefined}
+                      tabIndex={multi ? undefined : radioTab(sel || (v === undefined && o === f.options[0]))}
+                      onClick={() => {
+                        if (multi) {
+                          const cur = Array.isArray(v) ? v : [];
+                          set({ [f.key]: sel ? cur.filter((x) => x !== String(o)) : [...cur, String(o)] });
+                        } else set({ [f.key]: sel && f.default === undefined ? undefined : o });
+                      }}
+                      className={cn("h-8 rounded-full border px-3 text-[12.5px] font-medium transition-colors", sel ? "border-primary bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent")}
+                    >
+                      {fmt(f, o)}
+                    </button>
+                  );
+                })}
+              </div>
+              {f.manual && (
+                <Input
+                  value={String(values[`${f.key}_text`] ?? "")}
+                  onChange={(e) => set({ [`${f.key}_text`]: e.target.value.slice(0, 300) })}
+                  placeholder={`Or describe the ${f.label.toLowerCase()}`}
+                  aria-label={`Describe the ${f.label.toLowerCase()}`}
+                  className="h-8 max-w-md"
+                />
+              )}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+/**
+ * Save a finished sheet as a character (its sheet, views and the source photos as references), once:
+ * a sheet that is already a character (its image is one of the character's references) shows that
+ * character instead, also after a reload.
+ */
+function SaveCharacter({ item, extra, defaultName }: { item: Generation; extra: string[]; defaultName: string }) {
+  const [name, setName] = useState(defaultName);
+  const save = useSaveElement();
+  const elements = useElements();
+  const refs = [...item.outputs.filter((o) => o.kind === "image").map((o) => o.url), ...extra].slice(0, 20);
+  const saved = save.data ?? elements.data?.find((e) => e.kind === "character" && !!refs[0] && e.references.includes(refs[0]));
+  if (saved)
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-background p-3">
+        <span className="grid size-7 place-items-center rounded-full bg-success/15 text-success">
+          <Check className="size-4" />
+        </span>
+        <p className="min-w-0 flex-1 text-[13px]">
+          Saved as <span className="font-medium">@{saved.handle}</span> — use it anywhere with <AtSign className="inline size-3" />
+          mentions, in <Link href="/photodump" className="text-brand-text hover:underline">Photodump</Link> or <Link href="/fashion-factory" className="text-brand-text hover:underline">Fashion Factory</Link>.
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/elements/${saved.id}`}>Open @{saved.handle}</Link>
+        </Button>
+      </div>
+    );
+  return (
+    <div className="flex flex-wrap items-end gap-2 rounded-2xl border bg-background p-3">
+      <label className="min-w-40 flex-1 space-y-1">
+        <span className="text-[12px] text-muted-foreground">Character name</span>
+        <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className="h-8" />
+      </label>
+      <Button
+        disabled={!name.trim() || save.isPending || elements.isLoading}
+        onClick={() =>
+          save.mutate(
+            { name: name.trim(), kind: "character", references: refs },
+            {
+              // The card turns into "Saved as @handle · Open": no toast needed.
+              onError: (e) => toast.error((e as Error).message),
+            },
+          )
+        }
+      >
+        {save.isPending ? <Loader2 className="animate-spin" /> : <UserRoundPlus />} Save as character
+      </Button>
+      <p className="w-full text-[12px] text-muted-foreground">
+        Use it anywhere with <AtSign className="inline size-3" />
+        mentions, in <Link href="/photodump" className="text-brand-text hover:underline">Photodump</Link> or <Link href="/fashion-factory" className="text-brand-text hover:underline">Fashion Factory</Link> — or train a Soul ID / LoRA from its page.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * /character-sheet ("Build your AI avatar"): a consistent character as a turnaround sheet — from 1–5
+ * reference photos, from a Soul Cast build, or from a description (the AI Influencer app) — saved as
+ * a character element.
+ */
+export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData[]; defaults: CastAnswers }) {
+  const [engine, setEngine] = useEngine();
+  const [mode, setMode] = useState<Mode>("reference");
+  const [photos, setPhotos] = useState<SlotValue[]>([]);
+  const [details, setDetails] = useState("");
+  const [cast, setCast] = useState<CastAnswers>(defaults);
+  const [brief, setBrief] = useState("");
+  const [ids, setIds] = useState<string[]>([]);
+  const [over, setOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const run = useRun<Record<string, unknown>>("/api/photodump/character");
+  const { data } = useGenerations({ features: ["character-sheet", "app:app-ai-influencer"], limit: 60 });
+  // This visit's sheets; after a reload, the most recent ones.
+  const mine = useMemo(() => (ids.length ? (data ?? []).filter((g) => ids.includes(g.id)) : (data ?? []).slice(0, 2)), [data, ids]);
+  const latest = mine.find((g) => g.status === "succeeded");
+
+  const uploading = photos.some((p) => p.uploading);
+  const body =
+    mode === "reference"
+      ? photos.length && !uploading
+        ? { mode, engine, images: photos.map((p) => p.ref), details: details || undefined }
+        : null
+      : mode === "cast"
+        ? { mode, engine, cast, details: details || undefined }
+        : brief.trim()
+          ? { mode, engine, prompt: brief }
+          : null;
+  const preview = useRunPreview("/api/photodump/character", body);
+  const addFiles = (files: Iterable<File>) => {
+    const list = [...files].filter((f) => /^image\//.test(f.type));
+    if (photos.length + list.length > SHEET_MAX_REFS) toast(`Maximum ${SHEET_MAX_REFS} images`);
+    list.slice(0, SHEET_MAX_REFS - photos.length).forEach((f) => fileToList(f, setPhotos, "image"));
+  };
+  const create = () => {
+    if (mode === "reference" && !photos.length) return toast("Upload at least 1 image");
+    if (!body) return toast(mode === "describe" ? "Describe your character first" : "Wait for the uploads to finish");
+    run.mutate(body, {
+      // The run line already says which model runs and why (its notes), so no toast here.
+      onSuccess: (r) => setIds((xs) => [...r.items.map((g) => g.id), ...xs]),
+      onError: (e) => toast.error((e as Error).message || "Failed to create character sheet"),
+    });
+  };
+
+  return (
+    <PageShell wide>
+      <PageHeader title="Build your AI avatar" description="Create a consistent AI character for your videos — from reference or define your character's look from scratch.">
+        <EngineSwitch value={engine} onChange={setEngine} />
+      </PageHeader>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="min-w-0 space-y-4">
+          <div role="tablist" aria-label="How to build it" className="scrollbar-none inline-flex max-w-full overflow-x-auto rounded-full bg-muted p-0.5">
+            {MODES.map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className={cn("h-8 shrink-0 rounded-full px-3.5 text-[13px] font-medium text-muted-foreground transition", mode === id && "bg-background text-foreground shadow-soft")}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === "reference" && (
+            <div className="space-y-3">
+              <div
+                onDragOver={(e) => (e.preventDefault(), setOver(true))}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setOver(false);
+                  addFiles(e.dataTransfer.files);
+                }}
+                onPaste={(e) => addFiles(e.clipboardData.files)}
+                className={cn("rounded-2xl border border-dashed transition-colors", over && "border-primary bg-brand-faint")}
+              >
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  className="flex w-full flex-col items-center justify-center gap-2 rounded-2xl px-4 py-10 text-center outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                >
+                  <ImagePlus className="size-6 text-muted-foreground" />
+                  <span className="text-[14px] font-medium">Drop images here</span>
+                  <span className="text-[12.5px] text-muted-foreground">1–{SHEET_MAX_REFS} photos of one person · PNG, JPG or WebP · or click to choose</span>
+                </button>
+                <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addFiles(e.target.files ?? []), (e.target.value = ""))} />
+              </div>
+              {photos.length > 0 && (
+                <div className="grid grid-cols-5 gap-2">
+                  {photos.map((p, i) => (
+                    <div key={p.id ?? i} className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.preview} alt="" className="size-full object-cover" />
+                      {p.uploading && (
+                        <span className="absolute inset-0 grid place-items-center bg-background/60">
+                          <Loader2 className="size-4 animate-spin" />
+                        </span>
+                      )}
+                      <button type="button" aria-label={`Remove photo ${i + 1}`} onClick={() => setPhotos((xs) => xs.filter((x) => x !== p))} className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background">
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Input value={details} onChange={(e) => setDetails(e.target.value.slice(0, 300))} placeholder="Optional details, e.g. “keep the denim jacket”" aria-label="Details" />
+            </div>
+          )}
+
+          {mode === "cast" && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="mr-auto text-[13px] text-muted-foreground">Build your film&apos;s cast from scratch - genre, budget, appearance, and every detail in between.</p>
+                <Button variant="outline" size="sm" onClick={() => setCast((v) => randomCast(fields, v))}>
+                  <Shuffle /> Randomize
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setCast(defaults)}>
+                  <RotateCcw /> Reset
+                </Button>
+              </div>
+              <CastForm fields={fields} values={cast} set={(patch) => setCast((v) => ({ ...v, ...patch }))} />
+              <Input value={details} onChange={(e) => setDetails(e.target.value.slice(0, 300))} placeholder="Distinguishing details (optional)" aria-label="Distinguishing details" />
+            </div>
+          )}
+
+          {mode === "describe" && (
+            <div className="space-y-2">
+              <Textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={5} placeholder="Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”" aria-label="Describe your character" />
+              <p className="text-[12px] text-muted-foreground">Runs the AI Influencer app: Higgsfield&apos;s character-sheet model on the cloud, Z-Image Turbo on the open engine.</p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-3">
+            <div className="min-w-0 flex-1">
+              <RunLine preview={body ? preview.data : undefined} loading={preview.isFetching} />
+            </div>
+            <Button onClick={create} disabled={run.isPending || uploading}>
+              {run.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} {run.isPending ? "Submitting..." : "Create AI Avatar"}
+            </Button>
+          </div>
+        </section>
+
+        <section className="min-w-0 space-y-3" aria-label="Your sheets">
+          {mine.length ? (
+            <>
+              {!ids.length && <p className="text-[13px] font-medium text-muted-foreground">Recent sheets</p>}
+              <ResultsGrid
+                items={mine}
+                ratio={16 / 9}
+                className="sm:grid-cols-1 lg:grid-cols-1"
+                onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
+              />
+              {latest && (
+                <SaveCharacter
+                  key={latest.id}
+                  item={latest}
+                  extra={(latest.request.inputs?.images ?? []).filter((u) => u.startsWith("/api/files/"))}
+                  defaultName={mode === "cast" ? castNameFor(cast) : "My character"}
+                />
+              )}
+            </>
+          ) : (
+            <div className="grid min-h-64 place-items-center rounded-2xl border border-dashed p-6 text-center">
+              <div className="max-w-sm space-y-1">
+                <p className="font-heading text-[22px]">Your character sheet appears here</p>
+                <p className="text-[13px] text-muted-foreground">Front, three-quarter, profile and back views of the same person — then save it as a character to use in any prompt with @.</p>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </PageShell>
+  );
+}
