@@ -1,10 +1,10 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import type { CinemaFolder, CinemaGenerateInput, CinemaProject, CinemaTile, DirectorMessage, DirectorSettings } from "@/lib/catalog/cinema";
 import type { Generation } from "@/lib/catalog/types";
-import { toStreamEvent } from "@/lib/generation-stream";
+import { useGenerationEvents } from "@/lib/api";
 import { Autosaver } from "./autosave";
 import { applyToTakes, type CinemaGeneration } from "./live";
 
@@ -33,57 +33,20 @@ const send = async <T,>(url: string, method: string, body?: unknown, keepalive =
 const active = (g: Generation) => g.status === "queued" || g.status === "running";
 
 // ---------------------------------------------------------------------------
-// Live updates: one EventSource on GET /api/generations/stream for the workspace's lists. While it's
-// connected the takes update in place and polling drops to a slow safety net.
+// Live updates: the app's one shared generation stream (useGenerationEvents in lib/api.ts, one
+// connection per browser rather than one per Cinema tab). While it's connected the takes update in
+// place and polling drops to a slow safety net.
 
-const live = { es: null as EventSource | null, users: 0, connected: false, client: null as QueryClient | null, listeners: new Set<() => void>() };
-
-function setConnected(v: boolean) {
-  if (live.connected === v) return;
-  live.connected = v;
-  live.listeners.forEach((l) => l());
-}
-
-function applyEvent(qc: QueryClient, data: string, event: string) {
-  const ev = toStreamEvent({ event, data });
-  if (!ev) return;
-  for (const q of qc.getQueryCache().findAll({ queryKey: ["cinema"] })) {
-    const k = q.queryKey;
-    if (!(k[2] === "items" || k[1] === "studio")) continue;
-    const old = q.state.data as CinemaGeneration[] | undefined;
+/** Patch one cached list of takes with a live event (cinema keeps its own caches). */
+function useLiveTakes(queryKey: readonly unknown[]): boolean {
+  const qc = useQueryClient();
+  const key = JSON.stringify(queryKey);
+  return useGenerationEvents((ev) => {
+    const k = JSON.parse(key) as unknown[];
+    const old = qc.getQueryData<CinemaGeneration[]>(k);
     const next = applyToTakes(old, ev);
     if (next !== old) qc.setQueryData(k, next);
-  }
-}
-
-function useCinemaStream(): boolean {
-  const qc = useQueryClient();
-  useEffect(() => {
-    live.client = qc;
-    live.users++;
-    if (!live.es && typeof EventSource !== "undefined") {
-      const es = new EventSource("/api/generations/stream");
-      es.onopen = () => setConnected(true);
-      es.onerror = () => setConnected(false);
-      for (const event of ["generation", "deleted"]) es.addEventListener(event, (m) => live.client && applyEvent(live.client, (m as MessageEvent<string>).data, event));
-      live.es = es;
-    }
-    return () => {
-      live.users--;
-      if (live.users) return;
-      live.es?.close();
-      live.es = null;
-      setConnected(false);
-    };
-  }, [qc]);
-  return useSyncExternalStore(
-    (cb) => {
-      live.listeners.add(cb);
-      return () => live.listeners.delete(cb);
-    },
-    () => live.connected,
-    () => false,
-  );
+  });
 }
 
 const pollEvery = (items: Generation[] | undefined, connected: boolean) => (items?.some(active) ? (connected ? 10_000 : 1500) : false);
@@ -108,7 +71,7 @@ export function useCinemaProject(id: string) {
 
 /** Every take in the project (folders are filtered in the browser); live, with polling as a fallback. */
 export function useCinemaItems(id: string) {
-  const connected = useCinemaStream();
+  const connected = useLiveTakes(["cinema", id, "items"]);
   return useQuery({
     queryKey: ["cinema", id, "items"],
     queryFn: async () => (await json<{ items: CinemaGeneration[] }>(await fetch(`/api/cinema/projects/${id}/items`))).items,
@@ -118,7 +81,7 @@ export function useCinemaItems(id: string) {
 
 /** "My Generations": every Cinema Studio generation, in any project (each with its projectId). */
 export function useStudioGenerations(id: string, enabled: boolean) {
-  const connected = useCinemaStream();
+  const connected = useLiveTakes(["cinema", "studio"]);
   return useQuery({
     queryKey: ["cinema", "studio"],
     enabled,

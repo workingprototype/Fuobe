@@ -2,18 +2,48 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, MUSIC_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
-import { type AssistItem, type AssistThread, type AssistThreadSummary, type AssistThreadView, threadTitle } from "@/lib/assist";
+import {
+  ASSIST_EFFORTS,
+  CLAUDE_MODELS,
+  contextUpdate,
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_EFFORT,
+  factMap,
+  guessCategory,
+  renderContext,
+  slashSkills,
+  threadTitle,
+  type AssistAgent,
+  type AssistAvailability,
+  type AssistEffort,
+  type AssistItem,
+  type AssistMode,
+  type AssistModeChoice,
+  type AssistThread,
+  type AssistThreadSummary,
+  type AssistThreadView,
+  type SkillMeta,
+} from "@/lib/assist";
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
 import { engineMode, getSetting } from "../settings";
+import { getSkill } from "../skills";
 import { readRef } from "../storage";
-import { apiTools, executeTool, getTool, planFor, validateInput, type ToolContext } from "./tools";
+import { canUseSkill, chatFacts } from "./context";
+import { getProject, touchProject } from "./projects";
+import { apiTools, cardTitle, executeTool, getTool, planFor, validateInput, type ToolContext } from "./tools";
 
 /**
  * The Assist agent loop. History is kept exactly as the API returned it (append-only, thinking
  * included) so later turns stay valid; generations that cost money stop the loop with an approval
  * card, and the user's answer resumes it with the matching tool results.
+ *
+ * Each chat's system prompt is frozen when it starts: the fixed instructions plus the chat's
+ * context (date, engine, approval mode, project, memory, skills). What changes later — a memory
+ * saved, a skill loaded, auto-run switched on — reaches the model as an appended
+ * `role: "system"` "Context update" message, never by rewriting earlier text, so the prompt cache
+ * and earlier thinking blocks stay valid.
  */
 
 type MessageParam = Anthropic.Beta.BetaMessageParam;
@@ -21,10 +51,15 @@ type ToolResult = Anthropic.Beta.BetaToolResultBlockParam;
 type UserBlock = Exclude<MessageParam["content"], string>[number];
 
 export interface ModelRequest {
+  /** stable: the fixed instructions; turn: this chat's frozen context. */
   system: { stable: string; turn: string };
   messages: MessageParam[];
   tools: Anthropic.Beta.BetaTool[];
   ctx: ToolContext;
+  /** The chat's model choice (Manual mode): a Claude model id or an Ollama model name, and the effort. */
+  settings?: { model?: string | null; effort?: AssistEffort | null };
+  /** Skills loaded in the chat (the offline planner uses their hints). */
+  skills?: SkillMeta[];
 }
 export type ModelCall = (req: ModelRequest) => Promise<Anthropic.Beta.BetaMessage>;
 
@@ -58,10 +93,35 @@ interface Row {
   updated_at: number;
 }
 
+interface StateRow {
+  thread_id: string;
+  project_id: string | null;
+  mode: AssistMode | null;
+  model: string | null;
+  effort: AssistEffort | null;
+  skills_json: string;
+  context: string | null;
+  sent_json: string | null;
+}
+
+/** Per-chat state beside the transcript (assist_thread_state). */
+interface Ext {
+  projectId: string | null;
+  mode: AssistMode | null;
+  model: string | null;
+  effort: AssistEffort | null;
+  skills: string[];
+  /** The chat's frozen context block (null until the first model call). */
+  context: string | null;
+  /** The facts the model has seen, to send only what changed. */
+  sent: Record<string, string> | null;
+}
+
 interface State {
   thread: AssistThread;
   messages: MessageParam[];
   pending: Pending | null;
+  ext: Ext;
 }
 
 declare global {
@@ -69,23 +129,45 @@ declare global {
 }
 const runs = (globalThis.__fuobeAssistRuns ??= new Set());
 
+function loadExt(id: string): Ext {
+  const r = db().prepare("SELECT * FROM assist_thread_state WHERE thread_id = ?").get(id) as StateRow | undefined;
+  return {
+    projectId: r?.project_id ?? null,
+    mode: r?.mode ?? null,
+    model: r?.model ?? null,
+    effort: r?.effort ?? null,
+    skills: r ? (JSON.parse(r.skills_json) as string[]) : [],
+    context: r?.context ?? null,
+    sent: r?.sent_json ? (JSON.parse(r.sent_json) as Record<string, string>) : null,
+  };
+}
+
+function withExt(t: AssistThread, e: Ext): AssistThread {
+  return { ...t, projectId: e.projectId, mode: e.mode ?? (t.agent === "claude" ? "smart" : "free"), model: e.model, effort: e.effort, skills: e.skills };
+}
+
 function load(id: string): State | null {
   const r = db().prepare("SELECT * FROM assist_threads WHERE id = ?").get(id) as Row | undefined;
   if (!r) return null;
+  const ext = loadExt(id);
   const s: State = {
-    thread: {
-      id: r.id,
-      title: r.title,
-      status: r.status,
-      agent: r.agent,
-      engine: r.engine,
-      autoApprove: !!r.auto_approve,
-      items: JSON.parse(r.items_json) as AssistItem[],
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    },
+    thread: withExt(
+      {
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        agent: r.agent,
+        engine: r.engine,
+        autoApprove: !!r.auto_approve,
+        items: JSON.parse(r.items_json) as AssistItem[],
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      },
+      ext,
+    ),
     messages: JSON.parse(r.messages_json) as MessageParam[],
     pending: r.pending_json ? (JSON.parse(r.pending_json) as Pending) : null,
+    ext,
   };
   // A run that died with the server (restart, crash) leaves the thread "running": reopen it.
   if (s.thread.status === "running" && !runs.has(id)) {
@@ -98,26 +180,46 @@ function load(id: string): State | null {
 
 function save(s: State): void {
   s.thread.updatedAt = Date.now();
-  db()
-    .prepare(
-      `INSERT INTO assist_threads (id, title, status, agent, engine, auto_approve, messages_json, items_json, pending_json, created_at, updated_at)
-       VALUES (@id, @title, @status, @agent, @engine, @auto_approve, @messages_json, @items_json, @pending_json, @created_at, @updated_at)
-       ON CONFLICT(id) DO UPDATE SET title = @title, status = @status, auto_approve = @auto_approve, messages_json = @messages_json,
-         items_json = @items_json, pending_json = @pending_json, updated_at = @updated_at`,
-    )
-    .run({
-      id: s.thread.id,
-      title: s.thread.title,
-      status: s.thread.status,
-      agent: s.thread.agent,
-      engine: s.thread.engine,
-      auto_approve: s.thread.autoApprove ? 1 : 0,
-      messages_json: JSON.stringify(s.messages),
-      items_json: JSON.stringify(s.thread.items),
-      pending_json: s.pending ? JSON.stringify(s.pending) : null,
-      created_at: s.thread.createdAt,
-      updated_at: s.thread.updatedAt,
-    });
+  Object.assign(s.thread, withExt(s.thread, s.ext));
+  db().transaction(() => {
+    db()
+      .prepare(
+        `INSERT INTO assist_threads (id, title, status, agent, engine, auto_approve, messages_json, items_json, pending_json, created_at, updated_at)
+         VALUES (@id, @title, @status, @agent, @engine, @auto_approve, @messages_json, @items_json, @pending_json, @created_at, @updated_at)
+         ON CONFLICT(id) DO UPDATE SET title = @title, status = @status, agent = @agent, auto_approve = @auto_approve, messages_json = @messages_json,
+           items_json = @items_json, pending_json = @pending_json, updated_at = @updated_at`,
+      )
+      .run({
+        id: s.thread.id,
+        title: s.thread.title,
+        status: s.thread.status,
+        agent: s.thread.agent,
+        engine: s.thread.engine,
+        auto_approve: s.thread.autoApprove ? 1 : 0,
+        messages_json: JSON.stringify(s.messages),
+        items_json: JSON.stringify(s.thread.items),
+        pending_json: s.pending ? JSON.stringify(s.pending) : null,
+        created_at: s.thread.createdAt,
+        updated_at: s.thread.updatedAt,
+      });
+    db()
+      .prepare(
+        `INSERT INTO assist_thread_state (thread_id, project_id, mode, model, effort, skills_json, context, sent_json)
+         VALUES (@thread_id, @project_id, @mode, @model, @effort, @skills_json, @context, @sent_json)
+         ON CONFLICT(thread_id) DO UPDATE SET project_id = @project_id, mode = @mode, model = @model, effort = @effort,
+           skills_json = @skills_json, context = @context, sent_json = @sent_json`,
+      )
+      .run({
+        thread_id: s.thread.id,
+        project_id: s.ext.projectId,
+        mode: s.ext.mode,
+        model: s.ext.model,
+        effort: s.ext.effort,
+        skills_json: JSON.stringify(s.ext.skills),
+        context: s.ext.context,
+        sent_json: s.ext.sent ? JSON.stringify(s.ext.sent) : null,
+      });
+  })();
 }
 
 type NewItem = AssistItem extends infer T ? (T extends AssistItem ? Omit<T, "id"> : never) : never;
@@ -127,12 +229,28 @@ function push(s: State, item: NewItem | AssistItem): AssistItem {
   return full;
 }
 
-export function listThreads(): AssistThreadSummary[] {
-  return (db().prepare("SELECT id, title, status, updated_at FROM assist_threads ORDER BY updated_at DESC LIMIT 100").all() as Row[]).map((r) => ({
+/** Chats, newest first. `project`: one project's chats; null: chats outside projects; omitted: all. `q` searches titles and messages. */
+export function listThreads(f: { project?: string | null; q?: string } = {}): AssistThreadSummary[] {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (f.project === null) where.push("s.project_id IS NULL");
+  else if (f.project) {
+    where.push("s.project_id = ?");
+    args.push(f.project);
+  }
+  if (f.q?.trim()) {
+    const like = `%${f.q.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push("(t.title LIKE ? ESCAPE '\\' OR t.items_json LIKE ? ESCAPE '\\')");
+    args.push(like, like);
+  }
+  const sql = `SELECT t.id, t.title, t.status, t.updated_at, s.project_id FROM assist_threads t LEFT JOIN assist_thread_state s ON s.thread_id = t.id
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY t.updated_at DESC LIMIT 100`;
+  return (db().prepare(sql).all(...args) as (Pick<Row, "id" | "title" | "status" | "updated_at"> & { project_id: string | null })[]).map((r) => ({
     id: r.id,
     title: r.title,
     status: r.status,
     updatedAt: r.updated_at,
+    projectId: r.project_id,
   }));
 }
 
@@ -144,32 +262,86 @@ export function getThread(id: string): AssistThreadView | null {
   return { thread: s.thread, generations };
 }
 
-export function deleteThread(id: string): void {
-  db().prepare("DELETE FROM assist_threads WHERE id = ?").run(id);
+/** What a project's chats made (its Assets tab): their finished generations, newest first, with the chat each came from. */
+export function projectAssets(projectId: string, limit = 120): { generation: Generation; chatId: string; chatTitle: string }[] {
+  const rows = db()
+    .prepare("SELECT t.id, t.title, t.items_json FROM assist_threads t JOIN assist_thread_state s ON s.thread_id = t.id WHERE s.project_id = ? ORDER BY t.updated_at DESC")
+    .all(projectId) as { id: string; title: string; items_json: string }[];
+  const seen = new Set<string>();
+  const out: { generation: Generation; chatId: string; chatTitle: string }[] = [];
+  for (const r of rows) {
+    for (const item of JSON.parse(r.items_json) as AssistItem[]) {
+      if (item.role !== "generations") continue;
+      for (const gid of item.ids) {
+        if (seen.has(gid)) continue;
+        seen.add(gid);
+        const g = getGeneration(gid);
+        if (g?.status === "succeeded" && g.outputs.length) out.push({ generation: g, chatId: r.id, chatTitle: r.title });
+      }
+    }
+  }
+  return out.sort((a, b) => b.generation.createdAt - a.generation.createdAt).slice(0, limit);
 }
 
-export function updateThread(id: string, patch: { autoApprove?: boolean; title?: string }): AssistThread | null {
+export function deleteThread(id: string): void {
+  db().transaction(() => {
+    db().prepare("DELETE FROM assist_threads WHERE id = ?").run(id);
+    db().prepare("DELETE FROM assist_thread_state WHERE thread_id = ?").run(id);
+  })();
+}
+
+export class AssistBusyError extends Error {}
+
+export interface ThreadPatch {
+  autoApprove?: boolean;
+  title?: string;
+  /** Move the chat into a project (or out, with null). */
+  projectId?: string | null;
+  mode?: AssistModeChoice;
+}
+
+export async function updateThread(id: string, patch: ThreadPatch): Promise<AssistThread | null> {
   const s = load(id);
   if (!s) return null;
   if (patch.autoApprove !== undefined) s.thread.autoApprove = patch.autoApprove;
   if (patch.title) s.thread.title = patch.title;
+  if (patch.projectId !== undefined) {
+    if (s.thread.status === "running" || runs.has(id)) throw new AssistBusyError("Wait for this reply to finish, then move the chat");
+    if (patch.projectId && !getProject(patch.projectId)) throw new Error("That project doesn't exist anymore");
+    s.ext.projectId = patch.projectId;
+    // Skills the new project doesn't offer are unloaded.
+    s.ext.skills = s.ext.skills.filter((n) => canUseSkill(n, s.ext.projectId));
+  }
+  if (patch.mode) {
+    if (s.thread.status === "running" || runs.has(id)) throw new AssistBusyError("Wait for this reply to finish, then switch");
+    const r = await resolveMode(patch.mode);
+    s.thread.agent = r.agent;
+    s.ext.mode = r.mode;
+    s.ext.model = r.model;
+    s.ext.effort = r.effort;
+    if (r.note) push(s, { role: "notice", tone: "info", text: r.note });
+  }
   save(s);
   return s.thread;
 }
 
-let ollamaProbe: { at: number; url: string; ok: boolean } | null = null;
-async function ollamaReachable(): Promise<boolean> {
+// ---------------------------------------------------------------------------
+// Which LLM runs a chat: modes
+
+let ollamaProbe: { at: number; url: string; ok: boolean; models: string[] } | null = null;
+async function probeOllama(): Promise<{ ok: boolean; models: string[] }> {
   const url = getSetting("ollamaUrl").replace(/\/+$/, "");
-  if (ollamaProbe && ollamaProbe.url === url && Date.now() - ollamaProbe.at < 30_000) return ollamaProbe.ok;
-  const ok = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(800) })
-    .then((r) => r.ok)
-    .catch(() => false);
-  ollamaProbe = { at: Date.now(), url, ok };
-  return ok;
+  if (ollamaProbe && ollamaProbe.url === url && Date.now() - ollamaProbe.at < 30_000) return ollamaProbe;
+  const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(800) })
+    .then(async (r) => (r.ok ? ((await r.json().catch(() => ({}))) as { models?: { name?: string }[] }) : null))
+    .catch(() => null);
+  ollamaProbe = { at: Date.now(), url, ok: !!res, models: (res?.models ?? []).map((m) => m.name ?? "").filter(Boolean).slice(0, 50) };
+  return ollamaProbe;
 }
+const ollamaReachable = async () => (await probeOllama()).ok;
 
 /**
- * Which LLM drives new chats: Claude when a key is set (on open-source-only installs only when
+ * Which LLM drives new chats by default: Claude when a key is set (on open-source-only installs only when
  * picked explicitly), else a reachable local Ollama, else the offline planner.
  */
 export async function resolveAgent(): Promise<AssistThread["agent"]> {
@@ -182,14 +354,86 @@ export async function resolveAgent(): Promise<AssistThread["agent"]> {
   return (await ollamaReachable()) ? "ollama" : "offline";
 }
 
-export function createThread(opts: { engine: Engine; agent: AssistThread["agent"]; autoApprove?: boolean; title?: string }): AssistThread {
+const claudeAllowed = () => !!getSetting("anthropicKey") && (engineMode() !== "open" || getSetting("enhanceProvider") === "anthropic");
+
+export async function availability(): Promise<AssistAvailability> {
+  const o = await probeOllama();
+  const aiOff = getSetting("enhanceProvider") === "none";
+  const claude = claudeAllowed();
+  return {
+    claude,
+    ollama: o.ok,
+    ollamaModels: o.models,
+    ollamaModel: getSetting("ollamaModel"),
+    aiOff,
+    defaultMode: !aiOff && claude && getSetting("enhanceProvider") !== "ollama" ? "smart" : "free",
+  };
+}
+
+export interface ResolvedMode {
+  mode: AssistMode;
+  agent: AssistAgent;
+  model: string | null;
+  effort: AssistEffort | null;
+  /** Why the chat didn't get what was asked (no key, AI helper off…). */
+  note?: string;
+}
+
+const OLLAMA_NAME = /^[\w.:/-]{1,100}$/;
+
+/**
+ * Supercomputer's modes on Fuobe's agents: Smart = Claude Opus 5.5; Free = a local model through
+ * Ollama (or the offline planner when none answers); Manual = the model and effort you pick.
+ * Without a choice, the default from Settings (resolveAgent).
+ */
+export async function resolveMode(choice?: Partial<AssistModeChoice>): Promise<ResolvedMode> {
+  const free = async (note?: string): Promise<ResolvedMode> =>
+    (await ollamaReachable()) ? { mode: "free", agent: "ollama", model: null, effort: null, note } : { mode: "free", agent: "offline", model: null, effort: null, note };
+  if (getSetting("enhanceProvider") === "none") {
+    return { mode: choice?.mode ?? "free", agent: "offline", model: null, effort: null, ...(choice?.mode && choice.mode !== "free" && { note: "The AI helper is off in Settings, so this chat uses the offline planner." }) };
+  }
+  if (!choice?.mode) {
+    const agent = await resolveAgent();
+    return { mode: agent === "claude" ? "smart" : "free", agent, model: null, effort: null };
+  }
+  const noKey = "Smart and Claude need an Anthropic API key (Settings → API keys) — using Free instead.";
+  if (choice.mode === "smart") return claudeAllowed() ? { mode: "smart", agent: "claude", model: DEFAULT_CLAUDE_MODEL, effort: DEFAULT_EFFORT } : free(noKey);
+  if (choice.mode === "free") return free();
+  // Manual
+  const agent = choice.agent ?? "claude";
+  if (agent === "claude") {
+    if (!getSetting("anthropicKey")) return free(noKey);
+    const model = CLAUDE_MODELS.some((m) => m.id === choice.model) ? choice.model! : DEFAULT_CLAUDE_MODEL;
+    const effort = ASSIST_EFFORTS.some((e) => e.id === choice.effort) ? choice.effort! : DEFAULT_EFFORT;
+    return { mode: "manual", agent: "claude", model, effort };
+  }
+  if (agent === "ollama") {
+    const model = choice.model && OLLAMA_NAME.test(choice.model) ? choice.model : null;
+    return { mode: "manual", agent: "ollama", model, effort: null, ...(!(await ollamaReachable()) && { note: `Ollama isn't answering at ${getSetting("ollamaUrl")} — start it, or pick another mode.` }) };
+  }
+  return { mode: "manual", agent: "offline", model: null, effort: null };
+}
+
+export function createThread(opts: {
+  engine: Engine;
+  agent: AssistThread["agent"];
+  autoApprove?: boolean;
+  title?: string;
+  projectId?: string | null;
+  mode?: AssistMode | null;
+  model?: string | null;
+  effort?: AssistEffort | null;
+}): AssistThread {
   const now = Date.now();
+  if (opts.projectId && !getProject(opts.projectId)) throw new Error("That project doesn't exist anymore");
   const s: State = {
     thread: { id: nanoid(12), title: opts.title ?? "New chat", status: "idle", agent: opts.agent, engine: opts.engine, autoApprove: !!opts.autoApprove, items: [], createdAt: now, updatedAt: now },
     messages: [],
     pending: null,
+    ext: { projectId: opts.projectId ?? null, mode: opts.mode ?? null, model: opts.model ?? null, effort: opts.effort ?? null, skills: [], context: null, sent: null },
   };
   save(s);
+  if (opts.projectId) touchProject(opts.projectId);
   return s.thread;
 }
 
@@ -271,43 +515,55 @@ How you work:
 - Call generate (or create_storyboard) directly. The app shows the user a plan card with the cost and runs it when they approve — never ask "shall I go ahead?" in text.
 - For multi-step work (an image, then animate it; transcribe, translate, then voice it), put the steps in one generate call and set "after" on each later job: it starts by itself when the earlier job finishes and gets its result as input. When you need to judge a result before deciding the next step, wait with check_generations instead (look=true to see images) and pass the output URL into the next call.
 - Besides images, video and audio, models can transcribe speech, translate or write text (scripts, captions, ad copy), split images into layers, separate voice from background, trim, caption or re-sound clips, and turn an image into a 3D model: search_models with kind "text" or "model3d" finds the text and 3D ones.
+- Whole studio jobs have their own tools — split_layers, restyle_footage, dub_video, faceless_episode, create_ads, add_captions: use them instead of chaining those steps by hand.
 - Use the user's files by the URLs listed in their message. Earlier outputs are found with list_recent. Saved characters and products are Elements: check list_elements and write their @handle in prompts.
 - Results show up in the chat by themselves, so don't repeat URLs back. After starting jobs, say briefly what's coming; after they finish, give a short take and suggest a next step.
-- Be brief and friendly. Plain sentences, no headings. Prices are estimates in USD; open-source models run free on the user's own GPU.`;
+- Be brief and friendly. Plain sentences, no headings. Prices are estimates in USD; open-source models run free on the user's own GPU.
 
-function turnSystem(t: AssistThread): string {
-  const mode = engineMode();
-  const engine =
-    mode === "open"
-      ? "This install runs open-source models only (ComfyUI on the user's GPU)."
-      : mode === "cloud"
-        ? "This install runs paid cloud APIs only."
-        : t.engine === "open"
-          ? "The user prefers open-source models (ComfyUI, free on their GPU); use paid ones only when no open model can do the job, and say so."
-          : "The user prefers paid cloud models (best quality); open-source models are available too.";
-  const approval = t.autoApprove ? "Auto-run is on: generations start without an approval card, so keep plans within what the user asked for." : "Ask-first is on: each generate call shows an approval card.";
-  return `Today is ${new Date().toISOString().slice(0, 10)}. ${engine} ${approval}`;
-}
+Skills, memory and projects (your context below lists them):
+- Skills are playbooks for whole kinds of jobs. When the request matches one under "Skills you can load", call load_skill with its name before planning, then follow it. A message that starts with /name has already loaded that skill. Follow every skill under "Skills in use".
+- Memory is what you know about the user. Follow it without mentioning it. When the user states something lasting — a preference, their style, a convention, their setup, a fix that worked — save it with remember: one short sentence, no secrets, nothing about only the current job. Correct an outdated memory with remember and its id as "replaces".
+- In a project, follow its instructions. Its sources are listed with ids: read one in full with read_source when it matters; image, video and audio sources are inputs by URL.
+- "Context update" messages from the system later in the chat replace the matching parts of your context.`;
 
 // ---------------------------------------------------------------------------
 // Models
 
-export const claude: ModelCall = async ({ system, messages, tools }) => {
+/** Models that take server-side fallbacks on a refusal ("default" routing). */
+const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]);
+
+/**
+ * Output room per reply: thinking plus a large generate or studio call. Extra and Max effort think
+ * longest, so they get the most; the cap only bounds a reply, it isn't spent.
+ */
+export const maxTokensFor = (effort: AssistEffort): number => (effort === "xhigh" || effort === "max" ? 64_000 : 32_000);
+
+export const claude: ModelCall = async ({ system, messages, tools, settings }) => {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
-  return client.beta.messages.create({
-    model: "claude-opus-5-5",
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "medium" },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+  const model = settings?.model && CLAUDE_MODELS.some((m) => m.id === settings.model) ? settings.model : DEFAULT_CLAUDE_MODEL;
+  const fallback = FALLBACK_MODELS.has(model);
+  const effort = settings?.effort ?? DEFAULT_EFFORT;
+  // Streamed, so long thinking at high effort never runs into an HTTP timeout; only the final
+  // message is used (the UI shows the reply once it's complete).
+  const stream = client.beta.messages.stream({
+    model,
+    max_tokens: maxTokensFor(effort),
+    // drop_block: a thinking block the API can't replay (a chat that switched models, or one from
+    // before contexts were frozen) is dropped instead of failing the request.
+    thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
+    output_config: { effort },
+    betas: [...(fallback ? (["server-side-fallback-2026-07-01"] as const) : []), "thinking-binding-controls-2026-08-01"],
+    ...(fallback && { fallbacks: "default" as const }),
+    // The fixed instructions and the chat's frozen context are cached; so is the conversation so far.
+    cache_control: { type: "ephemeral" },
     system: [
       { type: "text", text: system.stable, cache_control: { type: "ephemeral" } },
-      { type: "text", text: system.turn },
+      { type: "text", text: system.turn, cache_control: { type: "ephemeral" } },
     ],
     tools,
     messages: await hydrate(messages),
   });
+  return stream.finalMessage();
 };
 
 type OllamaMessage = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: { function: { name: string; arguments: unknown } }[]; tool_name?: string };
@@ -322,6 +578,10 @@ export function toOllamaMessages(system: ModelRequest["system"], messages: Messa
   for (const m of messages) {
     if (typeof m.content === "string") {
       out.push({ role: m.role, content: m.content });
+      continue;
+    }
+    if (m.role === "system") {
+      out.push({ role: "system", content: m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n") });
       continue;
     }
     if (m.role === "assistant") {
@@ -342,12 +602,13 @@ export function toOllamaMessages(system: ModelRequest["system"], messages: Messa
 }
 
 /** A local model through Ollama's tool calling (qwen3, llama3.x, mistral…), answering in the same shape as Claude. */
-export const ollama: ModelCall = async ({ system, messages, tools }) => {
+export const ollama: ModelCall = async ({ system, messages, tools, settings }) => {
+  const model = settings?.model || getSetting("ollamaModel");
   const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: getSetting("ollamaModel"),
+      model,
       stream: false,
       messages: toOllamaMessages(system, messages),
       tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
@@ -375,12 +636,13 @@ export const ollama: ModelCall = async ({ system, messages, tools }) => {
   }
   const stop: Anthropic.Beta.BetaStopReason = j.message?.tool_calls?.length ? "tool_use" : j.done_reason === "length" ? "max_tokens" : "end_turn";
   if (!content.length) content.push({ type: "text", text: "…", citations: null } as Anthropic.Beta.BetaTextBlock);
-  return { id: `msg_ollama_${nanoid(8)}`, type: "message", role: "assistant", model: getSetting("ollamaModel"), content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
+  return { id: `msg_ollama_${nanoid(8)}`, type: "message", role: "assistant", model, content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null } as unknown as Anthropic.Beta.BetaMessage;
 };
 
 /** A rule-based planner with the same shape as a model reply, for installs without an LLM. */
-export const offline: ModelCall = async ({ messages, ctx }) => {
-  const last = messages.at(-1);
+export const offline: ModelCall = async ({ messages, ctx, skills }) => {
+  // Context updates (system messages) aren't the user's words.
+  const last = messages.findLast((m) => m.role !== "system");
   const blocks = last && typeof last.content !== "string" ? last.content : [];
   const reply = (content: Anthropic.Beta.BetaContentBlock[], stop: Anthropic.Beta.BetaStopReason): Anthropic.Beta.BetaMessage =>
     ({ id: `msg_offline_${nanoid(8)}`, type: "message", role: "assistant", model: "offline", content, stop_reason: stop, stop_sequence: null, stop_details: null, usage: null }) as unknown as Anthropic.Beta.BetaMessage;
@@ -391,9 +653,11 @@ export const offline: ModelCall = async ({ messages, ctx }) => {
   if (results.length && !said.trim()) {
     const body = results.map((r) => (typeof r.content === "string" ? r.content : "")).join(" ");
     if (results.some((r) => r.is_error)) return reply([text(/declined/i.test(body) ? "Okay, I won't run that. Tell me what to change." : `That didn't start: ${body.replace(/^.*"error":"([^"]+)".*$/, "$1")}`)], "end_turn");
+    if (/"saved":/.test(body)) return reply([text("Saved to memory — every chat will follow it from now on.")], "end_turn");
     return reply([text(`On it — the results will appear here as they finish. ${FOLLOW_UP[startedKind(body)]}`)], "end_turn");
   }
-  const plan = offlinePlan(said, ctx.engine);
+  const hint = skills?.find((s) => s.offline)?.offline;
+  const plan = offlinePlan(said, ctx.engine, hint);
   if (!plan) return reply([text("Tell me what to make — an image, a video, a voice-over or a storyboard — and attach any photos to use.")], "end_turn");
   // step() adds OFFLINE_NOTE as a quiet line under the plan card.
   return reply(
@@ -431,9 +695,10 @@ const num = (s: string) => NUMBER_WORDS[s] ?? Number(s);
 /**
  * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats,
  * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs),
- * storyboards, music and voice-overs, translations and scripts.
+ * storyboards, music and voice-overs, translations and scripts, and "remember that …".
+ * A loaded skill's offline hints (its kind, format, count and style) fill in what the words leave open.
  */
-export function offlinePlan(message: string, preferred: Engine): { tool: string; input: Record<string, unknown>; say: string } | null {
+export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta["offline"]): { tool: string; input: Record<string, unknown>; say: string } | null {
   const [body, attached = ""] = message.split(/\n\nAttached files[^\n]*\n/);
   const text = body.trim();
   if (!text) return null;
@@ -442,20 +707,30 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
   const t = text.toLowerCase();
   const mode = engineMode();
   const engine: Engine = mode === "both" ? preferred : mode;
+
+  // "Remember that I always want 9:16" → a memory (approved like a plan in ask-first mode).
+  const memory = /^(?:please\s+)?(?:remember|note|keep in mind)(?:\s+that)?[:,]?\s+(.{4,})$/is.exec(text);
+  if (memory) {
+    const what = memory[1].trim().replace(/\.$/, "");
+    const sentence = `${what.charAt(0).toUpperCase()}${what.slice(1)}.`;
+    return { tool: "remember", input: { text: sentence, category: guessCategory(what) }, say: "I'll remember that for every chat." };
+  }
+
   const count = (() => {
     const m = new RegExp(
       `\\b${NUM}\\s+(?:[\\w-]+\\s+)?(images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?)\\b`,
     ).exec(t);
-    return m ? num(m[1]) : undefined;
+    return m ? num(m[1]) : hint?.outputs;
   })();
   // "a 3-shot ad", "in 4 shots": one clip cut into shots, not several clips.
   const shots = (() => {
     const m = new RegExp(`\\b${NUM}[- ]shots?\\b`).exec(t) ?? new RegExp(`\\bin\\s+${NUM}\\s+shots\\b`).exec(t);
     return m ? Math.max(2, Math.min(6, num(m[1]))) : undefined;
   })();
-  const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : undefined;
+  const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : hint?.aspect;
   const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
   const textModel = engine === "open" ? "oss-text-llm" : "text-llm";
+  const styled = (p: string) => (hint?.style ? `${p}. ${hint.style}` : p);
 
   // "… hero still, then animate it": the image first, then a video made from it (one plan, two chained jobs).
   const thenAnimate = /\bthen\b[^.?!]*\b(animate|animated|animation|bring (it|them) to life|make (it|them) move|turn (it|them) into an? (video|clip))\b/.test(t);
@@ -466,7 +741,7 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
       .replace(/\s{2,}/g, " ")
       .replace(/[\s,;:—–-]+$/, "")
       .trim();
-    const still = { model_id: pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels), prompt: subject, ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
+    const still = { model_id: pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels), prompt: styled(subject), ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
     const clip = {
       model_id: pick(VIDEO_STUDIO.defaultModels),
       prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`,
@@ -485,7 +760,7 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
     const frames = Math.max(1, Math.min(8, count ?? 4));
     return {
       tool: "create_storyboard",
-      input: { story: text, frames, ...(images.length && { references: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) },
+      input: { story: text, frames, ...(images.length && { references: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }), ...(hint?.style && { style: hint.style }) },
       say: `I'll split that into ${frames} frames with the same characters and look, each made from the one before.`,
     };
   }
@@ -502,7 +777,10 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
     };
   }
   const isMusic = /\b(music|song|soundtrack|beat|jingle)\b/.test(t);
-  const isWriting = !isMusic && /^(please\s+)?(write|draft|come up with|give me)\b/.test(t) && /\b(script|scripts|copy|captions?|taglines?|slogans?|hooks?|outline|story|poem|email|description|post|blog|headlines?|lines)\b/.test(t);
+  const isWriting =
+    !isMusic &&
+    ((/^(please\s+)?(write|draft|come up with|give me)\b/.test(t) && /\b(script|scripts|copy|captions?|taglines?|slogans?|hooks?|outline|story|poem|email|description|post|blog|headlines?|lines)\b/.test(t)) ||
+      (hint?.kind === "text" && !files.length));
   if (isWriting) {
     return {
       tool: "generate",
@@ -510,8 +788,9 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
       say: "I'll write that for you.",
     };
   }
-  const isSpeech = !isMusic && /\b(voice ?over|narrat\w*|read (this|it|out)|say|speak|text to speech|tts)\b/.test(t);
-  const isVideo = !isMusic && !isSpeech && (files.some((f) => f.kind === "video") || !!shots || /\b(videos?|clips?|animate|animation|motion|films?|footage|movies?|trailers?|commercials?|ads?)\b/.test(t));
+  const isSpeech = !isMusic && (/\b(voice ?over|narrat\w*|read (this|it|out)|say|speak|text to speech|tts)\b/.test(t) || hint?.kind === "audio");
+  const isVideo =
+    !isMusic && !isSpeech && (files.some((f) => f.kind === "video") || !!shots || /\b(videos?|clips?|animate|animation|motion|films?|footage|movies?|trailers?|commercials?|ads?)\b/.test(t) || hint?.kind === "video");
   if (isMusic || isSpeech) {
     const quoted = /["“]([^"”]+)["”]/.exec(text)?.[1] ?? text.replace(/^.*?:\s*/, "");
     return {
@@ -525,7 +804,7 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
   const multi = isVideo && shots ? shots : undefined;
   const job = {
     model_id: pick(studio.defaultModels),
-    prompt: text,
+    prompt: styled(text),
     ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }),
     ...(aspect && { aspect_ratio: aspect }),
     ...(n > 1 && { outputs: n }),
@@ -542,6 +821,22 @@ export function offlinePlan(message: string, preferred: Engine): { tool: string;
 // ---------------------------------------------------------------------------
 // The loop
 
+function toolCtx(s: State): ToolContext {
+  return {
+    engine: s.thread.engine,
+    thread: {
+      id: s.thread.id,
+      projectId: s.ext.projectId,
+      get skills() {
+        return s.ext.skills;
+      },
+      loadSkill: (name) => {
+        if (!s.ext.skills.includes(name)) s.ext.skills = [...s.ext.skills, name];
+      },
+    },
+  };
+}
+
 async function runTool(name: string, input: unknown, ctx: ToolContext): Promise<{ result: Omit<ToolResult, "tool_use_id">; items: AssistItem[] }> {
   const out = await executeTool(name, input, ctx);
   return { result: { type: "tool_result", content: out.content, ...(out.isError && { is_error: true }) }, items: out.items ?? [] };
@@ -551,9 +846,35 @@ function ordered(results: ToolResult[], order: string[]): ToolResult[] {
   return [...results].sort((a, b) => order.indexOf(a.tool_use_id) - order.indexOf(b.tool_use_id));
 }
 
+/**
+ * The chat's system prompt and, when something changed since the model last looked, the
+ * "Context update" message to append. The first call freezes the context into the system prompt.
+ */
+function contextFor(s: State): { system: ModelRequest["system"]; update: MessageParam | null; sent: Record<string, string> } {
+  const facts = chatFacts({ engine: s.thread.engine, autoApprove: s.thread.autoApprove, projectId: s.ext.projectId, skills: s.ext.skills });
+  const sent = factMap(facts);
+  if (!s.ext.context) {
+    s.ext.context = renderContext(facts);
+    s.ext.sent = sent;
+    return { system: { stable: STABLE_SYSTEM, turn: s.ext.context }, update: null, sent };
+  }
+  // A system message must follow a user turn (the user's words or tool results).
+  const text = s.messages.at(-1)?.role === "user" ? contextUpdate(s.ext.sent ?? {}, facts) : null;
+  return { system: { stable: STABLE_SYSTEM, turn: s.ext.context }, update: text ? { role: "system", content: text } : null, sent };
+}
+
 async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
-  const ctx: ToolContext = { engine: s.thread.engine };
-  const res = await model({ system: { stable: STABLE_SYSTEM, turn: turnSystem(s.thread) }, messages: s.messages, tools: apiTools(), ctx });
+  const ctx = toolCtx(s);
+  const { system, update, sent } = contextFor(s);
+  const active = s.ext.skills.map((n) => getSkill(n)).filter((x): x is NonNullable<typeof x> => !!x);
+  const res = await model({
+    system,
+    messages: update ? [...s.messages, update] : s.messages,
+    tools: apiTools(),
+    ctx,
+    settings: { model: s.ext.model, effort: s.ext.effort },
+    skills: active,
+  });
 
   if (res.stop_reason === "refusal") {
     // Nothing is appended: the user's turn stays last and their next message joins it.
@@ -563,6 +884,11 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   if (res.stop_reason === "model_context_window_exceeded") {
     push(s, { role: "notice", tone: "error", text: "This chat is too long to continue. Start a new one." });
     return "stop";
+  }
+  // The update is now part of the conversation the model answered.
+  if (update) {
+    s.messages.push(update);
+    s.ext.sent = sent;
   }
   s.messages.push({ role: "assistant", content: res.content });
   const text = res.content
@@ -610,9 +936,9 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
   if (gated.length) {
     const plans = gated.map((g) => planFor(g.name, g.input, ctx));
     const jobs = plans.flatMap((p) => p.jobs);
-    const summaries = gated.map((g) => (g.input as { summary?: string }).summary).filter(Boolean);
     const total = plans.some((p) => p.total === null) ? null : plans.reduce((n, p) => n + (p.total ?? 0), 0);
-    const item = push(s, { role: "approval", summary: summaries.join(" · ") || (gated[0].name === "create_storyboard" ? "Storyboard" : "Generate"), jobs, totalUsd: total, status: "pending" });
+    const summary = [...new Set(gated.map((g) => cardTitle(g.name, g.input)))].join(" · ");
+    const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending" });
     offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };
     s.thread.status = "waiting";
@@ -647,14 +973,24 @@ export async function run(id: string, model?: ModelCall): Promise<void> {
         next = "stop";
       }
       if (next === "stop") break;
+      refreshFlags(s);
       save(s);
       if (i === MAX_STEPS - 1) push(s, { role: "notice", tone: "info", text: "Paused after many steps. Send a message to keep going." });
     }
     if (s.thread.status === "running") s.thread.status = "idle";
+    refreshFlags(s);
     save(s);
   } finally {
     runs.delete(id);
   }
+}
+
+/** Keep what the user changed while the agent worked (the Ask-first switch, a rename). */
+function refreshFlags(s: State): void {
+  const r = db().prepare("SELECT title, auto_approve FROM assist_threads WHERE id = ?").get(s.thread.id) as { title: string; auto_approve: number } | undefined;
+  if (!r) return;
+  s.thread.autoApprove = r.auto_approve === 1;
+  s.thread.title = r.title;
 }
 
 function errorText(e: unknown): string {
@@ -665,21 +1001,28 @@ function errorText(e: unknown): string {
   return (e as Error).message || "Something went wrong";
 }
 
-export class AssistBusyError extends Error {}
-
-/** Add the user's message; a pending plan they didn't approve is declined with their message as feedback. */
+/**
+ * Add the user's message; a pending plan they didn't approve is declined with their message as feedback.
+ * Leading `/name` tokens load those skills into the chat first.
+ */
 export function addMessage(id: string, text: string, attachments: string[] = []): AssistThread {
   const s = load(id);
   if (!s) throw new Error("Not found");
   if (s.thread.status === "running" || runs.has(id)) throw new AssistBusyError("Still working on the last message");
-  if (!s.thread.items.some((i) => i.role === "user")) s.thread.title = threadTitle(text);
+  const slash = slashSkills(text, (n) => canUseSkill(n, s.ext.projectId));
+  for (const n of slash.skills) if (!s.ext.skills.includes(n)) s.ext.skills = [...s.ext.skills, n];
+  const titles = slash.skills.map((n) => getSkill(n)?.title ?? n);
+  // With only "/katana" (and files), the model still needs words to act on.
+  const words = slash.text || (slash.skills.length ? `Use the ${titles.join(" and ")} skill${titles.length > 1 ? "s" : ""}${attachments.length ? " with the attached files" : ""}.` : text);
+  if (!s.thread.items.some((i) => i.role === "user")) s.thread.title = threadTitle(slash.text || titles.join(", ") || text);
   // Tool results first: they answer the assistant's last turn.
   const results = s.pending ? decline(s, "The user replied with new instructions instead of approving; follow them.") : [];
   if (!results.length) closeDanglingToolUses(s.messages);
-  appendUser(s.messages, [...results, ...userBlocks(text, attachments)]);
-  push(s, { role: "user", text, ...(attachments.length && { attachments }) });
+  appendUser(s.messages, [...results, ...userBlocks(words, attachments)]);
+  push(s, { role: "user", text: slash.skills.length ? slash.text : text, ...(attachments.length && { attachments }), ...(slash.skills.length && { skills: slash.skills }) });
   s.thread.status = "running";
   save(s);
+  if (s.ext.projectId) touchProject(s.ext.projectId);
   return s.thread;
 }
 
@@ -698,8 +1041,9 @@ function decline(s: State, why = "The user declined this plan. Ask what they'd l
 
 async function runApproved(s: State, p: Pending): Promise<ToolResult[]> {
   const results = [...p.results];
+  const ctx = toolCtx(s);
   for (const g of p.gated) {
-    const { result, items } = await runTool(g.name, g.input, { engine: s.thread.engine });
+    const { result, items } = await runTool(g.name, g.input, ctx);
     results.push({ ...result, tool_use_id: g.id });
     for (const it of items) push(s, it);
   }

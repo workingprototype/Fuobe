@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
-import { type AssistItem, type PlannedJob, totalCost } from "@/lib/assist";
+import { type PlannedJob, totalCost } from "@/lib/assist";
 import { STORYBOARD_MODELS } from "@/lib/catalog/storyboard";
 import { createPipeline } from "../chains";
 import { listElements } from "../elements";
@@ -15,33 +15,11 @@ import { engineMode } from "../settings";
 import { readRef } from "../storage";
 import { katanaTool } from "../katana";
 import { createStoryboard } from "../storyboard";
+import { CONTEXT_TOOLS } from "./context-tools";
+import { defineTool, type ResultContent, type ToolContext, type ToolDef, type ToolOutcome } from "./define";
+import { STUDIO_TOOLS } from "./studio-tools";
 
-type ResultContent = Anthropic.Beta.BetaToolResultBlockParam["content"];
-
-export interface ToolContext {
-  engine: "cloud" | "open";
-}
-
-export interface ToolOutcome {
-  content: ResultContent;
-  isError?: boolean;
-  /** Cards to show in the chat (generations started, a short "looked up models" line…). */
-  items?: AssistItem[];
-}
-
-interface ToolDef<S extends z.ZodType> {
-  name: string;
-  description: string;
-  schema: S;
-  /** Spends money or GPU time: waits for the user's approval unless auto-approve is on. */
-  gated?: boolean;
-  strict?: boolean;
-  run: (input: z.infer<S>, ctx: ToolContext) => Promise<ToolOutcome>;
-  /** For gated tools: what the run would do, priced. */
-  plan?: (input: z.infer<S>, ctx: ToolContext) => PlannedJob[];
-}
-
-const defineTool = <S extends z.ZodType>(def: ToolDef<S>) => def;
+export type { ToolContext, ToolOutcome };
 
 const ref = z.string().describe("A file URL from the chat: an attachment or an earlier output (/api/files/…).");
 
@@ -400,7 +378,12 @@ const generate = defineTool({
   // Not strict: the API allows 24 optional parameters across all strict tools in a request, and a
   // job has more. Calls are validated with zod (validateInput / planFor / executeTool) instead, and
   // a malformed one goes back to the model as an error it can fix.
-  plan: ({ jobs }) => chainJobs(jobs.slice(0, 6)).map(plannedJob),
+  // Chained jobs are one pipeline (all or nothing); separate jobs start one by one.
+  plan: ({ jobs }) => {
+    const list = jobs.slice(0, 6);
+    const atomic = list.some((j) => j.after !== undefined) || undefined;
+    return chainJobs(list).map((c) => ({ ...plannedJob(c), atomic }));
+  },
   async run({ summary, jobs }) {
     const list = jobs.slice(0, 6);
     // The plan's jobs share a batch, so the Library stacks them under the plan's summary.
@@ -502,6 +485,19 @@ const storyboard = defineTool({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const TOOLS: ToolDef<any>[] = [searchModels, listElementsTool, listRecent, checkGenerations, generate, storyboard, defineTool(katanaTool)];
 export const getTool = (name: string) => TOOLS.find((t) => t.name === name);
+
+// Skills, memory and project sources; then whole studios (layers, restyle, dub, faceless, ads, captions).
+TOOLS.push(...CONTEXT_TOOLS, ...STUDIO_TOOLS);
+
+/** The approval card's heading for one gated call. */
+export function cardTitle(name: string, input: unknown): string {
+  const t = getTool(name);
+  const parsed = t?.schema.safeParse(input);
+  if (t?.title && parsed?.success) return t.title(parsed.data);
+  const summary = (input as { summary?: unknown } | null)?.summary;
+  if (typeof summary === "string" && summary.trim()) return summary.trim();
+  return name === "create_storyboard" ? "Storyboard" : "Generate";
+}
 
 /** JSON Schema for the API: every object closed, constraints the API doesn't take removed (zod still checks them). */
 export function apiSchema(schema: z.ZodType): Anthropic.Beta.BetaTool.InputSchema {

@@ -3,49 +3,40 @@
 //   (pnpm test:e2e:mobile; the app must be running, demo mode is fine). Exits 1 if any page is wider
 //   than the screen or doesn't load.
 //
-// Every page under src/app/(studio) is visited, dynamic segments with a sample id (a cinema project and
-// a canvas are created for the purpose), plus /login and an unknown URL (the 404 page). For each route it
+// Every page under src/app/(studio) is visited, dynamic segments with samples from tests/e2e/_routes.mjs:
+// every studio hub mode (/audio/music, /video-tools/join…), real ids (a cinema project, a canvas and an
+// Assist project are created for the purpose) and unknown ids (their not-found pages must fit too),
+// plus two demo Assist chats (an approval card, and results), /login and an unknown URL (the 404 page). A
+// dynamic route without a sample is visited with "does-not-exist" for each segment, and named. For each route it
 // asserts document.documentElement.scrollWidth === clientWidth once the page has rendered, and names
 // the widest elements when it isn't. Pages that don't load are reported apart from layout failures.
-import fs from "node:fs";
-import path from "node:path";
 import { launch, openRoute, PHONE, post, root } from "./_browser.mjs";
+import { dynamicSamples, studioRoutes } from "./_routes.mjs";
 
 const args = process.argv.slice(2);
 const app = (args.find((a) => !a.startsWith("--")) ?? "http://localhost:3000").replace(/\/$/, "");
 const schemes = args.includes("--dark") ? ["dark"] : args.includes("--light") ? ["light"] : ["light", "dark"];
 const only = args.find((a) => a.startsWith("--routes="))?.slice(9).split(",").filter(Boolean);
 
-/** Static routes from the file system, plus samples for the dynamic ones. */
+/** Static routes from the file system, plus samples for the dynamic ones (hub modes, created ids, unknown ids). */
 async function discoverRoutes() {
-  const base = path.join(root, "src/app/(studio)");
-  const out = [];
-  const walk = (dir, url) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!e.isDirectory()) continue;
-      const seg = e.name;
-      if (seg.startsWith("(")) walk(path.join(dir, seg), url);
-      else if (seg.startsWith("[")) continue; // sampled below
-      else walk(path.join(dir, seg), `${url}/${seg}`);
-    }
-    if (fs.existsSync(path.join(dir, "page.tsx"))) out.push(url || "/");
-  };
-  walk(base, "");
+  const { routes: out } = studioRoutes(root);
   const project = await post(app, "/api/cinema/projects", { name: "Layout check" });
   const canvas = await post(app, "/api/canvases", { name: "Layout check" });
-  const samples = [
-    "/apps/app-face-swap",
-    "/apps/app-packshot",
-    "/elements/does-not-exist",
-    "/library?tab=favorites",
-    project?.id ? `/cinema/${project.id}` : null,
-    canvas?.id ? `/canvas/${canvas.id}` : null,
-    "/login",
-    "/this-page-does-not-exist",
-  ].filter(Boolean);
-  if (!project?.id) console.log("note: couldn't create a sample cinema project, /cinema/[id] is not checked");
-  if (!canvas?.id) console.log("note: couldn't create a sample canvas, /canvas/[id] is not checked");
-  return [...new Set([...out.sort(), ...samples])];
+  const assistProject = await post(app, "/api/assist/projects", { name: "Layout check" });
+  // Two demo chats: one waiting on its approval card, one that ran by itself (results in the chat).
+  const brief = "4 product photos of a matte black perfume bottle on wet stone";
+  const askFirst = await post(app, "/api/assist", { text: brief, engine: "cloud", mode: { mode: "free" } });
+  const autoRun = await post(app, "/api/assist", { text: brief, engine: "cloud", autoApprove: true, mode: { mode: "free" } });
+  const { urls, generated } = dynamicSamples(root, { cinema: project?.id, canvas: canvas?.id, assistProject: assistProject?.id });
+  const chats = [askFirst?.id, autoRun?.id].filter(Boolean).map((id) => `/assist?c=${id}`);
+  const samples = [...urls, ...chats, "/library?tab=favorites", "/login", "/this-page-does-not-exist"];
+  if (!project?.id) console.log("note: couldn't create a sample cinema project, only an unknown /cinema/[id] is checked");
+  if (!canvas?.id) console.log("note: couldn't create a sample canvas, only an unknown /canvas/[id] is checked");
+  if (!assistProject?.id) console.log("note: couldn't create a sample Assist project, only an unknown /assist/projects/[id] is checked");
+  if (chats.length < 2) console.log("note: couldn't start the sample Assist chats, so /assist?c=<id> isn't fully checked");
+  for (const p of generated) console.log(`note: ${p} has no sample in tests/e2e/_routes.mjs: only its not-found page is checked`);
+  return [...new Set([...out, ...samples])];
 }
 
 const routes = only ?? (await discoverRoutes());

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { ErrorState, NotFoundState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -135,21 +136,11 @@ export function CinemaWorkspace({ id }: { id: string }) {
         </div>
       </div>
     );
-  if (!project.data)
-    return (
-      <div className="flex h-svh flex-col">
-        <div className="flex h-14 items-center px-3 md:hidden">
-          <SidebarTrigger />
-        </div>
-        <div className="mx-auto max-w-sm pt-[18vh] text-center">
-          <p className="font-heading text-[26px]">This project doesn&apos;t exist</p>
-          <p className="mt-1 text-[14px] text-muted-foreground">It may have been deleted.</p>
-          <Button asChild className="mt-5">
-            <Link href="/cinema">All projects</Link>
-          </Button>
-        </div>
-      </div>
-    );
+  if (!project.data) {
+    // A project that isn't there gets the shared 404 state; a request that failed otherwise can be retried.
+    if (project.error && !/not found/i.test(project.error.message)) return <ErrorState error={project.error} retry={() => void project.refetch()} />;
+    return <NotFoundState title="This project doesn’t exist">It may have been deleted. Its takes are still in your library.</NotFoundState>;
+  }
   return <Workspace data={project.data} items={items.data ?? []} loading={items.isLoading} />;
 }
 

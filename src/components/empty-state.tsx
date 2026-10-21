@@ -45,6 +45,7 @@ const SECTIONS: { prefix: string; href: string; label: string }[] = [
   { prefix: "/library", href: "/library", label: "Your library" },
   { prefix: "/cinema", href: "/cinema", label: "Cinema projects" },
   { prefix: "/canvas", href: "/canvas", label: "Your canvases" },
+  { prefix: "/assist", href: "/assist", label: "Back to Assist" },
 ];
 
 function SectionLink() {
