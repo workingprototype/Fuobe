@@ -8,6 +8,25 @@ export interface StepRow {
   key: string;
   label: string;
   g?: Generation;
+  /** Several jobs shown as one row (a dub's spoken lines): done when all are, failed when one is. */
+  group?: (Generation | undefined)[];
+}
+
+type Shown = Pick<Generation, "status" | "progress" | "message" | "modelName" | "provider" | "error">;
+
+/** One row's state: the job's own, or a group's roll-up (progress = the share done). */
+function shownState(s: StepRow): { g?: Shown; counted?: string } {
+  if (!s.group) return { g: s.g };
+  const gs = s.group.filter((g): g is Generation => !!g);
+  if (!gs.length) return {};
+  const failed = gs.find((g) => g.status === "failed" || g.status === "canceled");
+  const done = gs.filter((g) => g.status === "succeeded").length;
+  const started = gs.some((g) => g.status === "running" || (g.status === "queued" && !g.message?.startsWith("Waits")));
+  const status = failed ? failed.status : done === gs.length ? "succeeded" : started || done ? "running" : "queued";
+  return {
+    g: { status, progress: done / gs.length, message: null, modelName: gs[0].modelName, provider: gs.every((g) => g.provider === "mock") ? "mock" : gs[0].provider, error: failed?.error ?? null },
+    counted: `${done}/${gs.length}`,
+  };
 }
 
 /** One line per pipeline step: waiting, running (with progress), done or failed (with the reason). */
@@ -15,10 +34,10 @@ export function StepList({ steps, className }: { steps: StepRow[]; className?: s
   return (
     <ol className={cn("space-y-1.5", className)} aria-label="Steps">
       {steps.map((s) => {
-        const g = s.g;
+        const { g, counted } = shownState(s);
         const status = g?.status ?? "queued";
         const pct = g?.progress != null ? Math.round(g.progress * 100) : null;
-        const waiting = status === "queued" && (!g || g.message?.startsWith("Waits"));
+        const waiting = status === "queued" && (!g || !!g.message?.startsWith("Waits") || !!counted);
         return (
           <li key={s.key} className="flex min-w-0 items-start gap-2.5 text-[13px]">
             <span className="mt-0.5 grid size-5 shrink-0 place-items-center">
@@ -39,7 +58,7 @@ export function StepList({ steps, className }: { steps: StepRow[]; className?: s
                 <span className={cn("truncate font-medium", waiting && "text-muted-foreground")}>{s.label}</span>
                 {g?.modelName && <span className="hidden truncate text-[12px] text-muted-foreground sm:inline">{g.modelName}</span>}
                 <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
-                  {status === "succeeded" ? "Done" : status === "failed" ? "Failed" : status === "canceled" ? "Canceled" : waiting ? "Waiting" : pct != null ? `${pct}%` : "Working"}
+                  {status === "succeeded" ? "Done" : status === "failed" ? "Failed" : status === "canceled" ? "Canceled" : waiting ? "Waiting" : counted ?? (pct != null ? `${pct}%` : "Working")}
                   {g?.provider === "mock" && status === "succeeded" ? " · demo" : ""}
                 </span>
               </div>

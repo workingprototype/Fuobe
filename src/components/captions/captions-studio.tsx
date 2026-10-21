@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Feed } from "@/components/studio/feed";
 import type { SlotValue } from "@/components/studio/media-slot";
 import { CueEditor, useCueEditor } from "@/components/av/cue-editor";
+import { realDuration } from "@/components/av/frame-sampler";
 import { SourceLanguageSelect } from "@/components/av/language-picker";
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList } from "@/components/av/step-list";
@@ -301,7 +302,11 @@ function Preview({
           setT(e.currentTarget.currentTime);
           onTime(e.currentTarget.currentTime);
         }}
-        onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && onDuration(e.currentTarget.duration)}
+        onLoadedMetadata={(e) => {
+          const el = e.currentTarget;
+          if (Number.isFinite(el.duration) && el.duration > 0) onDuration(el.duration);
+          else void realDuration(el).then((d) => d && onDuration(d));
+        }}
         className="max-h-[52vh] w-full object-contain"
       />
       {shown && (

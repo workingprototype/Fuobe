@@ -1,8 +1,9 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useGenerationEvents } from "@/lib/api";
-import type { DubSessionView, OneShotModel } from "@/lib/av/dub";
+import type { DubPrice, DubSessionView, OneShotModel } from "@/lib/av/dub";
 import type { Cue } from "@/lib/cues";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
@@ -35,6 +36,46 @@ export interface NewDub {
   source?: string;
   targets: string[];
   model?: OneShotModel;
+  /** The video's length as the browser measured it (seconds). */
+  duration?: number;
+}
+
+/** A value that settles `ms` after it last changed (so prices aren't asked for on every keystroke). */
+function useSettled<T>(value: T, ms = 400): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+const post = async <T,>(url: string, body: unknown) => json<T>(await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+
+/** What starting this dub would cost (null body: nothing to price yet). */
+export function useDubPrice(body: NewDub | null) {
+  const key = useSettled(body ? JSON.stringify(body) : null);
+  return useQuery({
+    queryKey: ["dub-price", key],
+    queryFn: () => post<DubPrice>("/api/dub?preview=1", JSON.parse(key!)),
+    enabled: !!key,
+    staleTime: 30_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** What voicing one language would cost with these lines. */
+export function useVoicePrice(id: string, lang: string, lipsync: boolean, cues: Cue[], enabled: boolean) {
+  const key = useSettled(enabled ? JSON.stringify({ lang, lipsync, cues }) : null, 800);
+  return useQuery({
+    queryKey: ["dub-voice-price", id, key],
+    queryFn: () => post<DubPrice>(`/api/dub/${id}/voice?preview=1`, JSON.parse(key!)),
+    enabled: !!key,
+    staleTime: 30_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useDubActions() {

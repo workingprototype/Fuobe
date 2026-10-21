@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ACCEPT, fileToSlot, kindOfFile, LibraryGrid, wrongKindMessage, type SlotValue } from "@/components/studio/media-slot";
 import { cn } from "@/lib/utils";
+import { realDuration } from "./frame-sampler";
 
 /**
  * A large drop zone for the one video (or photo) a tool works on: drop, click or pick from the
@@ -93,7 +94,12 @@ export function MediaDrop({
               controls
               playsInline
               preload="metadata"
-              onLoadedMetadata={(e) => Number.isFinite(e.currentTarget.duration) && onDuration?.(e.currentTarget.duration)}
+              onLoadedMetadata={(e) => {
+                const el = e.currentTarget;
+                if (Number.isFinite(el.duration) && el.duration > 0) return onDuration?.(el.duration);
+                // A recording with no length in its header (MediaRecorder WebM): find it, else fall back to typed times.
+                void realDuration(el).then((d) => (d ? onDuration?.(d) : onUnreadable?.()));
+              }}
               onError={() => !value.uploading && onUnreadable?.()}
               className={cn("w-full object-contain", compact ? "max-h-[38vh]" : "max-h-[52vh]")}
             />

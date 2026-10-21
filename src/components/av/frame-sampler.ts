@@ -34,7 +34,36 @@ function once<K extends keyof HTMLMediaElementEventMap>(el: HTMLMediaElement, ev
   });
 }
 
-/** Load a video's metadata in a detached element: its duration and size. */
+const known = (d: number) => Number.isFinite(d) && d > 0;
+
+/**
+ * A clip's real length. MediaRecorder WebM (screen and turntable recordings) has no duration in its
+ * header, so the element reports Infinity: seeking far past the end makes the browser scan for the
+ * last frame and report the real length, then the clip is rewound. Null when it never tells.
+ */
+export function realDuration(v: HTMLMediaElement, ms = 8000): Promise<number | null> {
+  if (known(v.duration)) return Promise.resolve(v.duration);
+  return new Promise((resolve) => {
+    const check = () => known(v.duration) && finish(v.duration);
+    const finish = (d: number | null) => {
+      clearTimeout(timer);
+      for (const ev of ["durationchange", "timeupdate", "seeked"] as const) v.removeEventListener(ev, check);
+      try {
+        v.currentTime = 0;
+      } catch {}
+      resolve(d);
+    };
+    const timer = setTimeout(() => finish(null), ms);
+    for (const ev of ["durationchange", "timeupdate", "seeked"] as const) v.addEventListener(ev, check);
+    try {
+      v.currentTime = 1e101;
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/** Load a video's metadata in a detached element: its duration (found when the header has none) and size. */
 export async function openVideo(src: string): Promise<HTMLVideoElement> {
   const v = document.createElement("video");
   v.muted = true;
@@ -43,6 +72,10 @@ export async function openVideo(src: string): Promise<HTMLVideoElement> {
   v.crossOrigin = "anonymous";
   v.src = src;
   if (v.readyState < 1) await once(v, "loadedmetadata");
+  if (!known(v.duration) && !(await realDuration(v))) {
+    releaseVideo(v);
+    throw new Error("This video doesn't say how long it is — try an MP4, or re-save the recording");
+  }
   return v;
 }
 
