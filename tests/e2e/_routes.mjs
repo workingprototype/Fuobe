@@ -36,7 +36,10 @@ export function hubModePaths(root) {
 
 /**
  * Sample URLs for the dynamic patterns. `ids` holds ids created for the run (cinema, canvas,
- * assistProject). Unknown ids are included on purpose: their not-found pages must fit too.
+ * assistProject). Unknown ids are included on purpose: their not-found pages must fit too. A
+ * pattern with no explicit sample (a route another branch adds) gets one with "does-not-exist"
+ * for each [param], so every dynamic page is visited at least through its not-found state;
+ * `generated` lists those patterns.
  */
 export function dynamicSamples(root, ids = {}) {
   const samples = {
@@ -49,12 +52,18 @@ export function dynamicSamples(root, ids = {}) {
   const hubs = hubModePaths(root);
   const { patterns } = studioRoutes(root);
   const urls = [];
-  const unsampled = [];
+  const byPattern = {};
+  const generated = [];
   for (const p of patterns) {
     const hub = /^\/([\w-]+)\/\[mode\]$/.exec(p);
-    const list = hub ? hubs.filter((h) => h.startsWith(`/${hub[1]}/`)) : (samples[p] ?? []).filter(Boolean);
-    if (!list.length) unsampled.push(p);
+    let list = hub ? hubs.filter((h) => h.startsWith(`/${hub[1]}/`)) : (samples[p] ?? []).filter(Boolean);
+    if (!list.length) {
+      // [id], [...slug] and [[...slug]] alike: one unknown value per segment.
+      list = [p.replace(/\[\[?(?:\.\.\.)?[\w-]+\]?\]/g, "does-not-exist")];
+      generated.push(p);
+    }
+    byPattern[p] = list;
     urls.push(...list);
   }
-  return { urls, unsampled };
+  return { urls, byPattern, generated };
 }

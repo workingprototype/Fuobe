@@ -6,7 +6,8 @@
 // Every page under src/app/(studio) is visited, dynamic segments with samples from tests/e2e/_routes.mjs:
 // every studio hub mode (/audio/music, /video-tools/join…), real ids (a cinema project, a canvas and an
 // Assist project are created for the purpose) and unknown ids (their not-found pages must fit too),
-// plus /login and an unknown URL (the 404 page). A dynamic route without a sample is named. For each route it
+// plus two demo Assist chats (an approval card, and results), /login and an unknown URL (the 404 page). A
+// dynamic route without a sample is visited with "does-not-exist" for each segment, and named. For each route it
 // asserts document.documentElement.scrollWidth === clientWidth once the page has rendered, and names
 // the widest elements when it isn't. Pages that don't load are reported apart from layout failures.
 import { launch, openRoute, PHONE, post, root } from "./_browser.mjs";
@@ -23,12 +24,18 @@ async function discoverRoutes() {
   const project = await post(app, "/api/cinema/projects", { name: "Layout check" });
   const canvas = await post(app, "/api/canvases", { name: "Layout check" });
   const assistProject = await post(app, "/api/assist/projects", { name: "Layout check" });
-  const { urls, unsampled } = dynamicSamples(root, { cinema: project?.id, canvas: canvas?.id, assistProject: assistProject?.id });
-  const samples = [...urls, "/library?tab=favorites", "/login", "/this-page-does-not-exist"];
+  // Two demo chats: one waiting on its approval card, one that ran by itself (results in the chat).
+  const brief = "4 product photos of a matte black perfume bottle on wet stone";
+  const askFirst = await post(app, "/api/assist", { text: brief, engine: "cloud", mode: { mode: "free" } });
+  const autoRun = await post(app, "/api/assist", { text: brief, engine: "cloud", autoApprove: true, mode: { mode: "free" } });
+  const { urls, generated } = dynamicSamples(root, { cinema: project?.id, canvas: canvas?.id, assistProject: assistProject?.id });
+  const chats = [askFirst?.id, autoRun?.id].filter(Boolean).map((id) => `/assist?c=${id}`);
+  const samples = [...urls, ...chats, "/library?tab=favorites", "/login", "/this-page-does-not-exist"];
   if (!project?.id) console.log("note: couldn't create a sample cinema project, only an unknown /cinema/[id] is checked");
   if (!canvas?.id) console.log("note: couldn't create a sample canvas, only an unknown /canvas/[id] is checked");
   if (!assistProject?.id) console.log("note: couldn't create a sample Assist project, only an unknown /assist/projects/[id] is checked");
-  for (const p of unsampled) console.log(`note: ${p} has no sample in tests/e2e/_routes.mjs, so it isn't checked`);
+  if (chats.length < 2) console.log("note: couldn't start the sample Assist chats, so /assist?c=<id> isn't fully checked");
+  for (const p of generated) console.log(`note: ${p} has no sample in tests/e2e/_routes.mjs: only its not-found page is checked`);
   return [...new Set([...out, ...samples])];
 }
 

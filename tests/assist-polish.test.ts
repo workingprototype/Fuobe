@@ -32,9 +32,33 @@ describe("the 390 px sweep visits dynamic routes", () => {
     const { routes, patterns } = studioRoutes(root) as { routes: string[]; patterns: string[] };
     expect(routes).toContain("/assist/skills");
     expect(patterns).toEqual(expect.arrayContaining(["/audio/[mode]", "/video-tools/[mode]", "/upscale/[mode]", "/cinema/[id]", "/canvas/[id]", "/apps/[id]", "/assist/projects/[id]"]));
-    const { urls, unsampled } = dynamicSamples(root, { cinema: "c1", canvas: "v1", assistProject: "p1" }) as { urls: string[]; unsampled: string[] };
-    expect(unsampled).toEqual([]);
+    const { urls, byPattern } = dynamicSamples(root, { cinema: "c1", canvas: "v1", assistProject: "p1" }) as { urls: string[]; byPattern: Record<string, string[]> };
+    // Every dynamic route is visited at least once, and no sample still has a [param] in it.
+    for (const p of patterns) expect(byPattern[p]?.length, p).toBeGreaterThan(0);
+    expect(urls.filter((u) => /\[/.test(u))).toEqual([]);
     expect(urls).toEqual(expect.arrayContaining(["/cinema/c1", "/cinema/does-not-exist", "/canvas/v1", "/canvas/does-not-exist", "/assist/projects/p1", "/apps/does-not-exist"]));
+  });
+
+  it("gives a route added later (another branch's /faceless/[id]/[episode]) a not-found sample by itself", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-routes-"));
+    const page = (rel: string) => {
+      fs.mkdirSync(path.join(tmp, "src/app/(studio)", rel), { recursive: true });
+      fs.writeFileSync(path.join(tmp, "src/app/(studio)", rel, "page.tsx"), "export default function P() { return null; }\n");
+    };
+    fs.mkdirSync(path.join(tmp, "src/lib"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "src/lib/hubs.ts"), "export const HUB_MODES = {\n};\n");
+    for (const r of ["faceless", "faceless/[id]", "faceless/[id]/[episode]", "faceless/[id]/new", "cinema/[id]", "docs/[...slug]"]) page(r);
+    try {
+      const { byPattern, generated } = dynamicSamples(tmp, { cinema: "c1" }) as { byPattern: Record<string, string[]>; generated: string[] };
+      expect(byPattern["/faceless/[id]"]).toEqual(["/faceless/does-not-exist"]);
+      expect(byPattern["/faceless/[id]/[episode]"]).toEqual(["/faceless/does-not-exist/does-not-exist"]);
+      expect(byPattern["/faceless/[id]/new"]).toEqual(["/faceless/does-not-exist/new"]);
+      expect(byPattern["/docs/[...slug]"]).toEqual(["/docs/does-not-exist"]);
+      expect(byPattern["/cinema/[id]"]).toEqual(["/cinema/c1", "/cinema/does-not-exist"]);
+      expect(generated.sort()).toEqual(["/docs/[...slug]", "/faceless/[id]", "/faceless/[id]/[episode]", "/faceless/[id]/new"]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("reads every hub mode from src/lib/hubs.ts (the first mode is the hub's own page)", () => {
