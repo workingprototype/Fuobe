@@ -4,10 +4,10 @@
 Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
 - **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local Ollama model, or an offline planner
-- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs (layers, restyle, dub, faceless episode, ads, captions, Katana) and the skills as prompts
+- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs (layers, restyle, dub, faceless episode, ads, captions, Katana; they run as plain pipelines and don't open a studio session yet) and the skills as prompts
 - **Create:** Image · Video (text, image, start/end frame, reference images and clips, multi-shot, draft mode) · Edit · **Layers** (split a flat image into editable layers, edit text, regional edits, cropped or positioned zips) · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · **Canvas** (wire prompts, files and models into node workflows; every template in a cloud and an open-source version) · Apps
 - **Studios:**
-  - **Cinema Studio** — projects and scenes, Director's Panel (camera, lens, 50 palettes, lighting rig, Emotion Wheel), # camera moves, AI Director, image grids, Soul Cast and Soul Location
+  - **Cinema Studio** — projects and scenes, Director's Panel (camera, lens, 50 palettes, lighting rig, Emotion Wheel), 33 camera moves (# in the prompt bar), AI Director, image grids, Soul Cast and Soul Location
   - **Shorts Studio** — restyle up to 2 minutes of your own footage with 44 looks (or your own references), in segments you can regenerate, stitched back under your sound; **Mixed Media** — 33 looks for 1–10 s clips with per-preset settings and a preview frame
   - **Marketing Studio** (84 templates), **Click to Ad**, **Ads Studio** (brand kit from your website, up to 20 ads per product in 1:1 / 4:5 / 9:16) and **Ad Multiplier**
   - **Moodboards**, **Color signature** (Soul HEX palettes), **Photodump / Instadump**, **Fashion Factory**, **Character Sheet**
@@ -15,7 +15,7 @@ Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5
   - **Translate & dub** (your voice, lip-synced, over the original background on the open engine), **Captions** (transcribe, edit, burn in), **Trim**, **Katana** (recreate a reference edit with your subject), **Image to 3D**, Lipsync & avatars, Motion control, Edit / Extend / Reframe video, Video tools (matte, relight, depth, join clips, match colors), Upscale, Audio (speech with voice picker and cloning, dialogue, voice change, sound effects, music, sound for video), and a Virality predictor (a labelled heuristic)
 - **Library:** all your results (images, videos, audio, text, 3D) with layouts, filters, folders, bulk zip download and a Trash with 30-day restore; results arrive live
 - **Elements:** save characters, locations, props, styles and voices once, then `@mention` them in any prompt; train a character (Soul ID, a fal LoRA, or AI-Toolkit on your GPU) for a consistent face
-- **Catalog:** 157 cloud models + 73 open-source models (plus 32 hidden helper models: chain steps, self-tests, browser tools), 123 apps, 108 camera motions (mix any two), 255 effects
+- **Catalog:** 157 cloud models + 73 open-source models (plus 32 hidden ones: chain steps, self-tests, browser tools, and four open models no studio offers yet), 123 apps, 108 camera motions (mix any two), 255 effects
 - **Open-source engine:** 115 API-format ComfyUI workflows (official templates, community packs and hand-built graphs) validated against real ComfyUI node definitions, plus 43 researched LoRAs (camera moves, VFX) attached to 55 motion, effect and app presets
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
@@ -78,7 +78,7 @@ Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only
 2. Open **ComfyUI workflows** in Fuobe. Each workflow lists the model files it needs, which are already installed (✓) and a **Copy install commands** button that produces the exact `wget` / `git clone` lines.
 3. Switch the engine toggle (top-right of every studio) to **Open source**.
 
-LatentSync 1.6 and ThinkSound are optional and run on a separate, isolated ComfyUI (`scripts/comfy/install-isolated-worker.sh`, port 8189); see [`scripts/comfy/README.md`](scripts/comfy/README.md). Open dubbing, Faceless and UGC narration clone a voice with Chatterbox, so they need a voice sample (record or upload one).
+LatentSync 1.6 and ThinkSound are optional and run on a separate, isolated ComfyUI (`scripts/comfy/install-isolated-worker.sh`, port 8189); see [`scripts/comfy/README.md`](scripts/comfy/README.md). Their workflows are validated, but they are hidden models that no studio offers yet (the API takes them by `modelId`). Open dubbing, Faceless and UGC narration clone a voice with Chatterbox, so they need a voice sample (record or upload one).
 
 To check a ComfyUI connection end to end without downloading any models:
 
