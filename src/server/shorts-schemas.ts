@@ -8,6 +8,8 @@ import { ShortsError } from "./shorts";
 
 const fileUrl = z.string().startsWith("/api/files/").max(500);
 const seconds = z.number().finite().min(0).max(3600);
+/** A client nonce for one submit: a repeated id gets the first answer instead of a second paid run (see once()). */
+const requestId = z.string().trim().min(8).max(64).optional();
 
 const source = z.object({
   url: fileUrl,
@@ -24,6 +26,7 @@ export const ShortsBodySchema = z.object({
   aspectRatio: z.enum(["9:16", "16:9"]).default("9:16"),
   language: z.string().max(40).default("auto"),
   modelId: z.string().max(80).optional(),
+  requestId,
 });
 
 /** The estimate is asked for before the upload finishes: any URL stands in. */
@@ -49,7 +52,11 @@ export const MixedBodySchema = z.object({
   anchor: fileUrl.optional(),
   frameUrl: fileUrl.optional(),
   seed: z.number().int().min(0).max(2 ** 48).optional(),
+  requestId,
 });
+
+/** Bodies of the session actions that only carry a nonce (stitch again, regenerate a segment). */
+export const NonceSchema = z.object({ requestId }).default({});
 
 export const MixedEstimateSchema = MixedBodySchema.extend({ source: source.extend({ url: z.string().max(500).default("/api/files/placeholder.mp4") }) });
 
@@ -64,6 +71,45 @@ export async function body<S extends z.ZodType>(request: Request, schema: S, mes
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) throw new ShortsError(message, 400);
   return parsed.data;
+}
+
+/** Parse an optional JSON body (none, or an empty one, is `{}`). */
+export async function optionalBody<S extends z.ZodType>(request: Request, schema: S): Promise<z.infer<S>> {
+  const text = await request.text().catch(() => "");
+  let raw: unknown = {};
+  try {
+    raw = text.trim() ? JSON.parse(text) : {};
+  } catch {
+    throw new ShortsError("That request body isn't JSON", 400);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw new ShortsError("Bad request", 400);
+  return parsed.data;
+}
+
+declare global {
+  var __fuobeShortsRequests: Map<string, { at: number; result: Promise<unknown> }> | undefined;
+}
+const requests = () => (globalThis.__fuobeShortsRequests ??= new Map());
+const REQUEST_TTL = 10 * 60_000;
+
+/**
+ * Run `fn` once per client request id: a repeat of the same id (a double click that got through, a
+ * retried POST) gets the first call's answer — the same session or render — instead of starting a
+ * second paid run. A call that failed can be tried again with the same id. Without an id, it just runs.
+ */
+export function once<T>(scope: string, id: string | undefined, fn: () => Promise<T> | T): Promise<T> {
+  if (!id) return Promise.resolve().then(fn);
+  const map = requests();
+  const now = Date.now();
+  for (const [k, v] of map) if (now - v.at > REQUEST_TTL) map.delete(k);
+  const key = `${scope}:${id}`;
+  const hit = map.get(key);
+  if (hit) return hit.result as Promise<T>;
+  const result = Promise.resolve().then(fn);
+  map.set(key, { at: now, result });
+  result.catch(() => map.delete(key));
+  return result;
 }
 
 /** Run a route body, answering errors as `{ error }`. */

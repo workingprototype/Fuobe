@@ -165,6 +165,40 @@ describe("Shorts sessions", () => {
     expect(await settle(last.final)).toMatchObject({ status: "succeeded", op: "mux" });
   });
 
+  it("starts one session per request id, and one stitch per set of takes", async () => {
+    const before = shorts.listSessions().length;
+    const req = () => sessionsRoute.POST(json("POST", body({ requestId: "dbl-click-0001" })));
+    // A double click that got through: both requests arrive before either is answered.
+    const [a, b] = await Promise.all([req(), req()]);
+    const [sa, sb] = [await a.json(), await b.json()];
+    expect(sa.id).toBe(sb.id);
+    expect(shorts.listSessions().length).toBe(before + 1);
+    // A different id is a new session.
+    const c = await (await sessionsRoute.POST(json("POST", body({ requestId: "dbl-click-0002" })))).json();
+    expect(c.id).not.toBe(sa.id);
+    // Stitch again with the same takes while that stitch is still running: refused, not paid twice.
+    await settle(sa.stitches[0].final);
+    const fresh = shorts.regenerateSegment(sa.id, 0).segments[0].takes.at(-1)!.look;
+    await settle(fresh);
+    shorts.makePrimary(sa.id, 0, fresh);
+    const st = (id: string) => stitchRoute.POST(json("POST", { requestId: id }), params({ id: sa.id }));
+    const [s1, s2] = await Promise.all([st("stitch-nonce-1"), st("stitch-nonce-1")]);
+    expect((await s1.json()).stitches).toHaveLength(2);
+    expect((await s2.json()).stitches).toHaveLength(2);
+    const again = await st("stitch-nonce-2");
+    expect(again.status).toBe(409);
+    expect((await again.json()).error).toBe("These takes are already being stitched");
+    // Regenerate with the same id twice: one new take.
+    const r = (rid: string) => regenRoute.POST(json("POST", { requestId: rid }), params({ id: sa.id, index: "1" }));
+    const [r1, r2] = await Promise.all([r("take-nonce-1"), r("take-nonce-1")]);
+    expect((await r1.json()).segments[1].takes).toHaveLength(2);
+    expect((await r2.json()).segments[1].takes).toHaveLength(2);
+    const view = shorts.getSession(sa.id);
+    await Promise.all([settle(view.stitches[1].final), settle(view.segments[1].takes[1].look)]);
+    shorts.deleteSession(sa.id);
+    shorts.deleteSession(c.id);
+  });
+
   it("won't stitch while a segment is still rendering", async () => {
     const s = shorts.regenerateSegment(sessionId, 0);
     const take = s.segments[0].takes.at(-1)!.look;
@@ -278,6 +312,14 @@ describe("Mixed Media renders", () => {
     expect(items[1].request.params?.extra).toEqual({ preprocessor: "canny" });
     expect(dependsOn(final.id)).toEqual([items[1].id, items[0].id]);
     expect(await settle(final.id)).toMatchObject({ status: "succeeded", feature: "mixed-media" });
+  });
+
+  it("starts one render per request id", async () => {
+    const req = () => mixedRoute.POST(json("POST", mm({ requestId: "mm-render-0001" })));
+    const [a, b] = await Promise.all([req(), req()]);
+    const [ra, rb] = [await a.json(), await b.json()];
+    expect(ra.final.id).toBe(rb.final.id);
+    await settle(ra.final.id);
   });
 
   it("asks for a grabbed frame before a cloud preview", async () => {

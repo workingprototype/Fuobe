@@ -12,6 +12,7 @@ import {
   planTake,
   rangeProblem,
   sessionPlanInput,
+  stitchCurrent,
   SHORTS,
   SHORTS_MODELS,
   type PlanStep,
@@ -489,6 +490,11 @@ export function stitchSession(id: string): ShortsSessionView {
     if (g.status !== "succeeded" || !url) throw new ShortsError(`Segment ${i + 1} didn't render — regenerate it first`, 409);
     return { url };
   });
+  // A second "Stitch again" while the same takes are still being stitched would pay for the same video twice.
+  const last = s.stitches[s.stitches.length - 1];
+  if (last && stitchCurrent(s) && [...last.ids, last.final].some((gid) => ["queued", "running"].includes(getGeneration(gid)?.status ?? ""))) {
+    throw new ShortsError("These takes are already being stitched", 409);
+  }
   const plan = planStitch(sessionPlanInput(s), clips, `-s${s.stitches.length}`);
   const now = Date.now();
   let stitch: ShortsStitch;

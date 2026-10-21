@@ -25,7 +25,7 @@ import type { Engine } from "@/lib/catalog/types";
 import type { TrimRange } from "@/lib/trim-range";
 import { cn } from "@/lib/utils";
 import { CustomPresetDialog } from "./custom-preset-dialog";
-import { useShortsActions, useShortsEstimate, useShortsPresets, type ShortsBody } from "./hooks";
+import { useShortsActions, useShortsEstimate, useShortsPresets, useSubmitGuard, type ShortsBody } from "./hooks";
 import { CreateCard, CustomCard, LookCard } from "./preset-card";
 import { ShortsHistory } from "./history";
 import { ClipBar, ClipDrop, costText, Field, Segmented, Steps, tabKeys } from "./ui";
@@ -338,12 +338,21 @@ function SetupPanel({
                 ? (estimate.error as Error).message
                 : null;
 
+  const guard = useSubmitGuard();
+  const [leaving, setLeaving] = useState(false);
+  const busy = actions.create.isPending || leaving;
   const generate = () => {
     if (blocker) return void toast(blocker, { id: "shorts-blocker" });
-    actions.create.mutate(estimateBody!, {
-      onSuccess: (s) => router.push(`/shorts/${s.id}`),
-      onError: (e) => toast.error((e as Error).message),
-    });
+    if (busy || !estimateBody) return;
+    // One session per click: a second click while this one is on its way does nothing (and the
+    // server answers a repeated request id with the session it already started).
+    void guard(JSON.stringify(estimateBody), (requestId) => actions.create.mutateAsync({ ...estimateBody, requestId }), { hold: true })
+      .then((s) => {
+        if (!s) return;
+        setLeaving(true);
+        router.push(`/shorts/${s.id}`);
+      })
+      .catch((e: Error) => toast.error(e.message));
   };
 
   return (
@@ -479,15 +488,16 @@ function SetupPanel({
         <button
           type="button"
           onClick={generate}
-          aria-disabled={!!blocker || actions.create.isPending}
+          disabled={busy}
+          aria-disabled={!!blocker || busy}
           aria-describedby={blocker ? "shorts-blocker" : undefined}
           className={cn(
             "flex h-11 w-full items-center justify-center gap-2 rounded-full text-[14px] font-medium transition-colors",
             blocker ? "bg-muted text-subtle-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90",
           )}
         >
-          {actions.create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-          Generate short
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          {busy ? "Starting your short…" : "Generate short"}
           <ArrowRight className="size-4" />
         </button>
         {blocker && (

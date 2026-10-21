@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { createSession, listSessions } from "@/server/shorts";
-import { ShortsBodySchema, body, handle } from "@/server/shorts-schemas";
+import { ShortsBodySchema, body, handle, once } from "@/server/shorts-schemas";
 
 /** Shorts sessions, newest first (History). */
 export async function GET() {
@@ -12,6 +12,7 @@ export async function GET() {
 export async function POST(request: Request) {
   return handle(async () => {
     const input = await body(request, ShortsBodySchema, "Pick a preset, upload a clip and choose the part to restyle");
-    return Response.json(await createSession(input), { status: 201 });
+    // A repeated requestId (a second click on Generate) gets the session the first one started.
+    return Response.json(await once("shorts-session", input.requestId, () => createSession(input)), { status: 201 });
   });
 }

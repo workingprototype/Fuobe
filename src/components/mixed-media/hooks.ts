@@ -20,6 +20,8 @@ export interface MixedBody {
   modelId?: string;
   anchor?: string;
   frameUrl?: string;
+  /** Client nonce: a repeat of it gets the first answer (see useSubmitGuard). */
+  requestId?: string;
 }
 
 export interface MixedEstimate {

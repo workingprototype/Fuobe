@@ -26,7 +26,7 @@ import type { Generation } from "@/lib/catalog/types";
 import { formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { downloadHref, downloadName } from "@/lib/library";
 import { cn } from "@/lib/utils";
-import { useShortsActions, useShortsSession, type ShortsSessionView as View } from "./hooks";
+import { useShortsActions, useShortsSession, useSubmitGuard, type ShortsSessionView as View } from "./hooks";
 import { Steps } from "./ui";
 
 const STEPS = ["Choose preset", "Upload video", "Download"];
@@ -112,11 +112,21 @@ function Session({ s }: { s: View }) {
   const overall = (segStates.reduce((n, x) => n + (x.status === "done" ? 1 : x.progress), 0) + (finalState?.status === "done" ? 1 : (finalState?.progress ?? 0))) / (segStates.length + 1);
   const parts = s.segments.map((g) => g.primary).filter((id) => videoOf(gens[id]));
 
-  const stitchAgain = () =>
-    actions.stitch.mutate(undefined, {
-      onSuccess: () => toast("Stitching your short"),
-      onError: (e) => toast.error((e as Error).message),
-    });
+  // One stitch and one new take per click (the server also answers a repeated request id with the first result).
+  const stitchGuard = useSubmitGuard();
+  const takeGuard = useSubmitGuard();
+  const stitchAgain = () => {
+    if (!canStitch || actions.stitch.isPending) return;
+    void stitchGuard(`stitch:${s.segments.map((g) => g.primary).join(",")}`, (requestId) => actions.stitch.mutateAsync({ requestId }))
+      .then((v) => v && toast("Stitching your short"))
+      .catch((e: Error) => toast.error(e.message));
+  };
+  const regenerate = (i: number) => {
+    if (actions.regenerate.isPending) return;
+    void takeGuard(`take:${i}:${s.segments[i].takes.length}`, (requestId) => actions.regenerate.mutateAsync({ index: i, requestId }))
+      .then((v) => v && toast(`New take of segment ${i + 1} on the way`))
+      .catch((e: Error) => toast.error(e.message));
+  };
 
   return (
     <Frame
@@ -176,6 +186,7 @@ function Session({ s }: { s: View }) {
               <button
                 type="button"
                 onClick={stitchAgain}
+                disabled={actions.stitch.isPending}
                 aria-disabled={!canStitch || actions.stitch.isPending}
                 className={cn(
                   "inline-flex h-9 items-center gap-1.5 rounded-full border px-4 text-[13px] font-medium",
@@ -229,13 +240,9 @@ function Session({ s }: { s: View }) {
                 cost={s.regenerateUsd}
                 demo={Object.values(gens).some((g) => g.provider === "mock")}
                 onOpen={setOpen}
-                onRegenerate={() =>
-                  actions.regenerate.mutate(i, {
-                    onSuccess: () => toast(`New take of segment ${i + 1} on the way`),
-                    onError: (e) => toast.error((e as Error).message),
-                  })
-                }
-                regenerating={actions.regenerate.isPending && actions.regenerate.variables === i}
+                onRegenerate={() => regenerate(i)}
+                regenerating={actions.regenerate.isPending && actions.regenerate.variables?.index === i}
+                busy={actions.regenerate.isPending}
                 onPrimary={(gid) => actions.primary.mutate({ index: i, generationId: gid }, { onError: (e) => toast.error((e as Error).message) })}
               />
             ))}
@@ -283,6 +290,7 @@ function SegmentCard({
   onOpen,
   onRegenerate,
   regenerating,
+  busy,
   onPrimary,
 }: {
   seg: ShortsSessionSegment;
@@ -295,6 +303,8 @@ function SegmentCard({
   onOpen: (g: Generation) => void;
   onRegenerate: () => void;
   regenerating: boolean;
+  /** A new take (of any segment) is on its way. */
+  busy: boolean;
   onPrimary: (id: string) => void;
 }) {
   const primary = gens[seg.primary];
@@ -370,7 +380,7 @@ function SegmentCard({
             <button
               type="button"
               onClick={onRegenerate}
-              disabled={regenerating}
+              disabled={busy}
               className="inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[12px] font-medium hover:bg-accent disabled:opacity-60"
             >
               {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}

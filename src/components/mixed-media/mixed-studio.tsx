@@ -9,6 +9,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { MediaThumb } from "@/components/studio/result-media";
 import { VideoTrimmer, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
 import { LookCard } from "@/components/shorts/preset-card";
+import { useSubmitGuard } from "@/components/shorts/hooks";
 import { ClipBar, ClipDrop, costText, Field, Segmented, tabKeys } from "@/components/shorts/ui";
 import { clipDuration, useSourceClip } from "@/components/shorts/use-source-clip";
 import { uploadFile, useEngine } from "@/lib/api";
@@ -332,33 +333,41 @@ function Editor({
                 ? (estimate.error as Error).message
                 : null;
 
-  const makePreview = async () => {
+  // One preview and one render per click: a second click while one is on its way does nothing,
+  // and the server answers a repeated request id with what the first one started.
+  const previewGuard = useSubmitGuard();
+  const renderGuard = useSubmitGuard();
+  const previewBusy = actions.preview.isPending || grabbing;
+  const makePreview = () => {
     if (blocker || !body) return void toast(blocker ?? "Not ready yet", { id: "mm-blocker" });
-    let frameUrl: string | undefined;
-    if (engine === "cloud") {
-      setGrabbing(true);
-      try {
-        const blob = await trimmer.current?.grabFrame(range!.startTime);
-        if (!blob) return void toast.error("This browser can't read frames of this clip — try an MP4 (H.264), or generate the full video");
-        frameUrl = (await uploadFile(new File([blob], "frame.jpg", { type: "image/jpeg" }))).url;
-      } catch (e) {
-        return void toast.error((e as Error).message);
-      } finally {
-        setGrabbing(false);
+    if (previewBusy) return;
+    void previewGuard(JSON.stringify(body), async (requestId) => {
+      let frameUrl: string | undefined;
+      if (engine === "cloud") {
+        setGrabbing(true);
+        try {
+          const blob = await trimmer.current?.grabFrame(range!.startTime);
+          if (!blob) throw new Error("This browser can't read frames of this clip — try an MP4 (H.264), or generate the full video");
+          frameUrl = (await uploadFile(new File([blob], "frame.jpg", { type: "image/jpeg" }))).url;
+        } finally {
+          setGrabbing(false);
+        }
       }
-    }
-    actions.preview.mutate({ ...body, frameUrl }, { onSuccess: (g) => setPreviewId(g.id), onError: (e) => toast.error((e as Error).message) });
+      const g = await actions.preview.mutateAsync({ ...body, frameUrl, requestId });
+      setPreviewId(g.id);
+    }).catch((e: Error) => toast.error(e.message));
   };
 
   const generate = () => {
     if (blocker || !body) return void toast(blocker ?? "Not ready yet", { id: "mm-blocker" });
-    actions.render.mutate(body, {
-      onSuccess: (r) => {
+    if (actions.render.isPending) return;
+    void renderGuard(JSON.stringify(body), (requestId) => actions.render.mutateAsync({ ...body, requestId }))
+      .then((r) => {
+        if (!r) return;
         setRenderId(r.final.id);
         toast("Rendering your video", { description: "It shows up in History too." });
-      },
-      onError: (e) => toast.error((e as Error).message),
-    });
+      })
+      .catch((e: Error) => toast.error(e.message));
   };
 
   return (
@@ -520,13 +529,14 @@ function Editor({
         <button
           type="button"
           onClick={makePreview}
-          aria-disabled={!!blocker || actions.preview.isPending || grabbing}
+          disabled={previewBusy}
+          aria-disabled={!!blocker || previewBusy}
           className={cn(
             "flex h-9 w-full items-center justify-center gap-2 rounded-full border text-[13px] font-medium",
             blocker ? "text-subtle-foreground" : "bg-background hover:bg-accent",
           )}
         >
-          {actions.preview.isPending || grabbing ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+          {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
           {preview ? "Generate another preview frame" : "Generate preview frame"}
         </button>
       </div>
@@ -548,6 +558,7 @@ function Editor({
         <button
           type="button"
           onClick={generate}
+          disabled={actions.render.isPending}
           aria-disabled={!!blocker || actions.render.isPending}
           aria-describedby={blocker ? "mm-blocker" : undefined}
           className={cn(

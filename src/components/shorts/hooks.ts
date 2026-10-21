@@ -1,7 +1,8 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue } from "react";
+import { nanoid } from "nanoid";
+import { useCallback, useDeferredValue, useRef } from "react";
 import type { ShortsCustomPreset, ShortsRange, ShortsRatio, ShortsSession } from "@/lib/catalog/shorts";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { useGenerationEvents } from "@/lib/api";
@@ -26,6 +27,8 @@ export interface ShortsBody {
   aspectRatio: ShortsRatio;
   language: string;
   modelId?: string;
+  /** Client nonce: a repeat of it gets the first answer (see useSubmitGuard). */
+  requestId?: string;
 }
 
 export interface ShortsEstimate {
@@ -57,6 +60,32 @@ export interface ShortsSessionCard {
 }
 
 const active = (g?: Generation) => !!g && (g.status === "queued" || g.status === "running");
+
+/**
+ * One paid submit at a time. A second click while the first is on its way does nothing, and the
+ * request carries a nonce that stays the same for the same `key` until a submit succeeds, so the
+ * server answers a repeat (a lost response, a retry) with the first result instead of a second run.
+ * `hold` keeps it busy after success (the page is navigating away).
+ */
+export function useSubmitGuard() {
+  const busy = useRef(false);
+  const last = useRef<{ key: string; id: string } | null>(null);
+  return useCallback(async <T>(key: string, fn: (requestId: string) => Promise<T>, opts: { hold?: boolean } = {}): Promise<T | undefined> => {
+    if (busy.current) return undefined;
+    busy.current = true;
+    const id = last.current?.key === key ? last.current.id : nanoid(16);
+    last.current = { key, id };
+    let ok = false;
+    try {
+      const out = await fn(id);
+      ok = true;
+      last.current = null;
+      return out;
+    } finally {
+      if (!ok || !opts.hold) busy.current = false;
+    }
+  }, []);
+}
 
 /** Price and shape of a session before it starts (debounced by React's deferred value). */
 export function useShortsEstimate(body: ShortsBody | null) {
@@ -122,7 +151,7 @@ export function useShortsActions(id?: string) {
       onSuccess: () => void qc.invalidateQueries({ queryKey: ["shorts", "sessions"] }),
     }),
     regenerate: useMutation({
-      mutationFn: (index: number) => send<ShortsSessionView>(`/api/shorts/sessions/${id}/segments/${index}`, "POST"),
+      mutationFn: (v: { index: number; requestId?: string }) => send<ShortsSessionView>(`/api/shorts/sessions/${id}/segments/${v.index}`, "POST", { requestId: v.requestId }),
       onSuccess: put,
     }),
     primary: useMutation({
@@ -130,7 +159,7 @@ export function useShortsActions(id?: string) {
       onSuccess: put,
     }),
     stitch: useMutation({
-      mutationFn: () => send<ShortsSessionView>(`/api/shorts/sessions/${id}/stitch`, "POST"),
+      mutationFn: (v: { requestId?: string } = {}) => send<ShortsSessionView>(`/api/shorts/sessions/${id}/stitch`, "POST", { requestId: v.requestId }),
       onSuccess: put,
     }),
     rename: useMutation({
