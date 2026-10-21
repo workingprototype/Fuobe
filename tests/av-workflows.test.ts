@@ -41,6 +41,7 @@ describe("av-tools workflows", () => {
       ["frame-extract", "oss-extract-frame"],
       ["v2a-hunyuan-foley", "oss-hunyuan-foley-video"],
       ["product-shot-qwen-edit-2509", "oss-product-shot"],
+      ["audio-timeline", "oss-audio-timeline"],
     ]) {
       expect(byId.get(id)?.validated, id).toBe(true);
       expect(byId.get(id)?.license, id).toBeTruthy();
@@ -70,6 +71,28 @@ describe("av-tools workflows", () => {
     expect(r.workflow["3"].inputs).toMatchObject({ prompt: "footsteps on gravel", negative_prompt: "music", duration: 4, frame_rate: 8, seed: 7 });
     expect(r.workflow["5"].inputs).toMatchObject({ force_rate: 8, frame_load_cap: computeFrames(4, 8, 4, 481) });
     for (const n of ["4", "8"]) expect(r.workflow[n].inputs.filename_prefix).toBe("fuobe/gen1");
+  });
+
+  it("Voice timeline: every line at its cue on silence as long as the video, cut where the next starts", async () => {
+    const timeline = { length: 30, clips: [{ start: 0, duration: 6 }, { start: 6, duration: 18 }, { start: 24, duration: 6 }] };
+    const r = await prepare("audio-timeline", "timeline", { audios: ["l0.flac", "l1.flac", "l2.flac"], duration: 30, extra: { timeline } });
+    const wf = r.workflow;
+    const of = (cls: string) => Object.entries(wf).filter(([, n]) => n.class_type === cls);
+    // The track: EmptyAudio as long as the video, saved after the last line is added.
+    expect(wf["1"].inputs).toMatchObject({ duration: 30, sample_rate: 44100, channels: 2 });
+    expect(of("LoadAudio").map(([, n]) => n.inputs.audio)).toEqual(["l0.flac", "l1.flac", "l2.flac"]);
+    expect(of("TrimAudioDuration").map(([, n]) => n.inputs.duration)).toEqual([6, 18, 6]);
+    // A line at 0 s needs no lead-in; the others wait their start time in silence.
+    expect(of("EmptyAudio").map(([, n]) => n.inputs.duration)).toEqual([30, 6, 24]);
+    expect(wf.t1_add.inputs).toMatchObject({ audio1: ["1", 0], audio2: ["t1_cut", 0], merge_method: "add" });
+    expect(wf.t2_at.inputs).toMatchObject({ audio1: ["t2_lead", 0], audio2: ["t2_cut", 0], direction: "after" });
+    expect(wf.t2_add.inputs).toMatchObject({ audio1: ["t1_add", 0], audio2: ["t2_at", 0] });
+    expect(wf.t3_add.inputs.audio1).toEqual(["t2_add", 0]);
+    expect(wf["7"].inputs).toMatchObject({ audio: ["t3_add", 0], filename_prefix: "fuobe/gen1" });
+    // Nothing of the template's single line is left over.
+    for (const id of ["2", "3", "4", "5", "6"]) expect(wf[id]).toBeUndefined();
+    await expect(prepare("audio-timeline", "timeline", { audios: ["l0.flac"], duration: 30 })).rejects.toThrow(/start times/);
+    await expect(prepare("audio-timeline", "timeline", { audios: ["l0.flac"], extra: { timeline } })).rejects.toThrow(/places 3 clips but got 1/);
   });
 
   it("Product shot: the photo cut out onto white, the scene after the LoRA's trigger", async () => {

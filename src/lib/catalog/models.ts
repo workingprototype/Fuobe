@@ -1001,6 +1001,17 @@ const open: ModelDef[] = [
     routes: [comfy("mux", "video-mux-audio", "one track: video-mux-audio-replace; two: voice + background mix")],
     options: { sliders: [{ param: "backgroundVolumeDb", label: "Background level (dB)", min: -30, max: 6, step: 1, default: 0 }] },
   }),
+  o({
+    id: "oss-audio-timeline",
+    name: "Voice timeline",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Places spoken lines at their cue times on a silent track as long as the video (dub voices) · CPU",
+    routes: [comfy("timeline", "audio-timeline", "one loader per line, expanded per request")],
+    options: {},
+    hidden: true,
+  }),
   // Product 3D, try-on
   o({
     id: "oss-trellis2",

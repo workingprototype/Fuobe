@@ -523,6 +523,12 @@ model("whisper", "Whisper large-v3", "OpenAI", "whisper", "text", "Whisper large
 model("demucs", "Demucs stem split", "Meta", "demucs", "audio", "Split a track into vocals, drums, bass and the rest",
       [("separate-audio", "fal-ai/demucs")], fixed={"model": "htdemucs"})
 # Translate & dub (cloud, step by step): the clean voice straight from the video, to clone in the new language.
+# The cloud dub's voice track (av-tools): the spoken lines placed at their cue times over a still for the video's
+# length (compose renders a video), then its soundtrack read back as audio for voice conversion and lip re-sync.
+model("compose-timeline", "Voice timeline", "fal", "utility", "video", "Place audio clips at their start times on a timeline",
+      [("timeline", "fal-ai/ffmpeg-api/compose")], pricing=("second", 0.0002), hidden=True)
+model("extract-soundtrack", "Extract soundtrack", "fal", "utility", "audio", "A video's soundtrack as an audio file",
+      [("separate-audio", "fal-ai/workflow-utilities/extract-audio")], pricing=("second", 0.0002, "billed by compute time"), hidden=True)
 model("elevenlabs-voice-isolation", "ElevenLabs Voice Isolation", "ElevenLabs", "elevenlabs", "audio", "Clean speech from a video or recording — music and noise removed",
       [("separate-audio", "fal-ai/elevenlabs/audio-isolation")], pricing=("minute", 0.1))
 
@@ -796,6 +802,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["styleId"] = kf["styleId"]
     if "numLayers" in kf:
         fmap["numLayers"] = kf["numLayers"]
+    # fal compose: the timeline's tracks are built from the clips and their start times (FieldMap.timeline).
+    if "tracks" in kf and op == "timeline":
+        fmap["timeline"] = kf["tracks"]
     if "palette" in kf:
         fmt = palette_format(inputs.get(kf["palette"]))
         if fmt:

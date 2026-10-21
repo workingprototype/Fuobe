@@ -263,9 +263,9 @@ export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo
 /** Text steps depend on which LLM the route may use (the open model never calls Claude). */
 const routeReady = (r: ModelRoute) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured());
 
-/** What a run produces: colour matching works on images and videos, so it follows the model. */
+/** What a run produces: colour matching works on images and videos, and fal renders a timeline as a video, so those follow the model. */
 export function outputKind(op: Generation["op"], model: { kind: MediaKind }): MediaKind {
-  return op === "color-match" ? model.kind : OPERATION_OUTPUT[op];
+  return op === "color-match" || op === "timeline" ? model.kind : OPERATION_OUTPUT[op];
 }
 
 // Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row
@@ -410,6 +410,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   audio: "audio",
   voiceAudio: "audio",
   audio2: "audio",
+  audios: "audio",
   prompt: "text",
 };
 
@@ -462,7 +463,7 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   const inputs = { ...req.inputs };
   let prompt = req.prompt;
   const slots = slotsFor(req, urls.length);
-  for (const k of ["images", "videos"] as const) {
+  for (const k of ["images", "videos", "audios"] as const) {
     const at = (pos: "first" | "last") => slots.flatMap((s, i) => (s.slot === k && (s.position ?? "last") === pos ? [urls[i]] : []));
     const first = at("first");
     const last = at("last");
@@ -470,7 +471,7 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   }
   slots.forEach((s, i) => {
     if (s.slot === "prompt") prompt = prompt?.includes("{text}") ? prompt.replaceAll("{text}", urls[i]) : urls[i];
-    else if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = urls[i];
+    else if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios") inputs[s.slot] = urls[i];
   });
   return { ...req, prompt, inputs };
 }

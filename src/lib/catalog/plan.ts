@@ -97,6 +97,8 @@ const PROMPTLESS = new Set<Operation>([
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
   // round 3: tools that work from their inputs (open caption burn-in takes timed lines as its prompt and says so when they're missing)
   "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize",
+  // av-tools: the dub voice track (clips placed on the video's timeline)
+  "timeline",
 ]);
 
 /**

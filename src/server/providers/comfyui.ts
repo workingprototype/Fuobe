@@ -28,6 +28,7 @@ import {
   type ManifestOutput,
   type ManifestWorkflow,
 } from "@/lib/comfy";
+import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { guessKind } from "@/lib/catalog/payload";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
@@ -463,6 +464,8 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.prompt = (input.dialogue ?? []).filter((l) => l.text.trim()).map((l) => `SPEAKER ${l.voice === "B" ? "B" : "A"}: ${l.text.trim()}`).join("\n");
   }
   if (ctx.op === "voice-change") values.audio2 = input.voiceAudio;
+  // A voice track on the video's timeline: the clips are the spoken lines (the template binds the first).
+  if (ctx.op === "timeline") values.audio = input.audios?.[0] ?? input.audio;
   // Speech workflows read the soundtrack with LoadAudio, which also takes a video upload.
   if ((ctx.op === "transcribe" || ctx.op === "separate-audio" || ctx.op === "translate") && b.audio && !b.video) values.audio = input.audio ?? input.video ?? clips[0];
   if (b.language && input.targetLanguage) values.language = input.targetLanguage;
@@ -566,6 +569,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   const cues = manifest.expand === "captions" ? captionCues(input, extra) : [];
   delete extra.cues;
   delete extra.wordsPerCaption;
+  const timeline = manifest.expand === "timeline" ? readTimeline(extra.timeline) : null;
+  if (manifest.expand === "timeline" && !timeline) throw new ProviderError("The voice track needs the lines' start times (params.extra.timeline)");
+  delete extra.timeline;
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -611,6 +617,13 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
     try {
       wf = expandCaptionWorkflow(wf, cues, clip ? { duration: clipLength, fps: clip.fps, width: clip.width, height: clip.height, hasAudio: clip.hasAudio } : {});
+    } catch (e) {
+      throw new ProviderError((e as Error).message);
+    }
+  }
+  if (timeline) {
+    try {
+      wf = expandTimelineWorkflow(wf, input.audios?.length ? input.audios : [String(values.audio)], timeline);
     } catch (e) {
       throw new ProviderError((e as Error).message);
     }

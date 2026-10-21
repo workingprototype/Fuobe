@@ -1,3 +1,4 @@
+import { readTimeline, timelineTracks } from "@/lib/av/timeline";
 import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
@@ -109,6 +110,13 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.videos && input.videos?.length) out[map.videos] = input.videos;
   if (map.audio && input.audio) out[map.audio] = input.audio;
   if (map.audios && input.audios?.length) out[map.audios] = input.audios;
+  // A timeline render (fal compose): a still or the video as the picture, the clips at their start times.
+  if (map.timeline) {
+    const spec = readTimeline(input.extra?.timeline);
+    const visual = input.images?.[0] ? { url: input.images[0], type: "image" as const } : input.video ? { url: input.video, type: "video" as const } : null;
+    if (!spec || !visual) throw new Error("A timeline needs the clips' start times and a picture to render over");
+    out[map.timeline] = timelineTracks(spec, visual, input.audios ?? []);
+  }
 
   if (map.aspectRatio && input.aspectRatio) {
     const [k, v] = enumValue(map.aspectRatio, input.aspectRatio);
@@ -171,7 +179,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
 
-  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) setPath(out, k, v);
+  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline")) setPath(out, k, v);
   // A background colour given as hex goes out in the palette's shape (Recraft wants {r,g,b}).
   const bg = map.palette?.background;
   if (bg && typeof out[bg] === "string") {

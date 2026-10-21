@@ -2356,4 +2356,23 @@ export const SPEC = [
       'then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger "白底图转场景," = "white background to scene", prefixed by node 1002) places and relights it in the scene the prompt describes. ' +
       'The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud).',
   },
+  {
+    id: 'audio-timeline',
+    title: 'Voice track on the video\'s timeline: spoken lines placed at their start times over silence (core audio nodes)',
+    capability: 'timeline',
+    handBuilt: 'hand-built/audio-timeline.json',
+    bindings: {
+      audio: [b('2', 'audio')], duration: [b('1', 'duration')], startTime: [b('4', 'duration')],
+    },
+    outputs: [{ node: '7', kind: 'audio' }],
+    expand: 'timeline',
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core audio nodes)',
+    notes:
+      'The dub voice track, all core nodes. The template places one line: EmptyAudio of the video\'s length (duration) is the track, the line (audio) is cut where the next line starts ' +
+      '(TrimAudioDuration), put after startTime seconds of silence (AudioConcat after EmptyAudio) and added onto the track (AudioMerge add: pads or cuts the line to the track). ' +
+      'The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, ' +
+      'each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). ' +
+      'SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track\'s length = the video\'s) and video-mux-audio. Runs on CPU.',
+  },
 ];

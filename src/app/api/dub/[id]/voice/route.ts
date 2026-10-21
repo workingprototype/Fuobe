@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CueSchema, getDubSession, voiceDub } from "@/server/dub";
+import { CueSchema, getDubSession, previewVoiceDub, voiceDub } from "@/server/dub";
 
 const Body = z.object({
   lang: z.string().min(2).max(12),
@@ -8,14 +8,16 @@ const Body = z.object({
   lipsync: z.boolean().optional(),
 });
 
-/** Speak one language's reviewed lines in the cloned voice: the voice pipeline. */
+/** Speak one language's reviewed lines in the cloned voice: the voice pipeline; `?preview=1` only prices it. */
 export async function POST(request: Request, ctx: RouteContext<"/api/dub/[id]/voice">) {
   const { id } = await ctx.params;
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Pick the language to voice" }, { status: 400 });
   if (!getDubSession(id)) return Response.json({ error: "Not found" }, { status: 404 });
   try {
-    return Response.json(voiceDub(id, parsed.data.lang, { cues: parsed.data.cues, lipsync: parsed.data.lipsync }), { status: 201 });
+    const opts = { cues: parsed.data.cues, lipsync: parsed.data.lipsync };
+    if (new URL(request.url).searchParams.get("preview") === "1") return Response.json(previewVoiceDub(id, parsed.data.lang, opts));
+    return Response.json(voiceDub(id, parsed.data.lang, opts), { status: 201 });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }

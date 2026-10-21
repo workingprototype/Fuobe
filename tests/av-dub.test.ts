@@ -4,9 +4,10 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { cueReducer, cueProblems, formatCueTime, normalizeCues, parseCueTime } from "@/lib/av/cue-edit";
-import { languageStage, oneShotRequests, prepareSteps, reviewCues, spokenText, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { BLANK_FRAME, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, reviewCues, spokenText, voiceSteps, type DubSessionView } from "@/lib/av/dub";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { getModel } from "@/lib/catalog";
+import { buildPayload } from "@/lib/catalog/payload";
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -53,18 +54,19 @@ describe("dub languages", () => {
 describe("dub pipeline DAGs", () => {
   const video = "/api/files/uploads/clip.mp4";
 
-  it("open: stems → transcript of the voice stem → one translation per language", () => {
+  it("open: one job splits the stems and times the voice → one translation per language from its cues", () => {
     const steps = prepareSteps({ engine: "open", video, source: "en", targets: ["es", "de"] });
     expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
       ["stems", "oss-voice-separate", "separate-audio", null],
-      ["words", "oss-qwen3-asr", "transcribe", "stems"],
-      ["translate:es", "oss-text-llm", "translate", "words"],
-      ["translate:de", "oss-text-llm", "translate", "words"],
+      ["translate:es", "oss-text-llm", "translate", "stems"],
+      ["translate:de", "oss-text-llm", "translate", "stems"],
     ]);
-    expect(steps[1].chain).toEqual([{ slot: "audio", stem: "voice" }]);
-    expect(steps[1].request.params?.sourceLanguage).toBe("en");
-    expect(steps[2].chain).toEqual([{ slot: "prompt" }]);
-    expect(steps[2].request.params).toEqual({ targetLanguage: "Spanish", sourceLanguage: "English" });
+    // No second, weaker ASR pass: the stems workflow already runs Qwen3-ASR 1.7B + the forced aligner.
+    expect(getModel("oss-voice-separate")!.routes[0].endpoint).toBe("dub-prepare-separate-transcribe");
+    expect(steps[0].request.params?.sourceLanguage).toBe("en");
+    expect(steps[1].chain).toEqual([{ slot: "prompt" }]);
+    expect(steps[1].request.params).toEqual({ targetLanguage: "Spanish", sourceLanguage: "English" });
+    expect(steps[1].request.step).toMatchObject({ index: 1, of: 3 });
     expect(() => prepareSteps({ engine: "open", video, targets: ["th"] })).toThrow(/Thai isn't available on the open engine/);
   });
 
@@ -79,37 +81,99 @@ describe("dub pipeline DAGs", () => {
     expect(steps[1].request.params).toBeUndefined(); // "auto" = detect
   });
 
+  // Speech starts at 2 s, pauses at 7–12 s and ends at 26 s of a 30 s clip.
   const cues = [
-    { start: 0, end: 2, text: "Hola a todos" },
-    { start: 2.2, end: 4, text: "  bienvenidos  " },
+    { start: 2, end: 4, text: "Hola a todos" },
+    { start: 4.2, end: 7, text: "  bienvenidos  " },
+    { start: 12, end: 15, text: "Esto es una prueba" },
+    { start: 24, end: 26, text: "Adiós" },
   ];
 
-  it("open voice: cloned speech → lip re-sync → mixed over the background", () => {
-    const steps = voiceSteps({ engine: "open", video, lang: "es", cues, voiceRef: "/v.wav", background: "/bg.wav" });
-    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
-      ["speech", "oss-chatterbox", "tts", null],
-      ["lips", "oss-infinitetalk-v2v", "lipsync", "speech"],
-      ["film", "oss-mux", "mux", ["lips", "speech"]],
+  it("phrases: lines a breath apart are one take, pauses split takes, lines past the end are dropped", () => {
+    expect(dubPhrases(cues)).toEqual([
+      { start: 2, end: 7, text: "Hola a todos bienvenidos" },
+      { start: 12, end: 15, text: "Esto es una prueba" },
+      { start: 24, end: 26, text: "Adiós" },
     ]);
-    expect(steps[0].request).toMatchObject({ prompt: "Hola a todos\nbienvenidos", inputs: { voiceAudio: "/v.wav" }, params: { targetLanguage: "Spanish (es)" } });
-    expect(steps[2].chain).toEqual([{ slot: "video" }, { slot: "audio" }]);
-    expect(steps[2].request.inputs).toEqual({ audio2: "/bg.wav" });
-    // Without lip re-sync the new voice goes over the original picture.
-    const flat = voiceSteps({ engine: "open", video, lang: "es", cues, voiceRef: "/v.wav", background: "/bg.wav", lipsync: false });
-    expect(flat.map((s) => s.key)).toEqual(["speech", "film"]);
-    expect(flat[1].request.inputs).toEqual({ video, audio2: "/bg.wav" });
+    // A long run of speech still re-syncs every PHRASE_MAX seconds.
+    const run = Array.from({ length: 10 }, (_, i) => ({ start: i * 2, end: i * 2 + 1.9, text: `line ${i}` }));
+    const takes = dubPhrases(run);
+    expect(takes.length).toBe(2);
+    expect(takes.every((p) => p.end - p.start <= PHRASE_MAX)).toBe(true);
+    expect(dubPhrases([...cues, { start: 31, end: 32, text: "after the end" }, { start: 20, end: 21, text: "  " }], 30).map((p) => p.text)).toEqual(["Hola a todos bienvenidos", "Esto es una prueba", "Adiós"]);
   });
 
-  it("cloud voice: ElevenLabs speech → converted to the speaker's voice → Sync lipsync", () => {
-    const steps = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3" });
-    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op])).toEqual([
-      ["speech", "elevenlabs-v4", "tts"],
-      ["clone", "chatterbox-vc-cloud", "voice-change"],
-      ["film", "sync-lipsync-3", "lipsync"],
+  it("open voice: each take in the cloned voice → placed at its cue on a track as long as the video → lips → over the background", () => {
+    const steps = voiceSteps({ engine: "open", video, lang: "es", cues, voiceRef: "/v.wav", background: "/bg.wav", duration: 30 });
+    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
+      ["line:0", "oss-chatterbox", "tts", null],
+      ["line:1", "oss-chatterbox", "tts", null],
+      ["line:2", "oss-chatterbox", "tts", null],
+      ["track", "oss-audio-timeline", "timeline", ["line:0", "line:1", "line:2"]],
+      ["lips", "oss-infinitetalk-v2v", "lipsync", "track"],
+      ["film", "oss-mux", "mux", ["lips", "track"]],
     ]);
-    expect(steps[1].request.inputs).toEqual({ voiceAudio: "/v.mp3" });
-    expect(voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", lipsync: false })[2].request.modelId).toBe("merge-audio-video");
+    expect(steps[0].request).toMatchObject({ prompt: "Hola a todos bienvenidos", inputs: { voiceAudio: "/v.wav" }, params: { targetLanguage: "Spanish (es)" } });
+    const track = steps[3];
+    expect(track.chain).toEqual([{ slot: "audios" }, { slot: "audios" }, { slot: "audios" }]);
+    // The voice keeps the source's length and every take starts at its cue (each may play until the next one).
+    expect(track.request.params).toEqual({
+      duration: 30,
+      extra: { timeline: { length: 30, clips: [{ start: 2, duration: 10 }, { start: 12, duration: 12 }, { start: 24, duration: 6 }] } },
+    });
+    // Lip re-sync gets no time span: InfiniteTalk runs as long as its voice, which is now the whole clip.
+    expect(steps[4].request.params).toBeUndefined();
+    expect(steps[5].chain).toEqual([{ slot: "video" }, { slot: "audio" }]);
+    expect(steps[5].request.inputs).toEqual({ audio2: "/bg.wav" });
+    // Without lip re-sync the new voice goes over the original picture.
+    const flat = voiceSteps({ engine: "open", video, lang: "es", cues, voiceRef: "/v.wav", background: "/bg.wav", lipsync: false, duration: 30 });
+    expect(flat.map((s) => s.key)).toEqual(["line:0", "line:1", "line:2", "track", "film"]);
+    expect(flat.at(-1)!.request.inputs).toEqual({ video, audio2: "/bg.wav" });
+    // Unknown length (a WebM the server can't read): a second past the last line.
+    expect(voiceSteps({ engine: "open", video, lang: "es", cues, voiceRef: "/v.wav" })[3].request.params?.duration).toBe(27);
+  });
+
+  it("cloud voice: ElevenLabs takes → compose on the timeline → its soundtrack → their voice → Sync lipsync", () => {
+    const steps = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", duration: 30 });
+    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
+      ["line:0", "elevenlabs-v4", "tts", null],
+      ["line:1", "elevenlabs-v4", "tts", null],
+      ["line:2", "elevenlabs-v4", "tts", null],
+      ["track", "compose-timeline", "timeline", ["line:0", "line:1", "line:2"]],
+      ["soundtrack", "extract-soundtrack", "separate-audio", "track"],
+      ["clone", "chatterbox-vc-cloud", "voice-change", "soundtrack"],
+      ["film", "sync-lipsync-3", "lipsync", "clone"],
+    ]);
+    expect(steps[3].request.inputs).toEqual({ images: [BLANK_FRAME] });
+    expect(steps[3].request.params?.extra?.timeline).toEqual({ length: 30, clips: [{ start: 2, duration: 10 }, { start: 12, duration: 12 }, { start: 24, duration: 6 }] });
+    expect(steps[4].chain).toEqual([{ slot: "video" }]);
+    expect(steps[5].request.inputs).toEqual({ voiceAudio: "/v.mp3" });
+    expect(steps[6].request).toMatchObject({ inputs: { video }, params: { duration: 30 } });
+    const flat = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", lipsync: false, duration: 30 });
+    expect(flat.at(-1)!.request.modelId).toBe("merge-audio-video");
     expect(() => voiceSteps({ engine: "cloud", video, lang: "ja", cues: [{ start: 0, end: 1, text: " " }], voiceRef: "/v" })).toThrow(/no lines to speak/);
+    expect(() => voiceSteps({ engine: "cloud", video, lang: "ja", cues: [{ start: 40, end: 41, text: "late" }], voiceRef: "/v", duration: 30 })).toThrow(/after the end of the video/);
+  });
+
+  it("the cloud track is a fal compose timeline over the blank still", () => {
+    const steps = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", duration: 30 });
+    const route = getModel("compose-timeline")!.routes[0];
+    const payload = buildPayload(route.map!, { images: ["https://fal.media/still.png"], audios: ["https://a/0.mp3", "https://a/1.mp3", "https://a/2.mp3"], extra: steps[3].request.params?.extra });
+    expect(payload).toEqual({
+      tracks: [
+        { id: "picture", type: "image", keyframes: [{ url: "https://fal.media/still.png", timestamp: 0, duration: 30000 }] },
+        {
+          id: "voice",
+          type: "audio",
+          keyframes: [
+            { url: "https://a/0.mp3", timestamp: 2000, duration: 10000 },
+            { url: "https://a/1.mp3", timestamp: 12000, duration: 12000 },
+            { url: "https://a/2.mp3", timestamp: 24000, duration: 6000 },
+          ],
+        },
+      ],
+    });
+    expect(() => buildPayload(route.map!, { images: ["x"], audios: ["a"], extra: {} })).toThrow(/start times/);
   });
 
   it("one shot: HeyGen display names, ElevenLabs codes", () => {
@@ -120,7 +184,7 @@ describe("dub pipeline DAGs", () => {
   });
 
   it("spoken text is the reviewed lines, trimmed", () => {
-    expect(spokenText(cues)).toBe("Hola a todos\nbienvenidos");
+    expect(spokenText(cues)).toBe("Hola a todos\nbienvenidos\nEsto es una prueba\nAdiós");
   });
 });
 
@@ -192,12 +256,16 @@ describe("dub sessions (demo mode)", () => {
     expect(reviewCues(saved, "es")![0].text).toBe("Hola, esto es una prueba");
     const voiced = dub.voiceDub(view.id, "es");
     const run = voiced.voices!.es[0];
-    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["speech", "lips", "film"] : ["speech", "clone", "film"]);
-    expect(voiced.generations[run.ids.speech].request.prompt).toContain("Hola, esto es una prueba");
+    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["line:0", "track", "lips", "film"] : ["line:0", "track", "soundtrack", "clone", "film"]);
+    expect(voiced.generations[run.ids["line:0"]].request.prompt).toContain("Hola, esto es una prueba");
+    // The voice track is exactly as long as the source (read from its MP4 header when the session was made).
+    expect(view.duration).toBeGreaterThan(1);
+    expect(voiced.generations[run.ids.track].request.params?.duration).toBe(view.duration);
+    expect((voiced.generations[run.ids.track].request.params?.extra?.timeline as { length: number }).length).toBe(view.duration);
     if (engine === "open") {
       // The background stem rides along to the mix.
       expect(voiced.generations[run.ids.film].request.inputs?.audio2).toMatch(/^\/api\/files\//);
-      expect(voiced.generations[run.ids.speech].request.inputs?.voiceAudio).toMatch(/^\/api\/files\//);
+      expect(voiced.generations[run.ids["line:0"]].request.inputs?.voiceAudio).toMatch(/^\/api\/files\//);
     }
     expect(languageStage(voiced, "es")).toBe("voicing");
     expect((await settle(run.ids.film)).status).toBe("succeeded");
@@ -219,5 +287,14 @@ describe("dub sessions (demo mode)", () => {
     expect(g.request.params?.targetLanguage).toBe("Spanish");
     expect(languageStage(dub.dubView(dub.getDubSession(s.id)!) as DubSessionView, "es")).toBe("done");
     expect(dub.listDubSessions().map((x) => x.id)).toContain(s.id);
+  });
+
+  it("removing a dub stops the steps that haven't finished (nothing more is spent)", async () => {
+    const s = dub.createDubSession({ engine: "cloud", mode: "steps", video: clip(), targets: ["es"] });
+    const ids = Object.values(s.prepare!);
+    expect(dub.deleteDubSession(s.id)).toBe(true);
+    expect(dub.getDubSession(s.id)).toBeNull();
+    for (const id of ids) expect(["canceled", "succeeded"]).toContain((await settle(id)).status);
+    expect(ids.some((id) => gens.getGeneration(id)!.status === "canceled")).toBe(true);
   });
 });

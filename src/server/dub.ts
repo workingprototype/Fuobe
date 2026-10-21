@@ -1,4 +1,5 @@
 import "server-only";
+import fs from "node:fs";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Cue } from "@/lib/cues";
@@ -11,14 +12,19 @@ import {
   reviewCues,
   voiceSteps,
   type DubSession,
+  type DubStep,
+  type DubPrice,
   type DubSessionView,
   type OneShotModel,
 } from "@/lib/av/dub";
 import { normalizeCues } from "@/lib/av/cue-edit";
+import { getModel } from "@/lib/catalog";
 import type { Engine, Generation } from "@/lib/catalog/types";
+import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { db } from "./db";
-import { createGenerations, getGeneration } from "./generations";
+import { cancelGeneration, createGenerations, getGeneration, previewChained } from "./generations";
+import { absolutePath } from "./storage";
 
 /**
  * Translate & dub sessions. A session remembers the source video, the languages and which generations
@@ -86,12 +92,29 @@ export interface CreateDubInput {
   source?: string;
   targets: string[];
   model?: OneShotModel;
+  /** The video's length as the browser measured it (seconds); the file's header wins when it has one. */
+  duration?: number;
+}
+
+/** The source's length: its MP4/MOV header, else what the browser measured. The dubbed voice track is this long. */
+export function videoLength(ref: string, measured?: number): number | undefined {
+  try {
+    if (ref.startsWith("/api/files/")) {
+      const info = probeMedia(fs.readFileSync(absolutePath(decodeURIComponent(ref.slice("/api/files/".length)))));
+      const d = info?.videoDuration ?? info?.duration;
+      if (d && d > 0) return d;
+    }
+  } catch {
+    // An unreadable header (WebM): what the browser measured.
+  }
+  return measured && measured > 0 ? measured : undefined;
 }
 
 export function createDubSession(input: CreateDubInput): DubSessionView {
   if (input.mode === "oneshot" && input.engine === "open") throw new Error("One-shot dubbing is a cloud service — the open engine dubs step by step");
   const now = Date.now();
   const title = input.title?.trim().slice(0, 120) || "Dubbed video";
+  const duration = videoLength(input.video, input.duration);
   const base: DubSession = {
     id: nanoid(10),
     title,
@@ -100,6 +123,7 @@ export function createDubSession(input: CreateDubInput): DubSessionView {
     video: input.video,
     source: input.source || "auto",
     targets: [...new Set(input.targets)],
+    ...(duration && { duration }),
     batchId: nanoid(10),
     createdAt: now,
     updatedAt: now,
@@ -134,8 +158,8 @@ export function saveDubDraft(id: string, lang: string, cues: Cue[]): DubSessionV
   return dubView(save({ ...s, drafts: { ...s.drafts, [lang]: normalizeCues(cues) } }));
 }
 
-/** Speak the reviewed lines of one language: the voice pipeline. */
-export function voiceDub(id: string, lang: string, opts: { cues?: Cue[]; lipsync?: boolean } = {}): DubSessionView {
+/** The voice pipeline of one language, planned (not started): the steps and the session as it'll be saved. */
+function planVoice(id: string, lang: string, opts: { cues?: Cue[]; lipsync?: boolean }): { s: DubSession; current: DubSession; steps: DubStep[]; lipsync: boolean } {
   const s = getDubSession(id);
   if (!s) throw new Error("This dub no longer exists");
   if (s.mode !== "steps") throw new Error("This dub was made in one go — there's nothing to voice");
@@ -150,15 +174,76 @@ export function voiceDub(id: string, lang: string, opts: { cues?: Cue[]; lipsync
   const media = prepareMedia(view);
   if (!media.voice) throw new Error("The voice to clone is missing from the first step");
   const lipsync = opts.lipsync !== false;
-  const steps = voiceSteps({ engine: s.engine, video: s.video, lang, cues, voiceRef: media.voice, background: media.background, lipsync, title: s.title });
+  const steps = voiceSteps({ engine: s.engine, video: s.video, lang, cues, voiceRef: media.voice, background: media.background, lipsync, duration: s.duration ?? videoLength(s.video), title: s.title });
+  return { s, current, steps, lipsync };
+}
+
+/** Speak the reviewed lines of one language: the voice pipeline. */
+export function voiceDub(id: string, lang: string, opts: { cues?: Cue[]; lipsync?: boolean } = {}): DubSessionView {
+  const { s, current, steps, lipsync } = planVoice(id, lang, opts);
   const run = createPipeline(steps, { batchId: s.batchId });
   const ids = Object.fromEntries(Object.entries(run.byKey).map(([k, g]) => [k, g.id]));
   const voices = { ...s.voices, [lang]: [...(s.voices?.[lang] ?? []), { ids, at: Date.now(), lipsync }] };
   return dubView(save({ ...current, voices }));
 }
 
+// ---------------------------------------------------------------------------
+// Prices, before anything runs
+
+const asList = (a: string | string[] | undefined) => (a === undefined ? [] : Array.isArray(a) ? a : [a]);
+
+/** Price planned steps; per-second and per-minute steps are priced for the video's length. */
+export function priceSteps(engine: Engine, steps: DubStep[], seconds?: number): DubPrice {
+  let costUsd = 0;
+  let demo = false;
+  const unpriced = new Set<string>();
+  for (const st of steps) {
+    const unit = getModel(st.request.modelId)?.pricing?.unit;
+    const timed = seconds && (unit === "second" || unit === "minute") && st.request.params?.duration === undefined ? { ...st.request, params: { ...st.request.params, duration: seconds } } : st.request;
+    const p = previewChained(st.chain ? { ...timed, chain: st.chain } : timed, asList(st.after).length);
+    demo ||= p.demo;
+    if (p.costUsd === null) unpriced.add(p.model.name);
+    else costUsd += p.costUsd;
+  }
+  return { engine, costUsd: Math.round(costUsd * 1000) / 1000, unpriced: demo || engine === "open" ? [] : [...unpriced], demo, steps: steps.length };
+}
+
+/** What starting this dub would cost (POST /api/dub?preview=1). */
+export function previewDub(input: CreateDubInput): DubPrice {
+  if (input.mode === "oneshot" && input.engine === "open") throw new Error("One-shot dubbing is a cloud service — the open engine dubs step by step");
+  const seconds = videoLength(input.video, input.duration);
+  const targets = [...new Set(input.targets)];
+  if (input.mode === "oneshot") {
+    const jobs = oneShotRequests({ model: input.model ?? "heygen-translate", video: input.video, source: input.source, targets });
+    return priceSteps(input.engine, jobs.map((j, i) => ({ key: `dub:${i}`, request: j.request })), seconds);
+  }
+  return priceSteps(input.engine, prepareSteps({ engine: input.engine, video: input.video, source: input.source, targets }), seconds);
+}
+
+/** What voicing one language would cost (POST /api/dub/[id]/voice?preview=1). */
+export function previewVoiceDub(id: string, lang: string, opts: { cues?: Cue[]; lipsync?: boolean } = {}): DubPrice {
+  const { s, steps } = planVoice(id, lang, opts);
+  return priceSteps(s.engine, steps, s.duration ?? videoLength(s.video));
+}
+
+/** Forget a dub: steps still waiting or running are stopped first (nothing more is spent); finished results stay in the Library. */
 export function deleteDubSession(id: string): boolean {
+  const s = getDubSession(id);
+  if (s) stopSteps(sessionIds(s));
   return db().prepare("DELETE FROM dub_sessions WHERE id = ?").run(id).changes > 0;
+}
+
+/** Cancel the generations among these that haven't finished. */
+export function stopSteps(ids: string[]): number {
+  let n = 0;
+  for (const gid of ids) {
+    const g = getGeneration(gid);
+    if (g && (g.status === "queued" || g.status === "running")) {
+      void cancelGeneration(gid);
+      n++;
+    }
+  }
+  return n;
 }
 
 export { DUB_FEATURE };

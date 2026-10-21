@@ -610,6 +610,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   audio: "audio",
   voiceAudio: "audio",
   audio2: "audio",
+  audios: "audio",
   prompt: "text",
 };
 
@@ -618,7 +619,7 @@ export function withPlaceholders(req: GenerationRequest): GenerationRequest {
   const slots = req.chain ?? [];
   const inputs = { ...req.inputs };
   let prompt = req.prompt;
-  for (const k of ["images", "videos"] as const) {
+  for (const k of ["images", "videos", "audios"] as const) {
     const at = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).map((s) => PLACEHOLDER[SLOT_KIND[s.slot]]);
     const first = at("first");
     const last = at("last");
@@ -626,7 +627,7 @@ export function withPlaceholders(req: GenerationRequest): GenerationRequest {
   }
   for (const s of slots) {
     if (s.slot === "prompt") prompt = prompt?.includes("{text}") ? prompt.replaceAll("{text}", PLACEHOLDER.text) : PLACEHOLDER.text;
-    else if (s.slot !== "images" && s.slot !== "videos") inputs[s.slot] = PLACEHOLDER[SLOT_KIND[s.slot]];
+    else if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios") inputs[s.slot] = PLACEHOLDER[SLOT_KIND[s.slot]];
   }
   return { ...req, prompt, inputs };
 }

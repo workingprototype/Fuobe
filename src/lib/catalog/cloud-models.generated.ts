@@ -11450,6 +11450,63 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "compose-timeline",
+    "name": "Voice timeline",
+    "vendor": "fal",
+    "family": "utility",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Place audio clips at their start times on a timeline",
+    "routes": [
+      {
+        "op": "timeline",
+        "provider": "fal",
+        "endpoint": "fal-ai/ffmpeg-api/compose",
+        "map": {
+          "prompt": false,
+          "timeline": "tracks"
+        }
+      }
+    ],
+    "options": {
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0002
+    },
+    "hidden": true
+  },
+  {
+    "id": "extract-soundtrack",
+    "name": "Extract soundtrack",
+    "vendor": "fal",
+    "family": "utility",
+    "engine": "cloud",
+    "kind": "audio",
+    "tagline": "A video's soundtrack as an audio file",
+    "routes": [
+      {
+        "op": "separate-audio",
+        "provider": "fal",
+        "endpoint": "fal-ai/workflow-utilities/extract-audio",
+        "map": {
+          "prompt": false,
+          "video": "video_url"
+        }
+      }
+    ],
+    "options": {
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0002,
+      "note": "billed by compute time"
+    },
+    "hidden": true
+  },
+  {
     "id": "elevenlabs-voice-isolation",
     "name": "ElevenLabs Voice Isolation",
     "vendor": "ElevenLabs",
