@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { AddFromLink, ProductCard, ProductDialog, UploadProductButton } from "@/components/brand/products";
-import { AD_RATIOS, MAX_ADS_PER_PRODUCT, MAX_PRODUCTS_PER_RUN, type BrandKit, type Product } from "@/lib/catalog/marketing";
+import { AD_RATIOS, MAX_ADS_PER_PRODUCT, MAX_PRODUCTS_PER_RUN, type AdRatio, type BrandKit, type Product } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useCreativeActions, useEstimate, useProductActions, useStatusFlags } from "@/components/marketing/hooks";
@@ -44,17 +44,65 @@ function Stepper({ value, onChange, label }: { value: number; onChange: (n: numb
   );
 }
 
+/** Who makes a brand's ads: Fuobe (copy + visual + browser compositing) or Higgsfield's one-shot Ads Studio. */
+export interface AdRouteChoice {
+  /** Higgsfield's route is on offer (cloud engine, Higgsfield key set). */
+  available: boolean;
+  route: "fuobe" | "higgsfield";
+  /** The one format Higgsfield renders per ad. */
+  ratio: AdRatio;
+  setRoute: (r: "fuobe" | "higgsfield") => void;
+  setRatio: (r: AdRatio) => void;
+}
+
+/**
+ * One route choice for New ads and the brand chat. It's derived from the status until the user picks,
+ * so it doesn't freeze at "Fuobe" while the status is still loading.
+ */
+export function useAdRoute(engine: "cloud" | "open"): AdRouteChoice {
+  const { higgsfield } = useStatusFlags();
+  const [picked, setPicked] = useState<"fuobe" | "higgsfield" | null>(null);
+  const [ratio, setRatio] = useState<AdRatio>("4:5");
+  const available = engine === "cloud" && higgsfield;
+  return { available, route: available ? (picked ?? "higgsfield") : "fuobe", ratio, setRoute: setPicked, setRatio };
+}
+
+/** The route radios (and Higgsfield's format), shared by New ads and a chat proposal. */
+export function RoutePicker({ choice, compact }: { choice: AdRouteChoice; compact?: boolean }) {
+  if (!choice.available) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {!compact && <span className="text-[12px] font-medium text-muted-foreground">Made by</span>}
+      <div role="radiogroup" aria-label="Who makes the ads" className="inline-flex rounded-full bg-muted p-0.5">
+        {(["higgsfield", "fuobe"] as const).map((r) => (
+          <button key={r} type="button" role="radio" aria-checked={choice.route === r} onClick={() => choice.setRoute(r)} className={cn("h-7 rounded-full px-3 text-[12px] font-medium text-muted-foreground", choice.route === r && "bg-background text-foreground shadow-soft")}>
+            {r === "higgsfield" ? (compact ? "Higgsfield" : "Higgsfield Ads Studio") : compact ? "Fuobe" : "Fuobe (your fonts, editable words)"}
+          </button>
+        ))}
+      </div>
+      {choice.route === "higgsfield" && (
+        <div role="radiogroup" aria-label="Format" className="inline-flex rounded-full bg-muted p-0.5">
+          {AD_RATIOS.map((r) => (
+            <button key={r} type="button" role="radio" aria-checked={choice.ratio === r} onClick={() => choice.setRatio(r)} className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", choice.ratio === r && "bg-background text-foreground shadow-soft")}>
+              {r}
+            </button>
+          ))}
+        </div>
+      )}
+      {choice.route === "higgsfield" && !compact && <span className="text-[12px] text-muted-foreground">One format per ad, words drawn into the picture</span>}
+    </div>
+  );
+}
+
 /** Select products (≤10) → "How many ads to create?" (≤20 each, total price first) → Create. */
-export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit; products: Product[]; engine: "cloud" | "open"; onCreated: (batchId: string) => void }) {
+export function NewAds({ brand, products, engine, choice, onCreated }: { brand: BrandKit; products: Product[]; engine: "cloud" | "open"; choice: AdRouteChoice; onCreated: (batchId: string) => void }) {
   const { createBatch } = useCreativeActions(brand.id);
   const { remove } = useProductActions();
-  const { higgsfield } = useStatusFlags();
   const [selected, setSelected] = useState<string[]>(() => products.slice(0, MAX_PRODUCTS_PER_RUN).map((p) => p.id));
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState<Product | null>(null);
-  const [route, setRoute] = useState<"fuobe" | "higgsfield">(higgsfield && engine === "cloud" ? "higgsfield" : "fuobe");
-  const [ratio, setRatio] = useState<string>("4:5");
-  const effectiveRoute = engine === "open" || !higgsfield ? "fuobe" : route;
+  const effectiveRoute = choice.route;
+  const ratio = choice.ratio;
   const items = selected.filter((id) => products.some((p) => p.id === id)).map((productId) => ({ productId, count: counts[productId] ?? 4 }));
   const total = items.reduce((n, i) => n + i.count, 0);
   const body = useMemo(() => (items.length ? { brandId: brand.id, engine, route: effectiveRoute, items, ratio: effectiveRoute === "higgsfield" ? ratio : undefined } : null), [brand.id, engine, effectiveRoute, items, ratio]);
@@ -114,7 +162,7 @@ export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit
       {items.length > 0 && (
         <section className="rounded-2xl border bg-background p-4 sm:p-5">
           <h3 className="text-[16px] font-semibold">How many ads to create?</h3>
-          <p className="text-[13px] text-muted-foreground">Each ad comes in 1:1, 4:5 and 9:16, with a headline, copy and a call to action.</p>
+          <p className="text-[13px] text-muted-foreground">{effectiveRoute === "higgsfield" ? `Each ad comes in ${ratio}, made in one go by Higgsfield's Ads Studio.` : "Each ad comes in 1:1, 4:5 and 9:16, with a headline, copy and a call to action."}</p>
           <ul className="mt-4 divide-y">
             {items.map((i) => {
               const p = products.find((x) => x.id === i.productId)!;
@@ -130,25 +178,9 @@ export function NewAds({ brand, products, engine, onCreated }: { brand: BrandKit
               );
             })}
           </ul>
-          {engine === "cloud" && higgsfield && (
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="text-[12px] font-medium text-muted-foreground">Made by</span>
-              <div role="radiogroup" aria-label="Route" className="inline-flex rounded-full bg-muted p-0.5">
-                {(["higgsfield", "fuobe"] as const).map((r) => (
-                  <button key={r} role="radio" aria-checked={route === r} onClick={() => setRoute(r)} className={cn("h-7 rounded-full px-3 text-[12px] font-medium text-muted-foreground", route === r && "bg-background text-foreground shadow-soft")}>
-                    {r === "higgsfield" ? "Higgsfield Ads Studio" : "Fuobe (your fonts, editable words)"}
-                  </button>
-                ))}
-              </div>
-              {route === "higgsfield" && (
-                <div role="radiogroup" aria-label="Format" className="inline-flex rounded-full bg-muted p-0.5">
-                  {AD_RATIOS.map((r) => (
-                    <button key={r} role="radio" aria-checked={ratio === r} onClick={() => setRatio(r)} className={cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", ratio === r && "bg-background text-foreground shadow-soft")}>
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              )}
+          {choice.available && (
+            <div className="mt-4">
+              <RoutePicker choice={choice} />
             </div>
           )}
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/60 px-4 py-3">

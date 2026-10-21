@@ -128,6 +128,16 @@ export function drawPlan(ctx: CanvasRenderingContext2D, plan: AdPlan, image: Can
   ctx.restore();
 }
 
+/** Fit a w×h picture inside a W×H frame without cropping, centred (a ±1 px difference fills the frame). */
+export function containRect(w: number, h: number, W: number, H: number): { x: number; y: number; w: number; h: number } {
+  const k = Math.min(W / w, H / h);
+  let dw = w * k;
+  let dh = h * k;
+  if (Math.abs(dw - W) <= 1) dw = W;
+  if (Math.abs(dh - H) <= 1) dh = H;
+  return { x: (W - dw) / 2, y: (H - dh) / 2, w: dw, h: dh };
+}
+
 export interface RenderInput {
   ratio: AdRatio | string;
   layout: AdLayout;
@@ -149,10 +159,13 @@ export async function renderAd(canvas: HTMLCanvasElement, input: RenderInput, sc
   if (!ctx) return;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   if (input.baked) {
-    const plan = planAd({ ratio: input.ratio, layout: "overlay", content: { headline: "" }, theme: input.theme, image: img ? { w: img.naturalWidth, h: img.naturalHeight } : null, measure: measureText });
+    // The words are in the picture: show all of it (letterboxed in another format), never crop it.
     ctx.fillStyle = "#111";
     ctx.fillRect(0, 0, w, h);
-    if (img && plan.image) ctx.drawImage(img, plan.image.sx, plan.image.sy, plan.image.sw, plan.image.sh, 0, 0, w, h);
+    if (img?.naturalWidth && img.naturalHeight) {
+      const r = containRect(img.naturalWidth, img.naturalHeight, w, h);
+      ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    }
     return;
   }
   const plan = planAd({

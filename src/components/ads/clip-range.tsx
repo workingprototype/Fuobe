@@ -2,11 +2,54 @@
 
 import { Play, Scissors } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { clampClip, initialClip, MULTIPLIER, type ClipRange as Range } from "@/lib/catalog/marketing";
+import { clampClip, commitClipTime, initialClip, MULTIPLIER, parseClipTime, type ClipRange as Range } from "@/lib/catalog/marketing";
 import { cn } from "@/lib/utils";
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const fmt = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+
+/**
+ * An in/out time: what's typed stays as typed until Enter or leaving the field (then the range is
+ * clamped), so "20" isn't cut to the 4 s minimum at its first digit. Arrow keys step 0.1 s at once;
+ * Escape goes back to the current value.
+ */
+function TimeField({ label, value, max, onCommit }: { label: string; value: number; max: number; onCommit: (text: string) => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const invalid = text != null && parseClipTime(text) == null;
+  const commit = () => {
+    if (text == null) return;
+    setText(null);
+    onCommit(text);
+  };
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{label}</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={text ?? String(value)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape" && text != null) {
+            e.preventDefault();
+            setText(null);
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const base = parseClipTime(text ?? String(value)) ?? value;
+            setText(null);
+            onCommit(String(Math.min(max, Math.max(0, r1(base + (e.key === "ArrowUp" ? 0.1 : -0.1))))));
+          }
+        }}
+        aria-invalid={invalid || undefined}
+        className={cn("h-8 w-20 rounded-lg border bg-background px-2 font-mono text-[13px] tabular-nums outline-none focus:border-primary", invalid && "border-destructive")}
+      />
+    </label>
+  );
+}
 
 /**
  * A plain in/out picker for the reference ad: the player, a bar showing the kept part, two time
@@ -71,21 +114,15 @@ export function ClipRange({ src, duration, value, onChange, onDuration, onUnplay
           <div className="flex flex-wrap items-end gap-2">
             {(["start", "end"] as const).map((k) => (
               <div key={k} className="flex items-end gap-1">
-                <label className="block">
-                  <span className="mb-1 block text-[11px] font-medium text-muted-foreground">{k === "start" ? "In (s)" : "Out (s)"}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={r1(d)}
-                    step={0.1}
-                    value={range[k]}
-                    onChange={(e) => {
-                      const n = parseFloat(e.target.value);
-                      if (Number.isFinite(n)) set(k, n);
-                    }}
-                    className="h-8 w-20 rounded-lg border bg-background px-2 font-mono text-[13px] tabular-nums outline-none focus:border-primary"
-                  />
-                </label>
+                <TimeField
+                  label={k === "start" ? "In (s)" : "Out (s)"}
+                  value={range[k]}
+                  max={r1(d)}
+                  onCommit={(text) => {
+                    const next = commitClipTime(text, range, d, k);
+                    if (next) onChange(next);
+                  }}
+                />
                 <button type="button" onClick={() => here(k)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-secondary px-2 text-[12px] font-medium hover:bg-accent" title={`Set the ${k === "start" ? "in" : "out"} point at the playhead`}>
                   <Scissors className="size-3" /> {k === "start" ? "Set in here" : "Set out here"}
                 </button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, ChevronDown, Image as ImageIcon, LayoutTemplate, Loader2, SlidersHorizontal, Type, Video, X } from "lucide-react";
+import { ArrowUp, ChevronDown, Globe, Image as ImageIcon, LayoutTemplate, Loader2, SlidersHorizontal, Type, Video, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { BrandChip } from "@/components/brand/brand-dialog";
 import { inputCls } from "@/components/brand/fields";
-import { FORMATS, formatModels, MAX_PROMPT, TEMPLATE_INDEX, type FormatId, type MarketingCategory, type MarketingTemplate, type RunEstimate } from "@/lib/catalog/marketing";
+import { FORMATS, formatModels, looksLikeWebsite, MAX_PROMPT, openingAspect, TEMPLATE_INDEX, type FormatId, type MarketingCategory, type MarketingTemplate, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useBrands, useEstimate, useStatusFlags } from "./hooks";
@@ -43,9 +43,11 @@ interface Draft {
   modelId?: string;
   voice?: string;
   voiceSample: SlotValue | null;
+  /** SaaS motion: a website or social link to make the video about. */
+  website: string;
 }
 
-const BLANK: Draft = { format: "product-standalone", templateId: null, product: null, avatar: null, reference: null, hookId: null, settingId: null, prompt: "", headline: "", cta: "", aspectRatio: "3:4", batch: 1, voiceSample: null };
+const BLANK: Draft = { format: "product-standalone", templateId: null, product: null, avatar: null, reference: null, hookId: null, settingId: null, prompt: "", headline: "", cta: "", aspectRatio: "3:4", batch: 1, voiceSample: null, website: "" };
 
 const BRAND_KEY = "fuobe:marketing-brand";
 const brandListeners = new Set<() => void>();
@@ -83,7 +85,7 @@ function withTemplate(d: Draft, t: MarketingTemplate | null, format?: FormatId):
     ...d,
     format: f.id,
     templateId: t?.id ?? null,
-    aspectRatio: f.aspectRatios.includes(t?.aspect ?? d.aspectRatio) ? (t?.aspect ?? d.aspectRatio) : f.defaultAspect,
+    aspectRatio: openingAspect(d, t, f.id),
     duration: f.durations ? (t?.duration ?? f.durations.default) : undefined,
     batch: Math.min(d.batch, f.batch),
     hookId: f.hookAndSetting ? (t?.hook ?? null) : null,
@@ -129,6 +131,7 @@ function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draf
         {f.durations && (
           <div>
             <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Length · {draft.duration}s</p>
+            {f.pipeline === "ugc" && <p className="-mt-1 mb-1.5 text-[11px] text-subtle-foreground">The whole video: the script is sized to what&apos;s left after the hook and the product close-up</p>}
             <input type="range" min={f.durations.min} max={f.durations.max} step={1} value={draft.duration ?? f.durations.default} onChange={(e) => set({ duration: Number(e.target.value) })} aria-label="Length in seconds" className="w-full accent-[var(--primary)]" />
             <p className="mt-0.5 flex justify-between text-[11px] text-subtle-foreground">
               <span>{f.durations.min}s</span>
@@ -190,6 +193,33 @@ function TextPanel({ draft, set, template }: { draft: Draft; set: (p: Partial<Dr
           <input value={draft.cta} onChange={(e) => set({ cta: e.target.value })} maxLength={40} placeholder={template?.cta ?? "e.g. Shop now"} className={inputCls} />
         </label>
       </div>
+    </ResponsivePanel>
+  );
+}
+
+/** SaaS motion's "Website or social link" (one of prompt / product / website). */
+function WebsitePanel({ draft, set }: { draft: Draft; set: (p: Partial<Draft>) => void }) {
+  const [open, setOpen] = useState(false);
+  const v = draft.website.trim();
+  const bad = !!v && !looksLikeWebsite(v);
+  return (
+    <ResponsivePanel
+      open={open}
+      onOpenChange={setOpen}
+      title="Website or social link"
+      description="What the video is about when there's no product photo: your site or a social profile."
+      trigger={
+        <button type="button" className={cn(chipBase, v && !bad ? chipOn : chipIdle, "max-w-44")} aria-label={v ? `Website: ${v}` : "Add a website or social link"}>
+          <Globe className="size-3.5" />
+          <span className="truncate">{v ? v.replace(/^https?:\/\//i, "") : "Website"}</span>
+        </button>
+      }
+    >
+      <label className="block space-y-1.5">
+        <span className="text-[12px] font-medium text-muted-foreground">Link</span>
+        <input value={draft.website} onChange={(e) => set({ website: e.target.value })} maxLength={300} inputMode="url" placeholder="www.example.com" aria-invalid={bad || undefined} className={cn(inputCls, bad && "border-destructive")} />
+        {bad && <span className="block text-[11px] text-destructive">Enter a valid website URL</span>}
+      </label>
     </ResponsivePanel>
   );
 }
@@ -285,11 +315,13 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
       batch: draft.batch,
       voice: draft.voice,
       voiceSample: draft.voiceSample?.ref,
+      website: f.oneOf?.includes("website") && looksLikeWebsite(draft.website) ? draft.website.trim() : undefined,
     }),
     [draft, engine, f, brandId],
   );
   const est = useEstimate<RunEstimate>("/api/marketing/estimate", draft.avatar?.uploading || draft.voiceSample?.uploading ? null : body);
-  const blocker = draft.product === null && f.product === "required" ? "Attach a product to generate" : est.data?.blocker;
+  const badSite = !!f.oneOf?.includes("website") && !!draft.website.trim() && !looksLikeWebsite(draft.website);
+  const blocker = draft.product === null && f.product === "required" ? "Attach a product to generate" : badSite ? "Enter a valid website URL" : est.data?.blocker;
   const cost = est.data && !est.data.blocker ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "" : est.data.costUsd === 0 ? "Free" : `≈ ${formatCost(est.data.costUsd)}`) : "";
 
   const generate = async () => {
@@ -425,6 +457,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
               {f.hookAndSetting && <SettingPicker value={draft.settingId} onChange={(s) => set({ settingId: s })} />}
               {f.pipeline === "ugc" && <VoiceControl engine={engine} models={models} voice={draft.voice} sample={draft.voiceSample} onVoice={(v) => set({ voice: v })} onSample={(s) => set({ voiceSample: s })} />}
               {f.text && <TextPanel draft={draft} set={set} template={template} />}
+              {f.oneOf?.includes("website") && <WebsitePanel draft={draft} set={set} />}
               {f.brandKit && <BrandChip value={brandId} onChange={pickBrand} />}
               <SettingsPanel draft={draft} set={set} models={models} higgsfield={higgsfield} engine={engine} />
             </div>
@@ -444,8 +477,14 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
               <TooltipContent>{blocker ?? (template ? `Recreate template${cost ? ` · ${cost}` : ""}` : `Generate${cost ? ` · ${cost}` : ""}`)}</TooltipContent>
             </Tooltip>
           </div>
-          {est.data?.notes.length && !blocker ? <p className="truncate px-2 pt-1 text-[11px] text-muted-foreground">{est.data.notes[0]}</p> : null}
-          {blocker && <p className="px-2 pt-1 text-[11px] text-muted-foreground sm:hidden">{blocker}</p>}
+          {est.data?.notes.length && !blocker ? <p className="hidden truncate px-2 pt-1 text-[11px] text-muted-foreground sm:block">{est.data.notes[0]}</p> : null}
+          {/* Phones have no hover: the price (and what blocks Generate) sit under the composer. */}
+          {(blocker || cost || est.data?.notes.length) && (
+            <p className="flex min-w-0 items-baseline justify-between gap-2 px-2 pt-1 text-[11px] text-muted-foreground sm:hidden" aria-live="polite">
+              <span className="min-w-0 truncate">{blocker ?? est.data?.notes[0] ?? ""}</span>
+              {!blocker && cost && <span className="shrink-0 font-mono tabular-nums">{cost}</span>}
+            </p>
+          )}
         </div>
       </div>
     </div>

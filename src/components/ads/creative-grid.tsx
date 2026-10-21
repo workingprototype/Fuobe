@@ -18,11 +18,18 @@ import { zipFiles } from "./zip";
 
 const layoutOf = (c: AdCreative, ratio: string) => (c.layout as AdLayout | null) ?? defaultLayout(ratio, c.position);
 
+/** The formats a creative exists in: a baked (Higgsfield) ad only in the one it was rendered in. */
+export const formatsOf = (c: Pick<AdCreative, "baked" | "ratio">): AdRatio[] => (c.baked ? [c.ratio ?? "4:5"] : [...AD_RATIOS]);
+
+/** The format to export a creative in when the grid shows `ratio`. */
+const exportRatio = (c: AdCreative, ratio: AdRatio): AdRatio => (formatsOf(c).includes(ratio) ? ratio : formatsOf(c)[0]);
+
 function CreativeCard({ c, brand, ratio, product, n, onEdit }: { c: AdCreative; brand: BrandKit; ratio: AdRatio; product?: Product; n: number; onEdit: () => void }) {
   const { retry, remove } = useCreativeActions(brand.id);
   const ready = c.status === "ready" && !!c.image;
   const failed = c.status === "failed" || c.status === "canceled";
   const angle = AD_ANGLES.find((a) => a.id === c.angle)?.name;
+  const own = exportRatio(c, ratio);
   return (
     <article className="group/ad min-w-0 animate-fade-up">
       <div className="relative">
@@ -33,6 +40,7 @@ function CreativeCard({ c, brand, ratio, product, n, onEdit }: { c: AdCreative; 
         ) : (
           <div className="relative overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio.replace(":", " / ") }} />
         )}
+        {ready && own !== ratio && <span className="pointer-events-none absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">{own} only</span>}
         {!ready && (
           <div className={cn("absolute inset-0 flex flex-col justify-end rounded-xl p-3", failed ? "bg-background/85" : "bg-gradient-to-t from-background/90 via-background/30 to-transparent")}>
             {!failed && <div className="skeleton-sweep absolute inset-0 animate-skeleton rounded-xl" />}
@@ -70,12 +78,14 @@ function CreativeCard({ c, brand, ratio, product, n, onEdit }: { c: AdCreative; 
                 <DropdownMenuItem onClick={onEdit}>
                   <Pencil /> Edit words and layout
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void downloadFormats({ brand: brand.name, product: product?.name, n }, [renderInput({ ratio, layout: layoutOf(c, ratio), text: c, brand, image: c.image, baked: c.baked })])}>
-                  <Download /> Download {ratio}
+                <DropdownMenuItem onClick={() => void downloadFormats({ brand: brand.name, product: product?.name, n }, [renderInput({ ratio: own, layout: layoutOf(c, own), text: c, brand, image: c.image, baked: c.baked })])}>
+                  <Download /> Download {own}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void downloadFormats({ brand: brand.name, product: product?.name, n }, AD_RATIOS.map((r) => renderInput({ ratio: r, layout: layoutOf(c, r), text: c, brand, image: c.image, baked: c.baked })))}>
-                  <FolderDown /> Download all formats
-                </DropdownMenuItem>
+                {formatsOf(c).length > 1 && (
+                  <DropdownMenuItem onClick={() => void downloadFormats({ brand: brand.name, product: product?.name, n }, formatsOf(c).map((r) => renderInput({ ratio: r, layout: layoutOf(c, r), text: c, brand, image: c.image, baked: c.baked })))}>
+                    <FolderDown /> Download all formats
+                  </DropdownMenuItem>
+                )}
               </>
             )}
             {failed && (
@@ -107,7 +117,13 @@ export function CreativeGrid({ brand, products, creatives }: { brand: BrandKit; 
   const shown = creatives.filter((c) => filter === "all" || c.productId === filter);
   const ready = shown.filter((c) => c.status === "ready" && c.image);
   const pending = creatives.filter((c) => c.status === "writing" || c.status === "queued" || c.status === "rendering").length;
-  const number = new Map(creatives.map((c, i) => [c.id, creatives.length - i]));
+  // Ads are numbered in the order they were made: oldest batch first, and in a batch the order asked for.
+  const number = useMemo(() => {
+    const m = new Map<string, number>();
+    let n = 0;
+    for (const b of [...new Set(creatives.map((c) => c.batchId))].reverse()) for (const c of creatives) if (c.batchId === b) m.set(c.id, ++n);
+    return m;
+  }, [creatives]);
   const groups = split ? products.filter((p) => shown.some((c) => c.productId === p.id)).map((p) => ({ key: p.id, title: p.name, items: shown.filter((c) => c.productId === p.id) })) : [{ key: "all", title: "", items: shown }];
 
   const downloadAll = async () => {
@@ -117,8 +133,10 @@ export function CreativeGrid({ brand, products, creatives }: { brand: BrandKit; 
     try {
       const files = [];
       for (const c of ready) {
-        const blob = await exportPng(renderInput({ ratio, layout: layoutOf(c, ratio), text: c, brand, image: c.image, baked: c.baked }));
-        files.push({ name: exportName(brand.name, byId.get(c.productId ?? "")?.name, ratio, number.get(c.id) ?? 0), data: new Uint8Array(await blob.arrayBuffer()) });
+        // A baked ad goes in the one format it was made in.
+        const r = exportRatio(c, ratio);
+        const blob = await exportPng(renderInput({ ratio: r, layout: layoutOf(c, r), text: c, brand, image: c.image, baked: c.baked }));
+        files.push({ name: exportName(brand.name, byId.get(c.productId ?? "")?.name, r, number.get(c.id) ?? 0), data: new Uint8Array(await blob.arrayBuffer()) });
       }
       downloadBlob(new Blob([zipFiles(files) as BlobPart], { type: "application/zip" }), `${exportName(brand.name, undefined, ratio, ready.length).replace(/\.png$/, "")}-ads.zip`);
       toast.success("Downloaded", { id, duration: 1500 });
@@ -177,7 +195,7 @@ export function CreativeGrid({ brand, products, creatives }: { brand: BrandKit; 
           title={`${byId.get(editing.productId ?? "")?.name ?? brand.name} · ${AD_ANGLES.find((a) => a.id === editing.angle)?.name ?? "Ad"}`}
           image={editing.image}
           baked={editing.baked}
-          ratios={[ratio, ...AD_RATIOS.filter((r) => r !== ratio)]}
+          ratios={editing.baked ? formatsOf(editing) : [ratio, ...AD_RATIOS.filter((r) => r !== ratio)]}
           initial={{ headline: editing.headline, body: editing.body, cta: editing.cta, layout: layoutOf(editing, ratio) }}
           brand={brand}
           productName={byId.get(editing.productId ?? "")?.name}

@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useGenerationEvents, useStatus } from "@/lib/api";
 import type { AdCreative, BrandKit, BrandKitFields, MarketingRun, Product, RunEstimate, RunFeature } from "@/lib/catalog/marketing";
@@ -110,12 +110,19 @@ export function useProductActions() {
     update: useMutation({ mutationFn: ({ id, ...p }: ProductInput & { id: string }) => send<Product>(`/api/products/${id}`, "PATCH", p), onSuccess: done }),
     remove: useMutation({ mutationFn: (id: string) => send<void>(`/api/products/${id}`, "DELETE"), onSuccess: done }),
     read: useMutation({
+      mutationKey: PRODUCT_READ,
       mutationFn: (b: { url: string; brandId?: string | null; limit?: number; withBrand?: boolean }) =>
-        send<{ products: Product[]; found: number; duplicate?: Product; message?: string; brand: { name?: string; logo?: string; colors: string[]; fonts: { heading?: string; body?: string } } }>("/api/products/read", "POST", b),
+        send<{ products: Product[]; found: number; duplicate?: Product; message?: string; brandId?: string; brand: { name?: string; logo?: string; colors: string[]; fonts: { heading?: string; body?: string } } }>("/api/products/read", "POST", b),
       onSuccess: done,
     }),
   };
 }
+
+/** The key of "read a product link" mutations, so a page can show progress for a read started elsewhere on it. */
+export const PRODUCT_READ = ["product-read"] as const;
+
+/** A product link is being read somewhere on the page (Click to Ad's "Building your product kit"). */
+export const useReadingProduct = () => useIsMutating({ mutationKey: PRODUCT_READ }) > 0;
 
 // ---------------------------------------------------------------------------
 // Runs (Marketing Studio, Click to Ad, Ad Multiplier)
@@ -265,7 +272,7 @@ export function useBrandChat(brandId: string) {
       onError: () => void qc.invalidateQueries({ queryKey: key }),
     }),
     confirm: useMutation({
-      mutationFn: (b: { messageId: string; engine: "cloud" | "open"; route?: "fuobe" | "higgsfield" }) => send<{ batchId: string; messages: ChatMessage[] }>(`/api/brands/${brandId}/chat/confirm`, "POST", b),
+      mutationFn: (b: { messageId: string; engine: "cloud" | "open"; route?: "fuobe" | "higgsfield"; ratio?: string }) => send<{ batchId: string; messages: ChatMessage[] }>(`/api/brands/${brandId}/chat/confirm`, "POST", b),
       onSuccess: (r) => {
         set(r.messages);
         void qc.invalidateQueries({ queryKey: ["ads", brandId] });

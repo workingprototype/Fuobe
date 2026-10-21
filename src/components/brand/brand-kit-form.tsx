@@ -93,7 +93,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
-function LogoField({ value, onChange }: { value?: string; onChange: (v?: string) => void }) {
+export function LogoField({ value, onChange }: { value?: string; onChange: (v?: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   return (

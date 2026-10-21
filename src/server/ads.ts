@@ -405,6 +405,7 @@ function toCreative(r: CreativeRow): AdCreative {
     generationId: r.generation_id,
     image: s.image,
     baked: meta.route === "higgsfield",
+    ...(meta.route === "higgsfield" && { ratio: (AD_RATIOS as readonly string[]).includes(meta.ratio ?? "") ? (meta.ratio as AdCreative["ratio"]) : "4:5" }),
     layout: r.layout,
     engine: meta.engine,
     modelId: meta.modelId,
@@ -663,12 +664,12 @@ export async function chat(brandId: string, text: string): Promise<ChatMessage[]
 }
 
 /** The user said yes to a proposal: run it and remember the batch on the message. */
-export function confirmProposal(brandId: string, messageId: string, engine: Engine, route?: "fuobe" | "higgsfield"): { batchId: string; run: Promise<void>; chat: ChatMessage[] } {
+export function confirmProposal(brandId: string, messageId: string, engine: Engine, route?: "fuobe" | "higgsfield", ratio?: BatchInput["ratio"]): { batchId: string; run: Promise<void>; chat: ChatMessage[] } {
   const history = getChat(brandId);
   const msg = history.find((m) => m.id === messageId);
   if (!msg?.proposal) throw new AdsError("That suggestion is no longer available");
   if (msg.batchId) throw new AdsError("Those ads are already on their way");
-  const r = createBatch({ brandId, engine, route, items: msg.proposal.items, direction: msg.proposal.direction });
+  const r = createBatch({ brandId, engine, route, items: msg.proposal.items, direction: msg.proposal.direction, ratio });
   const next = history.map((m) => (m.id === messageId ? { ...m, batchId: r.batchId } : m));
   saveChat(brandId, next);
   return { batchId: r.batchId, run: r.run, chat: next };

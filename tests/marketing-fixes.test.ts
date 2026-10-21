@@ -22,6 +22,8 @@ const { saveFile } = await import("@/server/storage");
 const { prepareWorkflow, loadManifest } = await import("@/server/providers/comfyui");
 const cat = await import("@/lib/catalog/marketing");
 const { getModel } = await import("@/lib/catalog");
+const mention = await import("@/components/ads/mention");
+const render = await import("@/components/ads/render");
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(4000, 7)]);
 const upload = (name = "p.png") => saveFile({ data: PNG, contentType: "image/png", name, source: "upload" }).url;
@@ -297,6 +299,99 @@ describe("chat directions", () => {
     expect(ads.offlineProposal("Make 2 ads for @Nght with a holiday theme", products)).toEqual({ count: 2, productIds: [], direction: "with a holiday theme" });
     expect(ads.offlineProposal("3 bold ads of @Day Cream and @Night Serum", products)?.direction).toBe("bold");
     expect(ads.offlineProposal("Make 4 ads for @Night Serum with a holiday theme", products)?.direction).toBe("with a holiday theme");
+  });
+});
+
+describe("@product mentions in the chat box", () => {
+  const products = [
+    { id: "a", name: "Night Serum" },
+    { id: "b", name: "Day Cream" },
+    { id: "c", name: "Serum Duo" },
+  ];
+  it("find the '@query' being typed and filter by it", () => {
+    expect(mention.mentionQuery("Make five playful ads for @", 27)).toEqual({ start: 26, query: "" });
+    expect(mention.mentionQuery("ads for @Ser", 12)).toEqual({ start: 8, query: "Ser" });
+    expect(mention.mentionQuery("mail me@home", 12)).toBeNull(); // not after a space
+    expect(mention.mentionQuery("for @Night Serum now", 20)).toBeNull();
+    expect(mention.mentionMatches(products, "ser").map((p) => p.id)).toEqual(["c", "a"]);
+    expect(mention.mentionMatches(products, "")).toHaveLength(3);
+  });
+  it("replace the typed '@' (and query) with the product instead of appending", () => {
+    const t = "Make five playful ads for @";
+    expect(mention.insertMention(t, t.length, "Night Serum")).toEqual({ text: "Make five playful ads for @Night Serum ", caret: 39 });
+    expect(mention.insertMention("ads for @Ni and more", 11, "Night Serum").text).toBe("ads for @Night Serum and more");
+    // From the button, at the caret.
+    expect(mention.insertMention("Make ads", 8, "Day Cream").text).toBe("Make ads @Day Cream ");
+    // The result reads back cleanly offline.
+    const msg = mention.insertMention(t, t.length, "Night Serum").text;
+    expect(ads.offlineProposal(msg, products)).toEqual({ count: 5, productIds: ["a"], direction: "playful" });
+  });
+});
+
+describe("in/out times in the Ad Multiplier", () => {
+  it("don't move while typed; the range is clamped once the time is committed", () => {
+    const range = { start: 12, end: 16 };
+    // Typing "20" into Out: nothing is applied per keystroke, then 12–20 on Enter / blur.
+    expect(cat.commitClipTime("20", range, 60, "end")).toEqual({ start: 12, end: 20 });
+    expect(cat.commitClipTime("35", range, 60, "end")).toEqual({ start: 12, end: 35 });
+    // Past the 30 s limit, the other point follows.
+    expect(cat.commitClipTime("50", range, 60, "end")).toEqual({ start: 20, end: 50 });
+    expect(cat.commitClipTime("0:45.5", { start: 20, end: 30 }, 60, "end")).toEqual({ start: 20, end: 45.5 });
+    expect(cat.commitClipTime("abc", range, 60, "end")).toBeNull();
+    expect(cat.parseClipTime("1:02")).toBe(62);
+    expect(cat.parseClipTime("12,5")).toBe(12.5);
+    expect(cat.parseClipTime(".5")).toBe(0.5);
+    expect(cat.parseClipTime("")).toBeNull();
+  });
+});
+
+describe("composer details", () => {
+  it("a template opens in its own shape, else the format's when the format changes", () => {
+    // Hero Headline (Ads) after a 3:4 product shot opens 4:5, the Ads default.
+    expect(cat.openingAspect({ format: "product-standalone", aspectRatio: "3:4" }, cat.TEMPLATE_INDEX.get("ad-hero-headline"), "ads")).toBe("4:5");
+    // A talking head after it opens 9:16.
+    expect(cat.openingAspect({ format: "ads", aspectRatio: "3:4" }, cat.TEMPLATE_INDEX.get("ugc-honest-review"), "ugc-talking")).toBe("9:16");
+    // Same format: the ratio in use stays.
+    expect(cat.openingAspect({ format: "ads", aspectRatio: "1:1" }, cat.TEMPLATE_INDEX.get("ad-offer-burst"), "ads")).toBe("1:1");
+  });
+  it("checks a website or social link", () => {
+    expect(cat.looksLikeWebsite("www.example.com")).toBe(true);
+    expect(cat.looksLikeWebsite("https://instagram.com/acme")).toBe(true);
+    expect(cat.looksLikeWebsite("acme")).toBe(false);
+    expect(cat.looksLikeWebsite("my site.com")).toBe(false);
+  });
+  it("SaaS motion uses the brand kit's website when no link or product is given", () => {
+    const b = { ...cat.emptyKit("Northbound"), id: "b1", website: "https://northbound.example/" } as import("@/lib/catalog/marketing").BrandKit;
+    const plan = mk.planMarketing({ engine: "cloud", format: "motion-saas" }, { brand: b, higgsfield: false });
+    expect(plan.steps[0].request.prompt).toMatch(/For the product at https:\/\/northbound\.example\//);
+    expect(() => mk.planMarketing({ engine: "cloud", format: "motion-saas" }, { higgsfield: false })).toThrow(/website/);
+  });
+  it("open posters and ads ask for room where the words go", () => {
+    const ad = mk.planMarketing({ engine: "open", format: "ads", templateId: "ad-hero-headline", productImages: [upload()] }, { higgsfield: false });
+    expect(cat.overlayLayout("ads")).toBe("overlay");
+    expect(ad.steps[0].request.prompt).toMatch(/lower third/);
+    const poster = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert" }, { higgsfield: false });
+    expect(cat.overlayLayout("poster")).toBe("frame");
+    expect(poster.steps[0].request.prompt).not.toMatch(/third/);
+  });
+  it("keeps the browser's own composite on the run once (a second automatic one returns it)", () => {
+    const plan = mk.planMarketing({ engine: "open", format: "poster", prompt: "A summer concert", headline: "Live at dusk" }, { higgsfield: false });
+    const run = mk.launch(plan);
+    expect(run.meta.overlay).toEqual({ headline: "Live at dusk" });
+    const first = mk.saveRunComposite(run.id, { url: upload("c1.png"), ratio: "3:4", text: "Live at dusk", auto: true });
+    const again = mk.saveRunComposite(run.id, { url: upload("c2.png"), ratio: "3:4", text: "Live at dusk", auto: true });
+    expect(again.id).toBe(first.id);
+    expect(mk.getRun(run.id)!.meta.composed).toEqual({ id: first.id, url: first.outputs[0].url });
+    // An edit from "Edit text" replaces it and keeps the new words.
+    const edited = mk.saveRunComposite(run.id, { url: upload("c3.png"), ratio: "3:4", text: "Tonight", overlay: { headline: "Tonight" } });
+    expect(edited.id).not.toBe(first.id);
+    expect(mk.getRun(run.id)!.meta).toMatchObject({ composed: { id: edited.id }, overlay: { headline: "Tonight" } });
+  });
+
+  it("baked ads are letterboxed, never cropped", () => {
+    expect(render.containRect(1080, 1350, 1080, 1080)).toEqual({ x: 108, y: 0, w: 864, h: 1080 });
+    expect(render.containRect(1080, 1350, 1080, 1350)).toEqual({ x: 0, y: 0, w: 1080, h: 1350 });
+    expect(render.containRect(1080, 1351, 1080, 1350)).toMatchObject({ w: 1080, h: 1350 });
   });
 });
 

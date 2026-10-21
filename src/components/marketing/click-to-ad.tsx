@@ -5,14 +5,15 @@ import { Check, Clapperboard, Loader2, MousePointerClick, PenLine, RefreshCw, Sp
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { areaCls, inputCls } from "@/components/brand/fields";
+import { LogoField } from "@/components/brand/brand-kit-form";
+import { areaCls, ColorList, inputCls } from "@/components/brand/fields";
 import { ImageList } from "@/components/brand/image-list";
 import { AddFromLink, priceText, ProductThumb, UploadProductButton } from "@/components/brand/products";
 import type { SlotValue } from "@/components/studio/media-slot";
-import { AD_STYLES, KIT_LABELS, type MarketingRun, type Product, type RunEstimate } from "@/lib/catalog/marketing";
+import { AD_STYLES, KIT_LABELS, type BrandKit, type MarketingRun, type Product, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { addRuns, send, useBrand, useEstimate, useProductActions, useProducts } from "./hooks";
+import { addRuns, send, useBrand, useEstimate, useProductActions, useProducts, useReadingProduct, useUpdateBrand } from "./hooks";
 import type { ModelInfo } from "./model-info";
 import { AvatarSlot, VoiceControl } from "./pickers";
 import { RunsList } from "./runs";
@@ -58,12 +59,63 @@ function KitProgress() {
 
 const styleScene = (presenter: boolean, dark?: boolean) => (presenter ? "selfie" : dark ? "noir" : "orbit");
 
+/**
+ * The product kit's logo and colours, kept in the product's brand kit (made from the page when the link
+ * was read) so they stay after a reload and reach the video prompts. Edits save to that kit.
+ */
+function KitBrand({ brand }: { brand: BrandKit }) {
+  const update = useUpdateBrand(brand.id);
+  const [colors, setColors] = useState(brand.colors);
+  const [shown, setShown] = useState(brand.colors);
+  if (shown !== brand.colors) {
+    setShown(brand.colors);
+    setColors(brand.colors);
+  }
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<(() => void) | null>(null);
+  const save = (patch: Partial<Pick<BrandKit, "logo" | "colors">>) => update.mutate(patch, { onError: (e) => toast.error((e as Error).message) });
+  // Colours typed just before leaving the step still get saved.
+  useEffect(() => {
+    const t = timer;
+    const p = pending;
+    return () => {
+      if (t.current) clearTimeout(t.current);
+      p.current?.();
+    };
+  }, []);
+  return (
+    <div className="space-y-2.5 rounded-xl border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[12px] font-medium text-muted-foreground">Logo and colours</p>
+        <span className="text-[11px] text-subtle-foreground">{update.isPending ? "Saving…" : `In the ${brand.name} brand kit`}</span>
+      </div>
+      <LogoField value={brand.logo} onChange={(v) => save({ logo: v ?? "" })} />
+      <ColorList
+        value={colors}
+        max={6}
+        onChange={(v) => {
+          setColors(v);
+          if (timer.current) clearTimeout(timer.current);
+          pending.current = () => save({ colors: v });
+          timer.current = setTimeout(() => {
+            pending.current?.();
+            pending.current = null;
+          }, 500);
+        }}
+      />
+      <p className="text-[11px] text-muted-foreground">Used in the video&apos;s look. Ads Studio and Marketing Studio use this kit too.</p>
+    </div>
+  );
+}
+
 /** Click to Ad: product link → product kit → style → a 9:16 ad of up to 12 s with voiceover and captions. */
 export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
   const products = useProducts();
-  const { update, read } = useProductActions();
+  const { update } = useProductActions();
+  // The link is read by AddFromLink's own mutation: follow it by its key.
+  const reading = useReadingProduct();
   const [productId, setProductId] = useState<string | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [brandBits, setBrandBits] = useState<{ logo?: string; colors: string[] } | null>(null);
@@ -162,7 +214,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
 
         <Step n={1} title="Your product" hint="Paste the product's own page, or pick one you saved." done={!!product}>
           <AddFromLink limit={1} withBrand placeholder="https://yourshop.com/products/…" onAdded={(ps, extra) => ps[0] && choose(ps[0], extra.brand)} />
-          {read.isPending && <KitProgress />}
+          {reading && <KitProgress />}
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-[12px] font-medium text-muted-foreground">Or select your product</p>
@@ -205,21 +257,24 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
                     </div>
                   </>
                 )}
-                {(brandBits?.logo || brand?.logo || (brandBits?.colors.length ?? brand?.colors.length)) && (
+                {brand ? (
+                  <KitBrand key={brand.id} brand={brand} />
+                ) : (brandBits?.logo || brandBits?.colors.length) ? (
+                  // The page's bits while the product's brand kit loads.
                   <div className="flex items-center gap-3 pt-1">
-                    {(brandBits?.logo || brand?.logo) && (
+                    {brandBits?.logo && (
                       <div className="checkerboard grid h-10 w-20 place-items-center overflow-hidden rounded-lg border">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={brandBits?.logo || brand?.logo} alt="Logo" className="max-h-full max-w-full object-contain p-1" />
+                        <img src={brandBits.logo} alt="Logo" className="max-h-full max-w-full object-contain p-1" />
                       </div>
                     )}
                     <div className="flex gap-1">
-                      {(brandBits?.colors.length ? brandBits.colors : (brand?.colors ?? [])).slice(0, 6).map((c) => (
+                      {(brandBits?.colors ?? []).slice(0, 6).map((c) => (
                         <span key={c} className="size-5 rounded-full border" style={{ background: c }} title={c} />
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
               <div className="min-w-0 space-y-3">
                 <label className="block space-y-1.5">

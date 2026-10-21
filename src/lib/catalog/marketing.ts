@@ -451,6 +451,30 @@ export const TEMPLATES: MarketingTemplate[] = [
 
 export const TEMPLATE_INDEX = new Map(TEMPLATES.map((x) => [x.id, x]));
 
+/**
+ * The shape a picked template (or format) opens in: the template's own, else the ratio in use while
+ * the format stays the same, else the format's default (a UGC talking head opens 9:16, not the 3:4 of
+ * the product shot picked before it).
+ */
+export function openingAspect(current: { format: FormatId; aspectRatio: string }, t: Pick<MarketingTemplate, "aspect"> | null | undefined, format: FormatId): string {
+  const f = FORMATS[format];
+  if (t?.aspect && f.aspectRatios.includes(t.aspect)) return t.aspect;
+  if (format === current.format && f.aspectRatios.includes(current.aspectRatio)) return current.aspectRatio;
+  return f.defaultAspect;
+}
+
+/** "www.example.com" → true: a web address the server accepts (a host with a dot, no spaces). */
+export function looksLikeWebsite(s: string): boolean {
+  const v = s.trim();
+  if (!v || /\s/.test(v)) return false;
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    return /^https?:$/.test(u.protocol) && u.hostname.includes(".") && !u.hostname.endsWith(".");
+  } catch {
+    return false;
+  }
+}
+
 export function templatesFor(category: MarketingCategory | "all", media: "all" | "image" | "video"): MarketingTemplate[] {
   return TEMPLATES.filter((x) => {
     const f = FORMATS[x.format];
@@ -610,6 +634,8 @@ export interface AdCreative extends AdConcept {
   image?: string | null;
   /** The visual already holds the text (Higgsfield Ads Studio): don't draw over it. */
   baked?: boolean;
+  /** A baked creative's one format (Higgsfield renders a single ratio per ad). */
+  ratio?: "1:1" | "4:5" | "9:16";
   layout?: string | null;
   engine: Engine;
   modelId: string;
@@ -668,6 +694,25 @@ export function clampClip(r: ClipRange, duration: number, moved: "start" | "end"
     if (end - start < min) end = Math.min(duration, start + min);
   }
   return { start: tenth(start), end: tenth(end) };
+}
+
+/** A time typed into an in/out field: "12", "12.5", "12,5", "0:12.5" or "1:02" (seconds); null when it isn't one. */
+export function parseClipTime(text: string): number | null {
+  const t = text.trim().replace(",", ".");
+  const m = /^(?:(\d+):)?(\d+(?:\.\d*)?|\.\d+)$/.exec(t);
+  if (!m) return null;
+  const s = (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
+  return Number.isFinite(s) ? s : null;
+}
+
+/**
+ * The range after the user finishes typing an in or out time (blur or Enter): the typed time is kept
+ * and the other point follows (clampClip). Keystrokes before that don't move anything, so "20" isn't
+ * clamped at its first digit.
+ */
+export function commitClipTime(text: string, range: ClipRange, duration: number, moved: "start" | "end"): ClipRange | null {
+  const n = parseClipTime(text);
+  return n == null ? null : clampClip({ ...range, [moved]: n }, duration, moved);
 }
 
 export interface MultiplierParts {
@@ -884,6 +929,12 @@ export interface RunOverlay {
   cta?: string;
 }
 
+/**
+ * How the browser sets the words over an open-engine poster / ad / listing: posters framed on paper
+ * (the words beside the picture), the rest over a soft shade at the bottom. The open prompt leaves room to match.
+ */
+export const overlayLayout = (format?: FormatId): "frame" | "overlay" => (format === "poster" ? "frame" : "overlay");
+
 export interface MarketingRunMeta {
   format?: FormatId;
   templateId?: string;
@@ -892,6 +943,8 @@ export interface MarketingRunMeta {
   styleId?: string;
   /** Open-engine text formats: the exact words the browser sets over the picture. */
   overlay?: RunOverlay | null;
+  /** The picture with those words set (a Library generation), made in the browser once the picture is ready. */
+  composed?: { id: string; url: string } | null;
   script?: string;
   mode?: "prompt" | "sections";
   notes?: string[];

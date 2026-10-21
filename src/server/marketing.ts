@@ -18,6 +18,7 @@ import {
   MULTIPLIER_MODELS,
   multiplierResolution,
   OPEN_SOUND_JOIN,
+  overlayLayout,
   multiplierText,
   settingById,
   shotPlan,
@@ -36,6 +37,7 @@ import {
   type Product,
   type RunEstimate,
   type RunFeature,
+  type RunOverlay,
 } from "@/lib/catalog/marketing";
 import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
@@ -44,7 +46,7 @@ import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
 import { db } from "./db";
 import { llmText } from "./enhance";
-import { createGenerations, listGenerations, previewChained, recordLocalGeneration } from "./generations";
+import { createGenerations, getGeneration, listGenerations, previewChained, recordLocalGeneration } from "./generations";
 import { provider } from "./providers";
 import { engineMode } from "./settings";
 import { readRef } from "./storage";
@@ -191,7 +193,11 @@ const KEEP_PRODUCT = "Keep the product exactly as in the reference photo: its sh
 /** The exact headline/CTA in a prompt (cloud models render text), or room left for the browser to set it (open). */
 function textLine(f: FormatDef, open: boolean, headline?: string, cta?: string, brand?: BrandKit | null): string {
   if (!f.text) return "";
-  if (open) return "Leave clean, uncluttered space at the top third for a headline; no text, letters, words or logos anywhere in the image";
+  // Open results get the words set in the browser, in the layout overlayLayout() picks: the picture leaves room for it.
+  if (open)
+    return overlayLayout(f.id) === "frame"
+      ? "No text, letters, words or logos anywhere in the image; the subject well composed with a little breathing room at the edges"
+      : "Leave calm, uncluttered space in the lower third for a headline; no text, letters, words or logos anywhere in the image";
   const font = brand?.fonts.heading ? `set in a ${brand.fonts.heading}-style typeface` : "in bold, clean typography";
   return [headline && `The headline reads exactly “${headline}” ${font}`, cta && `a button that says exactly “${cta}”`, "spell every word exactly as written, no other text"].filter(Boolean).join(", ");
 }
@@ -1088,12 +1094,20 @@ export async function rerun(id: string): Promise<MarketingRun[]> {
   return (await runMarketing(MarketingBody.parse(input))).runs;
 }
 
-/** An open-engine poster/ad with its words set in the browser (an uploaded PNG), recorded in the Library. */
-export function saveRunComposite(id: string, input: { url: string; ratio: string; text: string }) {
+/**
+ * An open-engine poster/ad with its words set in the browser (an uploaded PNG), recorded in the Library
+ * and on the run (the card shows it). `auto`: the first composite the browser makes on its own once the
+ * picture is ready; a run that has one already keeps it (no duplicate from a second tab).
+ */
+export function saveRunComposite(id: string, input: { url: string; ratio: string; text: string; overlay?: RunOverlay; auto?: boolean }) {
   const r = getRun(id);
   if (!r) throw new PlanError("Not found");
+  if (input.auto && r.meta.composed) {
+    const existing = getGeneration(r.meta.composed.id);
+    if (existing) return existing;
+  }
   const source = r.generations.find((g) => r.finalIds.includes(g.id))?.outputs.find((o) => o.kind === "image")?.url;
-  return recordLocalGeneration({
+  const g = recordLocalGeneration({
     feature: r.feature,
     modelId: "local-ad-compose",
     op: "edit",
@@ -1102,6 +1116,9 @@ export function saveRunComposite(id: string, input: { url: string; ratio: string
     params: { aspectRatio: input.ratio },
     output: { url: input.url, kind: "image", contentType: "image/png" },
   });
+  const meta: MarketingRunMeta = { ...r.meta, composed: { id: g.id, url: input.url }, ...(input.overlay && { overlay: input.overlay }) };
+  db().prepare("UPDATE marketing_runs SET meta_json = ? WHERE id = ?").run(JSON.stringify(meta), id);
+  return g;
 }
 
 // ---------------------------------------------------------------------------

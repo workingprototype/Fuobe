@@ -3,14 +3,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, Circle, Download, Loader2, MoreHorizontal, Repeat2, Type, X } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MediaThumb } from "@/components/studio/result-media";
-import { useGenerationActions } from "@/lib/api";
-import { FORMATS, runStatus, type BrandKit, type MarketingRun, type RunFeature } from "@/lib/catalog/marketing";
+import { uploadFile, useGenerationActions } from "@/lib/api";
+import { FORMATS, overlayLayout, runStatus, type BrandKit, type MarketingRun, type RunFeature } from "@/lib/catalog/marketing";
 import type { Generation } from "@/lib/catalog/types";
 import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -54,6 +54,33 @@ function runRatio(run: MarketingRun, g?: Generation): number {
   return ratioValue(ar && ar !== "auto" ? ar : undefined, g?.kind === "video" ? 9 / 16 : 3 / 4);
 }
 
+/** The format the words are set in: the picture's own ratio. */
+const composeRatio = (g?: Generation) => {
+  const ar = g?.request.params?.aspectRatio;
+  return ar && ar !== "auto" ? ar : "3:4";
+};
+
+const overlayText = (run: MarketingRun) => ({ headline: run.meta.overlay?.headline ?? "", body: run.meta.overlay?.body ?? "", cta: run.meta.overlay?.cta ?? "" });
+
+/** An open-engine poster / ad whose picture is ready and whose words aren't set yet. */
+function needsCompose(run: MarketingRun): boolean {
+  if (run.engine !== "open" || !run.meta.overlay || run.meta.composed || runStatus(run).state !== "done") return false;
+  return run.generations.some((g) => run.finalIds.includes(g.id) && g.outputs.some((o) => o.kind === "image"));
+}
+
+/** Set the run's words over its picture in the browser (brand fonts, logo, colours) and save it on the run. */
+async function autoCompose(run: MarketingRun, brand: BrandKit | null): Promise<void> {
+  const final = run.generations.find((g) => run.finalIds.includes(g.id));
+  const image = final?.outputs.find((o) => o.kind === "image")?.url;
+  if (!image) return;
+  const [{ renderInput }, { exportPng }] = await Promise.all([import("@/components/ads/ad-editor"), import("@/components/ads/render")]);
+  const ratio = composeRatio(final);
+  const text = overlayText(run);
+  const blob = await exportPng(renderInput({ ratio, layout: overlayLayout(run.meta.format), text, brand, image }));
+  const asset = await uploadFile(new File([blob], `${run.title.replace(/[^\w-]+/g, "-").slice(0, 60) || "ad"}.png`, { type: "image/png" }));
+  await send(`/api/marketing/runs/${run.id}/compose`, "POST", { url: asset.url, ratio, text: [text.headline, text.body, text.cta].filter(Boolean).join(" · "), overlay: run.meta.overlay ?? undefined, auto: true });
+}
+
 function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?: BrandKit; onOpen: (g: Generation, i: number) => void; onCompose: (run: MarketingRun) => void }) {
   const qc = useQueryClient();
   const forget = useForgetRun(run.feature);
@@ -70,6 +97,9 @@ function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?:
   const ratio = runRatio(run, final);
   const format = run.meta.format ? FORMATS[run.meta.format] : null;
   const canCompose = run.engine === "open" && !!run.meta.overlay && status.state === "done" && outputs.some((x) => x.o.kind === "image");
+  // The words are set in the browser right after the picture lands; the card shows that version.
+  const composed = canCompose ? run.meta.composed : null;
+  const setting = canCompose && !composed;
   const runAgain = () => {
     setAgain(true);
     send<{ runs: MarketingRun[] }>(`/api/marketing/runs/${run.id}/again`, "POST")
@@ -83,11 +113,21 @@ function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?:
   return (
     <article className="group/run min-w-0 animate-fade-up">
       <div className="relative">
-        {outputs.length ? (
+        {composed ? (
+          <button onClick={() => onCompose(run)} className="relative block w-full overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ aspectRatio: ratio }} aria-label={`Edit the text of ${run.title}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={composed.url} alt="" className="size-full object-cover" loading="lazy" />
+          </button>
+        ) : outputs.length ? (
           <div className={cn("grid gap-1.5", outputs.length > 1 && "grid-cols-2")}>
             {outputs.slice(0, 4).map(({ g, o, i }) => (
               <button key={o.url} onClick={() => onOpen(g, i)} className="relative block overflow-hidden rounded-xl bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring" style={{ aspectRatio: ratio }} aria-label={`Open ${run.title}`}>
                 <MediaThumb output={o} g={g} />
+                {setting && i === 0 && (
+                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2.5 pt-6 pb-2 text-left text-[12px] font-medium text-white">
+                    <span className="shimmer-text animate-shimmer-text">Setting your text…</span>
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -124,16 +164,23 @@ function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?:
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {composed && (
+              <DropdownMenuItem asChild>
+                <a href={composed.url} download>
+                  <Download /> Download
+                </a>
+              </DropdownMenuItem>
+            )}
             {outputs.map(({ o }, i) => (
               <DropdownMenuItem key={o.url} asChild>
                 <a href={o.url} download>
-                  <Download /> Download{outputs.length > 1 ? ` ${i + 1}` : ""}
+                  <Download /> {composed ? "Download the picture without text" : `Download${outputs.length > 1 ? ` ${i + 1}` : ""}`}
                 </a>
               </DropdownMenuItem>
             ))}
             {canCompose && (
               <DropdownMenuItem onClick={() => onCompose(run)}>
-                <Type /> Set your text
+                <Type /> {composed ? "Edit text" : "Set your text"}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={runAgain} disabled={again}>
@@ -156,7 +203,7 @@ function RunCard({ run, brand, onOpen, onCompose }: { run: MarketingRun; brand?:
         </p>
         {canCompose && (
           <button onClick={() => onCompose(run)} className="mt-1.5 inline-flex h-7 items-center gap-1.5 rounded-full bg-brand-faint px-2.5 text-[12px] font-medium text-brand-text hover:bg-brand-faint-hover">
-            <Type className="size-3" /> Set your text
+            <Type className="size-3" /> {composed ? "Edit text" : "Set your text"}
           </button>
         )}
         {steps.length > 1 && (
@@ -179,6 +226,19 @@ export function RunsList({ feature, empty, limit }: { feature: RunFeature; empty
   const [open, setOpen] = useState<{ id: string; index: number } | null>(null);
   const [compose, setCompose] = useState<MarketingRun | null>(null);
   const list = useMemo(() => (limit ? runs.data?.slice(0, limit) : runs.data) ?? [], [runs.data, limit]);
+  // Open posters and ads get their words set as soon as the picture lands (once per run; "Edit text" changes them).
+  const qc = useQueryClient();
+  const tried = useRef(new Set<string>());
+  useEffect(() => {
+    if (brands.isLoading) return;
+    for (const r of list) {
+      if (!needsCompose(r) || tried.current.has(r.id)) continue;
+      tried.current.add(r.id);
+      autoCompose(r, brands.data?.find((b) => b.id === r.meta.brandId) ?? null)
+        .then(() => qc.invalidateQueries({ queryKey: ["marketing-runs", feature] }))
+        .catch(() => undefined);
+    }
+  }, [list, brands.isLoading, brands.data, qc, feature]);
   const flat = useMemo(() => list.flatMap((r) => r.generations.filter((g) => r.finalIds.includes(g.id) && g.status === "succeeded").flatMap((g) => g.outputs.map((_, i) => ({ g, i })))), [list]);
   const pos = open ? flat.findIndex((f) => f.g.id === open.id && f.i === open.index) : -1;
   if (runs.isLoading)
@@ -218,11 +278,12 @@ export function RunsList({ feature, empty, limit }: { feature: RunFeature; empty
           onOpenChange={(o) => !o && setCompose(null)}
           title={compose.title}
           image={composeFinal.outputs.find((o) => o.kind === "image")?.url}
-          ratios={[composeFinal.request.params?.aspectRatio && composeFinal.request.params.aspectRatio !== "auto" ? composeFinal.request.params.aspectRatio : "3:4"]}
-          initial={{ headline: compose.meta.overlay?.headline ?? "", body: compose.meta.overlay?.body ?? "", cta: compose.meta.overlay?.cta ?? "", layout: compose.meta.format === "poster" ? "frame" : "overlay" }}
+          ratios={[composeRatio(composeFinal)]}
+          initial={{ ...overlayText(compose), layout: overlayLayout(compose.meta.format) }}
           brand={composeBrand}
           onSaveToLibrary={async (url, ratio, text) => {
-            await send(`/api/marketing/runs/${compose.id}/compose`, "POST", { url, ratio, text: [text.headline, text.body, text.cta].filter(Boolean).join(" · ") });
+            await send(`/api/marketing/runs/${compose.id}/compose`, "POST", { url, ratio, text: [text.headline, text.body, text.cta].filter(Boolean).join(" · "), overlay: { headline: text.headline, body: text.body, cta: text.cta } });
+            void qc.invalidateQueries({ queryKey: ["marketing-runs", compose.feature] });
           }}
         />
       )}

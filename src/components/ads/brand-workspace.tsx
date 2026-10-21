@@ -15,7 +15,7 @@ import { useBrand, useBrandActions, useCreatives } from "@/components/marketing/
 import { MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
 import { AdChat } from "./ad-chat";
 import { CreativeGrid } from "./creative-grid";
-import { NewAds } from "./new-ads";
+import { NewAds, useAdRoute } from "./new-ads";
 
 type Step = "kit" | "new" | "ads";
 
@@ -45,7 +45,10 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
   const actions = useBrandActions(brandId);
   const [step, setStep] = useState<Step | null>(null);
   const [chat, setChat] = useState(false);
+  const choice = useAdRoute(engine);
   const brand = view.data?.brand;
+  // The chat works for any kit that isn't being researched (a canceled or failed research keeps what it found).
+  const chatReady = !!brand && brand.status !== "researching";
   const products = view.data?.products ?? [];
   // First visit after the research: review the kit; with ads already made: the grid.
   const current: Step = step ?? (creatives.data?.length ? "ads" : brand?.status === "ready" && !products.length ? "kit" : creatives.isLoading ? "ads" : "kit");
@@ -74,7 +77,8 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
     );
   }
 
-  const chatPanel = brand && <AdChat brand={brand} products={products} engine={engine} onBatch={() => (setStep("ads"), setChat(false))} className="h-full" />;
+  const chatPanel = (inSheet: boolean) =>
+    brand && <AdChat brand={brand} products={products} engine={engine} choice={choice} onBatch={() => (setStep("ads"), setChat(false))} onClose={inSheet ? () => setChat(false) : undefined} className="h-full" />;
 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
@@ -84,7 +88,7 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
         engine={engine}
         onEngine={setEngine}
         right={
-          brand?.status === "ready" ? (
+          chatReady ? (
             <Button variant="ghost" size="sm" className="xl:hidden" onClick={() => setChat(true)} aria-label="Open the brand chat">
               <MessageCircle /> <span className="hidden sm:inline">Chat</span>
             </Button>
@@ -146,7 +150,7 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
                     <BrandKitForm key={brand.id} brand={brand} />
                   </>
                 )}
-                {current === "new" && <NewAds brand={brand} products={products} engine={engine} onCreated={() => setStep("ads")} />}
+                {current === "new" && <NewAds brand={brand} products={products} engine={engine} choice={choice} onCreated={() => setStep("ads")} />}
                 {current === "ads" &&
                   (creatives.isLoading ? (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -172,15 +176,15 @@ export function BrandWorkspace({ brandId }: { brandId: string }) {
             </>
           )}
         </main>
-        {brand?.status === "ready" && <div className="sticky top-28 hidden h-[calc(100svh-8rem)] w-[340px] shrink-0 xl:block">{chatPanel}</div>}
+        {chatReady && <div className="sticky top-28 hidden h-[calc(100svh-8rem)] w-[340px] shrink-0 xl:block">{chatPanel(false)}</div>}
       </div>
       <Sheet open={chat} onOpenChange={setChat}>
-        <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
+        <SheetContent side="right" showCloseButton={false} className="w-full gap-0 p-0 sm:max-w-md">
           <SheetHeader className="sr-only">
             <SheetTitle>Brand chat</SheetTitle>
             <SheetDescription>Ask for ads in plain words</SheetDescription>
           </SheetHeader>
-          <div className="h-full p-2">{chat && chatPanel}</div>
+          <div className="h-full p-2">{chat && chatPanel(true)}</div>
         </SheetContent>
       </Sheet>
     </div>
