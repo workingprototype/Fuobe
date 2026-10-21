@@ -372,6 +372,18 @@ describe("Episodes", () => {
     expect(faceless.getChannel(doomed.id)).toBeNull();
   });
 
+  it("starts stage two without anyone reading the episode (the background sweep)", async () => {
+    const ep = faceless.createEpisode({ kind: "explainer", topic: "Why bridges sway", settings: { ...cloud, length: 20 }, autoRender: true });
+    await faceless.scriptWritten(ep.id);
+    // Only the row is read from here on: no episodeView, no list.
+    const plan = () => JSON.parse((db().prepare("SELECT plan_json FROM faceless_episodes WHERE id = ?").get(ep.id) as { plan_json: string }).plan_json);
+    expect(plan().awaiting).toBe(true);
+    for (let i = 0; i < 60 && plan().awaiting; i++) await sleep(500);
+    expect(plan().awaiting).toBe(false);
+    expect(Object.keys(plan().ids)).toEqual(expect.arrayContaining(["join", "mix", "captions"]));
+    await faceless.deleteEpisode(ep.id);
+  }, 60_000);
+
   it("marks a script that was being written when the server restarted as failed, with Try again", async () => {
     const ep = faceless.createEpisode({ kind: "faceless", channelId: channel.id, topic: "The Silk Road", settings: cloud });
     await faceless.scriptWritten(ep.id);
