@@ -16,7 +16,24 @@ import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useGeneration } from "@/components/av/use-generation";
 import { useCreateGeneration, useEngine, useGenerations, useHydrated } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
-import { burnRequest, burnRouteFor, CAPTION_STYLES, OPEN_FONT_SIZE, previewText, styleById, transcribeRequest, usesCues, type CaptionLook, type CaptionPosition, type CaptionSize } from "@/lib/av/captions";
+import {
+  BURN_CAPS,
+  burnNote,
+  burnPricePerMinute,
+  burnRequest,
+  burnRouteFor,
+  CAPTION_STYLES,
+  lookFor,
+  OPEN_FONT_SIZE,
+  previewText,
+  styleById,
+  transcribeRequest,
+  usesCues,
+  type BurnRoute,
+  type CaptionLook,
+  type CaptionPosition,
+  type CaptionSize,
+} from "@/lib/av/captions";
 import { parseCues, toSrt, toVtt, type Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
 
@@ -145,7 +162,7 @@ function Editor({ video, restored, onReplace }: { video: SlotValue; restored: Sa
     if (usesCues(route) && problems.length) return void toast(problems[0], { id: "captions-blocker" });
     let req;
     try {
-      req = burnRequest({ route, video: video.ref, cues, look, sourceLanguage: source });
+      req = burnRequest({ route, video: video.ref, cues, look: lookFor(route, look), sourceLanguage: source });
     } catch (e) {
       return void toast((e as Error).message);
     }
@@ -160,14 +177,14 @@ function Editor({ video, restored, onReplace }: { video: SlotValue; restored: Sa
   return (
     <div className="grid gap-4 pt-4 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)]">
       <div className="min-w-0 space-y-3 lg:sticky lg:top-20 lg:self-start">
-        <Preview video={video} cues={cues} look={look} player={player} onTime={setTime} onDuration={setDuration} />
+        <Preview video={video} cues={cues} look={lookFor(route, look)} route={route} player={player} onTime={setTime} onDuration={setDuration} />
         <div className="flex flex-wrap items-center gap-1.5">
           <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{video.name}</p>
           <Button variant="ghost" size="sm" className="rounded-full" onClick={() => onReplace(null)}>
             Another video
           </Button>
         </div>
-        <StylePanel look={look} onChange={setLook} />
+        <StylePanel look={look} route={route} onChange={setLook} />
       </div>
 
       <div className="min-w-0 space-y-3">
@@ -226,8 +243,14 @@ function Editor({ video, restored, onReplace }: { video: SlotValue; restored: Sa
         <Panel title="Burn in">
           {engine === "cloud" && (
             <div role="radiogroup" aria-label="Burner" className="mb-3 grid gap-2 sm:grid-cols-2">
-              <RouteCard on={!quick} onClick={() => setQuick(false)} icon={<Flame className="size-4" />} title="Your lines" note="VEED Subtitles burns your edited lines in your style (≈ $0.10 per minute)." />
-              <RouteCard on={quick} onClick={() => setQuick(true)} icon={<Wand2 className="size-4" />} title="Quick karaoke" note="Auto Subtitle transcribes again and burns word-by-word captions — your edits aren't used." />
+              <RouteCard
+                on={!quick}
+                onClick={() => setQuick(false)}
+                icon={<Flame className="size-4" />}
+                title="Your lines"
+                note={`VEED Subtitles burns your edited lines in your style (≈ $${burnPricePerMinute("veed", look.style).toFixed(2)} per minute${burnPricePerMinute("veed", look.style) > 0.1 ? ` — ${styleById(look.style).name} is one of VEED's dynamic styles` : ""}).`}
+              />
+              <RouteCard on={quick} onClick={() => setQuick(true)} icon={<Wand2 className="size-4" />} title="Quick karaoke" note="Auto Subtitle transcribes again and burns word-by-word captions, the spoken word highlighted (≈ $0.03 per minute) — your edits aren't used." />
             </div>
           )}
           {engine === "open" && <p className="mb-3 text-[12px] text-muted-foreground">ComfyUI&apos;s caption burn-in draws your lines into the frames chunk by chunk and keeps the sound (CPU is fine, no model).</p>}
@@ -266,6 +289,7 @@ function Preview({
   video,
   cues,
   look,
+  route,
   player,
   onTime,
   onDuration,
@@ -273,6 +297,7 @@ function Preview({
   video: SlotValue;
   cues: Cue[];
   look: CaptionLook;
+  route: BurnRoute;
   player: React.RefObject<HTMLVideoElement | null>;
   onTime: (t: number) => void;
   onDuration: (t: number) => void;
@@ -287,8 +312,10 @@ function Preview({
     return () => ro.disconnect();
   }, [player]);
   const style = styleById(look.style);
-  const shown = previewText(cues, t, look);
+  const shown = previewText(cues, t, look, route);
   const color = look.color ?? style.color;
+  // Only what this burner draws: no box on the open engine, no highlight where the spoken word isn't marked.
+  const box = style.box && BURN_CAPS[route].box;
   const words = useMemo(() => shown?.text.split(" ") ?? [], [shown]);
   return (
     <div className="relative overflow-hidden rounded-2xl border bg-media">
@@ -315,13 +342,13 @@ function Preview({
           className={cn("pointer-events-none absolute inset-x-[6%] flex justify-center text-center", look.position === "top" ? "top-[8%]" : look.position === "center" ? "top-1/2 -translate-y-1/2" : "bottom-[14%]")}
         >
           <span
-            className={cn("leading-tight", style.box && "rounded-md bg-black/60 px-2 py-0.5")}
+            className={cn("leading-tight", box && "rounded-md bg-black/60 px-2 py-0.5")}
             style={{
               fontFamily: `${style.font}, var(--font-sans), sans-serif`,
               fontWeight: style.weight,
               fontSize: Math.max(11, (h * OPEN_FONT_SIZE[look.size]) / 100),
               color,
-              textShadow: style.box ? undefined : "0 0 3px #000, 0 0 3px #000, 0 1px 2px #000",
+              textShadow: box ? undefined : "0 0 3px #000, 0 0 3px #000, 0 1px 2px #000",
             }}
           >
             {words.map((w, i) => (
@@ -344,8 +371,10 @@ const POSITIONS: { id: CaptionPosition; label: string }[] = [
   { id: "bottom", label: "Bottom" },
 ];
 
-function StylePanel({ look, onChange }: { look: CaptionLook; onChange: (l: CaptionLook) => void }) {
-  const seg = (on: boolean) => cn("h-7 rounded-full px-3 text-[12px] font-medium transition", on ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground");
+function StylePanel({ look, route, onChange }: { look: CaptionLook; route: BurnRoute; onChange: (l: CaptionLook) => void }) {
+  const seg = (on: boolean) => cn("h-7 rounded-full px-3 text-[12px] font-medium transition disabled:pointer-events-none disabled:opacity-40", on ? "bg-background text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground");
+  const caps = BURN_CAPS[route];
+  const position = lookFor(route, look).position;
   return (
     <Panel title="Style">
       <div role="radiogroup" aria-label="Caption style" className="grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -358,10 +387,10 @@ function StylePanel({ look, onChange }: { look: CaptionLook; onChange: (l: Capti
             onClick={() => onChange({ ...look, style: s.id, color: undefined })}
             className={cn("flex flex-col items-center gap-1 rounded-xl border p-2 transition-colors", look.style === s.id ? "border-primary bg-brand-faint" : "hover:bg-accent")}
           >
-            <span className={cn("grid h-9 w-full place-items-center rounded-md bg-[oklch(0.3_0.02_260)] text-[13px] leading-none", s.box && "px-1")} style={{ fontWeight: s.weight, fontFamily: `${s.font}, var(--font-sans), sans-serif` }}>
-              <span className={cn(s.box && "rounded bg-black/70 px-1 py-0.5")} style={{ color: s.color, textShadow: s.box ? undefined : "0 0 2px #000" }}>
+            <span aria-hidden className={cn("grid h-9 w-full place-items-center rounded-md bg-[oklch(0.3_0.02_260)] text-[13px] leading-none", s.box && caps.box && "px-1")} style={{ fontWeight: s.weight, fontFamily: `${s.font}, var(--font-sans), sans-serif` }}>
+              <span className={cn(s.box && caps.box && "rounded bg-black/70 px-1 py-0.5")} style={{ color: s.color, textShadow: s.box && caps.box ? undefined : "0 0 2px #000" }}>
                 {s.upper ? "AA" : "Aa"}
-                {s.karaoke && <span style={{ color: s.highlight }}>a</span>}
+                {s.karaoke && <span style={caps.highlight !== "none" ? { color: s.highlight } : undefined}>a</span>}
               </span>
             </span>
             <span className="text-[11px] font-medium">{s.name}</span>
@@ -369,24 +398,38 @@ function StylePanel({ look, onChange }: { look: CaptionLook; onChange: (l: Capti
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] text-muted-foreground">Size</span>
-          <div role="radiogroup" aria-label="Size" className="inline-flex rounded-full bg-muted p-0.5">
-            {SIZES.map((s) => (
-              <button key={s} type="button" role="radio" aria-checked={look.size === s} onClick={() => onChange({ ...look, size: s })} className={seg(look.size === s)}>
-                {s}
-              </button>
-            ))}
+        {caps.sizes && (
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] text-muted-foreground">Size</span>
+            <div role="radiogroup" aria-label="Size" className="inline-flex rounded-full bg-muted p-0.5">
+              {SIZES.map((s) => (
+                <button key={s} type="button" role="radio" aria-checked={look.size === s} onClick={() => onChange({ ...look, size: s })} className={seg(look.size === s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-muted-foreground">Position</span>
           <div role="radiogroup" aria-label="Position" className="inline-flex rounded-full bg-muted p-0.5">
-            {POSITIONS.map((p) => (
-              <button key={p.id} type="button" role="radio" aria-checked={look.position === p.id} onClick={() => onChange({ ...look, position: p.id })} className={seg(look.position === p.id)}>
-                {p.label}
-              </button>
-            ))}
+            {POSITIONS.map((p) => {
+              const can = caps.positions.includes(p.id);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={position === p.id}
+                  disabled={!can}
+                  title={can ? undefined : "This burner draws at the top or the bottom"}
+                  onClick={() => onChange({ ...look, position: p.id })}
+                  className={seg(position === p.id)}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
         </div>
         <label className="flex items-center gap-2 text-[12px] text-muted-foreground">
@@ -400,7 +443,7 @@ function StylePanel({ look, onChange }: { look: CaptionLook; onChange: (l: Capti
           />
         </label>
       </div>
-      <p className="mt-3 text-[12px] text-muted-foreground">Karaoke styles show a few words at a time on the open engine and highlight the spoken word on the cloud. The open burner places text at the top or the bottom.</p>
+      <p className="mt-3 text-[12px] text-muted-foreground">{burnNote(route)}</p>
     </Panel>
   );
 }

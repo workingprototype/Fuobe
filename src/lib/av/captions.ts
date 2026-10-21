@@ -100,6 +100,47 @@ export const burnRouteFor = (engine: Engine, quick: boolean): BurnRoute => (engi
 /** Whether a route burns your edited lines (Auto Subtitle transcribes again by itself). */
 export const usesCues = (route: BurnRoute) => route !== "auto";
 
+/** What each burner can draw, so the controls and the live preview promise only that. */
+export interface BurnCaps {
+  positions: CaptionPosition[];
+  /** S / M / L reaches the burner (VEED sizes the text by its preset). */
+  sizes: boolean;
+  /** It draws a box behind the text (the open burner outlines it). */
+  box: boolean;
+  /** What a karaoke style's highlight colour marks: the spoken word, the burner's own key words, or nothing. */
+  highlight: "spoken" | "keywords" | "none";
+  /** Karaoke styles show this many words at a time (0: the whole line). */
+  karaokeWords: number;
+}
+
+export const BURN_CAPS: Record<BurnRoute, BurnCaps> = {
+  open: { positions: ["top", "bottom"], sizes: true, box: false, highlight: "none", karaokeWords: 3 },
+  veed: { positions: ["top", "center", "bottom"], sizes: false, box: true, highlight: "keywords", karaokeWords: 0 },
+  auto: { positions: ["top", "center", "bottom"], sizes: true, box: true, highlight: "spoken", karaokeWords: 3 },
+};
+
+/** The look a burner will actually draw: a position it lacks falls back to the bottom. */
+export function lookFor(route: BurnRoute, look: CaptionLook): CaptionLook {
+  return BURN_CAPS[route].positions.includes(look.position) ? look : { ...look, position: "bottom" };
+}
+
+/** VEED's dynamic presets bill twice the basic rate. */
+const VEED_DYNAMIC = new Set(["glass", "whisper", "glide2", "fusion", "glide", "terminal", "handwritten", "backdrop", "backdrop2"]);
+
+/** The burn's price per minute of video (USD), for the route's note; 0 on the open engine. */
+export function burnPricePerMinute(route: BurnRoute, style: string): number {
+  if (route === "open") return 0;
+  if (route === "auto") return 0.03;
+  return VEED_DYNAMIC.has(styleById(style).veed) ? 0.2 : 0.1;
+}
+
+/** What the style controls mean on this burner, in one line. */
+export function burnNote(route: BurnRoute): string {
+  if (route === "open") return "The open burner draws outlined text at the top or the bottom; karaoke styles show 3 words at a time, without a highlight.";
+  if (route === "veed") return "VEED sizes the text by its preset; in karaoke styles the highlight colour marks the words VEED finds key, not the spoken one.";
+  return "Auto Subtitle shows 3 words at a time and highlights the spoken word in karaoke styles.";
+}
+
 const upper = (cues: Cue[], on?: boolean) => (on ? cues.map((c) => ({ ...c, text: c.text.toUpperCase() })) : cues);
 
 /** The burn job for a style: the model, its settings (params.extra) and the cues it takes. */
@@ -172,16 +213,22 @@ export function transcribeRequest(o: { engine: Engine; video: string; modelId?: 
   };
 }
 
-/** The words shown at time `t` (karaoke styles show a few words at a time), for the live preview. */
-export function previewText(cues: Cue[], t: number, look: CaptionLook): { text: string; highlight?: number } | null {
+/**
+ * The words shown at time `t`, the way the route's burner shows them (for the live preview): karaoke
+ * styles show a few words at a time where the burner does, and the spoken word is highlighted only
+ * where the burner highlights it.
+ */
+export function previewText(cues: Cue[], t: number, look: CaptionLook, route: BurnRoute = "auto"): { text: string; highlight?: number } | null {
   const c = cues.find((x) => t >= x.start && t < x.end);
   if (!c) return null;
   const style = styleById(look.style);
+  const caps = BURN_CAPS[route];
   const text = style.upper ? c.text.toUpperCase() : c.text;
-  if (!style.karaoke) return { text };
+  if (!style.karaoke || !caps.karaokeWords) return { text };
   const words = text.split(/\s+/).filter(Boolean);
   if (!words.length) return null;
+  const n = caps.karaokeWords;
   const i = Math.min(words.length - 1, Math.floor(((t - c.start) / Math.max(0.01, c.end - c.start)) * words.length));
-  const group = Math.floor(i / 3) * 3;
-  return { text: words.slice(group, group + 3).join(" "), highlight: i - group };
+  const group = Math.floor(i / n) * n;
+  return { text: words.slice(group, group + n).join(" "), ...(caps.highlight === "spoken" && { highlight: i - group }) };
 }

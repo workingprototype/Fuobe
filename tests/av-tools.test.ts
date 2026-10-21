@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPayload, extractOutputs } from "@/lib/catalog/payload";
 import { getModel, getPreset } from "@/lib/catalog";
 import { planGeneration } from "@/lib/catalog/plan";
-import { burnRequest, burnRouteFor, CAPTION_STYLES, nearestColorName, OPEN_FONT_SIZE, previewText, styleById, usesCues, type CaptionLook } from "@/lib/av/captions";
+import { BURN_CAPS, burnPricePerMinute, burnRequest, burnRouteFor, CAPTION_STYLES, lookFor, nearestColorName, OPEN_FONT_SIZE, previewText, styleById, usesCues, type CaptionLook } from "@/lib/av/captions";
 import { animateSpinHref, model3dRequest, model3dView, MODELS_3D } from "@/lib/av/model3d";
 import { frameParams, frameRequest } from "@/lib/av/frames";
 import type { Cue } from "@/lib/cues";
@@ -73,6 +73,25 @@ describe("caption style → burn params", () => {
     expect(styleById("nope").id).toBe("clean");
     expect(previewText(cues, 0.5, look())?.text).toBe("hello there friends");
     expect(previewText(cues, 5, look())).toBeNull();
+  });
+
+  it("the controls and the preview promise only what each burner draws", () => {
+    // Open: top or bottom only (Middle falls back), no box, karaoke in 3-word groups without a highlight.
+    expect(lookFor("open", look({ position: "center" })).position).toBe("bottom");
+    expect(lookFor("veed", look({ position: "center" })).position).toBe("center");
+    expect(BURN_CAPS.open).toMatchObject({ box: false, highlight: "none", karaokeWords: 3 });
+    const karaoke = look({ style: "karaoke" });
+    const six: Cue[] = [{ start: 0, end: 3, text: "hello there friends how are you" }];
+    expect(previewText(six, 0.6, karaoke, "open")).toEqual({ text: "HELLO THERE FRIENDS" });
+    expect(previewText(six, 0.6, karaoke, "auto")).toEqual({ text: "HELLO THERE FRIENDS", highlight: 1 });
+    // VEED renders the whole line (its preset animates it) and sizes text itself: Size isn't offered.
+    expect(previewText(six, 0.6, karaoke, "veed")).toEqual({ text: "HELLO THERE FRIENDS HOW ARE YOU" });
+    expect(BURN_CAPS.veed.sizes).toBe(false);
+    expect(burnRequest({ route: "veed", video: "/v.mp4", cues, look: look({ size: "L" }) }).params?.extra).not.toHaveProperty("font_size");
+    // Karaoke, Boxed and Neon map to VEED's dynamic presets, which cost twice as much.
+    expect(CAPTION_STYLES.filter((s) => burnPricePerMinute("veed", s.id) === 0.2).map((s) => s.id)).toEqual(["karaoke", "boxed", "neon"]);
+    expect(burnPricePerMinute("veed", "clean")).toBe(0.1);
+    expect(burnPricePerMinute("open", "karaoke")).toBe(0);
   });
 });
 
