@@ -27,7 +27,12 @@ export interface PlannedJob {
   error?: string;
   /** A short extra line on the card (a studio's step, what a step waits for). */
   note?: string;
+  /** One step of a pipeline: it only starts when every step can, so one error blocks the run. */
+  atomic?: boolean;
 }
+
+/** Whether an approval card's plan can run: something to run, and no pipeline with a broken step. */
+export const planRunnable = (jobs: PlannedJob[]): boolean => jobs.some((j) => !j.error) && !jobs.some((j) => j.atomic && j.error);
 
 export type AssistItem =
   | { id: string; role: "user"; text: string; attachments?: string[]; skills?: string[] }

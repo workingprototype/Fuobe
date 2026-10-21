@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FailedTile, MediaThumb, PendingTile, tileRatio } from "@/components/studio/feed";
 import { useCreateGeneration } from "@/lib/api";
-import type { AssistItem, AssistThread, PlannedJob, SkillSummary } from "@/lib/assist";
+import { planRunnable, type AssistItem, type AssistThread, type PlannedJob, type SkillSummary } from "@/lib/assist";
 import { OPERATION_LABELS, type Generation, type MediaKind, type Operation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -58,12 +58,14 @@ function jobLine(j: PlannedJob): string {
 
 export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistItem, { role: "approval" }>; live: boolean; onAnswer: (ok: boolean) => Promise<void> }) {
   const [busy, setBusy] = useState<boolean | null>(null);
-  const runnable = item.jobs.some((j) => !j.error);
+  const runnable = planRunnable(item.jobs);
   const memoryOnly = item.jobs.length > 0 && item.jobs.every((j) => j.op === "memory");
   const allDemo = item.jobs.every((j) => j.demo || j.error || j.op === "memory");
   const total = memoryOnly
     ? "Saved to memory for future chats"
-    : allDemo
+    : !runnable && item.status === "pending"
+      ? "Can't run yet — fix what's marked above, or tell Assist what to change"
+      : allDemo
       ? "Demo run — no provider connected"
       : item.totalUsd === null
         ? "Some prices vary"

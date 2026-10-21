@@ -3,10 +3,13 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { PlannedJob } from "@/lib/assist";
 import { getModel } from "@/lib/catalog";
-import type { ChainSlot, Engine, GenerationRequest } from "@/lib/catalog/types";
+import { routesFor } from "@/lib/catalog/plan";
+import type { ChainSlot, Engine, GenerationRequest, Operation } from "@/lib/catalog/types";
 import { createPipeline, type PipelineStep } from "../chains";
-import { createGenerations, outputKind, previewChained } from "../generations";
+import { db } from "../db";
+import { chooseRoute, createGenerations, outputKind, previewChained } from "../generations";
 import { engineMode } from "../settings";
+import { fileUrl, saveFile } from "../storage";
 import { defineTool, type ToolContext, type ToolOutcome } from "./define";
 
 /**
@@ -68,7 +71,10 @@ const FacelessInput = z.object({
     .describe("2–8 scenes in order."),
   style: z.string().describe("The visual style for every scene, e.g. 'flat 2D illustration, muted palette'."),
   aspect_ratio: z.string().optional().describe("9:16 (default), 16:9 or 1:1."),
-  voice: z.string().optional().describe("A voice id for the narrator (search_models kind audio lists them)."),
+  voice: z.string().optional().describe("A premade narrator voice id for the cloud engine (search_models kind audio lists them)."),
+  voice_sample: ref
+    .optional()
+    .describe("A short recording of the narrator (10–60 s of clear speech): an attachment, a saved voice or an earlier audio output. The narration clones it. Required on the open-source engine; on the cloud engine it replaces the premade voice."),
 });
 const AdsInput = z.object({
   brief: z.string().describe("What the ads sell and to whom, with the offer or angle."),
@@ -111,20 +117,29 @@ const pick = (ctx: ToolContext, cloud: string, open: string, override?: string) 
 const asList = <T,>(a: T | T[] | undefined): T[] => (a === undefined ? [] : Array.isArray(a) ? a : [a]);
 const req = (r: Omit<GenerationRequest, "feature">): GenerationRequest => ({ feature: "assist", ...r });
 
-/** Price each step of a pipeline the way createPipeline validates it, without creating anything. */
-export function planSteps(tool: string, steps: PipelineStep[]): PlannedJob[] {
+/**
+ * Price each step of a pipeline the way createPipeline validates it, without creating anything.
+ * Every job is marked `atomic`: a pipeline only starts when all of its steps can. `problems` names
+ * a step (by key) that can't run as planned, in clearer words than the model's own check. With
+ * `independent` the steps start on their own (a batch, not a pipeline): one bad step doesn't stop the rest.
+ */
+export function planSteps(tool: string, steps: PipelineStep[], problems: Record<string, string | undefined> = {}, independent = false): PlannedJob[] {
+  const atomic = independent ? undefined : true;
   const jobs = steps.map((s, i): PlannedJob => {
     const chain = s.chain ?? s.request.chain;
     const r: GenerationRequest = { ...s.request, ...(chain && { chain }) };
     const label = s.request.step?.label ?? `Step ${i + 1} of ${steps.length}`;
     try {
+      const problem = problems[s.key];
+      if (problem) throw new Error(problem);
       const p = previewChained(r, asList(s.after).length);
-      return { tool, modelId: p.model.id, modelName: p.model.name, kind: outputKind(p.op, p.model), op: p.op, prompt: s.request.prompt?.trim() || label, count: p.outputs, costUsd: p.costUsd, demo: p.demo, note: label };
+      return { tool, modelId: p.model.id, modelName: p.model.name, kind: outputKind(p.op, p.model), op: p.op, prompt: s.request.prompt?.trim() || label, count: p.outputs, costUsd: p.costUsd, demo: p.demo, note: label, atomic };
     } catch (e) {
       const m = getModel(s.request.modelId);
-      return { tool, modelId: s.request.modelId, modelName: m?.name ?? s.request.modelId, kind: m?.kind ?? "video", op: s.request.op ?? "t2i", prompt: s.request.prompt?.trim() || label, count: 0, costUsd: 0, demo: false, note: label, error: (e as Error).message };
+      return { tool, modelId: s.request.modelId, modelName: m?.name ?? s.request.modelId, kind: m?.kind ?? "video", op: s.request.op ?? "t2i", prompt: s.request.prompt?.trim() || label, count: 0, costUsd: 0, demo: false, note: label, atomic, error: (e as Error).message };
     }
   });
+  if (independent) return jobs;
   // createPipeline refuses a mix of demo and real steps: say so on the card already.
   if (jobs.some((j) => j.demo && !j.error) && jobs.some((j) => !j.demo && !j.error)) {
     const d = jobs.find((j) => j.demo && !j.error)!;
@@ -194,7 +209,66 @@ function dubSteps(i: DubToolInput, ctx: ToolContext): PipelineStep[] {
   return labelled(steps);
 }
 
-function facelessSteps(i: FacelessToolInput, ctx: ToolContext): PipelineStep[] {
+// The narrator's voice. Open-source narration (Chatterbox) clones a voice from a sample, so the
+// open engine needs one; the cloud engine has premade voices, and clones a sample when given one.
+
+const NEEDS_SAMPLE =
+  "Add a voice sample for the narrator: open-source narration clones a voice. Attach or record 10–60 s of clear speech (or use a saved voice), then pass it as voice_sample.";
+
+/** Whether a model's operation would run as a demo right now (no provider connected). */
+function runsAsDemo(modelId: string, op: Operation): boolean {
+  const m = getModel(modelId);
+  if (!m) return false;
+  try {
+    return chooseRoute(routesFor(m, op)).demo;
+  } catch {
+    return false;
+  }
+}
+
+/** Stands in for the demo voice while planning, so a plan never writes a file. */
+const DEMO_VOICE_PLAN = "/api/files/uploads/fuobe-demo-voice.wav";
+
+/**
+ * A voice to clone when the open narrator has no sample and the narration only runs as a demo
+ * anyway (no ComfyUI): a short tone saved once, so demo mode stays clickable end to end. It has the
+ * same asset name as Faceless Studio's, so the two share one file.
+ */
+function demoVoice(): string {
+  const found = db().prepare("SELECT rel_path FROM assets WHERE name = 'fuobe-demo-voice.wav' LIMIT 1").get() as { rel_path: string } | undefined;
+  if (found) return fileUrl(found.rel_path);
+  const rate = 16000;
+  const n = rate * 2;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + n * 2, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(n * 2, 40);
+  for (let k = 0; k < n; k++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * k) / rate) * 0.2 * 32767 * Math.min(1, k / 800, (n - k) / 800)), 44 + k * 2);
+  return saveFile({ data: buf, contentType: "audio/wav", name: "fuobe-demo-voice.wav", source: "upload" }).url;
+}
+
+/** Planning uses a placeholder for the demo voice; starting the job saves the real file. */
+type VoiceFor = "plan" | "run";
+
+/** The narration model and the sample it clones (none: a premade voice); `missing` when the open engine has nothing to clone. */
+export function narratorVoice(i: Pick<FacelessToolInput, "voice_sample">, ctx: ToolContext, voiceFor: VoiceFor = "plan"): { modelId: string; voiceAudio?: string; missing?: string } {
+  const sample = i.voice_sample?.trim();
+  if (engineOf(ctx) === "cloud") return sample ? { modelId: "chatterbox-cloud", voiceAudio: sample } : { modelId: "elevenlabs-v4" };
+  if (sample) return { modelId: "oss-chatterbox", voiceAudio: sample };
+  if (runsAsDemo("oss-chatterbox", "tts")) return { modelId: "oss-chatterbox", voiceAudio: voiceFor === "run" ? demoVoice() : DEMO_VOICE_PLAN };
+  return { modelId: "oss-chatterbox", missing: NEEDS_SAMPLE };
+}
+
+function facelessSteps(i: FacelessToolInput, ctx: ToolContext, voiceFor: VoiceFor = "plan"): PipelineStep[] {
   const scenes = i.scenes.filter((s) => s.visual.trim() || s.narration.trim()).slice(0, 8);
   if (scenes.length < 2) throw new Error("Give at least 2 scenes");
   const open = engineOf(ctx) === "open";
@@ -232,8 +306,14 @@ function facelessSteps(i: FacelessToolInput, ctx: ToolContext): PipelineStep[] {
     steps.push({ key: "film", label: "Joined scenes", request: req({ modelId: join, op: "concat", prompt: i.title?.trim() || "Episode" }), after: groups, chain: groups.map(() => ({ slot: "videos" as const })) });
     film = "film";
   }
+  const narrator = narratorVoice(i, ctx, voiceFor);
+  const narration = scenes.map((s) => s.narration.trim()).filter(Boolean).join("\n\n");
   steps.push(
-    { key: "voice", label: "Narration", request: req({ modelId: open ? "oss-chatterbox" : "elevenlabs-v4", op: "tts", prompt: scenes.map((s) => s.narration.trim()).filter(Boolean).join("\n\n"), params: { voice: i.voice } }) },
+    {
+      key: "voice",
+      label: "Narration",
+      request: req({ modelId: narrator.modelId, op: "tts", prompt: narration, ...(narrator.voiceAudio ? { inputs: { voiceAudio: narrator.voiceAudio } } : { params: { voice: i.voice } }) }),
+    },
     { key: "episode", label: "Episode", request: req({ modelId: open ? "oss-mux" : "merge-audio-video", op: "mux", prompt: i.title?.trim() || "Episode" }), after: [film, "voice"], chain: [{ slot: "video" }, { slot: "audio" }] },
   );
   return labelled(steps);
@@ -359,7 +439,7 @@ const dubVideo = defineTool({
     try {
       return planSteps("dub_video", dubSteps(i, ctx));
     } catch (e) {
-      return [{ tool: "dub_video", modelId: "dub", modelName: "Translate & dub", kind: "video", op: "dub", prompt: i.languages.join(", "), count: 0, costUsd: 0, demo: false, error: (e as Error).message }];
+      return [{ tool: "dub_video", modelId: "dub", modelName: "Translate & dub", kind: "video", op: "dub", prompt: i.languages.join(", "), count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
     }
   },
   async run(i, ctx) {
@@ -370,20 +450,24 @@ const dubVideo = defineTool({
 const facelessEpisode = defineTool({
   name: "faceless_episode",
   description:
-    "Make a narrated faceless video from scenes you wrote: a still and an animated clip per scene in one style, the narration, joined into one episode — Fuobe's Faceless studio. Write the narration and visuals first (load the faceless-video skill), then call this once. Gated by the same approval card as generate.",
+    "Make a narrated faceless video from scenes you wrote: a still and an animated clip per scene in one style, the narration, joined into one episode — Fuobe's Faceless studio. Write the narration and visuals first (load the faceless-video skill), then call this once. On the open-source engine the narration clones voice_sample, so ask the user for a recording (or a saved voice) when there is none. Gated by the same approval card as generate.",
   schema: FacelessInput,
   gated: true,
   title: (i) => i.title?.trim() || "Faceless episode",
   plan: (i, ctx) => {
     if (STUDIO_ROUTES.faceless_episode?.plan) return STUDIO_ROUTES.faceless_episode.plan(i, ctx);
     try {
-      return planSteps("faceless_episode", facelessSteps(i, ctx));
+      return planSteps("faceless_episode", facelessSteps(i, ctx), { voice: narratorVoice(i, ctx).missing });
     } catch (e) {
-      return [{ tool: "faceless_episode", modelId: "faceless", modelName: "Faceless episode", kind: "video", op: "concat", prompt: i.title ?? "Episode", count: 0, costUsd: 0, demo: false, error: (e as Error).message }];
+      return [{ tool: "faceless_episode", modelId: "faceless", modelName: "Faceless episode", kind: "video", op: "concat", prompt: i.title ?? "Episode", count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
     }
   },
   async run(i, ctx) {
-    return (await viaStudio(STUDIO_ROUTES.faceless_episode, i, ctx, "Started a faceless episode")) ?? startPipeline("Faceless episode", facelessSteps(i, ctx), i.title?.trim() || "Faceless episode");
+    const studio = await viaStudio(STUDIO_ROUTES.faceless_episode, i, ctx, "Started a faceless episode");
+    if (studio) return studio;
+    const missing = narratorVoice(i, ctx).missing;
+    if (missing) return { content: JSON.stringify({ error: missing }), isError: true };
+    return startPipeline("Faceless episode", facelessSteps(i, ctx, "run"), i.title?.trim() || "Faceless episode");
   },
 });
 
@@ -399,6 +483,8 @@ const createAds = defineTool({
     return planSteps(
       "create_ads",
       adRequests(i, ctx).map((r, k) => ({ key: `ad${k}`, request: { ...r, step: { label: `Ad ${k + 1} · ${r.params?.aspectRatio}`, index: k, of: 0 } } })),
+      {},
+      true,
     );
   },
   async run(i, ctx) {

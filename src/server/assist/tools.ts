@@ -377,7 +377,12 @@ const generate = defineTool({
   // Not strict: the API allows 24 optional parameters across all strict tools in a request, and a
   // job has more. Calls are validated with zod (validateInput / planFor / executeTool) instead, and
   // a malformed one goes back to the model as an error it can fix.
-  plan: ({ jobs }) => chainJobs(jobs.slice(0, 6)).map(plannedJob),
+  // Chained jobs are one pipeline (all or nothing); separate jobs start one by one.
+  plan: ({ jobs }) => {
+    const list = jobs.slice(0, 6);
+    const atomic = list.some((j) => j.after !== undefined) || undefined;
+    return chainJobs(list).map((c) => ({ ...plannedJob(c), atomic }));
+  },
   async run({ summary, jobs }) {
     const list = jobs.slice(0, 6);
     // The plan's jobs share a batch, so the Library stacks them under the plan's summary.

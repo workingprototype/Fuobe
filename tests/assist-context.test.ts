@@ -18,6 +18,7 @@ const memory = await import("@/server/assist/memory");
 const projects = await import("@/server/assist/projects");
 const { handleMcp } = await import("@/server/mcp");
 const { db } = await import("@/server/db");
+const { planRunnable } = await import("@/lib/assist");
 
 type Msg = Anthropic.Beta.BetaMessage;
 type Block = Anthropic.Beta.BetaContentBlock;
@@ -272,6 +273,86 @@ describe("studio tools", () => {
     const ads = studio.fallbackSteps.ads({ brief: "oat milk", product_image: "/api/files/uploads/p.png", count: 8, aspect_ratios: ["1:1", "4:5", "9:16"] }, { engine: "cloud" });
     expect(ads).toHaveLength(12);
     expect(ads[0]).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/uploads/p.png"] } });
+  });
+
+  const image = "/api/files/uploads/2026-10-19/still.png";
+  const scenes = [
+    { narration: "Tea began as medicine.", visual: "A misty mountain tea garden" },
+    { narration: "Then it became a ritual.", visual: "Hands pouring tea in a quiet room" },
+    { narration: "Today it's everywhere.", visual: "A busy café counter" },
+  ];
+  const SAMPLES: Record<string, unknown[]> = {
+    split_layers: [{ image }, { image, layers: 8, focus: "the person and the text" }],
+    restyle_footage: [{ video, style: "claymation" }, { video, style: "anime", references: [image] }],
+    dub_video: [{ video, languages: ["Spanish"] }, { video, languages: ["Spanish", "German"], lipsync: false }],
+    faceless_episode: [
+      { scenes, style: "flat 2D" },
+      { title: "Tea", scenes: [...scenes, ...scenes], style: "watercolour", aspect_ratio: "1:1" },
+      { scenes, style: "flat 2D", voice_sample: "/api/files/uploads/2026-10-19/me.wav" },
+    ],
+    create_ads: [{ brief: "oat milk for runners" }, { brief: "oat milk", product_image: image, count: 2, aspect_ratios: ["1:1", "9:16"] }],
+    add_captions: [{ video }, { video, translate_to: "Spanish" }],
+  };
+
+  it("every studio tool plans without errors on both engines in demo mode", () => {
+    expect(Object.keys(SAMPLES).sort()).toEqual(studio.STUDIO_TOOLS.map((t) => t.name).sort());
+    for (const mode of ["both", "open", "cloud"] as const) {
+      setSetting("engineMode", mode);
+      try {
+        for (const [name, inputs] of Object.entries(SAMPLES))
+          for (const input of inputs)
+            for (const engine of ["cloud", "open"] as const) {
+              const p = plan(name, input, engine);
+              expect(p.error, `${name} ${engine}/${mode}`).toBeUndefined();
+              expect(p.jobs.length, `${name} ${engine}/${mode}`).toBeGreaterThan(0);
+              for (const j of p.jobs) expect(j.error, `${name} ${engine}/${mode}: ${j.modelId}`).toBeUndefined();
+              expect(planRunnable(p.jobs)).toBe(true);
+            }
+      } finally {
+        setSetting("engineMode", "both");
+      }
+    }
+  });
+
+  it("an open-source narrator needs a voice sample to clone once it runs for real", () => {
+    // No sample on a real open engine: the narration step says what to add, and the card can't run.
+    setSetting("demoMode", "off");
+    try {
+      const p = plan("faceless_episode", { scenes, style: "flat 2D" }, "open");
+      const voice = p.jobs.find((j) => j.note === "Narration")!;
+      expect(voice).toMatchObject({ modelId: "oss-chatterbox", atomic: true });
+      expect(voice.error).toMatch(/Add a voice sample for the narrator/);
+      expect(planRunnable(p.jobs)).toBe(false);
+    } finally {
+      setSetting("demoMode", "auto");
+    }
+    // A sample is cloned on either engine; the cloud engine otherwise uses a premade voice.
+    const sample = "/api/files/uploads/2026-10-19/me.wav";
+    const open = studio.fallbackSteps.faceless({ scenes, style: "x", voice_sample: sample }, { engine: "open" }).find((s) => s.key === "voice")!;
+    expect(open.request).toMatchObject({ modelId: "oss-chatterbox", inputs: { voiceAudio: sample } });
+    const cloud = studio.fallbackSteps.faceless({ scenes, style: "x", voice_sample: sample }, { engine: "cloud" }).find((s) => s.key === "voice")!;
+    expect(cloud.request).toMatchObject({ modelId: "chatterbox-cloud", inputs: { voiceAudio: sample } });
+    const premade = studio.fallbackSteps.faceless({ scenes, style: "x", voice: "rachel" }, { engine: "cloud" }).find((s) => s.key === "voice")!;
+    expect(premade.request).toMatchObject({ modelId: "elevenlabs-v4", params: { voice: "rachel" } });
+  });
+
+  it("a demo faceless episode on the open engine clones a saved demo voice", async () => {
+    const out = await tools.executeTool("faceless_episode", { scenes, style: "flat 2D" }, { engine: "open" });
+    expect(out.isError).toBeFalsy();
+    const body = JSON.parse(out.content as string) as { steps: { step: string; id: string }[]; demo: boolean };
+    expect(body.demo).toBe(true);
+    const voiceId = body.steps.find((s) => s.step === "Narration")!.id;
+    const row = db().prepare("SELECT request_json FROM generations WHERE id = ?").get(voiceId) as { request_json: string };
+    expect(JSON.parse(row.request_json).inputs.voiceAudio).toMatch(/^\/api\/files\/uploads\/.+\.wav$/);
+  });
+
+  it("one broken step blocks a pipeline's card; a separate job only blocks itself", () => {
+    const chained = plan("generate", { summary: "s", jobs: [{ model_id: "nope", prompt: "a" }, { model_id: "oss-wan22-14b-fast", prompt: "b", after: 0 }] }, "open");
+    expect(chained.jobs.every((j) => j.atomic)).toBe(true);
+    expect(planRunnable(chained.jobs)).toBe(false);
+    const separate = plan("generate", { summary: "s", jobs: [{ model_id: "nope", prompt: "a" }, { model_id: "oss-z-image-turbo", prompt: "b" }] }, "open");
+    expect(separate.jobs.some((j) => j.atomic)).toBe(false);
+    expect(planRunnable(separate.jobs)).toBe(true);
   });
 
   it("runs as one demo pipeline, final result in the chat", async () => {
