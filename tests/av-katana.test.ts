@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
-import { detectCuts, finalKey, katanaStage, katanaSteps, nearestAspect, planSegments } from "@/lib/av/katana";
+import { detectCuts, finalKey, KEYFRAME_OFFSET, katanaStage, katanaSteps, nearestAspect, planSegments, refineCut, refineTimes, stepsToRedo } from "@/lib/av/katana";
 import { frameParams, frameRequest } from "@/lib/av/frames";
 
 vi.setConfig({ testTimeout: 150_000 });
@@ -39,8 +39,37 @@ describe("katana segment planning", () => {
     const times = Array.from({ length: 21 }, (_, i) => i * 0.5);
     const diffs = times.slice(1).map((_, i) => (i === 5 || i === 13 ? 0.6 : i === 14 ? 0.5 : 0.02));
     // Spikes between 2.5–3.0 s and 6.5–7.0 s; the one right after (7.0–7.5) is within the minimum gap.
-    expect(detectCuts(diffs, times)).toEqual([2.75, 6.75]);
+    // Each cut is the first sample of the new shot, never the midpoint (which lies in the old shot).
+    expect(detectCuts(diffs, times)).toEqual([3, 7]);
     expect(detectCuts(diffs.map(() => 0.03), times)).toEqual([]);
+  });
+
+  it("places a cut that falls between samples at or after the real cut, so the segment opens on the new shot", () => {
+    // Hard cuts at 4.0 s and 7.0 s, sampled every 1/6 s from 0.08 s (as the studio does, off the frame grid).
+    const shotAt = (t: number) => (t < 4 ? 0 : t < 7 ? 1 : 2);
+    const times = Array.from({ length: 60 }, (_, i) => 0.08 + i / 6);
+    const diffs = times.slice(1).map((t, i) => (shotAt(t) !== shotAt(times[i]) ? 0.7 : 0.02));
+    const cuts = detectCuts(diffs, times);
+    expect(cuts).toHaveLength(2);
+    cuts.forEach((c, i) => {
+      expect(c).toBeGreaterThanOrEqual([4, 7][i]);
+      expect(shotAt(c)).toBe(i + 1);
+      expect(c - [4, 7][i]).toBeLessThan(1 / 6 + 0.01);
+    });
+    // Refined with finer samples between the two around the jump: within a 30 fps frame of the cut.
+    const fine = refineTimes(times[23], times[24]);
+    const at = refineCut(fine.slice(1).map((t, k) => (shotAt(t) !== shotAt(fine[k]) ? 0.7 : 0.02)), fine);
+    expect(at).toBeGreaterThanOrEqual(4);
+    expect(at - 4).toBeLessThan(1 / 30 + 0.01);
+    // The planned segments start at the cuts: every segment's keyframe is in its own shot.
+    const segs = planSegments({ duration: 10, mode: "scenes", cuts, min: 1, max: 5 });
+    expect(segs.map((s) => shotAt(s.start))).toEqual([0, 1, 2]);
+    expect(segs.map((s) => shotAt(s.start + KEYFRAME_OFFSET))).toEqual([0, 1, 2]);
+  });
+
+  it("never plans past the end of the file (the end rounds down)", () => {
+    expect(planSegments({ duration: 10.008, mode: "fixed", length: 5, min: 1, max: 5 }).at(-1)!.end).toBe(10);
+    expect(planSegments({ duration: 10.008, mode: "scenes", cuts: [3.001], min: 1, max: 5 }).at(-1)!.end).toBe(10);
   });
 
   it("cuts every N seconds, evenly, within the model's limits", () => {
@@ -107,12 +136,37 @@ describe("katana steps", () => {
       ["final", "oss-mux", "mux"],
     ]);
     expect(steps[0].request.params).toMatchObject({ startTime: 0, endTime: 4, aspectRatio: "9:16" });
+    // The keyframe is taken a few frames in, clear of a cut's edge.
+    expect(steps[1].request.params).toEqual({ startTime: KEYFRAME_OFFSET, endTime: KEYFRAME_OFFSET + 0.5, extra: { frameIndex: 0 } });
+    // The open motion model is told the segment's length (Fun Control would render its 81-frame default).
+    expect(steps[3].request.params).toMatchObject({ duration: 4, resolution: "480p" });
     // Qwen-Image-Edit gets the frame first, then two photos.
     expect(steps[2]).toMatchObject({ after: "frame0", chain: [{ slot: "images", position: "first" }], request: { inputs: { images: ["/a.png", "/b.png"] } } });
     expect(steps[3]).toMatchObject({ after: ["key0", "cut0"], chain: [{ slot: "images", position: "first" }, { slot: "video" }] });
     expect(steps[8]).toMatchObject({ after: ["move0", "move1"], chain: [{ slot: "videos" }, { slot: "videos" }] });
     expect(steps[9]).toMatchObject({ after: "join", chain: [{ slot: "video" }], request: { inputs: { audio: "/ref.mp4" } } });
     expect(finalKey(steps)).toBe("final");
+  });
+
+  it("open Wan Fun Control renders each segment as long as it is", async () => {
+    const segs = [
+      { start: 0, end: 3 },
+      { start: 3, end: 7.5 },
+    ];
+    const steps = katanaSteps({ engine: "open", reference: "/r.mp4", photos, segments: segs, motionModel: "oss-wan22-fun-control" });
+    const moves = steps.filter((s) => s.key.startsWith("move"));
+    expect(moves.map((s) => s.request.params?.duration)).toEqual([3, 4.5]);
+    // …which the ComfyUI provider turns into the 4n+1 frame count for that span at 16 fps (3 s → 49, not 81).
+    const { prepareWorkflow } = await import("@/server/providers/comfyui");
+    const { workflow, manifest } = await prepareWorkflow("wan22-fun-control-14b", { prompt: "p", images: ["k.png"], video: "cut.mp4", duration: 3, aspectRatio: "16:9", resolution: "480p" }, { generationId: "g", op: "motion-transfer", upload: async () => "x" });
+    const frames = manifest.bindings.frames!.map((t) => workflow[t.node].inputs[t.input]);
+    expect(frames.every((f) => f === 49)).toBe(true);
+  });
+
+  it("a retry redoes the failed steps and everything after them, nothing before", () => {
+    const steps = katanaSteps({ engine: "open", reference: "/r.mp4", photos, segments });
+    expect(stepsToRedo(steps, ["move1"])).toEqual(["move1", "join", "final"]);
+    expect(stepsToRedo(steps, ["frame0"])).toEqual(["frame0", "key0", "move0", "join", "final"]);
   });
 
   it("open joins fold 4 clips at a time", () => {
@@ -160,6 +214,32 @@ describe("katana runs (demo mode)", () => {
     expect(final.status).toBe("succeeded");
     expect(katanaStage(katana.getKatana(job.id)!)).toBe("done");
     expect(katana.listKatana().map((j) => j.id)).toContain(job.id);
+  });
+
+  it("a failed step can be retried without redoing what finished; removing a run stops it", async () => {
+    const reference = file("demo-portrait.mp4", "video/mp4");
+    const photo = file("grade-sample.jpg", "image/jpeg");
+    const job = katana.createKatana({ engine: "open", reference, photos: [photo], duration: 8, length: 4, title: "Retry me" });
+    expect((await settle(job.steps[job.final])).status).toBe("succeeded");
+    // Pretend the second segment's motion step failed.
+    const { db } = await import("@/server/db");
+    db().prepare("UPDATE generations SET status = 'failed', error = 'GPU out of memory' WHERE id = ?").run(job.steps.move1);
+    expect(katanaStage(katana.getKatana(job.id)!)).toBe("failed");
+    const retried = katana.retryKatana(job.id);
+    for (const k of ["cut0", "frame0", "key0", "move0", "cut1", "frame1", "key1"]) expect(retried.steps[k]).toBe(job.steps[k]);
+    for (const k of ["move1", "join", "final"]) expect(retried.steps[k]).not.toBe(job.steps[k]);
+    expect(retried.replaced?.move1).toEqual([job.steps.move1]);
+    expect(gens.getGeneration(retried.steps.move1)!.batchId).toBe(job.batchId);
+    expect((await settle(retried.steps[retried.final])).status).toBe("succeeded");
+    expect(katanaStage(katana.getKatana(job.id)!)).toBe("done");
+    expect(() => katana.retryKatana(job.id)).toThrow(/No step failed/);
+    // Run again: a new run with the same settings.
+    const again = katana.rerunKatana(job.id);
+    expect(again.id).not.toBe(job.id);
+    expect(again.segments).toEqual(job.segments);
+    expect(katana.deleteKatana(again.id)).toBe(true);
+    for (const id of Object.values(again.steps)) expect(["canceled", "succeeded"]).toContain((await settle(id)).status);
+    expect(Object.values(again.steps).some((id) => gens.getGeneration(id)!.status === "canceled")).toBe(true);
   });
 
   it("is an Assist tool with a priced plan", () => {

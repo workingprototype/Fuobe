@@ -75,5 +75,13 @@ export function useKatanaActions() {
     },
     onSuccess: (id) => qc.setQueryData<KatanaJobView[]>(["katana"], (xs) => xs?.filter((j) => j.id !== id)),
   });
-  return { start, remove };
+  /** Retry the failed steps (all: the whole run again, as a new run). */
+  const retry = useMutation({
+    mutationFn: async ({ id, all }: { id: string; all?: boolean }) => json<KatanaJobView>(await fetch(`/api/katana/${id}/retry${all ? "?all=1" : ""}`, { method: "POST" })),
+    onSuccess: (job, { all }) => {
+      qc.setQueryData<KatanaJobView[]>(["katana"], (xs) => (all ? [job, ...(xs ?? [])] : (xs ?? []).map((j) => (j.id === job.id ? job : j))));
+      void qc.invalidateQueries({ queryKey: ["generations"] });
+    },
+  });
+  return { start, remove, retry };
 }

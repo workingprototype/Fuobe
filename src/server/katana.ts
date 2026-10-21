@@ -2,13 +2,13 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { PlannedJob } from "@/lib/assist";
-import { finalKey, KATANA_FEATURE, KATANA_LIMITS, katanaSteps, katanaStage, motionModel, MOTION_MODELS, planSegments, type KatanaInput, type KatanaJob, type KatanaJobView, type Segment } from "@/lib/av/katana";
+import { finalKey, KATANA_FEATURE, KATANA_LIMITS, katanaSteps, katanaStage, motionModel, MOTION_MODELS, planSegments, stepsToRedo, type KatanaInput, type KatanaJob, type KatanaJobView, type Segment } from "@/lib/av/katana";
 import { getModel } from "@/lib/catalog";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { db } from "./db";
-import { getGeneration, previewChained } from "./generations";
+import { cancelGeneration, createGenerations, getGeneration, previewChained } from "./generations";
 import { engineMode } from "./settings";
 import fs from "node:fs";
 import { absolutePath } from "./storage";
@@ -47,8 +47,84 @@ export function listKatana(limit = 20): KatanaJobView[] {
   return rows.map((r) => view(toJob(r)));
 }
 
+/** Steps that haven't finished are stopped (nothing more is spent); finished clips stay in the Library. */
+function stopUnfinished(ids: string[]): void {
+  for (const gid of ids) {
+    const g = getGeneration(gid);
+    if (g && (g.status === "queued" || g.status === "running")) void cancelGeneration(gid);
+  }
+}
+
 export function deleteKatana(id: string): boolean {
+  const j = getKatana(id);
+  if (j) stopUnfinished(Object.values(j.steps));
   return db().prepare("DELETE FROM katana_jobs WHERE id = ?").run(id).changes > 0;
+}
+
+function saveJob(j: KatanaJob): KatanaJob {
+  const { id, createdAt, ...data } = j;
+  const now = Date.now();
+  delete (data as Partial<KatanaJob>).updatedAt;
+  db().prepare("UPDATE katana_jobs SET data_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(data), now, id);
+  return { ...j, id, createdAt, updatedAt: now };
+}
+
+const inputOf = (j: KatanaJob): KatanaInput => ({
+  engine: j.engine,
+  reference: j.reference,
+  photos: j.photos,
+  instructions: j.instructions,
+  segments: j.segments,
+  motionModel: j.motionModel,
+  aspectRatio: j.aspectRatio,
+  keepAudio: j.keepAudio,
+  title: j.title,
+});
+
+/**
+ * Retry a run whose steps failed: the failed steps and every step after them are made again (new
+ * generations in the same batch, fed by the steps that did finish); nothing that succeeded is paid twice.
+ */
+export function retryKatana(id: string): KatanaJobView {
+  const found = getKatana(id);
+  if (!found) throw new Error("This run no longer exists");
+  const { generations, ...j } = found;
+  const failed = Object.entries(j.steps)
+    .filter(([, gid]) => {
+      const g = generations[gid];
+      return !g || g.status === "failed" || g.status === "canceled";
+    })
+    .map(([k]) => k);
+  if (!failed.length) throw new Error("No step failed — the run is done or still going");
+  const steps = katanaSteps(inputOf(j));
+  const redo = stepsToRedo(steps, failed);
+  // Old steps downstream of the failure that are still waiting would fail anyway: stop them now.
+  stopUnfinished(redo.map((k) => j.steps[k]).filter(Boolean));
+  const ids = { ...j.steps };
+  const made: string[] = [];
+  try {
+    for (const key of redo) {
+      const st = steps.find((x) => x.key === key)!;
+      const after = st.after === undefined ? [] : [st.after].flat();
+      const g = createGenerations({ ...st.request, ...(st.chain && { chain: st.chain }) }, { batchId: j.batchId, ...(after.length && { dependsOn: after.map((a) => ids[a]) }) })[0];
+      made.push(g.id);
+      ids[key] = g.id;
+    }
+  } catch (e) {
+    for (const gid of made) void cancelGeneration(gid);
+    throw e;
+  }
+  const replaced = { ...j.replaced };
+  for (const k of redo) if (j.steps[k] && j.steps[k] !== ids[k]) replaced[k] = [...(replaced[k] ?? []), j.steps[k]];
+  return view(saveJob({ ...j, steps: ids, replaced }));
+}
+
+/** The same reference, photos and settings as a new run. */
+export function rerunKatana(id: string): KatanaJobView {
+  const j = getKatana(id);
+  if (!j) throw new Error("This run no longer exists");
+  const aspect = j.aspectRatio === "16:9" || j.aspectRatio === "9:16" || j.aspectRatio === "1:1" ? j.aspectRatio : undefined;
+  return createKatana({ ...inputOf(j), aspectRatio: aspect, duration: j.segments.at(-1)?.end });
 }
 
 const Seg = z.object({ start: z.number().min(0).max(KATANA_LIMITS.maxReference), end: z.number().min(0).max(KATANA_LIMITS.maxReference + 1) });
@@ -124,6 +200,7 @@ export function createKatana(body: KatanaRequest): KatanaJobView {
     motionModel: input.motionModel!,
     segments: input.segments,
     keepAudio: input.keepAudio !== false,
+    ...(input.aspectRatio && { aspectRatio: input.aspectRatio }),
     batchId: run.batchId,
     steps: Object.fromEntries(Object.entries(run.byKey).map(([k, g]) => [k, g.id])),
     final: finalKey(steps),

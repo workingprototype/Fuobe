@@ -50,28 +50,61 @@ export interface Segment {
 }
 
 const r2 = (t: number) => Math.round(t * 100) / 100;
+/** Times that must not fall before the moment they stand for (a cut, the clip's end) round up / down. */
+const up2 = (t: number) => Math.ceil(t * 100 - 1e-6) / 100;
+const down2 = (t: number) => Math.floor(t * 100 + 1e-6) / 100;
 
 /**
- * Scene cuts from a frame-difference pass: `diffs[i]` is the change between frame i and i+1 (sampled at
- * `times`). A cut is a spike well above the clip's usual change (its median), at least `minGap` apart.
+ * Where scene cuts are in a frame-difference pass: `diffs[i]` is the change between samples i and i+1.
+ * A cut is a spike well above the clip's usual change (its median), at least `minGap` seconds apart;
+ * returns i for each (the cut lies between samples i and i+1).
  */
-export function detectCuts(diffs: number[], times: number[], o: { minGap?: number; floor?: number; ratio?: number } = {}): number[] {
+export function detectCutIndices(diffs: number[], times: number[], o: { minGap?: number; floor?: number; ratio?: number } = {}): number[] {
   if (diffs.length < 2) return [];
   const sorted = [...diffs].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
   const threshold = Math.max(o.floor ?? 0.12, median * (o.ratio ?? 4));
   const minGap = o.minGap ?? 0.8;
-  const cuts: number[] = [];
+  const out: number[] = [];
   for (let i = 0; i < diffs.length; i++) {
     const d = diffs[i];
     // A local peak above the threshold.
     if (d < threshold || d < (diffs[i - 1] ?? 0) || d < (diffs[i + 1] ?? 0)) continue;
-    const t = r2((times[i] + times[i + 1]) / 2);
-    if (cuts.length && t - cuts.at(-1)! < minGap) continue;
-    cuts.push(t);
+    if (out.length && times[i + 1] - times[out.at(-1)! + 1] < minGap) continue;
+    out.push(i);
   }
-  return cuts;
+  return out;
 }
+
+/**
+ * Scene cuts from a frame-difference pass sampled at `times`. Each cut is placed at the first sample of
+ * the new shot (the later sample of the jump), never between the samples, so a segment starting there
+ * opens on the new shot (its keyframe is the right shot). Refine with refineCut for frame accuracy.
+ */
+export function detectCuts(diffs: number[], times: number[], o: { minGap?: number; floor?: number; ratio?: number } = {}): number[] {
+  return detectCutIndices(diffs, times, o).map((i) => up2(times[i + 1]));
+}
+
+/**
+ * A cut found between two coarse samples, pinned down with finer ones: `times` run from the last sample
+ * of the old shot to the first of the new one, `diffs[i]` is the change between times[i] and times[i+1];
+ * the cut is the sample right after the biggest jump.
+ */
+export function refineCut(diffs: number[], times: number[]): number {
+  let best = 0;
+  diffs.forEach((d, i) => {
+    if (d > diffs[best]) best = i;
+  });
+  return up2(times[best + 1] ?? times.at(-1)!);
+}
+
+/** Fine sample times between two coarse samples (both ends included). */
+export function refineTimes(a: number, b: number, steps = 5): number[] {
+  return Array.from({ length: steps + 1 }, (_, i) => a + ((b - a) * i) / steps);
+}
+
+/** How far into a segment its keyframe is taken (s): clear of a cut's blended or late frame. */
+export const KEYFRAME_OFFSET = 0.1;
 
 /** Split [a, b] into equal pieces no longer than `max`. */
 function pieces(a: number, b: number, max: number): Segment[] {
@@ -84,7 +117,8 @@ function pieces(a: number, b: number, max: number): Segment[] {
  * join a neighbour, longer than `max` are split evenly; the whole clip is covered without gaps.
  */
 export function planSegments(o: { duration: number; mode: "fixed" | "scenes"; length?: number; cuts?: number[]; min: number; max: number; maxSegments?: number }): Segment[] {
-  const duration = r2(Math.min(o.duration, KATANA_LIMITS.maxReference));
+  // Rounded down: the last segment must not ask for time past the end of the file.
+  const duration = down2(Math.min(o.duration, KATANA_LIMITS.maxReference));
   if (!(duration > 0)) return [];
   const min = Math.min(o.min, duration);
   let segs: Segment[];
@@ -183,11 +217,14 @@ export function katanaSteps(o: KatanaInput): KatanaStep[] {
         ? { key: `cut${i}`, request: { ...base, modelId: "oss-segment", op: "trim", inputs: { video: o.reference }, params: { ...span, aspectRatio: aspect, resolution: "480p" }, step: label("cut") } }
         : { key: `cut${i}`, request: { ...base, modelId: "trim-video", op: "trim", inputs: { video: o.reference }, params: span, step: label("cut") } },
     );
-    steps.push({ key: `frame${i}`, after: `cut${i}`, chain: [{ slot: "video" }], request: { ...base, modelId: FRAME_MODEL[o.engine], op: "frame", params: frameParams(o.engine, "first"), step: label("first frame") } });
+    // The keyframe a few frames in on the open engine (frame accurate); the cloud tool takes the first frame.
+    const pick = o.engine === "open" ? { at: KEYFRAME_OFFSET } : ("first" as const);
+    steps.push({ key: `frame${i}`, after: `cut${i}`, chain: [{ slot: "video" }], request: { ...base, modelId: FRAME_MODEL[o.engine], op: "frame", params: frameParams(o.engine, pick), step: label("first frame") } });
     // Your subject in that frame (Qwen-Image-Edit takes up to 3 images: the frame and two photos).
     const photos = o.engine === "open" ? o.photos.slice(0, 2) : o.photos;
     steps.push({ key: `key${i}`, after: `frame${i}`, chain: [{ slot: "images", position: "first" }], request: { ...base, modelId: KEYFRAME_MODEL[o.engine], op: "edit", prompt: keyframePrompt(o.instructions, photos.length), inputs: { images: photos }, step: label("your subject") } });
-    const motion: GenerationRequest = { ...base, modelId: m.id, op: m.op, prompt: motionPrompt(o.instructions), params: { aspectRatio: aspect, ...(o.engine === "open" && { resolution: "480p" }) }, step: label("motion") };
+    // Open models render as long as they're told (Wan Fun Control defaults to 81 frames ≈ 5 s): ask for the segment's length.
+    const motion: GenerationRequest = { ...base, modelId: m.id, op: m.op, prompt: motionPrompt(o.instructions), params: { aspectRatio: aspect, ...(o.engine === "open" && { resolution: "480p", duration: r2(s.end - s.start) }) }, step: label("motion") };
     if (m.op === "v2v") {
       // The segment is edited with the new keyframe first among its references, then the photos.
       steps.push({ key: `move${i}`, after: [`cut${i}`, `key${i}`], chain: [{ slot: "video" }, { slot: "images", position: "first" }], request: { ...motion, inputs: { images: o.photos.slice(0, m.maxRefs - 1) } } });
@@ -229,6 +266,20 @@ export function katanaSteps(o: KatanaInput): KatanaStep[] {
   return steps;
 }
 
+/** The steps a retry makes again: the failed ones and every step after them (in pipeline order). */
+export function stepsToRedo(steps: KatanaStep[], failed: string[]): string[] {
+  const redo = new Set(failed);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const st of steps) {
+      if (redo.has(st.key) || !(st.after === undefined ? [] : [st.after].flat()).some((a) => redo.has(a))) continue;
+      redo.add(st.key);
+      grew = true;
+    }
+  }
+  return steps.filter((st) => redo.has(st.key)).map((st) => st.key);
+}
+
 /** The key of the step that makes the finished video. */
 export function finalKey(steps: KatanaStep[]): string {
   return steps.some((s) => s.key === "final") ? "final" : steps.some((s) => s.key === "join") ? "join" : "move0";
@@ -244,9 +295,13 @@ export interface KatanaJob {
   motionModel: string;
   segments: Segment[];
   keepAudio: boolean;
+  /** The render shape (older runs: 16:9). */
+  aspectRatio?: string;
   batchId: string;
   /** Generation id per step key. */
   steps: Record<string, string>;
+  /** Steps made again by a retry: the generations they replaced, by step key. */
+  replaced?: Record<string, string[]>;
   final: string;
   createdAt: number;
   updatedAt: number;

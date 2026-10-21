@@ -1,9 +1,10 @@
 "use client";
 
-import { ChevronDown, Download, Film, Loader2, ScanLine, Sparkles, Trash2, Users } from "lucide-react";
+import { ChevronDown, Download, Film, Loader2, RotateCcw, ScanLine, Sparkles, Trash2, Users } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useDeferredValue, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Label } from "@/components/ui/label";
@@ -13,25 +14,42 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media-slot";
-import { frameDiff, sampleFrames } from "@/components/av/frame-sampler";
+import { frameDiff, openVideo, releaseVideo, sampleFrames } from "@/components/av/frame-sampler";
 import { MediaDrop } from "@/components/av/media-drop";
 import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useEngine } from "@/lib/api";
 import { formatCueTime } from "@/lib/av/cue-edit";
-import { detectCuts, KATANA_LIMITS, katanaProgress, katanaStage, motionModel, MOTION_MODELS, nearestAspect, planSegments, type KatanaJobView, type Segment } from "@/lib/av/katana";
+import { detectCutIndices, KATANA_LIMITS, katanaProgress, katanaStage, motionModel, MOTION_MODELS, nearestAspect, planSegments, refineCut, refineTimes, type KatanaJobView, type Segment } from "@/lib/av/katana";
 import { cn } from "@/lib/utils";
 import { useKatanaActions, useKatanaJobs, useKatanaPreview, type KatanaBody } from "./hooks";
 
 type SplitMode = "fixed" | "scenes";
 
-/** Scene cuts by a frame-difference pass in the browser (about 6 samples a second, 48 px wide). */
+/**
+ * Scene cuts by a frame-difference pass in the browser: about 6 samples a second at 48 px, then each
+ * jump is pinned down with 5 finer samples between the two around it, so the cut sits on the first
+ * frame of the new shot (within a frame at 30 fps), not between samples.
+ */
 async function findCuts(src: string, duration: number, onProgress: (p: number) => void): Promise<number[]> {
   const fps = Math.min(6, 180 / Math.max(1, duration));
   const times = Array.from({ length: Math.max(2, Math.floor(duration * fps)) }, (_, i) => i / fps);
-  const frames = await sampleFrames(src, times, { width: 48, onProgress });
-  const diffs = frames.slice(1).map((f, i) => frameDiff(frames[i].data, f.data));
-  return detectCuts(diffs, frames.map((f) => f.t));
+  const v = await openVideo(src);
+  try {
+    const frames = await sampleFrames(v, times, { width: 48, onProgress: (d) => onProgress(d * 0.8) });
+    const at = frames.map((f) => f.t);
+    const diffs = frames.slice(1).map((f, i) => frameDiff(frames[i].data, f.data));
+    const coarse = detectCutIndices(diffs, at);
+    const cuts: number[] = [];
+    for (const [n, i] of coarse.entries()) {
+      const fine = await sampleFrames(v, refineTimes(at[i], at[i + 1]), { width: 48 });
+      cuts.push(refineCut(fine.slice(1).map((f, k) => frameDiff(fine[k].data, f.data)), fine.map((f) => f.t)));
+      onProgress(0.8 + (0.2 * (n + 1)) / coarse.length);
+    }
+    return cuts;
+  } finally {
+    releaseVideo(v);
+  }
 }
 
 const money = (usd: number | null | undefined, demo?: boolean, open?: boolean) => (demo ? "Demo · free" : open ? "Free · your GPU" : usd == null ? "Price unknown" : `≈ $${usd.toFixed(2)}`);
@@ -59,6 +77,7 @@ export function KatanaStudio() {
   const segments = useMemo<Segment[] | null>(() => {
     if (!meta) return null;
     try {
+      if (mode === "scenes" && !cuts) return null;
       return mode === "scenes" && cuts ? planSegments({ duration: meta.duration, mode: "scenes", cuts, min: m.min, max: m.max }) : planSegments({ duration: meta.duration, mode: "fixed", length: len, min: m.min, max: m.max });
     } catch {
       return null;
@@ -86,6 +105,8 @@ export function KatanaStudio() {
       ? "Uploading…"
       : !meta && !unreadable
         ? "Reading the reference…"
+        : scanning !== null
+          ? "Finding the cuts…"
         : !photos.length
           ? "Add at least one photo of your subject"
           : photos.some((p) => p.uploading)
@@ -97,14 +118,16 @@ export function KatanaStudio() {
                 : null;
 
   const scan = async () => {
-    if (!reference || !meta) return;
+    if (!reference || !meta || scanning !== null) return;
+    // The choice shows at once, with its progress; the plan waits for the cuts.
+    setMode("scenes");
     setScanning(0);
     try {
       const found = await findCuts(reference.ref, Math.min(meta.duration, KATANA_LIMITS.maxReference), setScanning);
       setCuts(found);
-      setMode("scenes");
       toast(found.length ? `${found.length} cut${found.length === 1 ? "" : "s"} found` : "No hard cuts — it'll be split evenly");
     } catch (e) {
+      if (!cuts) setMode("fixed");
       toast.error((e as Error).message);
     } finally {
       setScanning(null);
@@ -185,10 +208,12 @@ export function KatanaStudio() {
                     {scanning !== null ? <Loader2 className="size-3.5 animate-spin" /> : <ScanLine className="size-3.5" />}
                     {scanning !== null ? `Looking for cuts… ${Math.round(scanning * 100)}%` : "Find the cuts again"}
                   </Button>
-                  <span className="text-[12px] text-muted-foreground">{cuts?.length ?? 0} cuts found in your browser</span>
+                  <span className="text-[12px] text-muted-foreground" role="status" aria-live="polite">
+                    {scanning !== null ? "Reading the clip in your browser" : `${cuts?.length ?? 0} cut${cuts?.length === 1 ? "" : "s"} found in your browser`}
+                  </span>
                 </div>
               )}
-              {segments && <SegmentBar segments={segments} duration={Math.min(meta.duration, KATANA_LIMITS.maxReference)} />}
+              {scanning !== null && !cuts ? <Skeleton className="mt-3 h-7 w-full rounded-lg" /> : segments && <SegmentBar segments={segments} duration={Math.min(meta.duration, KATANA_LIMITS.maxReference)} />}
               {meta.duration > KATANA_LIMITS.maxReference && <p className="mt-2 text-[12px] text-muted-foreground">Only the first 30 s are recreated.</p>}
             </Panel>
           )}
@@ -204,6 +229,7 @@ export function KatanaStudio() {
             <p className="mt-2 flex items-start gap-1.5 text-[12px] text-muted-foreground">
               <Users className="mt-0.5 size-3.5 shrink-0" /> A person, a product or an outfit. Clear, well-lit photos from a couple of angles work best.
             </p>
+            {engine === "open" && <p className="mt-1 text-[12px] text-muted-foreground">The open engine uses your first 2 photos (Qwen-Image-Edit takes the frame and two references).</p>}
           </Panel>
           <Panel title="Instructions (optional)">
             <Textarea
@@ -253,7 +279,7 @@ export function KatanaStudio() {
                 (blocker ?? "Pricing…")
               )}
             </p>
-            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={start.isPending}>
+            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={start.isPending || scanning !== null}>
               {start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Recreate
             </Button>
           </div>
@@ -302,7 +328,12 @@ function stepRows(j: KatanaJobView): { segment: number; rows: StepRow[] }[] {
 }
 
 function Runs({ jobs, loading }: { jobs?: KatanaJobView[]; loading: boolean }) {
-  const { remove } = useKatanaActions();
+  const { remove, retry } = useKatanaActions();
+  const again = (id: string, all: boolean) =>
+    retry.mutate(
+      { id, all },
+      { onSuccess: (j) => toast.success(all ? `Started again · ${j.segments.length} segment${j.segments.length === 1 ? "" : "s"}` : "Retrying the failed steps"), onError: (e) => toast.error((e as Error).message) },
+    );
   if (loading)
     return (
       <div className="mx-auto mt-10 max-w-[1040px] space-y-2">
@@ -339,9 +370,30 @@ function Runs({ jobs, loading }: { jobs?: KatanaJobView[]; loading: boolean }) {
                         </a>
                       </Button>
                     )}
-                    <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={`Remove ${j.title}`} onClick={() => remove.mutate(j.id, { onSuccess: () => toast("Removed — its clips stay in your Library") })}>
-                      <Trash2 className="size-4" />
-                    </Button>
+                    {stage !== "running" && (
+                      <Button variant="ghost" size="sm" className="rounded-full" disabled={retry.isPending} onClick={() => again(j.id, stage === "done")}>
+                        <RotateCcw className="size-3.5" /> {stage === "failed" ? "Retry failed steps" : "Run again"}
+                      </Button>
+                    )}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label={`Remove ${j.title}`}>
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Remove this edit?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {stage === "running" ? "Its steps still running are stopped, and it leaves this list." : "It leaves this list."} The clips it already made stay in your Library.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep it</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => remove.mutate(j.id, { onSuccess: () => toast("Removed — its clips stay in your Library"), onError: (e) => toast.error((e as Error).message) })}>Remove</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                   <p className="mt-0.5 text-[12px] text-muted-foreground">
                     {j.segments.length} segment{j.segments.length === 1 ? "" : "s"} · {MOTION_MODELS[j.engine].find((x) => x.id === j.motionModel)?.label ?? j.motionModel} · {j.engine === "open" ? "Open source" : "Cloud"}
@@ -352,7 +404,9 @@ function Runs({ jobs, loading }: { jobs?: KatanaJobView[]; loading: boolean }) {
                       <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                         <div className={cn("h-full rounded-full transition-[width] duration-500", stage === "failed" ? "bg-destructive" : "bg-primary")} style={{ width: `${Math.max(3, pct)}%` }} />
                       </div>
-                      <p className="mt-1 text-[12px] text-muted-foreground">{stage === "failed" ? "A step failed — see below" : `${pct}% · steps run as soon as the ones before them finish`}</p>
+                      <p className="mt-1 text-[12px] text-muted-foreground">
+                        {stage === "failed" ? "A step failed — open the steps for the reason, then retry: the finished steps are kept" : `${pct}% · steps run as soon as the ones before them finish`}
+                      </p>
                     </div>
                   )}
                   <Collapsible className="mt-2">
