@@ -233,11 +233,18 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
       return [demoTranslate(brief, String(meta.targetLanguage ?? "Spanish"))];
     case "write":
       return [demoWrite(brief)];
-    case "separate-audio":
-      return [
+    case "separate-audio": {
+      const stems: DemoOutput[] = [
         { url: toDataUri(demoWav(3, [220, 330], 3), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { stem: "voice", demo: true } },
         { url: toDataUri(demoWav(3, [110, 165]), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { stem: "background", demo: true } },
       ];
+      // Workflows that also time the voice stem (the open dub's first step) return its cues too.
+      if (meta.transcript) {
+        const cues = demoCues("");
+        stems.push(textOutput(cueText(cues), cues, { role: "cues", language: meta.sourceLanguage ?? "English", demo: true }));
+      }
+      return stems;
+    }
     case "image-to-3d":
       return [
         { url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb" } },
@@ -276,8 +283,8 @@ export const mockProvider: ProviderAdapter = {
       meta: {
         startedAt: Date.now(),
         op: route.op,
-        // Colour matching keeps the input's kind (an image or a video).
-        kind: route.op === "color-match" ? model.kind : OPERATION_OUTPUT[route.op],
+        // Colour matching keeps the input's kind (an image or a video); a timeline is audio or (fal) a video.
+        kind: route.op === "color-match" || route.op === "timeline" ? model.kind : OPERATION_OUTPUT[route.op],
         prompt: input.prompt ?? route.op,
         aspectRatio: input.aspectRatio ?? "1:1",
         count: Math.max(1, Math.min(4, input.numOutputs ?? 1)),
@@ -288,6 +295,8 @@ export const mockProvider: ProviderAdapter = {
         numLayers: input.numLayers,
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
+        // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).
+        transcript: route.op === "separate-audio" && route.provider === "comfyui" && route.endpoint.includes("transcribe"),
       },
       payload: { demo: true, ...input },
     };

@@ -97,6 +97,8 @@ const PROMPTLESS = new Set<Operation>([
   "interpolate", "v2a", "face-swap", "motion-transfer", "lipsync", "avatar",
   // round 3: tools that work from their inputs (open caption burn-in takes timed lines as its prompt and says so when they're missing)
   "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize", "level",
+  // av-tools: the dub voice track (clips placed on the video's timeline)
+  "timeline",
 ]);
 
 /**
@@ -136,6 +138,9 @@ export function planGeneration(
     // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt.
     const sameModel = route.modelId === model.id;
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
+    // Option choices that set model settings (Angles: rotate / tilt / zoom); a value the user set wins.
+    const chosen = Object.assign({}, ...(preset.options ?? []).map((o) => o.choices.find((c) => c.value === (req.presetOptions?.[o.key] ?? o.default ?? o.choices[0]?.value))?.extra ?? {}));
+    if (sameModel && Object.keys(chosen).length) params = { ...params, extra: { ...chosen, ...params.extra } };
     loras = sameModel ? (route.loras ?? []) : [];
     if (sameModel) op = op ?? route.op;
   }

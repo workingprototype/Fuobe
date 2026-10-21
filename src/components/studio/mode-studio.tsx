@@ -15,7 +15,7 @@ export interface ModeTab {
 }
 
 /** Underline tabs on their own row under the page title; they scroll sideways (with faded edges) on phones. */
-function ModeTabs({ tabs, current }: { tabs: ModeTab[]; current: string }) {
+export function ModeTabs({ tabs, current }: { tabs: ModeTab[]; current: string }) {
   const [ref, fade] = useEdgeFade<HTMLDivElement>();
   const active = useRef<HTMLAnchorElement>(null);
   // Keep the selected tab in view when the row scrolls (only the row: the page stays put).

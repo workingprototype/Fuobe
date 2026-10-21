@@ -167,14 +167,16 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
   const video = original.inputs?.video;
   if (!video) throw new Error("Add the video to continue");
   if (!supportsOp(model, "i2v")) throw new Error(`${model.name} can't continue a video`);
+  // The last frame comes from fal's FFmpeg tool, or ComfyUI's frame-extract on the open engine.
+  const frameModel = model.engine === "open" ? "oss-extract-frame" : "extract-frame";
   assertOneMode([
-    { label: "Taking the last frame", modelId: "extract-frame", op: "frame" },
+    { label: "Taking the last frame", modelId: frameModel, op: "frame" },
     { label: model.name, modelId: model.id, op: "i2v" },
     { label: "Joining the clips", modelId: joinModelId(model.engine), op: "concat" },
   ]);
   const batchId = nanoid(10);
   const frame = createGenerations(
-    { feature: original.feature, modelId: "extract-frame", op: "frame", inputs: { video }, step: { label: "Last frame", index: 0, of: 3 } },
+    { feature: original.feature, modelId: frameModel, op: "frame", inputs: { video }, step: { label: "Last frame", index: 0, of: 3 } },
     { batchId },
   )[0];
   const rest = { ...original.inputs };

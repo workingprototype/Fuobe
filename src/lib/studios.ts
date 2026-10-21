@@ -196,7 +196,7 @@ export const SFX_STUDIO: StudioConfig = {
   ops: ["sfx"],
   feed: { kind: "audio", features: ["audio"] },
   slots: [],
-  defaultModels: { cloud: "mirelo-sfx-2", open: "" },
+  defaultModels: { cloud: "mirelo-sfx-2", open: "oss-stable-audio-3" },
   suggestions: ["Thunder rolling over a quiet forest", "Footsteps on gravel, distant birds", "Sci-fi door whooshing open"],
 };
 
@@ -217,12 +217,13 @@ export const FOLEY_STUDIO: StudioConfig = {
   feature: "audio",
   title: "Audio",
   hero: "Add sound to a video",
+  subtitle: "Foley in sync with the picture: Mirelo SFX 2.0 on the cloud, HunyuanVideo-Foley or MMAudio on your ComfyUI.",
   placeholder: "Optional: describe the sound, e.g. “footsteps on gravel, distant birds”",
   kind: "video",
   ops: ["v2a"],
   feed: { features: ["audio"] },
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
-  defaultModels: { cloud: "mirelo-sfx-2-video", open: "oss-mmaudio" },
+  defaultModels: { cloud: "mirelo-sfx-2-video", open: "oss-hunyuan-foley-video" },
   promptOptional: true,
 };
 

@@ -139,7 +139,8 @@ describe("stems and the second audio track", () => {
     const stems = gens.getGeneration(p.byKey.stems.id)!;
     const voice = gens.getGeneration(p.byKey.voice.id)!;
     const stem = (name: string) => stems.outputs.find((o) => o.meta?.stem === name)!.url;
-    expect(stems.outputs.map((o) => o.meta?.stem)).toEqual(["voice", "background"]);
+    // Two stems, then (like the real dub-prepare workflow) the voice stem's timed transcript.
+    expect(stems.outputs.map((o) => o.meta?.stem ?? o.meta?.role)).toEqual(["voice", "background", "cues"]);
     // The voice stem is cloned; the background stem (not the first audio output) goes under the new voice.
     expect(voice.request.inputs?.voiceAudio).toBe(stem("voice"));
     expect(film.request.inputs).toEqual({ video, audio: voice.outputs[0].url, audio2: stem("background") });

@@ -1,0 +1,531 @@
+"use client";
+
+import { ArrowLeft, AudioLines, ChevronRight, Cloud, Cpu, Download, Languages, Loader2, Mic2, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import type { SlotValue } from "@/components/studio/media-slot";
+import { CueEditor, useCueEditor } from "@/components/av/cue-editor";
+import { SourceLanguageSelect, TargetLanguages } from "@/components/av/language-picker";
+import { MediaDrop } from "@/components/av/media-drop";
+import { StepList, type StepRow } from "@/components/av/step-list";
+import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
+import { useEngine } from "@/lib/api";
+import { cueProblems } from "@/lib/av/cue-edit";
+import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
+import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
+import type { Cue } from "@/lib/cues";
+import { cn } from "@/lib/utils";
+import { useDubActions, useDubPrice, useDubSessions, useVoicePrice } from "./hooks";
+
+const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
+  "heygen-translate": { name: "HeyGen Translate", note: "Lip-synced, 170+ languages and accents · ≈ $0.10 per second" },
+  "heygen-translate-fast": { name: "HeyGen Translate Speed", note: "Faster and cheaper, lip-synced · ≈ $0.05 per second" },
+  "elevenlabs-dubbing": { name: "ElevenLabs Dubbing", note: "Keeps each speaker's voice, no lip re-sync · ≈ $0.60 per minute" },
+};
+
+const ROUTE_LINE = {
+  open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → your local LLM translates → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
+  cloud: "Cloud: ElevenLabs isolates the voice → Scribe v2 times it → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3. The cloud route keeps the voice only (no music stem on this route).",
+};
+
+const STAGE: Record<DubStage, { label: string; tone: string }> = {
+  preparing: { label: "Translating", tone: "bg-muted text-muted-foreground" },
+  // Solid in both themes: dark text on a translucent yellow over the dark page was unreadable.
+  review: { label: "Ready to review", tone: "bg-highlight text-highlight-foreground" },
+  voicing: { label: "Voicing", tone: "bg-brand-faint text-brand-text" },
+  done: { label: "Done", tone: "bg-success/15 text-foreground" },
+  failed: { label: "Failed", tone: "bg-destructive/10 text-destructive" },
+};
+
+function StageBadge({ stage }: { stage: DubStage }) {
+  const s = STAGE[stage];
+  return <span className={cn("inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[11px] font-medium", s.tone)}>{s.label}</span>;
+}
+
+/** Translate & dub (Audio → Translate): a new dub, the dubs in progress and, opened, one dub's review. */
+export function DubStudio({ tabs }: { tabs?: React.ReactNode }) {
+  const sessions = useDubSessions();
+  const [openId, setOpenId] = useState<string | null>(null);
+  // A dub removed elsewhere (another tab) just closes.
+  const open = sessions.data?.find((s) => s.id === openId);
+  return (
+    <ToolShell title="Audio" tabs={tabs}>
+      {open ? (
+        <SessionView key={open.id} s={open} onBack={() => setOpenId(null)} />
+      ) : (
+        <>
+          <NewDub onStarted={(id) => setOpenId(id)} />
+          <RecentDubs sessions={sessions.data} loading={sessions.isLoading} onOpen={setOpenId} />
+        </>
+      )}
+    </ToolShell>
+  );
+}
+
+function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
+  const [engine] = useEngine();
+  const { create } = useDubActions();
+  const [video, setVideo] = useState<SlotValue | null>(null);
+  const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [mode, setMode] = useState<"steps" | "oneshot">("steps");
+  const [model, setModel] = useState<OneShotModel>("heygen-translate");
+  const [source, setSource] = useState("auto");
+  const [targets, setTargets] = useState<string[]>(["es"]);
+  const oneShot = mode === "oneshot" && engine === "cloud";
+  const route: DubRoute = oneShot ? model : engine === "open" ? "open" : "cloud-steps";
+  const usable = targets.filter((c) => {
+    const l = languageByCode(c);
+    return l && supportsTarget(route, l);
+  });
+  const blocker = !video ? "Add the video to translate" : video.uploading ? "Uploading…" : !usable.length ? "Pick a language to dub into" : null;
+  const body = video && !video.uploading && usable.length ? { engine, mode: oneShot ? ("oneshot" as const) : ("steps" as const), model: oneShot ? model : undefined, video: video.ref, source, targets: usable, duration } : null;
+  const price = useDubPrice(body);
+  const start = () => {
+    if (blocker || !body) return void toast(blocker, { id: "dub-blocker" });
+    create.mutate(
+      { ...body, title: video!.name?.replace(/\.[a-z0-9]+$/i, "") },
+      {
+        onSuccess: (s) => {
+          toast.success(oneShot ? `Dubbing into ${usable.length} language${usable.length === 1 ? "" : "s"}` : "Transcribing and translating");
+          setVideo(null);
+          setDuration(undefined);
+          onStarted(s.id);
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+  return (
+    <div className="pb-10">
+      <ToolHero title="Speak every language" subtitle="Translate the speech, keep the speaker's voice and re-sync the lips. Review every line before it's spoken." />
+      <div className="mx-auto mt-8 max-w-[760px] space-y-3">
+        <MediaDrop
+          kind="video"
+          value={video}
+          onChange={(v) => {
+            setVideo(v);
+            if (!v) setDuration(undefined);
+          }}
+          onDuration={setDuration}
+          title="Add the video to translate"
+          hint="MP4, MOV or WebM up to 200 MB · one clear speaker works best"
+          compact
+        />
+        <Panel title="How">
+          <div role="radiogroup" aria-label="How to dub" className="grid gap-2 sm:grid-cols-2">
+            <ModeCard on={!oneShot} icon={<Languages className="size-4" />} title="Review the script first" onClick={() => setMode("steps")} note="Transcribe and translate, edit every line, then voice it. Cloud and open source." />
+            <ModeCard
+              on={oneShot}
+              disabled={engine === "open"}
+              icon={<Wand2 className="size-4" />}
+              title="One shot"
+              onClick={() => setMode("oneshot")}
+              note={engine === "open" ? "Cloud only — switch the engine to Cloud" : "HeyGen or ElevenLabs dub the whole video in one go."}
+            />
+          </div>
+          {oneShot && (
+            <div className="mt-3 flex flex-col gap-1.5 sm:flex-row sm:items-center">
+              <Label htmlFor="dub-model" className="text-[13px] sm:w-32">
+                Model
+              </Label>
+              <Select value={model} onValueChange={(v) => setModel(v as OneShotModel)}>
+                <SelectTrigger id="dub-model" className="h-9 w-full rounded-full sm:w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ONE_SHOT_MODELS.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {ONE_SHOT[m].name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[12px] text-muted-foreground sm:ml-2">{ONE_SHOT[model].note}</p>
+            </div>
+          )}
+        </Panel>
+        <Panel title="Languages">
+          <div className="space-y-3">
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+              <Label htmlFor="dub-source" className="text-[13px] sm:w-32">
+                Spoken language
+              </Label>
+              <SourceLanguageSelect id="dub-source" value={source} onChange={setSource} />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start">
+              <span className="pt-1.5 text-[13px] font-medium sm:w-32">Translate into</span>
+              <div className="min-w-0 flex-1">
+                <TargetLanguages
+                  value={targets}
+                  onChange={setTargets}
+                  available={(l) => supportsTarget(route, l)}
+                  unavailableHint={route === "open" ? "Chatterbox doesn't speak this one yet" : "This model doesn't offer it"}
+                />
+                {targets.length > usable.length && <p className="mt-1.5 text-[12px] text-muted-foreground">Crossed-out languages aren&apos;t available on this route and will be skipped.</p>}
+              </div>
+            </div>
+          </div>
+        </Panel>
+        <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center">
+          <p className="flex-1 text-[12px] leading-relaxed text-muted-foreground">
+            {oneShot ? `${ONE_SHOT[model].name} returns the finished video for each language.` : engine === "open" ? ROUTE_LINE.open : ROUTE_LINE.cloud}
+          </p>
+          <div className="flex shrink-0 items-center gap-3 self-end sm:self-auto">
+            <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} hint={oneShot ? undefined : "Translating costs little; you'll see the voice's price before it speaks"} />
+            <Button size="lg" className={cn("shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={start} disabled={create.isPending} aria-describedby={blocker ? "dub-blocker" : undefined}>
+              {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {oneShot ? "Dub it" : "Translate"}
+            </Button>
+          </div>
+        </div>
+        {blocker && (
+          <p id="dub-blocker" className="sr-only">
+            {blocker}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The price of the next step, next to its button: "≈ $8.13 + ElevenLabs v4", "Demo · free", "Free on your GPU". */
+function PriceNote({ price, loading, error, hint }: { price?: DubPrice; loading?: boolean; error?: Error | null; hint?: string }) {
+  if (loading) return <Skeleton className="h-4 w-20" aria-label="Pricing" />;
+  if (error) return <span className="max-w-[16rem] text-right text-[12px] leading-snug text-muted-foreground">{error.message}</span>;
+  if (!price) return null;
+  const extra = price.unpriced.length ? `${price.unpriced.join(" and ")} bill${price.unpriced.length === 1 ? "s" : ""} by the provider's own rate (per character or token).` : undefined;
+  return (
+    <span className="text-right text-[12px] leading-snug" title={[extra, hint].filter(Boolean).join(" ") || undefined}>
+      <span className="font-medium tabular-nums">{priceLine(price)}</span>
+      {price.steps > 1 && <span className="block text-muted-foreground">{price.steps} steps</span>}
+    </span>
+  );
+}
+
+function ModeCard({ on, disabled, icon, title, note, onClick }: { on: boolean; disabled?: boolean; icon: React.ReactNode; title: string; note: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex items-start gap-3 rounded-xl border p-3 text-left transition-colors",
+        on ? "border-primary bg-brand-faint" : "hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent",
+      )}
+    >
+      <span className={cn("mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg", on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[13px] font-semibold">{title}</span>
+        <span className="mt-0.5 block text-[12px] leading-snug text-muted-foreground">{note}</span>
+      </span>
+    </button>
+  );
+}
+
+function RecentDubs({ sessions, loading, onOpen }: { sessions?: DubSessionView[]; loading: boolean; onOpen: (id: string) => void }) {
+  if (loading)
+    return (
+      <div className="mx-auto max-w-[760px] space-y-2">
+        <Skeleton className="h-5 w-28" />
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <Skeleton className="h-16 w-full rounded-2xl" />
+      </div>
+    );
+  if (!sessions?.length) return null;
+  return (
+    <section className="mx-auto max-w-[760px]" aria-labelledby="recent-dubs">
+      <h3 id="recent-dubs" className="mb-2 font-heading text-[22px]">
+        Your dubs
+      </h3>
+      <ul className="space-y-2">
+        {sessions.map((s) => (
+          <li key={s.id}>
+            <button type="button" onClick={() => onOpen(s.id)} className="flex w-full min-w-0 items-center gap-3 rounded-2xl border bg-background p-3 text-left transition-colors hover:bg-accent">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-faint text-brand-text">{s.engine === "open" ? <Cpu className="size-4" /> : <Cloud className="size-4" />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[14px] font-medium">{s.title}</span>
+                <span className="mt-1 flex flex-wrap gap-1">
+                  {s.targets.map((c) => (
+                    <span key={c} className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
+                      {languageByCode(c)?.name ?? c} <StageBadge stage={languageStage(s, c)} />
+                    </span>
+                  ))}
+                </span>
+              </span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const PREPARE_LABEL: Record<string, string> = { stems: "Voice, background and transcript", voice: "Clean voice", words: "Transcript" };
+
+function prepareRows(s: DubSessionView, lang: string): StepRow[] {
+  // Older open dubs transcribed in a step of their own.
+  const keys = Object.keys(s.prepare ?? {}).filter((k) => !k.startsWith("translate:"));
+  const label = (k: string) => (k === "stems" && keys.includes("words") ? "Voice and background" : (PREPARE_LABEL[k] ?? k));
+  return [...keys.map((k) => ({ key: k, label: label(k), g: s.generations[s.prepare![k]] })), { key: "t", label: `Translate into ${languageByCode(lang)?.name ?? lang}`, g: s.generations[s.prepare?.[translateKey(lang)] ?? ""] }];
+}
+
+function voiceRows(s: DubSessionView, lang: string): StepRow[] {
+  const run = s.voices?.[lang]?.at(-1);
+  if (!run) return [];
+  const open = s.engine === "open";
+  const label: Record<string, string> = {
+    speech: open ? "Speech in their voice" : "Speech",
+    track: "Placed at each line's time",
+    soundtrack: "Voice track",
+    clone: "Their voice",
+    lips: "Lips re-synced",
+    film: run.lipsync && !open ? "Lips re-synced" : "Dubbed video",
+  };
+  const entries = Object.entries(run.ids);
+  const lines = entries.filter(([k]) => k.startsWith("line:")).map(([, id]) => s.generations[id]);
+  const rows: StepRow[] = [];
+  // One row for the takes: a dub of 30 lines would otherwise list 30 near-identical steps.
+  if (lines.length) rows.push({ key: "lines", label: `${lines.length} line${lines.length === 1 ? "" : "s"} ${open ? "in their voice" : "spoken"}`, group: lines });
+  for (const [k, id] of entries) if (!k.startsWith("line:")) rows.push({ key: k, label: label[k] ?? k, g: s.generations[id] });
+  return rows;
+}
+
+function SessionView({ s, onBack }: { s: DubSessionView; onBack: () => void }) {
+  const { remove } = useDubActions();
+  const [lang, setLang] = useState(s.targets[0]);
+  const video = useRef<HTMLVideoElement>(null);
+  const [time, setTime] = useState<number | undefined>(undefined);
+  const stage = languageStage(s, lang);
+  const result = dubResult(s, lang);
+  return (
+    <div className="pt-4 pb-10">
+      <div className="mb-4 flex min-w-0 items-center gap-2">
+        <Button variant="ghost" size="sm" className="-ml-2 rounded-full" onClick={onBack}>
+          <ArrowLeft className="size-4" /> All dubs
+        </Button>
+        <h2 className="min-w-0 flex-1 truncate font-heading text-[22px] leading-tight">{s.title}</h2>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon-sm" className="rounded-full" aria-label="Remove this dub">
+              <Trash2 className="size-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove this dub?</AlertDialogTitle>
+              <AlertDialogDescription>Steps still running are stopped, and the review leaves this list. The videos and audio it already made stay in your Library.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep it</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() =>
+                  remove.mutate(s.id, {
+                    onSuccess: () => {
+                      toast("Dub removed");
+                      onBack();
+                    },
+                    onError: (e) => toast.error((e as Error).message),
+                  })
+                }
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+
+      <div role="tablist" aria-label="Languages" className="scrollbar-none mb-4 flex gap-1.5 overflow-x-auto">
+        {s.targets.map((c) => (
+          <button
+            key={c}
+            role="tab"
+            aria-selected={c === lang}
+            onClick={() => setLang(c)}
+            className={cn("inline-flex h-8 shrink-0 items-center gap-2 rounded-full px-3 text-[13px] font-medium transition-colors", c === lang ? "bg-foreground text-background" : "bg-secondary hover:bg-accent")}
+          >
+            {languageByCode(c)?.name ?? c}
+            <span className={cn("size-1.5 rounded-full", { preparing: "bg-subtle-foreground", review: "bg-highlight", voicing: "bg-primary", done: "bg-success", failed: "bg-destructive" }[languageStage(s, c)])} />
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+        <div className="space-y-3 lg:sticky lg:top-20 lg:self-start">
+          <div className="overflow-hidden rounded-2xl border bg-media">
+            <video ref={video} src={s.video} controls playsInline preload="metadata" onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} className="max-h-[42vh] w-full object-contain" />
+          </div>
+          <p className="text-[12px] text-muted-foreground">Original · {s.source === "auto" ? "language detected" : (languageByCode(s.source)?.name ?? s.source)}</p>
+          {result && <ResultCard s={s} lang={lang} />}
+        </div>
+        <div className="min-w-0 space-y-3">
+          {s.mode === "oneshot" ? (
+            <Panel title={`Dub into ${languageByCode(lang)?.name ?? lang}`} aside={<StageBadge stage={stage} />}>
+              <StepList steps={[{ key: "dub", label: "Translated and voiced in one go", g: s.generations[s.oneshot?.[lang] ?? ""] }]} />
+            </Panel>
+          ) : (
+            <>
+              <Panel title="Translation" aside={<StageBadge stage={stage} />}>
+                <StepList steps={prepareRows(s, lang)} />
+              </Panel>
+              {stage === "preparing" ? (
+                <Panel>
+                  <p className="text-[13px] text-muted-foreground">Transcribing and translating. You&apos;ll review every line here before anything is spoken.</p>
+                </Panel>
+              ) : stage === "failed" && !s.voices?.[lang]?.length ? (
+                <Panel>
+                  <p className="text-[13px] text-muted-foreground">A step failed (see above). Start a new dub to try again — check the clip has clear speech.</p>
+                </Panel>
+              ) : (
+                <Review
+                  key={`${s.id}:${lang}`}
+                  s={s}
+                  lang={lang}
+                  time={time}
+                  onSeek={(t) => {
+                    if (video.current) video.current.currentTime = t;
+                  }}
+                />
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultCard({ s, lang }: { s: DubSessionView; lang: string }) {
+  const g = dubResult(s, lang)!;
+  const out = g.outputs.find((o) => o.kind === "video");
+  if (!out) return null;
+  const name = `${s.title} · ${languageByCode(lang)?.name ?? lang}.mp4`;
+  return (
+    <Panel
+      title={`Dubbed · ${languageByCode(lang)?.name ?? lang}`}
+      aside={
+        <Button asChild variant="outline" size="sm" className="rounded-full">
+          <a href={out.url} download={name}>
+            <Download className="size-3.5" /> Download
+          </a>
+        </Button>
+      }
+    >
+      <video src={out.url} controls playsInline preload="metadata" className="max-h-[42vh] w-full rounded-xl bg-media object-contain" />
+      {g.provider === "mock" && <p className="mt-2 text-[12px] text-muted-foreground">Demo result — connect a provider (or start ComfyUI) to dub for real.</p>}
+      {s.engine === "cloud" && s.mode === "steps" && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: the cloud route has no music stem to mix back in (the open route and the one-shot models keep it).</p>}
+    </Panel>
+  );
+}
+
+function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; time?: number; onSeek: (t: number) => void }) {
+  const { saveDraft, voice } = useDubActions();
+  const initial = useMemo(() => reviewCues(s, lang) ?? [], [s, lang]);
+  const editor = useCueEditor(initial);
+  const [lipsync, setLipsync] = useState(true);
+  const stage = languageStage(s, lang);
+  const runs = s.voices?.[lang] ?? [];
+  // Autosave the reviewed lines shortly after the last edit (the video's time updates don't restart the wait).
+  const [savedBody, setSavedBody] = useState(() => JSON.stringify(initial));
+  const cues = editor.cues;
+  const save = useRef(saveDraft.mutate);
+  const body = JSON.stringify(cues);
+  // What's on screen vs. what the server has, for the flush when this review closes.
+  const pending = useRef({ body, savedBody, id: s.id, lang });
+  useEffect(() => {
+    save.current = saveDraft.mutate;
+    pending.current = { body, savedBody, id: s.id, lang };
+  });
+  const dirty = body !== savedBody;
+  useEffect(() => {
+    if (body === savedBody) return;
+    const t = setTimeout(() => {
+      setSavedBody(body);
+      save.current({ id: s.id, lang, cues: JSON.parse(body) as Cue[] }, { onError: (e) => toast.error((e as Error).message) });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [body, savedBody, s.id, lang]);
+  // Edits made just before switching language, going back to all dubs or leaving the page are saved right away.
+  useEffect(() => {
+    const flush = (keepalive: boolean) => {
+      const p = pending.current;
+      if (p.body === p.savedBody) return;
+      pending.current = { ...p, savedBody: p.body };
+      if (keepalive) void fetch(`/api/dub/${p.id}`, { method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lang: p.lang, cues: JSON.parse(p.body) }) });
+      else save.current({ id: p.id, lang: p.lang, cues: JSON.parse(p.body) as Cue[] });
+    };
+    const leave = () => flush(true);
+    window.addEventListener("beforeunload", leave);
+    return () => {
+      window.removeEventListener("beforeunload", leave);
+      flush(false);
+    };
+  }, []);
+  const problems = cueProblems(cues);
+  const crowded = useMemo(() => crowdedLines(cues, s.duration), [cues, s.duration]);
+  const price = useVoicePrice(s.id, lang, lipsync, cues, stage !== "preparing" && !problems.length);
+  const name = languageByCode(lang)?.name ?? lang;
+  const start = (c: Cue[]) =>
+    voice.mutate(
+      { id: s.id, lang, cues: c, lipsync },
+      { onSuccess: () => toast.success(`Voicing ${name}`), onError: (e) => toast.error((e as Error).message) },
+    );
+  return (
+    <>
+      <Panel
+        title={`Review · ${name}`}
+        aside={<span className="text-[12px] text-muted-foreground">{saveDraft.isPending || dirty ? "Saving…" : "Saved"}</span>}
+      >
+        <CueEditor editor={editor} currentTime={time} onSeek={onSeek} className="max-h-[56vh]" emptyHint="The translation has no lines." />
+        <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+          Each line is spoken at its start time, so pauses stay where they were; a line that runs past the next one is cut there.
+          {crowded.length > 0 && (
+            <>
+              {" "}
+              <span className="font-medium text-foreground">
+                {crowded.length === 1
+                  ? `${takeLines(crowded[0]).replace(/^l/, "L")}${crowded[0].first === crowded[0].last ? " looks" : " (spoken as one take) look"} long for the time before the next line`
+                  : `${crowded.length} takes look long for their time (${crowded.slice(0, 4).map(takeLines).join(", ")}${crowded.length > 4 ? "…" : ""})`}
+              </span>{" "}
+              — shorten the words or start the next line later.
+            </>
+          )}
+        </p>
+      </Panel>
+      <Panel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-1 items-center gap-2">
+            <Switch id={`lips-${lang}`} checked={lipsync} onCheckedChange={setLipsync} />
+            <Label htmlFor={`lips-${lang}`} className="text-[13px]">
+              Re-sync the lips
+            </Label>
+            <span className="text-[12px] text-muted-foreground">{s.engine === "open" ? "InfiniteTalk · up to 40 s" : "Sync Lipsync 3 · $8 per minute"}</span>
+          </div>
+          <div className="flex items-center gap-3 self-end sm:self-auto">
+            <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} />
+            <Button
+              className={cn("rounded-full", problems.length && "bg-muted text-subtle-foreground hover:bg-muted")}
+              disabled={voice.isPending || stage === "voicing"}
+              onClick={() => (problems.length ? toast(problems[0], { id: "dub-blocker" }) : start(cues))}
+            >
+              {voice.isPending || stage === "voicing" ? <Loader2 className="size-4 animate-spin" /> : runs.length ? <Mic2 className="size-4" /> : <AudioLines className="size-4" />}
+              {stage === "voicing" ? "Voicing…" : runs.length ? "Voice again" : `Voice it in ${name}`}
+            </Button>
+          </div>
+        </div>
+        {runs.length > 0 && <StepList steps={voiceRows(s, lang)} className="mt-4" />}
+      </Panel>
+    </>
+  );
+}
+

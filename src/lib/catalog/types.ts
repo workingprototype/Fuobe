@@ -60,7 +60,8 @@ export type Operation =
   | "translate" // text → the same text in params.targetLanguage (LLM)
   | "write" // brief → text (LLM: scripts, ad copy, shot lists)
   | "vectorize" // image → the same picture as an SVG
-  | "level"; // audio → the same audio at a set loudness (a music bed under a voice-over)
+  | "level" // audio → the same audio at a set loudness (a music bed under a voice-over)
+  | "timeline"; // audio clips placed at their start times over silence → one track as long as the video (dub voices)
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -109,6 +110,7 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   write: "Write",
   vectorize: "Vectorize",
   level: "Level audio",
+  timeline: "Place on the timeline",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -158,6 +160,8 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   write: "text",
   vectorize: "image",
   level: "audio",
+  // The open engine returns the track; fal's compose renders it as a video (the result follows the model).
+  timeline: "audio",
 };
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
@@ -249,6 +253,12 @@ export interface FieldMap {
   fixed?: Record<string, unknown>;
   /** Array field that receives `inputs.audios` (reference audio clips: Seedance / Cinema Studio reference-to-video). */
   audios?: string;
+  /**
+   * Timeline render (fal ffmpeg compose `tracks`): one visual track (inputs.images[0] as a still, else
+   * inputs.video) as long as params.extra.timeline.length, and one audio track with inputs.audios placed
+   * at params.extra.timeline.clips[i].start for .duration seconds (keyframes in milliseconds).
+   */
+  timeline?: string;
   /**
    * Fields sent unless the request sets them (a canonical field or params.extra wins): Wizper's
    * `language: null` (detect instead of assuming English), Mirelo's full-length soundtrack.
@@ -465,8 +475,9 @@ export interface ChainSlot {
    * request's prompt, or becomes the prompt when there is no placeholder.
    * "voiceAudio" clones the voice of the dependency's audio output.
    * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
+   * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
@@ -562,6 +573,8 @@ export interface PresetChoice {
   label: string;
   /** Text substituted for {option:<key>} in the prompt template. */
   prompt: string;
+  /** Model settings this choice sets (params.extra), e.g. the camera angle sliders of Qwen Multiple Angles; what the user set wins. */
+  extra?: Record<string, number | string>;
 }
 
 export interface PresetOption {

@@ -54,6 +54,8 @@
 //   octreeResolution                      (Hunyuan3D 2.1 mesh resolution)
 //   columns, rows                         (ImageGridtoBatch: how the sheet is cut into tiles)
 //   gridPrompt, sheetPrompt               (contact-sheet / turnaround framing text placed before the prompt)
+// Keys added with the av-tools workflows (Wave B):
+//   frameIndex                            (Extract frame: which frame of the Trim Video window, -1 = its last, 0 = its first)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable"). Entry fields: worker "isolated" (needs its own ComfyUI,
 // see README), expand "captions" (the provider writes one segment per caption cue before submitting).
@@ -114,6 +116,8 @@ export const KNOWN_MODELS = {
   'qwen_image_vae.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors' },
   'Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors' },
   'Qwen-Image-Edit-2509-Relight.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Relight.safetensors' },
+  // av-tools (Wave B): Product shot's open route
+  'Qwen-Image-Edit-2509-White_to_Scene.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-White_to_Scene.safetensors' },
   'Qwen-Image-Edit-2509-Light-Migration.safetensors': { folder: 'loras', url: 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-Light-Migration.safetensors' },
   'next-scene_lora-v2-3000.safetensors': { folder: 'loras', url: 'https://huggingface.co/lovis93/next-scene-qwen-image-lora-2509/resolve/main/next-scene_lora-v2-3000.safetensors' },
   'wan2.2_bernini_r_high_noise_fp8_scaled.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Bernini-R/resolve/main/diffusion_models/wan2.2_bernini_r_high_noise_fp8_scaled.safetensors' },
@@ -2318,5 +2322,84 @@ export const SPEC = [
     notes:
       'The app compiles the Soul Cast fields (genre, era, archetype, age, build, hair, outfit...) into prompt; a batch of casts = several seeds. The sheet is cut into the 4 views; ' +
       '"Save as character" turns one into an element (optionally an AI-Toolkit LoRA from the views).',
+  },
+
+  // ---- av-tools (Wave B): extract frame, video-synced foley, product shot ---------
+  {
+    id: 'frame-extract',
+    title: 'Extract a frame: the last frame, or the frame at a time (core Trim Video + Get Image from Batch)',
+    capability: 'frame',
+    handBuilt: 'hand-built/frame-extract.json',
+    bindings: {
+      video: [b('1', 'file')], startTime: [b('2', 'start_time')], duration: [b('2', 'duration')], frameIndex: [b('4', 'batch_index')],
+    },
+    outputs: [{ node: '5', kind: 'image' }],
+    vramGb: 0,
+    license: 'n/a (no model)',
+    notes:
+      'Defaults give the LAST frame: Trim Video with start_time -1 (negative = from the end) and duration 0 decodes only the last second, Get Image from Batch takes index -1. ' +
+      'Frame at time t: params.startTime = t, params.endTime = t + 0.5 and params.extra.frameIndex = 0 (the first frame of that window); the first frame of the clip is t = 0. ' +
+      'Only the window is decoded, so it runs in constant memory on any clip length. The open side of fal-ai/ffmpeg-api/extract-frame (Canvas Extract frame, extend chains, Katana keyframes). Runs on CPU.',
+  },
+  {
+    id: 'v2a-hunyuan-foley',
+    title: 'Foley for a video: HunyuanVideo-Foley XL follows the frames (territory-restricted licence)',
+    capability: 'v2a',
+    handBuilt: 'hand-built/v2a-hunyuan-foley.json',
+    bindings: {
+      video: [b('5', 'video'), b('6', 'file')], prompt: [b('3', 'prompt')], negativePrompt: [b('3', 'negative_prompt')], duration: [b('3', 'duration')],
+      fps: [b('5', 'force_rate'), b('3', 'frame_rate')], frames: [b('5', 'frame_load_cap')], seed: [b('3', 'seed')], steps: [b('3', 'steps')], cfg: [b('3', 'cfg_scale')],
+    },
+    outputs: [{ node: '8', kind: 'video' }, { node: '4', kind: 'audio' }],
+    limits: { maxFrames: 481 },
+    vramGb: 12,
+    license: 'Tencent Hunyuan Community License (territory EXCLUDES the EU, UK and South Korea)',
+    autoDownloads: ['HunyuanDependenciesLoader fetches the SigLIP2 and CLAP text encoders into the Hugging Face cache on first run'],
+    notes:
+      'Same model files as sfx-hunyuan-foley (no new download). VHS_LoadVideo samples the clip at 8 fps, 512 px wide (frames = duration x fps, so a 60 s clip holds 481 small frames), ' +
+      'HunyuanFoleySampler gets them as its image input and makes duration seconds of 48 kHz sound in sync. Concatenate Video lays it under the untouched picture (stream copy); ' +
+      'a sound longer than the clip is cut at its end. Outputs: the video with the new sound, then the sound alone (MP3).',
+  },
+  {
+    id: 'product-shot-qwen-edit-2509',
+    title: 'Product shot: cut out (BiRefNet), put on white, relit into a scene (Qwen-Image-Edit 2509 + White_to_Scene LoRA)',
+    capability: 'edit',
+    handBuilt: 'hand-built/product-shot-qwen-edit-2509.json',
+    bindings: {
+      prompt: [b('1002', 'string_b')],
+      negativePrompt: [b('433:110', 'prompt')],
+      image: [b('78', 'image')],
+      seed: [b('433:3', 'seed')],
+      steps: [b('433:436', 'value')],
+      cfg: [b('433:437', 'value')],
+      loraStrength: [b('1001', 'strength_model')],
+    },
+    outputs: [{ node: '469', kind: 'image' }],
+    limits: { maxWidth: 2048, maxHeight: 2048 },
+    vramGb: 24,
+    license: 'Apache-2.0 (Qwen-Image-Edit-2509, White_to_Scene and Lightning LoRAs); BiRefNet MIT',
+    notes:
+      'relight-qwen-edit-2509 with a cut-out in front: core RemoveBackground (BiRefNet) masks the product, Image Composite Masked puts it on a white backdrop the size of the photo, ' +
+      'then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger "白底图转场景," = "white background to scene", prefixed by node 1002) places and relights it in the scene the prompt describes. ' +
+      'The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud).',
+  },
+  {
+    id: 'audio-timeline',
+    title: 'Voice track on the video\'s timeline: spoken lines placed at their start times over silence (core audio nodes)',
+    capability: 'timeline',
+    handBuilt: 'hand-built/audio-timeline.json',
+    bindings: {
+      audio: [b('2', 'audio')], duration: [b('1', 'duration')], startTime: [b('4', 'duration')],
+    },
+    outputs: [{ node: '7', kind: 'audio' }],
+    expand: 'timeline',
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core audio nodes)',
+    notes:
+      'The dub voice track, all core nodes. The template places one line: EmptyAudio of the video\'s length (duration) is the track, the line (audio) is cut where the next line starts ' +
+      '(TrimAudioDuration), put after startTime seconds of silence (AudioConcat after EmptyAudio) and added onto the track (AudioMerge add: pads or cuts the line to the track). ' +
+      'The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, ' +
+      'each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). ' +
+      'SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track\'s length = the video\'s) and video-mux-audio. Runs on CPU.',
   },
 ];

@@ -78,8 +78,11 @@ export interface ManifestWorkflow {
   autoDownloads?: string[];
   /** "isolated": the node pack has process-wide side effects and runs on a separate ComfyUI. */
   worker?: "isolated";
-  /** The provider rewrites the graph before submitting ("captions": one segment per caption cue). */
-  expand?: "captions";
+  /**
+   * The provider rewrites the graph before submitting ("captions": one segment per caption cue;
+   * "timeline": one loader per audio clip, each placed at its start time).
+   */
+  expand?: "captions" | "timeline";
   validated: boolean;
   notes?: string;
 }

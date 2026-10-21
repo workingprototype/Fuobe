@@ -13,6 +13,7 @@ import { provider } from "../providers";
 import { llmBackends } from "../providers/llm";
 import { engineMode } from "../settings";
 import { readRef } from "../storage";
+import { katanaTool } from "../katana";
 import { createStoryboard } from "../storyboard";
 
 type ResultContent = Anthropic.Beta.BetaToolResultBlockParam["content"];
@@ -499,7 +500,7 @@ const storyboard = defineTool({
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const TOOLS: ToolDef<any>[] = [searchModels, listElementsTool, listRecent, checkGenerations, generate, storyboard];
+export const TOOLS: ToolDef<any>[] = [searchModels, listElementsTool, listRecent, checkGenerations, generate, storyboard, defineTool(katanaTool)];
 export const getTool = (name: string) => TOOLS.find((t) => t.name === name);
 
 /** JSON Schema for the API: every object closed, constraints the API doesn't take removed (zod still checks them). */

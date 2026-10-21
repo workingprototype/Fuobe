@@ -641,6 +641,19 @@ const open: ModelDef[] = [
     options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"] },
     defaults: { aspectRatio: "16:9", resolution: "720p" },
   }),
+  // The open side of fal's extract-frame (Canvas, extend chains, Katana keyframes). Last frame by default;
+  // a frame at time t: params.startTime = t, endTime = t + 0.5, extra.frameIndex = 0 (see frameRequest in lib/av-frames.ts).
+  o({
+    id: "oss-extract-frame",
+    name: "Extract frame",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "image",
+    tagline: "The last frame of a video, or the frame at a moment — decodes only that second · CPU",
+    routes: [comfy("frame", "frame-extract", "core Trim Video window + Get Image from Batch")],
+    options: {},
+    hidden: true,
+  }),
   o({
     id: "oss-palette-image",
     name: "Palette match",
@@ -844,6 +857,19 @@ const open: ModelDef[] = [
     options: { durations: [3, 5, 8, 10], seed: true, negativePrompt: true },
     defaults: { duration: 5 },
   }),
+  // Foley that follows the picture: the same HunyuanVideo-Foley weights, fed the clip's frames (Audio → Sound for video).
+  o({
+    id: "oss-hunyuan-foley-video",
+    name: "HunyuanVideo-Foley (video)",
+    vendor: "Tencent",
+    family: "hunyuan",
+    kind: "video",
+    tagline: "48 kHz foley in sync with your whole clip (up to 30 s), laid under the untouched picture · 12 GB GPU · licence excludes the EU, UK and South Korea",
+    badges: ["new"],
+    // No length to pick: the sound is as long as the clip (the provider reads it from the MP4 header).
+    routes: [comfy("v2a", "v2a-hunyuan-foley", "frames at 8 fps → HunyuanFoleySampler; picture stream-copied; sound as long as the clip")],
+    options: { seed: true, negativePrompt: true },
+  }),
   o({
     id: "oss-mmaudio-sfx",
     name: "MMAudio (text to audio)",
@@ -975,6 +1001,17 @@ const open: ModelDef[] = [
     routes: [comfy("mux", "video-mux-audio", "one track: video-mux-audio-replace; two: voice + background mix")],
     options: { sliders: [{ param: "backgroundVolumeDb", label: "Background level (dB)", min: -30, max: 6, step: 1, default: 0 }] },
   }),
+  o({
+    id: "oss-audio-timeline",
+    name: "Voice timeline",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Places spoken lines at their cue times on a silent track as long as the video (dub voices) · CPU",
+    routes: [comfy("timeline", "audio-timeline", "one loader per line, expanded per request")],
+    options: {},
+    hidden: true,
+  }),
   // Product 3D, try-on
   o({
     id: "oss-trellis2",
@@ -1007,6 +1044,18 @@ const open: ModelDef[] = [
     badges: ["new", "fast"],
     routes: [comfy("edit", "tryon-flux2-klein-4b", "try-on LoRA; old outfit masked out first")],
     options: { maxImages: 3, seed: true, requires: { images: 2, msg: "Add a photo of the person, then the garment" } },
+  }),
+  // Product shot (the open route of the Product shot app): cut out, on white, relit into the scene you describe.
+  o({
+    id: "oss-product-shot",
+    name: "Qwen-Image-Edit Product Shot",
+    vendor: "Alibaba Qwen × dx8152",
+    family: "qwen-image",
+    kind: "image",
+    tagline: "Cuts your product out and relights it into the scene you describe (White_to_Scene LoRA, 4 steps) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("edit", "product-shot-qwen-edit-2509", "BiRefNet cut-out on white → Qwen-Image-Edit 2509 + White_to_Scene LoRA")],
+    options: { seed: true, negativePrompt: true, maxImages: 1, requires: { prompt: true, msg: "Describe the scene to put the product in, e.g. “on a marble counter, morning light”" } },
   }),
   // Cinema Studio grid and Soul Cast (used by those studios)
   o({

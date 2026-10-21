@@ -23,6 +23,8 @@ export const HUB_MODES: Record<HubKind, { id: string; label: string }[]> = {
     { id: "matte", label: "Remove background" },
     { id: "relight", label: "Relight" },
     { id: "depth", label: "Depth map" },
+    { id: "captions", label: "Captions" },
+    { id: "trim", label: "Trim" },
     { id: "join", label: "Join clips" },
     { id: "colors", label: "Match colors" },
   ],

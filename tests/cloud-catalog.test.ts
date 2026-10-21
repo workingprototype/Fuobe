@@ -152,7 +152,7 @@ describe("round-3 cloud models", () => {
     expect(ids("model3d", ["image-to-3d"])[0]).toBe("hunyuan-3d-3-1-pro");
     expect(ids("text", ["transcribe"])[0]).toBe("scribe-v2");
     expect(ids("video", ["captions"])[0]).toBe("auto-subtitle");
-    expect(ids("audio", ["separate-audio"])).toEqual(["demucs"]);
+    expect(ids("audio", ["separate-audio"])).toEqual(["demucs", "elevenlabs-voice-isolation"]);
     // Utility steps never show up in a picker.
     expect(modelsFor({ ops: ["trim", "mux"] }).filter((m) => m.engine === "cloud")).toEqual([]);
   });

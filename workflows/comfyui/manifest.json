@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-21T14:06:47.188Z",
+  "generatedAt": "2026-10-21T15:15:54.549Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -102,7 +102,7 @@
       "customNodes": [],
       "vramGb": 24,
       "validated": true,
-      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) — ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
+      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) \u2014 ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
     },
     {
       "id": "flux1-krea-dev-t2i",
@@ -6191,7 +6191,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, Relight LoRA, Lightning LoRA)",
       "validated": true,
-      "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"重新照明,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
+      "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"\u91cd\u65b0\u7167\u660e,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
     },
     {
       "id": "relight-qwen-edit-2509-reference",
@@ -6306,7 +6306,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, Light-Migration LoRA, Lightning LoRA)",
       "validated": true,
-      "notes": "Template templates-portrait_light_migration: image = subject, image2 = lighting reference (wired as image2 of both TextEncodeQwenImageEditPlus). Node 1002 prefixes the template instruction (\"参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明\" = remove image 1's lighting and relight it with image 2's light and tone); prompt may stay empty or add constraints. 4 steps, cfg 1."
+      "notes": "Template templates-portrait_light_migration: image = subject, image2 = lighting reference (wired as image2 of both TextEncodeQwenImageEditPlus). Node 1002 prefixes the template instruction (\"\u53c2\u8003\u8272\u8c03\uff0c\u79fb\u9664\u56fe1\u539f\u6709\u7684\u5149\u7167\u5e76\u53c2\u8003\u56fe2\u7684\u5149\u7167\u548c\u8272\u8c03\u5bf9\u56fe1\u91cd\u65b0\u7167\u660e\" = remove image 1's lighting and relight it with image 2's light and tone); prompt may stay empty or add constraints. 4 steps, cfg 1."
     },
     {
       "id": "video-relight-bernini-r",
@@ -7941,7 +7941,7 @@
           "kind": "image"
         }
       ],
-      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings → Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
+      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
       "customNodes": [],
       "models": [],
       "vramGb": 0,
@@ -11120,6 +11120,367 @@
       "license": "Apache-2.0 (Z-Image Turbo)",
       "validated": true,
       "notes": "The app compiles the Soul Cast fields (genre, era, archetype, age, build, hair, outfit...) into prompt; a batch of casts = several seeds. The sheet is cut into the 4 views; \"Save as character\" turns one into an element (optionally an AI-Toolkit LoRA from the views)."
+    },
+    {
+      "id": "frame-extract",
+      "title": "Extract a frame: the last frame, or the frame at a time (core Trim Video + Get Image from Batch)",
+      "capability": "frame",
+      "file": "frame-extract.json",
+      "source": "hand-built (scripts/comfy/hand-built/frame-extract.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "startTime": [
+          {
+            "node": "2",
+            "input": "start_time"
+          }
+        ],
+        "duration": [
+          {
+            "node": "2",
+            "input": "duration"
+          }
+        ],
+        "frameIndex": [
+          {
+            "node": "4",
+            "input": "batch_index"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "5",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "5",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "duration": 0,
+        "startTime": -1,
+        "frameIndex": -1
+      },
+      "limits": {},
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "n/a (no model)",
+      "validated": true,
+      "notes": "Defaults give the LAST frame: Trim Video with start_time -1 (negative = from the end) and duration 0 decodes only the last second, Get Image from Batch takes index -1. Frame at time t: params.startTime = t, params.endTime = t + 0.5 and params.extra.frameIndex = 0 (the first frame of that window); the first frame of the clip is t = 0. Only the window is decoded, so it runs in constant memory on any clip length. The open side of fal-ai/ffmpeg-api/extract-frame (Canvas Extract frame, extend chains, Katana keyframes). Runs on CPU."
+    },
+    {
+      "id": "v2a-hunyuan-foley",
+      "title": "Foley for a video: HunyuanVideo-Foley XL follows the frames (territory-restricted licence)",
+      "capability": "v2a",
+      "file": "v2a-hunyuan-foley.json",
+      "source": "hand-built (scripts/comfy/hand-built/v2a-hunyuan-foley.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "5",
+            "input": "video"
+          },
+          {
+            "node": "6",
+            "input": "file"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "3",
+            "input": "prompt"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "3",
+            "input": "negative_prompt"
+          }
+        ],
+        "duration": [
+          {
+            "node": "3",
+            "input": "duration"
+          }
+        ],
+        "fps": [
+          {
+            "node": "5",
+            "input": "force_rate"
+          },
+          {
+            "node": "3",
+            "input": "frame_rate"
+          }
+        ],
+        "frames": [
+          {
+            "node": "5",
+            "input": "frame_load_cap"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "3",
+            "input": "steps"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "3",
+            "input": "cfg_scale"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "8",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "8",
+          "kind": "video"
+        },
+        {
+          "node": "4",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "frames": 65,
+        "fps": 8,
+        "steps": 50,
+        "cfg": 4.5,
+        "duration": 8
+      },
+      "limits": {
+        "maxFrames": 481
+      },
+      "models": [
+        {
+          "file": "hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors",
+          "folder": "foley",
+          "url": "https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/hunyuanvideo_foley_xl_fp8_e4m3fn.safetensors",
+          "sizeGb": 3.75
+        },
+        {
+          "file": "vae_128d_48k_fp16.safetensors",
+          "folder": "foley",
+          "url": "https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/vae_128d_48k_fp16.safetensors",
+          "sizeGb": 0.74
+        },
+        {
+          "file": "synchformer_state_dict_fp16.safetensors",
+          "folder": "foley",
+          "url": "https://huggingface.co/phazei/HunyuanVideo-Foley/resolve/main/synchformer_state_dict_fp16.safetensors",
+          "sizeGb": 0.47
+        }
+      ],
+      "customNodes": [
+        {
+          "name": "ComfyUI-HunyuanVideo-Foley",
+          "repo": "https://github.com/phazei/ComfyUI-HunyuanVideo-Foley"
+        },
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 12,
+      "license": "Tencent Hunyuan Community License (territory EXCLUDES the EU, UK and South Korea)",
+      "validated": true,
+      "notes": "Same model files as sfx-hunyuan-foley (no new download). VHS_LoadVideo samples the clip at 8 fps, 512 px wide (frames = duration x fps, so a 60 s clip holds 481 small frames), HunyuanFoleySampler gets them as its image input and makes duration seconds of 48 kHz sound in sync. Concatenate Video lays it under the untouched picture (stream copy); a sound longer than the clip is cut at its end. Outputs: the video with the new sound, then the sound alone (MP3).",
+      "autoDownloads": [
+        "HunyuanDependenciesLoader fetches the SigLIP2 and CLAP text encoders into the Hugging Face cache on first run"
+      ]
+    },
+    {
+      "id": "product-shot-qwen-edit-2509",
+      "title": "Product shot: cut out (BiRefNet), put on white, relit into a scene (Qwen-Image-Edit 2509 + White_to_Scene LoRA)",
+      "capability": "edit",
+      "file": "product-shot-qwen-edit-2509.json",
+      "source": "hand-built (scripts/comfy/hand-built/product-shot-qwen-edit-2509.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "1002",
+            "input": "string_b"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "433:110",
+            "input": "prompt"
+          }
+        ],
+        "image": [
+          {
+            "node": "78",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "433:3",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "433:436",
+            "input": "value"
+          }
+        ],
+        "cfg": [
+          {
+            "node": "433:437",
+            "input": "value"
+          }
+        ],
+        "loraStrength": [
+          {
+            "node": "1001",
+            "input": "strength_model"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "469",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "469",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 4,
+        "cfg": 1,
+        "loraStrength": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048
+      },
+      "models": [
+        {
+          "file": "Qwen-Image-Edit-2509-White_to_Scene.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/loras/Qwen-Image-Edit-2509-White_to_Scene.safetensors",
+          "sizeGb": 0.24
+        },
+        {
+          "file": "birefnet.safetensors",
+          "folder": "background_removal",
+          "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+          "sizeGb": 0.44
+        },
+        {
+          "file": "qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+          "sizeGb": 20.43
+        },
+        {
+          "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+          "sizeGb": 9.38
+        },
+        {
+          "file": "qwen_image_vae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+          "sizeGb": 0.25
+        },
+        {
+          "file": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "folder": "loras",
+          "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+          "sizeGb": 0.85
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 24,
+      "license": "Apache-2.0 (Qwen-Image-Edit-2509, White_to_Scene and Lightning LoRAs); BiRefNet MIT",
+      "validated": true,
+      "notes": "relight-qwen-edit-2509 with a cut-out in front: core RemoveBackground (BiRefNet) masks the product, Image Composite Masked puts it on a white backdrop the size of the photo, then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger \"\u767d\u5e95\u56fe\u8f6c\u573a\u666f,\" = \"white background to scene\", prefixed by node 1002) places and relights it in the scene the prompt describes. The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud)."
+    },
+    {
+      "id": "audio-timeline",
+      "title": "Voice track on the video's timeline: spoken lines placed at their start times over silence (core audio nodes)",
+      "capability": "timeline",
+      "file": "audio-timeline.json",
+      "source": "hand-built (scripts/comfy/hand-built/audio-timeline.json)",
+      "bindings": {
+        "audio": [
+          {
+            "node": "2",
+            "input": "audio"
+          }
+        ],
+        "duration": [
+          {
+            "node": "1",
+            "input": "duration"
+          }
+        ],
+        "startTime": [
+          {
+            "node": "4",
+            "input": "duration"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "7",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "7",
+          "kind": "audio"
+        }
+      ],
+      "defaults": {
+        "duration": 10,
+        "startTime": 0.5
+      },
+      "limits": {},
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "n/a (no model; ComfyUI core audio nodes)",
+      "validated": true,
+      "notes": "The dub voice track, all core nodes. The template places one line: EmptyAudio of the video's length (duration) is the track, the line (audio) is cut where the next line starts (TrimAudioDuration), put after startTime seconds of silence (AudioConcat after EmptyAudio) and added onto the track (AudioMerge add: pads or cuts the line to the track). The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track's length = the video's) and video-mux-audio. Runs on CPU.",
+      "expand": "timeline"
     }
   ]
 }

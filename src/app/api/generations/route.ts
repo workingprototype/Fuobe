@@ -58,6 +58,9 @@ const RequestSchema = z.object({
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
   // Image studio: the Color signature / Moodboard picks (its sentences join the prompt on the server).
   signature: SignatureSchema,
+  // What a tool calls its result (Trim · 0:01.0–0:02.5, Captions · Karaoke), shown instead of the prompt.
+  title: z.string().max(200).optional(),
+  batchTitle: z.string().max(200).optional(),
 });
 
 /**
