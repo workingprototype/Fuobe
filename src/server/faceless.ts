@@ -73,6 +73,8 @@ import {
 } from "@/lib/catalog/faceless";
 import { routesFor } from "@/lib/catalog/plan";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import { DocxError, docxText } from "./assist/docx";
+import { PdfError, pdfText } from "./assist/pdf";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -539,7 +541,7 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
   const elements = listElements()
     .filter((e) => e.kind !== "voice" && handles.has(e.handle.toLowerCase()))
     .map((e) => ({ handle: e.handle, kind: e.kind, description: e.description }));
-  const textSources = ep.sources.flatMap((x) => (x.kind === "text" ? [`${x.name}: ${x.text.slice(0, 6000)}`] : x.kind === "link" ? [`${x.title ?? x.url} (${x.url}): ${x.text.slice(0, 6000)}`] : []));
+  const textSources = ep.sources.flatMap((x) => (x.kind === "text" ? [`${x.name}: ${x.text.slice(0, SOURCE_CHARS)}`] : x.kind === "link" ? [`${x.title ?? x.url} (${x.url}): ${x.text.slice(0, SOURCE_CHARS)}`] : []));
   let failure = "";
   const ask = { onError: (m: string) => (failure = m), signal };
   let script: EpisodeScript;
@@ -1326,6 +1328,57 @@ export async function summarizeLink(url: string, engine: Engine): Promise<Extrac
     { timeoutMs: 2 * 60_000 },
   );
   return { kind: "link", url: res.url, title: title?.slice(0, 160), text: (summary ?? text).slice(0, 6000) };
+}
+
+/** The largest PDF or Word file the Explainer reads. */
+export const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+/** The script writer reads this much of each source; longer documents are summarised for it first. */
+const SOURCE_CHARS = 6000;
+/** What a document summary is written from (about a 40-page report; a local model's context holds it). */
+const SUMMARY_INPUT_CHARS = 40_000;
+
+export type DocumentKind = "pdf" | "docx";
+
+/** What a file is, from its first bytes, name and type: a PDF, a Word file, or neither. */
+export function documentKind(file: { name: string; data: Buffer; type?: string }): DocumentKind | null {
+  const head = file.data.subarray(0, 5).toString("latin1");
+  if (head === "%PDF-") return "pdf";
+  if (head.startsWith("PK\x03\x04") && (/\.docx$/i.test(file.name) || /wordprocessingml/.test(file.type ?? ""))) return "docx";
+  if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") return "pdf"; // a damaged one: the reader says so
+  if (/\.(docx?|dot[xm]?)$/i.test(file.name) || /msword|wordprocessingml/.test(file.type ?? "")) return "docx";
+  return null;
+}
+
+/**
+ * A PDF or Word source for the Explainer: its text is read on the server (PDF.js through unpdf, or
+ * word/document.xml through the bounded unzip), and a document longer than the writer reads is
+ * summarised by the engine's text model, like a link. With no text model the beginning is kept.
+ */
+export async function readDocument(
+  file: { name: string; data: Buffer; type?: string },
+  engine: Engine,
+): Promise<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; summarized: boolean }> {
+  if (file.data.length > MAX_DOCUMENT_BYTES) throw new FacelessError(`${file.name} is over ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB — add the part that matters, or paste its text into the prompt`, 413);
+  const kind = documentKind(file);
+  if (!kind) throw new FacelessError(`${file.name} isn't a PDF or a Word file (.docx)`, 415);
+  let read: { text: string; title?: string; pages?: number };
+  try {
+    read = kind === "pdf" ? await pdfText(file.data, { maxChars: SUMMARY_INPUT_CHARS, maxPages: 200 }) : docxText(file.data, { maxChars: SUMMARY_INPUT_CHARS });
+  } catch (e) {
+    if (e instanceof PdfError || e instanceof DocxError) throw new FacelessError(e.message, 422);
+    throw new FacelessError(kind === "pdf" ? "Couldn't read that PDF — save it again, or paste its text into the prompt" : "Couldn't read that Word file — save it as PDF, or paste its text into the prompt", 422);
+  }
+  const name = file.name.slice(0, 200);
+  const long = read.text.length > SOURCE_CHARS;
+  const summary = long
+    ? await askLlm(
+        engine,
+        "You summarise documents for a video script writer. Reply with the key facts, numbers, names, steps and explanations as short plain sentences (at most 300 words). No preamble.",
+        `Document: ${read.title ?? name}\n\n${read.text}`,
+        { timeoutMs: 2 * 60_000 },
+      )
+    : null;
+  return { source: { kind: "text", name, text: (summary ?? read.text).slice(0, 20_000) }, ...(read.pages && { pages: read.pages }), summarized: !!summary };
 }
 
 // ---------------------------------------------------------------------------

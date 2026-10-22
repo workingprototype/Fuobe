@@ -34,33 +34,41 @@ import {
 import { cn } from "@/lib/utils";
 import { EpisodeTile } from "../faceless/cards";
 import { EstimateLine, Segmented, ToggleRow } from "../faceless/controls";
-import { readLink, useCreateExplainer, useEstimate, useExplainers, useLikeEpisode } from "../faceless/hooks";
+import { readDocument, readLink, useCreateExplainer, useEstimate, useExplainers, useLikeEpisode } from "../faceless/hooks";
 import { NarratorChip } from "../faceless/narrator";
 import { StyleArt, StyleGrid } from "../faceless/style-art";
 
 const DOC_TYPES = /\.(txt|md|markdown|csv|srt|vtt|json)$/i;
 const MAX_DOC = 20_000;
+/** PDF and Word files are read on the server. */
+const READ_TYPES = /\.(pdf|docx)$/i;
+const READ_MIME = /^application\/(pdf|vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/;
+const MAX_READ_MB = 20;
 
-type Draft = { kind: "image"; id: string; url: string; name: string; preview: string; uploading?: boolean } | Exclude<ExplainerSource, { kind: "image" }>;
+type Draft =
+  | { kind: "image"; id: string; url: string; name: string; preview: string; uploading?: boolean }
+  /** A PDF or Word file being read on the server. */
+  | { kind: "reading"; id: string; name: string }
+  | Exclude<ExplainerSource, { kind: "image" }>;
 
 const STEPS = [
   { icon: Sparkles, title: "Choose Preset", text: "One of 22 looks: whiteboard, pixel art, paper diorama…" },
-  { icon: Paperclip, title: "Attach a file or just prompt", text: "Images, a document or a link — or only a topic." },
+  { icon: Paperclip, title: "Attach a file or just prompt", text: "Images, a PDF, Word or text document, or a link — or only a topic." },
   { icon: Download, title: "Download your result", text: "A narrated, subtitled video; fix any scene in the timeline." },
 ];
 
 function SourceChip({ s, onRemove }: { s: Draft; onRemove: () => void }) {
-  const label = s.kind === "image" ? s.name : s.kind === "text" ? s.name : (s.title ?? s.url);
+  const label = s.kind === "link" ? (s.title ?? s.url) : s.name;
   return (
     <span className="inline-flex h-9 max-w-full min-w-0 items-center gap-1.5 rounded-full bg-secondary pr-1 pl-1 text-[12px] font-medium">
       {s.kind === "image" ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={s.preview} alt="" className="size-7 rounded-full object-cover" />
       ) : (
-        <span className="grid size-7 place-items-center rounded-full bg-background text-muted-foreground">{s.kind === "text" ? <FileText className="size-3.5" /> : <Link2 className="size-3.5" />}</span>
+        <span className="grid size-7 place-items-center rounded-full bg-background text-muted-foreground">{s.kind === "link" ? <Link2 className="size-3.5" /> : <FileText className="size-3.5" />}</span>
       )}
       <span className="min-w-0 truncate">{label}</span>
-      {s.kind === "image" && s.uploading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
+      {((s.kind === "image" && s.uploading) || s.kind === "reading") && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-label="Reading" />}
       <button type="button" onClick={onRemove} className="grid size-6 shrink-0 place-items-center rounded-full hover:bg-accent" aria-label={`Remove ${label}`}>
         <X className="size-3.5" />
       </button>
@@ -192,10 +200,29 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
         }
         room--;
         setSources((xs) => [...xs, { kind: "text", name: f.name, text }]);
-      } else if (/\.(pdf|docx?|odt|rtf|pages|pptx?|key)$/i.test(f.name) || /pdf|word|officedocument|opendocument|rtf/.test(f.type)) {
-        toast.error(`${f.name}: PDF and Word files aren't read yet — save it as .txt, or paste the text into the prompt`);
+      } else if (READ_TYPES.test(f.name) || READ_MIME.test(f.type)) {
+        if (f.size > MAX_READ_MB * 1024 * 1024) {
+          toast.error(`${f.name} is over ${MAX_READ_MB} MB — add the part that matters, or paste its text into the prompt`);
+          continue;
+        }
+        room--;
+        const id = `${f.name}:${Date.now()}:${room}`;
+        setSources((xs) => [...xs, { kind: "reading", id, name: f.name }]);
+        readDocument(f, engine).then(
+          (r) => {
+            // A source removed while it's read stays removed.
+            setSources((xs) => xs.map((x) => (x.kind === "reading" && x.id === id ? r.source : x)));
+            toast.success(`Read ${f.name}${r.pages ? ` (${r.pages} page${r.pages === 1 ? "" : "s"})` : ""}${r.summarized ? " and summarised it for the script" : ""}`);
+          },
+          (e: Error) => {
+            setSources((xs) => xs.filter((x) => !(x.kind === "reading" && x.id === id)));
+            toast.error(e.message);
+          },
+        );
+      } else if (/\.(doc|odt|rtf|pages|pptx?|key)$/i.test(f.name) || /msword|opendocument|rtf|presentation/.test(f.type)) {
+        toast.error(`${f.name}: save it as PDF or Word (.docx), or paste the text into the prompt`);
       } else {
-        toast.error(`${f.name}: add an image (PNG, JPEG, WebP) or a text document (.txt, .md, .csv)`);
+        toast.error(`${f.name}: add an image (PNG, JPEG, WebP), a PDF, a Word file (.docx) or a text file (.txt, .md, .csv)`);
       }
     }
   };
@@ -204,8 +231,10 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
     if (!prompt.trim() && !sources.length) return void toast("Add a prompt, or attach a file or link", { id: "faceless-blocker" });
     if (manualBad) return void toast("Duration must be Auto or a whole number of seconds between 15 and 600", { id: "faceless-blocker" });
     if (sources.some((s) => s.kind === "image" && s.uploading)) return void toast("Uploading…", { id: "faceless-blocker" });
+    const reading = sources.find((s) => s.kind === "reading");
+    if (reading) return void toast(`Reading ${reading.name}…`, { id: "faceless-blocker" });
     if (engine === "open" && settings.voice?.kind !== "sample" && estimate.data?.error) return void toast(estimate.data.error, { id: "faceless-blocker" });
-    const payload: ExplainerSource[] = sources.map((s) => (s.kind === "image" ? { kind: "image", url: s.url, name: s.name } : s));
+    const payload: ExplainerSource[] = sources.flatMap((s): ExplainerSource[] => (s.kind === "image" ? [{ kind: "image", url: s.url, name: s.name }] : s.kind === "reading" ? [] : [s]));
     create.mutate(
       { prompt: prompt.trim(), sources: payload, settings, review },
       {
@@ -279,7 +308,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
                 ref={file}
                 type="file"
                 multiple
-                accept="image/png,image/jpeg,image/webp,.txt,.md,.markdown,.csv,text/plain,text/markdown"
+                accept="image/png,image/jpeg,image/webp,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.txt,.md,.markdown,.csv,text/plain,text/markdown"
                 hidden
                 onChange={(e) => {
                   const fs = [...(e.target.files ?? [])];

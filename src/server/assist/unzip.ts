@@ -2,8 +2,9 @@ import "server-only";
 import zlib from "node:zlib";
 
 /**
- * A small, bounded ZIP reader for skill uploads (.zip / .skill): stored and deflated entries only,
- * read into memory with per-file and total size caps (a zip bomb stops at the cap). Nothing is
+ * A small, bounded ZIP reader for skill uploads (.zip / .skill) and Word documents (.docx): stored and
+ * deflated entries only, read into memory with per-file and total size caps (a zip bomb stops at the
+ * cap). `only` picks the entries to read; the others are skipped without being inflated. Nothing is
  * written to disk, so entry paths are only names.
  */
 
@@ -18,7 +19,7 @@ const EOCD = 0x06054b50;
 const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 
-export function unzip(buf: Buffer, limits: { maxEntries?: number; maxFileBytes?: number; maxTotalBytes?: number } = {}): ZipEntry[] {
+export function unzip(buf: Buffer, limits: { maxEntries?: number; maxFileBytes?: number; maxTotalBytes?: number; only?: (name: string) => boolean } = {}): ZipEntry[] {
   const maxEntries = limits.maxEntries ?? 300;
   const maxFile = limits.maxFileBytes ?? 2_000_000;
   const maxTotal = limits.maxTotalBytes ?? 8_000_000;
@@ -50,7 +51,7 @@ export function unzip(buf: Buffer, limits: { maxEntries?: number; maxFileBytes?:
     const local = buf.readUInt32LE(p + 42);
     const name = buf.subarray(p + 46, p + 46 + nameLen).toString(flags & 0x800 ? "utf8" : "latin1");
     p += 46 + nameLen + extraLen + commentLen;
-    if (name.endsWith("/")) continue;
+    if (name.endsWith("/") || (limits.only && !limits.only(name))) continue;
     if (flags & 0x1) throw new ZipError("The archive is password-protected");
     const tooBig = () => new ZipError(`${name} is over ${Math.round(maxFile / 1_000_000)} MB`);
     const tooMuch = () => new ZipError(`The archive unpacks to more than ${Math.round(maxTotal / 1_000_000)} MB`);
