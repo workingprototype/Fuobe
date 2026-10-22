@@ -386,15 +386,17 @@ export function FolderStrip({ all, parent, onOpen, onMove }: { all: Folder[]; pa
         </div>
       ))}
       {roomInside(all, parent) && (
-        <button
-          onClick={() => setCreating(true)}
-          className="flex w-[min(44vw,160px)] shrink-0 items-center gap-2.5 rounded-xl border border-dashed p-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted">
-            <FolderPlus className="size-5" />
-          </span>
-          <span className="text-[13px] font-medium">{parent ? "New folder inside" : "New folder"}</span>
-        </button>
+        <div role="listitem" className="flex shrink-0">
+          <button
+            onClick={() => setCreating(true)}
+            className="flex w-[min(44vw,160px)] shrink-0 items-center gap-2.5 rounded-xl border border-dashed p-2 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted">
+              <FolderPlus className="size-5" />
+            </span>
+            <span className="text-[13px] font-medium">{parent ? "New folder inside" : "New folder"}</span>
+          </button>
+        </div>
       )}
       {creating && <FolderDialog parent={parent} open onOpenChange={setCreating} />}
     </div>
