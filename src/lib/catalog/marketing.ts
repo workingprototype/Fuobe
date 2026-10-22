@@ -676,45 +676,6 @@ const tenth = (n: number) => Math.round(n * 10) / 10;
 /** The first usable part of a fresh clip: all of it, or its first 30 s. */
 export const initialClip = (duration: number): ClipRange => ({ start: 0, end: tenth(Math.min(duration, MULTIPLIER.maxSeconds)) });
 
-/**
- * Keep an in/out range inside the clip and within 4–30 s where the clip allows: the point that
- * moved stays put and the other one follows (a clip shorter than 4 s stays as it is).
- */
-export function clampClip(r: ClipRange, duration: number, moved: "start" | "end"): ClipRange {
-  const { minSeconds: min, maxSeconds: max } = MULTIPLIER;
-  let start = Math.min(Math.max(0, r.start), duration);
-  let end = Math.min(Math.max(0, r.end), duration);
-  if (moved === "start") {
-    if (end - start > max) end = Math.min(duration, start + max);
-    if (end - start < min) end = Math.min(duration, start + min);
-    if (end - start < min) start = Math.max(0, end - min);
-  } else {
-    if (end - start > max) start = Math.max(0, end - max);
-    if (end - start < min) start = Math.max(0, end - min);
-    if (end - start < min) end = Math.min(duration, start + min);
-  }
-  return { start: tenth(start), end: tenth(end) };
-}
-
-/** A time typed into an in/out field: "12", "12.5", "12,5", "0:12.5" or "1:02" (seconds); null when it isn't one. */
-export function parseClipTime(text: string): number | null {
-  const t = text.trim().replace(",", ".");
-  const m = /^(?:(\d+):)?(\d+(?:\.\d*)?|\.\d+)$/.exec(t);
-  if (!m) return null;
-  const s = (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
-  return Number.isFinite(s) ? s : null;
-}
-
-/**
- * The range after the user finishes typing an in or out time (blur or Enter): the typed time is kept
- * and the other point follows (clampClip). Keystrokes before that don't move anything, so "20" isn't
- * clamped at its first digit.
- */
-export function commitClipTime(text: string, range: ClipRange, duration: number, moved: "start" | "end"): ClipRange | null {
-  const n = parseClipTime(text);
-  return n == null ? null : clampClip({ ...range, [moved]: n }, duration, moved);
-}
-
 export interface MultiplierParts {
   mode: "prompt" | "sections";
   prompt?: string;

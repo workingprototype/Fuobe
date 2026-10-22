@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { areaCls } from "@/components/brand/fields";
 import { uploadImages } from "@/components/brand/image-list";
 import { fileToSlot, LibraryGrid, type SlotValue } from "@/components/studio/media-slot";
+import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { initialClip, mentionedImages, MULTIPLIER, MULTIPLIER_MODELS, multiplierResolution, type ClipRange as Range, type MarketingRun, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { probeMedia } from "@/lib/media-probe";
@@ -19,7 +20,6 @@ import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketi
 import type { ModelInfo } from "@/components/marketing/model-info";
 import { RunsList } from "@/components/marketing/runs";
 import { EmptyIcon, MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
-import { ClipRange } from "./clip-range";
 import { uploadFrame } from "./frames";
 
 type Quality = (typeof MULTIPLIER.qualities)[number];
@@ -232,7 +232,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
     setDuration(d);
     setRange((r) => r ?? initialClip(d));
     if (!first) return;
-    if (d > MULTIPLIER.maxSeconds + 0.05) toast(`Using the first ${MULTIPLIER.maxSeconds} s — move the in and out points to pick another part`, { id: "mult-trim" });
+    if (d > MULTIPLIER.maxSeconds + 0.05) toast(`Using the first ${MULTIPLIER.maxSeconds} s — slide the selection to pick another part`, { id: "mult-trim" });
     if (d < MULTIPLIER.minSeconds - 0.05) toast.error(`That clip is ${d.toFixed(1)} s — the reference needs ${MULTIPLIER.minSeconds}–${MULTIPLIER.maxSeconds} s`, { id: "mult-trim" });
   };
 
@@ -319,8 +319,18 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
               <ReferenceDrop onFile={onFile} onPick={(v) => (startVideo(), setVideo(v))} />
             ) : (
               <div className="relative">
-                <ClipRange src={video.preview} duration={duration} value={range} onChange={setRange} onDuration={onDuration} onUnplayable={() => {
-                    if (!video.uploading && video.ref && !known.current) void probe(video.ref, clip.current);
+                {/* A new reference mounts a new trimmer (Replace goes back to the drop zone); a finished upload only moves its preview to the server. */}
+                <VideoTrimmer
+                  src={video.preview}
+                  value={range && { startTime: range.start, endTime: range.end }}
+                  onChange={(r) => setRange({ start: r.startTime, end: r.endTime })}
+                  min={MULTIPLIER.minSeconds}
+                  max={MULTIPLIER.maxSeconds}
+                  duration={duration ?? undefined}
+                  label="Part of the reference ad"
+                  onMeta={(m) => m.duration > 0 && onDuration(m.duration)}
+                  onUnreadable={() => {
+                    if (!known.current) void probe(video.ref || video.preview, clip.current);
                   }}
                 />
                 {video.uploading && (

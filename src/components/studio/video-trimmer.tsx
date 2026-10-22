@@ -2,6 +2,7 @@
 
 import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { realDuration } from "@/components/av/frame-sampler";
 import { clampRange, clock, initialRange, moveRange, parseTime, setEdge, thumbTimes, trimHint, trimKey, type TrimLimits, type TrimRange } from "@/lib/trim-range";
 import { cn } from "@/lib/utils";
 
@@ -11,8 +12,8 @@ export type { TrimRange } from "@/lib/trim-range";
  * Pick a part of a clip: a filmstrip of frames grabbed in the browser, a draggable window with two
  * handles (min/max length enforced), "play the selection", and typed start/end times. Keyboard: the
  * handles and the window are sliders (arrows 0.1 s, Shift ×10, Page Up/Down 5 s, Home/End).
- * Used by Shorts Studio and Mixed Media; reusable anywhere a clip needs trimming (Ad Multiplier,
- * Motion control).
+ * Used by Shorts Studio, Mixed Media, Video tools → Trim and the Ad Multiplier; reusable anywhere a
+ * clip needs trimming (Motion control).
  */
 
 export interface VideoTrimmerHandle {
@@ -35,6 +36,11 @@ export interface VideoTrimmerProps {
   /** Overrides the "Select a 10-second segment" line. */
   hint?: string;
   onMeta?: (m: { duration: number; width: number; height: number }) => void;
+  /**
+   * This browser can't decode the clip (no frames, no length: e.g. H.265 without the codec). The
+   * caller can pass the length from the file's header as `duration` (the times still work), or offer typed times.
+   */
+  onUnreadable?: () => void;
   /** Hide the clip preview above the filmstrip. */
   noPreview?: boolean;
   className?: string;
@@ -106,7 +112,7 @@ function makeVideo(src: string): HTMLVideoElement {
 const STEP = 0.1;
 
 export const VideoTrimmer = forwardRef<VideoTrimmerHandle, VideoTrimmerProps>(function VideoTrimmer(
-  { src, value, onChange, min, max, duration: knownDuration, label = "Part of the clip", hint, onMeta, noPreview, className },
+  { src, value, onChange, min, max, duration: knownDuration, label = "Part of the clip", hint, onMeta, onUnreadable, noPreview, className },
   ref,
 ) {
   const video = useRef<HTMLVideoElement>(null);
@@ -154,13 +160,17 @@ export const VideoTrimmer = forwardRef<VideoTrimmerHandle, VideoTrimmerProps>(fu
     (async () => {
       const ok = await loaded(v);
       if (cancelled) return;
-      const len = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : (knownDuration ?? 0);
+      const headerLength = Number.isFinite(v.duration) && v.duration > 0;
+      // A recording with no length in its header (MediaRecorder WebM): the browser finds it at the end.
+      const len = (headerLength ? v.duration : ok && v.videoWidth ? await realDuration(v) : null) || (knownDuration ?? 0);
+      if (cancelled) return;
       if (!ok || !v.videoWidth || !len) {
         setUnsupported(true);
+        onUnreadable?.();
         return;
       }
-      // Without the preview, this copy is where the length and shape come from.
-      if (noPreview) {
+      // Without the preview (or when its header has no length), this copy is where the length and shape come from.
+      if (noPreview || !headerLength) {
         setDuration((cur) => cur ?? len);
         onMeta?.({ duration: len, width: v.videoWidth, height: v.videoHeight });
       }
