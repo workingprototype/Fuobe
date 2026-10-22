@@ -12,6 +12,7 @@ import {
   nodeSignature,
   outline,
   planCanvas,
+  withCurrentElements,
   type Canvas,
   type CanvasGraph,
   type CanvasNodeType,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/catalog/canvas";
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "./db";
+import { listElements } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
 import { engineMode } from "./settings";
 
@@ -278,8 +280,10 @@ export function deleteCanvas(id: string): boolean {
 
 /** The canvas with the generations its nodes made (for status, progress and outputs). */
 export function canvasView(id: string): { canvas: Canvas; generations: Generation[] } | null {
-  const canvas = getCanvas(id);
-  if (!canvas) return null;
+  const stored = getCanvas(id);
+  if (!stored) return null;
+  // Element nodes show (and mention) their element as it's called now, after a rename.
+  const canvas = { ...stored, graph: withCurrentElements(stored.graph, listElements()) };
   const ids = [...new Set(Object.values(canvas.runs).flatMap((r) => r.ids))];
   // getGeneration also makes sure the runner is polling after a restart.
   const generations = ids.map((g) => getGeneration(g)).filter((g): g is Generation => !!g);
@@ -318,7 +322,8 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
   let canvas = getCanvas(id);
   if (!canvas) return null;
   if (opts.graph) canvas = updateCanvas(id, { graph: opts.graph })!;
-  const graph = canvas.graph;
+  // An element renamed since the board was saved: its node mentions the new @handle.
+  const graph = withCurrentElements(canvas.graph, listElements());
   const plan = planCanvas(graph, { targets: opts.targets, force: opts.force, runs: canvas.runs, status: statusOf, engineMode: engineMode() });
   const nodes = nodeMap(graph);
   const batchId = nanoid(10);

@@ -249,4 +249,26 @@ describe("canvas API", () => {
     res = await one.GET(req("GET"), ctx(id));
     expect(((await res.json()) as { generations: Generation[] }).generations.length).toBeGreaterThan(0);
   });
+
+  it("follows an element renamed after it was put on the board", async () => {
+    const elements = await import("@/server/elements");
+    const el = elements.createElement({ name: "Maya", kind: "character", references: [] });
+    const graph: CanvasGraph = {
+      nodes: [
+        { id: "el", type: "element", position: { x: 0, y: 0 }, data: { elementId: el.id, handle: el.handle, name: el.name } },
+        { id: "img", type: "model", position: { x: 320, y: 0 }, data: { modelId: "nano-banana-pro", prompt: "A portrait" } },
+      ],
+      edges: [{ id: "e1", source: "el", sourceHandle: "out", target: "img", targetHandle: "elements" }],
+    };
+    const created = (await (await list.POST(req("POST", { name: "Cast", graph }))).json()) as Canvas;
+    const renamed = elements.updateElement(el.id, { name: "Maya Lee" })!;
+    expect(renamed.handle).not.toBe(el.handle);
+    // The board shows the element's name now, and a run mentions its new @handle.
+    const view = (await (await one.GET(req("GET"), ctx(created.id))).json()) as { canvas: Canvas };
+    expect(view.canvas.graph.nodes[0].data).toMatchObject({ handle: renamed.handle, name: "Maya Lee" });
+    const body = (await (await run.POST(req("POST", { graph }), ctx(created.id))).json()) as { items: Generation[] };
+    expect(body.items[0].request.prompt).toContain(`@${renamed.handle}`);
+    // …which the server resolves to the element (it has no photos: its name goes into the prompt).
+    expect(body.items[0].prompt).toContain("Maya Lee");
+  });
 });

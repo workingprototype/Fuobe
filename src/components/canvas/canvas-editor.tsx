@@ -40,7 +40,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { Viewer } from "@/components/studio/viewer";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { useEngine, useStatus, type EngineMode } from "@/lib/api";
+import { useElements, useEngine, useStatus, type EngineMode } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
   acceptsType,
@@ -50,6 +50,7 @@ import {
   counterpart,
   defaultModelForNode,
   describeNode,
+  elementUpdates,
   EMPTY_GRAPH,
   graphEngine,
   inputPorts,
@@ -388,6 +389,16 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     },
     [touch],
   );
+
+  // An element renamed (or given a new photo) while the board is open: its nodes follow, and the board saves.
+  const elements = useElements().data;
+  useEffect(() => {
+    if (!elements) return;
+    const updates = elementUpdates(toGraph(latest.current.nodes, latest.current.edges), elements);
+    if (!updates.size) return;
+    setNodes((ns) => ns.map((n) => (updates.has(n.id) ? { ...n, data: { ...n.data, ...updates.get(n.id) } } : n)));
+    touch();
+  }, [elements, touch]);
 
   /** Deleted nodes come back with their edges from the toast's Undo. */
   const offerUndo = useCallback(
