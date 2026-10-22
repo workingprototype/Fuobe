@@ -4,7 +4,7 @@ title: Katana
 description: Remix a reference edit for your subject — recreate a short video's cuts, motion and soundtrack with the user's own person or product — or edit the user's own footage into a finished video.
 when_to_use: The user supplies a reference video and photos of a subject and says "make this edit with me", "do this trend with my product", or invokes /katana with a reference and subject (no further brief needed). Also for "edit my footage like this".
 icon: scissors
-studio: /video-edit
+studio: /katana
 tags: [remix, trend, edit, video]
 offline:
   kind: video

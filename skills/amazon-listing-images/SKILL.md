@@ -4,7 +4,7 @@ title: Amazon Listing Designer
 description: A compliant marketplace listing image set from the user's product photo — the main image on pure white, secondary images (lifestyle, features, dimensions, in-the-box) and A+ content modules.
 when_to_use: The user sells on Amazon, Etsy, eBay, Shopify or another marketplace and wants listing images, a "main image", "secondary images", "A+ content" or "product cards that sell".
 icon: shopping-bag
-studio: /apps/app-packshot
+studio: /marketing?template=mk-clean-listing
 tags: [amazon, marketplace, listing, ecommerce]
 offline:
   kind: image

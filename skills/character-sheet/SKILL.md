@@ -4,7 +4,7 @@ title: Character Sheet
 description: Cast a character, lock the wardrobe, and get a verified multi-view reference sheet (front, back, side, portrait) to reuse for recurring characters across images and videos.
 when_to_use: The user needs a consistent character for a series, a film, an ad campaign or a mascot; asks for a "character sheet", "turnaround", "model sheet" or "reference sheet"; or a story needs the same person in many shots.
 icon: user-square
-studio: /elements
+studio: /character-sheet
 tags: [character, consistency, reference]
 offline:
   kind: image

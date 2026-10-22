@@ -4,7 +4,7 @@ title: Product Photographer
 description: Studio product photos without a studio — packshots on clean backgrounds, lifestyle scenes, banners, model try-ons, CGI and restyles, from the user's own product photo.
 when_to_use: The user wants product photos, a packshot, e-commerce or catalog images, lifestyle shots of a product, or "make my product look premium". Not for ads with headlines (use marketing-studio-cards) or marketplace listing sets (use amazon-listing-images).
 icon: package
-studio: /apps/app-packshot
+studio: /marketing
 tags: [product, ecommerce, photo]
 offline:
   kind: image

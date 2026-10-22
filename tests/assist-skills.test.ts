@@ -272,6 +272,31 @@ describe("skills on the server", () => {
     }
   });
 
+  it("links each skill to the studio that does its job", async () => {
+    const { TEMPLATE_INDEX } = await import("@/lib/catalog/marketing");
+    const { getModel } = await import("@/lib/catalog");
+    const studio = Object.fromEntries(skills.listSkills().filter((s) => s.source === "builtin").map((s) => [s.name, s.studio]));
+    expect(studio).toMatchObject({
+      "faceless-video": "/faceless",
+      katana: "/katana",
+      "ad-multiplier": "/ads/multiplier",
+      "marketing-studio-cards": "/marketing",
+      "character-sheet": "/character-sheet",
+      localization: "/audio/translate",
+      "ugc-video": "/marketing?template=ugc-honest-review",
+      "amazon-listing-images": "/marketing?template=mk-clean-listing",
+      "product-photoshoot": "/marketing",
+      "visual-studio": "/video?model=minimax-h3",
+      "video-montage": "/video-tools/join",
+    });
+    // Templates and models named in a link exist (the page would otherwise open on its default).
+    for (const [name, link] of Object.entries(studio)) {
+      const q = new URL(link ?? "/", "http://x").searchParams;
+      if (q.get("template")) expect(TEMPLATE_INDEX.get(q.get("template")!), name).toBeTruthy();
+      if (q.get("model")) expect(getModel(q.get("model")!), name).toBeTruthy();
+    }
+  });
+
   it("creates, edits, duplicates, switches off and deletes the user's skills", () => {
     expect(() => skills.createSkill({ name: "katana", title: "K", description: "d", body: "b" })).toThrow(/built-in skill/);
     expect(() => skills.createSkill({ name: "upload", title: "U", description: "d", body: "b" })).toThrow(/reserved/);
