@@ -611,6 +611,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   voiceAudio: "audio",
   audio2: "audio",
   audios: "audio",
+  model3d: "model3d",
   prompt: "text",
 };
 

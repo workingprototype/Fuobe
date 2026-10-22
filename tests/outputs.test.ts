@@ -228,3 +228,86 @@ describe("3D models, stems and other extras", () => {
     ]);
   });
 });
+
+// Round 4: response fixtures follow docs/research/paid-model-apis-4.json → outputShape / outputFields.
+describe("round-4 structured outputs", () => {
+  it("Florence-2 OCR: the lines joined as text, each line's box as fractions of the picture", () => {
+    const res = {
+      results: {
+        quad_boxes: [
+          { x: 100, y: 50, w: 400, h: 60, label: "SUMMER SALE" },
+          { x: 100, y: 130, w: 300, h: 30, label: " 50% off everything " },
+          { x: 0, y: 0, w: 10, h: 10, label: "" },
+        ],
+      },
+      image: { ...file("https://v3.fal.media/files/annotated.png", "image/png"), width: 1000, height: 500 },
+    };
+    const [out] = extractOutputs(res, "ocr");
+    expect(out).toMatchObject({ kind: "text", contentType: "text/plain", text: "SUMMER SALE\n50% off everything" });
+    expect(decode(out.url)).toBe("SUMMER SALE\n50% off everything");
+    expect(out.meta).toEqual({
+      lines: [
+        { text: "SUMMER SALE", bbox: [0.1, 0.1, 0.4, 0.12] },
+        { text: "50% off everything", bbox: [0.1, 0.26, 0.3, 0.06] },
+      ],
+      size: [1000, 500],
+    });
+    // No size in the answer: the boxes stay in pixels (bboxPx) for the caller to scale.
+    expect(extractOutputs({ results: { quad_boxes: [{ x: 1, y: 2, w: 3, h: 4, label: "Hi" }] } }, "ocr")[0].meta).toEqual({ lines: [{ text: "Hi", bboxPx: [1, 2, 3, 4] }] });
+    // Lines that are already normalized pass through; a picture without text is an empty text.
+    expect(extractOutputs({ lines: [{ text: "Hello", bbox: [0.1, 0.2, 0.3, 0.05] }] }, "ocr")[0].meta).toEqual({ lines: [{ text: "Hello", bbox: [0.1, 0.2, 0.3, 0.05] }] });
+    expect(extractOutputs({ results: { quad_boxes: [] }, image: { width: 10, height: 10 } }, "ocr")[0]).toMatchObject({ text: "", meta: { lines: [] } });
+  });
+
+  it("TripoSplat: the splat as a model3d .ply with meta.format, the cut-out it saw as the preview", () => {
+    const res = {
+      model_mesh: file("https://v3.fal.media/files/splat.ply", "application/octet-stream"),
+      preprocessed_image: { ...file("https://v3.fal.media/files/cut.png", "image/png"), width: 512, height: 512 },
+      seed: 1,
+      num_gaussians: 262144,
+    };
+    expect(extractOutputs(res, "splat")).toEqual([
+      { url: "https://v3.fal.media/files/splat.ply", kind: "model3d", contentType: "model/ply", meta: { format: "ply", preview: "https://v3.fal.media/files/cut.png" } },
+    ]);
+    expect(extractOutputs({ model_mesh: file("https://x/scene.spz") }, "splat")[0]).toMatchObject({ contentType: "model/x-spz", meta: { format: "spz" } });
+  });
+
+  it("SAM 3D Objects: the combined GLB, with the whole splat among its formats", () => {
+    const res = {
+      model_glb: file("https://v3.fal.media/files/objects.glb", "model/gltf-binary"),
+      gaussian_splat: file("https://v3.fal.media/files/objects.ply"),
+      individual_splats: [file("https://v3.fal.media/files/o1.ply")],
+      metadata: [{ object_index: 0 }],
+    };
+    expect(extractOutputs(res, "image-to-3d")).toEqual([
+      { url: "https://v3.fal.media/files/objects.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { formats: { splat: "https://v3.fal.media/files/objects.ply" } } },
+    ]);
+  });
+
+  it("Meshy rigging: the animated GLB when a preset was asked for, the rig and walk / run cycles in meta.formats", () => {
+    const basic = { walking_glb: file("https://x/walk.glb"), running_glb: file("https://x/run.glb"), walking_fbx: file("https://x/walk.fbx") };
+    const rigged = { rigged_character_glb: file("https://x/rig.glb"), rigged_character_fbx: file("https://x/rig.fbx"), basic_animations: basic, rig_task_id: "r1" };
+    expect(extractOutputs(rigged, "rig-3d")).toEqual([
+      { url: "https://x/rig.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { rigged: true, formats: { fbx: "https://x/rig.fbx", walking: "https://x/walk.glb", running: "https://x/run.glb" } } },
+    ]);
+    const animated = extractOutputs({ ...rigged, animation_glb: file("https://x/dance.glb"), animation_fbx: file("https://x/dance.fbx") }, "rig-3d");
+    expect(animated[0]).toMatchObject({ url: "https://x/dance.glb", meta: { rigged: true, animated: true, formats: { fbx: "https://x/dance.fbx", rigged: "https://x/rig.glb" } } });
+    // Text to 3D (Tripo H3.1) reads like image to 3D.
+    expect(extractOutputs({ model_mesh: file("https://x/lantern.glb"), rendered_image: file("https://x/r.webp") }, "text-to-3d")[0]).toMatchObject({ kind: "model3d", meta: { preview: "https://x/r.webp" } });
+  });
+
+  it("SDR to HDR: Topaz's HDR file is the result; LTX's EXR frames ride along on the SDR preview", () => {
+    expect(extractOutputs({ video: file("https://x/hdr.mp4", "video/mp4") }, "sdr-to-hdr")).toEqual([{ url: "https://x/hdr.mp4", kind: "video", contentType: "video/mp4" }]);
+    const ltx = { exr_frames_url: file("https://x/frames.zip", "application/zip"), preview_video: file("https://x/preview.mp4", "video/mp4"), prompt: "p", seed: 2 };
+    expect(extractOutputs(ltx, "sdr-to-hdr")).toEqual([{ url: "https://x/preview.mp4", kind: "video", contentType: "video/mp4", meta: { preview: "sdr", artifacts: { exr: "https://x/frames.zip" } } }]);
+  });
+
+  it("extract frames: the images in order, each with meta.index", () => {
+    const res = { images: [file("https://x/f0.png", "image/png"), file("https://x/f1.png", "image/png"), file("https://x/f2.png", "image/png")], frame_count: 3 };
+    expect(extractOutputs(res, "extract-frames").map((o) => [o.url, o.meta?.index])).toEqual([
+      ["https://x/f0.png", 0],
+      ["https://x/f1.png", 1],
+      ["https://x/f2.png", 2],
+    ]);
+  });
+});

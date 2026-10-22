@@ -7,7 +7,9 @@ import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 vi.mock("@/lib/catalog", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/catalog")>();
   const { ROUND3_FIXTURES } = await import("./fixtures/round3-models");
-  return { ...mod, MODELS: [...mod.MODELS, ...ROUND3_FIXTURES], getModel: (id: string) => ROUND3_FIXTURES.find((m) => m.id === id) ?? mod.getModel(id) };
+  const { ROUND4_FIXTURES } = await import("./fixtures/round4-models");
+  const fixtures = [...ROUND3_FIXTURES, ...ROUND4_FIXTURES];
+  return { ...mod, MODELS: [...mod.MODELS, ...fixtures], getModel: (id: string) => fixtures.find((m) => m.id === id) ?? mod.getModel(id) };
 });
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -141,5 +143,82 @@ describe("demo outputs for every new operation", () => {
     const res = await serve(glb.url, "vase.glb");
     expect(res.headers.get("content-type")).toBe("model/gltf-binary");
     checkGlb(Buffer.from(await res.arrayBuffer()));
+  });
+});
+
+describe("demo outputs for the round-4 operations", () => {
+  it("gives clips, OCR lines, longer tones, meshes and numbered frames", async () => {
+    const image = saveFile({ data: png, contentType: "image/png", source: "upload" }).url;
+    const image2 = saveFile({ data: png, contentType: "image/png", source: "upload" }).url;
+    const video = saveFile({ data: fs.readFileSync(path.join(process.cwd(), "public/samples/demo-square.mp4")), contentType: "video/mp4", source: "upload" }).url;
+    const audio = saveFile({ data: Buffer.from("RIFF0000WAVEfmt "), contentType: "audio/wav", source: "upload" }).url;
+    const glb = saveFile({ data: fs.readFileSync(path.join(process.cwd(), "public/samples/demo-model.glb")), contentType: "model/gltf-binary", source: "upload" }).url;
+    const req = (op: string, r: Omit<GenerationRequest, "feature" | "modelId">): GenerationRequest => ({ feature: "tools", modelId: `test4-${op}`, ...r });
+    const reqs: Record<string, GenerationRequest> = {
+      "remove-object": req("remove-object", { prompt: "the coffee cup", inputs: { video } }),
+      "video-swap": req("video-swap", { prompt: "swap the car for the red one", inputs: { video, images: [image] } }),
+      "video-insert": req("video-insert", { prompt: "put the lamp on the table", inputs: { video, images: [image] } }),
+      keyframes: req("keyframes", { prompt: "she puts on the hat", inputs: { images: [image, image2] }, params: { keyframeTimes: [0, 4], duration: 5 } }),
+      "sdr-to-hdr": req("sdr-to-hdr", { inputs: { video }, params: { format: "h265_10bit" } }),
+      "export-video": req("export-video", { inputs: { video }, params: { format: "prores_422_hq" } }),
+      ocr: req("ocr", { inputs: { images: [image] } }),
+      "still-motion": req("still-motion", { inputs: { images: [image] }, params: { zoomFrom: 1, zoomTo: 1.2, duration: 5 } }),
+      "audio-loop": req("audio-loop", { inputs: { audio }, params: { duration: 20, crossfade: 1 } }),
+      "audio-join": req("audio-join", { inputs: { audios: [audio, audio, audio] }, params: { crossfade: 0.5 } }),
+      "scene-3d": req("scene-3d", { inputs: { images: [image] } }),
+      splat: req("splat", { inputs: { images: [image] } }),
+      "text-to-3d": req("text-to-3d", { prompt: "a brass lantern" }),
+      "rig-3d": req("rig-3d", { inputs: { model3d: glb }, params: { animation: 12 } }),
+      "extract-frames": req("extract-frames", { inputs: { video }, params: { frameInterval: 2 } }),
+      "images-to-video": req("images-to-video", { inputs: { images: [image, image2] }, params: { fps: 12 } }),
+      overlay: req("overlay", { inputs: { images: [image, image2] }, params: { position: { x: 0.5, y: 0.8 }, scale: 0.5 } }),
+    };
+    const started = Object.fromEntries(Object.entries(reqs).map(([k, r]) => [k, gens.createGenerations(r)[0]]));
+    expect(started.ocr.kind).toBe("text");
+    expect(started.splat.kind).toBe("model3d");
+    expect(started["extract-frames"].kind).toBe("image");
+    const done = Object.fromEntries(await Promise.all(Object.entries(started).map(async ([k, g]) => [k, await settle(g.id)] as const)));
+    for (const [k, g] of Object.entries(done)) {
+      expect(g.status, `${k}: ${g.error}`).toBe("succeeded");
+      expect(g.op, k).toBe(k);
+    }
+
+    for (const k of ["remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "still-motion", "images-to-video"]) {
+      expect(done[k].outputs, k).toHaveLength(1);
+      expect(done[k].outputs[0], k).toMatchObject({ kind: "video", contentType: "video/mp4", meta: { demo: true } });
+    }
+    expect(done["sdr-to-hdr"].outputs[0].meta?.format).toBe("h265_10bit");
+    expect(done["export-video"].outputs[0].meta?.format).toBe("prores_422_hq");
+
+    const ocr = done.ocr.outputs[0];
+    expect(ocr).toMatchObject({ kind: "text", contentType: "text/plain" });
+    const lines = ocr.meta?.lines as { text: string; bbox: number[] }[];
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(ocr.text).toBe(lines.map((l) => l.text).join("\n"));
+    for (const l of lines) {
+      expect(l.bbox).toHaveLength(4);
+      for (const n of l.bbox) expect(n >= 0 && n <= 1).toBe(true);
+    }
+
+    // The loop is as long as asked (20 s), longer than the 3 s demo tone; a join is a track too.
+    const wavSeconds = async (url: string) => {
+      const buf = Buffer.from(await (await serve(url)).arrayBuffer());
+      return buf.readUInt32LE(40) / buf.readUInt32LE(28);
+    };
+    expect(done["audio-loop"].outputs[0]).toMatchObject({ kind: "audio", contentType: "audio/wav" });
+    expect(await wavSeconds(done["audio-loop"].outputs[0].url)).toBeCloseTo(20, 1);
+    expect(await wavSeconds(done["audio-join"].outputs[0].url)).toBeCloseTo(9, 1);
+
+    for (const k of ["scene-3d", "splat", "text-to-3d", "rig-3d"]) {
+      const m = done[k].outputs.find((o) => o.kind === "model3d");
+      expect(m, k).toMatchObject({ contentType: "model/gltf-binary" });
+      expect(m!.url, k).toMatch(/\.glb$/);
+    }
+    expect(done["rig-3d"].outputs[0].meta?.rigged).toBe(true);
+    checkGlb(Buffer.from(await (await serve(done.splat.outputs[0].url)).arrayBuffer()));
+
+    const frames = done["extract-frames"].outputs;
+    expect(frames.map((f) => [f.kind, f.meta?.index])).toEqual([0, 1, 2, 3].map((i) => ["image", i]));
+    expect(done.overlay.outputs).toEqual([expect.objectContaining({ kind: "image", contentType: "image/svg+xml" })]);
   });
 });

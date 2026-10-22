@@ -61,7 +61,25 @@ export type Operation =
   | "write" // brief → text (LLM: scripts, ad copy, shot lists)
   | "vectorize" // image → the same picture as an SVG
   | "level" // audio → the same audio at a set loudness (a music bed under a voice-over)
-  | "timeline"; // audio clips placed at their start times over silence → one track as long as the video (dub voices)
+  | "timeline" // audio clips placed at their start times over silence → one track as long as the video (dub voices)
+  // round 4
+  | "remove-object" // video + (prompt naming it | mask: first-frame mask, white = erase | params.points) → the same video without it
+  | "video-swap" // video + reference image(s) + prompt (optional mask / points) → the object or person replaced by the reference
+  | "video-insert" // video + reference image + prompt (where it goes) → the object added
+  | "keyframes" // images (1–10, in order) + params.keyframeTimes → one video through every keyframe
+  | "sdr-to-hdr" // video → HDR video (params.format)
+  | "export-video" // video → the same video in params.format
+  | "ocr" // image → its text lines (OutputFile.text, OutputFile.meta.lines [{text, bbox}])
+  | "still-motion" // image → a camera move over it (Ken Burns: zoomFrom/zoomTo, panFrom/panTo, easing)
+  | "audio-loop" // audio → the same audio extended to params.duration (params.crossfade at each seam)
+  | "audio-join" // audio clips in order → one track (params.crossfade between them)
+  | "scene-3d" // image → a whole-scene 3D model (GLB) for camera recomposition
+  | "splat" // image → a Gaussian splat of the subject (meta.format "ply" | "spz")
+  | "text-to-3d" // prompt → 3D model
+  | "rig-3d" // 3D model (+ params.animation) → rigged / animated model
+  | "extract-frames" // video → an image every params.frameInterval frames (meta.index)
+  | "images-to-video" // images in order → a video at params.fps
+  | "overlay"; // image + a second image (logo) → composited (params.position, params.scale)
 
 export const OPERATION_LABELS: Record<Operation, string> = {
   t2i: "Text to image",
@@ -111,6 +129,23 @@ export const OPERATION_LABELS: Record<Operation, string> = {
   vectorize: "Vectorize",
   level: "Level audio",
   timeline: "Place on the timeline",
+  "remove-object": "Remove object",
+  "video-swap": "Swap object",
+  "video-insert": "Add object",
+  keyframes: "Keyframes to video",
+  "sdr-to-hdr": "SDR to HDR",
+  "export-video": "Export video",
+  ocr: "Read text",
+  "still-motion": "Ken Burns",
+  "audio-loop": "Loop audio",
+  "audio-join": "Join audio",
+  "scene-3d": "3D scene",
+  splat: "Gaussian splat",
+  "text-to-3d": "Text to 3D",
+  "rig-3d": "Rig 3D model",
+  "extract-frames": "Extract frames",
+  "images-to-video": "Images to video",
+  overlay: "Overlay image",
 };
 
 export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
@@ -162,7 +197,43 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
   level: "audio",
   // The open engine returns the track; fal's compose renders it as a video (the result follows the model).
   timeline: "audio",
+  "remove-object": "video",
+  "video-swap": "video",
+  "video-insert": "video",
+  keyframes: "video",
+  "sdr-to-hdr": "video",
+  "export-video": "video",
+  ocr: "text",
+  "still-motion": "video",
+  "audio-loop": "audio",
+  "audio-join": "audio",
+  "scene-3d": "model3d",
+  splat: "model3d",
+  "text-to-3d": "model3d",
+  "rig-3d": "model3d",
+  "extract-frames": "image",
+  "images-to-video": "video",
+  overlay: "image",
 };
+
+/**
+ * Video codecs and containers an export or HDR job can write (params.format): H.264 MP4, 10-bit H.265
+ * MP4, ProRes 422 HQ or 4444 in a .mov, lossless FFV1 in a .mkv, or a 16-bit EXR frame sequence.
+ */
+export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr";
+
+/** A point on a picture in its own pixels (the first frame of a video). Negative points mark what to keep. */
+export interface PixelPoint {
+  x: number;
+  y: number;
+  label?: "positive" | "negative";
+}
+
+/** A position on a picture as fractions of its width and height (0–1 from the top left). */
+export interface FocusPoint {
+  x: number;
+  y: number;
+}
 
 /** "llm" runs text steps (translate, write) on the configured LLM (Claude or Ollama) inside the server. */
 export type ProviderId = "fal" | "replicate" | "higgsfield" | "openai" | "google" | "comfyui" | "mock" | "local" | "llm";
@@ -269,6 +340,49 @@ export interface FieldMap {
    * and one for `audio2` (a background bed), each placed at 0 and as long as `duration` (seconds).
    */
   tracks?: string;
+  // Round 4 (research part 4).
+  /**
+   * Points clicked on the first frame (params.points, pixels) in the API's shape: "bria" = strings like
+   * "{'x':100, 'y':100, 'type':'positive'}", "sam" = objects {x, y, label: 1 | 0}.
+   */
+  points?: { key: string; format: "bria" | "sam" };
+  /**
+   * Keyframes (inputs.images in order at params.keyframeTimes seconds) as [{[image]: url, [frame]: index}],
+   * the frame index counted at the API's `fps`. Without times the keyframes are spread over the clip.
+   */
+  keyframes?: { key: string; image: string; frame: string; fps: number };
+  /** Output codec / container (params.format) as the API's own value; a format the API can't write is left out. */
+  format?: { key: string; values: Partial<Record<VideoFormat, string>> };
+  /** Seconds of crossfade at each join or loop seam (params.crossfade). */
+  crossfade?: string;
+  /**
+   * A Ken Burns move sent as one zoom toward a focal point (fal's zoompan): `factor` = the larger of
+   * params.zoomFrom / zoomTo over the smaller (at most `max`), `direction` in or out, the focal point = the pan point at
+   * the zoomed-in end (0–1, or percent), `easing` from params.easing.
+   */
+  zoom?: { factor: string; max?: number; direction?: { key: string; in: string; out: string }; x?: string; y?: string; easing?: EnumField; percent?: boolean };
+  /** Where an overlay's centre goes (params.position, 0–1 of the background; or percent). */
+  position?: { x: string; y: string; percent?: boolean };
+  /** An overlay's size (params.scale, 1 = its own size) times `multiplier` (100 for percent). */
+  scale?: { key: string; multiplier?: number };
+  /** Frame interpolation: the output frame rate (params.targetFps) and slow-motion factor (params.slowdown). */
+  targetFps?: string;
+  slowdown?: string;
+  /** Every Nth frame (params.frameInterval). */
+  frameInterval?: string;
+  /** Depth map colours (params.colormap: grayscale, turbo, inferno, magma, viridis). */
+  colormap?: string | EnumField;
+  /** Images held as video frames: [{[url]: image, [frames]: 1}] in order (images to video at params.fps). */
+  frames?: { key: string; url: string; frames: string };
+  /**
+   * A loop by repetition: inputs.audio listed as many times as params.duration / params.sourceDuration
+   * needs (2 to `max` plays; `max` when either is unknown).
+   */
+  loop?: { key: string; max: number };
+  /** The 3D model to work on (inputs.model3d: rig-3d). */
+  model3d?: string;
+  /** An animation preset (params.animation); `flag` is the API's switch that turns animation on. */
+  animation?: { key: string; flag?: string };
 }
 
 export interface ModelRoute {
@@ -322,6 +436,8 @@ export interface ModelOptions {
   imageLabels?: string[];
   /** None of its routes takes a prompt (try-on, 3D, transcription): the composer can hide the prompt box. */
   promptless?: boolean;
+  /** The prompt box shows, but the model also runs without words (P-Video Replace, Genjutsu Lite object swap). */
+  promptOptional?: boolean;
   /** Max reference videos / audio clips it accepts (reference-to-video: inputs.videos / inputs.audios). */
   maxVideos?: number;
   maxAudios?: number;
@@ -330,9 +446,11 @@ export interface ModelOptions {
   /**
    * What this model needs beyond its operation's own inputs, checked before a job is created (the
    * composer shows `msg` inline): reference images for a style-reference t2i model, a prompt for a
-   * model whose operation is otherwise promptless.
+   * model whose operation is otherwise promptless, a painted mask or clicked points (video erasers).
    */
-  requires?: { images?: number; prompt?: boolean; msg: string };
+  requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
+  /** Output formats it can write (params.format: SDR to HDR, export). */
+  formats?: VideoFormat[];
 }
 
 export interface Pricing {
@@ -343,6 +461,11 @@ export interface Pricing {
   byResolution?: Record<string, number>;
   /** Billed on the input clip's seconds as well as the output's (Happy Horse video edit): a restyle costs about twice the clip's length. */
   inputSeconds?: boolean;
+  /**
+   * A launch price that runs to the end of `until` (UTC, YYYY-MM-DD); `usd` / `byResolution` are the list
+   * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
+   */
+  promo?: { until: string; usd: number; byResolution?: Record<string, number> };
 }
 
 export interface ModelDef {
@@ -399,6 +522,35 @@ export interface GenParams {
   sourceLanguage?: string;
   /** Layer decomposition: how many layers to ask for. */
   numLayers?: number;
+  // Round 4.
+  /** Points clicked on the first frame, in its pixels (remove-object, video-swap, 3D objects). */
+  points?: PixelPoint[];
+  /** Keyframes: when each image is reached, in seconds (one per image, ascending). */
+  keyframeTimes?: number[];
+  /** Codec / container to write (export-video, sdr-to-hdr). */
+  format?: VideoFormat;
+  /** Ken Burns: zoom at the start and end (1 = the whole picture, 1.25 = 25% closer), where it looks (0–1) and how it moves. */
+  zoomFrom?: number;
+  zoomTo?: number;
+  panFrom?: FocusPoint;
+  panTo?: FocusPoint;
+  easing?: "linear" | "ease-in-out";
+  /** Seconds of crossfade at each seam (audio-loop, audio-join). */
+  crossfade?: number;
+  /** The input clip's length in seconds, when the caller knows it (how many plays a cloud loop needs). */
+  sourceDuration?: number;
+  /** Extract every Nth frame. */
+  frameInterval?: number;
+  /** Frame interpolation: the frame rate to reach, and a slow-motion factor (1–8; 2 = twice as long). */
+  targetFps?: number;
+  slowdown?: number;
+  /** Depth map colours: grayscale, turbo, inferno, magma or viridis. */
+  colormap?: string;
+  /** Overlay: where its centre goes (0–1 of the background) and its size (1 = its own size). */
+  position?: FocusPoint;
+  scale?: number;
+  /** An animation preset for a rigged model (the provider's preset id). */
+  animation?: string | number;
   /** Free-form advanced params forwarded to the provider payload. */
   extra?: Record<string, unknown>;
 }
@@ -439,6 +591,8 @@ export interface GenerationRequest {
     videos?: string[];
     /** Reference audio clips (reference-to-video: voices, music or sound the clip should follow). */
     audios?: string[];
+    /** A 3D model file (.glb) to work on (rig-3d). */
+    model3d?: string;
   };
   params?: GenParams;
   /** Values for preset option pickers (apps). */
@@ -476,8 +630,9 @@ export interface ChainSlot {
    * "voiceAudio" clones the voice of the dependency's audio output.
    * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
    * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
+   * "model3d" is a 3D model (a mesh to rig).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
@@ -503,6 +658,7 @@ export interface GenInput extends GenParams {
   voiceAudio2?: string;
   videos?: string[];
   audios?: string[];
+  model3d?: string;
   loras?: LoraRef[];
 }
 

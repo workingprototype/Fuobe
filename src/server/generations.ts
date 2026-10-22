@@ -429,6 +429,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   voiceAudio: "audio",
   audio2: "audio",
   audios: "audio",
+  model3d: "model3d",
   prompt: "text",
 };
 
@@ -458,6 +459,7 @@ const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : SLOT_KIND[s.slot
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
   if (kind === "text") return "Placeholder text from an earlier step";
+  if (kind === "model3d") return "/api/files/placeholder.glb";
   return kind === "image" ? "/api/files/placeholder.png" : kind === "video" ? "/api/files/placeholder.mp4" : "/api/files/placeholder.wav";
 }
 
@@ -633,6 +635,7 @@ async function submit(
       voiceAudio2: await prep(req.inputs?.voiceAudio2),
       videos: (await Promise.all((req.inputs?.videos ?? []).map(prep))).filter(Boolean) as string[],
       audios: (await Promise.all((req.inputs?.audios ?? []).map(prep))).filter(Boolean) as string[],
+      model3d: await prep(req.inputs?.model3d),
       loras: plan.loras,
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,

@@ -1,5 +1,6 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
+import { pricingAt } from "./plan";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -1207,9 +1208,14 @@ const AI_INFLUENCER: ModelDef = {
   pricing: { unit: "image", usd: 0.05 },
 };
 
+/** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
+const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
+
 /** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
 const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)).map(withLastFrameExtend),
+  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m))
+    .map(withLastFrameExtend)
+    .map(withCurrentPrice),
   ...HIGGSFIELD_MODELS,
   AI_INFLUENCER,
   ...cloudTools,
