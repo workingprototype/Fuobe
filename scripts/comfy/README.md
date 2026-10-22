@@ -118,8 +118,12 @@ ISO_DIR=/srv/comfyui-isolated scripts/comfy/install-isolated-worker.sh
 cd /srv/comfyui-isolated/ComfyUI && HOME=/srv/comfyui-isolated/home /srv/comfyui-isolated/.venv/bin/python main.py --listen 127.0.0.1 --port 8189
 ```
 
-Point a second Fuobe install (or Settings → ComfyUI URL while you use those models) at port 8189. Build and
-validate them against that server (placeholder models go into the shared main `models/` folder the worker reads):
+Then set **Settings → Open-source engine · ComfyUI → Isolated worker URL** (or `COMFYUI_ISOLATED_URL`) to
+`http://127.0.0.1:8189`: Fuobe sends these two workflows, their uploads and their polls there, and everything else
+to the main ComfyUI (the Lipsync studio offers LatentSync 1.6 and Audio → Sound effects offers ThinkSound, marked
+"Runs on the isolated ComfyUI worker"; without the setting, or when the worker doesn't answer, the job fails with a
+message that names the setting). Build and validate them against that server (placeholder models go into the shared
+main `models/` folder the worker reads):
 
 ```bash
 COMFYUI_URL=http://127.0.0.1:8189 npm run build -- lipsync-latentsync16 sfx-thinksound

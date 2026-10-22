@@ -362,6 +362,11 @@ export interface ModelDef {
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
+  /**
+   * Open models whose workflow runs on the isolated ComfyUI worker (Settings → Isolated worker URL), not
+   * the main server: the picker says so.
+   */
+  worker?: "isolated";
 }
 
 /** User-facing generation parameters (canonical, provider-agnostic). */

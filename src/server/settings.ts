@@ -29,6 +29,8 @@ export const SETTINGS = {
   anthropicKey: { key: "anthropic.key", env: "ANTHROPIC_API_KEY", secret: true },
   comfyUrl: { key: "comfyui.url", env: "COMFYUI_URL", default: "http://127.0.0.1:8188" },
   comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
+  /** A second ComfyUI for workflows whose node packs can't share the main install (LatentSync 1.6, ThinkSound; scripts/comfy/README.md). */
+  comfyIsolatedUrl: { key: "comfyui.isolatedUrl", env: "COMFYUI_ISOLATED_URL" },
   /** ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there. */
   comfyLorasDir: { key: "comfyui.lorasDir", env: "COMFYUI_LORAS_DIR" },
   /** AI-Toolkit UI (ostris/ai-toolkit, port 8675) for open-source character LoRA training. */

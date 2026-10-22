@@ -16,7 +16,12 @@ export interface ModelRow {
   /** Provider routes ("fal: fal-ai/flux/dev"), shown in the row's details popover. */
   routes: string[];
   price: string;
+  /** Where it runs when that's not the obvious place ("Runs on the isolated ComfyUI worker"). */
+  note?: string;
 }
+
+/** The picker's and the Models page's note on models that run on the isolated ComfyUI worker. */
+export const ISOLATED_NOTE = "Runs on the isolated ComfyUI worker";
 
 const BADGE_LABEL: Record<string, string> = {
   new: "New",
@@ -42,6 +47,7 @@ export function toModelRow(m: ModelDef): ModelRow {
     ops: [...new Set(m.routes.map((r) => OPERATION_LABELS[r.op] ?? r.op))],
     routes: [...new Set(m.routes.map((r) => `${r.provider}: ${r.endpoint}`))],
     price: m.engine === "open" ? "Free" : m.pricing ? `${formatCost(m.pricing.usd)} / ${m.pricing.unit}` : "—",
+    ...(m.worker === "isolated" && { note: ISOLATED_NOTE }),
   };
 }
 

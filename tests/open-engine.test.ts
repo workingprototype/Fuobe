@@ -108,8 +108,11 @@ describe("round-3 open models", () => {
     expect(getModel("oss-captions-whisper")!.tagline).toMatch(/non-commercial/);
     expect(getModel("oss-hunyuan-foley")!.tagline).toMatch(/EU, UK and South Korea/);
     expect(getModel("oss-stable-audio-3")!.tagline).toMatch(/US\$1M/);
-    expect(getModel("oss-thinksound")!.hidden).toBe(true); // isolated worker only
-    expect(getModel("oss-latentsync")!.hidden).toBe(true);
+    // Offered in their studios, and marked as running on the isolated worker.
+    for (const id of ["oss-thinksound", "oss-latentsync"]) {
+      expect(getModel(id)!.worker, id).toBe("isolated");
+      expect(getModel(id)!.hidden, id).toBeFalsy();
+    }
   });
 
   it("every open model's sliders and controls are bindings of its workflows", () => {

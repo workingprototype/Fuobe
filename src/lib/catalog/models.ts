@@ -887,11 +887,11 @@ const open: ModelDef[] = [
     vendor: "FunAudioLLM",
     family: "thinksound",
     kind: "audio",
-    tagline: "Apache-2.0 sound effects with a step-by-step sound description · 12 GB GPU · needs a separate ComfyUI worker",
+    tagline: "Apache-2.0 sound effects from a description, up to 30 s · 12 GB GPU",
     routes: [comfy("sfx", "sfx-thinksound", "isolated worker (scripts/comfy/README.md)")],
     options: { durations: [3, 5, 8, 10, 20, 30], seed: true },
     defaults: { duration: 8 },
-    hidden: true,
+    worker: "isolated",
   }),
   // Voice, transcription, captions, translation, lip re-sync, soundtrack
   o({
@@ -986,10 +986,16 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "latentsync",
     kind: "video",
-    tagline: "Mouth-only lip re-sync, identity untouched · 20 GB GPU · OpenRAIL++ · needs a separate ComfyUI worker",
+    tagline: "Re-syncs only the mouth of real footage to a new voice; face, camera and background untouched · 20 GB GPU · OpenRAIL++",
     routes: [comfy("lipsync", "lipsync-latentsync16", "isolated worker (scripts/comfy/README.md)")],
-    options: { seed: true },
-    hidden: true,
+    options: {
+      seed: true,
+      sliders: [
+        { param: "lipsExpression", label: "Lip movement", min: 1, max: 3, step: 0.1, default: 1.5 },
+        { param: "steps", label: "Steps", min: 10, max: 50, step: 1, default: 20 },
+      ],
+    },
+    worker: "isolated",
   }),
   o({
     id: "oss-mux",

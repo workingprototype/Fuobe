@@ -323,6 +323,13 @@ export function SettingsForm() {
       >
         <Field setting={get("comfyUrl")} label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" onSave={set("comfyUrl")} />
         <Field setting={get("comfyToken")} label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." onSave={set("comfyToken")} />
+        <Field
+          setting={get("comfyIsolatedUrl")}
+          label="Isolated worker URL (optional)"
+          placeholder="http://127.0.0.1:8189"
+          hint="A second ComfyUI for LatentSync 1.6 and ThinkSound, whose node packs can't share the main install. scripts/comfy/README.md shows how to start one."
+          onSave={set("comfyIsolatedUrl")}
+        />
         <TestButton provider="comfyui" />
       </Section>
 

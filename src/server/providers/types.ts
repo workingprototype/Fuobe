@@ -46,8 +46,11 @@ export interface ProviderAdapter {
   id: ProviderId;
   label: string;
   isConfigured(): boolean;
-  /** Turn a local file into something the provider accepts (URL, data URI, uploaded filename). */
-  prepareFile(data: Buffer, contentType: string, name: string): Promise<string>;
+  /**
+   * Turn a local file into something the provider accepts (URL, data URI, uploaded filename). `route` is
+   * the route the file is for (ComfyUI uploads an isolated-worker workflow's inputs to that worker).
+   */
+  prepareFile(data: Buffer, contentType: string, name: string, route?: ModelRoute): Promise<string>;
   submit(ctx: SubmitContext): Promise<SubmitResult>;
   poll(ctx: PollContext): Promise<PollResult>;
   cancel?(ctx: PollContext): Promise<void>;
