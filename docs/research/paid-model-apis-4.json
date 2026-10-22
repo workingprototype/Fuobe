@@ -14136,7 +14136,7 @@
    },
    "replicateEquivalent": null,
    "license": "commercial",
-   "notes": "1-4 images, instruction edits, optional mask_url (polarity not stated). $0.04 per image.",
+   "notes": "1-4 images, instruction edits, optional mask_url (white = edit, black = keep, per the schema's field description; single-image requests only). $0.04 per image.",
    "verified": true,
    "sourceUrl": "https://fal.ai/models/bria/fibo-2/edit/api",
    "schemaUrl": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bria/fibo-2/edit",

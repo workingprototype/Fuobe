@@ -329,75 +329,6 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
     }
   },
   {
-    "id": "grok-imagine-image-2",
-    "name": "Grok Imagine Image 2.0",
-    "vendor": "xAI",
-    "family": "grok",
-    "engine": "cloud",
-    "kind": "image",
-    "tagline": "xAI's image model — bold, fast, few refusals",
-    "badges": [],
-    "routes": [
-      {
-        "op": "t2i",
-        "provider": "higgsfield",
-        "endpoint": "xai/grok-imagine-image-2.0",
-        "map": {
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
-        }
-      },
-      {
-        "op": "edit",
-        "provider": "higgsfield",
-        "endpoint": "xai/grok-imagine-image-2.0",
-        "map": {
-          "images": "image_urls",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
-        }
-      }
-    ],
-    "options": {
-      "aspectRatios": [
-        "auto",
-        "1:1",
-        "1:2",
-        "2:1",
-        "3:2",
-        "2:3",
-        "4:3",
-        "3:4",
-        "16:9",
-        "9:16"
-      ],
-      "resolutions": [
-        "1k",
-        "2k"
-      ],
-      "controls": [
-        {
-          "param": "quality",
-          "label": "Detail",
-          "values": [
-            "low",
-            "medium"
-          ],
-          "default": "medium"
-        }
-      ],
-      "maxImages": 10
-    },
-    "defaults": {
-      "aspectRatio": "1:1"
-    },
-    "pricing": {
-      "unit": "image",
-      "usd": 0.04,
-      "note": "Higgsfield list price"
-    }
-  },
-  {
     "id": "cinema-studio-4",
     "name": "Cinema Studio 4.0",
     "vendor": "Higgsfield",
@@ -714,6 +645,16 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
           "video": "video_url",
           "resolution": "resolution"
         }
+      },
+      {
+        "op": "video-swap",
+        "provider": "higgsfield",
+        "endpoint": "higgsfield/genjutsu/object-swap/v1.0",
+        "map": {
+          "images": "image_urls",
+          "video": "video_url",
+          "resolution": "resolution"
+        }
       }
     ],
     "options": {
@@ -722,7 +663,8 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
         "480p",
         "1080p"
       ],
-      "maxImages": 8
+      "maxImages": 8,
+      "promptOptional": true
     },
     "defaults": {
       "resolution": "720p"
@@ -773,94 +715,83 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
     }
   },
   {
-    "id": "grok-imagine-video-1-5",
-    "name": "Grok Imagine Video 1.5",
-    "vendor": "xAI",
-    "family": "grok",
+    "id": "genjutsu-lite-object-swap",
+    "name": "Genjutsu Lite Object Swap",
+    "vendor": "Higgsfield",
+    "family": "genjutsu",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "xAI's video model with references and audio",
-    "badges": [],
+    "tagline": "Swap objects, characters or clothes from 1–8 references in clips up to 15 s",
+    "badges": [
+      "new"
+    ],
     "routes": [
       {
-        "op": "t2v",
+        "op": "video-swap",
         "provider": "higgsfield",
-        "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
+        "endpoint": "higgsfield/genjutsu-light/object-swap/v1.0",
         "map": {
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
-        }
-      },
-      {
-        "op": "i2v",
-        "provider": "higgsfield",
-        "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
-        "map": {
-          "image": "image_url",
           "images": "image_urls",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
-        }
-      },
-      {
-        "op": "ref2v",
-        "provider": "higgsfield",
-        "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
-        "map": {
-          "image": "image_url",
-          "images": "image_urls",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
-          "duration": {
-            "key": "duration",
-            "type": "number"
-          }
+          "video": "video_url",
+          "resolution": "resolution"
         }
       }
     ],
     "options": {
-      "aspectRatios": [
-        "auto",
-        "1:1",
-        "16:9",
-        "9:16",
-        "4:3",
-        "3:4",
-        "3:2",
-        "2:3"
-      ],
+      "promptOptional": true,
       "resolutions": [
-        "480p",
         "720p",
+        "480p",
         "1080p"
       ],
-      "durations": [
-        3,
-        4,
-        5,
-        6,
-        8,
-        10,
-        12,
-        15
-      ],
-      "maxImages": 7
+      "maxImages": 8
     },
     "defaults": {
-      "aspectRatio": "16:9",
-      "duration": 6
+      "resolution": "720p"
     },
     "pricing": {
       "unit": "second",
-      "usd": 0.08,
+      "usd": 0.1,
+      "note": "Higgsfield list price"
+    }
+  },
+  {
+    "id": "genjutsu-lite-motion-transfer",
+    "name": "Genjutsu Lite Motion Transfer",
+    "vendor": "Higgsfield",
+    "family": "genjutsu",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "A clip's motion on your characters, for clips up to 15 s",
+    "badges": [
+      "new"
+    ],
+    "routes": [
+      {
+        "op": "motion-transfer",
+        "provider": "higgsfield",
+        "endpoint": "higgsfield/genjutsu-light/motion-transfer/v1.0",
+        "map": {
+          "images": "image_urls",
+          "video": "video_url",
+          "resolution": "resolution"
+        }
+      }
+    ],
+    "options": {
+      "resolutions": [
+        "720p",
+        "480p",
+        "1080p"
+      ],
+      "maxImages": 8
+    },
+    "defaults": {
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.1,
       "note": "Higgsfield list price"
     }
   },
@@ -1342,6 +1273,33 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
     },
     {
       "op": "v2v",
+      "provider": "higgsfield",
+      "endpoint": "kling-video/o3/video-edit",
+      "map": {
+        "images": "image_urls",
+        "videoArray": "video_urls"
+      }
+    },
+    {
+      "op": "remove-object",
+      "provider": "higgsfield",
+      "endpoint": "kling-video/o3/video-edit",
+      "map": {
+        "images": "image_urls",
+        "videoArray": "video_urls"
+      }
+    },
+    {
+      "op": "video-swap",
+      "provider": "higgsfield",
+      "endpoint": "kling-video/o3/video-edit",
+      "map": {
+        "images": "image_urls",
+        "videoArray": "video_urls"
+      }
+    },
+    {
+      "op": "video-insert",
       "provider": "higgsfield",
       "endpoint": "kling-video/o3/video-edit",
       "map": {
@@ -1971,6 +1929,72 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
           "format": "rgb-array",
           "background": "background_color"
         },
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution"
+      }
+    }
+  ],
+  "grok-imagine-video-1-5": [
+    {
+      "op": "t2v",
+      "provider": "higgsfield",
+      "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
+      "map": {
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution",
+        "duration": {
+          "key": "duration",
+          "type": "number"
+        }
+      }
+    },
+    {
+      "op": "i2v",
+      "provider": "higgsfield",
+      "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
+      "map": {
+        "image": "image_url",
+        "images": "image_urls",
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution",
+        "duration": {
+          "key": "duration",
+          "type": "number"
+        }
+      }
+    },
+    {
+      "op": "ref2v",
+      "provider": "higgsfield",
+      "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
+      "map": {
+        "image": "image_url",
+        "images": "image_urls",
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution",
+        "duration": {
+          "key": "duration",
+          "type": "number"
+        }
+      }
+    }
+  ],
+  "grok-imagine-image-2": [
+    {
+      "op": "t2i",
+      "provider": "higgsfield",
+      "endpoint": "xai/grok-imagine-image-2.0",
+      "map": {
+        "aspectRatio": "aspect_ratio",
+        "resolution": "resolution"
+      }
+    },
+    {
+      "op": "edit",
+      "provider": "higgsfield",
+      "endpoint": "xai/grok-imagine-image-2.0",
+      "map": {
+        "images": "image_urls",
         "aspectRatio": "aspect_ratio",
         "resolution": "resolution"
       }
