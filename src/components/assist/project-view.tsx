@@ -240,8 +240,8 @@ function Assets({ p, active }: { p: AssistProject; active: boolean }) {
         {tiles.map(({ a, at, o, i }) => (
           <li key={`${a.generation.id}-${i}`}>
             <button onClick={() => setOpen({ at, i })} className="group relative block aspect-square w-full overflow-hidden rounded-xl bg-muted" aria-label={`Open ${a.generation.request.prompt?.slice(0, 60) || "result"} (from ${a.chatTitle})`}>
-              <MediaThumb output={o} g={a.generation} className="transition duration-300 group-hover:scale-[1.03]" />
-              {a.generation.provider === "mock" && <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-medium">Demo</span>}
+              <MediaThumb output={o} g={a.generation} className="transition duration-300 group-hover:scale-[1.03]" tag={a.generation.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
+              {a.generation.provider === "mock" && o.kind !== "text" && <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-medium">Demo</span>}
             </button>
           </li>
         ))}

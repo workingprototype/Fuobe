@@ -156,8 +156,9 @@ export function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[
     if (g.status === "succeeded") {
       return g.outputs.map((o, i) => (
         <button key={`${g.id}-${i}`} onClick={() => onOpen(g, i)} className="group relative overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }} aria-label={`Open ${g.request.prompt?.slice(0, 60) || "result"}`}>
-          <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" />
-          {g.provider === "mock" && <span className="absolute top-2 right-2 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
+          {/* A text card says "Demo" in its own header row: on a narrow tile a corner badge would cover its label. */}
+          <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" tag={g.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
+          {g.provider === "mock" && o.kind !== "text" && <span className="absolute top-2 right-2 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
         </button>
       ));
     }
