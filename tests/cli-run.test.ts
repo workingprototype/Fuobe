@@ -1,0 +1,267 @@
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { unzip } from "@/server/assist/unzip";
+
+/**
+ * The fuobe CLI as a child process against a stub of Fuobe's REST API: upload → generate → wait →
+ * download, the MCP bridge, skills add, login, and the messages for a missing token or server.
+ */
+
+const TOKEN = "fuobe_test-token";
+const CLI = path.join(process.cwd(), "bin/fuobe.mjs");
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-cli-run-"));
+const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+
+interface Seen {
+  method: string;
+  path: string;
+  auth: string | null;
+  json?: unknown;
+  file?: { name: string; type: string; data: Buffer };
+}
+
+let server: http.Server;
+let base = "";
+let requireAuth = true;
+let seen: Seen[] = [];
+let polls = 0;
+
+const generation = (status: string, extra: Record<string, unknown> = {}) => ({
+  id: "gen1",
+  status,
+  progress: status === "running" ? 0.5 : status === "succeeded" ? 1 : null,
+  modelId: "nano-banana-pro",
+  modelName: "Nano Banana Pro",
+  provider: "fal",
+  kind: "image",
+  op: "edit",
+  prompt: "a red fox",
+  outputs: [],
+  error: null,
+  createdAt: 1_000,
+  completedAt: null,
+  ...extra,
+});
+
+async function body(req: http.IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(c as Buffer);
+  return Buffer.concat(chunks);
+}
+
+beforeAll(async () => {
+  server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://stub");
+    const raw = await body(req);
+    const s: Seen = { method: req.method ?? "GET", path: url.pathname + url.search, auth: req.headers.authorization ?? null };
+    if (/json/.test(req.headers["content-type"] ?? "")) s.json = JSON.parse(raw.toString());
+    if (/multipart/.test(req.headers["content-type"] ?? "")) {
+      const form = await new Request("http://stub", { method: "POST", headers: { "content-type": req.headers["content-type"]! }, body: new Uint8Array(raw) }).formData();
+      const f = form.get("file") as File;
+      s.file = { name: f.name, type: f.type, data: Buffer.from(await f.arrayBuffer()) };
+    }
+    seen.push(s);
+    const send = (status: number, data: unknown) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    if (requireAuth && s.auth !== `Bearer ${TOKEN}`) return send(401, { error: "Sign in, or send an API token as Authorization: Bearer fuobe_…" });
+    const route = `${s.method} ${url.pathname}`;
+    if (route === "POST /api/uploads") return send(201, { id: "up1", url: "/api/files/uploads/2026-10-22/up1.png" });
+    if (route === "GET /api/models")
+      return send(200, { engineMode: "both", defaults: { image: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" }, edit: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } }, items: [{ id: "nano-banana-pro", name: "Nano Banana Pro" }] });
+    if (route === "POST /api/generations" && (s.json as { modelId?: string }).modelId === "kling-3") return send(422, { error: "Add a start frame" });
+    if (route === "POST /api/generations" && url.searchParams.get("preview") === "1")
+      return send(200, { modelId: "nano-banana-pro", modelName: "Nano Banana Pro", engine: "cloud", kind: "image", op: "edit", opLabel: "Edit", jobs: 1, outputs: 1, demo: false, providerId: "fal", costUsd: 0.15 });
+    if (route === "POST /api/generations") return send(201, { items: [generation("queued")] });
+    if (route === "GET /api/generations/gen1") {
+      polls++;
+      return send(200, polls < 2 ? generation("running") : generation("succeeded", { outputs: [{ url: "/api/files/outputs/2026-10-22/out1.png", kind: "image" }], completedAt: 5_000 }));
+    }
+    if (route === "GET /api/generations") return send(200, { items: [generation("succeeded")] });
+    if (route === "GET /api/files/outputs/2026-10-22/out1.png") {
+      res.writeHead(200, { "content-type": "image/png" });
+      return res.end(PNG);
+    }
+    if (route === "POST /api/mcp") {
+      const rpc = s.json as { id: number; params: { name: string; arguments: Record<string, unknown> } };
+      return send(200, { jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: JSON.stringify({ echo: rpc.params }) }], isError: false } });
+    }
+    if (route === "POST /api/assist/skills/upload") {
+      const entries = unzip(s.file!.data);
+      const md = entries.find((e) => e.name.endsWith("/SKILL.md"))!.data.toString();
+      const name = /name:\s*(\S+)/.exec(md)![1];
+      return send(201, { skill: { name, title: name }, skipped: [], replaced: false });
+    }
+    send(404, { error: "Not found" });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+
+afterAll(async () => {
+  await new Promise((r) => server.close(r));
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  seen = [];
+  polls = 0;
+  requireAuth = true;
+});
+
+function run(args: string[], env: Record<string, string | undefined> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLI, ...args], {
+      cwd: tmp,
+      // Undefined values are left out of the child's environment.
+      env: { PATH: process.env.PATH, HOME: tmp, FUOBE_CONFIG: path.join(tmp, "config.json"), FUOBE_URL: base, FUOBE_TOKEN: TOKEN, ...env } as unknown as NodeJS.ProcessEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+describe("fuobe CLI against a Fuobe server", () => {
+  it("uploads a local image, generates, waits and downloads the result", async () => {
+    fs.writeFileSync(path.join(tmp, "me.png"), PNG);
+    const r = await run(["generate", "a red fox", "--image", "me.png", "--aspect", "1:1", "--out", "renders", "--interval", "0.2"]);
+    expect(r.stderr).toContain("Using Nano Banana Pro (nano-banana-pro)");
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^Saved renders\/gen1\.png \(1 KB\)$/m);
+    expect(fs.readFileSync(path.join(tmp, "renders/gen1.png")).equals(PNG)).toBe(true);
+    // Every request carried the token.
+    expect(seen.every((s) => s.auth === `Bearer ${TOKEN}`)).toBe(true);
+    const upload = seen.find((s) => s.path === "/api/uploads")!;
+    expect(upload.file).toMatchObject({ name: "me.png", type: "image/png" });
+    expect(upload.file!.data.equals(PNG)).toBe(true);
+    // The default came from the edit studio (an image is attached); the request uses the uploaded URL.
+    expect(seen.find((s) => s.path.startsWith("/api/models"))!.path).toBe("/api/models?kind=image");
+    expect(seen.find((s) => s.path === "/api/generations" && s.method === "POST")!.json).toEqual({
+      feature: "cli",
+      modelId: "nano-banana-pro",
+      prompt: "a red fox",
+      inputs: { images: ["/api/files/uploads/2026-10-22/up1.png"] },
+      params: { aspectRatio: "1:1" },
+    });
+    expect(seen.filter((s) => s.path === "/api/generations/gen1").length).toBe(2);
+  });
+
+  it("prints JSON for scripts: generate without waiting, then wait", async () => {
+    const started = await run(["generate", "a red fox", "--model", "nano-banana-pro", "--json"]);
+    expect(started.code).toBe(0);
+    expect(JSON.parse(started.stdout).items[0]).toMatchObject({ id: "gen1", status: "queued" });
+    const waited = await run(["wait", "gen1", "--json", "--interval", "0.2"]);
+    expect(waited.code).toBe(0);
+    const out = JSON.parse(waited.stdout);
+    expect(out.items[0]).toMatchObject({ id: "gen1", status: "succeeded" });
+    expect(waited.stderr).toBe("");
+  });
+
+  it("prices a run without uploading anything, and refuses a model of the other engine", async () => {
+    fs.writeFileSync(path.join(tmp, "big.png"), PNG);
+    const r = await run(["estimate", "a red fox", "-m", "nano-banana-pro", "-i", "big.png"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe("Nano Banana Pro (cloud) · Edit · 1 image · about $0.15");
+    expect(seen.some((s) => s.path === "/api/uploads")).toBe(false);
+    expect((seen.find((s) => s.path === "/api/generations?preview=1")!.json as { inputs: { images: string[] } }).inputs.images[0]).toMatch(/^\/api\/files\/uploads\/estimate\/big\.png$/);
+    const wrong = await run(["generate", "a red fox", "-m", "nano-banana-pro", "--engine", "open"]);
+    expect(wrong.code).toBe(2);
+    expect(wrong.stderr).toMatch(/Nano Banana Pro is a cloud model, but you asked for --engine open/);
+    expect(seen.some((s) => s.path === "/api/generations")).toBe(false);
+  });
+
+  it("runs MCP tools with JSON or key=value arguments", async () => {
+    const r = await run(["tool", "search_models", "--arg", "kind=video", "--arg", "query=kling"]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({ echo: { name: "search_models", arguments: { kind: "video", query: "kling" } } });
+    const j = await run(["tool", "estimate_job", '{"tool":"katana","arguments":{"reference":"/api/files/a.mp4"}}', "--json"]);
+    expect(JSON.parse(j.stdout).echo.arguments).toEqual({ tool: "katana", arguments: { reference: "/api/files/a.mp4" } });
+  });
+
+  it("adds skills from a folder as zips the server unpacks", async () => {
+    const dir = path.join(tmp, "my-skills");
+    for (const n of ["launch-video", "promo-card"]) {
+      fs.mkdirSync(path.join(dir, "skills", n), { recursive: true });
+      fs.writeFileSync(path.join(dir, "skills", n, "SKILL.md"), `---\nname: ${n}\ndescription: Does ${n}.\n---\n\n# ${n}\n`);
+    }
+    const r = await run(["skills", "add", "my-skills"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("Added /launch-video");
+    expect(r.stdout).toContain("Added /promo-card");
+    const uploads = seen.filter((s) => s.path.startsWith("/api/assist/skills/upload"));
+    expect(uploads.map((u) => u.file!.name)).toEqual(["launch-video.zip", "promo-card.zip"]);
+    const only = await run(["skills", "add", "my-skills", "--skill", "promo-card", "--replace", "--json"]);
+    expect(JSON.parse(only.stdout).items).toEqual([{ ok: true, name: "promo-card", title: "promo-card", replaced: false, skipped: [] }]);
+    expect(seen.at(-1)!.path).toBe("/api/assist/skills/upload?replace=1");
+  });
+
+  it("logs in: checks the token and saves it readable by you only", async () => {
+    const r = await run(["login", "--url", base, "--token", TOKEN], { FUOBE_TOKEN: undefined, FUOBE_URL: undefined });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`Signed in to ${base} with an API token.`);
+    const file = path.join(tmp, "config.json");
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ url: base, token: TOKEN });
+    if (process.platform !== "win32") expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+    // Later commands use the saved address and token.
+    const list = await run(["list", "--json"], { FUOBE_TOKEN: undefined, FUOBE_URL: undefined });
+    expect(list.code).toBe(0);
+    expect(seen.at(-1)).toMatchObject({ path: "/api/generations?limit=20", auth: `Bearer ${TOKEN}` });
+    const bad = await run(["login", "--url", base, "--token", "fuobe_wrong"], { FUOBE_TOKEN: undefined, FUOBE_URL: undefined });
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toMatch(/refused the API token/);
+    fs.rmSync(file);
+  });
+
+  it("explains a missing token and a server that isn't running", async () => {
+    const noToken = await run(["list"], { FUOBE_TOKEN: undefined });
+    expect(noToken.code).toBe(1);
+    expect(noToken.stderr).toMatch(/has a password, so the CLI needs an API token\. Create one in Settings → Security → API tokens/);
+    const json = await run(["models", "--json"], { FUOBE_TOKEN: undefined });
+    expect(JSON.parse(json.stderr)).toMatchObject({ status: 401 });
+    // A port nothing listens on.
+    const probe = http.createServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((r) => probe.close(r));
+    const down = await run(["status"], { FUOBE_URL: `http://127.0.0.1:${port}` });
+    expect(down.code).toBe(1);
+    expect(down.stderr).toMatch(/Can't reach Fuobe at http:\/\/127\.0\.0\.1:\d+ \(connection refused\)\. Is the server running\?/);
+  });
+
+  it("names the options a refused request needs, and an unknown id in words", async () => {
+    fs.writeFileSync(path.join(tmp, "clip.mp4"), "not really a clip");
+    const refused = await run(["generate", "she smiles", "-m", "kling-3", "--video", "clip.mp4"]);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr.trim()).toBe("Add a start frame (use --image <file|url>)");
+    // The request was checked before the clip was uploaded.
+    expect(seen.some((s) => s.path === "/api/uploads")).toBe(false);
+    const unknown = await run(["status", "nope"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stderr).toMatch(/There's no generation nope on http:\/\/127\.0\.0\.1:\d+ \(it may be in the Trash\)\. fuobe list shows recent ones\./);
+    const cancel = await run(["cancel", "nope", "--json"]);
+    expect(JSON.parse(cancel.stderr)).toMatchObject({ status: 404 });
+    expect(seen.some((s) => s.path.endsWith("/cancel"))).toBe(false);
+  });
+
+  it("answers usage mistakes with exit code 2 and help with 0", async () => {
+    const typo = await run(["generat", "x"]);
+    expect(typo.code).toBe(2);
+    expect(typo.stderr).toMatch(/Did you mean fuobe generate\?/);
+    const help = await run(["generate", "--help"]);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toMatch(/^Usage: fuobe generate/m);
+    const mcp = await run(["mcp"], { FUOBE_TOKEN: undefined });
+    expect(mcp.stdout.trim()).toBe(`claude mcp add --transport http fuobe ${base}/api/mcp`);
+    expect(seen).toHaveLength(0);
+  });
+});

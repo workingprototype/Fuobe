@@ -2,6 +2,9 @@
   "name": "fuobe",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "fuobe": "bin/fuobe.mjs"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:clean": "rm -rf .next && next dev",
