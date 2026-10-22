@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { handoffKey, mergeHandoff } from "@/lib/composer";
+import { handoffKey, mergeHandoff, promptShown } from "@/lib/composer";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
@@ -178,6 +178,31 @@ function ActivePresetHeader() {
   );
 }
 
+/**
+ * Example prompts under the hero. Its own component: it follows the picked model (a model that
+ * takes no prompt, like FASHN try-on, gets none), so it re-renders with the draft, not the page.
+ */
+function PromptSuggestions({ suggestions }: { suggestions: string[] }) {
+  const { config, draft, setDraft } = useStudio();
+  const catalog = useCatalog();
+  const preset = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
+  const model = catalog.getModel(draft.modelId);
+  if (!promptShown(config.hidePrompt, preset?.userPrompt, model?.options.promptless)) return null;
+  return (
+    <div className="mx-auto mt-4 flex max-w-[760px] flex-wrap justify-center gap-2 px-3 pb-10">
+      {suggestions.map((s) => (
+        <button
+          key={s}
+          onClick={() => setDraft({ prompt: s })}
+          className="h-8 max-w-full truncate rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {s.length > 48 ? `${s.slice(0, 46)}…` : s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Sticky page header (title + engine), with an optional row of mode tabs under it. */
 function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
   const [engine, setEngine] = useEngine();
@@ -282,19 +307,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
         </div>
       </div>
 
-      {!hasItems && config.suggestions && (
-        <div className="mx-auto mt-4 flex max-w-[760px] flex-wrap justify-center gap-2 px-3 pb-10">
-          {config.suggestions.map((s) => (
-            <button
-              key={s}
-              onClick={() => setDraft({ prompt: s })}
-              className="h-8 max-w-full truncate rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {s.length > 48 ? `${s.slice(0, 46)}…` : s}
-            </button>
-          ))}
-        </div>
-      )}
+      {!hasItems && config.suggestions && <PromptSuggestions suggestions={config.suggestions} />}
       {!hasItems && config.signature && <SoulPresetCards />}
 
       {dragging && (

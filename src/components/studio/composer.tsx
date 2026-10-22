@@ -12,7 +12,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -245,6 +245,7 @@ export function Composer({ docked }: { docked: boolean }) {
     engineError,
     missing,
     uploading,
+    maskMissing: needsMask(model, config.sketch, draft.slots),
     planError,
     promptMissing,
   });
@@ -305,7 +306,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
   const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
+  const showPrompt = promptShown(config.hidePrompt, preset?.userPrompt, model?.options.promptless);
   const effectiveOp = studioOp ?? op;
   const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));

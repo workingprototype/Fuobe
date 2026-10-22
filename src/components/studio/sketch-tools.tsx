@@ -62,6 +62,8 @@ export function SketchTools({ modes, image, autoOpen }: { modes: SketchMode[]; i
             <TooltipTrigger asChild>
               <button
                 onClick={() => setEditing(m)}
+                // Generate points here when the painted area is what it's waiting for.
+                data-slot-key={m === "mask" ? "mask" : "sketch"}
                 className="flex size-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl border border-dashed border-primary/50 bg-brand-faint text-brand-text transition-colors hover:border-primary"
               >
                 {m === "mask" ? <Brush className="size-4" /> : <PenLine className="size-4" />}

@@ -3,7 +3,7 @@
  * blocker messages, attachment placement and model-picker grouping. No catalog import here, so
  * nothing in this file pulls the model list into the browser bundle.
  */
-import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation } from "./catalog/types";
+import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, Preset } from "./catalog/types";
 
 // ---------------------------------------------------------------------------
 // Settings summary ("16:9 · 720p · 5s · ×1")
@@ -157,14 +157,30 @@ export function missingMessage(m: MissingSlot): string {
 
 export interface Blocker {
   message: string;
-  /** The attachment to point at (pulse) when Generate is pressed. */
+  /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile). */
   slot?: InputSlot["key"];
 }
 
 /**
+ * Whether Generate is waiting for a painted area: the studio offers the mask brush, its image is
+ * in (or uploading), nothing is painted yet, and the model only changes a picture through a mask
+ * (FLUX Fill: an inpaint route and no instruction edit to fall back on). The planner's own message
+ * names both inputs ("Add an image and paint the area to change"), which reads wrong with the image
+ * right there, and comes after its prompt check, though Inpaint asks for the painting first.
+ */
+export function needsMask(model: Pick<ModelDef, "routes"> | undefined, sketch: ("mask" | "draw")[] | undefined, slots: SlotValues): boolean {
+  if (!model || !sketch?.includes("mask")) return false;
+  const image = slots.image;
+  if (!image?.ref && !image?.uploading) return false;
+  if (slots.mask?.ref) return false;
+  const ops = new Set(model.routes.map((r) => r.op));
+  return ops.has("inpaint") && !ops.has("edit");
+}
+
+/**
  * What stops Generate, most actionable first: missing model, missing attachment (named with the
- * studio's own slot label, not the planner's generic message), uploads in flight, then whatever
- * the planner says (prompt, voice, language…).
+ * studio's own slot label, not the planner's generic message), uploads in flight, the area to
+ * paint (needsMask), then whatever the planner says (prompt, voice, language…).
  */
 export function blockerFor(s: {
   loading?: string | null;
@@ -172,6 +188,7 @@ export function blockerFor(s: {
   engineError?: string | null;
   missing?: MissingSlot;
   uploading: boolean;
+  maskMissing?: boolean;
   planError?: string | null;
   promptMissing: boolean;
 }): Blocker | null {
@@ -180,9 +197,18 @@ export function blockerFor(s: {
   if (s.engineError) return { message: s.engineError };
   if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
   if (s.uploading) return { message: "Uploading…" };
+  if (s.maskMissing) return { message: "Paint the area to change", slot: "mask" };
   if (s.planError) return { message: s.planError };
   if (s.promptMissing) return { message: "Write a prompt first" };
   return null;
+}
+
+/**
+ * Whether the composer shows a prompt box (and the studio its prompt suggestions): not when the
+ * studio or app has none, nor for a model that takes no prompt (try-on, upscalers, 3D, transcription).
+ */
+export function promptShown(hidePrompt: boolean | undefined, userPrompt: Preset["userPrompt"] | undefined, promptless: boolean | undefined): boolean {
+  return !hidePrompt && userPrompt !== "none" && !promptless;
 }
 
 /** Placeholder refs for empty required slots, so cost and plan can be computed before anything is attached. */
