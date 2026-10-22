@@ -1,0 +1,103 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { MODELS } from "@/lib/catalog";
+import { findModels, toModelInfo } from "@/lib/model-list";
+
+/** The REST routes the fuobe CLI added: GET /api/models and POST /api/generations?preview=1. */
+
+// Route handlers are called directly, outside a Next request: connection() has nothing to wait for.
+vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-cli-api-"));
+process.env.FUOBE_DATA_DIR = dir;
+process.env.COMFYUI_URL = "http://127.0.0.1:9";
+process.env.OLLAMA_URL = "http://127.0.0.1:9";
+const { GET: listModels } = await import("@/app/api/models/route");
+const { POST: postGeneration } = await import("@/app/api/generations/route");
+const { listGenerations } = await import("@/server/generations");
+const { setSetting } = await import("@/server/settings");
+afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+type ModelsBody = { engineMode: string; defaults: Record<string, { cloud?: string; open?: string }>; items: (ReturnType<typeof toModelInfo> & { connected: boolean })[]; error?: string };
+const models = async (query = "") => {
+  const res = await listModels(new Request(`http://localhost/api/models${query}`));
+  return { status: res.status, body: (await res.json()) as ModelsBody };
+};
+
+describe("GET /api/models", () => {
+  it("filters by kind, engine, operation and search words, and leaves hidden helpers out", async () => {
+    const { body } = await models("?kind=video&engine=open");
+    expect(body.items.length).toBeGreaterThan(3);
+    expect(body.items.every((m) => m.kind === "video" && m.engine === "open")).toBe(true);
+    const kling = (await models("?q=kling%20motion")).body.items.map((m) => m.id);
+    expect(kling).toContain("kling-motion-control");
+    expect(kling.every((id) => id.includes("kling"))).toBe(true);
+    const tts = (await models("?op=tts")).body.items;
+    expect(tts.length).toBeGreaterThan(2);
+    expect(tts.every((m) => m.opIds.includes("tts"))).toBe(true);
+    const all = (await models()).body.items;
+    expect(all.some((m) => m.hidden)).toBe(false);
+    expect((await models("?hidden=1")).body.items.some((m) => m.hidden)).toBe(true);
+  });
+
+  it("gives what a request needs: operation ids, sizes, lengths, voices, and whether it would run as a demo", async () => {
+    const { body } = await models("?q=kling-3");
+    const k = body.items.find((m) => m.id === "kling-3")!;
+    expect(k).toMatchObject({ name: "Kling 3.0", engine: "cloud", kind: "video", connected: false });
+    expect(k.opIds).toEqual(expect.arrayContaining(["t2v", "i2v"]));
+    expect(k.durations?.length).toBeGreaterThan(0);
+    expect(k.aspectRatios).toContain("16:9");
+    const voice = (await models("?q=elevenlabs-v4")).body.items.find((m) => m.id === "elevenlabs-v4")!;
+    expect(voice.voices?.length).toBeGreaterThan(5);
+    // No field maps or endpoints beyond the route list.
+    expect(Object.keys(k)).not.toContain("options");
+  });
+
+  it("names the studios' default models, and follows the engine mode", async () => {
+    expect((await models()).body.defaults).toMatchObject({ image: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" }, video: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" } });
+    setSetting("engineMode", "open");
+    try {
+      const { body } = await models("?kind=image");
+      expect(body.engineMode).toBe("open");
+      expect(body.items.every((m) => m.engine === "open")).toBe(true);
+      expect(body.defaults.image).toEqual({ open: "oss-z-image-turbo" });
+    } finally {
+      setSetting("engineMode", "both");
+    }
+  });
+
+  it("refuses unknown filters with a sentence", async () => {
+    expect(await models("?kind=smell")).toMatchObject({ status: 400, body: { error: "kind is one of image, video, audio, text, model3d" } });
+    expect((await models("?engine=gpu")).status).toBe(400);
+    expect((await models("?op=dance")).body.error).toBe("Unknown operation dance");
+  });
+
+  it("matches every word, in the catalog's order (pure helper)", () => {
+    expect(findModels(MODELS, { q: "wan zzqx" })).toEqual([]);
+    const open = findModels(MODELS, { q: "wan 2.2", engine: "open", kind: "video" });
+    expect(open.length).toBeGreaterThan(0);
+    expect(open.every((m) => m.engine === "open" && /wan/i.test(`${m.name} ${m.id}`))).toBe(true);
+  });
+});
+
+describe("POST /api/generations?preview=1", () => {
+  const post = (body: unknown, query = "") => postGeneration(new Request(`http://localhost/api/generations${query}`, { method: "POST", body: JSON.stringify(body) }));
+
+  it("prices a request without creating anything", async () => {
+    const before = listGenerations({ limit: 200 }).length;
+    const res = await post({ feature: "cli", modelId: "nano-banana-pro", prompt: "a fox", params: { numOutputs: 2 } }, "?preview=1");
+    expect(res.status).toBe(200);
+    const p = await res.json();
+    expect(p).toMatchObject({ modelId: "nano-banana-pro", modelName: "Nano Banana Pro", engine: "cloud", kind: "image", op: "t2i", opLabel: "Text to image", outputs: 2, demo: true, providerId: "mock" });
+    expect(p).not.toHaveProperty("model");
+    expect(listGenerations({ limit: 200 }).length).toBe(before);
+  });
+
+  it("answers a request it can't run with the planner's reason", async () => {
+    const res = await post({ feature: "cli", modelId: "kling-3", prompt: "x", op: "i2v" }, "?preview=1");
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("Add a start frame");
+  });
+});
