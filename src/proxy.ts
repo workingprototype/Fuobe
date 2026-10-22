@@ -13,17 +13,15 @@ const APP_IDS = new Set(APPS.map((a) => a.id));
  * Let the request through — except a page for something that doesn't exist (an unknown app or hub
  * mode, a project / canvas / channel… id that isn't stored), which gets a real 404. The page can't
  * send one itself: the studio's loading.tsx streams the shell (with a 200) before the page knows
- * the id is unknown. Records are checked on document loads only: a client-side navigation (an RSC
- * request) gets the page's own notFound() in place, without a reload.
+ * the id is unknown. (The proxy can't tell a client-side navigation from a page load, so a link to
+ * a deleted id reloads into the same 404 page.)
  */
 function pass(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const app = /^\/apps\/([^/]+)\/?$/.exec(pathname)?.[1];
   if ((app && !APP_IDS.has(safeDecode(app))) || unknownHubMode(pathname)) return notFound(request);
-  if (!request.headers.has("rsc")) {
-    const record = recordForPath(pathname);
-    if (record && !recordExists(record)) return notFound(request);
-  }
+  const record = recordForPath(pathname);
+  if (record && !recordExists(record)) return notFound(request);
   return NextResponse.next();
 }
 
