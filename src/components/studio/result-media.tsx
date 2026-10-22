@@ -14,6 +14,7 @@ export function MediaThumb({
   autoPlay,
   fit,
   tag,
+  inset,
 }: {
   output: OutputFile;
   /** The generation it belongs to (3D models show a sibling turntable or poster). */
@@ -24,6 +25,8 @@ export function MediaThumb({
   fit?: boolean;
   /** A small badge ("Demo") a text card shows in its own header row, where it can't cover the label. */
   tag?: string;
+  /** Room at the end of a text card's header for a control in the tile's top-right corner (the feed's ⋯ or heart). */
+  inset?: boolean;
 }) {
   const object = fit ? "object-contain" : "object-cover";
   if (output.kind === "video") {
@@ -51,7 +54,7 @@ export function MediaThumb({
       </div>
     );
   }
-  if (output.kind === "text") return <TextPreview output={output} className={className} tag={tag} />;
+  if (output.kind === "text") return <TextPreview output={output} className={className} tag={tag} inset={inset} />;
   if (output.kind === "model3d") {
     const { poster, video } = modelPreview(g ?? { outputs: [output] }, output);
     if (video) return <MediaThumb output={{ url: video, kind: "video" }} autoPlay={autoPlay} fit={fit} className={className} />;
@@ -88,13 +91,13 @@ export function SmallThumb({ g, output }: { g: Generation; output: OutputFile })
 }
 
 /** A transcript, translation or script as a readable card: the first lines and a cue count. */
-export function TextPreview({ output, className, tag }: { output: OutputFile; className?: string; tag?: string }) {
+export function TextPreview({ output, className, tag, inset }: { output: OutputFile; className?: string; tag?: string; inset?: boolean }) {
   const cues = cuesOf(output);
   const text = textOf(output).trim();
   return (
     // A size container: on a narrow tile (a phone's three-column grid) the header drops its icon to keep the label readable.
     <div className={cn("@container flex size-full flex-col gap-2 bg-card p-4 text-left", className)}>
-      <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <span className={cn("flex min-w-0 items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase", inset && "pr-7")}>
         <FileText className="size-3.5 shrink-0 @max-[8rem]:hidden" />
         <span className="min-w-0 flex-1 truncate">{cues.length ? `Transcript · ${cues.length} lines` : "Text"}</span>
         {tag && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tracking-normal text-foreground normal-case">{tag}</span>}

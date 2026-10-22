@@ -156,7 +156,7 @@ const OutputTile = memo(function OutputTile({ g, index, ratio, layered, count }:
       className="group/tile relative h-56 max-w-full animate-fade-up cursor-zoom-in overflow-hidden rounded-xl bg-muted sm:h-64"
       style={{ aspectRatio: audio ? 1.6 : layered ? Math.max(ratio, 0.8) : ratio }}
     >
-      {layered ? <LayersStack g={g} /> : <MediaThumb output={o} g={g} />}
+      {layered ? <LayersStack g={g} /> : <MediaThumb output={o} g={g} inset={!canHover || g.favorite} />}
       <button
         type="button"
         aria-label={`Open “${userTitle(g)}”${count > 1 ? ` · ${index + 1} of ${count}` : ""}`}
