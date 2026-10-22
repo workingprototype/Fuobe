@@ -52,4 +52,4 @@ export function toModelRow(m: ModelDef): ModelRow {
 }
 
 /** Lower-cased text the Models search matches against. */
-export const modelSearchText = (r: ModelRow) => `${r.name} ${r.vendor} ${r.tagline} ${r.ops.join(" ")} ${r.id}`.toLowerCase();
+export const modelSearchText = (r: ModelRow) => `${r.name} ${r.vendor} ${r.tagline} ${r.ops.join(" ")} ${r.id} ${r.note ?? ""}`.toLowerCase();
