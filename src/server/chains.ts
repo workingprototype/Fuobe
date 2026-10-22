@@ -292,7 +292,8 @@ function topoOrder(steps: PipelineStep[]): PipelineStep[] {
  * ]);
  * // byKey.film is the finished video; every step shares batchId and shows "Step n of 6".
  * // Paid route: demucs ("vocals" counts as "voice"), scribe-v2, text-llm, chatterbox-cloud, sync-lipsync-3;
- * // its soundtrack model (merge-audio-video) takes one track, so it ends at "lips" or muxes the voice alone.
+ * // merge-audio-video takes one track, so the voice and the other stems are mixed first by compose-timeline
+ * // (overlapping clips go on tracks of their own) and that mix is the soundtrack (src/lib/av/dub.ts).
  * ```
  */
 export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}): Pipeline {

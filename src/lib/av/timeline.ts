@@ -51,13 +51,26 @@ const ms = (s: number) => Math.round(s * 1000);
 
 /**
  * fal ffmpeg compose `tracks` for a timeline: exactly one visual track (a still image, else a video) for
- * the whole length, then the clips as keyframes of one audio track.
+ * the whole length, then the clips as keyframes of audio tracks. Clips that follow each other share a
+ * track (a dub's lines are one "voice" track); a clip that starts before an earlier one has ended goes on
+ * the next track that is free by then, so compose mixes them (a voice over background stems). ComfyUI's
+ * timeline adds every clip onto one track, which mixes overlaps the same way.
  */
 export function timelineTracks(spec: TimelineSpec, visual: { url: string; type: "image" | "video" }, audios: string[]): Record<string, unknown>[] {
   if (audios.length !== spec.clips.length) throw new Error(`The timeline places ${spec.clips.length} clip${spec.clips.length === 1 ? "" : "s"} but got ${audios.length}`);
+  const lanes: { end: number; keyframes: { url: string; timestamp: number; duration: number }[] }[] = [];
+  spec.clips.forEach((c, i) => {
+    const key = { url: audios[i], timestamp: ms(c.start), duration: ms(c.duration) };
+    // A millisecond of rounding between one line's end and the next one's start is no overlap.
+    const lane = lanes.find((l) => l.end <= key.timestamp + 1);
+    if (lane) {
+      lane.keyframes.push(key);
+      lane.end = key.timestamp + key.duration;
+    } else lanes.push({ end: key.timestamp + key.duration, keyframes: [key] });
+  });
   return [
     { id: "picture", type: visual.type, keyframes: [{ url: visual.url, timestamp: 0, duration: ms(spec.length) }] },
-    { id: "voice", type: "audio", keyframes: spec.clips.map((c, i) => ({ url: audios[i], timestamp: ms(c.start), duration: ms(c.duration) })) },
+    ...lanes.map((l, n) => ({ id: n ? `audio-${n + 1}` : "voice", type: "audio", keyframes: l.keyframes })),
   ];
 }
 

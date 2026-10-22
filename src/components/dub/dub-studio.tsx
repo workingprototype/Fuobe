@@ -17,7 +17,7 @@ import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useEngine } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
-import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
+import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
 import type { Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
 
 const ROUTE_LINE = {
   open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → your local LLM translates → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
-  cloud: "Cloud: ElevenLabs isolates the voice → Scribe v2 times it → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3. The cloud route keeps the voice only (no music stem on this route).",
+  cloud: "Cloud: ElevenLabs isolates the voice and Demucs lifts out the music and effects → Scribe v2 times the voice → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3 → mixed back over the music and effects.",
 };
 
 const STAGE: Record<DubStage, { label: string; tone: string }> = {
@@ -270,7 +270,7 @@ function RecentDubs({ sessions, loading, onOpen }: { sessions?: DubSessionView[]
   );
 }
 
-const PREPARE_LABEL: Record<string, string> = { stems: "Voice, background and transcript", voice: "Clean voice", words: "Transcript" };
+const PREPARE_LABEL: Record<string, string> = { stems: "Voice, background and transcript", voice: "Clean voice", words: "Transcript", sound: "Original sound", background: "Music and effects" };
 
 function prepareRows(s: DubSessionView, lang: string): StepRow[] {
   // Older open dubs transcribed in a step of their own.
@@ -289,7 +289,9 @@ function voiceRows(s: DubSessionView, lang: string): StepRow[] {
     soundtrack: "Voice track",
     clone: "Their voice",
     lips: "Lips re-synced",
-    film: run.lipsync && !open ? "Lips re-synced" : "Dubbed video",
+    mix: "Over the music and effects",
+    // Older cloud dubs (and cloud dubs with no background) re-synced the lips as their last step.
+    film: run.lipsync && !run.ids.lips ? "Lips re-synced" : "Dubbed video",
   };
   const entries = Object.entries(run.ids);
   const lines = entries.filter(([k]) => k.startsWith("line:")).map(([, id]) => s.generations[id]);
@@ -423,7 +425,7 @@ function ResultCard({ s, lang }: { s: DubSessionView; lang: string }) {
     >
       <video src={out.url} controls playsInline preload="metadata" className="max-h-[42vh] w-full rounded-xl bg-media object-contain" />
       {g.provider === "mock" && <p className="mt-2 text-[12px] text-muted-foreground">Demo result — connect a provider (or start ComfyUI) to dub for real.</p>}
-      {s.engine === "cloud" && s.mode === "steps" && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: the cloud route has no music stem to mix back in (the open route and the one-shot models keep it).</p>}
+      {voiceOnly(s) && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: this dub&apos;s music and effects weren&apos;t separated, so the new voice plays alone.</p>}
     </Panel>
   );
 }
@@ -523,6 +525,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
             </Button>
           </div>
         </div>
+        {voiceOnly(s) && <p className="mt-3 text-[12px] text-muted-foreground">The music and effects weren&apos;t separated for this dub, so the new voice will play alone.</p>}
         {runs.length > 0 && <StepList steps={voiceRows(s, lang)} className="mt-4" />}
       </Panel>
     </>
