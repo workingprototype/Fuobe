@@ -284,7 +284,7 @@ StartLoop(simple, N, initial = head) → AudioConcat(current, repeat) → EndLoo
   * **Real run** on a ComfyUI-encoded 2 s clip + a 2 s card: 4.000 s and 100 frames. The ad's 50 frames decode **bit-identical** to the source (stream copy). silencedetect finds silence from exactly 2.00 s.
   * **Limit found: it fails for clips from other encoders.** An ffmpeg/libx264 clip, both untagged and bt709-tagged, failed in core v0.41 with "Video chunk 1 could not be encoded compatibly: extradata … color space". `ConcatenateVideo` cannot normalise foreign H.264 parameter sets.
   * So: use this graph for clips Fuobe's open engine made (all are ComfyUI-encoded, sRGB-tagged H.264). For cloud clips and uploads, fall back to `still-to-clip` + the existing `video-concat-sound1-2`, which decodes everything and keeps clip 1's sound.
-  * Silent ads: drop node 2.
+  * Silent ads: drop node 2. _Correction (comfy-graphs-4): drop nodes 2, 12 and 13 and node 14's `complete_audio`; that output has no sound track. Dropping only node 2 leaves node 13 unlinked, and linking node 12 alone gives a sound track only as long as the card (checked on CPU)._
 
 ---
 
@@ -321,7 +321,7 @@ No round-4 file had an open graph for **Cinema Studio's "Create 3D scene"** (STA
 | Workflow id (new) | What it does | Nodes | Weights (licence) | `/prompt` | Ran on CPU |
 |---|---|---|---|---|---|
 | `scene-mesh-moge` | photo → textured GLB of the **whole scene** + depth PNG | core `LoadMoGeModel`, `MoGeInference`, `MoGePointMapToMesh`, `SaveGLB`, `MoGeRender` | MoGe 2 ViT-L 0.66 GB (MIT); MoGe 3 ViT-L 0.74 GB / ViT-G 2.50 GB optional | yes | **yes** |
-| `image-to-splat-triposplat` | photo → Gaussian splat of the **subject** (`.spz`) + 3 s orbit MP4 | core `TripoSplatPreprocessImage`, `TripoSplatConditioning`, `KSampler`, `VAEDecodeTripoSplat`, `SplatToFile3D`, `RenderSplat`, `CreateCameraInfo`, BiRefNet `RemoveBackground` | 3.97 GB: TripoSplat (MIT), DINOv3 ViT-H (DINOv3 License: royalty-free, commercial use allowed, "Built with DINOv3" notice), FLUX.2 VAE (Apache-2.0), BiRefNet (MIT) | yes | no |
+| `image-to-splat-triposplat` | photo → Gaussian splat of the **subject** (`.spz`) + 3 s orbit MP4 | core `TripoSplatPreprocessImage`, `TripoSplatConditioning`, `KSampler`, `VAEDecodeTripoSplat`, `SplatToFile3D`, `RenderSplat`, `CreateCameraInfo`, BiRefNet `RemoveBackground` | 3.78 GB: TripoSplat (MIT), DINOv3 ViT-H (DINOv3 License: royalty-free, commercial use allowed, "Built with DINOv3" notice), FLUX.2 VAE (Apache-2.0), BiRefNet (MIT) | yes | no |
 | `reference-brief-gemma4` | reference clip (frames at 1 fps + its sound) → JSON style brief | `VHS_LoadVideo` (24 fps, ≤ 720 frames, 384 px wide) → core `TextGenerate` with `video` and `audio` → `SaveText` | Gemma 4 E4B fp8 9.06 GB, already in the library (Apache-2.0) | yes | no |
 
 **`scene-mesh-moge`** comes from the official template `3d_moge_perspective_to_mesh` (2026-05-15), exported with `scripts/comfy/export-templates.mjs`; the normal-map previews were dropped and a depth PNG added.
@@ -392,7 +392,7 @@ This is not built or timed. RIFE runs once per in-between frame, so m 15 costs a
   * the `-audio.mov` of VHS ProRes
 * **Licence follow-up.** Mark `wan21-vace-14b-ref2v` as non-commercial (CausVid LoRA), or switch it to the lightx2v T2V LoRA as done here.
 * **For the §i additions (critic):**
-  * New `KNOWN_MODELS`: `moge_2_vitl_normal_fp16`, `moge_3_vitl_fp16` and `moge_3_vitg_fp16` (folder `geometry_estimation`); `triposplat_fp16` (`diffusion_models`); `triposplat_vae_decoder_fp16` and `flux2-vae` (`vae`); `dino_v3_vit_h` (`clip_vision`); `birefnet` (`background_removal`).
+  * New `KNOWN_MODELS`: `moge_2_vitl_normal_fp16`, `moge_3_vitl_fp16` and `moge_3_vitg_fp16` (folder `geometry_estimation`); `triposplat_fp16` (`diffusion_models`); `triposplat_vae_decoder_fp16` (`vae`); `dino_v3_vit_h` (`clip_vision`). _Correction (comfy-graphs-4): `flux2-vae` and `birefnet` were already library entries; VAST-AI/TripoSplat's `flux2-vae.safetensors` is byte-identical to Comfy-Org/flux2-dev's (same sha256 etag)._
   * New binding keys: `resolutionLevel`, `fovX`, `decimation`, `cutout`, `numGaussians`, `splatFormat`, `orbitFrames`, `frameCap`, `skipFrames`.
   * New output roles: `scene` (GLB), `splat` (.spz), `turntable`, `brief`.
   * Attribution: TripoSplat's DINOv3 encoder needs a "Built with DINOv3" notice in the app's about or licences page.

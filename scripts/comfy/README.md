@@ -130,6 +130,66 @@ node validate-workflows.mjs video-trim     # then once on the main server, so ob
 `validate-workflows.mjs` keeps the subset definitions of classes the current server lacks, so validating on either
 server never drops the other's classes.
 
+## Round-4 workflows (comfyui-oss-4, 2026-10-22)
+
+17 hand-built entries from `docs/research/comfyui-oss-4.json` (the 14 researched graphs and the critic's 3), in the
+"comfyui-oss-4" section of `library.spec.mjs`, all `validated: true` (132/132 in the manifest). No new node pack and no
+worker: core nodes plus KJNodes' `GrowMaskWithBlur` and VHS's audio loader / `VHS_VideoCombine` / `VHS_LoadVideo`.
+`capability` is the round-4 operation each one serves.
+
+```bash
+npm run build -- <the 17 ids>          # hand-built: no export needed
+node export-templates.mjs video_wan_vace_14B_ref2v && npm run build -- wan21-vace-14b-ref2v
+node validate-workflows.mjs <ids> wan21-vace-14b-ref2v --shared
+```
+
+| id | capability | what | ran for real here |
+|---|---|---|---|
+| `ocr-lines-qwen35` | ocr | text lines + boxes (OvisOCR3 0.8B, core `TextGenerate`) | research only (161-194 s per poster on CPU) |
+| `video-inpaint-wan-vace` | remove-object | SAM 3.1 tracks `maskPrompt`, Wan 2.1 VACE 14B + lightx2v fills, pasted into the original frames | window + sound sub-path only |
+| `video-inpaint-wan-vace-painted` | remove-object | same, the object painted on the first frame (`mask`) | no (GPU) |
+| `video-erase-void` | remove-object | Netflix VOID, removes the object's shadows / reflections too (CogVideoX licence) | no (GPU) |
+| `video-swap-wan-vace` | video-swap | tracked object replaced by a reference `image` | no (GPU) |
+| `video-insert-wan-vace` | video-insert | reference `image` placed in a painted region (`mask`) | no (GPU) |
+| `kenburns-still` | still-motion | pan + zoom over a still, core loops, chunk-encoded | yes: 2 s 320x180 25 fps in 7.6-11.2 s |
+| `audio-loop-crossfade` | audio-loop | loop a bed to `duration` with equal-power seams | yes: 3 s → 10 s FLAC in 1.1-2.5 s, seams click-free |
+| `audio-join-crossfade` | audio-join | two clips, `crossfade` seconds of overlap | yes: 3 s + 2 s → 4.5 s in 0.2-2.1 s |
+| `video-export-pro` | export-video | ProRes HQ / 4444, H.265 10-bit, FFV1, H.264 (VHS) | yes: all five formats, ffprobe-checked |
+| `video-sdr-to-hdr` | sdr-to-hdr | core `ImageSDRToHDR` → BT.2020 HLG 10-bit H.264 | yes: High 10, arib-std-b67 |
+| `video-export-exr` | export-video | half-float scene-linear EXR per frame | yes: 16 frames → 16 `.exr` |
+| `still-to-clip` | still-motion | a still held N s with a silent track | yes: 50 frames + AAC silence |
+| `video-append-endcard` | concat | ad + end card, ad picture stream-copied, ad sound kept | yes: bit-identical ad frames, silence from 2.00 s; foreign H.264 fails (known limit) |
+| `scene-mesh-moge` | scene-3d | whole-scene textured GLB + depth PNG (MoGe 2) | research only (42 s on CPU) |
+| `image-to-splat-triposplat` | splat | subject Gaussian splat (`.spz`) + orbit MP4 (TripoSplat) | no |
+| `reference-brief-gemma4` | write | reference clip's frames + sound → JSON style brief (Gemma 4 E4B) | no |
+
+- **Changes from the research graphs** (each also in the entry's notes): the painted / insert masks are read from the
+  **red channel** (white = erase / the region, Fuobe's mask convention since `flux1-fill-inpaint`), not alpha; Ken Burns
+  gained `easeInOut` (1 = the research's ease in-out, 0 = linear) for `params.easing`; both audio graphs name the
+  crossfade curve upload `fadeCurve` (the research used `audio2` / `audio3`, which the provider fills with user audio);
+  the brief binds `frames` / `startFrame` (canonical keys) and `frameWidth` (a canonical `width` would be resized by the
+  provider) plus `seed`; TripoSplat's `seed` drives both the sampler and the decoder; outputs use kind `model3d`.
+- **What the provider has to do** (feature packages): write the crossfade curve (a stereo WAV exactly `crossfade` seconds
+  long, left = sin(π/2·t), right = cos(π/2·t), 8 kHz) and upload it as `fadeCurve`; parse the OCR JSON (strip fences,
+  `bbox`/`text` or `bbox_2d`/`text_content`, boxes relative 0–1000); run VACE / VOID windows of ≤ 81 / ≤ 197 source frames
+  (`startFrame`, `frames` counted at the clip's own fps) and join them; map Ken Burns and export params; for a silent ad
+  drop nodes 2, 12 and 13 of the end card and node 14's `complete_audio` (`LoadAudio` stops on a clip with no sound),
+  and fall back to `still-to-clip` + `video-concat-sound1-2` for clips other encoders made.
+- **Build**: `OpticalFlowLoader` (folder `optical_flow`) and `LoadMoGeModel` (`geometry_estimation`) are known loaders;
+  `KNOWN_MODELS` has the OvisOCR3, VACE, VOID, MoGe and TripoSplat files and the alternative checkpoints (Qwen3.5 0.8B / 2B,
+  VACE 1.3B, MoGe 3). OvisOCR3 (`model.safetensors`) and Qwen3.5 0.8B (`model.safetensors-00001-of-00001.safetensors`) are
+  single files upstream: save them under the manifest names. VOID's `t5xxl_fp16` and TripoSplat's `flux2-vae` are
+  byte-identical to the library's FLUX files (same sha256). New output roles: `lines`, `frame`, `frames`, `scene`, `depth`, `splat`, `brief` (typed in `src/lib/comfy.ts`).
+- **Licence fix (R4-15)**: `wan21-vace-14b-ref2v` shipped the template's CausVid LoRA, which is CC-BY-NC-4.0. Its spec
+  entry now swaps it (transforms on nodes 115 / 108 / 110) for the Apache-2.0 `lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64`
+  at 1.0 with the round-4 VACE settings (4 steps, cfg 1, euler, shift 5; clip strength 0) and binds `loraStrength`
+  (0 + steps 20 + cfg 6 = full quality). Re-validated; the pairing is inferred, not GPU-tested.
+- **Real runs** used the fixtures plus tiny generated tones / noise, on the shared CPU server (own prompt ids only; the
+  test inputs and outputs were deleted afterwards), in two sessions; every output was checked with ffprobe (and
+  framemd5, silencedetect or numpy where it matters). Timings are in each entry's notes. The VACE graphs' window-and-sound
+  part (`ImageFromBatch` + `TrimAudioDuration` at the clip's fps → `CreateVideo`, nodes taken from the built graph) ran on
+  a clip with sound (the window's 0.84 s kept) and a silent one (no sound track, no error).
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`
