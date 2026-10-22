@@ -60,7 +60,8 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
     void headerLength(video.preview).then((d) => setUnreadable({ clip: at, length: d }));
   };
   const trim = () => {
-    if (!video || video.uploading) return void toast("Add the video first");
+    if (!video) return void toast("Add the video first");
+    if (video.uploading) return void toast("Still uploading — one moment");
     if (!range) return void toast("Pick the part to keep");
     if (range.endTime - range.startTime < MIN_LENGTH) return void toast(`Keep at least ${MIN_LENGTH} s`);
     create.mutate(
