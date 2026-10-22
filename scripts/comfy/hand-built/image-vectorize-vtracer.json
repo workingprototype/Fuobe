@@ -1,0 +1,58 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "Image"
+    }
+  },
+  "2": {
+    "class_type": "TS_ImageToSVGStringColor_Vtracer",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "hierarchical": "stacked",
+      "mode": "spline",
+      "filter_speckle": 4,
+      "color_precision": 6,
+      "layer_difference": 16,
+      "corner_threshold": 60,
+      "length_threshold": 4.0,
+      "max_iterations": 10,
+      "splice_threshold": 45,
+      "path_precision": 3
+    },
+    "_meta": {
+      "title": "VTracer: colour image to SVG (stacked shapes, spline curves)"
+    }
+  },
+  "3": {
+    "class_type": "TS_SVGStringToSVGBytesIO",
+    "inputs": {
+      "SVG_String": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SVG text to an SVG"
+    }
+  },
+  "4": {
+    "class_type": "SaveSVGNode",
+    "inputs": {
+      "svg": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/image-vectorize-vtracer"
+    },
+    "_meta": {
+      "title": "Save SVG"
+    }
+  }
+}

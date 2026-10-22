@@ -80,6 +80,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'octreeResolution', 'columns', 'rows',
   // av-tools (Wave B)
   'frameIndex',
+  // round 4 (engine seams)
+  'filterSpeckle', 'colorPrecision',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -98,6 +100,8 @@ export const BINDING_KEYS = new Set([
   'gridPrompt', 'sheetPrompt',
   // av-tools (Wave B, see library.spec.mjs header)
   'frameIndex',
+  // round 4 (engine seams, see library.spec.mjs header)
+  'curveMode', 'filterSpeckle', 'colorPrecision',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

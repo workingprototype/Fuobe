@@ -155,6 +155,12 @@
     "error": null,
     "at": "2026-10-17T21:02:04.654Z"
   },
+  "image-vectorize-vtracer": {
+    "sha256": "3e85b34e1383cde00a7c6024f8cead7f6585ab712cf655be3c78ecd22339a333",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-22T18:38:56.968Z"
+  },
   "infinitetalk-native": {
     "sha256": "816327852679ebc006a3842668c35a0c9127f724690abc4d58d7e820d2cf0de5",
     "validated": true,

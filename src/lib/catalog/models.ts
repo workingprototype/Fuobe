@@ -204,6 +204,25 @@ const open: ModelDef[] = [
     options: {},
   }),
   o({
+    // The Vectorize app's open route (Recraft Vectorize on the cloud): tracing, no model weights.
+    id: "oss-vtracer",
+    name: "VTracer",
+    vendor: "visioncortex",
+    family: "vtracer",
+    kind: "image",
+    tagline: "Traces logos, icons and flat art into a clean, editable SVG · CPU, no model · MIT",
+    routes: [comfy("vectorize", "image-vectorize-vtracer", "colour tracing, stacked shapes")],
+    options: {
+      promptless: true,
+      maxImages: 1,
+      controls: [{ param: "curveMode", label: "Curves", values: ["spline", "polygon"], default: "spline" }],
+      sliders: [
+        { param: "colorPrecision", label: "Colour detail", min: 1, max: 8, step: 1, default: 6 },
+        { param: "filterSpeckle", label: "Ignore specks (px)", min: 0, max: 32, step: 1, default: 4 },
+      ],
+    },
+  }),
+  o({
     id: "oss-seedvr2-image",
     name: "SeedVR2 (image)",
     vendor: "ByteDance Seed",

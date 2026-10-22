@@ -56,6 +56,8 @@
 //   gridPrompt, sheetPrompt               (contact-sheet / turnaround framing text placed before the prompt)
 // Keys added with the av-tools workflows (Wave B):
 //   frameIndex                            (Extract frame: which frame of the Trim Video window, -1 = its last, 0 = its first)
+// Keys added with round 4 (engine seams):
+//   curveMode, filterSpeckle, colorPrecision (VTracer: spline | polygon | none curves, specks dropped (px), colour precision bits)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable"). Entry fields: worker "isolated" (needs its own ComfyUI,
 // see README), expand "captions" (the provider writes one segment per caption cue before submitting).
@@ -79,6 +81,8 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI-QwenASR': 'https://github.com/1038lab/ComfyUI-QwenASR',
   'ComfyUI-HunyuanVideo-Foley': 'https://github.com/phazei/ComfyUI-HunyuanVideo-Foley',
   'ComfyUI-Whisper': 'https://github.com/yuvraj108c/ComfyUI-Whisper',
+  // round 4 (engine seams): VTracer image → SVG
+  'ComfyUI-ToSVG': 'https://github.com/Yanick112/ComfyUI-ToSVG',
   // isolated worker only (process-wide side effects / old pins), see scripts/comfy/README.md
   'ComfyUI-LatentSyncWrapper': 'https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper',
   'ComfyUI-ThinkSound_Wrapper': 'https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper',
@@ -2401,5 +2405,26 @@ export const SPEC = [
       'The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, ' +
       'each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). ' +
       'SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track\'s length = the video\'s) and video-mux-audio. Runs on CPU.',
+  },
+  // ---- round 4 (engine seams): vectorize -------------------------------------------
+  {
+    id: 'image-vectorize-vtracer',
+    title: 'Image to SVG: VTracer traces the colours into stacked vector shapes (no model)',
+    capability: 'vectorize',
+    handBuilt: 'hand-built/image-vectorize-vtracer.json',
+    bindings: {
+      image: [b('1', 'image')],
+      curveMode: [b('2', 'mode')],
+      filterSpeckle: [b('2', 'filter_speckle')],
+      colorPrecision: [b('2', 'color_precision')],
+      filenamePrefix: [b('4', 'filename_prefix')],
+    },
+    outputs: [{ node: '4', kind: 'image' }],
+    vramGb: 0,
+    license: 'MIT (VTracer, ComfyUI-ToSVG); the pack also imports PyMuPDF (AGPL-3.0) for its SVG-to-image node, which this graph doesn\'t use',
+    notes:
+      'The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG\'s colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) ' +
+      'returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under "images", so the provider collects it as an image output). ' +
+      'filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second.',
   },
 ];

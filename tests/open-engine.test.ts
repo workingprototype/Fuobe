@@ -75,6 +75,8 @@ const ROUND3_MODELS: Record<string, { op: Operation; kind: MediaKind; workflow: 
   "oss-tryon-klein": { op: "edit", kind: "image", workflow: "tryon-flux2-klein-4b" },
   "oss-zimage-grid": { op: "t2i", kind: "image", workflow: "grid-zimage-contact-sheet" },
   "oss-zimage-soul-cast": { op: "t2i", kind: "image", workflow: "soul-cast-sheet-zimage" },
+  // round 4
+  "oss-vtracer": { op: "vectorize", kind: "image", workflow: "image-vectorize-vtracer" },
 };
 const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/manifest.json"), "utf8")) as Manifest;
 const workflowById = new Map(manifest.workflows.map((w) => [w.id, w]));

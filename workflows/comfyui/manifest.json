@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-21T15:15:54.549Z",
+  "generatedAt": "2026-10-22T18:38:50.755Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -11481,6 +11481,67 @@
       "validated": true,
       "notes": "The dub voice track, all core nodes. The template places one line: EmptyAudio of the video's length (duration) is the track, the line (audio) is cut where the next line starts (TrimAudioDuration), put after startTime seconds of silence (AudioConcat after EmptyAudio) and added onto the track (AudioMerge add: pads or cuts the line to the track). The provider rewrites the graph per request (expandTimelineWorkflow, src/lib/av/timeline.ts): params.extra.timeline = {length, clips:[{start, duration}]} with one inputs.audios clip per entry, each loaded, cut, led in and added in turn, so the saved track is exactly as long as the video with every line at its cue time (pauses kept). SaveAudio writes FLAC (lossless, no MP3 priming delay). Feeds lip re-sync (InfiniteTalk frames = the track's length = the video's) and video-mux-audio. Runs on CPU.",
       "expand": "timeline"
+    },
+    {
+      "id": "image-vectorize-vtracer",
+      "title": "Image to SVG: VTracer traces the colours into stacked vector shapes (no model)",
+      "capability": "vectorize",
+      "file": "image-vectorize-vtracer.json",
+      "source": "hand-built (scripts/comfy/hand-built/image-vectorize-vtracer.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "curveMode": [
+          {
+            "node": "2",
+            "input": "mode"
+          }
+        ],
+        "filterSpeckle": [
+          {
+            "node": "2",
+            "input": "filter_speckle"
+          }
+        ],
+        "colorPrecision": [
+          {
+            "node": "2",
+            "input": "color_precision"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "filterSpeckle": 4,
+        "colorPrecision": 6
+      },
+      "limits": {},
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-ToSVG",
+          "repo": "https://github.com/Yanick112/ComfyUI-ToSVG"
+        }
+      ],
+      "vramGb": 0,
+      "license": "MIT (VTracer, ComfyUI-ToSVG); the pack also imports PyMuPDF (AGPL-3.0) for its SVG-to-image node, which this graph doesn't use",
+      "validated": true,
+      "notes": "The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG's colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under \"images\", so the provider collects it as an image output). filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second."
     }
   ]
 }
