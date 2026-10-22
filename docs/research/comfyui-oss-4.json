@@ -1,0 +1,7670 @@
+{
+ "asOf": "2026-10-22",
+ "scope": "Open-source research part 4 for Fuobe: open ComfyUI routes for Layers text detection (OCR), video object removal / swap / insert, the Genjutsu equivalents, Ken Burns stills, audio loop / join, FPS boost and pro output formats, end cards; and open-weight models released 2026-09-15 .. 2026-10-22. Companion to comfyui-oss-4.md.",
+ "validationServer": {
+  "comfyui": "core fc04da91 (v0.41.0-7, 2026-10-16), Python 3.13.16, torch 2.14.1+cpu, comfyui-workflow-templates 0.11.86, CPU only, 4 cores, 14.3 GB RAM",
+  "method": "POST /prompt with zero-byte placeholder weights for missing models; a KJNodes Sleep blocker holds the worker; the prompt is deleted from the queue at once (same as scripts/comfy/validate-workflows.mjs, own prompt ids only). Placeholders deleted afterwards.",
+  "negativeTests": "video-inpaint-wan-vace with a missing unet_name -> 400 value_not_in_list; video-erase-void with an IMAGE linked into quadmask -> 400 return_type_mismatch.",
+  "realRuns": "Model-free graphs ran for real on CPU and were checked with ffprobe/ffmpeg/numpy. OCR ran for real with downloaded weights (OvisOCR3 1.71 GB, Qwen3.5-0.8B 1.75 GB); RIFE 4.26 and FILM ran for real for the existing interpolate-* graphs. All downloaded weights were deleted afterwards.",
+  "upstream": "ComfyUI master has v0.42.0 (2026-10-18) and later commits up to 1a82e6d0 (2026-10-22): Fibo 2.0 support (#17240), MOSS-image fixes (#17172, #17206), TextGenerate think-block fix (#17121) and cleanup fix (#17169), Pad Image node (#17224). Not installed here."
+ },
+ "packs": [
+  {
+   "name": "ComfyUI-KJNodes",
+   "url": "https://github.com/kijai/ComfyUI-KJNodes",
+   "commit": "17195fcfa8a05f601b766a0f09c9733284f47416",
+   "pipDeps": [],
+   "new": false,
+   "usedBy": [
+    "video-inpaint-wan-vace",
+    "video-inpaint-wan-vace-painted",
+    "video-swap-wan-vace",
+    "video-insert-wan-vace"
+   ],
+   "note": "GrowMaskWithBlur (already installed)."
+  },
+  {
+   "name": "ComfyUI-VideoHelperSuite",
+   "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite",
+   "commit": "4d907bee61e92c2e65af3bd6383a4e4d356126d1",
+   "pipDeps": [],
+   "new": false,
+   "usedBy": [
+    "audio-loop-crossfade",
+    "audio-join-crossfade",
+    "video-export-pro"
+   ],
+   "note": "VHS_LoadAudioUpload (duration output), VHS_VideoCombine pro formats (already installed)."
+  }
+ ],
+ "packsConsideredNotInstalled": [
+  {
+   "name": "ComfyUI-Florence2",
+   "url": "https://github.com/kijai/ComfyUI-Florence2",
+   "commit": "9ece3de914214c5f581d725167bc9d0eeb0d1120",
+   "commitDate": "2026-05-06",
+   "pipDeps": [
+    "tokenizers",
+    "matplotlib",
+    "pillow>=10.2.0"
+   ],
+   "licence": "MIT code; Florence-2 weights MIT",
+   "why": "Core TextGenerate + OvisOCR3/Qwen3.5 reads stylised text better, needs no pack and ran here. Florence2Run task ocr_with_region returns data [{label, box:[x1,y1,...,x4,y4] normalised 0-1}] (read from nodes.py at this commit)."
+  },
+  {
+   "name": "ComfyUI-GIMM-VFI",
+   "url": "https://github.com/kijai/ComfyUI-GIMM-VFI",
+   "commit": null,
+   "pipDeps": [],
+   "licence": "unverified (GIMM-VFI repo licence not confirmed; Kijai/GIMM-VFI_safetensors card says 'other')",
+   "why": "Native RIFE 4.26 / FILM already cover FPS boost; GIMM-VFI is slower and its licence is unconfirmed."
+  },
+  {
+   "name": "MiniMax-Remover (WanVideoWrapper WanVideoMiniMaxRemoverEmbeds, already installed)",
+   "url": "https://huggingface.co/zibojia/minimax-remover",
+   "commit": null,
+   "pipDeps": [],
+   "licence": "CC-BY-NC-4.0 weights",
+   "why": "Non-commercial weights (Kijai/WanVideo_comfy Wan2_1-MiniMaxRemover_1_3B_fp16.safetensors, 2.25 GB)."
+  }
+ ],
+ "workflows": [
+  {
+   "id": "ocr-lines-qwen35",
+   "title": "Text lines with boxes for Layers: OvisOCR3 (Qwen3.5 0.8B OCR) through core TextGenerate",
+   "capability": "ocr",
+   "graph": {
+    "1": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "poster.png"
+     },
+     "_meta": {
+      "title": "Image to read (image)"
+     }
+    },
+    "2": {
+     "class_type": "ImageScaleToMaxDimension",
+     "inputs": {
+      "image": [
+       "1",
+       0
+      ],
+      "upscale_method": "area",
+      "largest_size": 1280
+     },
+     "_meta": {
+      "title": "Longest side the model sees (maxSize; 1280 keeps small print legible)"
+     }
+    },
+    "3": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "ovisocr3_0.8b_bf16.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "OCR model (checkpoint: ovisocr3_0.8b_bf16 default, or qwen3.5_0.8b / 2b / 4b_bf16)"
+     }
+    },
+    "4": {
+     "class_type": "TextGenerate",
+     "inputs": {
+      "clip": [
+       "3",
+       0
+      ],
+      "prompt": "Locate and transcribe every readable line of text in the image. Return a single JSON array in natural reading order.\n\nEach element follows this schema:\n`{\"bbox\": [x_min, y_min, x_max, y_max], \"text\": \"string\"}`\n\nRules:\n1. Use line-level annotations. Each element must represent exactly one visible line of text; keep the words of one line together and do not merge separate lines.\n2. The bbox coordinates are integers scaled to [0, 1000).\n3. Each bbox must tightly enclose its line.\n4. Preserve the original text exactly without translation, paraphrasing, correction, or completion.\n5. Output strictly valid JSON only. Do not output Markdown, explanations, or code fences.",
+      "image": [
+       "2",
+       0
+      ],
+      "max_length": 2048,
+      "sampling_mode": "off",
+      "thinking": false,
+      "use_default_template": true
+     },
+     "_meta": {
+      "title": "Read every text line with its box (instruction)"
+     }
+    },
+    "5": {
+     "class_type": "SaveText",
+     "inputs": {
+      "text": [
+       "4",
+       0
+      ],
+      "filename_prefix": "fuobe/ocr-lines",
+      "format": "json"
+     },
+     "_meta": {
+      "title": "Lines + boxes as JSON text: [{\"bbox\":[x0,y0,x1,y1] in 0-1000, \"text\":\"...\"}]"
+     }
+    },
+    "6": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Size the model saw"
+     }
+    },
+    "7": {
+     "class_type": "StringFormat",
+     "inputs": {
+      "values.a": [
+       "6",
+       0
+      ],
+      "values.b": [
+       "6",
+       1
+      ],
+      "f_string": "{{\"width\": {a}, \"height\": {b}, \"coords\": \"relative-1000\"}}"
+     },
+     "_meta": {
+      "title": "Frame of reference"
+     }
+    },
+    "8": {
+     "class_type": "PreviewAny",
+     "inputs": {
+      "source": [
+       "7",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Size (text)"
+     }
+    }
+   },
+   "bindings": {
+    "image": [
+     {
+      "node": "1",
+      "input": "image"
+     }
+    ],
+    "maxSize": [
+     {
+      "node": "2",
+      "input": "largest_size"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "3",
+      "input": "clip_name"
+     }
+    ],
+    "instruction": [
+     {
+      "node": "4",
+      "input": "prompt"
+     }
+    ],
+    "maxTokens": [
+     {
+      "node": "4",
+      "input": "max_length"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "5",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "5",
+     "kind": "text",
+     "role": "lines"
+    },
+    {
+     "node": "8",
+     "kind": "text",
+     "role": "frame"
+    }
+   ],
+   "defaults": {
+    "maxSize": 1280,
+    "maxTokens": 2048
+   },
+   "models": [
+    {
+     "folder": "text_encoders",
+     "file": "ovisocr3_0.8b_bf16.safetensors",
+     "url": "https://huggingface.co/ATH-MaaS/OvisOCR3/resolve/main/model.safetensors",
+     "sizeBytes": 1706030528,
+     "saveAs": "ovisocr3_0.8b_bf16.safetensors",
+     "licence": "Apache-2.0",
+     "note": "Upstream file is model.safetensors; save it under this name. Repo sha 5f6ce6932efe (2026-10-21)."
+    },
+    {
+     "folder": "text_encoders",
+     "file": "qwen3.5_0.8b_bf16.safetensors",
+     "url": "https://huggingface.co/Qwen/Qwen3.5-0.8B/resolve/main/model.safetensors-00001-of-00001.safetensors",
+     "sizeBytes": 1746942600,
+     "saveAs": "qwen3.5_0.8b_bf16.safetensors",
+     "licence": "Apache-2.0",
+     "alternative": true
+    },
+    {
+     "folder": "text_encoders",
+     "file": "qwen3.5_2b_bf16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_2b_bf16.safetensors",
+     "sizeBytes": 4548221488,
+     "licence": "Apache-2.0",
+     "alternative": true
+    },
+    {
+     "folder": "text_encoders",
+     "file": "qwen3.5_4b_bf16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_4b_bf16.safetensors",
+     "sizeBytes": 9319828320,
+     "licence": "Apache-2.0",
+     "alternative": true,
+     "note": "Already in the library (translate-qwen35-textgen)."
+    }
+   ],
+   "vram": "about 3 GB with the 0.8B checkpoints (inferred: 1.7 GB bf16 weights + image tokens); about 10 GB with qwen3.5_4b. Runs on CPU (measured below).",
+   "licence": "Apache-2.0 (OvisOCR3 weights, Qwen3.5 weights, ComfyUI core)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "checkpoint": "qwen3.5_0.8b_bf16.safetensors",
+     "image": "1024x768 poster, 5 lines (scaled to 1280 long side)",
+     "seconds": 395.8,
+     "result": "5/5 lines, text exact, mean IoU 0.817 vs the rendered boxes; output wrapped in ```json fences"
+    },
+    {
+     "checkpoint": "ovisocr3_0.8b_bf16.safetensors",
+     "image": "same poster at 1024 long side",
+     "seconds": 193.8,
+     "result": "5/5 lines, text exact, mean IoU 0.822; bare JSON, no fences"
+    },
+    {
+     "checkpoint": "ovisocr3_0.8b_bf16.safetensors",
+     "image": "1024x1024 busy colour-bar background, outlined text, a 12-degree rotated sticker",
+     "seconds": 160.9,
+     "result": "5/5 lines incl. the rotated 'SAVE 30%' (IoU 0.76-0.92 on the straight lines); bare JSON; skipped a tiny 00:00:00.000 timecode"
+    },
+    {
+     "checkpoint": "qwen3.5_0.8b_bf16.safetensors",
+     "image": "same busy poster at 1024 (same line-level instruction)",
+     "seconds": 645.3,
+     "result": "4/5 lines: 'Limited stock' split into two items with wrong boxes; IoU 0.58-0.91; found the timecode; ignored the requested keys (bbox_2d/text_content) and wrapped the JSON in fences. The server was shared with other jobs during this run, so the time is not comparable"
+    }
+   ],
+   "notes": "Output: a JSON array [{\"bbox\":[x0,y0,x1,y1],\"text\":\"...\"}] in reading order; coordinates are relative 0-1000 (verified against rendered ground truth), so the app scales by the image size. The app must strip ``` fences and accept bbox_2d/text_content keys too (general Qwen3.5 checkpoints answer in that style). instruction is OvisOCR3's word_spotting prompt changed to line level; use OvisOCR3's original prompts/word_spotting.txt for word boxes. sampling_mode off = greedy. Node 8 reports the size the model saw. ComfyUI >= v0.42 (#17121, 2026-10-17) writes the empty think block exactly as Qwen3.5's chat template; v0.41 used '<think>\\n</think>\\n' and still worked here."
+  },
+  {
+   "id": "video-inpaint-wan-vace",
+   "title": "Remove an object from a video by naming it: SAM 3.1 tracking + Wan 2.1 VACE 14B fill (lightx2v 4-step)",
+   "capability": "video-inpaint",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Source clip (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 0
+     },
+     "_meta": {
+      "title": "First frame of the window (startFrame)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 81
+     },
+     "_meta": {
+      "title": "Frames to process, 4n+1 (frames)"
+     }
+    },
+    "5": {
+     "class_type": "ImageFromBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "batch_index": [
+       "3",
+       0
+      ],
+      "length": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window"
+     }
+    },
+    "6": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Work size (width, height; multiples of 16)"
+     }
+    },
+    "60": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window start in seconds"
+     }
+    },
+    "61": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "4",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window length in seconds"
+     }
+    },
+    "62": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       1
+      ],
+      "start_index": [
+       "60",
+       0
+      ],
+      "duration": [
+       "61",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window's sound (none for silent clips)"
+     }
+    },
+    "7": {
+     "class_type": "CheckpointLoaderSimple",
+     "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+     },
+     "_meta": {
+      "title": "SAM 3.1"
+     }
+    },
+    "8": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "the person walking on the left",
+      "clip": [
+       "7",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "What to select (maskPrompt)"
+     }
+    },
+    "9": {
+     "class_type": "SAM3_VideoTrack",
+     "inputs": {
+      "images": [
+       "6",
+       0
+      ],
+      "model": [
+       "7",
+       0
+      ],
+      "conditioning": [
+       "8",
+       0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+     },
+     "_meta": {
+      "title": "Track it through the window"
+     }
+    },
+    "10": {
+     "class_type": "SAM3_TrackToMask",
+     "inputs": {
+      "track_data": [
+       "9",
+       0
+      ],
+      "object_indices": ""
+     },
+     "_meta": {
+      "title": "Per-frame masks (object_indices: which tracked objects)"
+     }
+    },
+    "11": {
+     "class_type": "GrowMask",
+     "inputs": {
+      "mask": [
+       "10",
+       0
+      ],
+      "expand": 16,
+      "tapered_corners": true
+     },
+     "_meta": {
+      "title": "Grow the mask to cover edges and shadows (maskGrow, px)"
+     }
+    },
+    "12": {
+     "class_type": "InvertMask",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Inverted mask"
+     }
+    },
+    "13": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "12",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Black where the mask is"
+     }
+    },
+    "14": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "6",
+       0
+      ],
+      "source": [
+       "13",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Control video: the clip with the masked area blanked (as the official VACE inpainting template)"
+     }
+    },
+    "15": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "umT5"
+     }
+    },
+    "16": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "An empty street with parked cars and trees, natural daylight.",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The scene after the change (prompt)"
+     }
+    },
+    "17": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+     }
+    },
+    "18": {
+     "class_type": "VAELoader",
+     "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+     },
+     "_meta": {
+      "title": "Wan VAE"
+     }
+    },
+    "19": {
+     "class_type": "WanVaceToVideo",
+     "inputs": {
+      "positive": [
+       "16",
+       0
+      ],
+      "negative": [
+       "17",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1,
+      "strength": 1.0,
+      "control_video": [
+       "14",
+       0
+      ],
+      "control_masks": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "VACE: mask 1 = regenerate, 0 = keep"
+     }
+    },
+    "20": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+     },
+     "_meta": {
+      "title": "Wan 2.1 VACE 14B (cast to fp8 on load)"
+     }
+    },
+    "21": {
+     "class_type": "LoraLoaderModelOnly",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "strength_model": 1.0
+     },
+     "_meta": {
+      "title": "lightx2v 4-step LoRA, Apache-2.0 (loraStrength 0 + steps 20 + cfg 6 = full quality)"
+     }
+    },
+    "22": {
+     "class_type": "ModelSamplingSD3",
+     "inputs": {
+      "model": [
+       "21",
+       0
+      ],
+      "shift": 5.0
+     },
+     "_meta": {
+      "title": "Shift (shift)"
+     }
+    },
+    "23": {
+     "class_type": "KSampler",
+     "inputs": {
+      "model": [
+       "22",
+       0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Sample (seed, steps, cfg)"
+     }
+    },
+    "24": {
+     "class_type": "TrimVideoLatent",
+     "inputs": {
+      "samples": [
+       "23",
+       0
+      ],
+      "trim_amount": [
+       "19",
+       3
+      ]
+     },
+     "_meta": {
+      "title": "Drop the reference latent"
+     }
+    },
+    "25": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "24",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Decode"
+     }
+    },
+    "30": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Source size"
+     }
+    },
+    "31": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "25",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Result at the source size"
+     }
+    },
+    "32": {
+     "class_type": "GrowMaskWithBlur",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ],
+      "expand": 4,
+      "incremental_expandrate": 0.0,
+      "tapered_corners": true,
+      "flip_input": false,
+      "blur_radius": 6.0,
+      "lerp_alpha": 1.0,
+      "decay_factor": 1.0,
+      "fill_holes": false
+     },
+     "_meta": {
+      "title": "Soft paste edge"
+     }
+    },
+    "33": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "32",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Paste mask as image"
+     }
+    },
+    "34": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "33",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Paste mask at the source size"
+     }
+    },
+    "35": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "34",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "Paste mask"
+     }
+    },
+    "36": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "5",
+       0
+      ],
+      "source": [
+       "31",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "35",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Only the masked area changes"
+     }
+    },
+    "37": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "36",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "62",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+     },
+     "_meta": {
+      "title": "Clip with the window's sound"
+     }
+    },
+    "38": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "37",
+       0
+      ],
+      "filename_prefix": "fuobe/video-inpaint-wan-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "startFrame": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "frames": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "width": [
+     {
+      "node": "6",
+      "input": "width"
+     },
+     {
+      "node": "19",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "6",
+      "input": "height"
+     },
+     {
+      "node": "19",
+      "input": "height"
+     }
+    ],
+    "maskGrow": [
+     {
+      "node": "11",
+      "input": "expand"
+     }
+    ],
+    "prompt": [
+     {
+      "node": "16",
+      "input": "text"
+     }
+    ],
+    "negativePrompt": [
+     {
+      "node": "17",
+      "input": "text"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "20",
+      "input": "unet_name"
+     }
+    ],
+    "loraStrength": [
+     {
+      "node": "21",
+      "input": "strength_model"
+     }
+    ],
+    "shift": [
+     {
+      "node": "22",
+      "input": "shift"
+     }
+    ],
+    "seed": [
+     {
+      "node": "23",
+      "input": "seed"
+     }
+    ],
+    "steps": [
+     {
+      "node": "23",
+      "input": "steps"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "23",
+      "input": "cfg"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "38",
+      "input": "filename_prefix"
+     }
+    ],
+    "maskPrompt": [
+     {
+      "node": "8",
+      "input": "text"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "38",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "frames": 81,
+    "width": 832,
+    "height": 480,
+    "maskGrow": 16,
+    "steps": 4,
+    "cfg": 1,
+    "shift": 5,
+    "loraStrength": 1
+   },
+   "limits": {
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "maxFrames": 81,
+    "dimensionMultiple": 16,
+    "frameStep": 4
+   },
+   "models": [
+    {
+     "folder": "checkpoints",
+     "file": "sam3.1_multiplex_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "sizeBytes": 1745546848,
+     "licence": "SAM License (Meta; commercial use allowed with its terms)",
+     "note": "Already in the library (video-bg-remove-sam3)."
+    },
+    {
+     "folder": "text_encoders",
+     "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "sizeBytes": 6735906897,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "vae",
+     "file": "wan_2.1_vae.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+     "sizeBytes": 253815318,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "wan2.1_vace_14B_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+     "sizeBytes": 34675323640,
+     "licence": "Apache-2.0",
+     "note": "Already in the library (wan21-vace-14b-ref2v). Cast to fp8 on load (weight_dtype fp8_e4m3fn_fast)."
+    },
+    {
+     "folder": "loras",
+     "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "sizeBytes": 630697104,
+     "licence": "Apache-2.0 (lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill)",
+     "note": "Already a library KNOWN_MODELS entry."
+    }
+   ],
+   "vram": "24 GB class (14B cast to fp8 + 81 frames at 832x480); 8 GB class with wan2.1_vace_1.3B (checkpoint)",
+   "licence": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License; KJNodes GPL-3.0 code (GrowMaskWithBlur)",
+   "validated": true,
+   "ranOnCpu": false,
+   "notes": "maskPrompt = what to remove ('the man in the red jacket'); prompt = the scene WITHOUT it. SAM3_VideoTrack follows the object through the window; GrowMask covers edges and contact shadows; the control video blanks the masked area (black, as Comfy-Org's video_wan_vace_inpainting template) and WanVaceToVideo regenerates mask=1. The result is scaled back and pasted into the source frames through a 6 px soft mask, so every pixel outside the mask stays exactly the source's. Windows of frames (4n+1, <=81) from startFrame at the source fps; longer clips run window by window (provider) and are joined with the existing concat graphs. The window's sound is kept. Speed LoRA swapped from the template's CausVid (CC-BY-NC-4.0) to Apache-2.0 lightx2v T2V 4-step: pairing with VACE inferred, not GPU-tested."
+  },
+  {
+   "id": "video-inpaint-wan-vace-painted",
+   "title": "Remove an object painted on the first frame: SAM 3.1 tracks the painted mask + Wan 2.1 VACE 14B fill",
+   "capability": "video-inpaint",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Source clip (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 0
+     },
+     "_meta": {
+      "title": "First frame of the window (startFrame)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 81
+     },
+     "_meta": {
+      "title": "Frames to process, 4n+1 (frames)"
+     }
+    },
+    "5": {
+     "class_type": "ImageFromBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "batch_index": [
+       "3",
+       0
+      ],
+      "length": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window"
+     }
+    },
+    "6": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Work size (width, height; multiples of 16)"
+     }
+    },
+    "60": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window start in seconds"
+     }
+    },
+    "61": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "4",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window length in seconds"
+     }
+    },
+    "62": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       1
+      ],
+      "start_index": [
+       "60",
+       0
+      ],
+      "duration": [
+       "61",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window's sound (none for silent clips)"
+     }
+    },
+    "7": {
+     "class_type": "CheckpointLoaderSimple",
+     "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+     },
+     "_meta": {
+      "title": "SAM 3.1"
+     }
+    },
+    "70": {
+     "class_type": "LoadImageMask",
+     "inputs": {
+      "image": "mask.png",
+      "channel": "alpha"
+     },
+     "_meta": {
+      "title": "Mask painted on the first frame (mask; alpha = selected)"
+     }
+    },
+    "71": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "70",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Mask as image"
+     }
+    },
+    "72": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "71",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "At the work size"
+     }
+    },
+    "73": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "72",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "First-frame mask"
+     }
+    },
+    "9": {
+     "class_type": "SAM3_VideoTrack",
+     "inputs": {
+      "images": [
+       "6",
+       0
+      ],
+      "model": [
+       "7",
+       0
+      ],
+      "initial_mask": [
+       "73",
+       0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+     },
+     "_meta": {
+      "title": "Track the painted object"
+     }
+    },
+    "10": {
+     "class_type": "SAM3_TrackToMask",
+     "inputs": {
+      "track_data": [
+       "9",
+       0
+      ],
+      "object_indices": ""
+     },
+     "_meta": {
+      "title": "Per-frame masks"
+     }
+    },
+    "11": {
+     "class_type": "GrowMask",
+     "inputs": {
+      "mask": [
+       "10",
+       0
+      ],
+      "expand": 16,
+      "tapered_corners": true
+     },
+     "_meta": {
+      "title": "Grow the mask to cover edges and shadows (maskGrow, px)"
+     }
+    },
+    "12": {
+     "class_type": "InvertMask",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Inverted mask"
+     }
+    },
+    "13": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "12",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Black where the mask is"
+     }
+    },
+    "14": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "6",
+       0
+      ],
+      "source": [
+       "13",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Control video: the clip with the masked area blanked (as the official VACE inpainting template)"
+     }
+    },
+    "15": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "umT5"
+     }
+    },
+    "16": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "An empty street with parked cars and trees, natural daylight.",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The scene after the change (prompt)"
+     }
+    },
+    "17": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+     }
+    },
+    "18": {
+     "class_type": "VAELoader",
+     "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+     },
+     "_meta": {
+      "title": "Wan VAE"
+     }
+    },
+    "19": {
+     "class_type": "WanVaceToVideo",
+     "inputs": {
+      "positive": [
+       "16",
+       0
+      ],
+      "negative": [
+       "17",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1,
+      "strength": 1.0,
+      "control_video": [
+       "14",
+       0
+      ],
+      "control_masks": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "VACE: mask 1 = regenerate, 0 = keep"
+     }
+    },
+    "20": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+     },
+     "_meta": {
+      "title": "Wan 2.1 VACE 14B (cast to fp8 on load)"
+     }
+    },
+    "21": {
+     "class_type": "LoraLoaderModelOnly",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "strength_model": 1.0
+     },
+     "_meta": {
+      "title": "lightx2v 4-step LoRA, Apache-2.0 (loraStrength 0 + steps 20 + cfg 6 = full quality)"
+     }
+    },
+    "22": {
+     "class_type": "ModelSamplingSD3",
+     "inputs": {
+      "model": [
+       "21",
+       0
+      ],
+      "shift": 5.0
+     },
+     "_meta": {
+      "title": "Shift (shift)"
+     }
+    },
+    "23": {
+     "class_type": "KSampler",
+     "inputs": {
+      "model": [
+       "22",
+       0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Sample (seed, steps, cfg)"
+     }
+    },
+    "24": {
+     "class_type": "TrimVideoLatent",
+     "inputs": {
+      "samples": [
+       "23",
+       0
+      ],
+      "trim_amount": [
+       "19",
+       3
+      ]
+     },
+     "_meta": {
+      "title": "Drop the reference latent"
+     }
+    },
+    "25": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "24",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Decode"
+     }
+    },
+    "30": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Source size"
+     }
+    },
+    "31": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "25",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Result at the source size"
+     }
+    },
+    "32": {
+     "class_type": "GrowMaskWithBlur",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ],
+      "expand": 4,
+      "incremental_expandrate": 0.0,
+      "tapered_corners": true,
+      "flip_input": false,
+      "blur_radius": 6.0,
+      "lerp_alpha": 1.0,
+      "decay_factor": 1.0,
+      "fill_holes": false
+     },
+     "_meta": {
+      "title": "Soft paste edge"
+     }
+    },
+    "33": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "32",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Paste mask as image"
+     }
+    },
+    "34": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "33",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Paste mask at the source size"
+     }
+    },
+    "35": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "34",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "Paste mask"
+     }
+    },
+    "36": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "5",
+       0
+      ],
+      "source": [
+       "31",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "35",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Only the masked area changes"
+     }
+    },
+    "37": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "36",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "62",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+     },
+     "_meta": {
+      "title": "Clip with the window's sound"
+     }
+    },
+    "38": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "37",
+       0
+      ],
+      "filename_prefix": "fuobe/video-inpaint-wan-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "startFrame": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "frames": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "width": [
+     {
+      "node": "6",
+      "input": "width"
+     },
+     {
+      "node": "19",
+      "input": "width"
+     },
+     {
+      "node": "72",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "6",
+      "input": "height"
+     },
+     {
+      "node": "19",
+      "input": "height"
+     },
+     {
+      "node": "72",
+      "input": "height"
+     }
+    ],
+    "maskGrow": [
+     {
+      "node": "11",
+      "input": "expand"
+     }
+    ],
+    "prompt": [
+     {
+      "node": "16",
+      "input": "text"
+     }
+    ],
+    "negativePrompt": [
+     {
+      "node": "17",
+      "input": "text"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "20",
+      "input": "unet_name"
+     }
+    ],
+    "loraStrength": [
+     {
+      "node": "21",
+      "input": "strength_model"
+     }
+    ],
+    "shift": [
+     {
+      "node": "22",
+      "input": "shift"
+     }
+    ],
+    "seed": [
+     {
+      "node": "23",
+      "input": "seed"
+     }
+    ],
+    "steps": [
+     {
+      "node": "23",
+      "input": "steps"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "23",
+      "input": "cfg"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "38",
+      "input": "filename_prefix"
+     }
+    ],
+    "mask": [
+     {
+      "node": "70",
+      "input": "image"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "38",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "frames": 81,
+    "width": 832,
+    "height": 480,
+    "maskGrow": 16,
+    "steps": 4,
+    "cfg": 1,
+    "shift": 5,
+    "loraStrength": 1
+   },
+   "limits": {
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "maxFrames": 81,
+    "dimensionMultiple": 16,
+    "frameStep": 4
+   },
+   "models": [
+    {
+     "folder": "checkpoints",
+     "file": "sam3.1_multiplex_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "sizeBytes": 1745546848,
+     "licence": "SAM License (Meta; commercial use allowed with its terms)",
+     "note": "Already in the library (video-bg-remove-sam3)."
+    },
+    {
+     "folder": "text_encoders",
+     "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "sizeBytes": 6735906897,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "vae",
+     "file": "wan_2.1_vae.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+     "sizeBytes": 253815318,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "wan2.1_vace_14B_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+     "sizeBytes": 34675323640,
+     "licence": "Apache-2.0",
+     "note": "Already in the library (wan21-vace-14b-ref2v). Cast to fp8 on load (weight_dtype fp8_e4m3fn_fast)."
+    },
+    {
+     "folder": "loras",
+     "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "sizeBytes": 630697104,
+     "licence": "Apache-2.0 (lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill)",
+     "note": "Already a library KNOWN_MODELS entry."
+    }
+   ],
+   "vram": "24 GB class",
+   "licence": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License; KJNodes GPL-3.0 code (GrowMaskWithBlur)",
+   "validated": true,
+   "ranOnCpu": false,
+   "notes": "mask = a PNG of the first frame where alpha (or set channel to red for a black/white mask) marks the object. It is scaled to the work size and given to SAM3_VideoTrack as initial_mask, which tracks it through the window. Otherwise identical to video-inpaint-wan-vace."
+  },
+  {
+   "id": "video-erase-void",
+   "title": "Remove an object AND its effects (shadows, reflections, things it moves): Netflix VOID, two passes (core nodes)",
+   "capability": "video-inpaint",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Source clip (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 0
+     },
+     "_meta": {
+      "title": "First frame of the window (startFrame)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 45
+     },
+     "_meta": {
+      "title": "Frames to process (frames; rounded down so (frames-1)/4+1 is even, e.g. 45, 53, 61 ... 197)"
+     }
+    },
+    "5": {
+     "class_type": "ImageFromBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "batch_index": [
+       "3",
+       0
+      ],
+      "length": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window"
+     }
+    },
+    "6": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 672,
+      "height": 384,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Work size (width, height; VOID trained at 672x384, multiples of 8)"
+     }
+    },
+    "60": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window start in seconds"
+     }
+    },
+    "61": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "4",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window length in seconds"
+     }
+    },
+    "62": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       1
+      ],
+      "start_index": [
+       "60",
+       0
+      ],
+      "duration": [
+       "61",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window's sound (none for silent clips)"
+     }
+    },
+    "7": {
+     "class_type": "CheckpointLoaderSimple",
+     "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+     },
+     "_meta": {
+      "title": "SAM 3.1"
+     }
+    },
+    "8": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "the person",
+      "clip": [
+       "7",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "What to select (maskPrompt)"
+     }
+    },
+    "9": {
+     "class_type": "SAM3_VideoTrack",
+     "inputs": {
+      "images": [
+       "6",
+       0
+      ],
+      "model": [
+       "7",
+       0
+      ],
+      "conditioning": [
+       "8",
+       0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+     },
+     "_meta": {
+      "title": "Track it through the window"
+     }
+    },
+    "10": {
+     "class_type": "SAM3_TrackToMask",
+     "inputs": {
+      "track_data": [
+       "9",
+       0
+      ],
+      "object_indices": ""
+     },
+     "_meta": {
+      "title": "Per-frame masks (object_indices: which tracked objects)"
+     }
+    },
+    "11": {
+     "class_type": "GrowMask",
+     "inputs": {
+      "mask": [
+       "10",
+       0
+      ],
+      "expand": 8,
+      "tapered_corners": true
+     },
+     "_meta": {
+      "title": "Grow the mask (maskGrow, px)"
+     }
+    },
+    "15": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "t5xxl_fp16.safetensors",
+      "type": "cogvideox",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "T5-XXL"
+     }
+    },
+    "16": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "An empty snowy mountain slope under a clear sky.",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The scene after removal (prompt)"
+     }
+    },
+    "17": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+     }
+    },
+    "18": {
+     "class_type": "VAELoader",
+     "inputs": {
+      "vae_name": "cogvideox_vae.safetensors"
+     },
+     "_meta": {
+      "title": "CogVideoX VAE"
+     }
+    },
+    "19": {
+     "class_type": "VOIDInpaintConditioning",
+     "inputs": {
+      "positive": [
+       "16",
+       0
+      ],
+      "negative": [
+       "17",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ],
+      "video": [
+       "6",
+       0
+      ],
+      "quadmask": [
+       "11",
+       0
+      ],
+      "width": 672,
+      "height": 384,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1
+     },
+     "_meta": {
+      "title": "VOID conditioning (mask 1 = remove)"
+     }
+    },
+    "20": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "void_pass1.safetensors",
+      "weight_dtype": "default"
+     },
+     "_meta": {
+      "title": "VOID pass 1"
+     }
+    },
+    "21": {
+     "class_type": "CFGGuider",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "cfg": 6.0
+     },
+     "_meta": {
+      "title": "Guidance (cfg)"
+     }
+    },
+    "22": {
+     "class_type": "BasicScheduler",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "scheduler": "simple",
+      "steps": 30,
+      "denoise": 1.0
+     },
+     "_meta": {
+      "title": "Steps (steps)"
+     }
+    },
+    "23": {
+     "class_type": "VOIDSampler",
+     "inputs": {},
+     "_meta": {
+      "title": "VOID DDIM"
+     }
+    },
+    "24": {
+     "class_type": "RandomNoise",
+     "inputs": {
+      "noise_seed": 0
+     },
+     "_meta": {
+      "title": "Seed (seed)"
+     }
+    },
+    "25": {
+     "class_type": "SamplerCustomAdvanced",
+     "inputs": {
+      "noise": [
+       "24",
+       0
+      ],
+      "guider": [
+       "21",
+       0
+      ],
+      "sampler": [
+       "23",
+       0
+      ],
+      "sigmas": [
+       "22",
+       0
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Pass 1"
+     }
+    },
+    "26": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "25",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Pass 1 frames"
+     }
+    },
+    "40": {
+     "class_type": "OpticalFlowLoader",
+     "inputs": {
+      "model_name": "raft_large_C_T_SKHT_V2-ff5fadd5.safetensors"
+     },
+     "_meta": {
+      "title": "RAFT optical flow"
+     }
+    },
+    "41": {
+     "class_type": "VOIDWarpedNoise",
+     "inputs": {
+      "optical_flow": [
+       "40",
+       0
+      ],
+      "video": [
+       "26",
+       0
+      ],
+      "width": 672,
+      "height": 384,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1
+     },
+     "_meta": {
+      "title": "Noise warped along pass 1's motion"
+     }
+    },
+    "42": {
+     "class_type": "VOIDWarpedNoiseSource",
+     "inputs": {
+      "warped_noise": [
+       "41",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Warped noise"
+     }
+    },
+    "43": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "void_pass2.safetensors",
+      "weight_dtype": "default"
+     },
+     "_meta": {
+      "title": "VOID pass 2"
+     }
+    },
+    "44": {
+     "class_type": "CFGGuider",
+     "inputs": {
+      "model": [
+       "43",
+       0
+      ],
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "cfg": 6.0
+     },
+     "_meta": {
+      "title": "Pass 2 guidance"
+     }
+    },
+    "45": {
+     "class_type": "BasicScheduler",
+     "inputs": {
+      "model": [
+       "43",
+       0
+      ],
+      "scheduler": "simple",
+      "steps": 30,
+      "denoise": 1.0
+     },
+     "_meta": {
+      "title": "Pass 2 steps"
+     }
+    },
+    "46": {
+     "class_type": "VOIDSampler",
+     "inputs": {},
+     "_meta": {
+      "title": "VOID DDIM"
+     }
+    },
+    "47": {
+     "class_type": "SamplerCustomAdvanced",
+     "inputs": {
+      "noise": [
+       "42",
+       0
+      ],
+      "guider": [
+       "44",
+       0
+      ],
+      "sampler": [
+       "46",
+       0
+      ],
+      "sigmas": [
+       "45",
+       0
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Pass 2 (temporal refinement)"
+     }
+    },
+    "48": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "47",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Pass 2 frames"
+     }
+    },
+    "49": {
+     "class_type": "PrimitiveBoolean",
+     "inputs": {
+      "value": false
+     },
+     "_meta": {
+      "title": "Skip pass 2 (skipPass2: halves the time; pass 1 suffices for most clips)"
+     }
+    },
+    "50": {
+     "class_type": "ComfySwitchNode",
+     "inputs": {
+      "switch": [
+       "49",
+       0
+      ],
+      "on_true": [
+       "26",
+       0
+      ],
+      "on_false": [
+       "48",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Pass 1 or pass 2"
+     }
+    },
+    "51": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "50",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "62",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+     },
+     "_meta": {
+      "title": "Clip with the window's sound"
+     }
+    },
+    "52": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "51",
+       0
+      ],
+      "filename_prefix": "fuobe/video-erase-void",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "startFrame": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "frames": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "width": [
+     {
+      "node": "6",
+      "input": "width"
+     },
+     {
+      "node": "19",
+      "input": "width"
+     },
+     {
+      "node": "41",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "6",
+      "input": "height"
+     },
+     {
+      "node": "19",
+      "input": "height"
+     },
+     {
+      "node": "41",
+      "input": "height"
+     }
+    ],
+    "maskPrompt": [
+     {
+      "node": "8",
+      "input": "text"
+     }
+    ],
+    "maskGrow": [
+     {
+      "node": "11",
+      "input": "expand"
+     }
+    ],
+    "prompt": [
+     {
+      "node": "16",
+      "input": "text"
+     }
+    ],
+    "negativePrompt": [
+     {
+      "node": "17",
+      "input": "text"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "21",
+      "input": "cfg"
+     },
+     {
+      "node": "44",
+      "input": "cfg"
+     }
+    ],
+    "steps": [
+     {
+      "node": "22",
+      "input": "steps"
+     },
+     {
+      "node": "45",
+      "input": "steps"
+     }
+    ],
+    "seed": [
+     {
+      "node": "24",
+      "input": "noise_seed"
+     }
+    ],
+    "skipPass2": [
+     {
+      "node": "49",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "52",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "52",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "frames": 45,
+    "width": 672,
+    "height": 384,
+    "steps": 30,
+    "cfg": 6,
+    "skipPass2": false
+   },
+   "limits": {
+    "maxFrames": 197,
+    "dimensionMultiple": 8
+   },
+   "models": [
+    {
+     "folder": "checkpoints",
+     "file": "sam3.1_multiplex_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "sizeBytes": 1745546848,
+     "licence": "SAM License (Meta; commercial use allowed with its terms)",
+     "note": "Already in the library (video-bg-remove-sam3)."
+    },
+    {
+     "folder": "text_encoders",
+     "file": "t5xxl_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/void-model/resolve/main/text_encoders/t5xxl_fp16.safetensors",
+     "sizeBytes": 9787841024,
+     "licence": "Apache-2.0 (T5)"
+    },
+    {
+     "folder": "vae",
+     "file": "cogvideox_vae.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/void-model/resolve/main/vae/cogvideox_vae.safetensors",
+     "sizeBytes": 431221142,
+     "licence": "Apache-2.0 (CogVideoX-2b VAE)"
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "void_pass1.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/void-model/resolve/main/diffusion_models/void_pass1.safetensors",
+     "sizeBytes": 11143025952,
+     "licence": "Apache-2.0 declared by netflix/void-model; fine-tuned from CogVideoX-Fun-V1.5-5b-InP whose 5B transformer is under the CogVideoX License"
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "void_pass2.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/void-model/resolve/main/diffusion_models/void_pass2.safetensors",
+     "sizeBytes": 11143025952,
+     "licence": "as void_pass1",
+     "note": "Optional (skipPass2)."
+    },
+    {
+     "folder": "optical_flow",
+     "file": "raft_large_C_T_SKHT_V2-ff5fadd5.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/void-model/resolve/main/optical_flow/raft_large_C_T_SKHT_V2-ff5fadd5.safetensors",
+     "sizeBytes": 21060840,
+     "licence": "BSD-3-Clause (RAFT)"
+    }
+   ],
+   "vram": "unverified for ComfyUI; Netflix's reference code needs 40 GB+ (A100); bf16 5B (11.1 GB per pass) + T5-XXL fp16 (9.8 GB) suggests a 24 GB card with offloading",
+   "licence": "VOID weights Apache-2.0 (netflix/void-model) but fine-tuned from CogVideoX-Fun-V1.5-5b-InP, whose 5B transformer carries the CogVideoX License (commercial use only after registration, <=1M monthly visits); RAFT BSD-3; SAM License",
+   "validated": true,
+   "ranOnCpu": false,
+   "notes": "From Comfy-Org template utility_void_video_inpainting (2026-05-14), flattened, with SAM3_VideoTrack instead of per-frame SAM3_Detect. The mask goes straight into VOIDInpaintConditioning as the template does (1 = remove); VOIDQuadmaskPreprocess is only for 4-level quadmasks (0 remove / 63 overlap / 127 affected / 255 keep) from VOID's own mask reasoner. frames is rounded down by the node so the latent length is even (45, 53 ... 197). Pass 2 re-samples with noise warped along pass 1's optical flow (RAFT) for steadier long clips; skipPass2 halves the time."
+  },
+  {
+   "id": "video-swap-wan-vace",
+   "title": "Swap an object or character for a reference image: SAM 3.1 tracking + Wan 2.1 VACE 14B with reference",
+   "capability": "video-swap",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Source clip (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 0
+     },
+     "_meta": {
+      "title": "First frame of the window (startFrame)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 81
+     },
+     "_meta": {
+      "title": "Frames to process, 4n+1 (frames)"
+     }
+    },
+    "5": {
+     "class_type": "ImageFromBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "batch_index": [
+       "3",
+       0
+      ],
+      "length": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window"
+     }
+    },
+    "6": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Work size (width, height; multiples of 16)"
+     }
+    },
+    "60": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window start in seconds"
+     }
+    },
+    "61": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "4",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window length in seconds"
+     }
+    },
+    "62": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       1
+      ],
+      "start_index": [
+       "60",
+       0
+      ],
+      "duration": [
+       "61",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window's sound (none for silent clips)"
+     }
+    },
+    "7": {
+     "class_type": "CheckpointLoaderSimple",
+     "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+     },
+     "_meta": {
+      "title": "SAM 3.1"
+     }
+    },
+    "8": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "the car",
+      "clip": [
+       "7",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "What to select (maskPrompt)"
+     }
+    },
+    "9": {
+     "class_type": "SAM3_VideoTrack",
+     "inputs": {
+      "images": [
+       "6",
+       0
+      ],
+      "model": [
+       "7",
+       0
+      ],
+      "conditioning": [
+       "8",
+       0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+     },
+     "_meta": {
+      "title": "Track it through the window"
+     }
+    },
+    "10": {
+     "class_type": "SAM3_TrackToMask",
+     "inputs": {
+      "track_data": [
+       "9",
+       0
+      ],
+      "object_indices": ""
+     },
+     "_meta": {
+      "title": "Per-frame masks (object_indices: which tracked objects)"
+     }
+    },
+    "11": {
+     "class_type": "GrowMask",
+     "inputs": {
+      "mask": [
+       "10",
+       0
+      ],
+      "expand": 16,
+      "tapered_corners": true
+     },
+     "_meta": {
+      "title": "Grow the mask to cover edges and shadows (maskGrow, px)"
+     }
+    },
+    "12": {
+     "class_type": "InvertMask",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Inverted mask"
+     }
+    },
+    "13": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "12",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Black where the mask is"
+     }
+    },
+    "14": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "6",
+       0
+      ],
+      "source": [
+       "13",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Control video: the clip with the masked area blanked (as the official VACE inpainting template)"
+     }
+    },
+    "15": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "umT5"
+     }
+    },
+    "16": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "The red sports car from the reference drives down the street.",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The scene after the change (prompt)"
+     }
+    },
+    "17": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+     }
+    },
+    "18": {
+     "class_type": "VAELoader",
+     "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+     },
+     "_meta": {
+      "title": "Wan VAE"
+     }
+    },
+    "19": {
+     "class_type": "WanVaceToVideo",
+     "inputs": {
+      "positive": [
+       "16",
+       0
+      ],
+      "negative": [
+       "17",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1,
+      "strength": 1.0,
+      "control_video": [
+       "14",
+       0
+      ],
+      "control_masks": [
+       "11",
+       0
+      ],
+      "reference_image": [
+       "40",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "VACE: mask 1 = regenerate, 0 = keep"
+     }
+    },
+    "20": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+     },
+     "_meta": {
+      "title": "Wan 2.1 VACE 14B (cast to fp8 on load)"
+     }
+    },
+    "21": {
+     "class_type": "LoraLoaderModelOnly",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "strength_model": 1.0
+     },
+     "_meta": {
+      "title": "lightx2v 4-step LoRA, Apache-2.0 (loraStrength 0 + steps 20 + cfg 6 = full quality)"
+     }
+    },
+    "22": {
+     "class_type": "ModelSamplingSD3",
+     "inputs": {
+      "model": [
+       "21",
+       0
+      ],
+      "shift": 5.0
+     },
+     "_meta": {
+      "title": "Shift (shift)"
+     }
+    },
+    "23": {
+     "class_type": "KSampler",
+     "inputs": {
+      "model": [
+       "22",
+       0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Sample (seed, steps, cfg)"
+     }
+    },
+    "24": {
+     "class_type": "TrimVideoLatent",
+     "inputs": {
+      "samples": [
+       "23",
+       0
+      ],
+      "trim_amount": [
+       "19",
+       3
+      ]
+     },
+     "_meta": {
+      "title": "Drop the reference latent"
+     }
+    },
+    "25": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "24",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Decode"
+     }
+    },
+    "30": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Source size"
+     }
+    },
+    "31": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "25",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Result at the source size"
+     }
+    },
+    "32": {
+     "class_type": "GrowMaskWithBlur",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ],
+      "expand": 4,
+      "incremental_expandrate": 0.0,
+      "tapered_corners": true,
+      "flip_input": false,
+      "blur_radius": 6.0,
+      "lerp_alpha": 1.0,
+      "decay_factor": 1.0,
+      "fill_holes": false
+     },
+     "_meta": {
+      "title": "Soft paste edge"
+     }
+    },
+    "33": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "32",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Paste mask as image"
+     }
+    },
+    "34": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "33",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Paste mask at the source size"
+     }
+    },
+    "35": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "34",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "Paste mask"
+     }
+    },
+    "36": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "5",
+       0
+      ],
+      "source": [
+       "31",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "35",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Only the masked area changes"
+     }
+    },
+    "37": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "36",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "62",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+     },
+     "_meta": {
+      "title": "Clip with the window's sound"
+     }
+    },
+    "38": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "37",
+       0
+      ],
+      "filename_prefix": "fuobe/video-swap-wan-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    },
+    "40": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "reference.png"
+     },
+     "_meta": {
+      "title": "What to put in (image: object, product or character on a plain background)"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "startFrame": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "frames": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "width": [
+     {
+      "node": "6",
+      "input": "width"
+     },
+     {
+      "node": "19",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "6",
+      "input": "height"
+     },
+     {
+      "node": "19",
+      "input": "height"
+     }
+    ],
+    "maskGrow": [
+     {
+      "node": "11",
+      "input": "expand"
+     }
+    ],
+    "prompt": [
+     {
+      "node": "16",
+      "input": "text"
+     }
+    ],
+    "negativePrompt": [
+     {
+      "node": "17",
+      "input": "text"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "20",
+      "input": "unet_name"
+     }
+    ],
+    "loraStrength": [
+     {
+      "node": "21",
+      "input": "strength_model"
+     }
+    ],
+    "shift": [
+     {
+      "node": "22",
+      "input": "shift"
+     }
+    ],
+    "seed": [
+     {
+      "node": "23",
+      "input": "seed"
+     }
+    ],
+    "steps": [
+     {
+      "node": "23",
+      "input": "steps"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "23",
+      "input": "cfg"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "38",
+      "input": "filename_prefix"
+     }
+    ],
+    "maskPrompt": [
+     {
+      "node": "8",
+      "input": "text"
+     }
+    ],
+    "image": [
+     {
+      "node": "40",
+      "input": "image"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "38",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "frames": 81,
+    "width": 832,
+    "height": 480,
+    "maskGrow": 16,
+    "steps": 4,
+    "cfg": 1,
+    "shift": 5,
+    "loraStrength": 1
+   },
+   "limits": {
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "maxFrames": 81,
+    "dimensionMultiple": 16,
+    "frameStep": 4
+   },
+   "models": [
+    {
+     "folder": "checkpoints",
+     "file": "sam3.1_multiplex_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/sam3.1/resolve/main/checkpoints/sam3.1_multiplex_fp16.safetensors",
+     "sizeBytes": 1745546848,
+     "licence": "SAM License (Meta; commercial use allowed with its terms)",
+     "note": "Already in the library (video-bg-remove-sam3)."
+    },
+    {
+     "folder": "text_encoders",
+     "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "sizeBytes": 6735906897,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "vae",
+     "file": "wan_2.1_vae.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+     "sizeBytes": 253815318,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "wan2.1_vace_14B_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+     "sizeBytes": 34675323640,
+     "licence": "Apache-2.0",
+     "note": "Already in the library (wan21-vace-14b-ref2v). Cast to fp8 on load (weight_dtype fp8_e4m3fn_fast)."
+    },
+    {
+     "folder": "loras",
+     "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "sizeBytes": 630697104,
+     "licence": "Apache-2.0 (lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill)",
+     "note": "Already a library KNOWN_MODELS entry."
+    }
+   ],
+   "vram": "24 GB class",
+   "licence": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License; KJNodes GPL-3.0 code (GrowMaskWithBlur)",
+   "validated": true,
+   "ranOnCpu": false,
+   "notes": "maskPrompt = what to replace; image = the new thing (best on a plain or white background, cut out with bg-remove-birefnet); prompt describes the result. The reference goes to WanVaceToVideo.reference_image (one extra latent frame that TrimVideoLatent drops), the masked area is regenerated following the original motion. Genjutsu 'Object Swap' open route. For a whole person, SCAIL-2 Character Replacement (template video_wan21_scail2_character_replacement) keeps the body motion better (not built)."
+  },
+  {
+   "id": "video-insert-wan-vace",
+   "title": "Insert an object into a painted region: Wan 2.1 VACE 14B with reference (region held for the whole window)",
+   "capability": "video-swap",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Source clip (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 0
+     },
+     "_meta": {
+      "title": "First frame of the window (startFrame)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 81
+     },
+     "_meta": {
+      "title": "Frames to process, 4n+1 (frames)"
+     }
+    },
+    "5": {
+     "class_type": "ImageFromBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "batch_index": [
+       "3",
+       0
+      ],
+      "length": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window"
+     }
+    },
+    "6": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Work size (width, height; multiples of 16)"
+     }
+    },
+    "60": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window start in seconds"
+     }
+    },
+    "61": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "4",
+       0
+      ],
+      "values.b": [
+       "2",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Window length in seconds"
+     }
+    },
+    "62": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       1
+      ],
+      "start_index": [
+       "60",
+       0
+      ],
+      "duration": [
+       "61",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The window's sound (none for silent clips)"
+     }
+    },
+    "70": {
+     "class_type": "LoadImageMask",
+     "inputs": {
+      "image": "mask.png",
+      "channel": "alpha"
+     },
+     "_meta": {
+      "title": "Region to fill (mask; alpha = selected)"
+     }
+    },
+    "71": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "70",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Mask as image"
+     }
+    },
+    "72": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "71",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": 832,
+      "height": 480,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "At the work size"
+     }
+    },
+    "74": {
+     "class_type": "RepeatImageBatch",
+     "inputs": {
+      "image": [
+       "72",
+       0
+      ],
+      "amount": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Same region in every frame"
+     }
+    },
+    "10": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "74",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "Per-frame masks"
+     }
+    },
+    "11": {
+     "class_type": "GrowMask",
+     "inputs": {
+      "mask": [
+       "10",
+       0
+      ],
+      "expand": 16,
+      "tapered_corners": true
+     },
+     "_meta": {
+      "title": "Grow the mask to cover edges and shadows (maskGrow, px)"
+     }
+    },
+    "12": {
+     "class_type": "InvertMask",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Inverted mask"
+     }
+    },
+    "13": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "12",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Black where the mask is"
+     }
+    },
+    "14": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "6",
+       0
+      ],
+      "source": [
+       "13",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Control video: the clip with the masked area blanked (as the official VACE inpainting template)"
+     }
+    },
+    "15": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+     },
+     "_meta": {
+      "title": "umT5"
+     }
+    },
+    "16": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "The red sports car from the reference drives down the street.",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The scene after the change (prompt)"
+     }
+    },
+    "17": {
+     "class_type": "CLIPTextEncode",
+     "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+       "15",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+     }
+    },
+    "18": {
+     "class_type": "VAELoader",
+     "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+     },
+     "_meta": {
+      "title": "Wan VAE"
+     }
+    },
+    "19": {
+     "class_type": "WanVaceToVideo",
+     "inputs": {
+      "positive": [
+       "16",
+       0
+      ],
+      "negative": [
+       "17",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ],
+      "width": 832,
+      "height": 480,
+      "length": [
+       "4",
+       0
+      ],
+      "batch_size": 1,
+      "strength": 1.0,
+      "control_video": [
+       "14",
+       0
+      ],
+      "control_masks": [
+       "11",
+       0
+      ],
+      "reference_image": [
+       "40",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "VACE: mask 1 = regenerate, 0 = keep"
+     }
+    },
+    "20": {
+     "class_type": "UNETLoader",
+     "inputs": {
+      "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+     },
+     "_meta": {
+      "title": "Wan 2.1 VACE 14B (cast to fp8 on load)"
+     }
+    },
+    "21": {
+     "class_type": "LoraLoaderModelOnly",
+     "inputs": {
+      "model": [
+       "20",
+       0
+      ],
+      "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "strength_model": 1.0
+     },
+     "_meta": {
+      "title": "lightx2v 4-step LoRA, Apache-2.0 (loraStrength 0 + steps 20 + cfg 6 = full quality)"
+     }
+    },
+    "22": {
+     "class_type": "ModelSamplingSD3",
+     "inputs": {
+      "model": [
+       "21",
+       0
+      ],
+      "shift": 5.0
+     },
+     "_meta": {
+      "title": "Shift (shift)"
+     }
+    },
+    "23": {
+     "class_type": "KSampler",
+     "inputs": {
+      "model": [
+       "22",
+       0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "positive": [
+       "19",
+       0
+      ],
+      "negative": [
+       "19",
+       1
+      ],
+      "latent_image": [
+       "19",
+       2
+      ]
+     },
+     "_meta": {
+      "title": "Sample (seed, steps, cfg)"
+     }
+    },
+    "24": {
+     "class_type": "TrimVideoLatent",
+     "inputs": {
+      "samples": [
+       "23",
+       0
+      ],
+      "trim_amount": [
+       "19",
+       3
+      ]
+     },
+     "_meta": {
+      "title": "Drop the reference latent"
+     }
+    },
+    "25": {
+     "class_type": "VAEDecode",
+     "inputs": {
+      "samples": [
+       "24",
+       0
+      ],
+      "vae": [
+       "18",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Decode"
+     }
+    },
+    "30": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Source size"
+     }
+    },
+    "31": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "25",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Result at the source size"
+     }
+    },
+    "32": {
+     "class_type": "GrowMaskWithBlur",
+     "inputs": {
+      "mask": [
+       "11",
+       0
+      ],
+      "expand": 4,
+      "incremental_expandrate": 0.0,
+      "tapered_corners": true,
+      "flip_input": false,
+      "blur_radius": 6.0,
+      "lerp_alpha": 1.0,
+      "decay_factor": 1.0,
+      "fill_holes": false
+     },
+     "_meta": {
+      "title": "Soft paste edge"
+     }
+    },
+    "33": {
+     "class_type": "MaskToImage",
+     "inputs": {
+      "mask": [
+       "32",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Paste mask as image"
+     }
+    },
+    "34": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "33",
+       0
+      ],
+      "upscale_method": "bilinear",
+      "width": [
+       "30",
+       0
+      ],
+      "height": [
+       "30",
+       1
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "Paste mask at the source size"
+     }
+    },
+    "35": {
+     "class_type": "ImageToMask",
+     "inputs": {
+      "image": [
+       "34",
+       0
+      ],
+      "channel": "red"
+     },
+     "_meta": {
+      "title": "Paste mask"
+     }
+    },
+    "36": {
+     "class_type": "ImageCompositeMasked",
+     "inputs": {
+      "destination": [
+       "5",
+       0
+      ],
+      "source": [
+       "31",
+       0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+       "35",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Only the masked area changes"
+     }
+    },
+    "37": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "36",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "62",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+     },
+     "_meta": {
+      "title": "Clip with the window's sound"
+     }
+    },
+    "38": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "37",
+       0
+      ],
+      "filename_prefix": "fuobe/video-insert-wan-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    },
+    "40": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "reference.png"
+     },
+     "_meta": {
+      "title": "What to put in (image: object, product or character on a plain background)"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "startFrame": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "frames": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "width": [
+     {
+      "node": "6",
+      "input": "width"
+     },
+     {
+      "node": "19",
+      "input": "width"
+     },
+     {
+      "node": "72",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "6",
+      "input": "height"
+     },
+     {
+      "node": "19",
+      "input": "height"
+     },
+     {
+      "node": "72",
+      "input": "height"
+     }
+    ],
+    "maskGrow": [
+     {
+      "node": "11",
+      "input": "expand"
+     }
+    ],
+    "prompt": [
+     {
+      "node": "16",
+      "input": "text"
+     }
+    ],
+    "negativePrompt": [
+     {
+      "node": "17",
+      "input": "text"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "20",
+      "input": "unet_name"
+     }
+    ],
+    "loraStrength": [
+     {
+      "node": "21",
+      "input": "strength_model"
+     }
+    ],
+    "shift": [
+     {
+      "node": "22",
+      "input": "shift"
+     }
+    ],
+    "seed": [
+     {
+      "node": "23",
+      "input": "seed"
+     }
+    ],
+    "steps": [
+     {
+      "node": "23",
+      "input": "steps"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "23",
+      "input": "cfg"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "38",
+      "input": "filename_prefix"
+     }
+    ],
+    "mask": [
+     {
+      "node": "70",
+      "input": "image"
+     }
+    ],
+    "image": [
+     {
+      "node": "40",
+      "input": "image"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "38",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "frames": 81,
+    "width": 832,
+    "height": 480,
+    "maskGrow": 16,
+    "steps": 4,
+    "cfg": 1,
+    "shift": 5,
+    "loraStrength": 1
+   },
+   "limits": {
+    "maxWidth": 1280,
+    "maxHeight": 1280,
+    "maxFrames": 81,
+    "dimensionMultiple": 16,
+    "frameStep": 4
+   },
+   "models": [
+    {
+     "folder": "text_encoders",
+     "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+     "sizeBytes": 6735906897,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "vae",
+     "file": "wan_2.1_vae.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+     "sizeBytes": 253815318,
+     "licence": "Apache-2.0",
+     "note": "Already in the library."
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "wan2.1_vace_14B_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
+     "sizeBytes": 34675323640,
+     "licence": "Apache-2.0",
+     "note": "Already in the library (wan21-vace-14b-ref2v). Cast to fp8 on load (weight_dtype fp8_e4m3fn_fast)."
+    },
+    {
+     "folder": "loras",
+     "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+     "sizeBytes": 630697104,
+     "licence": "Apache-2.0 (lightx2v/Wan2.1-T2V-14B-StepDistill-CfgDistill)",
+     "note": "Already a library KNOWN_MODELS entry."
+    }
+   ],
+   "vram": "24 GB class",
+   "licence": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v LoRA); KJNodes GPL-3.0 code",
+   "validated": true,
+   "ranOnCpu": false,
+   "notes": "mask = the region (alpha) where the new object should appear; it is repeated for every frame (RepeatImageBatch), so it suits a static or slow camera. image = the object. No SAM 3.1 needed."
+  },
+  {
+   "id": "kenburns-still",
+   "title": "Ken Burns pan and zoom over a still for N seconds at F fps (core loops, chunk-encoded)",
+   "capability": "still-motion",
+   "graph": {
+    "1": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "still.png"
+     },
+     "_meta": {
+      "title": "Still (image)"
+     }
+    },
+    "2": {
+     "class_type": "ImageScaleBy",
+     "inputs": {
+      "image": [
+       "1",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "scale_by": 2.0
+     },
+     "_meta": {
+      "title": "Supersample the still (supersample): finer crop steps"
+     }
+    },
+    "3": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Source size"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 1280
+     },
+     "_meta": {
+      "title": "Output width (width)"
+     }
+    },
+    "5": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 720
+     },
+     "_meta": {
+      "title": "Output height (height)"
+     }
+    },
+    "6": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 5.0
+     },
+     "_meta": {
+      "title": "Seconds (duration)"
+     }
+    },
+    "7": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 30.0
+     },
+     "_meta": {
+      "title": "Frames per second (fps)"
+     }
+    },
+    "8": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "max(round(a * b), 2)",
+      "values.a": [
+       "6",
+       0
+      ],
+      "values.b": [
+       "7",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frame count = duration x fps"
+     }
+    },
+    "9": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 1.0
+     },
+     "_meta": {
+      "title": "Zoom at the start (zoomStart; 1 = the widest crop)"
+     }
+    },
+    "10": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 1.25
+     },
+     "_meta": {
+      "title": "Zoom at the end (zoomEnd)"
+     }
+    },
+    "11": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 0.5
+     },
+     "_meta": {
+      "title": "Centre x at the start, 0-1 (panStartX)"
+     }
+    },
+    "12": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 0.5
+     },
+     "_meta": {
+      "title": "Centre y at the start, 0-1 (panStartY)"
+     }
+    },
+    "13": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 0.6
+     },
+     "_meta": {
+      "title": "Centre x at the end, 0-1 (panEndX)"
+     }
+    },
+    "14": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 0.45
+     },
+     "_meta": {
+      "title": "Centre y at the end, 0-1 (panEndY)"
+     }
+    },
+    "15": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "min(a, b * c / d)",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "3",
+       1
+      ],
+      "values.c": [
+       "4",
+       0
+      ],
+      "values.d": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Widest crop with the output's shape: width"
+     }
+    },
+    "16": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "min(b, a * d / c)",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "3",
+       1
+      ],
+      "values.c": [
+       "4",
+       0
+      ],
+      "values.d": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Widest crop with the output's shape: height"
+     }
+    },
+    "17": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 30
+     },
+     "_meta": {
+      "title": "Frames per encoded chunk (chunkFrames)"
+     }
+    },
+    "18": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "ceil(a / b)",
+      "values.a": [
+       "8",
+       1
+      ],
+      "values.b": [
+       "17",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Chunk count"
+     }
+    },
+    "40": {
+     "class_type": "StartLoop",
+     "inputs": {
+      "mode": "For",
+      "mode.start_iteration_index": 0,
+      "mode.max_iteration": [
+       "18",
+       1
+      ],
+      "mode.step": 1,
+      "cache_iterations": false
+     },
+     "_meta": {
+      "title": "One pass per chunk"
+     }
+    },
+    "41": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a * b",
+      "values.a": [
+       "40",
+       0
+      ],
+      "values.b": [
+       "17",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "First frame of this chunk"
+     }
+    },
+    "42": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "min(a * b + b, c)",
+      "values.a": [
+       "40",
+       0
+      ],
+      "values.b": [
+       "17",
+       0
+      ],
+      "values.c": [
+       "8",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "End of this chunk (exclusive)"
+     }
+    },
+    "20": {
+     "class_type": "StartLoop",
+     "inputs": {
+      "mode": "For",
+      "mode.start_iteration_index": [
+       "41",
+       1
+      ],
+      "mode.max_iteration": [
+       "42",
+       1
+      ],
+      "mode.step": 1,
+      "cache_iterations": false,
+      "parent_iteration": [
+       "40",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "One pass per frame of the chunk"
+     }
+    },
+    "21": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "(1 - cos(3.141592653589793 * a / max(b - 1, 1))) / 2",
+      "values.a": [
+       "20",
+       0
+      ],
+      "values.b": [
+       "8",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Eased progress 0..1 (ease in-out)"
+     }
+    },
+    "22": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a + (b - a) * c",
+      "values.a": [
+       "9",
+       0
+      ],
+      "values.b": [
+       "10",
+       0
+      ],
+      "values.c": [
+       "21",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Zoom of this frame"
+     }
+    },
+    "23": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "15",
+       0
+      ],
+      "values.b": [
+       "22",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Crop width"
+     }
+    },
+    "24": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a / b",
+      "values.a": [
+       "16",
+       0
+      ],
+      "values.b": [
+       "22",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Crop height"
+     }
+    },
+    "25": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "min(max((a + (b - a) * c) * d - e / 2, 0), d - e)",
+      "values.a": [
+       "11",
+       0
+      ],
+      "values.b": [
+       "13",
+       0
+      ],
+      "values.c": [
+       "21",
+       0
+      ],
+      "values.d": [
+       "3",
+       0
+      ],
+      "values.e": [
+       "23",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Crop left"
+     }
+    },
+    "26": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "min(max((a + (b - a) * c) * d - e / 2, 0), d - e)",
+      "values.a": [
+       "12",
+       0
+      ],
+      "values.b": [
+       "14",
+       0
+      ],
+      "values.c": [
+       "21",
+       0
+      ],
+      "values.d": [
+       "3",
+       1
+      ],
+      "values.e": [
+       "24",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Crop top"
+     }
+    },
+    "27": {
+     "class_type": "ImageCrop",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "width": [
+       "23",
+       1
+      ],
+      "height": [
+       "24",
+       1
+      ],
+      "x": [
+       "25",
+       1
+      ],
+      "y": [
+       "26",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Crop this frame"
+     }
+    },
+    "28": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "27",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "4",
+       0
+      ],
+      "height": [
+       "5",
+       0
+      ],
+      "crop": "disabled"
+     },
+     "_meta": {
+      "title": "To the output size"
+     }
+    },
+    "29": {
+     "class_type": "EndLoop",
+     "inputs": {
+      "accumulate": true,
+      "output_value": [
+       "28",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The chunk's frames"
+     }
+    },
+    "30": {
+     "class_type": "RebatchImages",
+     "inputs": {
+      "images": [
+       "29",
+       0
+      ],
+      "batch_size": 4096
+     },
+     "_meta": {
+      "title": "As one batch"
+     }
+    },
+    "31": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "30",
+       0
+      ],
+      "fps": [
+       "7",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264"
+     },
+     "_meta": {
+      "title": "Encode the chunk now (its frames can leave memory)"
+     }
+    },
+    "43": {
+     "class_type": "EndLoop",
+     "inputs": {
+      "accumulate": true,
+      "output_value": [
+       "31",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The encoded chunks"
+     }
+    },
+    "44": {
+     "class_type": "ConcatenateVideo",
+     "inputs": {
+      "videos.video0": [
+       "43",
+       0
+      ],
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Chunks in order"
+     }
+    },
+    "32": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "44",
+       0
+      ],
+      "filename_prefix": "fuobe/kenburns-still",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "image": [
+     {
+      "node": "1",
+      "input": "image"
+     }
+    ],
+    "supersample": [
+     {
+      "node": "2",
+      "input": "scale_by"
+     }
+    ],
+    "width": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "height": [
+     {
+      "node": "5",
+      "input": "value"
+     }
+    ],
+    "duration": [
+     {
+      "node": "6",
+      "input": "value"
+     }
+    ],
+    "fps": [
+     {
+      "node": "7",
+      "input": "value"
+     }
+    ],
+    "zoomStart": [
+     {
+      "node": "9",
+      "input": "value"
+     }
+    ],
+    "zoomEnd": [
+     {
+      "node": "10",
+      "input": "value"
+     }
+    ],
+    "panStartX": [
+     {
+      "node": "11",
+      "input": "value"
+     }
+    ],
+    "panStartY": [
+     {
+      "node": "12",
+      "input": "value"
+     }
+    ],
+    "panEndX": [
+     {
+      "node": "13",
+      "input": "value"
+     }
+    ],
+    "panEndY": [
+     {
+      "node": "14",
+      "input": "value"
+     }
+    ],
+    "chunkFrames": [
+     {
+      "node": "17",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "32",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "32",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "supersample": 2.0,
+    "width": 1280,
+    "height": 720,
+    "duration": 5,
+    "fps": 30,
+    "zoomStart": 1.0,
+    "zoomEnd": 1.25,
+    "panStartX": 0.5,
+    "panStartY": 0.5,
+    "panEndX": 0.6,
+    "panEndY": 0.45,
+    "chunkFrames": 30
+   },
+   "models": [],
+   "vram": "0 (CPU). RAM: about 11 MB per output frame at 1280x720 stays cached until ComfyUI's RAM-pressure cache evicts it",
+   "licence": "n/a (no model; ComfyUI core nodes)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "2 s, 25 fps, 640x360, one loop (first design)",
+     "seconds": 33.3,
+     "result": "50 frames, 2.000 s; zoom 1->1.25 and pan visible in frames 0/25/49"
+    },
+    {
+     "settings": "5 s, 30 fps, 1280x720, one loop (first design), default cache",
+     "seconds": null,
+     "result": "OOM-killed at 10.0 GB RSS (about 41 MB per frame cached) - why the final graph encodes chunks"
+    },
+    {
+     "settings": "2 s, 25 fps, 640x360, chunks of 20 (final graph)",
+     "seconds": 17.9,
+     "result": "50 frames, 2.000 s, identical to the one-loop output (mean abs diff 0.56/255, codec noise); smooth across chunk joins"
+    },
+    {
+     "settings": "5 s, 30 fps, 1280x720, chunks of 30, --cache-ram 13 (RAM pressure)",
+     "seconds": 75.6,
+     "result": "150 frames h264, 4.999 s; peak RSS +2.6 GB"
+    },
+    {
+     "settings": "10 s, 30 fps, 1280x720, zoom 1->1.5, chunks of 30, --cache-ram 13",
+     "seconds": 142.1,
+     "result": "300 frames, 9.999 s; peak RSS +3.7 GB"
+    }
+   ],
+   "notes": "Zoom 1 = the widest crop with the output's aspect ratio (cover); zoom 1.25 = 25% closer. Centre positions are 0-1 of the source. Ease in-out (1-cos(pi t))/2. Outer StartLoop/EndLoop runs one pass per chunk of chunkFrames; the inner loop (parent_iteration) crops each frame (ImageCrop) and scales it (lanczos) to width x height; each chunk is encoded at once (CreateVideo codec h264) and ConcatenateVideo joins the list. supersample upsizes the still once so integer crop steps are half a source pixel. Core loops landed on 2026-09-15 (ComfyUI #16227/#16345/#16347): new API. Faceless 'Frame by frame' open route; also a gentle push-in for end cards."
+  },
+  {
+   "id": "audio-loop-crossfade",
+   "title": "Music bed of any length: loop a clip with equal-power crossfades and a fade-out (core audio nodes + core loop)",
+   "capability": "audio-loop",
+   "graph": {
+    "1": {
+     "class_type": "VHS_LoadAudioUpload",
+     "inputs": {
+      "audio": "music.wav",
+      "start_time": 0,
+      "duration": 0
+     },
+     "_meta": {
+      "title": "Music clip to loop (audio)"
+     }
+    },
+    "2": {
+     "class_type": "AudioAdjustVolume",
+     "inputs": {
+      "audio": [
+       "1",
+       0
+      ],
+      "volume": -3
+     },
+     "_meta": {
+      "title": "Headroom so overlapping seams never clip (headroomDb)"
+     }
+    },
+    "3": {
+     "class_type": "LoadAudio",
+     "inputs": {
+      "audio": "fade.wav"
+     },
+     "_meta": {
+      "title": "Crossfade curve: stereo, left = fade-in, right = fade-out, crossfade seconds long (audio2)"
+     }
+    },
+    "4": {
+     "class_type": "SplitAudioChannels",
+     "inputs": {
+      "audio": [
+       "3",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Fade-in / fade-out curves"
+     }
+    },
+    "5": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 1.0
+     },
+     "_meta": {
+      "title": "Crossfade seconds (crossfade; = the curve's length)"
+     }
+    },
+    "6": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 20.0
+     },
+     "_meta": {
+      "title": "Length of the bed in seconds (duration)"
+     }
+    },
+    "7": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "max(ceil((a - b) / (c - b)), 1)",
+      "values.a": [
+       "6",
+       0
+      ],
+      "values.b": [
+       "5",
+       0
+      ],
+      "values.c": [
+       "1",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Repeats needed"
+     }
+    },
+    "8": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       0
+      ],
+      "start_index": 0.0,
+      "duration": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Head (first crossfade seconds)"
+     }
+    },
+    "9": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "0 - a",
+      "values.a": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "-crossfade (from the end)"
+     }
+    },
+    "10": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       0
+      ],
+      "start_index": [
+       "9",
+       0
+      ],
+      "duration": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Tail (last crossfade seconds)"
+     }
+    },
+    "11": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a - 2 * b",
+      "values.a": [
+       "1",
+       1
+      ],
+      "values.b": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Body length"
+     }
+    },
+    "12": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       0
+      ],
+      "start_index": [
+       "5",
+       0
+      ],
+      "duration": [
+       "11",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Body (between head and tail)"
+     }
+    },
+    "13": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "10",
+       0
+      ],
+      "audio2": [
+       "4",
+       1
+      ],
+      "merge_method": "multiply"
+     },
+     "_meta": {
+      "title": "Tail fading out"
+     }
+    },
+    "14": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "8",
+       0
+      ],
+      "audio2": [
+       "4",
+       0
+      ],
+      "merge_method": "multiply"
+     },
+     "_meta": {
+      "title": "Head fading in"
+     }
+    },
+    "15": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "13",
+       0
+      ],
+      "audio2": [
+       "14",
+       0
+      ],
+      "merge_method": "add"
+     },
+     "_meta": {
+      "title": "Seam: tail into head"
+     }
+    },
+    "16": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "12",
+       0
+      ],
+      "audio2": [
+       "15",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "One repeat = body + seam"
+     }
+    },
+    "20": {
+     "class_type": "StartLoop",
+     "inputs": {
+      "mode": "simple",
+      "mode.num_iterations": [
+       "7",
+       1
+      ],
+      "cache_iterations": false,
+      "initial_iteration_value": [
+       "8",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Append one repeat per pass (starts from the head)"
+     }
+    },
+    "21": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "20",
+       4
+      ],
+      "audio2": [
+       "16",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "Bed so far + one repeat"
+     }
+    },
+    "22": {
+     "class_type": "EndLoop",
+     "inputs": {
+      "accumulate": false,
+      "output_value": [
+       "21",
+       0
+      ],
+      "next_iteration_value": [
+       "21",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "The looped bed"
+     }
+    },
+    "23": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "22",
+       0
+      ],
+      "start_index": 0.0,
+      "duration": [
+       "6",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Cut to the requested length"
+     }
+    },
+    "24": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a - b",
+      "values.a": [
+       "6",
+       0
+      ],
+      "values.b": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Start of the final fade"
+     }
+    },
+    "25": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "23",
+       0
+      ],
+      "start_index": 0.0,
+      "duration": [
+       "24",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "All but the ending"
+     }
+    },
+    "26": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "23",
+       0
+      ],
+      "start_index": [
+       "9",
+       0
+      ],
+      "duration": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Ending"
+     }
+    },
+    "27": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "26",
+       0
+      ],
+      "audio2": [
+       "4",
+       1
+      ],
+      "merge_method": "multiply"
+     },
+     "_meta": {
+      "title": "Ending fades out"
+     }
+    },
+    "28": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "25",
+       0
+      ],
+      "audio2": [
+       "27",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "Finished bed"
+     }
+    },
+    "29": {
+     "class_type": "SaveAudio",
+     "inputs": {
+      "audio": [
+       "28",
+       0
+      ],
+      "filename_prefix": "fuobe/audio-loop"
+     },
+     "_meta": {
+      "title": "Save (FLAC)"
+     }
+    }
+   },
+   "bindings": {
+    "audio": [
+     {
+      "node": "1",
+      "input": "audio"
+     }
+    ],
+    "headroomDb": [
+     {
+      "node": "2",
+      "input": "volume"
+     }
+    ],
+    "audio2": [
+     {
+      "node": "3",
+      "input": "audio"
+     }
+    ],
+    "crossfade": [
+     {
+      "node": "5",
+      "input": "value"
+     }
+    ],
+    "duration": [
+     {
+      "node": "6",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "29",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "29",
+     "kind": "audio"
+    }
+   ],
+   "defaults": {
+    "headroomDb": -3,
+    "crossfade": 1.0,
+    "duration": 600
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (no model; ComfyUI core + VideoHelperSuite loader)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "6 s stereo 44.1 kHz clip -> 20 s, crossfade 1 s",
+     "seconds": 2.2,
+     "result": "FLAC 20.000 s, 44.1 kHz stereo (music not resampled), no clicks (max sample step = typical), seams at 5/10/15 s, fade-out over the last second"
+    }
+   ],
+   "notes": "audio2 = the crossfade curve the provider writes: a stereo WAV exactly crossfade seconds long, left = sin(pi/2 t) fade-in, right = cos(pi/2 t) fade-out, at a low rate (8 kHz) so AudioMerge upsamples the curve, never the music. Core has no gain-ramp node, hence the uploaded curve. Repeats = ceil((duration - crossfade)/(clip - crossfade)) from VHS_LoadAudioUpload's duration; each repeat is body + (tail fading out + head fading in). headroomDb (default -3) keeps the summed seam below 1.0 because AudioMerge 'add' normalises a whole segment when it peaks over 1. A pure tone shows a +3 dB bump at the seams (equal power on correlated sound); write a linear curve instead for loops of very similar material. Clip must be longer than 2 x crossfade. ACE-Step beds (<=240 s) become 10-minute beds."
+  },
+  {
+   "id": "audio-join-crossfade",
+   "title": "Join two audio clips with a crossfade (core audio nodes)",
+   "capability": "audio-concat",
+   "graph": {
+    "1": {
+     "class_type": "VHS_LoadAudioUpload",
+     "inputs": {
+      "audio": "a.wav",
+      "start_time": 0,
+      "duration": 0
+     },
+     "_meta": {
+      "title": "First clip (audio)"
+     }
+    },
+    "2": {
+     "class_type": "LoadAudio",
+     "inputs": {
+      "audio": "b.wav"
+     },
+     "_meta": {
+      "title": "Second clip (audio2)"
+     }
+    },
+    "3": {
+     "class_type": "LoadAudio",
+     "inputs": {
+      "audio": "fade.wav"
+     },
+     "_meta": {
+      "title": "Crossfade curve: stereo, left = fade-in, right = fade-out (audio3)"
+     }
+    },
+    "4": {
+     "class_type": "SplitAudioChannels",
+     "inputs": {
+      "audio": [
+       "3",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Fade-in / fade-out curves"
+     }
+    },
+    "5": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 1.0
+     },
+     "_meta": {
+      "title": "Crossfade seconds (crossfade)"
+     }
+    },
+    "6": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "0 - a",
+      "values.a": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "-crossfade"
+     }
+    },
+    "7": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a - b",
+      "values.a": [
+       "1",
+       1
+      ],
+      "values.b": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "First clip without its tail"
+     }
+    },
+    "8": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "1",
+       0
+      ],
+      "start_index": 0.0,
+      "duration": [
+       "7",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "First clip, all but the overlap"
+     }
+    },
+    "9": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "1",
+       0
+      ],
+      "start_index": [
+       "6",
+       0
+      ],
+      "duration": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "First clip's tail"
+     }
+    },
+    "10": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       0
+      ],
+      "start_index": 0.0,
+      "duration": [
+       "5",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Second clip's head"
+     }
+    },
+    "11": {
+     "class_type": "TrimAudioDuration",
+     "inputs": {
+      "audio": [
+       "2",
+       0
+      ],
+      "start_index": [
+       "5",
+       0
+      ],
+      "duration": 100000.0
+     },
+     "_meta": {
+      "title": "Second clip after the overlap (a long duration = to its end)"
+     }
+    },
+    "12": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "9",
+       0
+      ],
+      "audio2": [
+       "4",
+       1
+      ],
+      "merge_method": "multiply"
+     },
+     "_meta": {
+      "title": "Tail fading out"
+     }
+    },
+    "13": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "10",
+       0
+      ],
+      "audio2": [
+       "4",
+       0
+      ],
+      "merge_method": "multiply"
+     },
+     "_meta": {
+      "title": "Head fading in"
+     }
+    },
+    "14": {
+     "class_type": "AudioMerge",
+     "inputs": {
+      "audio1": [
+       "12",
+       0
+      ],
+      "audio2": [
+       "13",
+       0
+      ],
+      "merge_method": "add"
+     },
+     "_meta": {
+      "title": "Overlap"
+     }
+    },
+    "15": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "8",
+       0
+      ],
+      "audio2": [
+       "14",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "First clip + overlap"
+     }
+    },
+    "16": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "15",
+       0
+      ],
+      "audio2": [
+       "11",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "+ the rest of the second clip"
+     }
+    },
+    "17": {
+     "class_type": "SaveAudio",
+     "inputs": {
+      "audio": [
+       "16",
+       0
+      ],
+      "filename_prefix": "fuobe/audio-join"
+     },
+     "_meta": {
+      "title": "Save (FLAC)"
+     }
+    }
+   },
+   "bindings": {
+    "audio": [
+     {
+      "node": "1",
+      "input": "audio"
+     }
+    ],
+    "audio2": [
+     {
+      "node": "2",
+      "input": "audio"
+     }
+    ],
+    "audio3": [
+     {
+      "node": "3",
+      "input": "audio"
+     }
+    ],
+    "crossfade": [
+     {
+      "node": "5",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "17",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "17",
+     "kind": "audio"
+    }
+   ],
+   "defaults": {
+    "crossfade": 1.0
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (no model; ComfyUI core + VideoHelperSuite loader)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "6 s 44.1 kHz tone + 6 s 48 kHz pink noise, crossfade 1 s",
+     "seconds": 1.0,
+     "result": "FLAC 11.000 s at 48 kHz (AudioConcat resamples to the higher rate), level continuous through the overlap"
+    }
+   ],
+   "notes": "audio3 = the same curve file as audio-loop-crossfade. Fold for more clips (A+B, then +C). crossfade 0.02 gives a click-free hard join. For clips placed at exact times use the existing audio-timeline."
+  },
+  {
+   "id": "video-export-pro",
+   "title": "Pro codec export: ProRes 422 HQ / 4444, H.265 10-bit, FFV1 lossless or 16-bit PNG (VideoHelperSuite)",
+   "capability": "video-export",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Video (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "VHS_VideoCombine",
+     "inputs": {
+      "images": [
+       "2",
+       0
+      ],
+      "audio": [
+       "2",
+       1
+      ],
+      "frame_rate": [
+       "2",
+       2
+      ],
+      "loop_count": 0,
+      "filename_prefix": "fuobe/video-export-pro",
+      "format": "video/ProRes",
+      "profile": "hq",
+      "pingpong": false,
+      "save_output": true
+     },
+     "_meta": {
+      "title": "Pro codec (format: video/ProRes | video/h265-mp4 | video/ffv1-mkv | video/16bit-png; profile for ProRes)"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "format": [
+     {
+      "node": "3",
+      "input": "format"
+     }
+    ],
+    "profile": [
+     {
+      "node": "3",
+      "input": "profile"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "3",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "3",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "format": "video/ProRes",
+    "profile": "hq"
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (VideoHelperSuite GPL-3.0 code; system ffmpeg prores_ks)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "2 s 320x180 25 fps clip with sound",
+     "seconds": 1.2,
+     "result": ".mov ProRes profile HQ, yuv444p10le, bt709, 50 frames, pcm_s16le audio, 2.000 s"
+    }
+   ],
+   "notes": "VHS writes <prefix>.mov (no sound), <prefix>-audio.mov (with sound) and a .png; history lists the -audio file under .gifs[] when the clip has sound. format options from the live node: video/ProRes (profile lt|standard|hq|4444|4444xq), video/h265-mp4 (pix_fmt yuv420p10le), video/ffv1-mkv, video/16bit-png, video/av1-webm. Missing format widgets fall back to their defaults (VHS apply_format_widgets). Decodes the whole clip (GetVideoComponents): RAM grows with length."
+  },
+  {
+   "id": "video-sdr-to-hdr",
+   "title": "SDR to HDR: expand to Rec.2020 HLG and save 10-bit H.264 (core ImageSDRToHDR)",
+   "capability": "video-export",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "SDR video (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames, sound, fps"
+     }
+    },
+    "3": {
+     "class_type": "ImageSDRToHDR",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "algorithm": "lottes",
+      "algorithm.target_luminance": 650.0
+     },
+     "_meta": {
+      "title": "Expand to Rec.2020 HLG (strength: target peak nits)"
+     }
+    },
+    "4": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "3",
+       0
+      ],
+      "fps": [
+       "2",
+       2
+      ],
+      "audio": [
+       "2",
+       1
+      ],
+      "bit_depth": 10,
+      "color_space": "HDR",
+      "codec": "h264"
+     },
+     "_meta": {
+      "title": "10-bit HLG"
+     }
+    },
+    "5": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "4",
+       0
+      ],
+      "filename_prefix": "fuobe/video-sdr-to-hdr",
+      "format": "mp4",
+      "format.codec": "h264",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save HDR MP4"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "peakNits": [
+     {
+      "node": "3",
+      "input": "algorithm.target_luminance"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "5",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "5",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "peakNits": 650
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (ComfyUI core)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "2 s 320x180 25 fps",
+     "seconds": 11.2,
+     "result": "H.264 High 10, yuv420p10le, bt2020 primaries, arib-std-b67 (HLG) transfer, 50 frames, AAC kept"
+    }
+   ],
+   "notes": "Algorithmic inverse tone mapping (Lottes-style curve), not a learned model: the open stand-in for Topaz's SDR->HDR. The learned alternative is the LTX-2.5 SDR-To-HDR IC-LoRA (2026-09-28, LTX community licence; not built). AV1 10-bit via SaveVideo codec av1."
+  },
+  {
+   "id": "video-export-exr",
+   "title": "OpenEXR frame sequence (half float, scene-linear) from a video (core SaveImageAdvanced)",
+   "capability": "video-export",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "input.mp4"
+     },
+     "_meta": {
+      "title": "Video (video)"
+     }
+    },
+    "2": {
+     "class_type": "GetVideoComponents",
+     "inputs": {
+      "video": [
+       "1",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frames"
+     }
+    },
+    "3": {
+     "class_type": "SaveImageAdvanced",
+     "inputs": {
+      "images": [
+       "2",
+       0
+      ],
+      "filename_prefix": "fuobe/video-export-exr",
+      "format": "exr",
+      "format.bit_depth": "16-bit float",
+      "format.input_color_space": "sRGB"
+     },
+     "_meta": {
+      "title": "OpenEXR frames (scene-linear, half float)"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "3",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "3",
+     "kind": "image",
+     "role": "frames"
+    }
+   ],
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (ComfyUI core)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "2 s 320x180 25 fps",
+     "seconds": 1.0,
+     "result": "50 .exr files, linear transfer"
+    }
+   ],
+   "notes": "format.input_color_space sRGB applies the inverse sRGB curve, so the EXRs are scene-linear Rec.709. One file per frame: the app should zip them. Decodes the whole clip."
+  },
+  {
+   "id": "still-to-clip",
+   "title": "Still or end card to an N-second clip with a silent track (core)",
+   "capability": "still-motion",
+   "graph": {
+    "1": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "card.png"
+     },
+     "_meta": {
+      "title": "Still or end card (image)"
+     }
+    },
+    "2": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "1",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": 1280,
+      "height": 720,
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "To the clip size (width, height; centre crop)"
+     }
+    },
+    "3": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 3.0
+     },
+     "_meta": {
+      "title": "Seconds (duration)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 30.0
+     },
+     "_meta": {
+      "title": "Frames per second (fps)"
+     }
+    },
+    "5": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "max(round(a * b), 1)",
+      "values.a": [
+       "3",
+       0
+      ],
+      "values.b": [
+       "4",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Frame count"
+     }
+    },
+    "6": {
+     "class_type": "RepeatImageBatch",
+     "inputs": {
+      "image": [
+       "2",
+       0
+      ],
+      "amount": [
+       "5",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Hold the still"
+     }
+    },
+    "7": {
+     "class_type": "EmptyAudio",
+     "inputs": {
+      "duration": [
+       "3",
+       0
+      ],
+      "sample_rate": 44100,
+      "channels": 2
+     },
+     "_meta": {
+      "title": "Silent soundtrack (so joins and players see an audio track)"
+     }
+    },
+    "8": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "6",
+       0
+      ],
+      "fps": [
+       "4",
+       0
+      ],
+      "audio": [
+       "7",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264"
+     },
+     "_meta": {
+      "title": "Clip (encoded right away)"
+     }
+    },
+    "9": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "8",
+       0
+      ],
+      "filename_prefix": "fuobe/still-to-clip",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "image": [
+     {
+      "node": "1",
+      "input": "image"
+     }
+    ],
+    "width": [
+     {
+      "node": "2",
+      "input": "width"
+     }
+    ],
+    "height": [
+     {
+      "node": "2",
+      "input": "height"
+     }
+    ],
+    "duration": [
+     {
+      "node": "3",
+      "input": "value"
+     }
+    ],
+    "fps": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "9",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "9",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "width": 1280,
+    "height": 720,
+    "duration": 3,
+    "fps": 30
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (ComfyUI core)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "logo PNG -> 3 s, 25 fps, 640x360",
+     "seconds": 1.3,
+     "result": "H.264 75 frames + stereo AAC silence, 3.000 s"
+    }
+   ],
+   "notes": "ImageScale centre-crops to the clip size: the app renders the card (logo on the brand colour) at that size. For a gentle push-in use kenburns-still with zoomEnd 1.05. The silent track keeps joins and players happy."
+  },
+  {
+   "id": "video-append-endcard",
+   "title": "Append an end card to an ad and keep the ad's sound (picture stream-copied; core ConcatenateVideo)",
+   "capability": "concat",
+   "graph": {
+    "1": {
+     "class_type": "LoadVideo",
+     "inputs": {
+      "file": "clip.mp4"
+     },
+     "_meta": {
+      "title": "The ad (video; its picture is copied, not re-encoded, when compatible)"
+     }
+    },
+    "2": {
+     "class_type": "LoadAudio",
+     "inputs": {
+      "audio": "clip.mp4"
+     },
+     "_meta": {
+      "title": "Its soundtrack (the same upload; drop for silent clips)"
+     }
+    },
+    "3": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "card.png"
+     },
+     "_meta": {
+      "title": "End card, e.g. the logo on the brand colour (image)"
+     }
+    },
+    "4": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 1280
+     },
+     "_meta": {
+      "title": "Clip width (width; from the clip's header)"
+     }
+    },
+    "5": {
+     "class_type": "PrimitiveInt",
+     "inputs": {
+      "value": 720
+     },
+     "_meta": {
+      "title": "Clip height (height)"
+     }
+    },
+    "6": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 30.0
+     },
+     "_meta": {
+      "title": "Clip frame rate (fps)"
+     }
+    },
+    "7": {
+     "class_type": "PrimitiveFloat",
+     "inputs": {
+      "value": 2.0
+     },
+     "_meta": {
+      "title": "End card seconds (duration)"
+     }
+    },
+    "8": {
+     "class_type": "ImageScale",
+     "inputs": {
+      "image": [
+       "3",
+       0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+       "4",
+       0
+      ],
+      "height": [
+       "5",
+       0
+      ],
+      "crop": "center"
+     },
+     "_meta": {
+      "title": "Card at the clip's size"
+     }
+    },
+    "9": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "max(round(a * b), 1)",
+      "values.a": [
+       "7",
+       0
+      ],
+      "values.b": [
+       "6",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Card frames"
+     }
+    },
+    "10": {
+     "class_type": "RepeatImageBatch",
+     "inputs": {
+      "image": [
+       "8",
+       0
+      ],
+      "amount": [
+       "9",
+       1
+      ]
+     },
+     "_meta": {
+      "title": "Hold the card"
+     }
+    },
+    "11": {
+     "class_type": "CreateVideo",
+     "inputs": {
+      "images": [
+       "10",
+       0
+      ],
+      "fps": [
+       "6",
+       0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264"
+     },
+     "_meta": {
+      "title": "Card clip (H.264, like the ad)"
+     }
+    },
+    "12": {
+     "class_type": "EmptyAudio",
+     "inputs": {
+      "duration": [
+       "7",
+       0
+      ],
+      "sample_rate": 44100,
+      "channels": 2
+     },
+     "_meta": {
+      "title": "Silence under the card"
+     }
+    },
+    "13": {
+     "class_type": "AudioConcat",
+     "inputs": {
+      "audio1": [
+       "2",
+       0
+      ],
+      "audio2": [
+       "12",
+       0
+      ],
+      "direction": "after"
+     },
+     "_meta": {
+      "title": "Ad sound, then silence"
+     }
+    },
+    "14": {
+     "class_type": "ConcatenateVideo",
+     "inputs": {
+      "videos.video0": [
+       "1",
+       0
+      ],
+      "videos.video1": [
+       "11",
+       0
+      ],
+      "codec": "auto",
+      "complete_audio": [
+       "13",
+       0
+      ]
+     },
+     "_meta": {
+      "title": "Ad + end card with the ad's sound"
+     }
+    },
+    "15": {
+     "class_type": "SaveVideo",
+     "inputs": {
+      "video": [
+       "14",
+       0
+      ],
+      "filename_prefix": "fuobe/video-append-endcard",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+     },
+     "_meta": {
+      "title": "Save video"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "file"
+     },
+     {
+      "node": "2",
+      "input": "audio"
+     }
+    ],
+    "image": [
+     {
+      "node": "3",
+      "input": "image"
+     }
+    ],
+    "width": [
+     {
+      "node": "4",
+      "input": "value"
+     }
+    ],
+    "height": [
+     {
+      "node": "5",
+      "input": "value"
+     }
+    ],
+    "fps": [
+     {
+      "node": "6",
+      "input": "value"
+     }
+    ],
+    "duration": [
+     {
+      "node": "7",
+      "input": "value"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "15",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "15",
+     "kind": "video"
+    }
+   ],
+   "defaults": {
+    "duration": 2
+   },
+   "models": [],
+   "vram": "0 (CPU)",
+   "licence": "n/a (ComfyUI core)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "ComfyUI-encoded 2 s 320x180 25 fps clip + 2 s card",
+     "seconds": 1.0,
+     "result": "4.000 s, 100 frames; the clip's 50 frames decode bit-identical to the source (stream copy); silencedetect: silence from 2.00 s"
+    },
+    {
+     "settings": "ffmpeg/libx264 clip, untagged and bt709-tagged",
+     "seconds": null,
+     "result": "FAILS in core v0.41: 'Video chunk 1 could not be encoded compatibly: extradata ... color space' (ConcatenateVideo cannot normalise clips from other encoders)"
+    }
+   ],
+   "notes": "width/height/fps = the clip's (from its header). Works for clips Fuobe's open engine made (CreateVideo/SaveVideo, sRGB-tagged H.264). For clips from cloud models or uploads, fall back to still-to-clip + the existing video-concat-sound1-2 (decodes and re-encodes, holds every frame in RAM). The ad's sound is padded with card-length silence (AudioConcat) and passed as complete_audio. Silent clips: drop node 2 and use node 12 alone."
+  },
+  {
+   "id": "scene-mesh-moge",
+   "title": "Image to a 3D scene mesh (MoGe 2 / MoGe 3, whole frame)",
+   "capability": "cinema-3d-scene",
+   "graph": {
+    "1": {
+     "class_type": "LoadImage",
+     "inputs": {
+      "image": "scene.png"
+     }
+    },
+    "2": {
+     "class_type": "GetImageSize",
+     "inputs": {
+      "image": [
+       "1",
+       0
+      ]
+     }
+    },
+    "3": {
+     "class_type": "ComfyMathExpression",
+     "inputs": {
+      "expression": "a > 2048",
+      "values.a": [
+       "2",
+       0
+      ]
+     }
+    },
+    "4": {
+     "class_type": "ResizeImagesByLongerEdge",
+     "inputs": {
+      "longer_edge": 2048,
+      "images": [
+       "1",
+       0
+      ]
+     }
+    },
+    "5": {
+     "class_type": "ComfySwitchNode",
+     "inputs": {
+      "switch": [
+       "3",
+       2
+      ],
+      "on_false": [
+       "1",
+       0
+      ],
+      "on_true": [
+       "4",
+       0
+      ]
+     }
+    },
+    "6": {
+     "class_type": "LoadMoGeModel",
+     "inputs": {
+      "model_name": "moge_2_vitl_normal_fp16.safetensors"
+     }
+    },
+    "7": {
+     "class_type": "MoGeInference",
+     "inputs": {
+      "resolution_level": 9,
+      "fov_x_degrees": 0,
+      "batch_size": 4,
+      "force_projection": true,
+      "apply_mask": true,
+      "refine_steps": 3,
+      "moge_model": [
+       "6",
+       0
+      ],
+      "image": [
+       "5",
+       0
+      ]
+     }
+    },
+    "8": {
+     "class_type": "MoGePointMapToMesh",
+     "inputs": {
+      "batch_index": 0,
+      "decimation": 1,
+      "discontinuity_threshold": 0.04,
+      "texture": true,
+      "moge_geometry": [
+       "7",
+       0
+      ]
+     }
+    },
+    "9": {
+     "class_type": "SaveGLB",
+     "inputs": {
+      "filename_prefix": "fuobe/scene-mesh",
+      "mesh": [
+       "8",
+       0
+      ]
+     }
+    },
+    "10": {
+     "class_type": "MoGeRender",
+     "inputs": {
+      "output": "depth",
+      "moge_geometry": [
+       "7",
+       0
+      ]
+     }
+    },
+    "11": {
+     "class_type": "SaveImage",
+     "inputs": {
+      "filename_prefix": "fuobe/scene-depth",
+      "images": [
+       "10",
+       0
+      ]
+     }
+    }
+   },
+   "bindings": {
+    "image": [
+     {
+      "node": "1",
+      "input": "image"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "6",
+      "input": "model_name"
+     }
+    ],
+    "resolutionLevel": [
+     {
+      "node": "7",
+      "input": "resolution_level"
+     }
+    ],
+    "fovX": [
+     {
+      "node": "7",
+      "input": "fov_x_degrees"
+     }
+    ],
+    "decimation": [
+     {
+      "node": "8",
+      "input": "decimation"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "9",
+      "input": "filename_prefix"
+     },
+     {
+      "node": "11",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "9",
+     "kind": "3d",
+     "role": "scene"
+    },
+    {
+     "node": "11",
+     "kind": "image",
+     "role": "depth"
+    }
+   ],
+   "defaults": {
+    "checkpoint": "moge_2_vitl_normal_fp16.safetensors",
+    "resolutionLevel": 9,
+    "fovX": 0,
+    "decimation": 1
+   },
+   "models": [
+    {
+     "folder": "geometry_estimation",
+     "file": "moge_2_vitl_normal_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/main/geometry_estimation/moge_2_vitl_normal_fp16.safetensors",
+     "sizeBytes": 661859924,
+     "licence": "MIT"
+    },
+    {
+     "folder": "geometry_estimation",
+     "file": "moge_3_vitl_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/main/geometry_estimation/moge_3_vitl_fp16.safetensors",
+     "sizeBytes": 740652334,
+     "licence": "MIT",
+     "note": "Optional alternative checkpoint (bind checkpoint)."
+    },
+    {
+     "folder": "geometry_estimation",
+     "file": "moge_3_vitg_fp16.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/main/geometry_estimation/moge_3_vitg_fp16.safetensors",
+     "sizeBytes": 2501605198,
+     "licence": "MIT",
+     "note": "Optional alternative checkpoint (bind checkpoint)."
+    }
+   ],
+   "vram": "unverified (ran on CPU here; MoGe-2 ViT-L is ~0.33B parameters)",
+   "licence": "MIT (microsoft/MoGe; Comfy-Org/MoGe repack)",
+   "validated": true,
+   "ranOnCpu": true,
+   "cpuRuns": [
+    {
+     "settings": "modern_living_room.png (Comfy-Org template input) scaled to 768x768, resolution_level 9, decimation 1, MoGe 2 ViT-L",
+     "seconds": 42.0,
+     "result": "textured GLB 25,161,024 bytes: 555,959 vertices, 1,083,964 triangles, 1 texture; bbox depth 0.35-6.58 m (the whole room); depth PNG 768x768; ComfyUI RSS +1.6 GB peak"
+    }
+   ],
+   "notes": "Added by the round-4 critic. Built from the official template 3d_moge_perspective_to_mesh (2026-05-15), exported with scripts/comfy/export-templates.mjs; normal-map previews dropped, a depth PNG added. This is the whole-scene step for Cinema Studio's 'Create 3D scene': the browser orbits the GLB (Fuobe already loads GLB), captures a view, and Qwen-Image-Edit 2511 (+ Multiple-Angles LoRA) re-renders it. Images over 2048 px are resized first. A 25 MB mesh is heavy for a phone: bind decimation 2 for the viewer (about 4x fewer triangles, inferred). MoGe 3 ViT-L / ViT-G (template utility_moge3_geometry_estimation, 2026-09-18) load through the same node.",
+   "addedBy": "round-4 critic (2026-10-22)"
+  },
+  {
+   "id": "image-to-splat-triposplat",
+   "title": "Image to a Gaussian splat of the subject (TripoSplat) + orbit preview",
+   "capability": "image-to-splat",
+   "graph": {
+    "41": {
+     "inputs": {
+      "fps": 25,
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264",
+      "images": [
+       "75",
+       0
+      ]
+     },
+     "class_type": "CreateVideo",
+     "_meta": {
+      "title": "Create Video"
+     }
+    },
+    "42": {
+     "inputs": {
+      "filename_prefix": "fuobe/splat-orbit",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+       "41",
+       0
+      ]
+     },
+     "class_type": "SaveVideo",
+     "_meta": {
+      "title": "Save Video"
+     }
+    },
+    "51": {
+     "inputs": {
+      "filename_prefix": "fuobe/splat",
+      "mesh": [
+       "92",
+       0
+      ]
+     },
+     "class_type": "SaveGLB",
+     "_meta": {
+      "title": "Save 3D Model"
+     }
+    },
+    "75": {
+     "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "frames": 75,
+      "splat_scale": 1,
+      "sharpen": 2,
+      "headlight_shading": 0,
+      "opacity_threshold": 0,
+      "render_style": "color",
+      "background": "#848484",
+      "splat": [
+       "88:55",
+       0
+      ],
+      "camera_info": [
+       "79",
+       0
+      ]
+     },
+     "class_type": "RenderSplat",
+     "_meta": {
+      "title": "Render Splat"
+     }
+    },
+    "79": {
+     "inputs": {
+      "mode": "orbit",
+      "mode.yaw": 35,
+      "mode.pitch": 30,
+      "mode.distance": 2.5,
+      "target_x": 0,
+      "target_y": 0,
+      "target_z": 0,
+      "roll": 0,
+      "fov": 35,
+      "zoom": 1,
+      "camera_type": "perspective"
+     },
+     "class_type": "CreateCameraInfo",
+     "_meta": {
+      "title": "Create Camera Info"
+     }
+    },
+    "92": {
+     "inputs": {
+      "format": "spz",
+      "splat": [
+       "88:55",
+       0
+      ]
+     },
+     "class_type": "SplatToFile3D",
+     "_meta": {
+      "title": "Create 3D File (from Splat)"
+     }
+    },
+    "99": {
+     "inputs": {
+      "image": "subject.png"
+     },
+     "class_type": "LoadImage",
+     "_meta": {
+      "title": "Load Image"
+     }
+    },
+    "88:24": {
+     "inputs": {
+      "clip_vision": [
+       "88:7",
+       0
+      ],
+      "vae": [
+       "88:8",
+       0
+      ],
+      "image": [
+       "88:2",
+       0
+      ]
+     },
+     "class_type": "TripoSplatConditioning",
+     "_meta": {
+      "title": "TripoSplat Conditioning"
+     }
+    },
+    "88:6": {
+     "inputs": {
+      "seed": 46,
+      "steps": 20,
+      "cfg": 3,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+       "88:96",
+       0
+      ],
+      "positive": [
+       "88:24",
+       0
+      ],
+      "negative": [
+       "88:24",
+       1
+      ],
+      "latent_image": [
+       "88:24",
+       2
+      ]
+     },
+     "class_type": "KSampler",
+     "_meta": {
+      "title": "KSampler"
+     }
+    },
+    "88:35": {
+     "inputs": {
+      "switch": true,
+      "on_false": [
+       "88:95",
+       0
+      ],
+      "on_true": [
+       "88:85:81",
+       0
+      ]
+     },
+     "class_type": "ComfySwitchNode",
+     "_meta": {
+      "title": "Switch: Mask Source"
+     }
+    },
+    "88:2": {
+     "inputs": {
+      "erode_radius": 1,
+      "size": 1024,
+      "image": [
+       "99",
+       0
+      ],
+      "mask": [
+       "88:35",
+       0
+      ]
+     },
+     "class_type": "TripoSplatPreprocessImage",
+     "_meta": {
+      "title": "TripoSplat Preprocess Image"
+     }
+    },
+    "88:7": {
+     "inputs": {
+      "clip_name": "dino_v3_vit_h.safetensors"
+     },
+     "class_type": "CLIPVisionLoader",
+     "_meta": {
+      "title": "Load CLIP Vision"
+     }
+    },
+    "88:11": {
+     "inputs": {
+      "vae_name": "triposplat_vae_decoder_fp16.safetensors"
+     },
+     "class_type": "VAELoader",
+     "_meta": {
+      "title": "Load VAE"
+     }
+    },
+    "88:8": {
+     "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+     },
+     "class_type": "VAELoader",
+     "_meta": {
+      "title": "Load VAE"
+     }
+    },
+    "88:55": {
+     "inputs": {
+      "num_gaussians": 262144,
+      "seed": 790219963981395,
+      "samples": [
+       "88:6",
+       0
+      ],
+      "vae": [
+       "88:11",
+       0
+      ]
+     },
+     "class_type": "VAEDecodeTripoSplat",
+     "_meta": {
+      "title": "TripoSplat Decode"
+     }
+    },
+    "88:85:81": {
+     "inputs": {
+      "bg_removal_model": [
+       "88:85:82",
+       0
+      ],
+      "image": [
+       "99",
+       0
+      ]
+     },
+     "class_type": "RemoveBackground",
+     "_meta": {
+      "title": "Remove Background"
+     }
+    },
+    "88:85:82": {
+     "inputs": {
+      "bg_removal_name": "birefnet.safetensors"
+     },
+     "class_type": "LoadBackgroundRemovalModel",
+     "_meta": {
+      "title": "Load Background Removal Model"
+     }
+    },
+    "88:85:83": {
+     "inputs": {
+      "mask": [
+       "88:85:81",
+       0
+      ]
+     },
+     "class_type": "InvertMask",
+     "_meta": {
+      "title": "Invert Mask"
+     }
+    },
+    "88:85:84": {
+     "inputs": {
+      "image": [
+       "99",
+       0
+      ],
+      "alpha": [
+       "88:85:83",
+       0
+      ]
+     },
+     "class_type": "JoinImageWithAlpha",
+     "_meta": {
+      "title": "Join Image with Alpha"
+     }
+    },
+    "88:95": {
+     "inputs": {
+      "mask": [
+       "99",
+       1
+      ]
+     },
+     "class_type": "InvertMask",
+     "_meta": {
+      "title": "Invert Mask"
+     }
+    },
+    "88:16": {
+     "inputs": {
+      "unet_name": "triposplat_fp16.safetensors",
+      "weight_dtype": "default"
+     },
+     "class_type": "UNETLoader",
+     "_meta": {
+      "title": "Load Diffusion Model"
+     }
+    },
+    "88:96": {
+     "class_type": "ComfySwitchNode",
+     "inputs": {
+      "switch": false,
+      "on_false": [
+       "88:16",
+       0
+      ],
+      "on_true": [
+       "88:16",
+       0
+      ]
+     }
+    }
+   },
+   "bindings": {
+    "image": [
+     {
+      "node": "99",
+      "input": "image"
+     }
+    ],
+    "cutout": [
+     {
+      "node": "88:35",
+      "input": "switch"
+     }
+    ],
+    "numGaussians": [
+     {
+      "node": "88:55",
+      "input": "num_gaussians"
+     }
+    ],
+    "steps": [
+     {
+      "node": "88:6",
+      "input": "steps"
+     }
+    ],
+    "cfg": [
+     {
+      "node": "88:6",
+      "input": "cfg"
+     }
+    ],
+    "seed": [
+     {
+      "node": "88:6",
+      "input": "seed"
+     }
+    ],
+    "splatFormat": [
+     {
+      "node": "92",
+      "input": "format"
+     }
+    ],
+    "orbitFrames": [
+     {
+      "node": "75",
+      "input": "frames"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "51",
+      "input": "filename_prefix"
+     },
+     {
+      "node": "42",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "51",
+     "kind": "3d",
+     "role": "splat"
+    },
+    {
+     "node": "42",
+     "kind": "video",
+     "role": "turntable"
+    }
+   ],
+   "defaults": {
+    "cutout": true,
+    "numGaussians": 262144,
+    "steps": 20,
+    "cfg": 3,
+    "splatFormat": "spz",
+    "orbitFrames": 75
+   },
+   "models": [
+    {
+     "folder": "background_removal",
+     "file": "birefnet.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+     "sizeBytes": 444473596,
+     "licence": "MIT"
+    },
+    {
+     "folder": "clip_vision",
+     "file": "dino_v3_vit_h.safetensors",
+     "url": "https://huggingface.co/VAST-AI/TripoSplat/resolve/main/clip_vision/dino_v3_vit_h.safetensors",
+     "sizeBytes": 1681247696,
+     "licence": "DINOv3 License (royalty-free, commercial use allowed; 'Built with DINOv3' attribution; trade-control limits)"
+    },
+    {
+     "folder": "vae",
+     "file": "triposplat_vae_decoder_fp16.safetensors",
+     "url": "https://huggingface.co/VAST-AI/TripoSplat/resolve/main/vae/triposplat_vae_decoder_fp16.safetensors",
+     "sizeBytes": 576148442,
+     "licence": "MIT"
+    },
+    {
+     "folder": "vae",
+     "file": "flux2-vae.safetensors",
+     "url": "https://huggingface.co/VAST-AI/TripoSplat/resolve/main/vae/flux2-vae.safetensors",
+     "sizeBytes": 336213556,
+     "licence": "Apache-2.0 (FLUX.2 autoencoder)"
+    },
+    {
+     "folder": "diffusion_models",
+     "file": "triposplat_fp16.safetensors",
+     "url": "https://huggingface.co/VAST-AI/TripoSplat/resolve/main/diffusion_models/triposplat_fp16.safetensors",
+     "sizeBytes": 741106994,
+     "licence": "MIT"
+    }
+   ],
+   "vram": "unverified",
+   "licence": "MIT (VAST-AI/TripoSplat) + DINOv3 License for the image encoder (royalty-free, commercial use allowed; 'Built with DINOv3' notice; trade-control limits) + Apache-2.0 FLUX.2 VAE",
+   "validated": true,
+   "ranOnCpu": false,
+   "cpuRuns": [],
+   "notes": "Added by the round-4 critic. The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02), exported to API format, with the UI-only live-preview patch removed and an H.264 75-frame orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5). Core nodes only (no pack, no worker). Subject only: BiRefNet removes the background first (cutout=false uses the image's own alpha). Output is an .spz splat (ply / ksplat selectable). RenderSplat also takes a CreateCameraInfo look_at camera, so a chosen browser view can be rendered server-side. 3.97 GB of weights.",
+   "addedBy": "round-4 critic (2026-10-22)"
+  },
+  {
+   "id": "reference-brief-gemma4",
+   "title": "Reference video to a style brief (Gemma 4 E4B reads frames + sound, core TextGenerate)",
+   "capability": "reference-video-analysis",
+   "graph": {
+    "1": {
+     "class_type": "VHS_LoadVideo",
+     "inputs": {
+      "video": "reference.mp4",
+      "force_rate": 24,
+      "custom_width": 384,
+      "custom_height": 0,
+      "frame_load_cap": 720,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+     }
+    },
+    "2": {
+     "class_type": "CLIPLoader",
+     "inputs": {
+      "clip_name": "gemma4_e4b_it_fp8_scaled.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+     }
+    },
+    "3": {
+     "class_type": "TextGenerate",
+     "inputs": {
+      "prompt": "You are given a short-form reference video (frames at 1 fps plus its soundtrack). Write a reusable style brief for a new faceless video in the same style. Return strict JSON with keys: format (e.g. 'what if' explainer), hook (first 3 s), pacing (average shot length in seconds), shots (list of {seconds, visual, camera, on_screen_text}), visual_style (medium, palette, lighting, texture), animation_style (one of 'Fully animated', 'Frame by frame', 'Scene by scene video', 'Seamless motion video'), narration (voice, tone, words per minute, language), music (genre, energy), captions (style, position), and topic_ideas (5). Describe style only; never copy the reference's people, logos or exact words.",
+      "max_length": 2048,
+      "sampling_mode": "on",
+      "sampling_mode.temperature": 0.3,
+      "sampling_mode.top_k": 64,
+      "sampling_mode.top_p": 0.95,
+      "sampling_mode.min_p": 0.05,
+      "sampling_mode.repetition_penalty": 1.05,
+      "sampling_mode.seed": 0,
+      "sampling_mode.presence_penalty": 0,
+      "thinking": false,
+      "use_default_template": true,
+      "mtp": "auto",
+      "clip": [
+       "2",
+       0
+      ],
+      "audio": [
+       "1",
+       2
+      ],
+      "video": [
+       "1",
+       0
+      ]
+     }
+    },
+    "4": {
+     "class_type": "SaveText",
+     "inputs": {
+      "text": [
+       "3",
+       0
+      ],
+      "filename_prefix": "fuobe/reference-brief",
+      "format": "txt"
+     }
+    }
+   },
+   "bindings": {
+    "video": [
+     {
+      "node": "1",
+      "input": "video"
+     }
+    ],
+    "frameCap": [
+     {
+      "node": "1",
+      "input": "frame_load_cap"
+     }
+    ],
+    "width": [
+     {
+      "node": "1",
+      "input": "custom_width"
+     }
+    ],
+    "skipFrames": [
+     {
+      "node": "1",
+      "input": "skip_first_frames"
+     }
+    ],
+    "instruction": [
+     {
+      "node": "3",
+      "input": "prompt"
+     }
+    ],
+    "checkpoint": [
+     {
+      "node": "2",
+      "input": "clip_name"
+     }
+    ],
+    "maxTokens": [
+     {
+      "node": "3",
+      "input": "max_length"
+     }
+    ],
+    "filenamePrefix": [
+     {
+      "node": "4",
+      "input": "filename_prefix"
+     }
+    ]
+   },
+   "outputs": [
+    {
+     "node": "4",
+     "kind": "text",
+     "role": "brief"
+    }
+   ],
+   "defaults": {
+    "frameCap": 720,
+    "width": 384,
+    "maxTokens": 2048
+   },
+   "models": [
+    {
+     "folder": "text_encoders",
+     "file": "gemma4_e4b_it_fp8_scaled.safetensors",
+     "url": "https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors",
+     "sizeBytes": 9057782194,
+     "licence": "Apache-2.0",
+     "note": "Already in the library (speech-translate-gemma4)."
+    }
+   ],
+   "vram": "unverified (Gemma 4 E4B fp8, 9.06 GB file)",
+   "licence": "Apache-2.0 (Gemma 4)",
+   "validated": true,
+   "ranOnCpu": false,
+   "cpuRuns": [],
+   "notes": "Added by the round-4 critic for Content Factory's 'Use as reference'. VHS_LoadVideo resamples to 24 fps (TextGenerate assumes 24 fps and keeps every 24th frame, i.e. 1 fps; gemma4.py caps a video frame at 70 soft tokens) and passes the clip's sound on the same call. Default cap 720 frames = the first 30 s at 384 px wide (~0.7 GB of frames in RAM, inferred). In ComfyUI v0.41 only the Gemma 4 and MiniMax text encoders read a video input; the Qwen3.5 encoder (OvisOCR3, translate-qwen35-textgen) ignores it. The instruction asks for a style brief as JSON (format, hook, pacing, shots, visual and animation style, narration, music, captions, topic ideas) and forbids copying people, logos or words. Whether Gemma 4 E4B accepts 30 s of audio in one call is unverified.",
+   "addedBy": "round-4 critic (2026-10-22)"
+  }
+ ],
+ "existingWorkflowRuns": [
+  {
+   "id": "interpolate-rife",
+   "model": "rife_v4.26.safetensors (22.7 MB, Comfy-Org/frame_interpolation, MIT)",
+   "settings": "2 s 320x180 25 fps, x2",
+   "seconds": 4.0,
+   "result": "99 frames at 50 fps, 1.98 s, sound kept (N frames -> 2N-1)"
+  },
+  {
+   "id": "interpolate-film",
+   "model": "film_net_fp16.safetensors (68.9 MB, Apache-2.0)",
+   "settings": "same",
+   "seconds": 124.0,
+   "result": "99 frames at 50 fps; 31x slower than RIFE on CPU"
+  }
+ ],
+ "genjutsuMapping": {
+  "motionTransfer": "wan-animate2 (existing; Wan Animate 2, Apache-2.0)",
+  "objectSwap": "video-swap-wan-vace (new); character replacement alternative: SCAIL-2 template video_wan21_scail2_character_replacement (MIT, 2026-06-15, not built)",
+  "restyle": "video-restyle-wan22-fun-vace (existing; first frame restyled with qwen-image-edit-2511, then Fun VACE with depth)",
+  "remove": "video-inpaint-wan-vace (new default), video-erase-void (effects-aware, licence caveat)",
+  "insert": "video-insert-wan-vace (new)"
+ },
+ "newModels": [
+  {
+   "name": "OvisOCR3",
+   "org": "ATH-MaaS (Alibaba)",
+   "capability": "ocr",
+   "released": "2026-10-21 (Hugging Face repo created)",
+   "repo": "https://huggingface.co/ATH-MaaS/OvisOCR3",
+   "licence": "Apache-2.0",
+   "size": "0.8B (Qwen3.5-0.8B architecture), model.safetensors 1,706,030,528 bytes",
+   "comfyui": "Native: core CLIPLoader detects it as Qwen3.5-0.8B (keys model.language_model.*), TextGenerate with image input. Ran here on CPU (ComfyUI v0.41).",
+   "vsCurrentPick": "Fuobe had no open OCR. Card claims OCRBench 88.8 vs 79.1 for Qwen3.5-0.8B and 85.0 for Qwen3.5-4B; OCRBench v2 EN 65.9 vs 41.5 / 54.1 (vendor numbers, unverified).",
+   "verdict": "Adopted as the default of ocr-lines-qwen35. One day old: re-check on real ad creatives.",
+   "sources": [
+    "https://huggingface.co/ATH-MaaS/OvisOCR3 (2026-10-22)",
+    "https://huggingface.co/ATH-MaaS/OvisOCR3/raw/main/prompts/word_spotting.txt (2026-10-22)"
+   ]
+  },
+  {
+   "name": "MOSS-Image (Base, SFT)",
+   "org": "OpenMOSS (Fudan)",
+   "capability": "image",
+   "released": "2026-10-11 (HF); Comfy-Org repack 2026-10-16",
+   "repo": "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT",
+   "licence": "Apache-2.0 (weights and code)",
+   "size": "5B DiT (moss_image_sft_bf16 10.16 GB) + Qwen3.5-9B text encoder (19.31 GB bf16, 9.75 GB int8 convrot); Comfy-Org/MOSS-Image total 68.45 GB",
+   "comfyui": "Native: core commit e087d8f6 'Add MOSS-image support' (#17095, 2026-10-16) is in the installed fc04da91; rope scaling (#17172) and colour-depth control (#17206) only in v0.42+. Templates image_moss_image_t2i and *_t2i_bboxes (layout boxes with their own captions; text boxes render text) dated 2026-10-17 in workflow_templates main, not in packaged 0.11.86.",
+   "vsCurrentPick": "Against Z-Image Turbo (Apache, 8 steps) and Qwen-Image 2512 (Apache): no published head-to-head on the card; MOSS defaults to 50 steps, cfg 3 (community 4-step adapters exist). Its layout-box prompting is new for open models.",
+   "verdict": "Best new Apache-2.0 image model in the window. Add as an opt-in text-to-image / layout model after one GPU render; do not replace Z-Image Turbo as the fast default yet.",
+   "sources": [
+    "https://huggingface.co/OpenMOSS-Team/MOSS-Image-SFT (2026-10-22)",
+    "https://huggingface.co/Comfy-Org/MOSS-Image (2026-10-22)",
+    "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/index.json (2026-10-22)",
+    "ComfyUI git log fc04da91..1a82e6d0 (fetched 2026-10-22)"
+   ]
+  },
+  {
+   "name": "FLUX 3 Image Klein (distilled, base)",
+   "org": "Black Forest Labs",
+   "capability": "image + edit",
+   "released": "2026-10-13 (HF repos); ComfyUI templates dated 2026-10-15",
+   "repo": "https://huggingface.co/black-forest-labs/flux-3-image-klein",
+   "licence": "FLUX Kommunity License (HF metadata). Terms unverified: the repo is gated; BFL's page says a commercial licence is needed to run Klein in a product; one secondary source says free below US$5M revenue.",
+   "size": "5.6B; model.safetensors 11.1 GB bf16, fp8r 6.27 GB, nvfp4 5.28 GB; Comfy repack (gated) also ships a Qwen3.5-9B prompt upsampler (18.8 GB bf16)",
+   "comfyui": "Native in the installed core (templates image_flux3_klein_t2i / _image_edit / _distilled_* in packaged templates 0.11.86; CLIPLoader type flux3).",
+   "vsCurrentPick": "Text-to-image, instruction edit, multi-reference and box layout in one 5.6B model; replaces FLUX.2 [klein] 4B (Apache) only if the licence fits.",
+   "verdict": "Opt-in only (licence). Keep FLUX.2 [klein] 4B for try-on and Qwen-Image-Edit 2511 for edits.",
+   "sources": [
+    "https://huggingface.co/api/models/black-forest-labs/flux-3-image-klein (2026-10-22)",
+    "https://bfl.ai/models/flux-3-image-klein (2026-10-22)",
+    "https://www.digitalapplied.com/blog/flux-3-image-klein-open-weights-8gb-gpu (secondary, 2026-10-22)"
+   ]
+  },
+  {
+   "name": "Qwen-Image-2.1 and Qwen-Image-2.1-Turbo",
+   "org": "Qwen (Alibaba)",
+   "capability": "image + edit + RGBA",
+   "released": "2026-09-14 (2.1), 2026-10-09 (Turbo, 8 steps)",
+   "repo": "https://huggingface.co/Qwen/Qwen-Image-2.1",
+   "licence": "Qwen RESEARCH License Agreement (2026-09-20): NON-COMMERCIAL ('for research or evaluation purposes only'); commercial use needs a separate licence",
+   "size": "7B visual DiT (qwen_image_2.1 bf16 14.23 GB, int8 convrot in the template) + Qwen3-VL-8B encoder (17.53 GB bf16); Comfy-Org repack 121 GB in all variants",
+   "comfyui": "Native (templates image_qwen_image_2_1_t2i / _image_edit / _background_removal 2026-09-20, _turbo_* 2026-10-13).",
+   "vsCurrentPick": "One model for generation, editing and native RGBA (transparent output, subject extraction): would fit Layers, but the licence rules it out as a default; Qwen-Image 2512 / Edit 2511 (Apache) stay.",
+   "verdict": "Research-only. Do not ship as a default.",
+   "sources": [
+    "https://huggingface.co/Qwen/Qwen-Image-2.1 (2026-10-22)",
+    "https://huggingface.co/Qwen/Qwen-Image-2.1/raw/main/LICENSE (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Fibo 2.0 (dev, edit-turbo)",
+   "org": "Bria",
+   "capability": "image + edit",
+   "released": "2026-10-18 / 2026-10-19 (HF); Comfy-Org repack 2026-10-20",
+   "repo": "https://huggingface.co/briaai/Fibo-2.0-dev",
+   "licence": "bria-fibo (HF metadata); Comfy-Org/Fibo-2.0 is tagged cc-by-nc-4.0: non-commercial",
+   "size": "fibo2_dev_bf16 16.45 GB (int8 8.41 GB) + Qwen3-VL-4B encoder 8.88 GB",
+   "comfyui": "Core support in commit 87ed5a06 (#17240, 2026-10-21), after v0.42.0; not in the installed v0.41.",
+   "vsCurrentPick": "Not comparable for a commercial default.",
+   "verdict": "Skip (non-commercial).",
+   "sources": [
+    "https://huggingface.co/briaai/Fibo-2.0-dev (2026-10-22)",
+    "https://huggingface.co/Comfy-Org/Fibo-2.0 (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Ming-Image-0.1-Design and Ming-Image-0.1-Design-Layer",
+   "org": "inclusionAI (Ant Group)",
+   "capability": "design images (posters, UI, infographics) + layer decomposition",
+   "released": "2026-09-17 (HF); Comfy-Org repack 2026-09-24; templates 2026-09-25 (t2i) and 2026-09-29 (edit)",
+   "repo": "https://huggingface.co/inclusionAI/Ming-Image-0.1-Design-Layer",
+   "licence": "MIT",
+   "size": "6B image model; Design-Layer repo 65.2 GB; Comfy-Org/Ming-Image 162.4 GB incl. a 36.7 GB Ling-mini-2.0 text model (19.5 GB int8)",
+   "comfyui": "Design t2i/edit native (TextEncodeMingImageEdit). The Layer variant's ComfyUI support is unverified (no template in 0.11.86). Upstream validated config: one 80 GB GPU.",
+   "vsCurrentPick": "Design-Layer splits a flat design into a requested number of RGBA layers from a layer plan, like Qwen-Image-Layered (Apache, 20.5 GB fp8) which Fuobe uses; much heavier.",
+   "verdict": "Watch for Layers; not adopted (size, unverified ComfyUI path).",
+   "sources": [
+    "https://huggingface.co/inclusionAI/Ming-Image-0.1-Design-Layer (2026-10-22)",
+    "https://huggingface.co/Comfy-Org/Ming-Image (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Kandinsky 6.0 Lite / Pro (5 s image-to-video)",
+   "org": "Kandinsky Lab",
+   "capability": "video",
+   "released": "HF repos created 2026-09-09 (pretrain and VSR variants 2026-09-15..29); a secondary source dates the public release 2026-10-06 (unverified)",
+   "repo": "https://huggingface.co/kandinskylab/Kandinsky-6.0-Lite-5s-Diffusers",
+   "licence": "MIT",
+   "size": "Lite 27.7 GB, Pro 90.0 GB (Diffusers format)",
+   "comfyui": "Not native in ComfyUI v0.41/v0.42 (core has Kandinsky 5 only); community wrappers and int8 quants exist (e.g. kabachuha, t8star/Kandinsky-Comfy).",
+   "vsCurrentPick": "No independent comparison with Wan 2.2 / LTX-2.5 found.",
+   "verdict": "Watch; revisit when core support lands.",
+   "sources": [
+    "https://huggingface.co/api/models?author=kandinskylab (2026-10-22)"
+   ]
+  },
+  {
+   "name": "MiniMax H3 ecosystem: FastH3 8-step, FastH3 OmniRef, H3 Person-Remover LoRA, H3 Character-Swap LoRA",
+   "org": "MiniMax / FastVideo / akatz-ai",
+   "capability": "video (with native audio), object removal, character swap",
+   "released": "FastH3 templates 2026-09-15 and 2026-10-20 (video_fasth3_ominiref_r2v); Person-Remover LoRA 2026-10-08; Character-Swap LoRA 2026-09-25. Base H3 2026-07-28 (before the window).",
+   "repo": "https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA",
+   "licence": "MiniMax H3 Community License Agreement (terms not checked here)",
+   "size": "LoRAs 0.16 GB each; base minimax_h3_fl2va_bf16 66.3 GB (pruned 40.2 GB) + Qwen3-VL-32B encoder 51.5 GB",
+   "comfyui": "Base native (templates video_minimax_h3_*); single-head LoRAs need core #17239 (2026-10-21, after v0.42).",
+   "vsCurrentPick": "Removal / swap with native audio; far heavier than Wan 2.1 VACE (34.7 GB, Apache).",
+   "verdict": "Watch; not adopted (size, licence).",
+   "sources": [
+    "https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA (2026-10-22)",
+    "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA (2026-10-22)",
+    "https://huggingface.co/Comfy-Org/MiniMax-H3 (2026-10-22)"
+   ]
+  },
+  {
+   "name": "LTX-2.5 IC-LoRAs: Alpha-Gen, SDR-To-HDR, Restore, Refine-Details, Layout-To-Render",
+   "org": "Lightricks",
+   "capability": "video tools (transparent video, HDR, restoration)",
+   "released": "2026-09-22 .. 2026-09-28",
+   "repo": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Alpha-Gen",
+   "licence": "LTX-2.x community license (revenue-gated; see comfyui-oss-3.md)",
+   "size": "about 1.31 GB each on LTX-2.5 22B",
+   "comfyui": "LTX-2.5 is native; IC-LoRA loading follows the LTX-2.3 IC-LoRA templates (not re-validated here).",
+   "vsCurrentPick": "SDR-To-HDR is a learned alternative to core ImageSDRToHDR (video-sdr-to-hdr); Alpha-Gen makes RGBA video (vs BiRefNet/SAM 3 mattes).",
+   "verdict": "Candidates for a later round; revenue-gated licence.",
+   "sources": [
+    "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR (2026-10-22)",
+    "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-Alpha-Gen (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Drama-3 (TTS)",
+   "org": "Fish Audio",
+   "capability": "tts / voice cloning",
+   "released": "2026-10-01",
+   "repo": "https://huggingface.co/fishaudio/drama-3",
+   "licence": "fish-audio-research-license (HF metadata; the card links a 'Fish Audio Community License'): terms unverified, research naming suggests non-commercial",
+   "size": "35B MoE, 3B active; 41.5 GB",
+   "comfyui": "Community node only (PedroMarinhoDev/Drama-3-ComfyUI, 2026-10-14); not validated.",
+   "vsCurrentPick": "Chatterbox Multilingual / IndexTTS-2 stay (permissive, ComfyUI packs pinned).",
+   "verdict": "Skip.",
+   "sources": [
+    "https://huggingface.co/fishaudio/drama-3 (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Ming-3.0-tts-0.5B",
+   "org": "inclusionAI",
+   "capability": "tts",
+   "released": "2026-09-22",
+   "repo": "https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B",
+   "licence": "MIT",
+   "size": "0.5B (Qwen2.5-0.5B backbone); 7 languages (zh, en, de, es, fr, ko, ja), voice design, reference cloning",
+   "comfyui": "None: inference needs the Ming-3.0-tts GitHub repo.",
+   "vsCurrentPick": "Smaller than Chatterbox but fewer languages (Chatterbox Multilingual: 23).",
+   "verdict": "Watch.",
+   "sources": [
+    "https://huggingface.co/inclusionAI/Ming-3.0-tts-0.5B (2026-10-22)"
+   ]
+  },
+  {
+   "name": "YuE2 (text to song, music cover)",
+   "org": "Comfy-Org repack of YuE2",
+   "capability": "music",
+   "released": "Comfy-Org repack 2026-09-11, templates 2026-09-14 (just before the window)",
+   "repo": "https://huggingface.co/Comfy-Org/YuE2",
+   "licence": "CC-BY-NC-4.0",
+   "size": "not checked",
+   "comfyui": "Native (templates audio_yue2_text2music, audio_yue2_music_cover).",
+   "vsCurrentPick": "ACE-Step 1.5 stays (permissive); the 240 s cap is now covered by audio-loop-crossfade.",
+   "verdict": "Skip (non-commercial).",
+   "sources": [
+    "https://huggingface.co/Comfy-Org/YuE2 (2026-10-22)"
+   ]
+  },
+  {
+   "name": "Lip-sync and 3D",
+   "org": "-",
+   "capability": "lipsync, image-to-3d",
+   "released": "2026-09-15 .. 2026-10-22",
+   "repo": null,
+   "licence": "-",
+   "size": "-",
+   "comfyui": "-",
+   "vsCurrentPick": "No new open lip-sync model with ComfyUI support was found (HF searches 'lipsync', 'talking'; only ONNX/CoreML ports and MuseTalk fine-tunes). New 3D repos (UniForge3D cc-by-nc-4.0, Hi3D, MeshAxiom) have no ComfyUI support; MoGe 3 (template 2026-09-18) estimates geometry, it does not make assets. CRITIC CORRECTION 2026-10-22: MoGe does make assets. Core MoGePointMapToMesh + SaveGLB turn its point map into a textured whole-scene GLB (template 3d_moge_perspective_to_mesh, 2026-05-15; MoGe 3 via utility_moge3_geometry_estimation, 2026-09-18, MIT); it ran here on CPU (scene-mesh-moge). Core also has native TripoSplat image-to-Gaussian-splat nodes (template 2026-06-02, MIT + DINOv3 License). Both fit Cinema Studio's 3D scene, which no round-4 file had an open graph for.",
+   "verdict": "Lip-sync: InfiniteTalk / LatentSync stay. 3D: TRELLIS.2 stays for assets; add scene-mesh-moge (whole scene) and image-to-splat-triposplat (subject splat).",
+   "sources": [
+    "https://huggingface.co/api/models?search=lipsync (2026-10-22)",
+    "https://huggingface.co/api/models?pipeline_tag=image-to-3d&sort=trendingScore (2026-10-22)",
+    "live /object_info of ComfyUI v0.41 (fc04da91): MoGe*, TripoSplat*, RenderSplat, SaveGaussianSplat",
+    "https://huggingface.co/Comfy-Org/MoGe",
+    "https://huggingface.co/VAST-AI/TripoSplat"
+   ]
+  },
+  {
+   "name": "ComfyUI v0.42.0 and master to 2026-10-22",
+   "org": "Comfy-Org",
+   "capability": "engine",
+   "released": "v0.42.0 2026-10-18 (commit 355cd6b1); master 1a82e6d0 2026-10-22",
+   "repo": "https://github.com/comfyanonymous/ComfyUI",
+   "licence": "GPL-3.0",
+   "size": "-",
+   "comfyui": "-",
+   "vsCurrentPick": "Installed: fc04da91 (v0.41.0-7). v0.42+ adds Fibo 2.0 (#17240), MOSS-image rope scaling and colour-depth control, Qwen think-block template fix in TextGenerate (#17121), TextGenerate cleanup fix (#17169), CPU fp8/int8 guard (#17170), Pad Image node with mirror padding (#17224), templates 0.11.94.",
+   "verdict": "Bump the pin in install-comfyui.sh in a later round and re-validate the library.",
+   "sources": [
+    "git fetch origin master in /home/user/ComfyUI (2026-10-22)"
+   ]
+  }
+ ],
+ "criticCheck": {
+  "date": "2026-10-22",
+  "revalidation": "All 14 round-4 graphs re-posted to POST /prompt on the live CPU ComfyUI v0.41 (fc04da91) by an independent script (own Sleep blocker, zero-byte placeholders for missing weights, fixtures from scripts/comfy/fixtures, queue entries deleted, placeholders and fixtures removed): 14/14 accepted with no node_errors. A static check of 315 nodes against /object_info found no unknown class or input, except VHS_VideoCombine's 'profile', which VHS adds per format at run time.",
+  "added": [
+   "scene-mesh-moge (ran on CPU)",
+   "image-to-splat-triposplat (validated)",
+   "reference-brief-gemma4 (validated)"
+  ],
+  "fpsTargets": "FrameInterpolate takes an integer multiplier 2-16. For Higgsfield's exact FPS Boost targets interpolate by m, then keep every n-th frame (VHS_SelectEveryNthImage) with src*m/n = target: 24->30 m5 n4; 24->60 m5 n2; 24->90 m15 n4; 24->120 m5 n1; 30->60 m2; 30->90 m3; 30->120 m4; 60->90 m3 n2; 60->120 m2. Not built or timed.",
+  "depthColormaps": "The installed VideoDepthAnythingOutput offers only 'gray' and 'inferno'; MoGeRender offers 'depth' and 'depth_colored'. Higgsfield's Turbo / Magma / Viridis need a LUT step (not researched)."
+ }
+}
