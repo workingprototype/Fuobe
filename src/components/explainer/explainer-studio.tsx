@@ -224,7 +224,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto grid w-full max-w-[1240px] min-w-0 flex-1 gap-8 px-3 pt-6 pb-16 sm:px-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+      <div className="mx-auto grid w-full max-w-[1240px] min-w-0 flex-1 gap-8 px-3 pt-6 pb-16 sm:px-6 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
         <section aria-label="New explainer" className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <div className="rounded-[20px] border bg-background p-3 shadow-soft transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer sm:p-4">
             <p className="px-1 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">Fuobe Explainer</p>
@@ -414,7 +414,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
             </div>
           )}
         </section>
-      </main>
+      </div>
 
       <Sheet open={stylesOpen} onOpenChange={setStylesOpen}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-[640px]">

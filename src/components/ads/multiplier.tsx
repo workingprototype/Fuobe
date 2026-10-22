@@ -299,7 +299,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
       <MarketingHeader title="Ad Multiplier" active="multiplier" engine={engine} onEngine={setEngine} />
-      <main className="mx-auto w-full min-w-0 max-w-[1180px] flex-1 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
+      <div className="mx-auto w-full min-w-0 max-w-[1180px] flex-1 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
         <div className="pb-6 text-center">
           <h2 className="font-heading text-display text-balance">Turn one winning ad into many</h2>
           <p className="mx-auto mt-2 max-w-xl text-[15px] text-muted-foreground">Upload an ad that works. Recreate it with new people, products or places — or keep it and try a new hook or call to action.</p>
@@ -481,7 +481,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
         <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-subtle-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
         </p>
-      </main>
+      </div>
     </div>
   );
 }

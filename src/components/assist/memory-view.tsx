@@ -75,7 +75,7 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
           </div>
         </header>
       )}
-      <main className={cn("w-full max-w-[900px] min-w-0 flex-1 px-3 pb-16 sm:px-6", projectId ? "pt-2" : "pt-4 md:pt-8")}>
+      <div className={cn("w-full max-w-[900px] min-w-0 flex-1 px-3 pb-16 sm:px-6", projectId ? "pt-2" : "pt-4 md:pt-8")}>
         {!projectId && <p className="max-w-2xl text-[15px] text-pretty text-muted-foreground">Learning from every chat. Assist follows these in every reply, and saves new ones when you tell it something worth keeping{" "}— it asks first while Ask first is on.</p>}
         {projectId && (
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -164,7 +164,7 @@ export function MemoryView({ projectId }: { projectId?: string } = {}) {
             </Empty>
           )}
         </div>
-      </main>
+      </div>
       <AddMemory open={adding} onOpenChange={setAdding} place={place} projects={projects.data ?? []} />
       <ImportMemories open={importing} onOpenChange={setImporting} place={place} projects={projects.data ?? []} />
     </div>

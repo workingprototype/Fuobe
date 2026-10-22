@@ -412,7 +412,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-60 shrink-0 border-r bg-sidebar/40 lg:block">{sidebar}</aside>
-        <main
+        <div
           className="relative flex min-w-0 flex-1 flex-col"
           onDragOver={(e) => {
             if (!e.dataTransfer.types.includes("Files")) return;
@@ -482,7 +482,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
               </p>
             </div>
           )}
-        </main>
+        </div>
         {xl && panel && <aside className="w-[380px] shrink-0 border-l bg-sidebar/40">{sidePanel}</aside>}
       </div>
 

@@ -92,7 +92,7 @@ export function ShortsStudio({ models }: { models: Record<Engine, ModelChoice[]>
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 px-3 pb-28 sm:px-6 lg:pb-16">
+      <div className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 px-3 pb-28 sm:px-6 lg:pb-16">
         {tab === "history" ? (
           <ShortsHistory onStart={() => pickTab("presets")} />
         ) : (
@@ -116,7 +116,7 @@ export function ShortsStudio({ models }: { models: Record<Engine, ModelChoice[]>
             />
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

@@ -243,7 +243,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
     >
       <StudioHeader title={config.title} header={header} tabs={tabs} />
 
-      <main className={cn("mx-auto w-full max-w-[1240px] min-w-0 px-3 sm:px-6", hasItems && "flex-1 pb-8")}>
+      <div className={cn("mx-auto w-full max-w-[1240px] min-w-0 px-3 sm:px-6", hasItems && "flex-1 pb-8")}>
         {hasItems ? (
           <div className="pt-4">
             <Feed items={items} onReuse={reuse} />
@@ -254,7 +254,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
             {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
           </div>
         )}
-      </main>
+      </div>
 
       {/* One composer for both layouts (centred under the hero, docked under the feed), so it keeps focus and state when the first result arrives. */}
       <div

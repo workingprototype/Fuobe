@@ -206,7 +206,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
       <MarketingHeader title="Click to Ad" active="click" engine={engine} onEngine={setEngine} />
-      <main className="mx-auto w-full min-w-0 max-w-[980px] flex-1 space-y-5 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
+      <div className="mx-auto w-full min-w-0 max-w-[980px] flex-1 space-y-5 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
         <div className="pb-2 text-center">
           <h2 className="font-heading text-display text-balance">Make a video ad in one click</h2>
           <p className="mx-auto mt-2 max-w-xl text-[15px] text-muted-foreground">Drop a product link, get a 9:16 ad with voiceover and captions — ready for TikTok, Reels and Shorts. No filming, no editing, no brief.</p>
@@ -389,7 +389,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
         <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-subtle-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 shots or an OmniHuman presenter, ElevenLabs voice, Auto Subtitle · Open source: Wan 2.2, InfiniteTalk, Chatterbox (your voice sample), caption burn-in
         </p>
-      </main>
+      </div>
     </div>
   );
 }

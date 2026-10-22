@@ -86,7 +86,7 @@ function Frame({ title, children, actions }: { title: string; children: React.Re
         <h1 className="min-w-0 truncate font-heading text-[22px] leading-none">{title}</h1>
         <div className="ml-auto flex items-center gap-1">{actions}</div>
       </header>
-      <main className="mx-auto w-full max-w-[1180px] min-w-0 flex-1 px-3 pb-16 sm:px-6">{children}</main>
+      <div className="mx-auto w-full max-w-[1180px] min-w-0 flex-1 px-3 pb-16 sm:px-6">{children}</div>
     </div>
   );
 }

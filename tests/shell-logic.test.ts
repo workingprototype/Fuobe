@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EFFECTS, MOTIONS } from "@/lib/catalog";
 import { copyText, copyWithToast } from "@/lib/clipboard";
@@ -337,5 +339,19 @@ describe("copyText", () => {
     vi.stubGlobal("document", { createElement: () => ({ style: {}, setAttribute() {}, select() {}, setSelectionRange() {}, remove() {} }), body: { appendChild() {} }, activeElement: null, execCommand: () => false });
     expect(await copyWithToast("a link")).toBe(false);
     expect(toasts.error.at(-1)).toMatch(/select the text/);
+  });
+});
+
+describe("landmarks", () => {
+  it("leaves one <main> per page: the app frame's inset sheet", () => {
+    // Pages render inside StudioChrome, whose SidebarInset is the <main>; a second one inside it
+    // would give screen readers two main landmarks.
+    const files = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : e.name.endsWith(".tsx") ? [path.join(dir, e.name)] : []));
+    const root = path.resolve(__dirname, "../src");
+    const mains = [...files(path.join(root, "components")), ...files(path.join(root, "app/(studio)"))]
+      .filter((f) => /<main[\s>]/.test(fs.readFileSync(f, "utf8")))
+      .map((f) => path.relative(root, f));
+    expect(mains).toEqual(["components/ui/sidebar.tsx"]);
   });
 });

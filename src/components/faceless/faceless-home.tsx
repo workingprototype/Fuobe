@@ -73,7 +73,7 @@ export function FacelessHome() {
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 space-y-12 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 space-y-12 px-3 pb-16 sm:px-6">
         <div className="mx-auto max-w-[760px] pt-[6vh] text-center sm:pt-[9vh]">
           <h2 className="font-heading text-display text-balance">Create your Faceless channel</h2>
           <p className="mx-auto mt-2 max-w-[560px] text-body text-muted-foreground">A narrated, illustrated show — scripts, voice-over, animation, music and subtitles — with the same look in every episode.</p>
@@ -225,7 +225,7 @@ export function FacelessHome() {
             </div>
           ))}
         </section>
-      </main>
+      </div>
     </div>
   );
 }

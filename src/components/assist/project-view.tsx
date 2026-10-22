@@ -117,7 +117,7 @@ function Project({ p }: { p: AssistProject }) {
           </DropdownMenu>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[860px] min-w-0 flex-1 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full max-w-[860px] min-w-0 flex-1 px-3 pb-16 sm:px-6">
         <div className="mx-auto max-w-[760px] pt-[6vh] sm:pt-[9vh]">
           <h2 className="text-center font-heading text-display text-balance">What are we creating in {p.name}?</h2>
           <button onClick={() => setSettings(true)} className="mx-auto mt-2 block max-w-xl text-center text-[14px] text-pretty text-muted-foreground hover:text-foreground">
@@ -183,7 +183,7 @@ function Project({ p }: { p: AssistProject }) {
             <MemoryView projectId={p.id} />
           </TabsContent>
         </Tabs>
-      </main>
+      </div>
       <ProjectDialog open={settings} onOpenChange={setSettings} project={p} />
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
