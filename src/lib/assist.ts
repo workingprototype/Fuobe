@@ -153,7 +153,11 @@ export function modeLabel(t: Pick<AssistThread, "mode" | "agent" | "model" | "ef
 }
 
 // ---------------------------------------------------------------------------
-// Skills: SKILL.md (frontmatter + Markdown body), as Anthropic's Agent Skills and Supercomputer use
+// Skills: SKILL.md (frontmatter + Markdown body), as Anthropic's Agent Skills and Supercomputer use.
+// The Agent Skills spec (agentskills.io) allows only name, description, license, compatibility,
+// allowed-tools and a string-to-string `metadata` map at the top, so Fuobe's own fields (title,
+// when_to_use, icon, studio, tags, and the offline hints as offline_kind / offline_aspect /
+// offline_outputs / offline_style) live under `metadata`. Older files with them at the top still parse.
 
 export interface SkillMeta {
   /** The id and the `/name` that loads it: lowercase letters, numbers and hyphens. */
@@ -246,6 +250,12 @@ export type SkillParse = { ok: true; skill: SkillMeta & { body: string } } | { o
 
 const titleFromName = (name: string) => name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
 
+/** The offline hints written the spec's way: `metadata.offline_kind`, `offline_aspect`, `offline_outputs`, `offline_style`. */
+function offlineFromMetadata(meta: Record<string, string>): Record<string, string> | undefined {
+  const hints = Object.fromEntries(Object.entries(meta).flatMap(([k, v]) => (k.startsWith("offline_") && typeof v === "string" ? [[k.slice("offline_".length), v]] : [])));
+  return Object.keys(hints).length ? hints : undefined;
+}
+
 /** Parse and validate a SKILL.md. Errors are user-facing ("Check SKILL.md and try again: …"). */
 export function parseSkillMd(text: string): SkillParse {
   const fail = (why: string): SkillParse => ({ ok: false, error: `Check SKILL.md and try again: ${why}` });
@@ -265,9 +275,11 @@ export function parseSkillMd(text: string): SkillParse {
   const body = text.slice(m[0].length).trim();
   if (!body) return fail("there are no instructions under the frontmatter.");
   if (body.length > SKILL_LIMITS.body) return fail(`the instructions are ${Math.round(body.length / 1000)}k characters; keep them under ${SKILL_LIMITS.body / 1000}k (move long references into separate files).`);
-  const offlineMap = fm.offline && typeof fm.offline === "object" && !Array.isArray(fm.offline) ? (fm.offline as Record<string, string>) : undefined;
+  const offlineMap = fm.offline && typeof fm.offline === "object" && !Array.isArray(fm.offline) ? (fm.offline as Record<string, string>) : offlineFromMetadata(meta);
   const kind = offlineMap?.kind;
-  const tags = Array.isArray(fm.tags) ? fm.tags : str(fm.tags)?.split(",").map((t) => t.trim()).filter(Boolean);
+  const tags = Array.isArray(fm.tags) ? fm.tags : (str(fm.tags) ?? meta.tags)?.split(",").map((t) => t.trim()).filter(Boolean);
+  const icon = str(fm.icon) ?? meta.icon;
+  const studio = str(fm.studio) ?? meta.studio;
   return {
     ok: true,
     skill: {
@@ -276,8 +288,8 @@ export function parseSkillMd(text: string): SkillParse {
       description,
       whenToUse,
       body,
-      ...(str(fm.icon) && { icon: str(fm.icon) }),
-      ...(str(fm.studio) && { studio: str(fm.studio) }),
+      ...(icon && { icon }),
+      ...(studio && { studio }),
       ...(tags?.length && { tags: tags.slice(0, 8) }),
       ...(offlineMap && {
         offline: {
@@ -291,15 +303,31 @@ export function parseSkillMd(text: string): SkillParse {
   };
 }
 
-const yamlValue = (v: string) => (/^[\w ./(),&+-]*$/.test(v) && !/^\s|\s$/.test(v) && !/^(true|false|null|\d+)$/i.test(v) ? v : JSON.stringify(v));
+/** A YAML scalar: plain when that can't be read as anything else (a number, a boolean, an anchor…), else JSON-quoted. */
+const yamlValue = (v: string) => (/^[A-Za-z_/(][\w ./(),&+-]*$/.test(v) && !/\s$/.test(v) && !/^(true|false|null|yes|no|on|off|y|n)$/i.test(v) ? v : JSON.stringify(v));
 
-/** Write a skill back out as SKILL.md (export, and the form's "Create skill"). */
-export function toSkillMd(s: Pick<SkillMeta, "name" | "title" | "description" | "whenToUse" | "icon" | "studio" | "tags"> & { body: string }): string {
-  const lines = ["---", `name: ${s.name}`, `title: ${yamlValue(s.title)}`, `description: ${yamlValue(s.description.replace(/\s*\n\s*/g, " "))}`];
-  if (s.whenToUse) lines.push(`when_to_use: ${yamlValue(s.whenToUse.replace(/\s*\n\s*/g, " "))}`);
-  if (s.icon) lines.push(`icon: ${s.icon}`);
-  if (s.studio) lines.push(`studio: ${s.studio}`);
-  if (s.tags?.length) lines.push(`tags: [${s.tags.map(yamlValue).join(", ")}]`);
+const oneLine = (v: string) => v.replace(/\s*\n\s*/g, " ");
+
+/**
+ * Write a skill back out as SKILL.md (export, and the form's "Create skill"), in the Agent Skills
+ * layout: the spec's fields at the top, Fuobe's under `metadata` (one line each, strings only), so
+ * the file also loads in Claude Code, claude.ai and other agents' skill folders.
+ */
+export function toSkillMd(s: Pick<SkillMeta, "name" | "title" | "description" | "whenToUse" | "icon" | "studio" | "tags" | "offline"> & { body: string }): string {
+  const meta: [string, string | number | undefined][] = [
+    ["title", s.title],
+    ["when_to_use", s.whenToUse && oneLine(s.whenToUse)],
+    ["icon", s.icon],
+    ["studio", s.studio],
+    ["tags", s.tags?.length ? s.tags.join(", ") : undefined],
+    ["offline_kind", s.offline?.kind],
+    ["offline_aspect", s.offline?.aspect],
+    ["offline_outputs", s.offline?.outputs],
+    ["offline_style", s.offline?.style],
+  ];
+  const lines = ["---", `name: ${s.name}`, `description: ${yamlValue(oneLine(s.description))}`, "metadata:"];
+  // Numbers are quoted: the spec's metadata maps strings to strings.
+  for (const [k, v] of meta) if (v !== undefined && v !== "") lines.push(`  ${k}: ${typeof v === "number" ? JSON.stringify(String(v)) : yamlValue(v)}`);
   lines.push("---", "", s.body.trim(), "");
   return lines.join("\n");
 }

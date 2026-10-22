@@ -1,14 +1,15 @@
 ---
 name: video-repurposer
-title: Video Repurposer
 description: One video in, platform-ready cuts out — reframe to new aspect ratios for TikTok, Reels, Shorts, YouTube, LinkedIn or X; cut a long video into short moments; burn in captions; translate or dub; and check each result before delivery.
-when_to_use: The user supplies an existing video and wants it adapted ("make this vertical", "cut this into shorts", "add captions", "a version in Spanish"). Not for new footage (use short-film or ugc-video).
-icon: monitor-smartphone
-studio: /reframe
-tags: [reframe, captions, shorts, repurpose]
-offline:
-  kind: video
-  aspect: "9:16"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Video Repurposer
+  when_to_use: The user supplies an existing video and wants it adapted ("make this vertical", "cut this into shorts", "add captions", "a version in Spanish"). Not for new footage (use short-film or ugc-video).
+  icon: monitor-smartphone
+  studio: /reframe
+  tags: reframe, captions, shorts, repurpose
+  offline_kind: video
+  offline_aspect: "9:16"
 ---
 
 # Video Repurposer
@@ -38,3 +39,10 @@ Deliver finished files, one per platform, each checked.
 `check_generations` for every output: status succeeded, the right ratio, no cut-off subject, and
 for captions the words match the speech. If something fails, redo only that step. List the
 deliverables with their platform and length in the reply.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` for the cut → reframe chain, `add_captions` for
+captions and `dub_video` for dubs. Price a run with `estimate_cost` (or `estimate_job` for a studio
+tool) and confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one.
+Without MCP, the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

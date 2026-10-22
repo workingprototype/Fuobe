@@ -1,16 +1,17 @@
 ---
 name: amazon-listing-images
-title: Amazon Listing Designer
 description: A compliant marketplace listing image set from the user's product photo — the main image on pure white, secondary images (lifestyle, features, dimensions, in-the-box) and A+ content modules.
-when_to_use: The user sells on Amazon, Etsy, eBay, Shopify or another marketplace and wants listing images, a "main image", "secondary images", "A+ content" or "product cards that sell".
-icon: shopping-bag
-studio: /apps/app-packshot
-tags: [amazon, marketplace, listing, ecommerce]
-offline:
-  kind: image
-  aspect: "1:1"
-  outputs: 2
-  style: "e-commerce main image: the product alone on a pure white background (RGB 255,255,255), filling about 85% of the frame, soft natural shadow, accurate colours, sharp, no text, no props, no logos other than the product's own"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Amazon Listing Designer
+  when_to_use: The user sells on Amazon, Etsy, eBay, Shopify or another marketplace and wants listing images, a "main image", "secondary images", "A+ content" or "product cards that sell".
+  icon: shopping-bag
+  studio: /apps/app-packshot
+  tags: amazon, marketplace, listing, ecommerce
+  offline_kind: image
+  offline_aspect: "1:1"
+  offline_outputs: "2"
+  offline_style: "e-commerce main image: the product alone on a pure white background (RGB 255,255,255), filling about 85% of the frame, soft natural shadow, accurate colours, sharp, no text, no props, no logos other than the product's own"
 ---
 
 # Amazon Listing Designer
@@ -45,3 +46,11 @@ image. Same palette and type across modules.
 ## QC
 `check_generations` with `look: true` on every image: white background really white, no invented
 claims, text spelled right, product not altered. State any rule a result breaks and redo it.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with the whole set in one call (the main image
+`after` its cut-out), then `check_generations` with `look: true` for the QC pass. Price a run with
+`estimate_cost` (or `estimate_job` for a studio tool) and confirm it with the user first. Files go
+in as URLs: `fuobe upload <file>` prints one. Without MCP, the `fuobe` CLI runs the same jobs
+(`fuobe generate`, `fuobe tool <name>`).

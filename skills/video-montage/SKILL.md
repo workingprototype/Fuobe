@@ -1,13 +1,14 @@
 ---
 name: video-montage
-title: Video Montage
 description: Assembly and post-processing for existing video files — concatenate, stitch or merge clips into one file, lay music under them, attach or burn subtitles, trim — returning one finished rendered file.
-when_to_use: The user has clips (uploaded or made earlier) and wants them joined, cut, given music or captions; "stitch these", "make a montage", "put music on this", "burn in subtitles". Also the final step other skills hand off to.
-icon: film
-studio: /video-tools/join
-tags: [edit, join, music, captions]
-offline:
-  kind: video
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Video Montage
+  when_to_use: The user has clips (uploaded or made earlier) and wants them joined, cut, given music or captions; "stitch these", "make a montage", "put music on this", "burn in subtitles". Also the final step other skills hand off to.
+  icon: film
+  studio: /video-tools/join
+  tags: edit, join, music, captions
+  offline_kind: video
 ---
 
 # Video Montage
@@ -32,3 +33,10 @@ uploaded: beach, sunset, fire").
 ## 3. Deliver
 `check_generations` until the last step finishes; reply with the length and what was applied.
 Offer a vertical cut (load video-repurposer) or a different track.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with the trim → join → music → mux chain (`after`),
+then `add_captions`. Price a run with `estimate_cost` (or `estimate_job` for a studio tool) and
+confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without MCP,
+the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

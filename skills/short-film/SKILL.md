@@ -1,15 +1,16 @@
 ---
 name: short-film
-title: Cinematic Director
 description: A photoreal multi-clip short film or scripted scene driven by story, character, dialogue and mood — consistent characters across shots, a shot list, then the clips joined into one film.
-when_to_use: The result is 2+ clips, several scenes, or a single video over 15 seconds with recurring characters — even when the user already wrote a shot list, and for "stitch them into one" briefs. Not for social creator formats (ugc-video) or motion graphics (visual-studio).
-icon: clapperboard
-studio: /cinema
-tags: [film, story, video, cinematic]
-offline:
-  kind: video
-  aspect: "16:9"
-  style: "cinematic, anamorphic 35mm film look, motivated lighting, shallow depth of field, film grain"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Cinematic Director
+  when_to_use: The result is 2+ clips, several scenes, or a single video over 15 seconds with recurring characters — even when the user already wrote a shot list, and for "stitch them into one" briefs. Not for social creator formats (ugc-video) or motion graphics (visual-studio).
+  icon: clapperboard
+  studio: /cinema
+  tags: film, story, video, cinematic
+  offline_kind: video
+  offline_aspect: "16:9"
+  offline_style: "cinematic, anamorphic 35mm film look, motivated lighting, shallow depth of field, film grain"
 ---
 
 # Cinematic Director
@@ -49,3 +50,10 @@ dialogue pass with lipsync for lines that need it.
 ## 5. Review
 `check_generations` with `look: true` on the stills before animating when the brief is
 demanding. Name the weakest shot and offer to redo it.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `create_storyboard` for the stills, then `generate` for the
+shots, the join and the score. Price a run with `estimate_cost` (or `estimate_job` for a studio
+tool) and confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one.
+Without MCP, the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

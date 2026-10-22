@@ -1,16 +1,17 @@
 ---
 name: brand-asset-creation
-title: Brand Asset Creation
 description: Logos and a brand kit from scratch or from the user's existing assets — logo concepts, palette, typography direction, a one-page brand board, and branded applications such as mockups, merchandise, packaging and signage.
-when_to_use: The user wants a new brand identity, a logo, a palette, a brand board or brandbook, or branded mockups (merch, packaging, signage, social templates) — starting empty or from an uploaded logo and materials.
-icon: palette
-studio: /image
-tags: [brand, logo, identity]
-offline:
-  kind: image
-  aspect: "1:1"
-  outputs: 4
-  style: "clean vector logo mark on a plain white background, flat colours, simple geometric shapes, strong silhouette, no mockup, no extra text"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Brand Asset Creation
+  when_to_use: The user wants a new brand identity, a logo, a palette, a brand board or brandbook, or branded mockups (merch, packaging, signage, social templates) — starting empty or from an uploaded logo and materials.
+  icon: palette
+  studio: /image
+  tags: brand, logo, identity
+  offline_kind: image
+  offline_aspect: "1:1"
+  offline_outputs: "4"
+  offline_style: "clean vector logo mark on a plain white background, flat colours, simple geometric shapes, strong silhouette, no mockup, no extra text"
 ---
 
 # Brand Asset Creation
@@ -40,3 +41,11 @@ After the user picks a logo:
 Mockups with the logo in `images` (op `edit`): business card, tote bag, storefront sign, app icon,
 packaging, Instagram post template. "Place the logo from the image exactly as it is, undistorted."
 Check every result with `look: true` for misspelled names or warped logos.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` for the logo concepts, the brand board and the
+mockups, `check_generations` with `look: true` for the lettering, and `remember` (asks the user) for
+the palette. Price a run with `estimate_cost` (or `estimate_job` for a studio tool) and confirm it
+with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without MCP, the `fuobe`
+CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

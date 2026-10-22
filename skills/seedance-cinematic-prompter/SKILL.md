@@ -1,15 +1,16 @@
 ---
 name: seedance-cinematic-prompter
-title: Seedance Cinematic Prompter
 description: Decide the scene, then write a production-safe Seedance 2.5 prompt — subject, action in time order, camera, lens, light, mood, sound — and pick duration, resolution and references so the clip comes out right the first time.
-when_to_use: The user wants a single cinematic video clip on Seedance (or names Seedance), asks for help writing a video prompt, or a previous Seedance take came out wrong.
-icon: camera
-studio: /video
-tags: [seedance, video, prompting]
-offline:
-  kind: video
-  aspect: "16:9"
-  style: "cinematic, 35mm anamorphic, shallow depth of field, motivated practical lighting, subtle film grain, smooth deliberate camera move"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Seedance Cinematic Prompter
+  when_to_use: The user wants a single cinematic video clip on Seedance (or names Seedance), asks for help writing a video prompt, or a previous Seedance take came out wrong.
+  icon: camera
+  studio: /video
+  tags: seedance, video, prompting
+  offline_kind: video
+  offline_aspect: "16:9"
+  offline_style: "cinematic, 35mm anamorphic, shallow depth of field, motivated practical lighting, subtle film grain, smooth deliberate camera move"
 ---
 
 # Seedance Cinematic Prompter (CINEDANCE)
@@ -41,3 +42,10 @@ Avoid real public figures, brand logos you don't own, and graphic violence — r
 intent. Name the most likely failure (fast hands, crowd faces, text on signs) and simplify it.
 
 Show the final prompt in a short block, then call `generate`.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with model `seedance-2-5` (`oss-wan22-14b` on the
+open engine). Price a run with `estimate_cost` (or `estimate_job` for a studio tool) and confirm it
+with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without MCP, the `fuobe`
+CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).
