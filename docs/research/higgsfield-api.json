@@ -935,6 +935,192 @@
    "verified": true
   },
   {
+   "id": "higgsfield/genjutsu-light/motion-transfer/v1.0",
+   "path": "/higgsfield/genjutsu-light/motion-transfer/v1.0",
+   "method": "POST",
+   "operation": "motion-transfer",
+   "title": "Genjutsu Light — Motion transfer",
+   "uiFeature": "Genjutsu Lite > Motion transfer",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "maxLength": 10000
+    },
+    "duration": {
+     "type": "integer",
+     "required": false,
+     "min": 4,
+     "max": 15,
+     "readOnly": true,
+     "desc": "Computed from the source video, rounded up to whole seconds, capped at 15 seconds. User-supplied values do not control output duration."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "minLength": 1,
+     "maxLength": 2083,
+     "format": "uri"
+    },
+    "image_urls": {
+     "type": "array",
+     "required": true,
+     "minItems": 1,
+     "maxItems": 8,
+     "items": {
+      "type": "string",
+      "format": "uri"
+     }
+    },
+    "resolution": {
+     "type": "string",
+     "required": false,
+     "default": "720p",
+     "enum": [
+      "720p",
+      "480p",
+      "1080p"
+     ]
+    }
+   },
+   "additionalProperties": false,
+   "output": {
+    "kind": "video",
+    "path": "video.url"
+   },
+   "priceUsd": {
+    "unit": "second",
+    "tiers": [
+     {
+      "resolution": "480p",
+      "durationSeconds": 1,
+      "listUsd": 0.05,
+      "currentUsd": 0.025,
+      "discountPct": 50.0
+     },
+     {
+      "resolution": "720p",
+      "durationSeconds": 1,
+      "listUsd": 0.1,
+      "currentUsd": 0.05,
+      "discountPct": 50.0
+     },
+     {
+      "resolution": "1080p",
+      "durationSeconds": 1,
+      "listUsd": 0.2,
+      "currentUsd": 0.1,
+      "discountPct": 50.0
+     }
+    ],
+    "source": "https://dash.higgsfield.ai/api/v2/pricing/models/",
+    "verified": true,
+    "formula": "Priced per total second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount. Billable seconds = output duration + the sum of input reference video durations. Genjutsu Light trims the source to 15 seconds; output duration is rounded up to whole seconds before billing."
+   },
+   "notes": [
+    "Copied by the catalog-4 package from docs/research/paid-model-apis-4.json (round-4 research, verified 2026-10-22 against https://dash.higgsfield.ai/models/higgsfield/genjutsu-light/motion-transfer/v1.0/llms.txt). Released on the public API 2026-10-20; the web app calls it Genjutsu Lite.",
+    "Same inputs as Genjutsu (higgsfield/genjutsu/motion-transfer/v1.0) but only the first 15 s of the source are used; 1-8 image references; the prompt is optional.",
+    "duration is read-only: computed from the source video, rounded up to whole seconds and capped at 15 s.",
+    "The pricing API showed 50% off on 2026-10-22 (currentUsd)."
+   ],
+   "source": "https://dash.higgsfield.ai/models/higgsfield/genjutsu-light/motion-transfer/v1.0/llms.txt",
+   "verified": true
+  },
+  {
+   "id": "higgsfield/genjutsu-light/object-swap/v1.0",
+   "path": "/higgsfield/genjutsu-light/object-swap/v1.0",
+   "method": "POST",
+   "operation": "video-swap",
+   "title": "Genjutsu Light — Object swap",
+   "uiFeature": "Genjutsu Lite > Objects swap",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": false,
+     "default": "",
+     "maxLength": 10000
+    },
+    "duration": {
+     "type": "integer",
+     "required": false,
+     "min": 4,
+     "max": 15,
+     "readOnly": true,
+     "desc": "Computed from the source video, rounded up to whole seconds, capped at 15 seconds. User-supplied values do not control output duration."
+    },
+    "video_url": {
+     "type": "string",
+     "required": true,
+     "minLength": 1,
+     "maxLength": 2083,
+     "format": "uri"
+    },
+    "image_urls": {
+     "type": "array",
+     "required": true,
+     "minItems": 1,
+     "maxItems": 8,
+     "items": {
+      "type": "string",
+      "format": "uri"
+     }
+    },
+    "resolution": {
+     "type": "string",
+     "required": false,
+     "default": "720p",
+     "enum": [
+      "720p",
+      "480p",
+      "1080p"
+     ]
+    }
+   },
+   "additionalProperties": false,
+   "output": {
+    "kind": "video",
+    "path": "video.url"
+   },
+   "priceUsd": {
+    "unit": "second",
+    "tiers": [
+     {
+      "resolution": "480p",
+      "durationSeconds": 1,
+      "listUsd": 0.05,
+      "currentUsd": 0.025,
+      "discountPct": 50.0
+     },
+     {
+      "resolution": "720p",
+      "durationSeconds": 1,
+      "listUsd": 0.1,
+      "currentUsd": 0.05,
+      "discountPct": 50.0
+     },
+     {
+      "resolution": "1080p",
+      "durationSeconds": 1,
+      "listUsd": 0.2,
+      "currentUsd": 0.1,
+      "discountPct": 50.0
+     }
+    ],
+    "source": "https://dash.higgsfield.ai/api/v2/pricing/models/",
+    "verified": true,
+    "formula": "Priced per total second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any applicable customer discount. Billable seconds = output duration + the sum of input reference video durations. Genjutsu Light trims the source to 15 seconds; output duration is rounded up to whole seconds before billing."
+   },
+   "notes": [
+    "Copied by the catalog-4 package from docs/research/paid-model-apis-4.json (round-4 research, verified 2026-10-22 against https://dash.higgsfield.ai/models/higgsfield/genjutsu-light/object-swap/v1.0/llms.txt). Released on the public API 2026-10-20; the web app calls it Genjutsu Lite.",
+    "Same inputs as Genjutsu (higgsfield/genjutsu/object-swap/v1.0) but only the first 15 s of the source are used; 1-8 image references; the prompt is optional.",
+    "duration is read-only: computed from the source video, rounded up to whole seconds and capped at 15 s.",
+    "The pricing API showed 50% off on 2026-10-22 (currentUsd)."
+   ],
+   "source": "https://dash.higgsfield.ai/models/higgsfield/genjutsu-light/object-swap/v1.0/llms.txt",
+   "verified": true
+  },
+  {
    "id": "xai/grok-imagine-image-2.0",
    "path": "/xai/grok-imagine-image-2.0",
    "method": "POST",

@@ -2,7 +2,7 @@
 
 As of **2026-10-22**. This extends [`paid-model-apis.md`](./paid-model-apis.md), [`-2.md`](./paid-model-apis-2.md) and [`-3.md`](./paid-model-apis-3.md). It covers the paid endpoints behind the round-4 features: removing an object from a video, swapping or inserting one from a reference image, FPS boost and slow motion, SDR to HDR, ProRes export, FFmpeg-style composition (Ken Burns, slideshows, end cards, audio loops), OCR with boxes for Layers, Cinema Studio's 3D scene and recomposition, and the models released between 2026-09-15 and 2026-10-22.
 
-The machine-readable companion is [`paid-model-apis-4.json`](./paid-model-apis-4.json). It holds **111 endpoint records**: 86 fal, 22 Replicate, 2 Higgsfield and 1 World Labs. 14 of them re-verify endpoints that parts 1-3 already had (current schema, `outputFields`, new key-field slots); the other 97 are new. It has the same top-level keys as part 3 (`asOf`, `method`, `conventions`, `recommendations`, `gaps`, `counts`, `endpoints`) and the same record fields.
+The machine-readable companion is [`paid-model-apis-4.json`](./paid-model-apis-4.json). It holds **114 endpoint records**: 89 fal, 22 Replicate, 2 Higgsfield and 1 World Labs. 14 of them re-verify endpoints that parts 1-3 already had (current schema, `outputFields`, new key-field slots); the other 100 are new (three of them added by the catalog package, §14). It has the same top-level keys as part 3 (`asOf`, `method`, `conventions`, `recommendations`, `gaps`, `counts`, `endpoints`) and the same record fields.
 
 ## How this was verified
 
@@ -314,7 +314,7 @@ Quality against Fuobe's defaults (Seedance 2.5, Nano Banana Pro, ElevenLabs v4) 
 
 - Kandinsky 6.0 Lite text/image-to-video.
 - MOSS Image (bilingual text rendering, $0.05/MP).
-- Meshy 7.1 text-to-3D and multi-image-to-3D, Tripo P2 text-to-3D, and the Meshy 6/6 Lite/7 retexture endpoints.
+- Meshy 7.1 text-to-3D, Tripo P2 text-to-3D, and the Meshy 6/6 Lite/7 retexture endpoints. (Meshy 7.1 multi-image-to-3D is now recorded, §14.)
 - Mureka lyrics video and podcast.
 - Seedance 2.0 / 2.5 "US-hosted" duplicates.
 - NVIDIA Cosmos 3 Super image-to-video.
@@ -395,3 +395,16 @@ The round-4 completeness critic re-fetched the fal OpenAPI files and `llms.txt` 
 | `fal-ai/workflow-utilities/extract-nth-frame` (part 3) | `frame_interval` 1–300, `max_frames` ≤ 500 per call. A per-frame Mixed Media chain must split clips that need more than 500 frames, and only integer source/target fps ratios work without resampling |
 
 **Corrected:** the "transcode on the Fuobe server with ffmpeg" route assumed an ffmpeg the server does not have (§1, §5).
+
+## 14. Added by the catalog package (2026-10-22)
+
+[`higgsfield-delta-4.md`](./higgsfield-delta-4.md) (§2.3, gap G15) names three fal routes for Higgsfield's CLI 3D jobs that this file had not recorded. The round-4 catalog package fetched their OpenAPI files and `llms.txt` prices on 2026-10-22, parsed them with the rules above (the parser reproduced `tripo3d/h3.1/image-to-3d`'s part-3 inputs exactly) and appended them to the JSON:
+
+| Endpoint | Op | Key fields | Output | Price |
+|---|---|---|---|---|
+| `fal-ai/meshy/rigging` | rig-3d | `model_url`* (a humanoid GLB), `animation_action_id` (0-696, used with `enable_animation`), `height_meters` | `rigged_character_glb`, `rigged_character_fbx`, `basic_animations`, `animation_glb` / `animation_fbx` | $0.20; +$0.12 with an animation |
+| `tripo3d/h3.1/text-to-3d` | text-to-3d | `prompt`*, `negative_prompt`, `texture`, `pbr`, `texture_quality`, `geometry_quality`, `face_limit`, `quad` | `model_mesh`, `model_urls`, `rendered_image` | $0.10 untextured, $0.20 standard, $0.30 HD (+$0.20 detailed geometry, +$0.05 quad) |
+| `meshy/v7.1/multi-image-to-3d` | image-to-3d | `image_urls` (1-4 views of one object), `texture_prompt`, `topology`, `target_polycount`, `should_texture`, `enable_pbr` | `model_glb`, `model_urls`, `thumbnail` | $0.80 untextured, $1.20 textured (+$0.20 rigging, +$0.12 animation) |
+
+All three are active in fal's catalog (`https://api.fal.ai/v1/models?endpoint_id=<id>`). The same day `kling/v4/text-to-video`'s `llms.txt` still said "API access is coming soon", so Kling 4.0 stays out of the catalog.
+
