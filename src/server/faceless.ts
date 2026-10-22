@@ -315,7 +315,7 @@ const NAME_SYSTEM = "You name YouTube channels. Reply with the name only: 2–4 
  * A new channel is there straight away with a name taken from the idea; the LLM's name replaces it when
  * it answers (within 15 s, and only while the channel still has the first name), then the avatar is drawn.
  */
-export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string }): Promise<FacelessChannel> {
+export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean }): Promise<FacelessChannel> {
   const idea = input.idea.trim();
   if (!idea) throw new FacelessError("Describe the channel first");
   const reference = input.reference?.trim() ? await readReference(input.reference) : null;
@@ -343,7 +343,8 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
       if (name) db().prepare("UPDATE faceless_channels SET name = ? WHERE id = ? AND name = ?").run(name, row.id, row.name);
     }
     try {
-      if (channelRow(row.id)) makeAvatar(row.id);
+      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button.
+      if (input.avatar !== false && channelRow(row.id)) makeAvatar(row.id);
     } catch {
       // No picture model can run right now: the channel shows its initials, and "Draw an avatar" is there.
     }
@@ -444,6 +445,8 @@ export interface EpisodeInput {
   autoRender?: boolean;
   /** Save this episode's look and sound as the channel's (default: only for a channel's first episode). */
   saveLook?: boolean;
+  /** A script that's written already, with its pictures (Assist): no writer runs; it's ready to review, or renders at once with autoRender. */
+  blocks?: Partial<ScriptBlock>[];
 }
 
 function cleanSettings(s: EpisodeSettings): EpisodeSettings {
@@ -462,25 +465,27 @@ function cleanSettings(s: EpisodeSettings): EpisodeSettings {
 export function createEpisode(input: EpisodeInput): FacelessEpisode {
   const topic = input.topic.trim();
   const pasted = input.script?.trim() ?? "";
-  if (!topic && !pasted && !input.sources?.length) throw new FacelessError(input.kind === "explainer" ? "Add a prompt, or attach a file or link" : "Add a topic, or bring your own script");
-  if (pasted.length > MAX_SCRIPT) throw new FacelessError("That script is too long to narrate. Shorten it and try again.");
+  const written = input.blocks ? normalizeBlocks(input.blocks) : null;
+  if (!topic && !pasted && !input.sources?.length && !written?.length) throw new FacelessError(input.kind === "explainer" ? "Add a prompt, or attach a file or link" : "Add a topic, or bring your own script");
+  if (pasted.length > MAX_SCRIPT || (written && narrationText(written).length > MAX_SCRIPT)) throw new FacelessError("That script is too long to narrate. Shorten it and try again.");
+  if (written && !written.length) throw new FacelessError("The script has no scenes yet");
   const channel = input.channelId ? getChannel(input.channelId) : null;
   if (input.channelId && !channel) throw new FacelessError("Channel not found", 404);
   const settings = cleanSettings(input.settings);
   const sources = (input.sources ?? []).slice(0, MAX_SOURCES);
   settings.sourceImages = sources.filter((s): s is Extract<ExplainerSource, { kind: "image" }> => s.kind === "image").map((s) => s.url);
   const now = Date.now();
-  const title = (topic || pasted).replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
+  const title = (topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
   const row: EpisodeRow = {
     id: nanoid(10),
     channel_id: channel?.id ?? null,
     kind: input.kind,
     title,
     topic: topic.slice(0, 5000),
-    status: "writing",
+    status: written ? "review" : "writing",
     error: null,
     settings_json: JSON.stringify(settings),
-    script_json: JSON.stringify({ blocks: [], source: pasted ? "pasted" : "ai" } satisfies EpisodeScript),
+    script_json: JSON.stringify((written ? { blocks: written, source: "ai" } : { blocks: [], source: pasted ? "pasted" : "ai" }) satisfies EpisodeScript),
     plan_json: null,
     sources_json: JSON.stringify(sources),
     favorite: 0,
@@ -495,6 +500,16 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     void updateChannel(channel.id, {
       settings: { engine: settings.engine, styleId: settings.styleId, styleRefs: settings.styleRefs, voice: settings.voice, aspect: settings.aspect, subtitles: settings.subtitles, music: settings.music, animation: settings.animation, length: settings.length },
     });
+  }
+  if (written) {
+    if (!input.autoRender) return toEpisode(row);
+    try {
+      return renderEpisode(row.id);
+    } catch (e) {
+      // The script is there: show it with what's in the way, as a written script that can't render does.
+      updateEpisodeRow(row.id, { status: "review", error: (e as Error).message });
+      return mustEpisode(row.id);
+    }
   }
   startWriting(row.id, pasted, !!input.autoRender);
   return toEpisode(row);

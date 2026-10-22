@@ -259,13 +259,16 @@ export interface BatchEstimate {
   copyBy: "llm" | "rules";
 }
 
-/** "Create N ads" with its price, before anything runs (the stepper shows it first). */
-export function estimateBatch(input: BatchInput): BatchEstimate {
-  const brand = getBrand(input.brandId);
+/**
+ * "Create N ads" with its price, before anything runs (the stepper shows it first). `draft` prices a
+ * brand and product that don't exist yet (Assist, before its brand kit and product are saved).
+ */
+export function estimateBatch(input: BatchInput, draft?: { brand: BrandKit; product: Product | null }): BatchEstimate {
+  const brand = draft?.brand ?? getBrand(input.brandId);
   if (!brand) throw new AdsError("That brand no longer exists");
   const route = batchRoute(input);
   const total = input.items.reduce((n, i) => n + i.count, 0);
-  const product = getProduct(input.items[0].productId);
+  const product = draft ? draft.product : getProduct(input.items[0].productId);
   const req = route === "higgsfield" ? higgsfieldRequest(product, brand, input.ratio ?? "4:5") : visualRequest({ visual: "the product", headline: "Ad" }, product, brand, input.engine);
   const p = previewGeneration(req);
   let copy = 0;
@@ -290,8 +293,14 @@ export function estimateBatch(input: BatchInput): BatchEstimate {
   };
 }
 
+/** Words every ad of a batch uses as given (Assist: "Headline exactly …"), instead of the copywriter's. */
+export interface FixedCopy {
+  headline?: string;
+  cta?: string;
+}
+
 /** Start a batch: creatives appear at once ("writing"), copy and visuals follow in the background. */
-export function createBatch(input: BatchInput): { batchId: string; creatives: AdCreative[]; run: Promise<void> } {
+export function createBatch(input: BatchInput, fixed: FixedCopy = {}): { batchId: string; creatives: AdCreative[]; run: Promise<void> } {
   const mode = engineMode();
   if (mode !== "both" && mode !== input.engine) throw new AdsError(mode === "open" ? "This install is set to open source only (Settings → Engine mode)" : "This install is set to paid cloud APIs only (Settings → Engine mode)");
   const brand = getBrand(input.brandId);
@@ -323,11 +332,11 @@ export function createBatch(input: BatchInput): { batchId: string; creatives: Ad
     }
   })();
   running().add(batchId);
-  const run = fillBatch(batchId, brand, ids, input, route).finally(() => running().delete(batchId));
+  const run = fillBatch(batchId, brand, ids, input, route, fixed).finally(() => running().delete(batchId));
   return { batchId, creatives: listCreatives({ brandId: brand.id, batchId }), run };
 }
 
-async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; product: Product; index: number }[], input: BatchInput, route: "fuobe" | "higgsfield"): Promise<void> {
+async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; product: Product; index: number }[], input: BatchInput, route: "fuobe" | "higgsfield", fixed: FixedCopy = {}): Promise<void> {
   const setGen = (id: string, g: Generation) => db().prepare("UPDATE ad_creatives SET generation_id = ?, status = 'queued', updated_at = ? WHERE id = ?").run(g.id, Date.now(), id);
   const fail = (id: string, error: string) => db().prepare("UPDATE ad_creatives SET status = 'failed', error = ?, updated_at = ? WHERE id = ?").run(error, Date.now(), id);
   if (route === "higgsfield") {
@@ -351,8 +360,10 @@ async function fillBatch(batchId: string, brand: BrandKit, ids: { id: string; pr
     } catch {
       concepts = heuristicConcepts(brand, product, list.length, input.direction);
     }
+    const headline = fixed.headline?.trim().slice(0, 90);
+    const cta = fixed.cta?.trim().slice(0, 30);
     list.forEach((c, i) => {
-      const k = concepts[i];
+      const k = { ...concepts[i], ...(headline && { headline }), ...(cta && { cta }) };
       // A creative deleted meanwhile gets no visual.
       const ok = db()
         .prepare("UPDATE ad_creatives SET angle = ?, headline = ?, body = ?, cta = ?, visual = ?, status = 'queued', updated_at = ? WHERE id = ? AND status = 'writing'")
