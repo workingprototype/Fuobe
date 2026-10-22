@@ -1,0 +1,207 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "clip.mp4"
+    },
+    "_meta": {
+      "title": "The ad (video; its picture is copied, not re-encoded, when compatible)"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "clip.mp4"
+    },
+    "_meta": {
+      "title": "Its soundtrack (the same upload; drop for silent clips)"
+    }
+  },
+  "3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "card.png"
+    },
+    "_meta": {
+      "title": "End card, e.g. the logo on the brand colour (image)"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1280
+    },
+    "_meta": {
+      "title": "Clip width (width; from the clip's header)"
+    }
+  },
+  "5": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 720
+    },
+    "_meta": {
+      "title": "Clip height (height)"
+    }
+  },
+  "6": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 30
+    },
+    "_meta": {
+      "title": "Clip frame rate (fps)"
+    }
+  },
+  "7": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 2
+    },
+    "_meta": {
+      "title": "End card seconds (duration)"
+    }
+  },
+  "8": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "3",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "4",
+        0
+      ],
+      "height": [
+        "5",
+        0
+      ],
+      "crop": "center"
+    },
+    "_meta": {
+      "title": "Card at the clip's size"
+    }
+  },
+  "9": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(round(a * b), 1)",
+      "values.a": [
+        "7",
+        0
+      ],
+      "values.b": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Card frames"
+    }
+  },
+  "10": {
+    "class_type": "RepeatImageBatch",
+    "inputs": {
+      "image": [
+        "8",
+        0
+      ],
+      "amount": [
+        "9",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Hold the card"
+    }
+  },
+  "11": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "fps": [
+        "6",
+        0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "Card clip (H.264, like the ad)"
+    }
+  },
+  "12": {
+    "class_type": "EmptyAudio",
+    "inputs": {
+      "duration": [
+        "7",
+        0
+      ],
+      "sample_rate": 44100,
+      "channels": 2
+    },
+    "_meta": {
+      "title": "Silence under the card"
+    }
+  },
+  "13": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "2",
+        0
+      ],
+      "audio2": [
+        "12",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "Ad sound, then silence"
+    }
+  },
+  "14": {
+    "class_type": "ConcatenateVideo",
+    "inputs": {
+      "videos.video0": [
+        "1",
+        0
+      ],
+      "videos.video1": [
+        "11",
+        0
+      ],
+      "codec": "auto",
+      "complete_audio": [
+        "13",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Ad + end card with the ad's sound"
+    }
+  },
+  "15": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "14",
+        0
+      ],
+      "filename_prefix": "fuobe/video-append-endcard",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  }
+}

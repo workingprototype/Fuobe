@@ -1,0 +1,49 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Video (video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames, sound, fps"
+    }
+  },
+  "3": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "audio": [
+        "2",
+        1
+      ],
+      "frame_rate": [
+        "2",
+        2
+      ],
+      "loop_count": 0,
+      "filename_prefix": "fuobe/video-export-pro",
+      "format": "video/ProRes",
+      "profile": "hq",
+      "pingpong": false,
+      "save_output": true
+    },
+    "_meta": {
+      "title": "Pro codec (format: video/ProRes | video/h265-mp4 | video/ffv1-mkv | video/16bit-png; profile for ProRes)"
+    }
+  }
+}
