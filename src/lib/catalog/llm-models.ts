@@ -5,7 +5,8 @@ import type { ModelDef, ModelRoute, Operation } from "./types";
  * server (src/server/providers/llm.ts). Kind "text": they only show up where a studio asks for
  * text models (dubbing, scripts, ad copy) and in pipelines, never in the image/video/audio pickers.
  * The route endpoint says which LLMs a model may use: "auto" = Claude when an Anthropic key is
- * set, else a local Ollama; "ollama" = Ollama only (open-source installs never call a paid API).
+ * set, else a local Ollama; "ollama" = Ollama only (open-source installs never call a paid API),
+ * and its translations run on ComfyUI's Qwen3.5 4B workflow when Ollama isn't running.
  */
 
 const llm = (op: Operation, endpoint: "auto" | "ollama"): ModelRoute => ({ op, provider: "llm", endpoint });
@@ -39,7 +40,7 @@ export const LLM_MODELS: ModelDef[] = [
     family: "llm",
     engine: "open",
     kind: "text",
-    tagline: "Translation and writing on your own machine with Ollama (qwen3, llama, mistral…)",
+    tagline: "Translation and writing on your own machine with Ollama (qwen3, llama, mistral…); without Ollama, translations run on ComfyUI (Qwen3.5 4B)",
     badges: ["open"],
     routes: [llm("translate", "ollama"), llm("write", "ollama")],
     options: { languages: LLM_LANGUAGES },

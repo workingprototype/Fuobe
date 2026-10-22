@@ -2,21 +2,28 @@ import "server-only";
 import { Worker } from "node:worker_threads";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
 import { cueText, parseCues, toSrt, type Cue } from "@/lib/cues";
-import type { GenInput, ModelRoute } from "@/lib/catalog/types";
+import type { GenInput, ModelRoute, Operation } from "@/lib/catalog/types";
 import { engineMode, getSetting } from "../settings";
 import { toDataUri } from "../storage";
-import type { ProviderAdapter, RemoteOutput } from "./types";
+import { comfyProvider } from "./comfyui";
+import type { PollResult, ProviderAdapter, RemoteOutput } from "./types";
 
 /**
  * The "llm" provider: text steps (translate, write) run inside this server on the LLM the
  * install is set up with — Claude when an Anthropic key is set (and the install isn't open
- * source only), else a local Ollama. Route endpoint "ollama" (the open model) never uses Claude.
+ * source only), else a local Ollama. Route endpoint "ollama" (the open model) never uses Claude;
+ * when Ollama isn't running, its translations run on ComfyUI instead (Qwen3.5 4B through the
+ * translate-qwen35-textgen workflow, one prompt per batch of lines, so cue timing is kept the same way).
  * Jobs run in the background of this process and are polled like any provider; a restart
  * loses a job that was still writing (it fails as interrupted and can be retried).
  */
 
-type Backend = "claude" | "ollama";
+type Backend = "claude" | "ollama" | "comfyui";
+
+/** The ComfyUI model and workflow open-source translations fall back to without Ollama. */
+export const COMFY_TRANSLATE_MODEL = "oss-qwen35-translate";
 
 /** A text output: the words in `text`, the same words saved as a file (.txt, or .srt for timed text). */
 export type TextOutput = RemoteOutput & { text: string; meta?: Record<string, unknown> };
@@ -85,23 +92,32 @@ function ollamaReady(): boolean {
   return cur.ok;
 }
 
+/** A route, or the part of one that decides its LLMs (the op: only translations fall back to ComfyUI). */
+type LlmRoute = Pick<ModelRoute, "endpoint"> & { op?: Operation };
+
 /**
  * The LLMs a route may use right now, in the order they're tried. Follows Settings → AI helper
- * ("none" turns text steps off; "ollama" never calls Claude) and the engine mode.
+ * ("none" turns text steps off; "ollama" never calls Claude) and the engine mode. An open-source
+ * translation with no Ollama answering runs on ComfyUI when that answers.
  */
-export function llmBackends(route: Pick<ModelRoute, "endpoint">): Backend[] {
+export function llmBackends(route: LlmRoute): Backend[] {
   const choice = getSetting("enhanceProvider");
   if (choice === "none") return [];
   const out: Backend[] = [];
   const claude = route.endpoint !== "ollama" && !!getSetting("anthropicKey") && (choice === "anthropic" || (choice === "auto" && engineMode() !== "open"));
   if (claude) out.push("claude");
   if ((route.endpoint === "ollama" || choice !== "anthropic") && ollamaReady()) out.push("ollama");
+  else if (route.endpoint === "ollama" && route.op === "translate" && comfyProvider.isConfigured()) out.push("comfyui");
   return out;
 }
 
 /** What to tell the user when no LLM can run a route (demo mode off). */
-export const llmMissing = (route: Pick<ModelRoute, "endpoint">) =>
-  route.endpoint === "ollama" ? "Connect Ollama in Settings to run this model (open-source text runs on your own machine)" : "Connect Claude or Ollama in Settings to run this model";
+export const llmMissing = (route: LlmRoute) =>
+  route.endpoint !== "ollama"
+    ? "Connect Claude or Ollama in Settings to run this model"
+    : route.op === "translate"
+      ? "Connect Ollama, or start ComfyUI with Qwen3.5 4B, in Settings to translate on your own machine"
+      : "Connect Ollama in Settings to run this model (open-source text runs on your own machine)";
 
 /** Claude is the one that costs money. */
 export const llmUsesClaude = (route: Pick<ModelRoute, "endpoint">) => llmBackends(route)[0] === "claude";
@@ -109,7 +125,7 @@ export const llmUsesClaude = (route: Pick<ModelRoute, "endpoint">) => llmBackend
 // ---------------------------------------------------------------------------
 // Calls
 
-const BACKEND_LABEL: Record<Backend, string> = { claude: "Claude", ollama: "Ollama" };
+const BACKEND_LABEL: Record<Backend, string> = { claude: "Claude", ollama: "Ollama", comfyui: "Qwen3.5 on ComfyUI" };
 
 async function viaClaude(system: string, user: string, signal: AbortSignal): Promise<string> {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
@@ -173,13 +189,63 @@ async function viaOllama(system: string, user: string, signal: AbortSignal): Pro
   return text;
 }
 
+const COMFY_POLL_MS = 500;
+/** One answer may take this long on ComfyUI (a GPU busy with other jobs queues it). */
+const COMFY_ANSWER_MS = 15 * 60_000;
+
+/**
+ * One answer from Qwen3.5 4B inside ComfyUI: the system prompt is the workflow's instruction and the
+ * user text follows it (TextGenerate reads them as one message). Submitted and polled like any
+ * ComfyUI job; canceling the text step cancels the prompt.
+ */
+async function viaComfy(system: string, user: string, signal: AbortSignal): Promise<string> {
+  const model = getModel(COMFY_TRANSLATE_MODEL);
+  const route = model?.routes.find((r) => r.provider === "comfyui");
+  if (!model || !route) throw new Error("The ComfyUI translate workflow is missing from the catalog");
+  // Room for a long chunk of plain text (~8k characters) translated in one go.
+  const { externalId, meta = {} } = await comfyProvider.submit({ generationId: `llm_${nanoid(8)}`, model, route, input: { prompt: user, extra: { instruction: `${system}\n\n`, maxTokens: 4096 } } });
+  const ctx = { externalId, meta, route, model, createdAt: Date.now() };
+  const stop = () => void comfyProvider.cancel?.(ctx).catch(() => {});
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    let misses = 0;
+    for (const end = Date.now() + COMFY_ANSWER_MS; Date.now() < end; ) {
+      await new Promise((r) => setTimeout(r, COMFY_POLL_MS));
+      if (signal.aborted) throw new Error("Canceled");
+      let r: PollResult;
+      try {
+        r = await comfyProvider.poll(ctx);
+        misses = 0;
+      } catch (e) {
+        // A proxy hiccup: ask again, a few times.
+        if (++misses >= 5) throw new Error(`ComfyUI stopped answering (${(e as Error).message})`);
+        continue;
+      }
+      if (r.state === "failed") throw new Error(`ComfyUI couldn't translate: ${r.error}`);
+      if (r.state !== "succeeded") continue;
+      const out = r.outputs.find((o) => o.kind === "text");
+      // SaveText hands the words back with the file; read the file when they're missing.
+      const raw = out?.text ?? (out ? await (await fetch(out.url, { headers: out.headers, signal })).text() : "");
+      const text = raw.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+      if (!text) throw new Error("ComfyUI returned no text");
+      return text;
+    }
+    stop();
+    throw new Error("ComfyUI took too long to translate");
+  } finally {
+    signal.removeEventListener("abort", stop);
+  }
+}
+
+const CALL: Record<Backend, (system: string, user: string, signal: AbortSignal) => Promise<string>> = { claude: viaClaude, ollama: viaOllama, comfyui: viaComfy };
+
 /** Ask the first backend; if it fails, the next (Claude → Ollama). Throws the first error when all fail. */
 async function complete(backends: Backend[], system: string, user: string, job: LlmJob): Promise<string> {
   let first: Error | null = null;
   for (const b of backends) {
     try {
       job.backend = b;
-      return await (b === "claude" ? viaClaude : viaOllama)(system, user, job.abort.signal);
+      return await CALL[b](system, user, job.abort.signal);
     } catch (e) {
       if (job.abort.signal.aborted) throw e;
       first ??= e as Error;
