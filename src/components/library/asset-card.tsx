@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Heart, Layers, MoreHorizontal, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Heart, Layers, MoreHorizontal, Pin, RotateCcw } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { tileRatio } from "@/components/studio/feed";
 import { TileActions, useCanHover, type RunnerOptions } from "@/components/studio/result-actions";
@@ -11,6 +11,7 @@ import { coverOf, trashDaysLeft, userTitle, type LibraryEntry } from "@/lib/libr
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { DRAG_TYPE } from "./folders";
+import { ReviewBadge } from "./review";
 import type { Layout } from "./view-options";
 
 /** Stable callbacks from the Library (refs inside), so cards re-render only when their own data changes. */
@@ -185,7 +186,13 @@ export const AssetCard = memo(function AssetCard({
   const badges = (
     <>
       <div className={cn("absolute top-2 right-2 flex items-center gap-1.5", audio && canHover && "group-focus-within/card:opacity-0 group-hover/card:opacity-0")}>
+        {!stack && !trashed && <ReviewBadge narrow status={g.review} />}
         {!stack && count > 1 && !isLayered(g) && <span className="rounded-full bg-black/55 px-1.5 py-0.5 font-mono text-[11px] text-white backdrop-blur">×{count}</span>}
+        {g.pinnedAt && !stack && !trashed && (
+          <span className="grid size-5 place-items-center rounded-full bg-black/55 text-white backdrop-blur" title="Pinned">
+            <Pin className="size-3" aria-label="Pinned" />
+          </span>
+        )}
         {g.favorite && !stack && <Heart className="m-0.5 size-4 fill-highlight text-highlight drop-shadow" />}
         {audio && touchMenu}
       </div>
@@ -225,7 +232,11 @@ export const AssetCard = memo(function AssetCard({
           <SelectDot selected={selected} visible={selecting} onToggle={(s) => api.toggle(entry.key, ids, s)} label={`Select ${title}`} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[14px] font-medium">{title}</p>
+          <p className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[14px] font-medium">{title}</span>
+            {g.pinnedAt && !stack && !trashed && <Pin className="size-3 shrink-0 text-muted-foreground" aria-label="Pinned" />}
+            {!stack && !trashed && <ReviewBadge status={g.review} className="bg-muted" />}
+          </p>
           <p className="truncate text-[12px] text-muted-foreground">
             {stack ? `${stack.label} · ` : `${g.modelName ?? g.modelId} · ${OPERATION_LABELS[g.op]} · `}
             {trashed ? `${trashDaysLeft(g.deletedAt!)} days left in Trash` : timeAgo(g.createdAt)}
@@ -276,7 +287,7 @@ export const AssetCard = memo(function AssetCard({
       <div
         {...common}
         className={cn(
-          "relative w-full cursor-pointer overflow-hidden rounded-xl bg-muted transition-[box-shadow]",
+          "@container relative w-full cursor-pointer overflow-hidden rounded-xl bg-muted transition-[box-shadow]",
           !selecting && done && !stack && "cursor-zoom-in",
           selected && "ring-3 ring-primary",
           expanded && "ring-2 ring-border-strong",

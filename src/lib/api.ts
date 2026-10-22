@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "r
 import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
 import type { ElementKind, StudioElement } from "./catalog/elements";
-import type { Engine, Generation, GenerationRequest, MediaKind } from "./catalog/types";
+import type { Engine, Generation, GenerationRequest, MediaKind, ReviewStatus } from "./catalog/types";
 import {
   applyToCanvasView,
   applyToList,
@@ -24,7 +24,7 @@ import {
   type Pages,
   type StreamEvent,
 } from "./generation-stream";
-import { cursorAfter, filterToSearch, type FeedFilter, type Folder } from "./library";
+import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
 
 export interface Asset {
   id: string;
@@ -397,16 +397,17 @@ export function useGenerations(filter: FeedFilter, opts: { keepPrevious?: boolea
 export const LIBRARY_PAGE = 60;
 
 /** The Library's paged list ("Load more" pages back with the before cursor). */
-export function useLibrary(filter: FeedFilter) {
+export function useLibrary(filter: FeedFilter, opts: { enabled?: boolean } = {}) {
   const connected = useGenerationStream();
   const f = { ...filter, limit: filter.limit ?? LIBRARY_PAGE };
   return useInfiniteQuery({
     queryKey: ["library", f] as const,
+    enabled: opts.enabled ?? true,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam }) =>
       (await json<{ items: Generation[] }>(await fetch(`/api/generations${f.trashed ? "/trash" : ""}?${filterToSearch(f, pageParam)}`))).items,
     // The last row's timestamp and id: rows sharing a timestamp across the page boundary aren't skipped.
-    getNextPageParam: (last) => (last.length < f.limit ? undefined : cursorAfter(last.at(-1)!, f.trashed)),
+    getNextPageParam: (last) => (last.length < f.limit ? undefined : cursorAfter(last.at(-1)!, f)),
     placeholderData: keepPreviousData,
     structuralSharing: sharePagesById,
     refetchInterval: (q) => pollEvery(q.state.data?.pages.flat(), connected),
@@ -420,13 +421,19 @@ export interface LibraryFacets {
   favorites: number;
   failed: number;
   trash: number;
+  pinned: number;
+  /** Helper steps, counted whether they're shown or not. */
+  steps: number;
+  reviews: Partial<Record<ReviewStatus, number>>;
 }
 
-export function useLibraryFacets() {
+/** Counts for the Library's tabs and filters (with the helper steps counted in when they're shown). */
+export function useLibraryFacets(opts: { steps?: boolean } = {}) {
   return useQuery({
-    queryKey: ["library-facets"],
-    queryFn: async () => json<LibraryFacets>(await fetch("/api/generations/facets")),
+    queryKey: ["library-facets", { steps: !!opts.steps }],
+    queryFn: async () => json<LibraryFacets>(await fetch(`/api/generations/facets${opts.steps ? "?steps=1" : ""}`)),
     staleTime: 15_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -452,16 +459,16 @@ export function useCreateGeneration() {
   });
 }
 
-export type BulkAction = "trash" | "restore" | "delete" | "favorite" | "unfavorite" | "move";
+export type BulkAction = "trash" | "restore" | "delete" | "favorite" | "unfavorite" | "move" | "pin" | "unpin" | "review";
 
 /** The bulk endpoint takes this many ids per request. */
 export const BULK_MAX = 500;
 
 /** One bulk action, sent in batches of BULK_MAX (a select-all after a few "Load more" can be bigger). */
-async function bulkRequest(action: BulkAction, ids: string[], folderId?: string | null): Promise<number> {
+async function bulkRequest(action: BulkAction, ids: string[], extra: { folderId?: string | null; review?: ReviewStatus | null } = {}): Promise<number> {
   let n = 0;
   for (let i = 0; i < ids.length; i += BULK_MAX) {
-    const body = JSON.stringify({ action, ids: ids.slice(i, i + BULK_MAX), folderId });
+    const body = JSON.stringify({ action, ids: ids.slice(i, i + BULK_MAX), ...extra });
     n += (await json<{ count: number }>(await fetch("/api/generations/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body }))).count;
   }
   return n;
@@ -477,18 +484,21 @@ export function useGenerationActions() {
       void qc.invalidateQueries({ queryKey: ["library-facets"] });
       void qc.invalidateQueries({ queryKey: ["folders"] });
     };
-    const local = (gs: Generation[], patch: Partial<Generation> | null) => {
+    /** A patch for every one (or per one, from its freshest copy); null removes them from the caches. */
+    type Patch = Partial<Generation> | ((cur: Generation) => Partial<Generation>) | null;
+    const local = (gs: Generation[], patch: Patch) => {
       for (const g of gs) {
         const cur = cached(qc, g.id) ?? g;
-        applyEvent(qc, patch ? { type: "generation", generation: patched(cur, patch) } : { type: "deleted", id: g.id });
+        const p = typeof patch === "function" ? patch(cur) : patch;
+        applyEvent(qc, p ? { type: "generation", generation: patched(cur, p) } : { type: "deleted", id: g.id });
       }
     };
     /** Optimistic, then the server; on failure the caches are refetched and the error shown. */
-    const run = async (gs: Generation[], patch: Partial<Generation> | null, action: BulkAction, folderId?: string | null) => {
+    const run = async (gs: Generation[], patch: Patch, action: BulkAction, extra?: Parameters<typeof bulkRequest>[2]) => {
       if (!gs.length) return 0;
       local(gs, patch);
       try {
-        return await bulkRequest(action, gs.map((g) => g.id), folderId);
+        return await bulkRequest(action, gs.map((g) => g.id), extra);
       } catch (e) {
         toast.error((e as Error).message);
         return 0;
@@ -530,7 +540,14 @@ export function useGenerationActions() {
         await fetch("/api/generations/trash", { method: "DELETE" });
         refresh();
       },
-      move: (gs: Generation[], folderId: string | null) => run(gs, { folderId }, "move", folderId),
+      move: (gs: Generation[], folderId: string | null) => run(gs, { folderId }, "move", { folderId }),
+      /** Pin to the top of the Library (ones already pinned keep their place), or unpin. */
+      pin: (gs: Generation[], value: boolean) => {
+        const now = Date.now();
+        // One already pinned keeps its pin time (and its place), as on the server.
+        return run(gs, (cur) => ({ pinnedAt: value ? (cur.pinnedAt ?? now) : null }), value ? "pin" : "unpin");
+      },
+      review: (gs: Generation[], review: ReviewStatus | null) => run(gs, { review }, "review", { review }),
       cancel: async (g: Generation) => {
         local([g], { status: "canceled" });
         await fetch(`/api/generations/${g.id}/cancel`, { method: "POST" });
@@ -579,8 +596,11 @@ export function useFolderActions() {
       return out;
     };
     return {
-      create: (body: { name: string; color?: string }) => send<Folder>("/api/folders", "POST", body),
-      update: (id: string, body: { name?: string; color?: string }) => send<Folder>(`/api/folders/${id}`, "PATCH", body),
+      /** A new folder; with parentId, a subfolder. */
+      create: (body: { name: string; color?: string; parentId?: string | null }) => send<Folder>("/api/folders", "POST", body),
+      /** Rename, recolour, pin, or move (parentId; null: the library root). */
+      update: (id: string, body: { name?: string; color?: string; parentId?: string | null; pinned?: boolean }) => send<Folder>(`/api/folders/${id}`, "PATCH", body),
+      /** Delete; its results and subfolders move up to its parent. */
       remove: async (id: string) => {
         await send<void>(`/api/folders/${id}`, "DELETE");
         void qc.invalidateQueries({ queryKey: ["library"] });
@@ -597,6 +617,23 @@ export async function uploadFile(file: File): Promise<Asset> {
   const form = new FormData();
   form.append("file", file);
   return json<Asset>(await fetch("/api/uploads", { method: "POST", body: form }));
+}
+
+/** A stored file's uses: where it's used, in one line ("2 results and the element “Maya”"), empty when nothing uses it. */
+export async function assetUsage(id: string): Promise<{ uses: AssetUse[]; usedBy: string }> {
+  return json<{ uses: AssetUse[]; usedBy: string }>(await fetch(`/api/assets/${encodeURIComponent(id)}`));
+}
+
+/** Delete an upload for good (refused, with where it's used, while anything still uses it). */
+export function useDeleteUpload() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (res.status !== 204) await json(res);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["assets"] }),
+  });
 }
 
 export function useAssets(source?: "upload" | "generation", kind?: MediaKind) {

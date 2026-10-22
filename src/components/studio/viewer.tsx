@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { CompareSlider } from "./compare-slider";
 import { ACTION_ICONS, downloadUrl, SaveElementForm, useActionRunner } from "./result-actions";
 import { LayersStack, ModelViewer, TextReader } from "./result-media";
+import { ReviewSelect } from "@/components/library/review";
 
 
 function Row({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
@@ -93,6 +94,7 @@ function Details({ g, index }: { g: Generation; index: number }) {
         <Row label="Cost" value={g.costUsd != null ? formatCost(g.costUsd) : undefined} mono />
         <Row label="Made" value={timeAgo(g.createdAt)} />
         {g.deletedAt && <Row label="In Trash" value={`${trashDaysLeft(g.deletedAt)} days left`} />}
+        {!g.deletedAt && <Row label="Review" value={<ReviewSelect g={g} />} />}
       </div>
       {g.request.negativePrompt && <p className="text-[12px] text-muted-foreground">Negative: {g.request.negativePrompt}</p>}
     </div>
@@ -168,6 +170,7 @@ export function Viewer({
       if (e.key === "ArrowLeft" && onPrev) onPrev();
       else if (e.key === "ArrowRight" && onNext) onNext();
       else if (k === "f") act("favorite");
+      else if (k === "p") act("pin");
       else if (k === "c" && source) setComparing((v) => !v);
       else if (k === "d") act("download");
       else if (k === "r") act("reuse");
@@ -198,8 +201,8 @@ export function Viewer({
 
   const primary = list.find((a) => a.placement === "primary");
   const bar = list.filter((a) => a.placement === "bar");
-  // "Copy prompt" sits under the title in the details, so it isn't repeated as a button.
-  const menu = list.filter((a) => a.placement === "menu" && a.id !== "copy-prompt");
+  // "Copy prompt" sits under the title in the details, and the review status is picked there too.
+  const menu = list.filter((a) => a.placement === "menu" && a.id !== "copy-prompt" && a.id !== "review");
 
   const actionButton = (a: OutputAction, opts: { variant?: "default" | "secondary" | "ghost"; className?: string; onDone?: () => void } = {}) => {
     const Icon = ACTION_ICONS[a.id];
@@ -245,7 +248,7 @@ export function Viewer({
         variant={variant}
         size="sm"
         className={cls}
-        aria-pressed={a.id === "favorite" ? g.favorite : a.id === "compare" ? comparing : undefined}
+        aria-pressed={a.id === "favorite" ? g.favorite : a.id === "compare" ? comparing : a.id === "pin" ? !!g.pinnedAt : undefined}
         onClick={() => {
           run(a, g, index);
           opts.onDone?.();
@@ -384,9 +387,14 @@ export function Viewer({
                 <Kbd>←</Kbd> <Kbd>→</Kbd> browse
               </span>
             )}
-            {!g.deletedAt && (
+            {!g.deletedAt && g.feature !== "upload" && (
               <span>
                 <Kbd>F</Kbd> favorite
+              </span>
+            )}
+            {!g.deletedAt && g.feature !== "upload" && (
+              <span>
+                <Kbd>P</Kbd> pin
               </span>
             )}
             {source && (

@@ -34,7 +34,10 @@ export type OutputActionId =
   | "compare"
   | "reuse"
   | "copy-prompt"
+  | "pin"
+  | "review"
   | "delete"
+  | "delete-upload"
   | "restore"
   | "delete-forever";
 
@@ -114,13 +117,16 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       out.push({ ...file, label: `Download .${ext}` }, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       break;
   }
-  // Uploads (the Library's Uploads tab) are files, not generations: hand-offs and download only.
-  if (g.feature === "upload") return out.filter((a) => a.id !== "favorite");
+  // Uploads (the Library's Uploads tab) are files, not generations: hand-offs, download, and a
+  // delete that first checks nothing uses the file.
+  if (g.feature === "upload") return [...out.filter((a) => a.id !== "favorite"), { id: "delete-upload", label: "Delete", placement: "menu", destructive: true }];
   if (g.outputs.length > 1) out.push({ id: "download-all", label: `Download all ${g.outputs.length} (.zip)`, placement: "menu", href: `/api/generations/zip?ids=${g.id}`, download: "" });
   if (o.draftId) out.push({ id: "finalize", label: "Render this draft in 1080p", placement: "menu" });
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });
   if (ctx.reuse) out.push({ id: "reuse", label: "Reuse settings", placement: "menu" });
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
+  // Library: pinned results stay at the top of their view; the review status is a sub-menu of its own.
+  out.push({ id: "pin", label: g.pinnedAt ? "Unpin" : "Pin to top", placement: "menu" }, { id: "review", label: "Review status", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });
   return out;
 }
