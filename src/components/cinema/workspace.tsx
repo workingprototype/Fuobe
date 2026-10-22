@@ -20,6 +20,7 @@ import { rigError, type CinemaFolder, type DirectorSettings, type DirectorShot }
 import type { StudioElement } from "@/lib/catalog/elements";
 import type { OutputFile } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { CinemaFeed, type FeedHandlers } from "./cinema-feed";
 import { initialDraft, type CinemaDraft } from "./draft";
 import { ElementsPanel } from "./elements-panel";
@@ -395,10 +396,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
               {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "Unpin project" : "Pin project"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => {
-                void navigator.clipboard.writeText(window.location.href);
-                toast("Link copied");
-              }}
+              onClick={() => void copyWithToast(window.location.href, "Link copied")}
             >
               <Copy /> Copy link
             </DropdownMenuItem>

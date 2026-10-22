@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EFFECTS, MOTIONS } from "@/lib/catalog";
-import { copyText } from "@/lib/clipboard";
+import { copyText, copyWithToast } from "@/lib/clipboard";
 import { loseContext, releaseVideo } from "@/lib/media-release";
 import { GLYPHS, MOVE_GLYPH, glyphFor } from "@/lib/move-glyphs";
 import {
@@ -18,6 +18,9 @@ import {
 import { createPlaybackStore, MIN_VISIBLE, type PlaybackEnv } from "@/lib/preview-playback";
 import { pageAfter, progressiveStart, syncProgressive } from "@/lib/progressive";
 import { storyboardName } from "@/lib/storyboard-board";
+
+const toasts = vi.hoisted(() => ({ ok: [] as string[], error: [] as string[] }));
+vi.mock("sonner", () => ({ toast: Object.assign((m: string) => void toasts.ok.push(m), { error: (m: string) => void toasts.error.push(m) }) }));
 import { capabilityGroup, usedByIndex } from "@/lib/workflow-usage";
 
 describe("workflow 'used by' index", () => {
@@ -323,5 +326,16 @@ describe("copyText", () => {
       execCommand: () => false,
     });
     expect(await copyText("x")).toBe(false);
+  });
+
+  it("gives every Copy button the same feedback (copyWithToast)", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: async () => {} } });
+    expect(await copyWithToast("a prompt", "Prompt copied")).toBe(true);
+    expect(toasts.ok.at(-1)).toBe("Prompt copied");
+    // Plain-http LAN origin and a browser that refuses execCommand too: say how to copy by hand.
+    vi.stubGlobal("navigator", {});
+    vi.stubGlobal("document", { createElement: () => ({ style: {}, setAttribute() {}, select() {}, setSelectionRange() {}, remove() {} }), body: { appendChild() {} }, activeElement: null, execCommand: () => false });
+    expect(await copyWithToast("a link")).toBe(false);
+    expect(toasts.error.at(-1)).toMatch(/select the text/);
   });
 });

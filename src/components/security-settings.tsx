@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { copyText } from "@/lib/clipboard";
+import { copyWithToast } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 
 interface TokenInfo {
@@ -22,12 +22,6 @@ interface AuthStatus {
   enabled: boolean;
   fromEnv: boolean;
   tokens: TokenInfo[];
-}
-
-/** Copy and say whether it worked (plain-http LAN origins have no Clipboard API; copyText falls back). */
-async function copyWithToast(text: string) {
-  if (await copyText(text)) toast("Copied");
-  else toast.error("Couldn’t copy — select the text and copy it instead");
 }
 
 async function call<T>(url: string, method: string, body?: unknown): Promise<T> {

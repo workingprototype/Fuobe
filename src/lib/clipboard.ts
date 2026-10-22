@@ -1,3 +1,5 @@
+import { toast } from "sonner";
+
 /**
  * Copy text to the clipboard, also where the Clipboard API is missing: a self-hosted Fuobe opened
  * over plain http on a LAN address is not a secure context, so `navigator.clipboard` is undefined
@@ -35,4 +37,15 @@ function legacyCopy(text: string): boolean {
     ta.remove();
     active?.focus?.();
   }
+}
+
+/**
+ * Copy and say how it went: `done` ("Prompt copied") when it worked, a hint to copy by hand when
+ * the browser refused (the same feedback on every Copy button).
+ */
+export async function copyWithToast(text: string, done = "Copied"): Promise<boolean> {
+  const ok = await copyText(text);
+  if (ok) toast(done, { duration: 1500 });
+  else toast.error("Couldn’t copy — select the text and copy it instead");
+  return ok;
 }

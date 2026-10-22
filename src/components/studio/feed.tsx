@@ -17,6 +17,7 @@ import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
 import { downloadHref, downloadName, userTitle } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { TileActions, useCanHover, type RunnerOptions } from "./result-actions";
 import { LayersStack, MediaThumb } from "./result-media";
 import { Viewer } from "./viewer";
@@ -258,10 +259,7 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem
-                onSelect={() => {
-                  void navigator.clipboard.writeText(g.prompt ?? "");
-                  toast("Prompt copied");
-                }}
+                onSelect={() => void copyWithToast(g.prompt ?? "", "Prompt copied")}
               >
                 <Copy /> Copy prompt
               </DropdownMenuItem>

@@ -56,6 +56,7 @@ import { downloadName } from "@/lib/library";
 import { toSrt, toVtt } from "@/lib/cues";
 import { cuesOf, outputActions, textOf, type ActionContext, type OutputAction, type OutputActionId } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 
 export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   animate: Clapperboard,
@@ -181,11 +182,9 @@ export function useActionRunner(opts: RunnerOptions = {}) {
       case "favorite":
         return void actions.favorite(g);
       case "copy-text":
-        void navigator.clipboard.writeText(textOf(o));
-        return void toast("Copied");
+        return void copyWithToast(textOf(o));
       case "copy-prompt":
-        void navigator.clipboard.writeText(g.prompt ?? "");
-        return void toast("Prompt copied");
+        return void copyWithToast(g.prompt ?? "", "Prompt copied");
       case "download-txt":
         return saveBlob(textOf(o), downloadName(g, o, index, "txt"), "text/plain");
       case "download-srt":

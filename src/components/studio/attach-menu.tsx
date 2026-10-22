@@ -11,8 +11,12 @@ import { ResponsivePanel } from "./responsive-panel";
 
 const KIND_WORD: Record<MediaKind, string> = { image: "images", video: "videos", audio: "audio", text: "text", model3d: "3D models" };
 
-/** Read pasteable media from the clipboard (needs the browser's clipboard permission). */
+/**
+ * Read pasteable media from the clipboard. Needs the browser's clipboard permission and a secure
+ * origin (plain-http LAN addresses have no Clipboard API): when it fails, the caller suggests ⌘V / Ctrl+V.
+ */
 async function clipboardFiles(): Promise<File[]> {
+  if (!navigator.clipboard?.read) throw new Error("No clipboard access here");
   const items = await navigator.clipboard.read();
   const files: File[] = [];
   for (const item of items) {

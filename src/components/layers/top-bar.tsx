@@ -24,6 +24,7 @@ import type { Engine } from "@/lib/catalog/types";
 import { timeAgo } from "@/lib/format";
 import { docJson, exportScale, scaledSize, type LayerDoc, type LayerJob, type LayerVersion } from "@/lib/layers";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { downloadPng, downloadZip, type ExportSize } from "./render";
 
 export type SaveState = "saved" | "saving" | "dirty" | "error" | "conflict";
@@ -165,14 +166,7 @@ export function TopBar(p: {
   const [draft, setDraft] = useState(p.name);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const copyJson = async () => {
-    try {
-      await navigator.clipboard.writeText(docJson(p.doc, window.location.origin));
-      toast.success("JSON copied", { duration: 1500 });
-    } catch {
-      toast.error("Could not copy to the clipboard. Try again.");
-    }
-  };
+  const copyJson = () => void copyWithToast(docJson(p.doc, window.location.origin), "JSON copied");
   const mod = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
   return (
