@@ -119,6 +119,7 @@ export function FilterBar({
   facets,
   subfolders,
   scoped,
+  trash,
 }: {
   value: Filters;
   onChange: (f: Filters) => void;
@@ -127,6 +128,8 @@ export function FilterBar({
   subfolders?: boolean;
   /** A folder, a tab or a search: the library-wide counts (pinned, steps, failed, review) would mislead, so they're left off. */
   scoped?: boolean;
+  /** The Trash shows everything in it, steps too, and has no pins: those chips go. */
+  trash?: boolean;
 }) {
   const counts = scoped ? undefined : facets;
   const [custom, setCustom] = useState<{ from: string; to: string }>(value.date.id === "custom" ? { from: value.date.from, to: value.date.to } : { from: "", to: "" });
@@ -225,16 +228,18 @@ export function FilterBar({
           </div>
         </PopoverContent>
       </Popover>
-      <Chip active={value.pinned} aria-pressed={value.pinned} onClick={() => onChange({ ...value, pinned: !value.pinned })} title="Only pinned results">
-        <Pin className="size-3.5" /> Pinned
-        {counts?.pinned ? <span className="font-mono text-[11px] text-muted-foreground">{counts.pinned}</span> : null}
-      </Chip>
+      {!trash && (
+        <Chip active={value.pinned} aria-pressed={value.pinned} onClick={() => onChange({ ...value, pinned: !value.pinned })} title="Only pinned results">
+          <Pin className="size-3.5" /> Pinned
+          {counts?.pinned ? <span className="font-mono text-[11px] text-muted-foreground">{counts.pinned}</span> : null}
+        </Chip>
+      )}
       {subfolders && (
         <Chip active={value.subfolders} aria-pressed={value.subfolders} onClick={() => onChange({ ...value, subfolders: !value.subfolders })} title="Include results from the folders inside this one">
           <FolderTree className="size-3.5" /> Subfolders
         </Chip>
       )}
-      {(facets?.steps || value.steps) && (
+      {!trash && (facets?.steps || value.steps) && (
         <Chip
           active={value.steps}
           aria-pressed={value.steps}

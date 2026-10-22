@@ -168,6 +168,12 @@ check("deleting a folder moves its subfolders up", after.find((f) => f.id === C.
 check("…and its results", (await gen(made[2].id)).folderId === A.id);
 check("…and opens its parent", new URL(page.url()).searchParams.get("folder") === A.id);
 
+// --- The Trash shows everything in it, helper steps too ------------------------------------------
+const helper = (await call(`/api/generations?q=${encodeURIComponent(`${tag} helper`)}&steps=1`)).items[0];
+await call("/api/generations/bulk", "POST", { action: "trash", ids: [helper.id] });
+await library("/library?tab=trash");
+check("the Trash lists a trashed helper step", (await page.getByRole("button", { name: new RegExp(`Open “${tag} helper step`) }).count()) === 1);
+
 // --- Uploads ------------------------------------------------------------------------------------
 await openRoute(page, `${app}/library?tab=uploads`, { settleMs: 1500 });
 await page.getByRole("textbox", { name: "Search prompts" }).fill(tag);

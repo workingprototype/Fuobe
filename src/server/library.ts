@@ -195,7 +195,6 @@ export function trashCount(): number {
   return (db().prepare("SELECT COUNT(*) AS n FROM generation_trash t JOIN generations g ON g.id = t.generation_id").get() as { n: number }).n;
 }
 
-
 // ---------------------------------------------------------------------------
 // Favorites, pins, review status
 

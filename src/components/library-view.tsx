@@ -230,7 +230,8 @@ function Inner() {
     () => ({
       ...(tab.kinds && { kinds: tab.kinds }),
       ...(tab.id === "favorites" && { favorites: true }),
-      ...(trash && { trashed: true }),
+      // The Trash shows everything in it, helper steps too: deleting a Shorts session trashes its steps, and they can come back.
+      ...(trash && { trashed: true, steps: true }),
       ...(folderId && !trash && (subtree ? { folderIds: subtree } : { folderId })),
       ...(dq && { q: dq }),
       ...filterFields(filters),
@@ -576,7 +577,7 @@ function Inner() {
 
       {!uploadsTab && !missingFolder && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <FilterBar value={filters} onChange={setFilters} facets={facets.data} subfolders={!!folder?.folders} scoped={!!folderId || tab.id !== "all" || !!dq} />
+          <FilterBar value={filters} onChange={setFilters} facets={facets.data} subfolders={!!folder?.folders} scoped={!!folderId || tab.id !== "all" || !!dq} trash={trash} />
           {trash && (
             <div className="flex items-center gap-3 text-[13px] text-muted-foreground">
               <span>Items stay here for {TRASH_DAYS} days.</span>
