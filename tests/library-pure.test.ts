@@ -282,7 +282,10 @@ describe("round-3 fixes", () => {
     expect(toChannelMessage({ type: "event", ev: { type: "deleted", id: "x" } })).toEqual({ type: "event", ev: { type: "deleted", id: "x" } });
     expect(toChannelMessage({ type: "state", connected: true })).toEqual({ type: "state", connected: true });
     expect(toChannelMessage({ type: "hello" })).toEqual({ type: "hello" });
-    for (const bad of [null, "x", { type: "state" }, { type: "event", ev: { type: "generation", generation: { id: 1 } } }, { type: "nope" }]) expect(toChannelMessage(bad)).toBeNull();
+    // "Anyone on screen?" and its answer (no notification while you're looking at another Fuobe tab).
+    expect(toChannelMessage({ type: "seen?", id: "q1" })).toEqual({ type: "seen?", id: "q1" });
+    expect(toChannelMessage({ type: "seen", id: "q1", extra: 1 })).toEqual({ type: "seen", id: "q1" });
+    for (const bad of [null, "x", { type: "state" }, { type: "event", ev: { type: "generation", generation: { id: 1 } } }, { type: "nope" }, { type: "seen?" }, { type: "seen", id: 3 }]) expect(toChannelMessage(bad)).toBeNull();
   });
 
   it("lets a server event replace a local edit (no browser clock in updatedAt)", () => {

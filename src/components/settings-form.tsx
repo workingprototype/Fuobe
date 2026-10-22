@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { NotificationSettings } from "@/components/notification-settings";
 import { SecuritySettings } from "@/components/security-settings";
 
 interface PublicSetting {
@@ -351,6 +352,14 @@ export function SettingsForm() {
           <Field setting={get("ollamaUrl")} label="Ollama URL" onSave={set("ollamaUrl")} />
           <Field setting={get("ollamaModel")} label="Ollama model" onSave={set("ollamaModel")} />
         </div>
+      </Section>
+
+      <Section
+        id="notifications"
+        title="Notifications"
+        description="Get a heads-up from your browser when something you started finishes while you're in another tab or app. Saved in this browser; nothing is sent anywhere."
+      >
+        <NotificationSettings />
       </Section>
 
       <Section

@@ -73,6 +73,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Kbd } from "@/components/ui/kbd";
 import { GlobalShortcuts } from "@/components/global-shortcuts";
+import { JobNotifications } from "@/components/job-notifications";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { groupId, NAV_CLOSED_KEY, navActive, parseClosed, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
@@ -281,6 +282,7 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
         {children}
       </SidebarInset>
       <GlobalShortcuts />
+      <JobNotifications />
     </SidebarShell>
   );
 }
