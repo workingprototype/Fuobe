@@ -4,6 +4,7 @@
  * nothing in this file pulls the model list into the browser bundle.
  */
 import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, Preset } from "./catalog/types";
+import { spokenLanguageName } from "./speech-languages";
 
 // ---------------------------------------------------------------------------
 // Settings summary ("16:9 · 720p · 5s · ×1")
@@ -29,6 +30,8 @@ export interface SettingsShape {
   enhance: boolean;
   sliders: boolean;
   negativePrompt: boolean;
+  /** The spoken languages a transcriber can be told (unset = it detects): the "Spoken language" picker. */
+  sourceLanguages: string[] | null;
 }
 
 /**
@@ -58,6 +61,7 @@ export function settingsShape(
     enhance: showPrompt,
     sliders: !!o.sliders?.length,
     negativePrompt: !!o.negativePrompt,
+    sourceLanguages: o.sourceLanguages?.length ? o.sourceLanguages : null,
   };
 }
 
@@ -77,6 +81,8 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
   if (shape.draft && params.draft) parts.push("Draft");
   if (shape.audio && params.generateAudio === false) parts.push("No audio");
   if (shape.enhance && params.enhancePrompt) parts.push("Enhance");
+  // Detecting the language is the default, so only a picked one is worth a word.
+  if (shape.sourceLanguages && params.sourceLanguage) parts.push(spokenLanguageName(params.sourceLanguage));
   return parts;
 }
 

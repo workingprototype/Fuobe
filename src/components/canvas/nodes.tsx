@@ -91,6 +91,7 @@ import {
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { cn } from "@/lib/utils";
 import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
@@ -574,6 +575,20 @@ function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: 
           <X className="size-3" /> Don&apos;t translate
         </button>,
       );
+  }
+  // Transcribers: the language of the speech, detected unless you pick one.
+  if (o.sourceLanguages?.length) {
+    const codes = ["auto", ...spokenLanguageOptions(o.sourceLanguages).map((l) => l.code)];
+    items.push(
+      <OptionSelect
+        key="spoken"
+        label="Spoken language"
+        value={p.sourceLanguage ?? "auto"}
+        options={codes}
+        onChange={(v) => set({ sourceLanguage: v === "auto" ? undefined : v })}
+        format={(v) => (v === "auto" ? "Detect language" : spokenLanguageName(v))}
+      />,
+    );
   }
   if (o.audio === true)
     items.push(

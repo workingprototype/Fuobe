@@ -312,12 +312,12 @@ export function Composer({ docked }: { docked: boolean }) {
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
   const costText = costLabel({ demo, cost }, formatCost);
 
-  // Attachments: only when something is attached or a required slot is still empty (U8).
+  // Attachments: only when something is attached, a required slot is still empty, or none of a "one of these" group is filled (U8).
   const kinds = [...attach.kinds];
   const hasAttachment = slots.some((s) => draft.slots[s.key]) || draft.refs.length > 0;
   // Tools whose only input is a list of clips (Join clips) keep their "Add clip" tile in view.
   const showAttachments =
-    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
+    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!missing || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
   const collapsed = docked && !focused;
   // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
   const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
