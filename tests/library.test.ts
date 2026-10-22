@@ -20,6 +20,10 @@ const { TOOLS } = await import("@/server/assist/tools");
 const { POST: bulk } = await import("@/app/api/generations/bulk/route");
 const folderRoutes = await import("@/app/api/folders/route");
 const folderIdRoutes = await import("@/app/api/folders/[id]/route");
+const folderZipRoute = await import("@/app/api/folders/[id]/zip/route");
+const generationRoutes = await import("@/app/api/generations/route");
+const generationIdRoutes = await import("@/app/api/generations/[id]/route");
+const assetIdRoutes = await import("@/app/api/assets/[id]/route");
 const { db } = await import("@/server/db");
 
 beforeAll(() => setSetting("demoMode", "auto"));
@@ -29,10 +33,10 @@ const DAY = 86_400_000;
 const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000", "hex");
 
 /** A finished generation with a real output file (recorded like a browser colour grade). */
-function made(prompt: string) {
+function made(prompt: string, feature = "grade") {
   const asset = saveFile({ data: Buffer.concat([PNG, Buffer.from(prompt)]), contentType: "image/png", source: "generation" });
   const g = gens.recordLocalGeneration({
-    feature: "grade",
+    feature,
     modelId: "local-color-grade",
     op: "grade",
     prompt,
@@ -396,5 +400,317 @@ describe("zip download", () => {
     fs.writeFileSync(file, buf);
     const out = execFileSync("python3", ["-I", "-c", "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);print(z.testzip(), len(z.namelist()), z.read(z.namelist()[0])[-6:].decode())", file]).toString();
     expect(out.trim()).toBe("None 2 zip me");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 4 (library-plus): helper steps, nested folders, pins, review status, deleting uploads, ASSET_REFS
+
+const ctxOf = (id: string) => ({ params: Promise.resolve({ id }) }) as never;
+const jsonReq = (url: string, method: string, b?: unknown) => new Request(`http://x${url}`, { method, ...(b !== undefined && { body: JSON.stringify(b) }) });
+
+describe("helper steps", () => {
+  it("are left out of the Library, the home feed and Assist's list_recent, unless asked for", async () => {
+    const final = made("helper final", "shorts").g;
+    const cut = made("helper cut", "shorts-step").g;
+    const preview = made("helper preview", "mixed-media-preview").g;
+    const avatar = made("helper avatar", "faceless-avatar").g;
+    db().prepare(`UPDATE generations SET batch_id = 'hb1' WHERE id IN (?, ?)`).run(final.id, cut.id);
+    const q = { q: "helper", limit: 200 };
+    expect(gens.listGenerations(q).map((g) => g.id)).toEqual([final.id]);
+    expect(gens.listGenerations({ ...q, steps: true }).map((g) => g.id).sort()).toEqual([final.id, cut.id, preview.id, avatar.id].sort());
+    // Lists that name their features (a studio's own feed) or their batch get the steps as asked.
+    expect(gens.listGenerations({ ...q, features: ["shorts", "shorts-step"] }).map((g) => g.id).sort()).toEqual([final.id, cut.id].sort());
+    expect(gens.listGenerations({ ...q, features: ["mixed-media*"] }).map((g) => g.id)).toEqual([preview.id]);
+    expect(gens.listGenerations({ ...q, feature: "faceless-avatar" }).map((g) => g.id)).toEqual([avatar.id]);
+    expect(gens.listGenerations({ batchId: "hb1" }).map((g) => g.id).sort()).toEqual([final.id, cut.id].sort());
+    // GET /api/generations: steps=1 shows them.
+    const get = async (qs: string) => ((await (await generationRoutes.GET(new Request(`http://x/api/generations?${qs}`))).json()) as { items: { id: string }[] }).items.map((g) => g.id);
+    expect(await get("q=helper")).toEqual([final.id]);
+    expect((await get("q=helper&steps=1")).length).toBe(4);
+    // Assist / MCP list_recent reads the same list.
+    const recent = TOOLS.find((t) => t.name === "list_recent")!;
+    const out = String((await recent.run({ limit: 30 }, {} as never)).content);
+    expect(out).not.toContain(cut.id);
+    // Facets count them apart, for the Show steps toggle.
+    const hidden = lib.libraryFacets();
+    const shown = lib.libraryFacets({ steps: true });
+    expect(hidden.steps).toBeGreaterThanOrEqual(3);
+    expect(shown.total - hidden.total).toBe(hidden.steps);
+    lib.trashGenerations([final.id, cut.id, preview.id, avatar.id]);
+  });
+});
+
+describe("nested folders", () => {
+  it("makes subfolders, with names unique among siblings only", () => {
+    const top = lib.createFolder({ name: "Nest top" });
+    const sub = lib.createFolder({ name: "Shots", parentId: top.id });
+    expect(sub.parentId).toBe(top.id);
+    expect(lib.getFolder(top.id)).toMatchObject({ folders: 1, parentId: null });
+    // Another "Shots" is fine elsewhere, not next to this one.
+    const elsewhere = lib.createFolder({ name: "Shots" });
+    expect(() => lib.createFolder({ name: "shots", parentId: top.id })).toThrow(/already a folder/);
+    expect(() => lib.createFolder({ name: "Lost", parentId: "missing" })).toThrow(/doesn't exist/);
+    expect(lib.listFolders().find((f) => f.id === sub.id)).toMatchObject({ parentId: top.id, pinnedAt: null });
+    for (const f of [sub, top, elsewhere]) lib.deleteFolder(f.id);
+  });
+
+  it("moves folders into others, refusing loops, namesakes and depth past the limit", () => {
+    const a = lib.createFolder({ name: "Move A" });
+    const b = lib.createFolder({ name: "Move B", parentId: a.id });
+    const c = lib.createFolder({ name: "Move C", parentId: b.id });
+    const d = lib.createFolder({ name: "Move D" });
+    expect(() => lib.moveFolder(a.id, a.id)).toThrow("Cannot move into itself");
+    expect(() => lib.moveFolder(a.id, c.id)).toThrow("Cannot move into a subfolder");
+    expect(() => lib.moveFolder(a.id, "missing")).toThrow(/doesn't exist/);
+    expect(lib.moveFolder(c.id, d.id)).toMatchObject({ parentId: d.id });
+    expect(lib.getFolder(b.id)!.folders).toBe(0);
+    expect(lib.moveFolder(c.id, null)).toMatchObject({ parentId: null });
+    // A namesake already there.
+    const twin = lib.createFolder({ name: "Move C", parentId: d.id });
+    expect(() => lib.moveFolder(c.id, d.id)).toThrow(/already a folder called “Move C” there/);
+    // Renaming and moving at once is checked against the new place.
+    expect(lib.updateFolder(c.id, { name: "Move C2", parentId: d.id })).toMatchObject({ name: "Move C2", parentId: d.id });
+    // Depth: a chain at the limit takes no more.
+    let parent = d.id;
+    const chain: string[] = [];
+    for (let i = 1; i < 8; i++) chain.push((parent = lib.createFolder({ name: `Deep ${i}`, parentId: parent }).id));
+    expect(() => lib.createFolder({ name: "Too deep", parentId: parent })).toThrow(/levels deep/);
+    expect(() => lib.moveFolder(a.id, chain[5])).toThrow(/levels deep/);
+    for (const id of [...chain.reverse(), twin.id, c.id, d.id, b.id, a.id]) lib.deleteFolder(id);
+  });
+
+  it("deletes a folder by moving its results and subfolders up to its parent", () => {
+    const top = lib.createFolder({ name: "Del top" });
+    const mid = lib.createFolder({ name: "Del mid", parentId: top.id });
+    const leaf = lib.createFolder({ name: "Drafts", parentId: mid.id });
+    const clash = lib.createFolder({ name: "Drafts", parentId: top.id });
+    const g1 = made("del in mid").g;
+    const g2 = made("del in leaf").g;
+    lib.moveToFolder([g1.id], mid.id);
+    lib.moveToFolder([g2.id], leaf.id);
+    expect(lib.deleteFolder(mid.id)).toBe(true);
+    expect(gens.getGeneration(g1.id)!.folderId).toBe(top.id);
+    expect(gens.getGeneration(g2.id)!.folderId).toBe(leaf.id);
+    // The subfolder moved up next to a namesake, so it was renamed.
+    expect(lib.getFolder(leaf.id)).toMatchObject({ parentId: top.id, name: "Drafts 2" });
+    expect(lib.getFolder(clash.id)!.name).toBe("Drafts");
+    // A top-level folder: everything goes to the library root.
+    expect(lib.deleteFolder(top.id)).toBe(true);
+    expect(gens.getGeneration(g1.id)!.folderId).toBeNull();
+    expect(lib.getFolder(leaf.id)!.parentId).toBeNull();
+    expect(lib.deleteFolder(top.id)).toBe(false);
+    for (const f of [leaf, clash]) lib.deleteFolder(f.id);
+  });
+
+  it("lists a folder with its subfolders' results (folders=…), and keeps the flat routes working", async () => {
+    const top = (await (await folderRoutes.POST(jsonReq("/api/folders", "POST", { name: "Route top" }))).json()) as { id: string; parentId: null };
+    expect(top.parentId).toBeNull();
+    const subRes = await folderRoutes.POST(jsonReq("/api/folders", "POST", { name: "Route sub", parentId: top.id }));
+    expect(subRes.status).toBe(201);
+    const sub = (await subRes.json()) as { id: string; parentId: string };
+    expect(sub.parentId).toBe(top.id);
+    expect((await folderRoutes.POST(jsonReq("/api/folders", "POST", { name: "Orphan", parentId: "missing" }))).status).toBe(404);
+    // The flat list has both, each with its parent.
+    const all = ((await (await folderRoutes.GET()).json()) as { items: { id: string; parentId: string | null }[] }).items;
+    expect(all.find((f) => f.id === sub.id)?.parentId).toBe(top.id);
+    // PATCH moves (409 into its own subfolder), pins and unpins.
+    expect((await folderIdRoutes.PATCH(jsonReq("/x", "PATCH", { parentId: sub.id }), ctxOf(top.id))).status).toBe(409);
+    const pinned = (await (await folderIdRoutes.PATCH(jsonReq("/x", "PATCH", { pinned: true }), ctxOf(sub.id))).json()) as { pinnedAt: number | null };
+    expect(pinned.pinnedAt).toBeTypeOf("number");
+    const moved = (await (await folderIdRoutes.PATCH(jsonReq("/x", "PATCH", { parentId: null }), ctxOf(sub.id))).json()) as { parentId: string | null; pinnedAt: number | null };
+    expect(moved).toMatchObject({ parentId: null, pinnedAt: pinned.pinnedAt });
+    await folderIdRoutes.PATCH(jsonReq("/x", "PATCH", { parentId: top.id, pinned: false }), ctxOf(sub.id));
+    // Results in either, through GET /api/generations?folders=.
+    const a = made("tree a").g;
+    const b = made("tree b").g;
+    lib.moveToFolder([a.id], top.id);
+    lib.moveToFolder([b.id], sub.id);
+    const ids = (qs: string) => gens.listGenerations({ ...lib.listOptionsFrom(new URLSearchParams(qs)), limit: 200 }).map((g) => g.id);
+    expect(ids(`folder=${top.id}`)).toEqual([a.id]);
+    expect(ids(`folders=${top.id},${sub.id}`).sort()).toEqual([a.id, b.id].sort());
+    lib.deleteFolder(sub.id);
+    lib.deleteFolder(top.id);
+  });
+
+  it("orders folders with the pinned ones first", () => {
+    const x = lib.createFolder({ name: "Order x" });
+    const y = lib.createFolder({ name: "Order y" });
+    lib.updateFolder(y.id, { pinned: true });
+    const order = lib.listFolders().map((f) => f.id);
+    expect(order.indexOf(y.id)).toBeLessThan(order.indexOf(x.id));
+    expect(order[0]).toBe(y.id);
+    lib.deleteFolder(x.id);
+    lib.deleteFolder(y.id);
+  });
+
+  it("downloads a folder as a zip with its subfolders inside", async () => {
+    const top = lib.createFolder({ name: "Zip/top" });
+    const sub = lib.createFolder({ name: "Close ups", parentId: top.id });
+    const deeper = lib.createFolder({ name: "Hands", parentId: sub.id });
+    const empty = lib.createFolder({ name: "Zip empty" });
+    const a = made("zip top").g;
+    const b = made("zip sub").g;
+    const c = made("zip deep").g;
+    const gone = made("zip trashed").g;
+    lib.moveToFolder([a.id], top.id);
+    lib.moveToFolder([b.id, gone.id], sub.id);
+    lib.moveToFolder([c.id], deeper.id);
+    lib.trashGenerations([gone.id]);
+    const zip = lib.folderZipEntries(top.id)!;
+    expect(zip.name).toBe("Zip/top");
+    expect(zip.entries.map((e) => e.name.replace(/-[\w-]{6}\.png$/, "")).sort()).toEqual(["Close ups/Hands/zip-deep", "Close ups/zip-sub", "zip-top"]);
+    expect(lib.folderZipEntries("missing")).toBeNull();
+    // The route: ?check=1 answers the count, then the zip itself reads back in Python.
+    const check = await folderZipRoute.GET(new Request("http://x/zip?check=1"), ctxOf(top.id));
+    expect(await check.json()).toMatchObject({ files: 3 });
+    const res = await folderZipRoute.GET(new Request("http://x/zip"), ctxOf(top.id));
+    expect(res.headers.get("Content-Disposition")).toMatch(/filename="Zip-top-\d{4}-\d{2}-\d{2}\.zip"/);
+    const file = path.join(dir, "folder.zip");
+    fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+    const names = execFileSync("python3", ["-I", "-c", "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print('|'.join(sorted(z.namelist())))", file]).toString().trim();
+    expect(names.split("|").map((n) => n.replace(/-[\w-]{6}\.png$/, ""))).toEqual(["Close ups/Hands/zip-deep", "Close ups/zip-sub", "zip-top"]);
+    expect((await folderZipRoute.GET(new Request("http://x/zip"), ctxOf(empty.id))).status).toBe(404);
+    expect((await folderZipRoute.GET(new Request("http://x/zip"), ctxOf("missing"))).status).toBe(404);
+    for (const f of [deeper, sub, top, empty]) lib.deleteFolder(f.id);
+  });
+});
+
+describe("pins and review status", () => {
+  it("pins results to their own list, most recently pinned first, and unpins them", () => {
+    const [a, b, c] = [made("pin a").g, made("pin b").g, made("pin c").g];
+    expect(lib.setPinned([a.id], true, 1000)).toBe(1);
+    expect(lib.setPinned([c.id, b.id], true, 2000)).toBe(2);
+    // Pinning again keeps the first pin time (its place).
+    lib.setPinned([a.id], true, 9000);
+    expect(gens.getGeneration(a.id)!.pinnedAt).toBe(1000);
+    const pinned = gens.listGenerations({ q: "pin ", pinned: true });
+    expect(pinned.map((g) => g.id)).toEqual([[b.id, c.id].sort().reverse(), a.id].flat());
+    expect(gens.listGenerations({ q: "pin ", pinned: false })).toEqual([]);
+    // Paging a pinned list goes by pin time.
+    const first = gens.listGenerations({ q: "pin ", pinned: true, limit: 2 });
+    const next = gens.listGenerations({ q: "pin ", pinned: true, limit: 2, ...lib.cursorFrom(`${first[1].pinnedAt}:${first[1].id}`) });
+    expect(next.map((g) => g.id)).toEqual([a.id]);
+    expect(lib.libraryFacets().pinned).toBeGreaterThanOrEqual(3);
+    lib.setPinned([a.id, b.id, c.id], false);
+    expect(gens.getGeneration(a.id)!.pinnedAt).toBeNull();
+    expect(gens.listGenerations({ q: "pin ", pinned: true })).toEqual([]);
+  });
+
+  it("sets, filters and clears review statuses", async () => {
+    const [a, b] = [made("review a").g, made("review b").g];
+    expect(lib.setReview([a.id], "approved")).toBe(1);
+    expect(gens.getGeneration(a.id)!.review).toBe("approved");
+    expect(() => lib.setReview([a.id], "great" as never)).toThrow(/review status/);
+    const ids = (qs: string) => gens.listGenerations({ ...lib.listOptionsFrom(new URLSearchParams(qs)), limit: 200 }).map((g) => g.id);
+    expect(ids("q=review&reviews=approved")).toEqual([a.id]);
+    expect(ids("q=review&reviews=none")).toEqual([b.id]);
+    expect(ids("q=review&reviews=approved,none").sort()).toEqual([a.id, b.id].sort());
+    expect(ids("q=review&reviews=bogus").sort()).toEqual([a.id, b.id].sort());
+    expect(lib.libraryFacets().reviews.approved).toBeGreaterThanOrEqual(1);
+    // The bulk endpoint and the single PATCH.
+    const call = async (body: unknown) => (await bulk(jsonReq("/api/generations/bulk", "POST", body))).json() as Promise<{ count?: number }>;
+    expect(await call({ action: "review", ids: [a.id, b.id], review: "needs-review" })).toEqual({ count: 2 });
+    expect(gens.getGeneration(b.id)!.review).toBe("needs-review");
+    expect((await bulk(jsonReq("/api/generations/bulk", "POST", { action: "review", ids: [a.id], review: "great" }))).status).toBe(400);
+    expect(await call({ action: "pin", ids: [a.id] })).toEqual({ count: 1 });
+    expect(gens.getGeneration(a.id)!.pinnedAt).toBeTypeOf("number");
+    expect(await call({ action: "unpin", ids: [a.id] })).toEqual({ count: 1 });
+    const patched = (await (await generationIdRoutes.PATCH(jsonReq("/x", "PATCH", { review: null, pinned: true }), ctxOf(b.id))).json()) as { review: string | null; pinnedAt: number | null };
+    expect(patched.review).toBeNull();
+    expect(patched.pinnedAt).toBeTypeOf("number");
+    expect((await generationIdRoutes.PATCH(jsonReq("/x", "PATCH", { review: "great" }), ctxOf(b.id))).status).toBe(400);
+    expect(await call({ action: "review", ids: [a.id], review: null })).toEqual({ count: 1 });
+    expect(gens.getGeneration(a.id)!.review).toBeNull();
+    lib.setPinned([b.id], false);
+  });
+});
+
+describe("deleting uploads", () => {
+  const upload = (tag: string) => saveFile({ data: Buffer.concat([PNG, Buffer.from(tag)]), contentType: "image/png", source: "upload", name: `${tag}.png` });
+  const del = async (id: string) => {
+    const res = await assetIdRoutes.DELETE(new Request("http://x", { method: "DELETE" }), ctxOf(id));
+    return { status: res.status, body: res.status === 204 ? null : ((await res.json()) as { error?: string; usedBy?: string }) };
+  };
+
+  it("deletes an upload nothing uses, file and all", async () => {
+    const free = upload("free upload");
+    const file = fileOf(free.url);
+    expect(fs.existsSync(file)).toBe(true);
+    const info = (await (await assetIdRoutes.GET(new Request("http://x"), ctxOf(free.id))).json()) as { usedBy: string; uses: unknown[] };
+    expect(info).toMatchObject({ usedBy: "", uses: [] });
+    expect((await del(free.id)).status).toBe(204);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(listAssets({ source: "upload", limit: 500 }).map((a) => a.id)).not.toContain(free.id);
+    expect((await del(free.id)).status).toBe(404);
+  });
+
+  it("refuses while a result's request uses it (in the Trash too), and says where", async () => {
+    const used = upload("used upload");
+    const [g] = gens.createGenerations({ feature: "edit", modelId: "nano-banana-pro", op: "edit", prompt: "make it blue", inputs: { images: [used.url] } });
+    let r = await del(used.id);
+    expect(r.status).toBe(409);
+    expect(r.body?.usedBy).toBe("1 result");
+    expect(r.body?.error).toBe("It's still used by 1 result.");
+    // Trashed results can be restored (and retried), so they still count.
+    lib.trashGenerations([g.id]);
+    r = await del(used.id);
+    expect(r.status).toBe(409);
+    expect(r.body?.usedBy).toBe("1 result (in the Trash)");
+    expect(fs.existsSync(fileOf(used.url))).toBe(true);
+    // Deleted for good: now it can go.
+    await lib.deleteForever([g.id]);
+    expect((await del(used.id)).status).toBe(204);
+  });
+
+  it("names the elements, Assist projects and studio sessions that use it", async () => {
+    const pic = upload("element upload");
+    const now = Date.now();
+    db().prepare("INSERT INTO characters (id, name, reference_asset_ids_json, status, created_at, updated_at) VALUES ('c-up', 'Juno', ?, 'ready', 0, 0)").run(JSON.stringify([pic.url]));
+    db().prepare("INSERT INTO assist_projects (id, name, created_at, updated_at) VALUES ('ap-up', 'Launch', ?, ?)").run(now, now);
+    db().prepare("INSERT INTO assist_project_sources (id, project_id, kind, title, url, created_at) VALUES ('s-up', 'ap-up', 'image', 'Ref', ?, ?)").run(pic.url, now);
+    db().prepare("INSERT INTO dub_sessions (id, data_json, created_at, updated_at) VALUES ('d-up', ?, ?, ?)").run(JSON.stringify({ title: "Interview", video: pic.url }), now, now);
+    const r = await del(pic.id);
+    expect(r.status).toBe(409);
+    expect(r.body?.usedBy).toBe("the element “Juno”, the Assist project “Launch” and the dub “Interview”");
+    for (const t of ["characters WHERE id = 'c-up'", "assist_project_sources WHERE id = 's-up'", "dub_sessions WHERE id = 'd-up'"]) db().prepare(`DELETE FROM ${t}`).run();
+    expect((await del(pic.id)).status).toBe(204);
+  });
+});
+
+describe("ASSET_REFS", () => {
+  it("keeps outputs a dub or Katana job still points at when their result is deleted for good", async () => {
+    const dubbed = made("dub source clip");
+    const cut = made("katana subject");
+    const now = Date.now();
+    db().prepare("INSERT INTO dub_sessions (id, data_json, created_at, updated_at) VALUES ('d-keep', ?, ?, ?)").run(JSON.stringify({ title: "Dub", video: dubbed.asset.url }), now, now);
+    db().prepare("INSERT INTO katana_jobs (id, data_json, created_at, updated_at) VALUES ('k-keep', ?, ?, ?)").run(JSON.stringify({ title: "Cut", subject: cut.asset.url }), now, now);
+    expect(gens.assetUses(dubbed.asset.id, { exceptGeneration: dubbed.g.id })).toEqual([{ what: "dub", key: "d-keep", name: "Dub" }]);
+    expect(gens.assetUses(cut.asset.id, { exceptGeneration: cut.g.id })).toEqual([{ what: "Katana job", key: "k-keep", name: "Cut" }]);
+    await lib.deleteForever([dubbed.g.id, cut.g.id]);
+    expect(fs.existsSync(fileOf(dubbed.asset.url))).toBe(true);
+    expect(fs.existsSync(fileOf(cut.asset.url))).toBe(true);
+  });
+
+  it("covers every column that can hold a file, and every entry's query runs", () => {
+    const tables = (db().prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((t) => t.name);
+    const columns = new Map(tables.map((t) => [t, (db().prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name)]));
+    const covered = new Set(gens.ASSET_REFS.flatMap((r) => r.cols.map((c) => `${r.table}.${c}`)));
+    const missing: string[] = [];
+    for (const [t, cols] of columns) {
+      for (const c of cols) {
+        const key = `${t}.${c}`;
+        if (/(_json|_url|^url|_file)$/.test(c) && !covered.has(key) && !(key in gens.ASSET_FREE)) missing.push(key);
+      }
+    }
+    // A table that stores file URLs must be in ASSET_REFS (or in ASSET_FREE with the reason it never holds one).
+    expect(missing).toEqual([]);
+    for (const key of [...covered, ...Object.keys(gens.ASSET_FREE)]) {
+      const [t, c] = key.split(".");
+      expect(columns.get(t), `${key} is not a column`).toContain(c);
+    }
+    // assetUses skips a table whose query fails (an older install), so a typo here would go unnoticed: prepare each one.
+    for (const r of gens.ASSET_REFS) expect(() => db().prepare(gens.assetRefSql(r)).all({ id: "nothing-uses-this", g: "", max: 1 }), r.table).not.toThrow();
+    expect(gens.ASSET_REFS.map((r) => r.table)).toEqual(expect.arrayContaining(["dub_sessions", "katana_jobs", "assist_project_sources", "layer_projects", "faceless_episodes"]));
   });
 });

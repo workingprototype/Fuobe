@@ -508,6 +508,9 @@ export interface GenInput extends GenParams {
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
+/** Where a result is in review (the Library's review status; none when unset). */
+export type ReviewStatus = "in-progress" | "needs-review" | "approved" | "rejected";
+
 export interface OutputFile {
   url: string;
   /** Text outputs (transcribe, translate, write): the content, also saved as a file at `url`. */
@@ -557,6 +560,10 @@ export interface Generation {
   deletedAt?: number | null;
   /** Library folder it's in. */
   folderId?: string | null;
+  /** Pinned to the top of the Library's views at (null: not pinned). */
+  pinnedAt?: number | null;
+  /** Review status (null: none). */
+  review?: ReviewStatus | null;
 }
 
 /** Input slot a preset asks the user for. */

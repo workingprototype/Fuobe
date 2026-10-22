@@ -7,6 +7,7 @@ import { applyMentions } from "@/lib/catalog/elements";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
+import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   LAST_FRAME_CHAIN,
@@ -60,6 +61,9 @@ interface Row {
   updated_at: number;
   completed_at: number | null;
   depends_on: string | null;
+  /** Library pin and review status (NULL until set; inserts leave them out). */
+  pinned_at?: number | null;
+  review?: string | null;
   /** Joined by the library readers (generation_trash, folder_items); looked up when absent. */
   deleted_at?: number | null;
   folder_id?: string | null;
@@ -109,6 +113,8 @@ export function toGeneration(r: Row): Generation {
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
+    pinnedAt: r.pinned_at ?? null,
+    review: isReviewStatus(r.review) ? r.review : null,
   };
 }
 
@@ -141,6 +147,18 @@ export interface ListOptions {
   /** Only the Trash, newest deletion first (`before` is then a deletedAt cursor). Otherwise the Trash is left out. */
   trashed?: boolean;
   folderId?: string;
+  /** In any of these folders (a folder and its subfolders). */
+  folderIds?: string[];
+  /** Only pinned ones, most recently pinned first (`before` is then a pinnedAt cursor); false: only the others. */
+  pinned?: boolean;
+  /** Review statuses ("none": no status). */
+  reviews?: ReviewFilter[];
+  /**
+   * Also list helper steps (chain steps and helper jobs: isHelperFeature in src/lib/library.ts). A list
+   * that names its features or its batch always gets them; others (the Library, the home feed,
+   * Assist's list_recent) leave them out unless this is set.
+   */
+  steps?: boolean;
   limit?: number;
   /**
    * Paging cursor: made before this (deleted before, in the Trash). With `beforeId` it is the last
@@ -175,8 +193,19 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   if (o.status) add("g.status = ?", o.status);
   if (o.statuses?.length) oneOf("g.status", o.statuses);
   if (o.folderId) add("fi.folder_id = ?", o.folderId);
+  if (o.folderIds?.length) oneOf("fi.folder_id", o.folderIds);
+  if (o.pinned !== undefined) add(o.pinned ? "g.pinned_at IS NOT NULL" : "g.pinned_at IS NULL");
+  if (o.reviews?.length) {
+    const set = o.reviews.filter((r) => r !== "none");
+    const any = [set.length ? `g.review IN (${set.map(() => "?").join(", ")})` : "", o.reviews.includes("none") ? "g.review IS NULL" : ""].filter(Boolean);
+    add(`(${any.join(" OR ")})`, ...set);
+  }
+  if (!o.steps && !o.feature && !o.features?.length && !o.batchId) {
+    add(`g.feature NOT LIKE ? AND g.feature NOT IN (${HELPER_FEATURES.map(() => "?").join(", ")})`, `%${HELPER_SUFFIX}`, ...HELPER_FEATURES);
+  }
+  // The cursor's order: the Trash by deletion, a pinned list by pin, the rest by creation (then id, all descending).
+  const col = o.trashed ? "t.deleted_at" : o.pinned ? "g.pinned_at" : "g.created_at";
   if (o.before) {
-    const col = o.trashed ? "t.deleted_at" : "g.created_at";
     if (o.beforeId) add(`(${col} < ? OR (${col} = ? AND g.id < ?))`, o.before, o.before, o.beforeId);
     else add(`${col} < ?`, o.before);
   }
@@ -185,9 +214,7 @@ export function listGenerations(o: ListOptions = {}): Generation[] {
   const q = o.q?.trim();
   // The user's own words (request.prompt) and what the model got (prompt, with suffixes and templates).
   if (q) add("(g.prompt LIKE ? OR json_extract(g.request_json, '$.prompt') LIKE ?)", `%${q}%`, `%${q}%`);
-  // The cursor's order: timestamp, then id (both descending).
-  const order = o.trashed ? "t.deleted_at DESC, g.id DESC" : "g.created_at DESC, g.id DESC";
-  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ?`;
+  const sql = `SELECT ${LIBRARY_COLUMNS} FROM ${LIBRARY_JOIN} WHERE ${where.join(" AND ")} ORDER BY ${col} DESC, g.id DESC LIMIT ?`;
   return (db().prepare(sql).all(...args, Math.max(1, Math.min(o.limit ?? 60, 200))) as Row[]).map(toGeneration);
 }
 
@@ -195,49 +222,111 @@ export function setFavorite(id: string, favorite: boolean): void {
   update(id, { favorite: favorite ? 1 : 0 });
 }
 
+export interface AssetRef {
+  table: string;
+  cols: string[];
+  /** A column whose row belongs to the generation being purged (its own row and Cinema membership don't keep its files). */
+  except?: string;
+  /** What a row is, for "where is it used" ("element", "Cinema project"). */
+  what: string;
+  /** SQL that names the row, and the key that tells rows apart (default `id`; a Cinema take and its project are one project). */
+  name?: string;
+  key?: string;
+}
+
 /**
  * Everywhere a stored file can still be in use, by URL (which ends in the asset id, …/<id>.png) or
- * by id: other jobs' inputs and outputs, elements, Assist chats (attachments, results), Cinema
- * covers, palettes and takes, canvas nodes. `except` names a column whose row belongs to the
- * generation being purged (its own row and Cinema membership don't keep its files).
+ * by id: other jobs' inputs and outputs (an upload a request still names keeps Retry and Reuse
+ * working), elements, Assist chats and projects, every studio's sessions, projects and presets.
+ * When a table starts storing file URLs, add it here (tests/library.test.ts checks every `_json` /
+ * `_url` column is either here or in ASSET_FREE).
  */
-const ASSET_REFS: { table: string; cols: string[]; except?: string }[] = [
-  { table: "generations", cols: ["request_json", "outputs_json"], except: "id" },
-  { table: "characters", cols: ["reference_asset_ids_json", "loras_json", "lora_file"] },
-  { table: "trainings", cols: ["meta_json"] },
-  { table: "assist_threads", cols: ["messages_json", "items_json", "pending_json"] },
-  { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"] },
-  { table: "cinema_items", cols: ["meta_json"], except: "generation_id" },
-  { table: "canvases", cols: ["graph_json"] },
-  { table: "layer_projects", cols: ["source_url", "cover_url"] },
-  { table: "layer_versions", cols: ["doc_json"] },
-  { table: "shorts_sessions", cols: ["source_json", "look_json"] },
-  { table: "shorts_presets", cols: ["references_json"] },
-  { table: "brand_kits", cols: ["kit_json", "chat_json"] },
-  { table: "products", cols: ["images_json"] },
-  { table: "ad_creatives", cols: ["meta_json"] },
-  { table: "marketing_runs", cols: ["meta_json"] },
+export const ASSET_REFS: AssetRef[] = [
+  { table: "generations", cols: ["request_json", "outputs_json"], except: "id", what: "result" },
+  { table: "characters", cols: ["reference_asset_ids_json", "loras_json", "lora_file"], what: "element", name: "name" },
+  { table: "trainings", cols: ["meta_json"], what: "element", key: "element_id", name: "(SELECT name FROM characters WHERE id = element_id)" },
+  { table: "assist_threads", cols: ["messages_json", "items_json", "pending_json"], what: "Assist chat", name: "title" },
+  // A chat's frozen context names its project's sources; a project's file sources are uploads.
+  { table: "assist_thread_state", cols: ["context", "sent_json"], what: "Assist chat", key: "thread_id", name: "(SELECT title FROM assist_threads WHERE id = thread_id)" },
+  { table: "assist_project_sources", cols: ["url", "content"], what: "Assist project", key: "project_id", name: "(SELECT name FROM assist_projects WHERE id = project_id)" },
+  { table: "cinema_projects", cols: ["cover_url", "palettes_json", "director_json", "chat_json", "brief_body"], what: "Cinema project", name: "name" },
+  { table: "cinema_items", cols: ["meta_json"], except: "generation_id", what: "Cinema project", key: "project_id", name: "(SELECT name FROM cinema_projects WHERE id = project_id)" },
+  { table: "canvases", cols: ["graph_json", "runs_json"], what: "canvas", name: "name" },
+  // A Layers project's source, cover, its tools' inputs (a picked image) and every saved version.
+  { table: "layer_projects", cols: ["source_url", "cover_url", "jobs_json"], what: "Layers project", name: "name" },
+  { table: "layer_versions", cols: ["doc_json"], what: "Layers project", key: "project_id", name: "(SELECT name FROM layer_projects WHERE id = project_id)" },
+  { table: "shorts_sessions", cols: ["source_json", "look_json"], what: "Shorts session", name: "title" },
+  { table: "shorts_presets", cols: ["references_json"], what: "Shorts preset", name: "name" },
+  { table: "brand_kits", cols: ["kit_json", "chat_json"], what: "brand kit", name: "name" },
+  { table: "products", cols: ["images_json"], what: "product", name: "name" },
+  { table: "ad_creatives", cols: ["meta_json"], what: "ad", name: "headline" },
+  { table: "marketing_runs", cols: ["meta_json"], what: "marketing run", name: "title" },
   // Image studios: a palette's thumbnail, a moodboard's images, collages and cover, an Instadump pack's photos.
-  { table: "palettes", cols: ["thumb_url"] },
-  { table: "moodboards", cols: ["images_json", "collages_json", "cover_url"] },
-  { table: "photodump_packs", cols: ["refs_json"] },
-  // Faceless / Explainer: a channel's avatar, style references and voice samples, episode sources.
-  { table: "faceless_channels", cols: ["avatar_url", "reference_json", "settings_json"] },
-  { table: "faceless_episodes", cols: ["settings_json", "sources_json"] },
+  { table: "palettes", cols: ["thumb_url"], what: "palette", name: "name" },
+  { table: "moodboards", cols: ["images_json", "collages_json", "cover_url"], what: "moodboard", name: "name" },
+  { table: "photodump_packs", cols: ["refs_json"], what: "photo pack", name: "name" },
+  // Faceless / Explainer: a channel's avatar, style references and voice samples; an episode's sources, script and picture edits.
+  { table: "faceless_channels", cols: ["avatar_url", "reference_json", "settings_json"], what: "Faceless channel", name: "name" },
+  { table: "faceless_episodes", cols: ["settings_json", "sources_json", "script_json", "plan_json"], what: "episode", name: "title" },
+  // Translate & dub sessions and Katana jobs: the source video, the subject picture and each step's files.
+  { table: "dub_sessions", cols: ["data_json"], what: "dub", name: "json_extract(data_json, '$.title')" },
+  { table: "katana_jobs", cols: ["data_json"], what: "Katana job", name: "json_extract(data_json, '$.title')" },
 ];
 
-/** Whether anything still refers to this stored file (see ASSET_REFS). */
-export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
+/**
+ * Columns that look like they could hold a file (`_json`, `_url`) but never hold one of Fuobe's
+ * stored files, with the reason. The ASSET_REFS coverage test reads this list.
+ */
+export const ASSET_FREE: Record<string, string> = {
+  "generations.provider_input_json": "what a provider was sent: its own upload URLs or file names, never ours",
+  "generations.external_meta_json": "the provider's job handles",
+  "shorts_sessions.range_json": "start and end times",
+  "shorts_sessions.settings_json": "ratio, language, model and resolution",
+  "shorts_sessions.segments_json": "generation ids of each take",
+  "shorts_sessions.stitches_json": "generation ids of each stitch",
+  "brand_kits.progress_json": "research progress labels",
+  "products.selling_points_json": "words",
+  "products.url": "the product's own web page",
+  "marketing_runs.final_ids_json": "generation ids",
+  "palettes.colors_json": "hex colours",
+  "assist_projects.skills_json": "skill names",
+  "assist_thread_state.skills_json": "skill names",
+  "skills.meta_json": "SKILL.md front matter",
+  "skills.files_json": "a skill's own text files, stored inline",
+};
+
+/** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
+export function assetRefSql(r: AssetRef): string {
+  const where = r.cols.map((c) => `instr(COALESCE(${c}, ''), @id) > 0`).join(" OR ");
+  const except = r.except ? ` AND ${r.except} != @g` : "";
+  const trashed = r.table === "generations" ? ", EXISTS (SELECT 1 FROM generation_trash t WHERE t.generation_id = generations.id) AS trashed" : "";
+  return `SELECT ${r.key ?? "id"} AS k, ${r.name ?? "NULL"} AS n${trashed} FROM ${r.table} WHERE (${where})${except} LIMIT @max`;
+}
+
+/**
+ * Where a stored file is still used (see ASSET_REFS), at most `max` rows: enough to say where
+ * ("2 results and the element “Maya”", describeUses in src/lib/library.ts) or, with max 1, whether.
+ */
+export function assetUses(assetId: string, opts: { exceptGeneration?: string; max?: number } = {}): AssetUse[] {
+  const max = opts.max ?? 50;
+  const out: AssetUse[] = [];
   for (const r of ASSET_REFS) {
-    const where = r.cols.map((c) => `instr(COALESCE(${c}, ''), @id) > 0`).join(" OR ");
-    const except = r.except ? ` AND ${r.except} != @g` : "";
     try {
-      if (db().prepare(`SELECT 1 FROM ${r.table} WHERE (${where})${except} LIMIT 1`).get({ id: assetId, g: exceptGeneration })) return true;
+      const rows = db()
+        .prepare(assetRefSql(r))
+        .all({ id: assetId, g: opts.exceptGeneration ?? "", max: max - out.length }) as { k: string; n: string | null; trashed?: number }[];
+      for (const row of rows) out.push({ what: r.what, key: String(row.k), name: row.n ?? null, ...(row.trashed ? { trashed: true } : {}) });
     } catch {
       // A table or column this install doesn't have yet: nothing there to keep the file for.
     }
+    if (out.length >= max) break;
   }
-  return false;
+  return out;
+}
+
+/** Whether anything still refers to this stored file (see ASSET_REFS). */
+export function assetInUse(assetId: string, exceptGeneration = ""): boolean {
+  return assetUses(assetId, { exceptGeneration, max: 1 }).length > 0;
 }
 
 /**
