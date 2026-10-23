@@ -10,6 +10,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
 import { claimStartToken, handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
@@ -86,6 +87,13 @@ function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id:
   if (r.inputs?.video) slots.video = slot(r.inputs.video);
   if (r.inputs?.audio) slots.audio = slot(r.inputs.audio);
   const params = { ...r.params };
+  // A keyframes run comes back in Frames mode, each still at its place in the clip.
+  const times = params.keyframeTimes;
+  const frames =
+    config.frames && times?.length && times.length === imgs.length && imgs.length > 1
+      ? positionsFrom(times, params.duration ?? times[times.length - 1]).map((at, i) => ({ value: slot(imgs[i])!, at }))
+      : undefined;
+  delete params.keyframeTimes;
   // A spoken language stored as a name (Assist's "Spanish") or a locale comes back as the model's own code.
   const languages = getModel(r.modelId)?.options.sourceLanguages;
   if (languages?.length && params.sourceLanguage) params.sourceLanguage = matchSpokenLanguage(params.sourceLanguage, languages) ?? params.sourceLanguage;
@@ -94,8 +102,9 @@ function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id:
     negativePrompt: r.negativePrompt ?? "",
     modelId: r.modelId,
     params,
-    slots,
-    refs,
+    slots: frames ? {} : slots,
+    refs: frames ? [] : refs,
+    frames,
     presetId: r.presetId,
     presetOptions: r.presetOptions ?? {},
     presetStrength: r.presetStrength,

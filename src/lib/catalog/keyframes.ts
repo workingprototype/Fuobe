@@ -183,6 +183,11 @@ export interface ChainTiming {
   minSeconds?: number;
 }
 
+/** The open chain's limits for a model: its longest clip is the longest gap between two frames. */
+export function chainTiming(model: Pick<ModelDef, "name" | "options">): ChainTiming {
+  return { name: model.name, maxSeconds: Math.max(...(model.options.durations ?? [5])) };
+}
+
 /**
  * The open chain's rule for the gaps: each pair of neighbouring frames (and the stretch after the
  * last frame, when it isn't at the end) is one clip the model can make. Returns the message for the

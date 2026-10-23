@@ -10,7 +10,7 @@ import type {
   PresetRoute,
   Pricing,
 } from "./types";
-import { chainGapProblem, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
+import { chainGapProblem, chainTiming, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -305,7 +305,7 @@ function checkKeyframes(model: ModelDef, n: number, params: GenParams) {
   }
   if (chain && n > 1) {
     const length = duration ?? 5;
-    const problem = chainGapProblem(times?.length ? times : frameTimes(spread(n), length), length, { name: model.name, maxSeconds: Math.max(...(model.options.durations ?? [5])) });
+    const problem = chainGapProblem(times?.length ? times : frameTimes(spread(n), length), length, chainTiming(model));
     if (problem) throw new Error(problem);
   }
 }

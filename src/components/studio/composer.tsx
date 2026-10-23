@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, AtSign, GalleryHorizontalEnd, Loader2, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,12 +12,31 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape, startStep } from "@/lib/composer";
+import { chainGapProblem, chainTiming, frameSupport, framesBlocker, framesDuration, framesDurations, framesNote, FRAMES_MODELS, frameTimes, keyframeChain, moveFrameAt, type FrameSupport } from "@/lib/catalog/keyframes";
+import {
+  blockerFor,
+  costLabel,
+  enterFrames,
+  filterModels,
+  firstMissingSlot,
+  framesRequest,
+  framesShape,
+  leaveFrames,
+  namedImageSlots,
+  needsMask,
+  onImageChange,
+  PLACEHOLDER,
+  promptShown,
+  pushRecent,
+  settingsShape,
+  startStep,
+} from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
 import { useAttach, useComposerBridge, useUploadReaper } from "./attachments";
 import { DialogueEditor, LanguageChip, VoicePicker } from "./audio-controls";
+import { FramesStrip, type FramesNotice } from "./frames-strip";
 import { loadFullCatalog, useCatalog } from "./catalog";
 import { Chip, chipBase, chipIdle } from "./chip";
 import { MediaSlot, SlotPreview, type SlotValue } from "./media-slot";
@@ -56,17 +75,34 @@ const defaultLines = (m: ModelDef) => {
 
 // ---------------------------------------------------------------------------
 
+/** Frames mode, as the request needs it: what the model does with frames, the clip's length, and whether it's the open chain. */
+interface FramesContext {
+  support: FrameSupport;
+  duration: number;
+  chained: boolean;
+}
+
 function buildRequest(
   feature: string,
-  draft: Pick<Draft, "slots" | "refs" | "presetId" | "modelId" | "prompt" | "negativePrompt" | "params" | "presetOptions" | "presetStrength" | "mix">,
+  draft: Pick<Draft, "slots" | "refs" | "presetId" | "modelId" | "prompt" | "negativePrompt" | "params" | "presetOptions" | "presetStrength" | "mix" | "frames">,
   op: Operation | undefined,
   promptSuffix?: string,
   refKind: MediaKind = "image",
+  frames?: FramesContext,
 ): GenerationRequest {
   const s = draft.slots;
   const refs = draft.refs.filter((x) => !!x?.ref).map((x) => x.ref);
-  const images = [s.image, s.image2, s.image3].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref).concat(refKind === "image" ? refs : []);
+  let images = [s.image, s.image2, s.image3].filter((x): x is SlotValue => !!x?.ref).map((x) => x.ref).concat(refKind === "image" ? refs : []);
   const videos = refKind === "video" ? refs : [];
+  let endImage = s.endImage?.ref || undefined;
+  let params = draft.params;
+  // Frames mode: the stills in order at their times (or the first and last as start and end frame), at the strip's length.
+  if (draft.frames && frames) {
+    const sent = framesRequest(draft.frames, frames);
+    images = sent.images;
+    endImage = sent.endImage;
+    params = { ...params, ...sent.params };
+  }
   return {
     feature,
     presetId: draft.presetId,
@@ -76,16 +112,16 @@ function buildRequest(
     negativePrompt: draft.negativePrompt || undefined,
     inputs: {
       images: images.length ? images : undefined,
-      endImage: s.endImage?.ref || undefined,
+      endImage,
       mask: s.mask?.ref || undefined,
       sketch: s.sketch?.ref || undefined,
       voiceAudio: s.voiceAudio?.ref || undefined,
       voiceAudio2: s.voiceAudio2?.ref || undefined,
       video: s.video?.ref || undefined,
       audio: s.audio?.ref || undefined,
-      videos: videos.length ? videos : undefined,
+      videos: videos.length && !draft.frames ? videos : undefined,
     },
-    params: draft.params,
+    params,
     presetOptions: draft.presetOptions,
     ...(draft.presetId && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
     ...(draft.presetId && draft.mix && { mix: draft.mix }),
@@ -190,6 +226,11 @@ export function Composer({ docked }: { docked: boolean }) {
       : Math.min(config.multiRef.max, Math.max(0, (opts.maxImages ?? 1) - slots.filter((s) => s.accept === "image").length));
   const attach = useAttach(slots, refMax);
 
+  // Frames mode (Video studio): up to 10 stills at their times, as the picked model can take them.
+  const framesOn = !!config.frames && !!draft.frames;
+  const framesCtx: FramesContext | undefined =
+    framesOn && model ? { support: frameSupport(model), duration: framesDuration(model, draft.params.duration), chained: !!keyframeChain(model) } : undefined;
+
   // The page's drop zone hands its files to this composer.
   useEffect(() => {
     if (!bridgeRef) return;
@@ -202,7 +243,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
   const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
-    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind));
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx));
     // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
     const raw = signed.worded;
     const m = catalog.getModel(raw.modelId) ?? model;
@@ -232,7 +273,12 @@ export function Composer({ docked }: { docked: boolean }) {
         const first = slots.find((s) => s.key === g[0]);
         if (first && !g.some((k) => planSlots[k]?.ref)) planSlots[first.key] = { ref: PLACEHOLDER[first.accept], preview: "", kind: first.accept };
       }
-      const { request: planned } = prepare({ ...draft, slots: planSlots, refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue) });
+      const { request: planned } = prepare({
+        ...draft,
+        slots: planSlots,
+        refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue),
+        frames: draft.frames?.map((f) => ({ ...f, value: stand(f.value, "image") as SlotValue })),
+      });
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
       cost = estimateCost(plan.model, plan.params, plan.jobs);
@@ -248,6 +294,7 @@ export function Composer({ docked }: { docked: boolean }) {
     loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
     engineError,
+    frames: framesOn && model ? framesBlocker(model, draft.frames!.length) : null,
     missing,
     uploading,
     maskMissing: needsMask(model, config.sketch, draft.slots),
@@ -272,7 +319,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
-    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind));
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
     if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
     create.mutate(sent.request, {
@@ -315,7 +362,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
   const showPrompt = promptShown(config.hidePrompt, preset?.userPrompt, model?.options.promptless);
   const effectiveOp = studioOp ?? op;
-  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
+  const baseShape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
+  const shape = framesCtx ? framesShape(baseShape, framesCtx.chained) : baseShape;
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
   const costText = costLabel({ demo, cost }, formatCost);
 
@@ -324,10 +372,11 @@ export function Composer({ docked }: { docked: boolean }) {
   const hasAttachment = slots.some((s) => draft.slots[s.key]) || draft.refs.length > 0;
   // Tools whose only input is a list of clips (Join clips) keep their "Add clip" tile in view.
   const showAttachments =
-    (slots.length > 0 || !!config.multiRef) && (hasAttachment || !!missing || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt));
+    framesOn ||
+    ((slots.length > 0 || !!config.multiRef) && (hasAttachment || !!missing || !!slots.find((s) => s.required && !draft.slots[s.key]) || (!!config.multiRef && !showPrompt)));
   const collapsed = docked && !focused;
   // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
-  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
+  const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs, ...(draft.frames ?? []).map((f) => f.value)].filter((v): v is SlotValue => !!v);
 
   // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
   const blocking = blocker?.message;
@@ -354,6 +403,60 @@ export function Composer({ docked }: { docked: boolean }) {
     // Nothing ran: the missing tile gets the focus, so Enter opens the file picker.
     if (step === "explain" && blockedSlot) requestAnimationFrame(() => slotButton(root.current, blockedSlot)?.focus({ preventScroll: true }));
   }, [step, startRequest, blockedSlot]);
+
+  const pickModel = (m: ModelDef) => {
+    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
+    if (m.engine !== engine) setEngine(m.engine);
+  };
+
+  // Frames on: the start and end frames already attached become the first frames. Off: the first and last frames
+  // go back to start and end (the ones in between can come back with Undo).
+  const framesLength = framesCtx?.duration ?? (model ? framesDuration(model, p.duration) : p.duration);
+  const toggleFrames = () => {
+    if (!draft.frames) {
+      setDraft((d) => {
+        const entered = enterFrames(d.slots);
+        const cleared = onImageChange(d, entered.slots);
+        return { frames: entered.frames, slots: cleared.slots, params: { ...(cleared.params ?? d.params), shots: undefined, multiShot: undefined, duration: framesLength } };
+      });
+      setFocused(true);
+      return;
+    }
+    const before = { frames: draft.frames, slots: draft.slots, params: draft.params };
+    const { slots: back, dropped } = leaveFrames(draft.frames, draft.slots);
+    // A length only the open chain makes goes back to the nearest one the model makes on its own.
+    const lengths = opts.durations;
+    const duration = lengths?.length && p.duration !== undefined && !lengths.includes(p.duration) ? lengths.reduce((a, b) => (Math.abs(b - p.duration!) < Math.abs(a - p.duration!) ? b : a)) : p.duration;
+    setDraft({ frames: undefined, slots: back, params: { ...p, duration } });
+    if (dropped) toast(`Frames off — frames 1 and ${draft.frames.length} are your start and end frames`, { action: { label: "Undo", onClick: () => setDraft(before) } });
+  };
+
+  // What the model does with the frames, said under the strip before anything runs (with the model that takes them all).
+  let framesNotice: FramesNotice | null = null;
+  if (framesCtx && model && draft.frames) {
+    const alt = catalog.getModel(FRAMES_MODELS[model.engine].id);
+    const action = alt && alt.id !== model.id ? { label: `Use ${alt.name}`, onClick: () => pickModel(alt) } : undefined;
+    const count = draft.frames.length;
+    const times = frameTimes(
+      draft.frames.map((f) => f.at),
+      framesCtx.duration,
+    );
+    const gap = framesCtx.chained && count > 1 ? chainGapProblem(times, framesCtx.duration, chainTiming(model)) : null;
+    const note = framesNote(model, count, draft.frames.at(-1)?.at);
+    if (framesCtx.support === "start" || framesCtx.support === "none") framesNotice = { text: `${framesBlocker(model, count)!.message}.`, tone: "warn", action };
+    else if (gap) framesNotice = { text: `${gap}.`, tone: "warn" };
+    else if (note) framesNotice = { text: note, tone: "info", action };
+  }
+  const framesChip = config.frames ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Chip icon={GalleryHorizontalEnd} active={framesOn} aria-pressed={framesOn} onClick={toggleFrames}>
+          Frames
+        </Chip>
+      </TooltipTrigger>
+      <TooltipContent>{framesOn ? "Back to a start and an end frame" : "Up to 10 frames, each at its own time"}</TooltipContent>
+    </Tooltip>
+  ) : null;
 
   // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
   const voiceChips = (
@@ -416,6 +519,7 @@ export function Composer({ docked }: { docked: boolean }) {
     </>
   );
   const hasSecondary =
+    !!config.frames ||
     (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
     !!config.presetPicker ||
     !!config.signature ||
@@ -445,7 +549,33 @@ export function Composer({ docked }: { docked: boolean }) {
         }
       }}
     >
-      {showAttachments && !collapsed && (
+      {framesOn && !collapsed && draft.frames && (
+        <FramesStrip
+          frames={draft.frames}
+          duration={framesCtx?.duration ?? p.duration ?? 5}
+          durations={model ? framesDurations(model) : [5]}
+          onDuration={(duration) => setP({ duration })}
+          onMove={(i, seconds) =>
+            setDraft((d) => {
+              if (!d.frames || !framesCtx) return {};
+              const ats = moveFrameAt(
+                d.frames.map((f) => f.at),
+                i,
+                seconds,
+                framesCtx.duration,
+              );
+              return { frames: d.frames.map((f, j) => ({ ...f, at: ats[j] })) };
+            })
+          }
+          onFrame={attach.setFrameValue}
+          onFrameFile={attach.uploadToFrame}
+          onAddFile={(f) => attach.attachFiles([f])}
+          onAddPick={attach.attach}
+          onClose={toggleFrames}
+          notice={framesNotice}
+        />
+      )}
+      {showAttachments && !collapsed && !framesOn && (
         <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-2">
           {slots.map((s) => (
             <MediaSlot
@@ -601,10 +731,7 @@ export function Composer({ docked }: { docked: boolean }) {
                   engine={engine}
                   onEngineChange={setEngine}
                   defaultModels={config.defaultModels}
-                  onChange={(m) => {
-                    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
-                    if (m.engine !== engine) setEngine(m.engine);
-                  }}
+                  onChange={pickModel}
                 />
               ) : (
                 <Chip icon={Loader2} disabled className="[&>svg]:animate-spin">
@@ -641,7 +768,10 @@ export function Composer({ docked }: { docked: boolean }) {
               <TooltipContent>Add a character, location or prop · type @</TooltipContent>
             </Tooltip>
           )}
-          <span className="contents max-sm:hidden">{voiceChips}</span>
+          <span className="contents max-sm:hidden">
+            {framesChip}
+            {voiceChips}
+          </span>
           <SettingsChip
             model={model}
             op={op}
@@ -659,6 +789,7 @@ export function Composer({ docked }: { docked: boolean }) {
             extras={
               hasSecondary ? (
                 <>
+                  {framesChip}
                   {voiceChips}
                   {styleChips}
                 </>

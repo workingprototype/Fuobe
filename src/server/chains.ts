@@ -1,7 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
-import { frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
+import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { routesFor } from "@/lib/catalog/plan";
 import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
@@ -179,8 +179,7 @@ export function createKeyframeFilm(original: GenerationRequest, model: ModelDef,
   const times = original.params?.keyframeTimes?.length ? original.params.keyframeTimes : frameTimes(spread(images.length), duration);
   const wf = loadManifest().workflows.find((w) => w.id === route.endpoint);
   const clips = planKeyframeClips(times, duration, {
-    name: model.name,
-    maxSeconds: Math.max(...(model.options.durations ?? [5])),
+    ...chainTiming(model),
     fps: Number(wf?.defaults.fps ?? 16),
     step: Number(wf?.defaults.frameStep ?? 4),
     maxFrames: wf?.limits?.maxFrames,
