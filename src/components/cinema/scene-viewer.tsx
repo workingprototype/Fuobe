@@ -269,6 +269,7 @@ export default function SceneViewer({ take, projectId, engine, onEngine, setting
               key={mm}
               type="button"
               aria-pressed={lens === mm}
+              aria-label={`${mm} mm`}
               onClick={() => setLens(mm)}
               className={cn("h-7 rounded-full px-2.5 font-mono text-[11.5px]", lens === mm ? "bg-primary text-primary-foreground" : "bg-secondary hover:bg-accent")}
             >

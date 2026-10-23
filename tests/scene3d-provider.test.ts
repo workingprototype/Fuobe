@@ -71,7 +71,11 @@ describe("open engine: MoGe 2 scene (scene-mesh-moge)", () => {
   it("returns the scene GLB first and the depth PNG second, each with its role", () => {
     const file = (filename: string) => ({ filename, subfolder: "fuobe", type: "output" });
     const outs = collectOutputs(
-      { status: { status_str: "success", completed: true }, outputs: { "11": { images: [file("gen-scene_00001_.png")] }, "9": { "3d": [file("gen-scene_00001_.glb")] } } },
+      // What ComfyUI 0.41 answers for this graph (a live CPU run): SaveGLB also lists camera_info [null].
+      {
+        status: { status_str: "success", completed: true },
+        outputs: { "11": { images: [file("gen-scene_00001_.png")] }, "9": { "3d": [file("gen-scene_00002_.glb")], camera_info: [null], model_3d_info: [] } },
+      },
       manifestOf("scene-mesh-moge"),
     );
     expect(outs.map((o) => [o.kind, o.contentType, o.meta?.role])).toEqual([
