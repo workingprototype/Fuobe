@@ -32,6 +32,16 @@ describe("Remove background: what to keep, cut-out or alpha mask", () => {
     expect(model("oss-video-matte-sam3").options).toMatchObject({ keepsNamed: true, matteOutputs: ["cutout", "matte"] });
   });
 
+  it("a model that makes both files makes the picker's default (the cut-out) unless asked", () => {
+    const video = { video: "/api/files/clip.mp4" };
+    expect(plan({ modelId: "oss-video-matte-birefnet", op: "bg-remove-video", inputs: video }).params.matteOutput).toBe("cutout");
+    expect(plan({ modelId: "birefnet-video", op: "bg-remove-video", inputs: video }).params.matteOutput).toBe("cutout");
+    expect(plan({ modelId: "oss-video-matte-sam3", op: "bg-remove-video", prompt: "the dog", inputs: video, params: { matteOutput: "matte" } }).params.matteOutput).toBe("matte");
+    // One file only: nothing to choose.
+    expect(plan({ modelId: "bria-video-bg", op: "bg-remove-video", inputs: video }).params.matteOutput).toBeUndefined();
+    expect(plan({ modelId: "sam-3-1-video-mask", op: "bg-remove-video", prompt: "the dog", inputs: video }).params.matteOutput).toBeUndefined();
+  });
+
   it("BiRefNet's alpha mask is its output_mask switch; Bria has none", () => {
     expect(buildPayload(map("birefnet-video"), { ...clip, matteOutput: "matte" })).toMatchObject({ video_url: clip.video, output_mask: true, video_output_type: "VP9 (.webm)" });
     expect(buildPayload(map("birefnet-video"), { ...clip, matteOutput: "cutout" })).toMatchObject({ output_mask: false });

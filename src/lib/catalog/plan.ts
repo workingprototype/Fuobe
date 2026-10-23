@@ -239,6 +239,10 @@ export function planGeneration(
   if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
   if (requires?.points && !params.points?.length) throw new Error(requires.msg);
   if (op === "bg-remove-video" || op === "depth-video") checkVideoToolOptions(model, op, prompt, params);
+  // Remove background on a model that makes both files: the picker's default (the cut-out) unless asked, so the job
+  // makes the one file the picker showed, not both.
+  const matteOutputs = model.options.matteOutputs;
+  if (op === "bg-remove-video" && !params.matteOutput && matteOutputs && matteOutputs.length > 1) params = { ...params, matteOutput: matteOutputs[0] };
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }

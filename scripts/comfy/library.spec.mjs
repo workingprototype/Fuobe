@@ -79,7 +79,7 @@
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
-// and black-and-white videos: params.extra.keepOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
+// and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
 // segment per caption cue before submitting).
 
 import fs from 'node:fs';
@@ -1704,7 +1704,7 @@ export const SPEC = [
       'Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). ' +
       'Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs "images" (animated: true), not "videos": classify by the .webm extension / the declared kind. ' +
       'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3. ' +
-      'Roles: node 7 "cutout", node 10 "matte"; params.extra.keepOutput ("cutout" | "matte") makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask).',
+      'Roles: node 7 "cutout", node 10 "matte"; params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask).',
   },
   {
     id: 'video-bg-remove-sam3',
@@ -1726,7 +1726,7 @@ export const SPEC = [
       'prompt = what to KEEP ("person", "red car"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices "" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). ' +
       'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. ' +
       'Second output (node 12, role "matte", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); ' +
-      'params.extra.keepOutput ("cutout" | "matte") makes the provider drop the other save node, so only the chosen one is encoded.',
+      'params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node, so only the chosen one is encoded.',
   },
   {
     id: 'video-depth-da3',
