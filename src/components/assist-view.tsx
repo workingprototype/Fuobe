@@ -19,16 +19,9 @@ import { ProjectDot, RailButton } from "@/components/assist/shell";
 import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
 import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
-import { modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
+import { ASSIST_SUGGESTIONS, modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
-
-const SUGGESTIONS = [
-  "A 3-shot product ad for a matte black perfume bottle — hero still, then animate it",
-  "Four moody portraits of a lighthouse keeper, 35mm film, then pick the best and animate it",
-  "Storyboard a 6-frame heist in Paris at night",
-  "A 10-second vertical video of a fox running through snow, with sound",
-];
 
 /** Skills offered as one-tap starters on the empty page (Supercomputer's suggestion cards). */
 const STARTER_SKILLS = ["product-photoshoot", "ugc-video", "thumbnail-generation", "faceless-video", "short-film", "localization"];
@@ -191,7 +184,7 @@ export function AssistView() {
             />
             <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />
             <div className="mt-6 flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
+              {ASSIST_SUGGESTIONS.map((s) => (
                 <button
                   key={s}
                   onClick={() => start(s).catch((e) => toast.error((e as Error).message))}

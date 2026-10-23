@@ -149,7 +149,10 @@ export const higgsfieldProvider: ProviderAdapter = {
       return { ok: true, detail: "Key accepted" };
     } catch (e) {
       const status = (e as ProviderError).status;
-      return status === 401 ? { ok: false, detail: "Key rejected (401)" } : { ok: true, detail: `Key accepted (list returned ${status ?? "an error"})` };
+      if (status === 401 || status === 403) return { ok: false, detail: `Key rejected (${status})` };
+      // The key got past auth, the list call itself failed.
+      if (status === 400 || status === 404 || status === 422) return { ok: true, detail: `Key accepted (list returned ${status})` };
+      return { ok: false, detail: status ? `Couldn't check the key: Higgsfield answered ${status}. Try again in a moment` : `Can't reach Higgsfield (${(e as Error).message})` };
     }
   },
 };

@@ -33,7 +33,7 @@ import { guessKind } from "@/lib/catalog/payload";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
-import { getSetting } from "../settings";
+import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
 import { readRef } from "../storage";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
@@ -78,7 +78,14 @@ export function workerFor(endpoint: string | undefined): ComfyWorker {
   return endpoint && loadManifest().workflows.find((w) => w.id === endpoint)?.worker === "isolated" ? "isolated" : "main";
 }
 
-function authHeaders(): Record<string, string> {
+/** A ComfyUI address as compared: no trailing slash. */
+const sameAddress = (a: string, b: string) => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+function authHeaders(worker: ComfyWorker = "main"): Record<string, string> {
+  // Save & test of an address that isn't the saved one: the saved token stays with the server it
+  // was saved for. Only a token typed for this test goes to the new address.
+  const address = worker === "isolated" ? "comfyIsolatedUrl" : "comfyUrl";
+  if (isCandidate(address) && !isCandidate("comfyToken") && !sameAddress(getSetting(address), savedSetting(address))) return {};
   const t = getSetting("comfyToken");
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
@@ -89,7 +96,7 @@ async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker
     throw new ProviderError(`This model runs on the isolated ComfyUI worker, which isn't set up yet: add its address in ${ISOLATED_SETTING} (or COMFYUI_ISOLATED_URL). scripts/comfy/README.md shows how to start one, usually on port 8189`);
   }
   try {
-    return await fetch(`${base}${p}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } });
+    return await fetch(`${base}${p}`, { ...init, headers: { ...authHeaders(worker), ...(init.headers ?? {}) } });
   } catch (e) {
     if (worker === "isolated") throw new ProviderError(`The isolated ComfyUI worker at ${base} doesn't answer (${(e as Error).message}). Start it (scripts/comfy/README.md) or check ${ISOLATED_SETTING}`);
     throw new ProviderError(`Can't reach ComfyUI at ${base} (${(e as Error).message}). Is it running?`);
@@ -751,7 +758,7 @@ async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | unde
   const failed = passes.find((e) => e.status?.status_str === "error");
   if (failed) return { error: explainExecutionError(executionError(failed), manifest) };
   for (const e of passes) {
-    const files = collectOutputs(e, manifest, baseUrl(worker), authHeaders());
+    const files = collectOutputs(e, manifest, baseUrl(worker), authHeaders(worker));
     if (files.length) return files;
   }
   return null;
@@ -839,7 +846,7 @@ export const comfyProvider: ProviderAdapter = {
         forget(externalId);
         return { state: "failed" as const, error: explainExecutionError(executionError(entry), manifest) };
       }
-      let outputs = collectOutputs(entry, manifest, baseUrl(worker), authHeaders());
+      let outputs = collectOutputs(entry, manifest, baseUrl(worker), authHeaders(worker));
       if (!outputs.length && meta.metaBatch && typeof meta.prefix === "string") {
         const next = await followMetaBatch(meta.prefix, manifest, worker);
         if (next === "running") return { state: "running" as const, message: "Rendering the next batch of frames" };
@@ -896,7 +903,7 @@ export const comfyProvider: ProviderAdapter = {
     if (q.queue_running?.some((r) => r[1] === externalId)) await post("/interrupt", { prompt_id: externalId }).catch(() => {});
   },
 
-  async test() {
+  async test(opts) {
     const describe = async (worker: ComfyWorker) => {
       const res = await comfyFetch("/system_stats", {}, worker);
       if (!res.ok) throw new ProviderError(`HTTP ${res.status}`);
@@ -904,6 +911,15 @@ export const comfyProvider: ProviderAdapter = {
       const dev = s.devices?.[0];
       return `ComfyUI ${s.system?.comfyui_version ?? ""} · ${dev?.name ?? "unknown device"}${dev?.vram_total ? ` · ${(dev.vram_total / 2 ** 30).toFixed(0)} GB` : ""}`;
     };
+    // Checking the isolated worker's address: that worker answers, or it isn't connected (the main
+    // server's state is the main address's test).
+    if (opts?.focus === "comfyIsolatedUrl") {
+      if (!baseUrl("isolated")) return { ok: false, detail: "No isolated worker address set" };
+      return describe("isolated").then(
+        (d) => ({ ok: true, detail: `isolated worker: ${d}` }),
+        (e: Error) => ({ ok: false, detail: /^HTTP \d/.test(e.message) ? `The isolated worker at ${baseUrl("isolated")} answered ${e.message}` : e.message }),
+      );
+    }
     let detail: string;
     try {
       detail = await describe("main");

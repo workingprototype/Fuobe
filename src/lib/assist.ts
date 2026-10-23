@@ -93,6 +93,17 @@ export function threadTitle(text: string): string {
   return t.length > 60 ? `${t.slice(0, 57).replace(/\s+\S*$/, "")}…` : t || "New chat";
 }
 
+/**
+ * The starter requests on Assist's empty page. Each one must plan right without an LLM too
+ * (tests/assist-suggestions.test.ts runs them through the offline planner).
+ */
+export const ASSIST_SUGGESTIONS = [
+  "A 3-shot product ad for a matte black perfume bottle — hero still, then animate it",
+  "Four moody portraits of a lighthouse keeper, 35mm film, then pick the best and animate it",
+  "Storyboard a 6-frame heist in Paris at night",
+  "A 10-second vertical video of a fox running through snow, with sound",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Modes (Supercomputer's Free / Smart / Manual)
 

@@ -4,6 +4,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
+import type { TestProvider } from "./connections";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind, ReviewStatus } from "./catalog/types";
 import {
@@ -772,6 +773,29 @@ export interface StatusInfo {
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
+  /** The first-run guide was put away, or something the engine mode generates with was connected once. */
+  onboarded?: boolean;
+}
+
+/** A connection test's answer (POST /api/providers/test). */
+export interface ConnectionTest {
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Test a provider, with unsaved values (by setting name) in place of the saved ones when given.
+ * `field` is the setting being checked (the Anthropic key, Ollama's address…), so the test checks that one.
+ */
+export async function testConnection(provider: TestProvider, values?: Record<string, string>, field?: string): Promise<ConnectionTest> {
+  const res = await fetch("/api/providers/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, values, field }) });
+  const body = (await res.json().catch(() => null)) as ConnectionTest | null;
+  return body && typeof body.ok === "boolean" ? body : { ok: false, detail: `The test didn't answer (${res.status})` };
+}
+
+/** Save settings by name (PUT /api/settings); throws the server's message when a value isn't allowed. */
+export async function saveSettings(patch: Record<string, string>): Promise<void> {
+  await json(await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }));
 }
 
 export function useStatus() {

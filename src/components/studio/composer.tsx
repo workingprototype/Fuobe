@@ -12,7 +12,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape, startStep } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -29,7 +29,7 @@ import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
-import { useStudio, type Draft } from "./studio-context";
+import { useStartRequest, useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 import { useSignature } from "../palettes/use-signature";
 
@@ -114,6 +114,11 @@ function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
     ],
     { duration: 650, iterations: 2, easing: "ease-out" },
   );
+}
+
+/** An empty attachment tile's upload button (focus it, or click it from a toast action to open the file picker). */
+function slotButton(root: HTMLElement | null, key: string) {
+  return root?.querySelector<HTMLButtonElement>(`[data-slot-key="${key}"] button[aria-label$=": upload"]`) ?? null;
 }
 
 export function Composer({ docked }: { docked: boolean }) {
@@ -254,9 +259,11 @@ export function Composer({ docked }: { docked: boolean }) {
     if (blocker || create.isPending || signature.lock.isPending) {
       if (blocker) {
         // One blocker toast at a time (pressing Generate again replaces it), gone once a run starts.
-        toast(blocker.message, { id: "composer-blocker" });
+        // A missing photo or clip: the toast's Upload opens the file picker (a click, so the browser allows it).
+        const slot = blocker.slot;
+        toast(blocker.message, { id: "composer-blocker", action: slot ? { label: "Upload", onClick: () => slotButton(root.current, slot)?.click() } : undefined });
         // Point at the tile to fill: the missing slot, or the clip list of a tool that only takes clips.
-        const target = blocker.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+        const target = slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
         if (target) pulseSlot(root.current, target);
       }
       return;
@@ -327,6 +334,26 @@ export function Composer({ docked }: { docked: boolean }) {
   useEffect(() => {
     toast.dismiss("composer-blocker");
   }, [blocking]);
+
+  // Home's Start (go=<token>): run the handed-over prompt once the models and uploads have settled. A
+  // blocker (Edit's photo) gets the usual toast, and its slot is pointed at, instead.
+  const startRequest = useStartRequest();
+  const startedFor = useRef(0);
+  const submitRef = useRef(submit);
+  useLayoutEffect(() => {
+    submitRef.current = submit;
+  });
+  const settling = !catalog.ready || presetLoading || uploading || (needsFull && !catalog.complete);
+  const step = startRequest ? startStep({ settling, blocker }) : "wait";
+  const blockedSlot = blocker?.slot;
+  useEffect(() => {
+    if (step === "wait" || startRequest <= startedFor.current) return;
+    startedFor.current = startRequest;
+    // After the blocker toast above was cleared for this render.
+    submitRef.current();
+    // Nothing ran: the missing tile gets the focus, so Enter opens the file picker.
+    if (step === "explain" && blockedSlot) requestAnimationFrame(() => slotButton(root.current, blockedSlot)?.focus({ preventScroll: true }));
+  }, [step, startRequest, blockedSlot]);
 
   // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
   const voiceChips = (
