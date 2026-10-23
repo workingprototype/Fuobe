@@ -1,20 +1,51 @@
 import { connection } from "next/server";
-import { MODELS } from "@/lib/catalog";
+import { getModel, MODELS } from "@/lib/catalog";
+import { ENGINE_MODELS } from "@/lib/catalog/faceless";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { findModels, MODEL_KINDS, toModelInfo } from "@/lib/model-list";
-import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
+import { AUDIO_STUDIO, DIALOGUE_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import { provider } from "@/server/providers";
 import { llmBackends } from "@/server/providers/llm";
-import { engineMode } from "@/server/settings";
+import { engineMode, getSetting } from "@/server/settings";
 
-/** A provider for one of its routes is set up (else it runs as a demo). */
+/** A provider for one of its routes is set up. */
 const connected = (m: ModelDef) => m.routes.some((r) => (r.provider === "llm" ? llmBackends(r).length > 0 : provider(r.provider).isConfigured()));
+
+/**
+ * How a run of the model goes today, the way chooseRoute decides: "real" on its provider, "demo"
+ * (placeholder media, free: Demo mode on, or auto with no provider set up) or "refused" (Demo mode
+ * off and no provider: the run fails with "Connect … in Settings").
+ */
+function runsAs(m: ModelDef, demoMode: string): "real" | "demo" | "refused" {
+  if (demoMode === "on") return "demo";
+  if (connected(m)) return "real";
+  return demoMode === "off" ? "refused" : "demo";
+}
+
+/** Per engine, the ids that clone voices (a dialogue studio's cloud default uses premade voices only). */
+const cloning = (ids: { cloud?: string; open?: string }) => Object.fromEntries(Object.entries(ids).filter(([, id]) => id && getModel(id)?.options.voiceClone));
+
+/**
+ * The studios' own picks per engine: image, edit (images attached), video, audio (text to speech),
+ * dialogue, clone (text to speech in the voice of a sample) and cloneDialogue (two speakers, each
+ * cloned from a sample).
+ */
+const DEFAULTS: Record<string, { cloud?: string; open?: string }> = {
+  image: IMAGE_STUDIO.defaultModels,
+  edit: EDIT_STUDIO.defaultModels,
+  video: VIDEO_STUDIO.defaultModels,
+  audio: AUDIO_STUDIO.defaultModels,
+  dialogue: DIALOGUE_STUDIO.defaultModels,
+  clone: cloning({ cloud: ENGINE_MODELS.cloud.cloneNarration, open: ENGINE_MODELS.open.cloneNarration }),
+  cloneDialogue: cloning(DIALOGUE_STUDIO.defaultModels),
+};
 
 /**
  * Models this install can run, for scripts and the `fuobe` CLI. Filters: kind, engine (open |
  * cloud), op, q (words that must all match), hidden=1 (chain helpers too). Models of an engine the
  * install has switched off (Settings → Engine mode) are left out. `defaults` are the studios' own
- * picks (image, edit, video, audio) per engine.
+ * picks per engine (DEFAULTS); each item says whether its provider is `connected` and how a run
+ * goes today (`runs`, which follows Settings → Demo mode).
  */
 export async function GET(request: Request) {
   await connection();
@@ -30,10 +61,8 @@ export async function GET(request: Request) {
     (m) => mode === "both" || m.engine === mode,
   );
   const defaults = Object.fromEntries(
-    Object.entries({ image: IMAGE_STUDIO, edit: EDIT_STUDIO, video: VIDEO_STUDIO, audio: AUDIO_STUDIO }).map(([k, s]) => [
-      k,
-      { ...(mode !== "open" && s.defaultModels.cloud && { cloud: s.defaultModels.cloud }), ...(mode !== "cloud" && s.defaultModels.open && { open: s.defaultModels.open }) },
-    ]),
+    Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: ids.cloud }), ...(mode !== "cloud" && ids.open && { open: ids.open }) }]),
   );
-  return Response.json({ engineMode: mode, defaults, items: list.map((m) => ({ ...toModelInfo(m), connected: connected(m) })) });
+  const demoMode = getSetting("demoMode");
+  return Response.json({ engineMode: mode, demoMode, defaults, items: list.map((m) => ({ ...toModelInfo(m), connected: connected(m), runs: runsAs(m, demoMode) })) });
 }

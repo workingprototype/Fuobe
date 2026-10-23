@@ -20,7 +20,13 @@ const { listGenerations } = await import("@/server/generations");
 const { setSetting } = await import("@/server/settings");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-type ModelsBody = { engineMode: string; defaults: Record<string, { cloud?: string; open?: string }>; items: (ReturnType<typeof toModelInfo> & { connected: boolean })[]; error?: string };
+type ModelsBody = {
+  engineMode: string;
+  demoMode: string;
+  defaults: Record<string, { cloud?: string; open?: string }>;
+  items: (ReturnType<typeof toModelInfo> & { connected: boolean; runs: "real" | "demo" | "refused" })[];
+  error?: string;
+};
 const models = async (query = "") => {
   const res = await listModels(new Request(`http://localhost/api/models${query}`));
   return { status: res.status, body: (await res.json()) as ModelsBody };
@@ -65,6 +71,43 @@ describe("GET /api/models", () => {
       expect(body.defaults.image).toEqual({ open: "oss-z-image-turbo" });
     } finally {
       setSetting("engineMode", "both");
+    }
+  });
+
+  it("names the models that clone a voice sample, alone and as a dialogue's two speakers", async () => {
+    const { defaults, items } = (await models("?kind=audio")).body;
+    expect(defaults).toMatchObject({
+      audio: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
+      dialogue: { cloud: "elevenlabs-dialogue", open: "oss-chatterbox-dialogue" },
+      clone: { cloud: "chatterbox-cloud", open: "oss-chatterbox" },
+    });
+    // ElevenLabs' dialogue speaks in premade voices only: no cloud model clones two speakers.
+    expect(defaults.cloneDialogue).toEqual({ open: "oss-chatterbox-dialogue" });
+    const byId = new Map(items.map((m) => [m.id, m]));
+    expect(byId.get("chatterbox-cloud")?.voiceClone).toBe(true);
+    expect(byId.get("oss-chatterbox-dialogue")?.voiceClone).toBe(true);
+    expect(byId.get("elevenlabs-v4")).not.toHaveProperty("voiceClone");
+  });
+
+  it("says how a run goes today, following Settings → Demo mode the way routing does", async () => {
+    const runs = async () => {
+      const { body } = await models("?q=nano-banana-pro");
+      const m = body.items.find((x) => x.id === "nano-banana-pro")!;
+      return { demoMode: body.demoMode, connected: m.connected, runs: m.runs };
+    };
+    // auto, no key: a free demo.
+    expect(await runs()).toEqual({ demoMode: "auto", connected: false, runs: "demo" });
+    try {
+      setSetting("demoMode", "off");
+      expect(await runs()).toEqual({ demoMode: "off", connected: false, runs: "refused" });
+      setSetting("falKey", "fal-test-key");
+      expect(await runs()).toEqual({ demoMode: "off", connected: true, runs: "real" });
+      // Demo mode on sends every run to the demo provider, key or not.
+      setSetting("demoMode", "on");
+      expect(await runs()).toEqual({ demoMode: "on", connected: true, runs: "demo" });
+    } finally {
+      setSetting("falKey", "");
+      setSetting("demoMode", "auto");
     }
   });
 

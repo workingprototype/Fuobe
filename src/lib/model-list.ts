@@ -23,6 +23,8 @@ export interface ModelInfo extends ModelRow {
   endFrame?: boolean;
   /** Premade voice ids (text to speech, voice change). */
   voices?: string[];
+  /** Takes a voice sample (`inputs.voiceAudio`) and speaks or changes into that voice. */
+  voiceClone?: true;
   /** Not offered by any studio picker (chain helpers); runs when asked for by id. */
   hidden?: true;
 }
@@ -40,6 +42,7 @@ export function toModelInfo(m: ModelDef): ModelInfo {
     ...(o.audio && { audio: o.audio }),
     ...(o.endFrame && { endFrame: true }),
     ...(o.voices?.length && { voices: o.voices.map((v) => v.id) }),
+    ...(o.voiceClone && { voiceClone: true as const }),
     ...(m.hidden && { hidden: true as const }),
   };
 }
