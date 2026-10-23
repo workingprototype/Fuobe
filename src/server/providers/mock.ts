@@ -228,6 +228,12 @@ function demoOcr(brief: string): DemoOutput {
   return textOutput(lines.map((l) => l.text).join("\n"), null, { lines, demo: true });
 }
 
+/** A black-and-white mask (white = the object) in the picture's shape. */
+function demoMaskSvg(ar: string): string {
+  const [w, h] = ar === "9:16" || ar === "3:4" || ar === "2:3" ? [360, 640] : ar === "1:1" ? [512, 512] : [640, 360];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#000"/><ellipse cx="${w * 0.55}" cy="${h * 0.6}" rx="${w * 0.12}" ry="${h * 0.14}" fill="#fff"/></svg>`;
+}
+
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 
 function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string, ar: string, meta: Record<string, unknown>): DemoOutput[] {
@@ -283,6 +289,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "audio-join":
       return [{ url: toDataUri(demoWav(clamp(3 * Number(meta.clips ?? 2), 4, 30), [330, 495]), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { demo: true } }];
     case "remove-object":
+      return [
+        { url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } },
+        // The painted eraser also hands the window's last tracked mask to the next window.
+        ...(meta.lastMask ? [{ url: svgUri(demoMaskSvg(ar)), kind: "image" as const, contentType: "image/svg+xml", meta: { role: "mask", demo: true } }] : []),
+      ];
     case "video-swap":
     case "video-insert":
     case "keyframes":
@@ -338,6 +349,8 @@ export const mockProvider: ProviderAdapter = {
         duration: input.duration,
         format: input.format,
         clips: input.audios?.length,
+        // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted).
+        lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted",
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).

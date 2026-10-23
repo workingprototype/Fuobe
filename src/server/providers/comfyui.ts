@@ -30,6 +30,7 @@ import {
 } from "@/lib/comfy";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { guessKind } from "@/lib/catalog/payload";
+import { CLICK_OPEN_PROBLEM, REMOVE_SCENE } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { getSetting } from "../settings";
@@ -571,6 +572,26 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values[key] = def.replaceAll("{columns}", String(columns)).replaceAll("{rows}", String(rows)).replaceAll("{count}", String(columns * rows)).replaceAll("{language}", languageName(input.targetLanguage));
   }
 
+  // Remove object: the words name what SAM 3.1 follows (maskPrompt) and the gap is filled with the scene without it
+  // (params.extra.prompt, else a neutral default). No graph takes clicked points.
+  if (ctx.op === "remove-object") {
+    const words = input.prompt?.trim();
+    if (b.maskPrompt) {
+      if (!words && typeof extra.maskPrompt !== "string") throw new ProviderError(input.points?.length ? CLICK_OPEN_PROBLEM : "Say what to remove, e.g. “the coffee cup in her hand”");
+      values.maskPrompt = words;
+    }
+    if (b.prompt) values.prompt = REMOVE_SCENE;
+  }
+  // Depth colour maps: Video Depth Anything has gray and inferno; the other graphs are grayscale only.
+  if (ctx.op === "depth-video" && input.colormap) {
+    const want = input.colormap.toLowerCase() === "grayscale" ? "gray" : input.colormap.toLowerCase();
+    if (b.colormap && (want === "gray" || want === "inferno")) values.colormap = want;
+    else if (want !== "gray") throw new ProviderError(b.colormap ? "The open engine's depth maps come in grayscale or inferno — turbo, magma and viridis are on the cloud" : "This depth model makes grayscale maps only — pick Video Depth Anything for inferno");
+  }
+  // Matte graphs save a cut-out and a black-and-white matte: params.extra.keepOutput ("cutout" | "matte") keeps one.
+  const keepRole = typeof extra.keepOutput === "string" ? extra.keepOutput : undefined;
+  delete extra.keepOutput;
+
   if (b.filenamePrefix) values.filenamePrefix = `fuobe/${ctx.generationId}`;
   const cues = manifest.expand === "captions" ? captionCues(input, extra) : [];
   delete extra.cues;
@@ -635,6 +656,8 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
   }
   if (input.loras?.length) wf = injectLoras(wf, input.loras);
+  // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
+  if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
   const metaBatch = Object.values(wf).some((n) => n.class_type === "VHS_BatchManager");
   return {
     manifest,
