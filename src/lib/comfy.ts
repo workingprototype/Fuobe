@@ -99,9 +99,10 @@ export interface ManifestWorkflow {
   worker?: "isolated";
   /**
    * The provider rewrites the graph before submitting ("captions": one segment per caption cue;
-   * "timeline": one loader per audio clip, each placed at its start time).
+   * "timeline": one loader per audio clip, each placed at its start time; "videos" / "audios": one loader
+   * per clip of a join, src/lib/av/joins.ts).
    */
-  expand?: "captions" | "timeline";
+  expand?: "captions" | "timeline" | "videos" | "audios";
   validated: boolean;
   notes?: string;
 }
