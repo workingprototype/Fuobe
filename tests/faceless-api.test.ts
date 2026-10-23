@@ -243,14 +243,15 @@ describe("Episodes", () => {
       expect(gens.getGeneration(cloudIds.mix)!.modelId).toBe("ffmpeg-compose");
       expect(gens.getGeneration(cloudIds.level)!.request.inputs?.audio).toBeTruthy();
 
-      // Upscale to 1080p: one step on the finished film (cloud only).
+      // Upscale to 1080p: one step on the finished film, on both engines (the open one upscales in passes of a few frames).
       expect(doneCloud.upscale).toEqual({ costUsd: 0, demo: true });
-      expect(doneOpen.upscale).toBeNull();
+      expect(doneOpen.upscale).toEqual({ costUsd: 0, demo: true });
       const upscaling: EpisodeView = await (await actionRoute.POST(json("POST"), params({ id: cloudId, action: "upscale" }))).json();
       const up = gens.getGeneration(upscaling.episode.plan!.upscaled!)!;
       expect(up).toMatchObject({ op: "upscale-video", modelId: "seedvr-video" });
       expect(up.request.params?.resolution).toBe("1080p");
-      expect((await actionRoute.POST(json("POST"), params({ id: openId, action: "upscale" }))).status).toBe(422);
+      const upscalingOpen: EpisodeView = await (await actionRoute.POST(json("POST"), params({ id: openId, action: "upscale" }))).json();
+      expect(gens.getGeneration(upscalingOpen.episode.plan!.upscaled!)).toMatchObject({ op: "upscale-video", modelId: "oss-upscale-video-esrgan", engine: "open" });
 
       // Timeline editor: change scene 3's picture.
       const target = doneCloud.episode.script.blocks[2].id;

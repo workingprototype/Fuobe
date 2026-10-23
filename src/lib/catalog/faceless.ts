@@ -563,7 +563,7 @@ export interface EngineModels {
   captionsUseWords: boolean;
   /** Pictures that show the subject of attached images, when the still model can't read images. */
   sourceStill?: string;
-  /** "Upscale to 1080p" on a finished episode (cloud: SeedVR2; the open 4× upscaler holds every frame in memory, so none). */
+  /** "Upscale to 1080p" on a finished episode (cloud: SeedVR2; open: Real-ESRGAN in passes of a few frames, so memory stays flat). */
   upscale?: string;
   write: string;
 }
@@ -610,6 +610,7 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     align: "oss-qwen3-asr",
     captionsUseWords: true,
     sourceStill: "oss-qwen-edit",
+    upscale: "oss-upscale-video-esrgan",
     write: "oss-text-llm",
   },
 };
