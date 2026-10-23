@@ -50,11 +50,19 @@ export function frameSupport(model: Pick<ModelDef, "routes" | "options">): Frame
   return ops.has("i2v") ? "start" : "none";
 }
 
-/** The model to suggest for every frame on each engine (it must be in the Video studio's list). */
+/**
+ * The model to suggest for every frame on each engine (it must be in the Video studio's list). On the open
+ * engine that's Wan 2.2 14B: its start/end-frame workflow is the one every pair runs on (Lightning has no
+ * 4-step version of it), so the whole film comes out at one quality, with up to 7 s between frames.
+ */
 export const FRAMES_MODELS: Record<Engine, { id: string; name: string }> = {
   cloud: { id: "flux-3-max", name: "FLUX 3 Max" },
-  open: { id: "oss-wan22-14b-fast", name: "Wan 2.2 14B Lightning" },
+  open: { id: "oss-wan22-14b", name: "Wan 2.2 14B" },
 };
+
+/** Why a chained route can't be a step that waits (a Canvas node fed by another node, a pipeline step): its clips are planned from its inputs when it's created. */
+export const chainedWaitMessage = (name: string) =>
+  `${name} builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output`;
 
 /** What stops Generate in Frames mode before the planner speaks: no start frame, or a model that can't follow frames. */
 export function framesBlocker(model: Pick<ModelDef, "name" | "engine" | "routes" | "options">, count: number): { message: string; slot?: "frames" } | null {
@@ -66,12 +74,26 @@ export function framesBlocker(model: Pick<ModelDef, "name" | "engine" | "routes"
   return null;
 }
 
+type NoteModel = Pick<ModelDef, "id" | "name" | "engine" | "routes" | "options">;
+
 /**
  * The line under the strip: what the model will do with the frames (said before anything runs).
- * Null when every frame is used as placed.
+ * Null when every frame is used as placed. `suggested` is the engine's FRAMES_MODELS model, when the
+ * catalog has it: an open chain whose pairs run on that model's own workflow says it gains nothing there
+ * (Wan 2.2 14B Lightning: the same full-quality start/end-frame clips, shorter gaps, and only the stretch
+ * after the last frame, `tail`, a fast one).
  */
-export function framesNote(model: Pick<ModelDef, "name" | "engine" | "routes" | "options">, count: number, lastAt = 1): string | null {
+export function framesNote(model: NoteModel, count: number, lastAt = 1, ctx: { suggested?: NoteModel; tail?: boolean } = {}): string | null {
   const support = frameSupport(model);
+  const chain = keyframeChain(model);
+  const { suggested } = ctx;
+  const theirs = suggested && keyframeChain(suggested);
+  if (support === "all" && count >= 2 && chain && theirs && suggested.id !== model.id && theirs.endpoint === chain.endpoint) {
+    const longer = chainTiming(suggested).maxSeconds > chainTiming(model).maxSeconds + EPS;
+    const more = longer ? ` and allows up to ${secondsLabel(chainTiming(suggested).maxSeconds)} between frames` : "";
+    const tail = ctx.tail ? " (only the stretch after the last frame is a fast clip)" : "";
+    return `${model.name} has no fast start/end-frame clips: the clips between frames render at ${suggested.name}'s full quality${tail} — ${suggested.name} takes as long${more}.`;
+  }
   if (support !== "ends" || count < 2) return null;
   const alt = FRAMES_MODELS[model.engine].name;
   if (count > 2) {
@@ -180,6 +202,9 @@ export function framesInputs(refs: string[], times: number[], support: FrameSupp
 // ---------------------------------------------------------------------------
 // Checks and the open engine's plan
 
+/** The open chain starts its film on the first frame: nothing comes before it. */
+export const FIRST_AT_ZERO = "The first frame is the start frame — give it the time 0";
+
 export interface ChainTiming {
   /** The model's name, for messages. */
   name: string;
@@ -201,6 +226,11 @@ export function chainTiming(model: Pick<ModelDef, "name" | "options">): ChainTim
  */
 export function chainGapProblem(times: number[], duration: number, t: ChainTiming): string | null {
   const min = t.minSeconds ?? OPEN_MIN_GAP;
+  // One frame is one clip from it alone (a plain image-to-video), as long as the model makes.
+  if (times.length === 1) {
+    const one = round1(duration - times[0]);
+    return one > t.maxSeconds + EPS ? `One frame makes a clip of up to ${secondsLabel(t.maxSeconds)} on ${t.name} — add more frames or make the clip shorter` : null;
+  }
   for (let i = 1; i < times.length; i++) {
     const gap = round1(times[i] - times[i - 1]);
     if (gap > t.maxSeconds + EPS) return `Frames ${i} and ${i + 1} are ${secondsLabel(gap)} apart — ${t.name} makes up to ${secondsLabel(t.maxSeconds)} between two frames. Move them closer or add a frame between them`;
@@ -225,11 +255,13 @@ export interface KeyframeClip {
  * One start/end-frame clip per pair of neighbouring frames, then the stretch after the last frame
  * when it isn't at the end (shorter than the minimum: the film ends on the last frame). Each clip's
  * last frame is the next one's first, so frame k lands on the film's frame Σ(earlier clips) − 1;
- * the counts are chosen against the film's running total, so the frames stay on their times within
- * half a frame step (Wan 2.2: ±2 frames at 16 fps) however many clips there are.
+ * the counts are chosen against the film's running total and the frame's exact time (t·fps, not
+ * rounded first), so the frames stay on their times within half a frame step (Wan 2.2: ±2 frames
+ * at 16 fps) however many clips there are. The film starts on the first frame, so its time is 0.
  */
 export function planKeyframeClips(times: number[], duration: number, t: ChainTiming & { fps: number; step: number; maxFrames?: number }): KeyframeClip[] {
   if (times.length < 2) throw new Error("A keyframe film needs at least two frames");
+  if (Math.abs(times[0]) > EPS) throw new Error(FIRST_AT_ZERO);
   const problem = chainGapProblem(times, duration, t);
   if (problem) throw new Error(problem);
   const min = t.minSeconds ?? OPEN_MIN_GAP;
@@ -245,7 +277,7 @@ export function planKeyframeClips(times: number[], duration: number, t: ChainTim
   let total = 0;
   for (let i = 1; i < stops.length; i++) {
     // The film's frame count once this clip is in: its last frame (the next frame) sits at stops[i].
-    const target = Math.round(stops[i] * t.fps) + 1;
+    const target = stops[i] * t.fps + 1;
     const frames = fit(target - total);
     total += frames;
     clips.push({ from: i - 1, to: i < times.length ? i : null, frames, seconds: Math.round(((frames - 1) / t.fps) * 1e4) / 1e4 });

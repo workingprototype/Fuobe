@@ -10,7 +10,7 @@ import type {
   PresetRoute,
   Pricing,
 } from "./types";
-import { chainGapProblem, chainTiming, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
+import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -30,8 +30,9 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (req.inputs?.video && imgs && has("video-swap")) return "video-swap";
     if (req.inputs?.video && has("remove-object")) return "remove-object";
     if (imgs && req.inputs?.endImage && has("flf2v")) return "flf2v";
-    // Several stills are keyframes when they have times, or when the model takes no references.
-    if (imgs > 1 && has("keyframes") && (req.params?.keyframeTimes?.length || !has("ref2v"))) return "keyframes";
+    // Several stills are keyframes when they have times, or when the model takes no references. The open
+    // chain (a film of several clips) only with times: stills left over from references stay a start frame.
+    if (imgs > 1 && has("keyframes") && (req.params?.keyframeTimes?.length || (!has("ref2v") && !keyframeChain(model)))) return "keyframes";
     if ((imgs > 1 || clipRefs > 0) && has("ref2v")) return "ref2v";
     if (imgs && has("i2v")) return "i2v";
     if (has("t2v")) return "t2v";
@@ -300,6 +301,8 @@ function checkKeyframes(model: ModelDef, n: number, params: GenParams) {
   if (times?.length) {
     if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
     if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
+    // The open chain's film starts on the first frame (FLUX 3 Max can start it later).
+    if (chain && times[0] !== 0) throw new Error(FIRST_AT_ZERO);
     const last = times[times.length - 1];
     if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
   }

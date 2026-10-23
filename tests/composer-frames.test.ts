@@ -17,7 +17,7 @@ describe("Frames mode in the Video studio composer", () => {
   it("is offered in the Video studio, whose list has the models that take every frame", () => {
     expect(VIDEO_STUDIO.frames).toBe(true);
     const ids = studioCatalog(VIDEO_STUDIO).models.map((m) => m.id);
-    expect(ids).toEqual(expect.arrayContaining(["flux-3-max", "oss-wan22-14b-fast", "kling-o3"]));
+    expect(ids).toEqual(expect.arrayContaining(["flux-3-max", "oss-wan22-14b-fast", "oss-wan22-14b", "kling-o3"]));
     // The client copy keeps the chained route's marker (the field maps stay on the server).
     const wan = studioCatalog(VIDEO_STUDIO).models.find((m) => m.id === "oss-wan22-14b-fast")!;
     expect(wan.routes.find((r) => r.op === "keyframes")).toMatchObject({ chained: true });
@@ -81,7 +81,7 @@ describe("Frames mode in the Video studio composer", () => {
   it("asks for the start frame first and says which models can't follow frames", () => {
     const base = { model: true, uploading: false, promptMissing: true };
     expect(blockerFor({ ...base, frames: framesBlocker(getModel("flux-3-max")!, 0) })).toEqual({ message: "Add the start frame", slot: "frames" });
-    expect(blockerFor({ ...base, frames: framesBlocker(getModel("oss-ltx25")!, 2) })?.message).toBe("LTX-2.5 takes a start frame only — pick Wan 2.2 14B Lightning to follow your frames, or turn Frames off");
+    expect(blockerFor({ ...base, frames: framesBlocker(getModel("oss-ltx25")!, 2) })?.message).toBe("LTX-2.5 takes a start frame only — pick Wan 2.2 14B to follow your frames, or turn Frames off");
     // A model that takes every frame (or the ends) falls through to the usual checks.
     expect(blockerFor({ ...base, frames: framesBlocker(getModel("kling-o3")!, 3) })?.message).toBe("Write a prompt first");
     expect(blockerFor({ ...base, loading: "Loading models…", frames: framesBlocker(getModel("flux-3-max")!, 0) })?.message).toBe("Loading models…");

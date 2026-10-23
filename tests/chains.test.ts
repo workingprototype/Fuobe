@@ -198,9 +198,19 @@ describe("keyframe film (Frames mode on the open engine)", () => {
     expect(gens.listGenerations({ limit: 500 }).length).toBe(before);
   });
 
-  it("refuses to wait for another step's images", () => {
-    expect(() =>
-      gens.createGenerations({ feature: "canvas", modelId: "oss-wan22-14b-fast", op: "keyframes", prompt: "x", chain: [{ slot: "images" }, { slot: "images" }] }, { dependsOn: ["a", "b"] }),
-    ).toThrow(/uploaded images, not another step's output/);
+  it("refuses to wait for another step's images, in the preview as when it's created", () => {
+    const req = { feature: "canvas", modelId: "oss-wan22-14b-fast", op: "keyframes" as const, prompt: "x", chain: [{ slot: "images" as const }, { slot: "images" as const }] };
+    expect(() => gens.createGenerations(req, { dependsOn: ["a", "b"] })).toThrow(/give it uploaded images and a typed prompt, not another step's output/);
+    expect(() => gens.previewChained(req, 2)).toThrow(/give it uploaded images and a typed prompt, not another step's output/);
+    // Another model's image-to-video waits as before.
+    expect(gens.previewChained({ feature: "canvas", modelId: "oss-wan22-14b-fast", prompt: "x", chainFrom: "first" }, 1).op).toBe("i2v");
+  });
+
+  it("keeps a start frame and a leftover reference an image-to-video clip, not a film", async () => {
+    // A Seedance reference tile carried over to Wan when the engine switches: no times, no film.
+    const images = await frames(2);
+    const items = gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "a fox in snow", inputs: { images }, params: { duration: 5 } });
+    expect(items).toHaveLength(1);
+    expect(items[0].op).toBe("i2v");
   });
 });

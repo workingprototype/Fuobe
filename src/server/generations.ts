@@ -8,7 +8,7 @@ import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
-import { keyframeChain } from "@/lib/catalog/keyframes";
+import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
 import {
@@ -441,6 +441,8 @@ export function previewChained(req: GenerationRequest, deps: number) {
   if (!deps) return previewGeneration(req);
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
+  // Refused before anything starts, as createGenerations refuses it.
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -475,7 +477,7 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
-  if (waits && route.chained) throw new Error(`${plan.model.name} builds this from several clips of the images you add — give it uploaded images, not another step's output`);
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();

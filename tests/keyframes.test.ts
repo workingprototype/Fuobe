@@ -100,7 +100,7 @@ describe("what each model does with frames", () => {
   });
 
   it("blocks models that can't follow frames, and asks for the start frame", () => {
-    expect(framesBlocker(m("oss-wan22-5b"), 3)?.message).toBe("Wan 2.2 5B takes a start frame only — pick Wan 2.2 14B Lightning to follow your frames, or turn Frames off");
+    expect(framesBlocker(m("oss-wan22-5b"), 3)?.message).toBe("Wan 2.2 5B takes a start frame only — pick Wan 2.2 14B to follow your frames, or turn Frames off");
     const t2vOnly = { name: "Text Only", engine: "cloud" as const, routes: [{ op: "t2v" as const, provider: "fal" as const, endpoint: "x" }], options: {} };
     expect(framesBlocker(t2vOnly, 2)?.message).toBe("Text Only can't start from frames — pick FLUX 3 Max, or turn Frames off");
     expect(framesBlocker(m("flux-3-max"), 0)).toEqual({ message: "Add the start frame", slot: "frames" });
@@ -115,6 +115,22 @@ describe("what each model does with frames", () => {
     expect(framesNote(m("kling-o3"), 2, 1)).toBeNull();
     expect(framesNote(m("flux-3-max"), 6)).toBeNull();
     expect(framesNote(m("oss-wan22-14b-fast"), 6)).toBeNull();
+  });
+
+  it("suggests Wan 2.2 14B for Frames on the open engine, and says Lightning gains nothing there", () => {
+    // Lightning's pairs run the same full-quality start/end-frame workflow as Wan 2.2 14B (it has no 4-step one).
+    expect(keyframeChain(m("oss-wan22-14b-fast"))?.endpoint).toBe(keyframeChain(m("oss-wan22-14b"))?.endpoint);
+    expect(m("oss-wan22-14b-fast").routes.find((r) => r.op === "flf2v")?.endpoint).toBe("wan22-flf2v-14b");
+    const suggested = m("oss-wan22-14b");
+    expect(framesNote(m("oss-wan22-14b-fast"), 3, 1, { suggested })).toBe(
+      "Wan 2.2 14B Lightning has no fast start/end-frame clips: the clips between frames render at Wan 2.2 14B's full quality — Wan 2.2 14B takes as long and allows up to 7 s between frames.",
+    );
+    expect(framesNote(m("oss-wan22-14b-fast"), 3, 0.8, { suggested, tail: true })).toMatch(/full quality \(only the stretch after the last frame is a fast clip\) — /);
+    // Nothing to say with one frame, or on Wan 2.2 14B itself.
+    expect(framesNote(m("oss-wan22-14b-fast"), 1, 0, { suggested })).toBeNull();
+    expect(framesNote(suggested, 4, 1, { suggested })).toBeNull();
+    // A start + end frame model on the open engine points at it.
+    expect(framesNote(m("oss-wan22-14b-fast"), 3, 1, { suggested: m("flux-3-max") })).toBeNull();
   });
 
   it("sends every frame with its time, or the first and last as start and end", () => {
@@ -174,6 +190,27 @@ describe("keyframes through the planner", () => {
     expect(fails({ modelId: "oss-wan22-14b-fast", op: "keyframes", inputs: { images: imgs(3) }, params: { duration: 8 } })).toBeNull();
     expect(fails({ modelId: "oss-wan22-14b-fast", op: "keyframes", inputs: { images: imgs(3) }, params: { duration: 30 } })).toMatch(/15 s apart/);
   });
+
+  it("never turns leftover images into a keyframe film on the open chain unless they have times", () => {
+    // A start frame plus a reference carried over from a cloud model: still image-to-video from the start frame.
+    for (const id of ["oss-wan22-14b-fast", "oss-wan22-14b"]) {
+      expect(inferOperation(m(id), { inputs: { images: imgs(2) } })).toBe("i2v");
+      expect(inferOperation(m(id), { inputs: { images: imgs(4) }, params: { duration: 5 } })).toBe("i2v");
+      expect(plan({ modelId: id, inputs: { images: imgs(2) } }).op).toBe("i2v");
+      // Times, or the operation asked for, make it a film.
+      expect(inferOperation(m(id), { inputs: { images: imgs(2) }, params: { keyframeTimes: [0, 5] } })).toBe("keyframes");
+      expect(inferOperation(m(id), { op: "keyframes", inputs: { images: imgs(2) } })).toBe("keyframes");
+    }
+    // FLUX 3 Max isn't a chain: its keyframes still read several stills without times.
+    expect(inferOperation(m("flux-3-max"), { inputs: { images: imgs(3) } })).toBe("keyframes");
+  });
+
+  it("starts the open chain's film on the first frame", () => {
+    expect(fails({ modelId: "oss-wan22-14b-fast", inputs: { images: imgs(2) }, params: { duration: 5, keyframeTimes: [1, 3] } })).toBe("The first frame is the start frame — give it the time 0");
+    expect(fails({ modelId: "oss-wan22-14b", inputs: { images: imgs(2) }, params: { duration: 7, keyframeTimes: [2, 6.9] } })).toBe("The first frame is the start frame — give it the time 0");
+    // FLUX 3 Max places its first keyframe where it's asked.
+    expect(fails({ modelId: "flux-3-max", inputs: { images: imgs(2) }, params: { duration: 5, keyframeTimes: [1, 3] } })).toBeNull();
+  });
 });
 
 describe("the open per-pair plan", () => {
@@ -204,6 +241,34 @@ describe("the open per-pair plan", () => {
     });
   });
 
+  it("holds the half-step bound (±2 frames at 16 fps) on any film the planner accepts", () => {
+    // A seeded walk over many films: 2–10 frames anywhere on the 0.1 s grid, with and without a tail.
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+    const full = { ...wan, name: "Wan 2.2 14B", maxSeconds: 7 };
+    let checked = 0;
+    let worst = 0;
+    for (let k = 0; k < 4000; k++) {
+      const t = k % 2 ? wan : full;
+      const duration = [3, 5, 8, 10, 15, 20, 30][k % 7];
+      const n = 2 + Math.floor(rand() * 9);
+      const ats = [0, ...Array.from({ length: n - 1 }, () => rand())].sort((a, b) => a - b);
+      if (rand() < 0.5) ats[n - 1] = 1;
+      const times = frameTimes(ats, duration);
+      if (chainGapProblem(times, duration, t)) continue;
+      const clips = planKeyframeClips(times, duration, t);
+      let total = 0;
+      for (const c of clips) {
+        total += c.frames;
+        const at = c.to === null ? duration : times[c.to];
+        worst = Math.max(worst, Math.abs(total - 1 - at * 16));
+      }
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(500);
+    expect(worst).toBeLessThanOrEqual(2 + 1e-9);
+  });
+
   it("adds the stretch after the last frame from that frame alone, unless it's too short", () => {
     const clips = planKeyframeClips([0, 2, 4], 6, wan);
     expect(clips.map((c) => [c.from, c.to])).toEqual([
@@ -218,6 +283,14 @@ describe("the open per-pair plan", () => {
   it("refuses gaps the model can't make", () => {
     expect(() => planKeyframeClips([0, 5.5], 6, wan)).toThrow(/5.5 s apart/);
     expect(() => planKeyframeClips([0], 5, wan)).toThrow(/at least two frames/);
+    expect(() => planKeyframeClips([1, 3], 5, wan)).toThrow("The first frame is the start frame — give it the time 0");
     expect(chainGapProblem([0, 2, 5], 5, wan)).toBeNull();
+  });
+
+  it("holds one frame to one clip the model makes", () => {
+    // One frame is a plain image-to-video: no longer than the model's own clip.
+    expect(chainGapProblem([0], 30, wan)).toBe("One frame makes a clip of up to 5 s on Wan 2.2 14B Lightning — add more frames or make the clip shorter");
+    expect(chainGapProblem([0], 5, wan)).toBeNull();
+    expect(chainGapProblem([], 30, wan)).toBeNull();
   });
 });
