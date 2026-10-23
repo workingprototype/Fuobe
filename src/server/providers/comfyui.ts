@@ -821,6 +821,38 @@ async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | unde
   return null;
 }
 
+type QueueEntry = unknown[];
+const postJson = (p: string, body: unknown) =>
+  comfyFetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
+
+/**
+ * Take a job off ComfyUI: delete its pending prompts and interrupt the one running. A meta-batch job is
+ * every prompt carrying its filename prefix (VHS re-queues each pass under a new id with a negative queue
+ * number, so the pending pass would run first). Returns whether any prompt of the job was still there.
+ */
+async function stopPrompts(externalId: string | undefined, prefix: string | undefined): Promise<boolean> {
+  const ours = (q: QueueEntry) => (!!externalId && q[1] === externalId) || (!!prefix && promptHasPrefix(q[2], prefix));
+  // Always delete the job's own id, even when the queue can't be read.
+  if (externalId) await postJson("/queue", { delete: [externalId] });
+  const queue = await comfyJson<{ queue_running?: QueueEntry[]; queue_pending?: QueueEntry[] }>("/queue").catch(() => undefined);
+  if (!queue) return false;
+  const pending = (queue.queue_pending ?? []).filter(ours).map((q) => String(q[1]));
+  if (pending.length) await postJson("/queue", { delete: pending });
+  const running = (queue.queue_running ?? []).filter(ours);
+  for (const q of running) await postJson("/interrupt", { prompt_id: String(q[1]) });
+  return pending.length + running.length > 0;
+}
+
+/** Cancel tries for a meta-batch job after the first: a pass that was already saving when interrupted can still queue the next one. */
+export const CANCEL_SWEEPS = { tries: 5, everyMs: 1000 };
+
+async function sweepPasses(prefix: string): Promise<void> {
+  for (let i = 0; i < CANCEL_SWEEPS.tries; i++) {
+    await new Promise((r) => setTimeout(r, CANCEL_SWEEPS.everyMs));
+    if (!(await stopPrompts(undefined, prefix).catch(() => false))) return;
+  }
+}
+
 export const comfyProvider: ProviderAdapter = {
   id: "comfyui",
   label: "ComfyUI",
@@ -939,21 +971,12 @@ export const comfyProvider: ProviderAdapter = {
     };
   },
 
-  async cancel({ externalId }) {
+  async cancel({ externalId, meta }) {
     forget(externalId);
-    await comfyFetch("/queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ delete: [externalId] }),
-    }).catch(() => {});
-    const q = (await (await comfyFetch("/queue")).json().catch(() => ({}))) as { queue_running?: unknown[][] };
-    if (q.queue_running?.some((r) => r[1] === externalId)) {
-      await comfyFetch("/interrupt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt_id: externalId }),
-      }).catch(() => {});
-    }
+    // A meta-batch job's later passes have prompt ids of their own (and jump the queue): find them by prefix.
+    const prefix = meta?.metaBatch && typeof meta.prefix === "string" ? meta.prefix : undefined;
+    const found = await stopPrompts(externalId, prefix);
+    if (prefix && found) void sweepPasses(prefix);
   },
 
   async test() {
