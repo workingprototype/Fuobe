@@ -181,9 +181,9 @@ describe("Episodes", () => {
     } finally {
       setSetting("engineMode", "both");
     }
-    // What the render will do differently: two of three style references on the open engine, a short music bed.
+    // What the render will do differently: two of three style references on the open engine, a bed looped past 4 minutes.
     const notes = (await est({ ...open, length: 300, styleRefs: ["/api/files/a.png", "/api/files/b.png", "/api/files/c.png"] })).notes;
-    expect(notes).toEqual(expect.arrayContaining([expect.stringMatching(/first 2 style references/), expect.stringMatching(/at most 4 min/)]));
+    expect(notes).toEqual(expect.arrayContaining([expect.stringMatching(/first 2 style references/), expect.stringMatching(/made 4 min long, then looped with a 3-second crossfade/)]));
   });
 
   it(
@@ -220,13 +220,17 @@ describe("Episodes", () => {
       const ids = timed.episode.plan!.ids;
       expect(timed.timing).toBe("planned");
       expect(timed.episode.plan!.untimed).toBe(true);
-      // Open, frame by frame: 5-second Wan shots, folded joins, music, timed captions.
+      // Open, frame by frame: one Ken Burns move per scene (no video model), one packet-copy join, music, timed captions.
       const clips = Object.keys(ids).filter((k) => k.startsWith("clip-"));
-      expect(clips.length).toBeGreaterThan(6);
+      expect(clips).toHaveLength(6);
       expect(clips).toHaveLength(timed.steps.filter((s) => s.part === "clip").length);
-      expect(Object.keys(ids)).toEqual(expect.arrayContaining(["join", "join-1-1", "narration", "music", "mix", "words", "captions"]));
-      expect(gens.getGeneration(ids[`clip-${blocks[0].id}-1`])!.request.prompt).toMatch(/still illustration/);
-      // The timeline shows the film as the clips make it (Wan's 3- and 5-second shots).
+      expect(Object.keys(ids)).toEqual(expect.arrayContaining(["join", "narration", "music", "mix", "words", "captions"]));
+      const move = gens.getGeneration(ids[`clip-${blocks[0].id}-1`])!;
+      expect(move).toMatchObject({ modelId: "oss-ken-burns", op: "still-motion" });
+      expect(move.request.params).toMatchObject({ zoomFrom: 1, fps: 24, easing: "ease-in-out", resolution: "720p" });
+      expect(move.request.prompt).toMatch(/^Slow push-in toward/);
+      expect(gens.getGeneration(ids.join)!.modelId).toBe("oss-join-encoded");
+      // The timeline shows the film as the clips make it.
       expect(timed.scenes.reduce((n, s) => n + s.seconds, 0)).toBe(clips.reduce((n, k) => n + Number(gens.getGeneration(ids[k])!.request.params?.duration), 0));
 
       const [doneCloud, doneOpen] = await Promise.all([settled(cloudId), settled(openId)]);

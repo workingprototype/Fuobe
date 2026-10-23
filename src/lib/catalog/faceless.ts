@@ -1,3 +1,4 @@
+import { describeMove, KEN_BURNS_FPS, sceneMoves } from "@/lib/av/ken-burns";
 import { estimateCost } from "./plan";
 import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from "./types";
 
@@ -17,7 +18,10 @@ import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from 
  * - still: a picture per block in the episode's style (Nano Banana Pro / Z-Image Turbo; with style
  *   references Nano Banana Pro edit / Qwen-Image-Edit Style Reference).
  * - clip: the still animated (Gemini Omni Flash, Higgsfield's engine, or Seedance 2.5 / Wan 2.2 Lightning).
- *   Frame by frame keeps the still and moves the camera slowly over it (a Ken Burns prompt, cheaper settings).
+ *   Frame by frame keeps the still and moves the camera slowly over it with no video model: a real Ken Burns
+ *   (src/lib/av/ken-burns.ts) — fal's image-to-video zooms in and out by turns on the cloud; ComfyUI's
+ *   kenburns-still zooms and pans on the open engine, at most 10 s a job, so longer scenes are split into
+ *   pieces of one move, joined packet by packet with the others (video-concat-encoded).
  * - narration: the whole reviewed script read in one take (one natural voice-over; ElevenLabs v4, or
  *   Chatterbox cloning a voice sample), then timed word by word (ElevenLabs forced alignment on the cloud,
  *   Qwen3-ASR on the open engine).
@@ -25,7 +29,9 @@ import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef } from 
  *   cut to where its lines really fall (retimeBlocks) and the clips, joins, music, mix and subtitles follow,
  *   so picture and voice stay together over the whole film, whatever pace the narrator reads at.
  * - music: an instrumental bed (Sonilo / ACE-Step) as long as the film, mixed under the voice: fal's compose
- *   with the bed levelled to -28 LUFS on the cloud, oss-mux at -14 dB on the open engine.
+ *   with the bed levelled to -28 LUFS on the cloud, oss-mux at -14 dB on the open engine. A film longer than
+ *   the music model makes (ACE-Step: 240 s; Sonilo: 600 s) loops the bed: crossfaded seams on the open engine
+ *   (audio-loop-crossfade, up to 600 s), whole plays on the cloud (merge-audios; the mix cuts it to the film).
  * - captions: Auto Subtitle on the cloud; Qwen3-ASR timings + the open burn-in on the open engine.
  */
 
@@ -344,8 +350,8 @@ export const ANIMATION_MODES: { id: AnimationMode; label: string; tagline: strin
     id: "frames",
     label: "Frame by frame",
     tagline: "Scene by scene video",
-    copy: "Paced stills with a slow camera move, rendered at a lower quality — lighter on credits",
-    openCopy: "Paced stills with a slow camera move — on your GPU it takes about as long as Fully animated",
+    copy: "Each picture with a slow Ken Burns zoom, in and out by turns — no video model, a fraction of the price",
+    openCopy: "Each picture with a slow pan and zoom (Ken Burns) — no video model, so no GPU needed for the motion",
   },
 ];
 
@@ -547,9 +553,16 @@ export interface EngineModels {
   longNarration: string;
   narrationMaxChars: number;
   music: string;
+  /** Extends a bed the music model can't make long enough (crossfaded on the open engine, whole plays on the cloud). */
+  loop: string;
+  /** Frame by frame: the camera move over each still (Ken Burns). */
+  kenBurns: string;
   join: string;
   /** Joins at most this many clips at once (longer films are folded). */
   joinMax: number;
+  /** Frame by frame's join (open: packet copy of the Ken Burns clips, flat memory) and its fold size. */
+  framesJoin: string;
+  framesJoinMax: number;
   /** Puts the voice on the film (no music). */
   mux: string;
   /** Lays the voice over a music bed on the film. */
@@ -580,8 +593,12 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     longNarration: "elevenlabs-multilingual-v2",
     narrationMaxChars: 5000,
     music: "sonilo-music",
+    loop: "join-audio",
+    kenBurns: "ken-burns",
     join: "join-clips",
     joinMax: 24,
+    framesJoin: "join-clips",
+    framesJoinMax: 24,
     mux: "merge-audio-video",
     mixMusic: "ffmpeg-compose",
     levelMusic: "ffmpeg-loudnorm",
@@ -602,8 +619,12 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
     longNarration: "oss-chatterbox",
     narrationMaxChars: Infinity,
     music: "oss-ace-step",
+    loop: "oss-audio-loop",
+    kenBurns: "oss-ken-burns",
     join: "oss-join-clips",
     joinMax: 4,
+    framesJoin: "oss-join-encoded",
+    framesJoinMax: 24,
     mux: "oss-mux",
     mixMusic: "oss-mux",
     captions: "oss-captions-burnin",
@@ -616,15 +637,18 @@ export const ENGINE_MODELS: Record<Engine, EngineModels> = {
 
 /**
  * Clip lengths each block video model can make. Gemini Omni Flash takes any whole number of seconds
- * from 3 to 10 (research: duration 3–10); the others list their durations in the catalog.
+ * from 3 to 10 (research: duration 3–10); the Ken Burns moves 1–30 s (fal) and 1–10 s per job (ComfyUI,
+ * longer scenes split); the others list their durations in the catalog.
  */
-export const DURATION_RANGES: Record<string, [number, number]> = { "gemini-omni-flash": [3, 10] };
+export const DURATION_RANGES: Record<string, [number, number]> = { "gemini-omni-flash": [3, 10], "ken-burns": [1, 30], "oss-ken-burns": [1, 10] };
 
 /** Default quality per mode. Frame by frame trades resolution for price on the cloud. */
 export const DEFAULT_RESOLUTION: Record<string, Record<AnimationMode, string>> = {
   "gemini-omni-flash": { animated: "720p", frames: "360p" },
   "seedance-2-5": { animated: "720p", frames: "480p" },
   "oss-wan22-14b-fast": { animated: "480p", frames: "480p" },
+  // No model in the loop: 720p costs CPU time and memory (~11 MB a frame), not a GPU.
+  "oss-ken-burns": { animated: "720p", frames: "720p" },
 };
 
 /**
@@ -639,6 +663,12 @@ export const PRICE_PER_SECOND: Record<string, Record<string, number>> = {
 
 /** Music models that make any whole length up to this (Sonilo: up to 600 s; ACE-Step's workflow: up to 240 s). */
 export const MUSIC_MAX: Record<string, number> = { "sonilo-music": 600, "oss-ace-step": 240 };
+
+/** Longest bed a loop model makes (the open loop graph's limit; the cloud's whole plays go past any film). */
+export const LOOP_MAX: Record<string, number> = { "oss-audio-loop": 600 };
+
+/** Seconds of crossfade at each seam of a looped bed (open engine): long enough to hide the restart. */
+export const BED_CROSSFADE = 3;
 
 /** How far the bed sits under the voice: levelled to -28 LUFS on the cloud, lowered by 14 dB by the open mixer. */
 export const BED_LUFS = -28;
@@ -683,16 +713,6 @@ export function blockShots(seconds: number, model: ModelDef | undefined): number
 // ---------------------------------------------------------------------------
 // Prompts
 
-/** Slow camera moves for Frame by frame, one per block in turn. */
-export const KEN_BURNS = [
-  "slow push-in towards the centre of the picture",
-  "slow pull-out revealing the whole picture",
-  "slow pan from left to right across the picture",
-  "slow pan from right to left across the picture",
-  "slow tilt upward across the picture",
-  "slow diagonal drift with a gentle zoom",
-];
-
 const clean = (s: string) => s.replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
 
 /** The picture for a block, in the episode's style (or its style references). */
@@ -705,12 +725,8 @@ export function stillPrompt(style: VisualStyle, block: Pick<ScriptBlock, "visual
   return [clean(block.visual), look, sources, frame, "No text, letters, captions or watermarks in the image"].filter(Boolean).join(". ") + ".";
 }
 
-/** What moves when a block's still is animated (Frame by frame: a slow camera over a still picture). */
-export function motionPrompt(style: VisualStyle, block: Pick<ScriptBlock, "motion">, mode: AnimationMode, blockIndex: number, shot = 0): string {
-  if (mode === "frames") {
-    const move = KEN_BURNS[(blockIndex + shot) % KEN_BURNS.length];
-    return `A still illustration with a ${move}. The picture itself doesn't change: nothing moves, nothing new appears, no morphing. Smooth and steady, like a documentary.`;
-  }
+/** What moves when a block's still is animated (Fully animated; Frame by frame moves the camera with no model, see sceneMoves). */
+export function motionPrompt(style: VisualStyle, block: Pick<ScriptBlock, "motion">, shot = 0): string {
   const then = shot ? "The camera keeps moving from where the last shot ended. " : "";
   return `${then}${clean(block.motion) || DEFAULT_MOTION}. ${style.motion.charAt(0).toUpperCase()}${style.motion.slice(1)}. Keep the art style, characters and colours exactly as in the first frame. No text.`;
 }
@@ -757,6 +773,8 @@ export interface ResolvedModels {
   resolution: string;
   narration: string;
   music: string | null;
+  /** Extends the bed past what the music model makes. */
+  loop: string | null;
   /** Brings the bed down under the voice before the mix (cloud). */
   level: string | null;
   mux: string;
@@ -772,7 +790,9 @@ export interface ResolvedModels {
 /** Which models an episode runs on, from its engine and settings. */
 export function resolveModels(settings: EpisodeSettings, narrationChars: number, lookup: ModelLookup): ResolvedModels {
   const m = ENGINE_MODELS[settings.engine];
-  const video = settings.videoModel && m.videoChoices.includes(settings.videoModel) ? settings.videoModel : m.video;
+  // Frame by frame moves a camera over each still (Ken Burns); the video model choice is for Fully animated.
+  const frames = settings.animation === "frames";
+  const video = frames ? m.kenBurns : settings.videoModel && m.videoChoices.includes(settings.videoModel) ? settings.videoModel : m.video;
   const videoDef = lookup(video);
   const offered = videoDef?.options.resolutions ?? [];
   const wanted = settings.resolution && offered.includes(settings.resolution) ? settings.resolution : (DEFAULT_RESOLUTION[video]?.[settings.animation] ?? videoDef?.defaults?.resolution ?? offered[0] ?? "720p");
@@ -787,10 +807,11 @@ export function resolveModels(settings: EpisodeSettings, narrationChars: number,
     resolution: wanted,
     narration,
     music: settings.music ? m.music : null,
+    loop: settings.music ? m.loop : null,
     level: settings.music ? (m.levelMusic ?? null) : null,
     mux: settings.music ? m.mixMusic : m.mux,
-    join: m.join,
-    joinMax: m.joinMax,
+    join: frames ? m.framesJoin : m.join,
+    joinMax: frames ? m.framesJoinMax : m.joinMax,
     captions: settings.subtitles ? m.captions : null,
     align: m.align,
     captionsUseWords: m.captionsUseWords,
@@ -844,6 +865,36 @@ export function musicLength(model: ModelDef | undefined, seconds: number): numbe
   return ds.find((d) => d >= seconds) ?? ds[ds.length - 1];
 }
 
+export interface MusicPlan {
+  /** Seconds the music model makes. */
+  bed: number;
+  /**
+   * The bed extended to cover the film: crossfaded seams (open), or whole plays the mix cuts to the film
+   * (cloud). Null when the bed already covers it.
+   */
+  loop: { duration: number; crossfade?: number; plays?: number } | null;
+  /** Seconds at the end of the film with no music (past what the loop makes, 600 s on the open engine). */
+  short: number;
+}
+
+/**
+ * The music for a film of `seconds`: the bed the music model makes (musicLength) and, when that is shorter
+ * than the film, the loop that extends it. 0 seconds of music short means the whole film has music.
+ */
+export function musicPlan(music: ModelDef | undefined, loop: ModelDef | undefined, seconds: number): MusicPlan {
+  const bed = musicLength(music, seconds);
+  const need = Math.ceil(seconds) + 1;
+  if (bed >= need || !loop) return { bed, loop: null, short: Math.max(0, Math.ceil(seconds - bed)) };
+  const duration = Math.min(LOOP_MAX[loop.id] ?? Infinity, need);
+  // A route that only repeats the clip (fal merge-audios) plays it whole; ComfyUI crossfades each seam.
+  const repeats = loop.routes.some((r) => r.op === "audio-loop" && !!r.map?.loop);
+  return {
+    bed,
+    loop: { duration, ...(repeats ? { plays: Math.ceil(duration / bed) } : { crossfade: BED_CROSSFADE }) },
+    short: Math.max(0, Math.ceil(seconds - duration)),
+  };
+}
+
 /** Seconds of film a block's shots make (its planned or timed length, rounded up to what the model makes). */
 export const filmSeconds = (seconds: number, video: ModelDef | undefined) => blockShots(seconds, video).reduce((a, c) => a + c, 0);
 
@@ -877,6 +928,10 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
   const stillImages =
     models.stillOp === "edit" ? sources.slice(0, maxImages) : !takesRefs ? [] : stillDef.engine === "open" && refs.length ? refs.slice(0, maxImages) : [...refs, ...sources].slice(0, maxImages);
   const refCount = models.stillOp === "edit" ? 0 : Math.min(refs.length, stillImages.length);
+  // Frame by frame: a camera move over the still, no video model. A route that sends the move as one zoom
+  // (fal's zoompan) can't pan: those scenes zoom in and out by turns.
+  const kenBurns = videoDef.routes.some((r) => r.op === "still-motion");
+  const zoomOnly = videoDef.routes.some((r) => r.op === "still-motion" && !!r.map?.zoom);
 
   blocks.forEach((b, i) => {
     const edit = input.stillEdits?.[b.id];
@@ -908,10 +963,14 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
           },
     });
     const shots = blockShots(b.seconds, videoDef);
+    // A scene longer than one Ken Burns job is one move cut into pieces (each starts where the last ended).
+    const moves = kenBurns ? sceneMoves({ motion: b.motion, visual: b.visual, index: i, pieces: shots, zoomOnly, ignore: DEFAULT_MOTION, fps: KEN_BURNS_FPS }) : null;
     shots.forEach((secs, s) => {
       const key = `clip-${b.id}-${s + 1}`;
       clipKeys.push(key);
-      const clipLabel = shots.length > 1 ? `Scene ${i + 1} · clip ${s + 1} of ${shots.length}` : `Scene ${i + 1} · clip`;
+      const noun = moves ? "camera move" : "clip";
+      const clipLabel = shots.length > 1 ? `Scene ${i + 1} · ${noun} ${s + 1} of ${shots.length}` : `Scene ${i + 1} · ${noun}`;
+      const move = moves?.[s];
       steps.push({
         key,
         part: "clip",
@@ -921,21 +980,41 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
         seconds: secs,
         after: [stillKey],
         chain: [{ slot: "images", position: "first" }],
-        request: {
-          ...base,
-          modelId: models.video,
-          op: "i2v",
-          prompt: motionPrompt(style, b, settings.animation, i, s),
-          params: {
-            aspectRatio: ar,
-            duration: secs,
-            resolution: models.resolution,
-            numOutputs: 1,
-            // The narration replaces the clip's own sound.
-            ...(videoDef.options.audio === true && { generateAudio: false }),
-          },
-          step: { label: clipLabel, index: i, of: n },
-        },
+        request: move
+          ? {
+              ...base,
+              modelId: models.video,
+              op: "still-motion",
+              prompt: describeMove(move),
+              params: {
+                aspectRatio: ar,
+                duration: secs,
+                resolution: models.resolution,
+                fps: KEN_BURNS_FPS,
+                zoomFrom: move.zoomFrom,
+                zoomTo: move.zoomTo,
+                panFrom: move.panFrom,
+                panTo: move.panTo,
+                easing: move.easing,
+                numOutputs: 1,
+              },
+              step: { label: clipLabel, index: i, of: n },
+            }
+          : {
+              ...base,
+              modelId: models.video,
+              op: "i2v",
+              prompt: motionPrompt(style, b, s),
+              params: {
+                aspectRatio: ar,
+                duration: secs,
+                resolution: models.resolution,
+                numOutputs: 1,
+                // The narration replaces the clip's own sound.
+                ...(videoDef.options.audio === true && { generateAudio: false }),
+              },
+              step: { label: clipLabel, index: i, of: n },
+            },
       });
     });
   });
@@ -997,9 +1076,11 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
     request: { ...base, modelId: models.align, op: "transcribe", ...(alignReadsText && { prompt: voiceText }), step: { label: "Narration timing", index: n, of: n } },
   });
 
+  let bedKey = "music";
   if (models.music) {
     const musicDef = pick(lookup, models.music);
-    const bed = musicLength(musicDef, length);
+    const plan = musicPlan(musicDef, models.loop ? lookup(models.loop) : undefined, length);
+    const bed = plan.bed;
     steps.push({
       key: "music",
       part: "music",
@@ -1014,29 +1095,49 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
         step: { label: "Music", index: n, of: n },
       },
     });
+    // A film longer than the bed: the bed looped (crossfaded seams, or whole plays the mix cuts to the film).
+    if (plan.loop && models.loop) {
+      const { duration, crossfade } = plan.loop;
+      steps.push({
+        key: "music-loop",
+        part: "music",
+        label: "Music bed · looped",
+        after: ["music"],
+        chain: [{ slot: "audio" }],
+        seconds: duration,
+        request: {
+          ...base,
+          modelId: models.loop,
+          op: "audio-loop",
+          params: { duration, sourceDuration: bed, ...(crossfade && { crossfade }) },
+          step: { label: "Music loop", index: n, of: n },
+        },
+      });
+      bedKey = "music-loop";
+    }
     if (models.level) {
       steps.push({
         key: "level",
         part: "music",
         label: "Music level",
-        after: ["music"],
+        after: [bedKey],
         chain: [{ slot: "audio" }],
         request: { ...base, modelId: models.level, op: "level", params: { extra: { integrated_loudness: BED_LUFS } }, step: { label: "Music level", index: n, of: n } },
       });
+      bedKey = "level";
     }
   }
 
   const muxDef = pick(lookup, models.mux);
   // A timeline mixer (fal compose) places every track for the film's length.
   const timeline = muxDef.routes.some((r) => r.op === "mux" && !!r.map?.tracks);
-  const bed = models.level ? "level" : "music";
   const mixLabel = models.music ? "Mixing voice and music" : "Mixing";
   steps.push({
     key: "mix",
     part: "mix",
     label: mixLabel,
     seconds: length,
-    after: models.music ? [film, "narration", bed] : [film, "narration"],
+    after: models.music ? [film, "narration", bedKey] : [film, "narration"],
     chain: models.music ? [{ slot: "video" }, { slot: "audio" }, { slot: "audio2" }] : [{ slot: "video" }, { slot: "audio" }],
     request: {
       ...base,
@@ -1688,6 +1789,8 @@ export function defaultSettings(engine: Engine, genre: GenreInfo, o: { explainer
 export interface PickerData {
   voices: { id: string; name: string; hint?: string }[];
   videoModels: { id: string; name: string; engine: Engine; resolutions: string[] }[];
+  /** Frame by frame's camera move per engine (Ken Burns) and the qualities it renders at (none: the still's own size). */
+  cameraMoves?: Record<Engine, { id: string; name: string; resolutions: string[] }>;
   /** How many style references each engine's picture model reads (the open one takes 2). */
   maxStyleRefs: Record<Engine, number>;
 }
@@ -1703,12 +1806,23 @@ export function pickerData(lookup: ModelLookup): PickerData {
       return m ? [{ id, name: m.name, engine, resolutions: m.options.resolutions ?? [] }] : [];
     }),
   );
+  const camera = (engine: Engine) => {
+    const id = ENGINE_MODELS[engine].kenBurns;
+    return { id, name: lookup(id)?.name ?? "Ken Burns", resolutions: lookup(id)?.options.resolutions ?? [] };
+  };
   return {
     voices: voices.map((v) => ({ id: v.id, name: v.name, ...(v.hint && { hint: v.hint }) })),
     videoModels,
+    cameraMoves: { cloud: camera("cloud"), open: camera("open") },
     maxStyleRefs: { cloud: styleRefLimit("cloud", lookup), open: styleRefLimit("open", lookup) },
   };
 }
+
+/** What the music switch does on each engine (settings, the Explainer's popover). */
+export const MUSIC_HINT: Record<Engine, string> = {
+  cloud: "An instrumental bed under the voice, as long as the film (Sonilo, up to 10 minutes)",
+  open: "An instrumental bed under the voice (ACE-Step); past 4 minutes it loops with a soft crossfade",
+};
 
 /** A short line the narrator reads for a voice preview. */
 export const previewLine = (name: string) => `Hi, I'm ${name}. I'll be narrating your episode — here's how I sound.`;

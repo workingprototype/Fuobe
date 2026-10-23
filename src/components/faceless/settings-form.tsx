@@ -13,6 +13,7 @@ import {
   ENGINE_MODELS,
   FACELESS_LENGTHS,
   MAX_STYLE_REFS,
+  MUSIC_HINT,
   type EpisodeSettings,
   type PickerData,
 } from "@/lib/catalog/faceless";
@@ -126,8 +127,11 @@ export function EpisodeSettingsForm({
 }) {
   const [own, setOwn] = useState(value.styleRefs.length > 0);
   const maxRefs = picker.maxStyleRefs?.[value.engine] ?? MAX_STYLE_REFS;
-  const videos = picker.videoModels.filter((m) => m.engine === value.engine);
-  const video = videos.find((m) => m.id === value.videoModel) ?? videos.find((m) => m.id === ENGINE_MODELS[value.engine].video) ?? videos[0];
+  // Frame by frame moves a camera over each picture (Ken Burns, no video model); Fully animated picks a video model.
+  const frames = value.animation === "frames";
+  const camera = picker.cameraMoves?.[value.engine];
+  const videos = frames ? [] : picker.videoModels.filter((m) => m.engine === value.engine);
+  const video = frames ? (camera && { ...camera, engine: value.engine }) : (videos.find((m) => m.id === value.videoModel) ?? videos.find((m) => m.id === ENGINE_MODELS[value.engine].video) ?? videos[0]);
   const resolution = value.resolution && video?.resolutions.includes(value.resolution) ? value.resolution : (DEFAULT_RESOLUTION[video?.id ?? ""]?.[value.animation] ?? video?.resolutions[0]);
   return (
     <div className="space-y-7">
@@ -181,12 +185,7 @@ export function EpisodeSettingsForm({
         </div>
         <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
           <ToggleRow label="Subtitles" hint="Burned into the video, timed to the voice" checked={value.subtitles} onChange={(subtitles) => onChange({ subtitles })} />
-          <ToggleRow
-            label="Background music"
-            hint={value.engine === "cloud" ? "An instrumental bed under the voice, as long as the film (Sonilo)" : "An instrumental bed under the voice (ACE-Step, up to 4 minutes)"}
-            checked={value.music}
-            onChange={(music) => onChange({ music })}
-          />
+          <ToggleRow label="Background music" hint={MUSIC_HINT[value.engine]} checked={value.music} onChange={(music) => onChange({ music })} />
         </div>
       </Section>
 
@@ -237,14 +236,14 @@ export function EpisodeSettingsForm({
             </Section>
           )}
           {video && video.resolutions.length > 1 && (
-            <Section title="Quality" hint={value.animation === "frames" ? "Frame by frame renders at a lower quality to keep it light; raise it here." : undefined}>
+            <Section title="Quality" hint={frames ? "The size the camera moves render at: no model runs, larger sizes take longer and more memory." : undefined}>
               <Segmented label="Quality" value={resolution ?? ""} options={video.resolutions.map((r) => ({ value: r, label: r }))} onChange={(r) => onChange({ resolution: r })} />
             </Section>
           )}
           <p className="text-[12px] text-muted-foreground">
             {value.engine === "cloud"
-              ? `Pictures: Nano Banana Pro · Video: ${video?.name ?? "Gemini Omni Flash"} · Voice: ElevenLabs v4 (Chatterbox for your own voice), timed word by word by ElevenLabs forced alignment · Music: Sonilo · Subtitles: Auto Subtitle`
-              : "Pictures: Z-Image Turbo (Qwen-Image-Edit with your images) · Video: Wan 2.2 Lightning · Voice: Chatterbox, timed by Qwen3-ASR · Music: ACE-Step · Subtitles: Qwen3-ASR + burn-in"}
+              ? `Pictures: Nano Banana Pro · ${frames ? "Camera: Ken Burns zoom (fal), no video model" : `Video: ${video?.name ?? "Gemini Omni Flash"}`} · Voice: ElevenLabs v4 (Chatterbox for your own voice), timed word by word by ElevenLabs forced alignment · Music: Sonilo · Subtitles: Auto Subtitle`
+              : `Pictures: Z-Image Turbo (Qwen-Image-Edit with your images) · ${frames ? "Camera: Ken Burns pan and zoom, scenes over 10 s in pieces" : "Video: Wan 2.2 Lightning"} · Voice: Chatterbox, timed by Qwen3-ASR · Music: ACE-Step, looped past 4 minutes · Subtitles: Qwen3-ASR + burn-in`}
             {" "}Each scene is cut to where its lines are spoken.
           </p>
         </CollapsibleContent>

@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getModel } from "@/lib/catalog";
+import { buildPayload } from "@/lib/catalog/payload";
+import type { GenerationRequest } from "@/lib/catalog/types";
 import {
   blockCount,
   blockShots,
@@ -44,7 +46,9 @@ import {
   ANIMATION_MODES,
   filmSeconds,
   musicLength,
+  musicPlan,
   plannedTiming,
+  resolveModels,
   sceneSpans,
   sceneTiming,
   spokenTimes,
@@ -167,15 +171,59 @@ describe("render graph", () => {
     expect(g.every((s) => s.request.feature === "faceless" && s.request.batchTitle === "How tides work")).toBe(true);
   });
 
-  it("cloud, frame by frame: a slow camera over each still at a cheaper quality", () => {
-    const g = graphFor({ engine: "cloud", animation: "frames", music: false }, six);
-    const clip = g.find((s) => s.part === "clip")!;
-    expect(clip.request.params?.resolution).toBe("360p");
-    expect(clip.request.prompt).toMatch(/slow push-in.*doesn't change/i);
+  it("cloud, frame by frame: a Ken Burns zoom over each still (fal image-to-video), in and out by turns, no video model", () => {
+    // Scenes whose motion words name no move take the cycle; one that names it gets it.
+    const still = six.map((b, i) => ({ ...b, motion: i === 4 ? "zoom out to reveal the valley on the left" : "" }));
+    const g = graphFor({ engine: "cloud", animation: "frames", music: false }, still);
+    const clips = g.filter((s) => s.part === "clip");
+    expect(clips).toHaveLength(6);
+    expect(clips[0]).toMatchObject({ label: "Scene 1 · camera move", after: ["still-b0"], chain: [{ slot: "images", position: "first" }] });
+    expect(clips[0].request).toMatchObject({ modelId: "ken-burns", op: "still-motion", params: { duration: 9, fps: 24, zoomFrom: 1, easing: "ease-in-out", aspectRatio: "16:9" } });
+    expect(clips[0].request.prompt).toMatch(/^Slow push-in toward/);
+    const dir = (p: GenerationRequest["params"]) => (p!.zoomTo! > p!.zoomFrom! ? "in" : "out");
+    expect(clips.map((c) => dir(c.request.params))).toEqual(["in", "out", "in", "out", "out", "out"]);
+    // What fal gets: the zoomed-in end and its focal point (in percent), the direction and the easing.
+    const route = getModel("ken-burns")!.routes[0];
+    const payload = buildPayload(route.map!, { ...clips[4].request.params, images: ["/still.png"] });
+    expect(payload).toMatchObject({ image_url: "/still.png", zoom_direction: "out", easing: "ease_in_out", frames_per_second: 24, duration: 9 });
+    expect(payload.zoom_factor).toBeCloseTo(1.225, 3);
+    expect(payload.zoom_x).toBeLessThan(50); // the valley on the left
+    // Joined with the cloud join; priced as Ken Burns, far below animating every scene.
+    expect(g.find((s) => s.key === "join")!.request.modelId).toBe("join-clips");
     const animated = estimateGraph(graphFor({ engine: "cloud", animation: "animated", music: false }, six), getModel);
     const frames = estimateGraph(g, getModel);
-    expect(frames.parts.clip).toBeLessThan(animated.parts.clip!);
-    expect(frames.total).toBeLessThan(animated.total);
+    expect(frames.parts.clip).toBeCloseTo(0.006, 5);
+    expect(frames.total).toBeLessThan(animated.total - 5);
+  });
+
+  it("open, frame by frame: zoom and pan per scene; a scene over 10 s is one move in pieces; one packet-copy join", () => {
+    const blocks = [{ ...block(0, 20, 14), motion: "pan left across the harbour" }, { ...block(1, 20, 6), motion: "" }, { ...block(2, 20, 8), motion: "" }];
+    const g = graphFor({ engine: "open", animation: "frames", music: false, voice: null }, blocks);
+    const clips = g.filter((s) => s.part === "clip");
+    expect(clips.map((c) => [c.key, c.seconds, c.label])).toEqual([
+      ["clip-b0-1", 7, "Scene 1 · camera move 1 of 2"],
+      ["clip-b0-2", 7, "Scene 1 · camera move 2 of 2"],
+      ["clip-b1-1", 6, "Scene 2 · camera move"],
+      ["clip-b2-1", 8, "Scene 3 · camera move"],
+    ]);
+    const [a, b] = clips.map((c) => c.request.params!);
+    expect(clips[0].request).toMatchObject({ modelId: "oss-ken-burns", op: "still-motion", params: { resolution: "720p", fps: 24, aspectRatio: "16:9", easing: "linear" } });
+    // One pan left in two pieces: the second goes on from the first, at the same zoom.
+    expect(a.zoomFrom).toBe(a.zoomTo);
+    expect(b.zoomFrom).toBe(a.zoomTo);
+    expect(a.panFrom!.x).toBeGreaterThan(a.panTo!.x);
+    expect(b.panFrom!.x).toBeLessThan(a.panTo!.x);
+    expect(a.panTo!.x - b.panFrom!.x).toBeLessThan(0.002); // one frame's step
+    // Scenes that fit one job keep the eased move; the cycle gives the second scene a pan right.
+    expect(clips[2].request.params).toMatchObject({ easing: "ease-in-out" });
+    expect(clips[2].request.prompt).toBe("Slow pan right");
+    const join = g.find((s) => s.key === "join")!;
+    expect(join.request.modelId).toBe("oss-join-encoded");
+    expect(join.after).toEqual(clips.map((c) => c.key));
+    expect(estimateGraph(g, getModel).total).toBe(0);
+    // A 10-minute explainer joins 24 scenes at a time (packet copy needs no memory per frame).
+    const long = graphFor({ engine: "open", animation: "frames", music: false, voice: null }, Array.from({ length: 60 }, (_, i) => block(i)));
+    expect(long.filter((s) => s.part === "join").map((j) => j.after!.length)).toEqual([24, 24, 12, 3]);
   });
 
   it("open: Wan 2.2 Lightning in 5-second shots, joins folded 4 at a time, Chatterbox, music under the voice, Qwen3-ASR timed burn-in", () => {
@@ -504,12 +552,44 @@ describe("pictures from sources, style references, music length, frame pricing",
     expect(musicLength(getModel("elevenlabs-music"), 50)).toBe(60);
   });
 
-  it("makes Frame by frame cheaper with Seedance 2.5 too, and says what it saves on each engine", () => {
+  it("makes Frame by frame a camera move whatever video model Fully animated would use, and says so on each engine", () => {
     const priced = (animation: "animated" | "frames") => estimateGraph(graphFor({ engine: "cloud", music: false, videoModel: "seedance-2-5", animation }, placeholderBlocks(300)), getModel);
-    expect(priced("frames").parts.clip).toBeLessThan(priced("animated").parts.clip! * 0.6);
+    expect(priced("frames").parts.clip).toBeLessThan(0.05);
+    expect(priced("animated").parts.clip).toBeGreaterThan(50);
+    expect(resolveModels({ ...defaultSettings("cloud", genreInfo("history")), animation: "frames", videoModel: "seedance-2-5" }, 100, getModel).video).toBe("ken-burns");
     const frames = ANIMATION_MODES.find((m) => m.id === "frames")!;
-    expect(frames.copy).toMatch(/lighter on credits/);
-    expect(frames.openCopy).not.toMatch(/credits/);
+    expect(frames.copy).toMatch(/Ken Burns zoom.*a fraction of the price/);
+    expect(frames.openCopy).toMatch(/pan and zoom.*no GPU/);
+  });
+
+  it("loops a music bed past what the model makes: crossfaded on the open engine, whole plays on the cloud", () => {
+    const [ace, sonilo, openLoop, cloudLoop] = ["oss-ace-step", "sonilo-music", "oss-audio-loop", "join-audio"].map((id) => getModel(id));
+    expect(musicPlan(ace, openLoop, 200)).toEqual({ bed: 201, loop: null, short: 0 });
+    expect(musicPlan(ace, openLoop, 300)).toEqual({ bed: 240, loop: { duration: 301, crossfade: 3 }, short: 0 });
+    expect(musicPlan(ace, openLoop, 700)).toEqual({ bed: 240, loop: { duration: 600, crossfade: 3 }, short: 100 });
+    expect(musicPlan(sonilo, cloudLoop, 300)).toEqual({ bed: 301, loop: null, short: 0 });
+    expect(musicPlan(sonilo, cloudLoop, 650)).toEqual({ bed: 600, loop: { duration: 651, plays: 2 }, short: 0 });
+    expect(musicPlan(ace, undefined, 300)).toEqual({ bed: 240, loop: null, short: 60 });
+
+    // A five-minute open episode: ACE-Step's 240 s bed, looped to the film with 3 s crossfades, under the voice.
+    const open = graphFor({ engine: "open", music: true, voice: null }, placeholderBlocks(300));
+    const length = open.filter((s) => s.part === "clip").reduce((n, s) => n + s.seconds!, 0);
+    expect(open.find((s) => s.key === "music")!.request.params?.duration).toBe(240);
+    const loop = open.find((s) => s.key === "music-loop")!;
+    expect(loop).toMatchObject({ part: "music", after: ["music"], chain: [{ slot: "audio" }], seconds: length + 1 });
+    expect(loop.request).toMatchObject({ modelId: "oss-audio-loop", op: "audio-loop", params: { duration: length + 1, sourceDuration: 240, crossfade: 3 } });
+    expect(open.find((s) => s.key === "mix")!.after).toEqual(["join", "narration", "music-loop"]);
+    // A ten-minute cloud explainer: Sonilo's 600 s, played twice (the compose cuts it to the film), then levelled.
+    const cloud = graphFor({ engine: "cloud", music: true, animation: "frames" }, placeholderBlocks(640));
+    const cl = cloud.find((s) => s.key === "music-loop")!;
+    expect(cl.request).toMatchObject({ modelId: "join-audio", op: "audio-loop", params: { sourceDuration: 600 } });
+    expect(cl.request.params?.crossfade).toBeUndefined();
+    expect(buildPayload(getModel("join-audio")!.routes.find((r) => r.op === "audio-loop")!.map!, { ...cl.request.params, audio: "/bed.mp3" }).audio_urls).toEqual(["/bed.mp3", "/bed.mp3"]);
+    expect(cloud.find((s) => s.key === "level")!.after).toEqual(["music-loop"]);
+    expect(cloud.find((s) => s.key === "mix")!.after).toEqual(["join", "narration", "level"]);
+    expect(estimateGraph(cloud, getModel, ["music-loop"]).total).toBeLessThan(0.01);
+    // Short films need no loop.
+    expect(graphFor({ engine: "open", music: true, voice: null }, six).some((s) => s.key === "music-loop")).toBe(false);
   });
 });
 

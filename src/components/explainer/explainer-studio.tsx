@@ -27,6 +27,7 @@ import {
   getStyle,
   MAX_SOURCES,
   MAX_TOPIC,
+  MUSIC_HINT,
   type EpisodeSettings,
   type ExplainerSource,
   type PickerData,
@@ -344,7 +345,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
                       return engine === "open" ? m?.openCopy : m?.copy;
                     })()}</p>
                   </div>
-                  <ToggleRow label="Background music" hint={engine === "cloud" ? "A Sonilo instrumental bed under the voice, as long as the film" : "An ACE-Step instrumental bed (up to 4 minutes)"} checked={settings.music} onChange={(music) => set({ music })} />
+                  <ToggleRow label="Background music" hint={MUSIC_HINT[engine]} checked={settings.music} onChange={(music) => set({ music })} />
                   <ToggleRow label="Review the script first" hint="Edit the scenes before anything renders" checked={review} onChange={setReview} />
                 </PopoverContent>
               </Popover>

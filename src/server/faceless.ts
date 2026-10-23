@@ -17,7 +17,7 @@ import {
   getStyle,
   MAX_SCRIPT,
   MAX_SOURCES,
-  musicLength,
+  musicPlan,
   narrationText,
   normalizeBlocks,
   OFFLINE_NOTE,
@@ -797,11 +797,12 @@ function advance(ep: FacelessEpisode): FacelessEpisode {
   const changed = graph
     .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || (s.part === "clip" && moved.has(blocks[s.block!].id)))
     .map((s) => s.key);
-  // A bed that no longer covers the film is made again.
-  const music = graph.find((s) => s.key === "music");
-  if (music && plan.ids.music && !changed.includes("music")) {
-    const had = getGeneration(plan.ids.music, { includeDeleted: true })?.request.params?.duration ?? 0;
-    if (had < (music.request.params?.duration ?? 0)) changed.push("music");
+  // A bed (or its loop) that no longer covers the film is made again.
+  for (const key of ["music", "music-loop"]) {
+    const step = graph.find((s) => s.key === key);
+    if (!step || !plan.ids[key] || changed.includes(key)) continue;
+    const had = getGeneration(plan.ids[key], { includeDeleted: true })?.request.params?.duration ?? 0;
+    if (had < (step.request.params?.duration ?? 0)) changed.push(key);
   }
   const rerun = planRerun(graph, changed).rerun.filter((k) => !TIMING_PARTS.has(part(k)));
   const ids = prune(relaunch(graph, plan.ids, rerun, plan.batchId), graph);
@@ -1264,8 +1265,11 @@ function notesFor(settings: EpisodeSettings, seconds: number): { notes?: string[
   if (settings.styleRefs.length > limit) notes.push(`The open-source picture model follows the first ${limit} style references.`);
   if (settings.engine === "open" && settings.styleRefs.length && settings.sourceImages?.length) notes.push("Your style references set the look; the attached images aren't used for the open-source pictures.");
   if (m.music) {
-    const max = musicLength(getModel(m.music), Number.MAX_SAFE_INTEGER);
-    if (seconds > max) notes.push(`The music bed is at most ${Math.floor(max / 60)} min ${max % 60 ? `${max % 60} s ` : ""}long, so the last ${Math.ceil(seconds - max)} s play without music.`);
+    const plan = musicPlan(getModel(m.music), m.loop ? getModel(m.loop) : undefined, seconds);
+    const minutes = (s: number) => `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
+    if (plan.loop?.crossfade) notes.push(`The music is made ${minutes(plan.bed)} long, then looped with a ${plan.loop.crossfade}-second crossfade to cover the film.`);
+    else if (plan.loop) notes.push(`The music is made ${minutes(plan.bed)} long and plays again to cover the film.`);
+    if (plan.short) notes.push(`The music bed goes up to ${minutes(plan.loop?.duration ?? plan.bed)}, so the last ${plan.short} s play without music.`);
   }
   return notes.length ? { notes } : {};
 }
