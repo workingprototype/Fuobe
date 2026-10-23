@@ -81,6 +81,12 @@ export function framesNote(model: Pick<ModelDef, "name" | "engine" | "routes" | 
   return lastAt < 1 - EPS ? `${model.name} puts the last frame at the end of the clip — ${alt} keeps it at its time.` : null;
 }
 
+/** What a frame is to the clip, as Kling 4.0 names them: the start frame, the end frame (the last one, at the end), or a middle frame. */
+export function frameRole(i: number, count: number, at: number): "Start frame" | "End frame" | "Middle frame" {
+  if (i === 0) return "Start frame";
+  return i === count - 1 && at >= 1 - EPS ? "End frame" : "Middle frame";
+}
+
 /** Clip lengths to offer in Frames mode: the open chain's own list, else the model's. */
 export function framesDurations(model: Pick<ModelDef, "routes" | "options">): number[] {
   if (keyframeChain(model)) return CHAIN_DURATIONS;

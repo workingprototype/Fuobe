@@ -4,6 +4,7 @@ import {
   addFrameAt,
   chainGapProblem,
   frameRange,
+  frameRole,
   frameSupport,
   framesBlocker,
   framesDuration,
@@ -64,6 +65,12 @@ describe("frame times", () => {
     expect(frameTimes([0.4, 0.5], 4)).toEqual([0, 2]); // the first is always the start frame
     // A longer clip stretches them.
     expect(frameTimes([0, 0.5, 1], 8)).toEqual([0, 4, 8]);
+  });
+
+  it("names the frames as Kling 4.0 does", () => {
+    expect([0, 1, 2].map((i) => frameRole(i, 3, [0, 0.5, 1][i]))).toEqual(["Start frame", "Middle frame", "End frame"]);
+    // A last frame before the end is a middle frame too.
+    expect(frameRole(1, 2, 0.6)).toBe("Middle frame");
   });
 
   it("drags a frame between its neighbours, snapped to 0.1 s; the start frame never moves", () => {

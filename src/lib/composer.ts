@@ -373,16 +373,9 @@ export function framesRequest(
   frames: FrameAttachment[],
   ctx: { support: FrameSupport; duration: number; chained: boolean },
 ): { images: string[]; endImage?: string; params: Pick<GenParams, "duration" | "keyframeTimes" | "shots" | "multiShot" | "numOutputs"> } {
-  const times = frameTimes(
-    frames.map((f) => f.at),
-    ctx.duration,
-  );
+  const times = frameTimes(frames.map((f) => f.at), ctx.duration);
   const kept = frames.map((f, i) => ({ ref: f.value.ref, time: times[i] })).filter((f) => !!f.ref);
-  const sent = framesInputs(
-    kept.map((f) => f.ref),
-    kept.map((f) => f.time),
-    ctx.support,
-  );
+  const sent = framesInputs(kept.map((f) => f.ref), kept.map((f) => f.time), ctx.support);
   // Frames and shots don't mix; the open chain makes one film (its clips are the jobs).
   return { images: sent.images ?? [], endImage: sent.endImage, params: { duration: ctx.duration, keyframeTimes: sent.keyframeTimes, shots: undefined, multiShot: undefined, ...(ctx.chained && { numOutputs: 1 }) } };
 }

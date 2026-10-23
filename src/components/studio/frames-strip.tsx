@@ -4,7 +4,7 @@ import { Loader2, Minus, Plus, X } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { FRAMES_HINT, frameRange, frameTimes, KEYFRAME_SNAP, MAX_KEYFRAMES, secondsLabel } from "@/lib/catalog/keyframes";
+import { FRAMES_HINT, frameRange, frameRole, frameTimes, KEYFRAME_SNAP, MAX_KEYFRAMES, secondsLabel } from "@/lib/catalog/keyframes";
 import type { FrameAttachment } from "@/lib/composer";
 import { cn } from "@/lib/utils";
 import { ACCEPT, kindOfFile, MediaSlot, SlotPreview, wrongKindMessage, type SlotValue } from "./media-slot";
@@ -52,10 +52,7 @@ export function FramesStrip({
 }) {
   const titleId = useId();
   const hintId = useId();
-  const times = frameTimes(
-    frames.map((f) => f.at),
-    duration,
-  );
+  const times = frameTimes(frames.map((f) => f.at), duration);
   return (
     <div role="group" aria-labelledby={titleId} aria-describedby={hintId} data-frames-strip className="space-y-1.5 px-1 pt-1 pb-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-1">
@@ -85,12 +82,20 @@ export function FramesStrip({
 
       <div className="scrollbar-none flex items-start gap-2 overflow-x-auto px-1 pt-1.5">
         {frames.map((f, i) => (
-          <FrameTile key={f.value.id ?? `${f.value.ref}-${i}`} index={i} value={f.value} time={times[i]} onChange={(v) => onFrame(i, v)} onFile={(file) => onFrameFile(i, file)} />
+          <FrameTile
+            key={f.value.id ?? `${f.value.ref}-${i}`}
+            index={i}
+            role={frameRole(i, frames.length, f.at)}
+            value={f.value}
+            time={times[i]}
+            onChange={(v) => onFrame(i, v)}
+            onFile={(file) => onFrameFile(i, file)}
+          />
         ))}
         {frames.length < MAX_KEYFRAMES && (
           <div className="flex shrink-0 flex-col items-center gap-1">
             <MediaSlot slotKey="frames" label={frames.length ? "Add frame" : "Start frame"} kind="image" required={!frames.length} value={null} onChange={(v) => v && onAddPick(v)} onFile={onAddFile} />
-            <span className="text-[11px] text-subtle-foreground tabular-nums">
+            <span className="text-[11px] text-muted-foreground tabular-nums">
               {frames.length} of {MAX_KEYFRAMES}
             </span>
           </div>
@@ -150,7 +155,21 @@ function LengthStepper({ value, options, onDuration }: { value: number; options:
 }
 
 /** A filled frame: its still (click or drop to replace it), its number, its time, and remove. */
-function FrameTile({ index, value, time, onChange, onFile }: { index: number; value: SlotValue; time: number; onChange: (v: SlotValue | null) => void; onFile: (f: File) => void }) {
+function FrameTile({
+  index,
+  role,
+  value,
+  time,
+  onChange,
+  onFile,
+}: {
+  index: number;
+  role: ReturnType<typeof frameRole>;
+  value: SlotValue;
+  time: number;
+  onChange: (v: SlotValue | null) => void;
+  onFile: (f: File) => void;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const name = index === 0 ? "the start frame" : `frame ${index + 1}`;
@@ -181,13 +200,16 @@ function FrameTile({ index, value, time, onChange, onFile }: { index: number; va
             <button
               type="button"
               onClick={() => input.current?.click()}
-              aria-label={`Frame ${index + 1}${index === 0 ? ", the start frame" : ""}, at ${secondsLabel(time)}: replace`}
+              aria-label={`Frame ${index + 1}, ${role.toLowerCase()} at ${secondsLabel(time)}: replace`}
               className={cn("size-full overflow-hidden rounded-xl border bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring/50", over && "ring-2 ring-primary")}
             >
               <SlotPreview value={{ ...value, name: "" }} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>{index === 0 ? "Start frame" : `Frame ${index + 1} at ${secondsLabel(time)}`} — click or drop to replace</TooltipContent>
+          <TooltipContent>
+            {role}
+            {index > 0 && ` · ${secondsLabel(time)}`} — click or drop to replace
+          </TooltipContent>
         </Tooltip>
         {value.uploading && (
           <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-background/60" role="status" aria-label="Uploading">
@@ -311,7 +333,7 @@ function Ruler({ frames, times, duration, onMove }: { frames: FrameAttachment<Sl
           </span>
         )}
       </div>
-      <div aria-hidden className="relative h-3.5 text-[10px] text-subtle-foreground tabular-nums">
+      <div aria-hidden className="relative h-3.5 text-[10px] text-muted-foreground tabular-nums">
         {labels.map((t, k) => (
           <span key={t} className={cn("absolute top-0 whitespace-nowrap", k === 0 ? "" : t === duration ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: pct(t, duration) }}>
             {secondsLabel(t)}

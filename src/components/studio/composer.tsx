@@ -437,10 +437,7 @@ export function Composer({ docked }: { docked: boolean }) {
     const alt = catalog.getModel(FRAMES_MODELS[model.engine].id);
     const action = alt && alt.id !== model.id ? { label: `Use ${alt.name}`, onClick: () => pickModel(alt) } : undefined;
     const count = draft.frames.length;
-    const times = frameTimes(
-      draft.frames.map((f) => f.at),
-      framesCtx.duration,
-    );
+    const times = frameTimes(draft.frames.map((f) => f.at), framesCtx.duration);
     const gap = framesCtx.chained && count > 1 ? chainGapProblem(times, framesCtx.duration, chainTiming(model)) : null;
     const note = framesNote(model, count, draft.frames.at(-1)?.at);
     if (framesCtx.support === "start" || framesCtx.support === "none") framesNotice = { text: `${framesBlocker(model, count)!.message}.`, tone: "warn", action };
@@ -558,12 +555,7 @@ export function Composer({ docked }: { docked: boolean }) {
           onMove={(i, seconds) =>
             setDraft((d) => {
               if (!d.frames || !framesCtx) return {};
-              const ats = moveFrameAt(
-                d.frames.map((f) => f.at),
-                i,
-                seconds,
-                framesCtx.duration,
-              );
+              const ats = moveFrameAt(d.frames.map((f) => f.at), i, seconds, framesCtx.duration);
               return { frames: d.frames.map((f, j) => ({ ...f, at: ats[j] })) };
             })
           }
