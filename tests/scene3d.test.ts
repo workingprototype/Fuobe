@@ -231,6 +231,26 @@ describe("the captured camera → a recomposition", () => {
     expect(scenePose({ position: [-3, 0, -3], yaw: -Math.PI / 2, pitch: 0 }, 24, 24, 3).horizontal).toBeCloseTo(270, 0);
   });
 
+  it("stays a back view right behind the subject, whichever side of 180° the camera looks", () => {
+    // 3 m behind the pivot, looking back at it: the orbit angle is ~179° and the yaw goes past ±180°.
+    for (const deg of [178, 180, 182]) {
+      const p = scenePose({ position: [0.05, 0, -6], yaw: (deg * Math.PI) / 180, pitch: 0 }, 24, 24, 3);
+      expect(p.horizontal).toBeGreaterThanOrEqual(178);
+      expect(p.horizontal).toBeLessThanOrEqual(181);
+      expect(poseWords(p)).toBe("back view eye-level shot medium shot");
+    }
+    // Either side of the front, the mean wraps through 0° and stays the front, not 180° away.
+    for (const [x, deg] of [
+      [0.05, -2],
+      [-0.05, 2],
+      [0.05, 2],
+    ]) {
+      const p = scenePose({ position: [x, 0, 0], yaw: (deg * Math.PI) / 180, pitch: 0 }, 24, 24, 3);
+      expect(Math.min(p.horizontal, 360 - p.horizontal)).toBeLessThanOrEqual(2);
+      expect(poseWords(p)).toBe("front view eye-level shot medium shot");
+    }
+  });
+
   it("zooms with the lens and the distance, within 0–10", () => {
     expect(scenePose(start, 48, 24, 3).zoom).toBeCloseTo(10);
     expect(scenePose({ ...start, position: [0, 0, -1.5] }, 24, 24, 3).zoom).toBeCloseTo(10);

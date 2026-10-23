@@ -437,28 +437,31 @@ export interface ScenePose {
 
 /**
  * The flown camera as angles around the scene's pivot (the photo's centre at its median depth `pivotDepth`),
- * averaging where the camera went with where it looks (each says half of a re-shot angle), and the zoom from how
- * much tighter the frame is than the photo's (lens and distance), as Qwen Multiple Angles reads them.
+ * averaging where the camera went with where it looks (each says half of a re-shot angle; the round angle is a
+ * circular mean), and the zoom from how much tighter the frame is than the photo's (lens and distance), as Qwen
+ * Multiple Angles reads them.
  */
 export function scenePose(pose: FlyPose, lensMm: number, photoLensMm: number, pivotDepth: number): ScenePose {
   const pivot: Vec3 = [0, 0, -pivotDepth];
   const dx = pose.position[0] - pivot[0];
   const dy = pose.position[1] - pivot[1];
   const dz = pose.position[2] - pivot[2];
-  const orbit = Math.atan2(dx, dz) / DEG;
+  const orbit = Math.atan2(dx, dz);
   const level = Math.hypot(dx, dz);
   const elevation = Math.atan2(dy, Math.max(level, 1e-6)) / DEG;
-  const yaw = pose.yaw / DEG;
   const pitch = pose.pitch / DEG;
-  const horizontal = (((orbit + wrap180(yaw)) / 2) % 360 + 360) % 360;
+  // Averaged on the circle: from behind, 179° and −179° make 180°, not 0°. Looking straight away from the
+  // subject the two cancel out, and where the camera went decides.
+  const sx = Math.sin(orbit) + Math.sin(pose.yaw);
+  const cx = Math.cos(orbit) + Math.cos(pose.yaw);
+  const mean = (Math.hypot(sx, cx) > 1e-6 ? Math.atan2(sx, cx) : orbit) / DEG;
+  const horizontal = ((mean % 360) + 360) % 360;
   const vertical = clamp((elevation - pitch) / 2, -30, 90);
   const distance = Math.max(1e-3, Math.hypot(dx, dy, dz));
   const tighter = (lensMm / Math.max(1, photoLensMm)) * (pivotDepth / distance);
   const zoom = clamp(5 + 5 * Math.log2(tighter), 0, 10);
   return { horizontal: round(horizontal, 1) % 360, vertical: round(vertical, 1), zoom: round(zoom, 0.1) };
 }
-
-const wrap180 = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
 
 /** The Multiple-Angles LoRA's own words for a pose (the same lists as the Angles app). */
 export const POSE_WORDS = {
