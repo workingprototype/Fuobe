@@ -593,7 +593,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
   // reference, the prompt says what appears there. Neither graph takes clicked points.
   if (ctx.op === "video-swap" || ctx.op === "video-insert") {
-    if (input.points?.length && !input.mask && typeof extra.maskPrompt !== "string") throw new ProviderError(OPEN_TARGET_PROBLEM.swap!);
+    if (input.points?.length && !input.mask && typeof extra.maskPrompt !== "string") throw new ProviderError(OPEN_TARGET_PROBLEM[ctx.op === "video-insert" ? "insert" : "swap"]!);
     const words = input.prompt?.trim() ?? "";
     const vace = getMaker(ctx.op === "video-swap" ? "oss-vace-swap" : "oss-vace-insert")!;
     if (ctx.op === "video-swap" && b.maskPrompt) {

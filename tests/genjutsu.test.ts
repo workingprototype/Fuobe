@@ -8,9 +8,11 @@ import {
   makerPrompt,
   makersFor,
   makerStepUsd,
+  OPEN_LOOK_PROBLEM,
   planGenjutsu,
   planMakerPieces,
   qualityFor,
+  resolutionWords,
   swapParts,
   swapTarget,
   type GenjutsuPlanInput,
@@ -55,6 +57,8 @@ describe("Genjutsu: which model runs", () => {
     expect(chooseMaker({ engine: "open", mode: "restyle", look: { kind: "preset", id: "shorts-watercolor" }, higgsfield: false })).toMatchObject({ maker: { id: "oss-wan22-vace-restyle" } });
     expect(chooseMaker({ engine: "open", mode: "swap", target: "paint", higgsfield: false })).toEqual({ problem: expect.stringMatching(/name what to swap/) });
     expect(chooseMaker({ engine: "open", mode: "insert", target: "type", higgsfield: false })).toEqual({ problem: expect.stringMatching(/paint where it goes/) });
+    // Higgsfield's looks are cloud-only: said as such, not "nothing does that".
+    expect(chooseMaker({ engine: "open", mode: "restyle", look: { kind: "higgsfield", id: "abc" }, higgsfield: true })).toEqual({ problem: OPEN_LOOK_PROBLEM });
   });
 
   it("every maker is a catalog model that does its mode's operation", () => {
@@ -96,7 +100,11 @@ describe("Genjutsu: checks", () => {
     const small = { ...clip, width: 640, height: 360 };
     expect(genjutsuProblem({ ...base, mode: "swap", maker: maker("genjutsu-object-swap"), source: small, target: "type" })).toMatch(/Genjutsu Lite takes it/);
     expect(genjutsuProblem({ ...base, mode: "swap", maker: maker("kling-o3"), source: small, target: "type", subject: "the cup" })).toMatch(/at least 720 px/);
-    expect(genjutsuProblem({ ...base, mode: "swap", maker: maker("wan-22-vace-inpaint"), source: { ...clip, fps: 60 }, target: "paint", mask: true })).toMatch(/up to 30 fps/);
+    // The hosted VACE is the only model for clicks and paint: the way out is words, not "another model".
+    expect(genjutsuProblem({ ...base, mode: "swap", maker: maker("wan-22-vace-inpaint"), source: { ...clip, fps: 60 }, target: "paint", mask: true })).toBe(
+      "Wan 2.2 VACE (hosted) takes up to 30 fps (this clip is 60 fps) — switch to “Type it”, or save the clip at 30 fps and add it again",
+    );
+    expect(genjutsuProblem({ ...base, mode: "insert", maker: maker("wan-22-vace-inpaint"), source: { ...clip, fps: 60 }, target: "paint", mask: true })).toMatch(/switch to “Say where”/);
     expect(genjutsuProblem({ ...base, mode: "swap", maker: maker("oss-vace-swap"), source: { ...clip, fps: undefined }, target: "type", subject: "the cup" })).toMatch(/frame rate/);
   });
 });
@@ -260,6 +268,19 @@ describe("Genjutsu: words and qualities", () => {
     expect(qualityFor(maker("oss-vace-swap"), "1080p")).toBe("720p");
     expect(qualityFor(maker("kling-o3"), "1080p")).toBeUndefined();
   });
+
+  it("says what comes out when it isn't the quality picked", () => {
+    // Above the pick is the model's lowest, below it the most it renders.
+    expect(resolutionWords(maker("p-video-replace"), "480p")).toBe("renders 720p (its lowest)");
+    expect(resolutionWords(maker("gemini-omni-flash"), "480p")).toBe("renders 720p (its lowest)");
+    expect(resolutionWords(maker("wan-22-vace-inpaint"), "1080p")).toBe("renders up to 720p");
+    expect(resolutionWords(maker("genjutsu-lite-motion-transfer"), "1080p")).toBeUndefined();
+    // No setting: each model's own words.
+    expect(resolutionWords(maker("kling-o3"), "720p")).toBe("keeps your clip's size");
+    expect(resolutionWords(maker("kling-o3-4k-edit"), "720p")).toBe("renders 4K");
+    expect(resolutionWords(maker("oss-wan22-vace-restyle"), "1080p")).toBe("renders 480p at 16 fps");
+    expect(resolutionWords(maker("kling-motion-control"), "720p")).toBe("picks its own size");
+  });
 });
 
 describe("Genjutsu: setup codes", () => {
@@ -288,6 +309,8 @@ describe("Genjutsu: setup codes", () => {
     expect(decodeSetup(encodeSetup({ mode: "restyle", look: { kind: "preset", id: "nope" } }))?.look).toBeUndefined();
     expect(decodeSetup(encodeSetup({ mode: "motion", target: "paint", model: "not-a-model" }))).toEqual({ mode: "motion" });
     expect(decodeSetup("gj1.!!!")).toBeNull();
+    // A link with a broken %-escape is no code (it doesn't throw).
+    expect(decodeSetup("https://x/genjutsu?setup=%E0%A4%A")).toBeNull();
     expect(decodeSetup("hello")).toBeNull();
     expect(decodeSetup(`gj1.${btoa(JSON.stringify({ m: "fly" }))}`)).toBeNull();
   });

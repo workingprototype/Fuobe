@@ -54,6 +54,8 @@ describe("Genjutsu's open graphs through the provider", () => {
     expect(at(wf, "40", "image")).toBe("lamp.png");
     expect(at(wf, "16", "text")).toMatch(/^The object from the reference image in the marked area/);
     await expect(prepare("video-insert-wan-vace", { images: ["lamp.png"], prompt: "a lamp" }, "video-insert")).rejects.toThrow("Paint where it goes on the first frame");
+    // Clicks (a Canvas node) are refused with the insert's own words: paint, not "name what to swap".
+    await expect(prepare("video-insert-wan-vace", { images: ["lamp.png"], points: [{ x: 3, y: 4 }] }, "video-insert")).rejects.toThrow(OPEN_TARGET_PROBLEM.insert!);
   });
 
   it("a planned swap window is what the graph is given", async () => {

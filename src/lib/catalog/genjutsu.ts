@@ -112,8 +112,10 @@ export interface Maker {
   maxFps?: number;
   /** The result carries the piece's own sound (otherwise the clip's sound is put back). */
   keepsSound: boolean;
-  /** The resolutions it renders; the quality asked for goes to the nearest (none: it keeps the clip's size). */
+  /** The resolutions it renders; the quality asked for goes to the nearest (none: see `renders`). */
   qualities?: string[];
+  /** Without a resolution setting: what it renders, in words ("keeps your clip's size", "renders 4K"). */
+  renders?: string;
   /** Words aren't needed (Genjutsu and P-Video find what to swap from the references). */
   promptOptional?: boolean;
   /** Swaps the person on camera only. */
@@ -175,6 +177,7 @@ export const MAKERS: Maker[] = [
     maxSeconds: 10,
     minSeconds: 3,
     keepsSound: false,
+    renders: "picks its own size",
   },
   // Object swap (cloud).
   {
@@ -224,6 +227,7 @@ export const MAKERS: Maker[] = [
     minSeconds: 3,
     keepsSound: true,
     sides: { min: 720, max: 3840 },
+    renders: "keeps your clip's size",
   },
   {
     id: "p-video-replace",
@@ -285,6 +289,7 @@ export const MAKERS: Maker[] = [
     note: "Reads up to 4 of the look's images · 4K · pieces of up to 10 s",
     refs: { min: 0, max: 0 },
     keepsSound: false,
+    renders: "renders 4K",
     looks: "fuobe",
     readsLookImages: 4,
   },
@@ -343,6 +348,7 @@ export const MAKERS: Maker[] = [
     note: "The Shorts chain: the first frame restyled (Qwen-Image-Edit, 2 of the look's images), then every frame with depth · 5 s segments at 16 fps, 480p",
     refs: { min: 0, max: 0 },
     keepsSound: false,
+    renders: "renders 480p at 16 fps",
     looks: "fuobe",
     readsLookImages: 2,
   },
@@ -367,6 +373,9 @@ export const OPEN_TARGET_PROBLEM: Partial<Record<GenjutsuMode, string>> = {
   insert: "On your ComfyUI, paint where it goes — saying it in words is on the cloud engine",
 };
 
+/** Restyle on the open engine with one of Higgsfield's looks (they run on Higgsfield's Genjutsu Restyle only). */
+export const OPEN_LOOK_PROBLEM = "Higgsfield's looks run on the cloud engine — pick one of the 44 looks or Your own";
+
 /**
  * The model a request runs on, or why there is none. Without a modelId: Genjutsu (Lite unless Quality is High) with a
  * Higgsfield key, else the keyless route for the mode; on the open engine, the one graph that does the mode.
@@ -384,7 +393,10 @@ export function chooseMaker(o: {
   const target = MODE_TARGETS[o.mode].length ? (o.target ?? MODE_TARGETS[o.mode][0]) : undefined;
   if (target && !MODE_TARGETS[o.mode].includes(target)) return { problem: `${getMode(o.mode).label} doesn't take ${target === "click" ? "clicks" : "that"} — pick another way` };
   const options = makersFor(o.engine, o.mode, target, o.look);
-  if (!options.length) return { problem: (o.engine === "open" && OPEN_TARGET_PROBLEM[o.mode]) || "Nothing on this engine does that yet" };
+  if (!options.length) {
+    if (o.engine === "open" && o.mode === "restyle" && o.look?.kind === "higgsfield") return { problem: OPEN_LOOK_PROBLEM };
+    return { problem: (o.engine === "open" && OPEN_TARGET_PROBLEM[o.mode]) || "Nothing on this engine does that yet" };
+  }
   const withTier = (m: Maker) => (m.pair && o.tier && m.tier !== o.tier ? (getMaker(m.pair) ?? m) : m);
   const picked = getMaker(o.modelId);
   if (picked) {
@@ -461,13 +473,25 @@ export function makerStepUsd(modelId: string, params: { duration?: number; resol
   return usd * (modelId.startsWith("genjutsu") ? Math.ceil(secs - 1e-6) : secs);
 }
 
+const px = (q: string) => parseInt(q, 10) || 0;
+
 /** The resolution a model is asked for: the quality picked, or the nearest it renders (the largest not above, else its smallest). */
 export function qualityFor(m: Maker, quality: string): string | undefined {
   if (!m.qualities?.length) return undefined;
   if (m.qualities.includes(quality)) return quality;
-  const p = (q: string) => parseInt(q, 10) || 0;
-  const below = m.qualities.filter((q) => p(q) <= p(quality)).sort((a, b) => p(b) - p(a));
-  return below[0] ?? [...m.qualities].sort((a, b) => p(a) - p(b))[0];
+  const below = m.qualities.filter((q) => px(q) <= px(quality)).sort((a, b) => px(b) - px(a));
+  return below[0] ?? [...m.qualities].sort((a, b) => px(a) - px(b))[0];
+}
+
+/**
+ * What comes out when it isn't the quality picked, in words (undefined: it is): "renders 720p (its lowest)" when the
+ * model starts above it, "renders up to 720p" when it stops below it, or the model's own words without a setting.
+ */
+export function resolutionWords(m: Maker, quality: string): string | undefined {
+  const res = qualityFor(m, quality);
+  if (!res) return m.renders ?? "keeps your clip's size";
+  if (res === quality) return undefined;
+  return px(res) > px(quality) ? `renders ${res} (its lowest)` : `renders up to ${res}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +603,7 @@ export function genjutsuProblem(c: GenjutsuCheck): string | null {
   const m = c.maker;
   const len = c.range.end - c.range.start;
   const { width: w, height: h } = c.source;
+  const target = MODE_TARGETS[c.mode].length ? (c.target ?? MODE_TARGETS[c.mode][0]) : undefined;
   if (m.minSeconds && len < m.minSeconds - 0.01) return `${m.label} needs at least ${m.minSeconds} s`;
   if (m.sides && w && h) {
     if (Math.min(w, h) < m.sides.min) return `${m.label} needs a clip at least ${m.sides.min} px on each side (this one is ${w}×${h}) — pick another model`;
@@ -586,7 +611,13 @@ export function genjutsuProblem(c: GenjutsuCheck): string | null {
   }
   if (m.minPixels && w && h && w * h < m.minPixels) return `${m.label} needs a sharper clip (at least ${Math.round(m.minPixels / 1000)} thousand pixels a frame; this one is ${w}×${h}) — Genjutsu Lite takes it`;
   if (m.window && !c.source.fps) return "Couldn't read this clip's frame rate — save it as an MP4 (H.264) and try again";
-  if (m.maxFps && c.source.fps && c.source.fps > m.maxFps + 0.01) return `${m.label} takes up to ${m.maxFps} fps (this clip is ${Math.round(c.source.fps)} fps) — pick another model`;
+  if (m.maxFps && c.source.fps && c.source.fps > m.maxFps + 0.01) {
+    // The hosted VACE is the only model for clicks and paint: the way out is words (or a slower copy of the clip).
+    const others = makersFor(m.engine, c.mode, target).filter((x) => x.id !== m.id);
+    const words = TARGET_LABELS[c.mode].type?.label;
+    const way = others.length ? "pick another model" : words && target !== "type" ? `switch to “${words}”, or save the clip at ${m.maxFps} fps and add it again` : `save the clip at ${m.maxFps} fps and add it again`;
+    return `${m.label} takes up to ${m.maxFps} fps (this clip is ${Math.round(c.source.fps)} fps) — ${way}`;
+  }
   if (c.mode !== "restyle" && c.references < Math.max(1, m.refs.min)) return REFS_MISSING[c.mode];
   if (c.mode === "restyle") {
     if (!c.look) return "Pick a look";
@@ -595,7 +626,6 @@ export function genjutsuProblem(c: GenjutsuCheck): string | null {
     if (m.looks === "fuobe" && c.look.kind === "higgsfield") return "Higgsfield's looks run on Genjutsu Restyle";
     if (c.look.kind === "custom" && !m.readsLookImages && !c.look.words?.trim()) return `${m.label} restyles from words only — describe your look, or pick Kling O3 4K Edit`;
   }
-  const target = MODE_TARGETS[c.mode].length ? (c.target ?? MODE_TARGETS[c.mode][0]) : undefined;
   if (target === "type") {
     if (c.mode === "swap" && !m.promptOptional && !c.subject?.trim()) return "Say what to swap, e.g. “the red car”";
     if (c.mode === "insert" && !c.prompt?.trim()) return "Say where it goes, e.g. “on the table, next to the cup”";
@@ -881,12 +911,13 @@ export function encodeSetup(s: GenjutsuSetup): string {
 
 /** A setup read back from a code (or a link with ?setup=…), checked field by field; null when it isn't one. */
 export function decodeSetup(input: string): GenjutsuSetup | null {
-  let code = input.trim();
-  const fromLink = /[?&]setup=([^&#\s]+)/.exec(code);
-  if (fromLink) code = decodeURIComponent(fromLink[1]);
-  if (!code.startsWith("gj1.")) return null;
   let o: Record<string, unknown>;
   try {
+    let code = input.trim();
+    // A link: its ?setup= (a malformed %-escape is not a code either).
+    const fromLink = /[?&]setup=([^&#\s]+)/.exec(code);
+    if (fromLink) code = decodeURIComponent(fromLink[1]);
+    if (!code.startsWith("gj1.")) return null;
     o = JSON.parse(fromBase64Url(code.slice(4).replace(/\s+/g, ""))) as Record<string, unknown>;
   } catch {
     return null;
