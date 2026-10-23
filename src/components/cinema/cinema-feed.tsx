@@ -198,14 +198,16 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
-        {u.scene && (
+        {/* A scene has no prompt to load: it opens in the 3D viewer instead. */}
+        {u.scene ? (
           <DropdownMenuItem onClick={() => handlers.onOpenScene(u.g)}>
             <Box /> Open 3D scene
           </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => handlers.onLoad(u.g)}>
+            <RotateCcw /> Load into prompt bar
+          </DropdownMenuItem>
         )}
-        <DropdownMenuItem onClick={() => handlers.onLoad(u.g)}>
-          <RotateCcw /> Load into prompt bar
-        </DropdownMenuItem>
         {o?.kind === "image" && !u.scene && (
           <>
             <DropdownMenuItem onClick={() => handlers.onCreateScene(u.g, o.url)}>

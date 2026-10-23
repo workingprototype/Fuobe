@@ -41,10 +41,10 @@ export function sceneTake(g: CinemaGeneration): SceneTake | null {
   return { generation: g, still, source, aspect: ar && IMAGE_ASPECTS.includes(ar) ? ar : "16:9" };
 }
 
-/** What a plan costs here: "Demo" when no provider of its model is connected and demo mode answers instead. */
+/** What a plan costs here: "Demo" when demo mode is on, or answers because no provider of its model is connected. */
 export function usePlanPrice(plan: CinemaPlan): { cost: number | null; label: string; demo: boolean } {
   const status = useStatus().data;
-  const demo = !!status && status.demoMode !== "off" && !plan.model.routes.some((r) => status.providers[r.provider]?.configured);
+  const demo = !!status && (status.demoMode === "on" || (status.demoMode !== "off" && !plan.model.routes.some((r) => status.providers[r.provider]?.configured)));
   const cost = demo ? 0 : plan.costUsd;
   return { cost, demo, label: demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : "Price unknown" };
 }
