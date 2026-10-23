@@ -5,8 +5,9 @@ import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
-import { OPERATION_LABELS, type GenParams, type ModelDef, type Operation } from "@/lib/catalog/types";
-import { durationLabel, hiddenChanges, settingsSummary, type SettingsShape } from "@/lib/composer";
+import { FORMAT_INFO } from "@/lib/av/formats";
+import { OPERATION_LABELS, type GenParams, type ModelDef, type Operation, type VideoFormat } from "@/lib/catalog/types";
+import { durationLabel, formatOf, hiddenChanges, settingsSummary, type SettingsShape } from "@/lib/composer";
 import { ratioValue } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SliderControls } from "./audio-controls";
@@ -119,6 +120,10 @@ export interface SettingsPanelProps {
   className?: string;
   /** Chips the toolbar has no room for on phones (voice, motion, style…): shown at the top of the sheet there. */
   extras?: React.ReactNode;
+  /** Picking a format (SDR to HDR, Export): another model may write it (the composer moves the request there). */
+  onFormat?: (f: VideoFormat) => void;
+  /** The model that writes a format, when it isn't the one picked ("via LTX 2.3 HDR"). */
+  formatVia?: (f: VideoFormat) => string | undefined;
 }
 
 /**
@@ -160,7 +165,40 @@ export function SettingsChip(props: SettingsPanelProps) {
   );
 }
 
-function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePrompt, setNegativePrompt, kind, enhancing, onRewrite, opNote, extras }: SettingsPanelProps) {
+/** Output formats as a list of choices, each with what it's for (Higgsfield's SDR to HDR copy). */
+function FormatChoices({ formats, value, onChange, via }: { formats: VideoFormat[]; value: VideoFormat; onChange: (f: VideoFormat) => void; via?: (f: VideoFormat) => string | undefined }) {
+  return (
+    <div role="radiogroup" aria-label="Format" onKeyDown={radioKeys} className="grid gap-1">
+      {formats.map((f) => {
+        const sel = value === f;
+        const info = FORMAT_INFO[f];
+        const other = via?.(f);
+        return (
+          <button
+            key={f}
+            type="button"
+            role="radio"
+            aria-checked={sel}
+            tabIndex={radioTab(sel)}
+            onClick={() => onChange(f)}
+            className={cn(
+              "flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50",
+              sel && "border-primary bg-brand-faint hover:bg-brand-faint-hover",
+            )}
+          >
+            <span className={cn("text-[13px] font-medium", sel && "text-brand-text")}>
+              {info?.label ?? f}
+              {other && <span className="font-normal text-muted-foreground"> · {other}</span>}
+            </span>
+            <span className="text-[12px] leading-snug text-muted-foreground">{info?.hint}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePrompt, setNegativePrompt, kind, enhancing, onRewrite, opNote, extras, onFormat, formatVia }: SettingsPanelProps) {
   const opts = model?.options ?? {};
   const d = model?.defaults ?? {};
   const [advanced, setAdvanced] = useState(p.seed !== undefined || !!negativePrompt);
@@ -195,9 +233,36 @@ function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePro
           </div>
         </Section>
       )}
+      {shape.formats && (
+        <Section label="Format">
+          <FormatChoices formats={shape.formats} value={formatOf(p, model, shape.formats)!} onChange={(f) => (onFormat ? onFormat(f) : setP({ format: f }))} via={formatVia} />
+        </Section>
+      )}
       {shape.resolution && (
-        <Section label="Quality">
-          <Segmented label="Quality" options={shape.resolution} value={p.resolution ?? d.resolution ?? shape.resolution[0]} onChange={(v) => setP({ resolution: v })} />
+        <Section label={op?.startsWith("upscale") ? "Resolution" : "Quality"}>
+          <Segmented
+            label={op?.startsWith("upscale") ? "Resolution" : "Quality"}
+            options={shape.resolution}
+            value={p.resolution ?? d.resolution ?? shape.resolution[0]}
+            onChange={(v) => setP({ resolution: v })}
+          />
+        </Section>
+      )}
+      {shape.fps && (
+        <Section label="Frame rate">
+          {/* 0 stands for the clip's own frame rate (nothing sent). */}
+          <Segmented
+            label="Frame rate"
+            options={shape.fps.original ? [0, ...shape.fps.values] : shape.fps.values}
+            value={p.targetFps ?? d.targetFps ?? (shape.fps.original ? 0 : shape.fps.values[0])}
+            onChange={(v) => setP({ targetFps: v || undefined })}
+            format={(v) => (v ? `${v}` : "Original")}
+          />
+        </Section>
+      )}
+      {shape.slowdown && (
+        <Section label="Slow motion">
+          <Segmented label="Slow motion" options={shape.slowdown} value={p.slowdown ?? 1} onChange={(v) => setP({ slowdown: v > 1 ? v : undefined })} format={(v) => (v > 1 ? `${v}×` : "Off")} />
         </Section>
       )}
       {shape.duration && (

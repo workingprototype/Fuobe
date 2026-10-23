@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Ban, Check, Clapperboard, Loader2, Palette } from "lucide-react";
+import { Ban, Check, Clapperboard, Loader2, Palette, Settings2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -187,21 +187,24 @@ export function ControlsChip({
   controls,
   values,
   onChange,
+  title = "Director",
 }: {
   controls: NonNullable<ModelOptions["controls"]>;
   values: Record<string, unknown>;
   onChange: (param: string, v?: string | number) => void;
+  /** The chip's name: "Director" (Cinema's genre, lens, light…), "Options" for a tool's model settings (Upscale). */
+  title?: string;
 }) {
   const set = controls.filter((c) => values[c.param] !== undefined);
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Chip icon={Clapperboard} active={set.length > 0}>
-          {set.length ? `Director · ${set.length}` : "Director"}
+        <Chip icon={title === "Director" ? Clapperboard : Settings2} active={set.length > 0}>
+          {set.length ? `${title} · ${set.length}` : title}
         </Chip>
       </PopoverTrigger>
       <PopoverContent className="w-[min(92vw,420px)] space-y-2 p-3" align="start" side="top" collisionPadding={12}>
-        <p className="text-[13px] font-medium">Director controls</p>
+        <p className="text-[13px] font-medium">{title === "Director" ? "Director controls" : `Model ${title.toLowerCase()}`}</p>
         <p className="text-[12px] text-muted-foreground">Leave one on Auto and the model decides.</p>
         <div className="grid grid-cols-2 gap-2">
           {controls.map((c) => (
@@ -213,10 +216,10 @@ export function ControlsChip({
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
                   {/* Auto sends nothing: the model's default, named when it's known (Leffa: Upper body). */}
-                  <SelectItem value="__auto">{c.default !== undefined ? `Auto · ${label(c.default)}` : "Auto"}</SelectItem>
+                  <SelectItem value="__auto">{c.default !== undefined ? `Auto · ${c.labels?.[String(c.default)] ?? label(c.default)}` : "Auto"}</SelectItem>
                   {c.values.map((v) => (
                     <SelectItem key={String(v)} value={String(v)}>
-                      {label(v)}
+                      {c.labels?.[String(v)] ?? label(v)}
                     </SelectItem>
                   ))}
                 </SelectContent>

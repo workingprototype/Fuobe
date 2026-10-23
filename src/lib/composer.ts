@@ -3,7 +3,10 @@
  * blocker messages, attachment placement and model-picker grouping. No catalog import here, so
  * nothing in this file pulls the model list into the browser bundle.
  */
-import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation } from "./catalog/types";
+import { FORMAT_INFO } from "./av/formats";
+import { fpsPlan, fpsSummary } from "./av/fps";
+import { targetShortEdge, upscaledSize } from "./av/upscale";
+import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, VideoFormat } from "./catalog/types";
 
 // ---------------------------------------------------------------------------
 // Settings summary ("16:9 · 720p · 5s · ×1")
@@ -11,7 +14,7 @@ import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation } fro
 /** Operations that transform one input into one result — no batch count. */
 export const SINGLE_TAKE = new Set<Operation>([
   "lipsync", "avatar", "upscale-video", "upscale-image", "dub", "extend", "reframe", "finalize", "v2a", "interpolate",
-  "bg-remove", "bg-remove-video", "depth-video", "concat", "color-match", "frame",
+  "bg-remove", "bg-remove-video", "depth-video", "concat", "color-match", "frame", "sdr-to-hdr", "export-video",
 ]);
 
 export const durationLabel = (v: number) => (v >= 1000 ? `${Math.round(v / 1000)}s` : `${v}s`);
@@ -29,6 +32,12 @@ export interface SettingsShape {
   enhance: boolean;
   sliders: boolean;
   negativePrompt: boolean;
+  /** Frame rates to reach (FPS Boost, upscalers): `original` adds the clip's own rate as the first choice. */
+  fps: { values: number[]; original: boolean } | null;
+  /** Slow-motion factors (1 = off). */
+  slowdown: number[] | null;
+  /** Output formats (SDR to HDR, export): the model's, or every format the studio's models write. */
+  formats: VideoFormat[] | null;
 }
 
 /**
@@ -37,14 +46,16 @@ export interface SettingsShape {
  * transforms (Lipsync), there's still no batch count.
  */
 export function settingsShape(
-  model: Pick<ModelDef, "options"> | undefined,
+  model: Pick<ModelDef, "options" | "defaults"> | undefined,
   op: Operation | undefined,
   kind: MediaKind,
   showPrompt: boolean,
   params: GenParams = {},
   studioOps: Operation[] = [],
+  studioFormats?: VideoFormat[],
 ): SettingsShape {
   const o = model?.options ?? {};
+  const formats = studioFormats?.length ? studioFormats : o.formats;
   const many = <T,>(xs: T[] | undefined) => (xs && xs.length > 1 ? xs : null);
   const single = op ? SINGLE_TAKE.has(op) : studioOps.length > 0 && studioOps.every((x) => SINGLE_TAKE.has(x));
   return {
@@ -58,6 +69,9 @@ export function settingsShape(
     enhance: showPrompt,
     sliders: !!o.sliders?.length,
     negativePrompt: !!o.negativePrompt,
+    fps: o.fpsTargets?.length ? { values: o.fpsTargets, original: model?.defaults?.targetFps === undefined } : null,
+    slowdown: many(o.slowdowns),
+    formats: formats && formats.length > 0 ? formats : null,
   };
 }
 
@@ -76,8 +90,79 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
   if (shape.multiShot && !params.shots && params.multiShot === "auto") parts.push("Multi-shot");
   if (shape.draft && params.draft) parts.push("Draft");
   if (shape.audio && params.generateAudio === false) parts.push("No audio");
+  if (shape.fps) {
+    const fps = params.targetFps ?? d.targetFps;
+    if (fps) parts.push(`${fps} fps`);
+    else if (!shape.fps.original) parts.push(`${shape.fps.values[0]} fps`);
+  }
+  if (shape.slowdown && (params.slowdown ?? 1) > 1) parts.push(`${params.slowdown}× slow`);
+  if (shape.formats) {
+    const f = formatOf(params, model, shape.formats);
+    if (f) parts.push(FORMAT_INFO[f]?.short ?? f);
+  }
   if (shape.enhance && params.enhancePrompt) parts.push("Enhance");
   return parts;
+}
+
+/** The output format a request writes: the one picked, else the model's default or first, else the studio's first. */
+export function formatOf(params: GenParams, model: Pick<ModelDef, "options" | "defaults"> | undefined, studio: VideoFormat[] = []): VideoFormat | undefined {
+  return params.format ?? model?.defaults?.format ?? model?.options.formats?.[0] ?? studio[0];
+}
+
+// ---------------------------------------------------------------------------
+// What a video tool makes of the attached clip (Upscale hub), from its header.
+
+const clipSeconds = (n: number) => (n >= 60 ? `${Math.floor(n / 60)}:${String(Math.round(n % 60)).padStart(2, "0")}` : `${Math.round(n * 10) / 10} s`);
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * One line under the clip saying what comes out: "1280×720 → 3840×2160", "24 → 60 fps · 2× slow motion ·
+ * 5 s → 10 s", "1920×1080 · 12 s → ProRes 422 HQ (.mov)". Null when the header told nothing (or the tool isn't one of these).
+ */
+export function clipOutcome(
+  op: Operation | undefined,
+  facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
+  params: GenParams,
+  model: Pick<ModelDef, "engine" | "options" | "defaults"> | undefined,
+): string | null {
+  if (!facts || !model) return null;
+  const { width, height, fps, duration } = facts;
+  const size = width && height ? `${width}×${height}` : "";
+  const length = duration ? clipSeconds(duration) : "";
+  if (op === "upscale-video") {
+    if (!size) return null;
+    const res = params.resolution ?? model.defaults?.resolution;
+    const target = targetShortEdge(res);
+    const short = Math.min(width!, height!);
+    const rate = params.targetFps ? ` · ${params.targetFps} fps` : "";
+    if (res?.toLowerCase() === "original") return `${size}, cleaned up at its own size${rate}`;
+    if (target && target <= short) return `This clip is already ${short}p — pick a higher resolution${model.options.resolutions?.some((r) => r.toLowerCase() === "original") ? ", or Original to only clean it up" : ""}`;
+    const out = upscaledSize({ width: width!, height: height! }, res);
+    return out ? `${size} → ${out.width}×${out.height}${rate}` : null;
+  }
+  if (op === "interpolate") {
+    const slowdown = Math.max(1, params.slowdown ?? 1);
+    const longer = duration && slowdown > 1 ? ` · ${clipSeconds(duration)} → ${clipSeconds(duration * slowdown)}` : "";
+    const target = params.targetFps ?? model.defaults?.targetFps;
+    // A route with no frame-rate field (hosted RIFE) doubles the frames at the clip's speed.
+    if (!model.options.fpsTargets?.length) return fps ? `Twice the frames: ${round2(fps)} → ${round2(fps * 2)} fps` : null;
+    if (!target) return null;
+    // The open engine reaches the target as source × m / n: say so when this clip's rate doesn't divide into it.
+    if (model.engine === "open" && fps) {
+      const plan = fpsPlan(fps, target, slowdown);
+      if (!plan.exact) return `${round2(fps)} → about ${plan.fps} fps (the nearest this clip's rate allows)${slowdown > 1 ? ` · ${slowdown}× slow motion` : ""}${longer}`;
+    }
+    return `${fpsSummary(fps, target, slowdown)}${longer}`;
+  }
+  if (op === "sdr-to-hdr" || op === "export-video") {
+    const f = formatOf(params, model);
+    const info = f ? FORMAT_INFO[f] : undefined;
+    const frames = f === "exr" && duration && fps ? ` (${Math.round(duration * fps)} frames)` : "";
+    const head = [size, length].filter(Boolean).join(" · ");
+    if (!head) return null;
+    return info ? `${head} → ${info.short}${frames}, .${info.ext}` : head;
+  }
+  return null;
 }
 
 /** How many settings differ from their defaults beyond what the summary shows (seed, negative prompt, sliders). */
@@ -311,7 +396,7 @@ export function acceptedKinds(slots: InputSlot[], multiRef?: { kind?: MediaKind 
 // Hand-off params ("/video?image=…") arriving after the first paint
 
 /** The URL params a studio prefills its draft from; anything else in the query is ignored. */
-export const HANDOFF_PARAMS = ["image", "ref", "video", "audio", "prompt", "preset", "model"] as const;
+export const HANDOFF_PARAMS = ["image", "ref", "video", "audio", "prompt", "preset", "model", "format"] as const;
 
 /** A stable key for the hand-off part of a query string ("" when there's none). */
 export function handoffKey(search: string | URLSearchParams | null | undefined): string {

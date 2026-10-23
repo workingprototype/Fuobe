@@ -681,6 +681,27 @@ export function useStatus() {
   });
 }
 
+/** What an uploaded clip's header says: length, size, frame rate and sound (empty for formats the server can't read). */
+export interface ClipFacts {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+/** The attached clip's facts (Upscale hub: prices by its length, "24 → 60 fps"). Only for uploads and results on this server. */
+export function useClipFacts(url: string | undefined) {
+  return useQuery({
+    queryKey: ["clip-facts", url],
+    enabled: !!url && url.startsWith("/api/files/"),
+    queryFn: async () =>
+      json<ClipFacts>(await fetch("/api/media/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) })),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
 export async function enhance(prompt: string, kind: MediaKind, op: string): Promise<string> {
   return (
     await json<{ prompt: string }>(

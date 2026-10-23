@@ -2,17 +2,19 @@
 
 import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
-import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "@/lib/catalog/types";
-import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
+import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
+import { formatsOf } from "@/lib/av/formats";
+import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, clipOutcome, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -117,9 +119,9 @@ function pulseSlot(root: HTMLElement | null, key: string, retried = false) {
 }
 
 export function Composer({ docked }: { docked: boolean }) {
-  const { config, draft, setDraft, setSlot } = useStudio();
+  const { config, draft: typed, setDraft, setSlot } = useStudio();
   const catalog = useCatalog();
-  const [engine, setEngine] = useEngine();
+  const [engine, setEngine, engineMode] = useEngine();
   const create = useCreateGeneration();
   const [enhancing, setEnhancing] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -129,6 +131,13 @@ export function Composer({ docked }: { docked: boolean }) {
   const hydrated = useHydrated();
   const liveStatus = useStatus().data;
   const status = hydrated ? liveStatus : undefined;
+  // Upscale hub: the attached clip's header (length, size, frame rate). Its length prices per-second tools and
+  // travels with the request (params.sourceDuration); a clip swapped since a Reuse never keeps the old one's.
+  const facts = useClipFacts(config.clipFacts && !typed.slots.video?.uploading ? typed.slots.video?.ref : undefined).data;
+  const draft = useMemo(
+    () => (config.clipFacts ? { ...typed, params: { ...typed.params, sourceDuration: typed.slots.video?.ref ? facts?.duration : undefined } } : typed),
+    [config.clipFacts, typed, facts?.duration],
+  );
   const liveElements = useElements().data;
   const elements = (hydrated && liveElements) || EMPTY;
   const [, setRecent] = useStoredList(RECENT_MODELS);
@@ -230,7 +239,7 @@ export function Composer({ docked }: { docked: boolean }) {
       const { request: planned } = prepare({ ...draft, slots: planSlots, refs: draft.refs.map((r) => stand(r, r.kind) as SlotValue) });
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
-      cost = estimateCost(plan.model, plan.params, plan.jobs);
+      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op);
     } catch (e) {
       planError = (e as Error).message;
     }
@@ -307,7 +316,27 @@ export function Composer({ docked }: { docked: boolean }) {
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
   const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
   const effectiveOp = studioOp ?? op;
-  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops);
+  // SDR to HDR, Export: every format the studio's models on this engine write; picking one this model doesn't
+  // write moves the request to the model that does (EXR frames → LTX 2.3 HDR on the cloud).
+  const engineModels = useMemo(() => models.filter((m) => m.engine === (model?.engine ?? engine)), [models, model?.engine, engine]);
+  const studioFormats = useMemo(() => (config.formatPicker ? formatsOf(engineModels) : undefined), [config.formatPicker, engineModels]);
+  const writerOf = (f: VideoFormat) => (model?.options.formats?.includes(f) ? model : engineModels.find((m) => m.options.formats?.includes(f)));
+  const pickFormat = (f: VideoFormat) => {
+    const m = writerOf(f);
+    if (!m || m.id === model?.id) return setP({ format: f });
+    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, format: f, numOutputs: d.params.numOutputs, seed: d.params.seed } }));
+  };
+  const formatVia = (f: VideoFormat) => {
+    const m = writerOf(f);
+    return m && m.id !== model?.id ? `via ${m.name}` : undefined;
+  };
+  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops, studioFormats);
+  const outcome = config.clipFacts && draft.slots.video?.ref ? clipOutcome(effectiveOp, facts, p, model) : null;
+  // Export without a ComfyUI to write it (none connected, or the install runs cloud APIs only): say so and offer the cloud route.
+  const comfyMissing = !!config.comfyOnly && !!status && (engineMode === "cloud" || !status.providers.comfyui?.configured);
+  const video = draft.slots.video?.ref;
+  const alternative = config.comfyOnly?.alternative;
+  const alternativeHref = alternative && `${alternative.href}${video?.startsWith("/api/files/") ? `&video=${encodeURIComponent(video)}` : ""}`;
   const demo = !!(model && status && status.demoMode !== "off" && !model.routes.some((r) => status.providers[r.provider]?.configured));
   const costText = costLabel({ demo, cost }, formatCost);
 
@@ -384,7 +413,7 @@ export function Composer({ docked }: { docked: boolean }) {
         />
       )}
       {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
-      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} />}
+      {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} title={config.controlsTitle} />}
     </>
   );
   const hasSecondary =
@@ -627,6 +656,8 @@ export function Composer({ docked }: { docked: boolean }) {
             enhancing={enhancing}
             onRewrite={runEnhance}
             opNote={opNote}
+            onFormat={pickFormat}
+            formatVia={formatVia}
             className="max-sm:order-1"
             extras={
               hasSecondary ? (
@@ -674,6 +705,30 @@ export function Composer({ docked }: { docked: boolean }) {
           </TooltipContent>
         </Tooltip>
       </div>
+      {outcome && (
+        <p className="px-2 pt-1 text-[12px] text-muted-foreground tabular-nums" aria-live="polite">
+          {outcome}
+        </p>
+      )}
+      {comfyMissing && (
+        <div role="note" className="mx-1 mt-2 space-y-1 rounded-xl border border-dashed px-3 py-2 text-[12px] leading-snug text-muted-foreground">
+          <p>
+            {engineMode === "cloud"
+              ? "This install runs paid cloud APIs only (Settings → Engine mode), and no cloud API re-encodes a finished clip: export formats are written by ComfyUI on your own machine."
+              : config.comfyOnly!.note}{" "}
+            <Link href="/settings" className="font-medium text-brand-text underline-offset-2 hover:underline">
+              Open Settings
+            </Link>
+          </p>
+          {alternative && alternativeHref && engineMode !== "open" && (
+            <p>
+              <Link href={alternativeHref} onClick={() => setEngine("cloud")} className="font-medium text-brand-text underline-offset-2 hover:underline">
+                {alternative.label}
+              </Link>
+            </p>
+          )}
+        </div>
+      )}
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
       {signed.notes.length > 0 && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{signed.notes.join(" · ")}</p>}
       {model && op && model.options.endFrame === undefined && draft.slots.endImage?.ref && (

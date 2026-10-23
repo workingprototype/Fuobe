@@ -1,6 +1,6 @@
 /**
  * Studio hubs: Audio, Video tools and Upscale group several studios, one path per mode
- * (/audio/music, /video-tools/join, /upscale/video). The hub's own path is its first mode.
+ * (/audio/music, /video-tools/join, /upscale/video, /upscale/fps). The hub's own path is its first mode.
  * Pure data (client and server). Old `/audio?mode=music` links redirect in next.config.ts.
  */
 export type HubKind = "audio" | "video-tools" | "upscale";
@@ -9,6 +9,9 @@ export const HUB_MODES: Record<HubKind, { id: string; label: string }[]> = {
   upscale: [
     { id: "image", label: "Image" },
     { id: "video", label: "Video" },
+    { id: "fps", label: "FPS Boost" },
+    { id: "hdr", label: "SDR to HDR" },
+    { id: "export", label: "Export" },
   ],
   audio: [
     { id: "speech", label: "Speech" },
