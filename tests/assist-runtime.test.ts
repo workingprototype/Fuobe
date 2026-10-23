@@ -216,6 +216,18 @@ describe("new kinds and operations in the tools", () => {
     ]);
   });
 
+  it("hands a 3D model on to be rigged", () => {
+    const plan = tools.planFor(
+      "generate",
+      { summary: "A knight, rigged", jobs: [{ model_id: "tripo-h3-1-text", prompt: "A knight in plate armour" }, { model_id: "meshy-rigging", op: "rig-3d", prompt: "Rig it", after: 0 }] },
+      { engine: "cloud" },
+    );
+    expect(plan.jobs.map((j) => [j.op, j.error])).toEqual([
+      ["text-to-3d", undefined],
+      ["rig-3d", undefined],
+    ]);
+  });
+
   it("passes a background track to mux", async () => {
     const out = await tools.executeTool(
       "generate",

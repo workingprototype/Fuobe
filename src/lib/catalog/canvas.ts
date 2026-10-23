@@ -258,8 +258,14 @@ export function nodeLabel(n: Pick<CanvasNode, "type" | "data">): string {
 // ---------------------------------------------------------------------------
 // Models for generator nodes
 
-/** Ops the canvas can't feed (masks, browser-only tools, multi-speaker scripts, draft finishing). */
-const UNSUPPORTED_OPS = new Set<Operation>(["grade", "inpaint", "finalize", "dialogue"]);
+/**
+ * Ops the canvas can't feed (masks, browser-only tools, multi-speaker scripts, draft finishing, and
+ * inputs it has no port for: a 3D model to rig, a list of audio clips to join).
+ */
+const UNSUPPORTED_OPS = new Set<Operation>(["grade", "inpaint", "finalize", "dialogue", "rig-3d", "audio-join"]);
+
+/** Models that only run on a painted mask or clicked points (VACE inpaint, Bria's point eraser): the canvas has neither. */
+const needsMarks = (m: ModelDef) => !!(m.options.requires?.mask || m.options.requires?.points);
 
 /** Preferred defaults; anything missing falls back to the first catalog model for that op and engine. */
 const PREFERRED: Partial<Record<Operation, Partial<Record<Engine, string>>>> = {
@@ -322,10 +328,10 @@ export function defaultModelForNode(n: Pick<CanvasNode, "type" | "data">, engine
 export function modelChoices(n: Pick<CanvasNode, "type" | "data">): ModelDef[] {
   if (n.type === "model") {
     const kind = n.data.mediaKind;
-    return MODELS.filter((m) => !m.hidden && (!kind || m.kind === kind) && m.routes.some((r) => !UNSUPPORTED_OPS.has(r.op)));
+    return MODELS.filter((m) => !m.hidden && (!kind || m.kind === kind) && !needsMarks(m) && m.routes.some((r) => !UNSUPPORTED_OPS.has(r.op)));
   }
   const ops = nodeOps(n);
-  return MODELS.filter((m) => ops.some((op) => supportsOp(m, op)) && (!m.hidden || ops.includes("frame")));
+  return MODELS.filter((m) => ops.some((op) => supportsOp(m, op)) && (!m.hidden || ops.includes("frame")) && !needsMarks(m));
 }
 
 // ---------------------------------------------------------------------------
@@ -388,10 +394,27 @@ const OP_PORTS: Partial<Record<Operation, InputPortId[]>> = {
   "separate-audio": ["audio", "video"],
   translate: ["prompt"],
   write: ["prompt"],
+  vectorize: ["images"],
+  // round 4 (masks, clicked points and keyframe times are set outside the canvas)
+  "remove-object": ["prompt", "video"],
+  "video-swap": ["prompt", "elements", "video", "images"],
+  "video-insert": ["prompt", "elements", "video", "images"],
+  keyframes: ["prompt", "images"],
+  "sdr-to-hdr": ["video"],
+  "export-video": ["video"],
+  ocr: ["images"],
+  "still-motion": ["images"],
+  "audio-loop": ["audio"],
+  "scene-3d": ["images"],
+  splat: ["images"],
+  "text-to-3d": ["prompt"],
+  "extract-frames": ["video"],
+  "images-to-video": ["images"],
+  overlay: ["images"],
 };
 
 /** Ops whose images list takes several images. */
-const MULTI_IMAGE_OPS = new Set<Operation>(["edit", "ref2v", "face-swap", "color-match", "relight-video"]);
+const MULTI_IMAGE_OPS = new Set<Operation>(["edit", "ref2v", "face-swap", "color-match", "relight-video", "video-swap", "video-insert", "keyframes", "images-to-video", "overlay"]);
 
 const TEXT_LABEL_OPS = new Set<Operation>(["tts", "translate", "write", "sfx", "music"]);
 

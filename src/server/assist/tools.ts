@@ -306,8 +306,11 @@ function toRequest(j: JobInput): GenerationRequest {
 function slotFor(kind: MediaKind, op: Operation | undefined): ChainSlot {
   if (kind === "text") return { slot: "prompt" };
   if (kind === "video") return { slot: op === "concat" ? "videos" : "video" };
-  // tts clones the earlier audio's voice; voice-change re-voices the earlier audio (its target voice is voice_audio).
-  if (kind === "audio") return { slot: op === "tts" ? "voiceAudio" : "audio" };
+  // tts clones the earlier audio's voice; voice-change re-voices the earlier audio (its target voice is voice_audio);
+  // a join takes it as one of its clips.
+  if (kind === "audio") return { slot: op === "tts" ? "voiceAudio" : op === "audio-join" ? "audios" : "audio" };
+  // A mesh goes on to be rigged.
+  if (kind === "model3d") return { slot: "model3d" };
   return { slot: "images", position: "first" };
 }
 
