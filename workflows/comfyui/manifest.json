@@ -11921,19 +11921,19 @@
           "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-          "sizeGb": null
+          "sizeGb": 6.74
         },
         {
           "file": "wan_2.1_vae.safetensors",
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
-          "sizeGb": null
+          "sizeGb": 0.25
         },
         {
           "file": "wan2.1_vace_14B_fp16.safetensors",
           "folder": "diffusion_models",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
-          "sizeGb": null
+          "sizeGb": 34.68
         },
         {
           "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
