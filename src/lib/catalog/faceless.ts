@@ -379,6 +379,26 @@ export interface EpisodeSettings {
   sourceImages?: string[];
   /** Explainer "Auto": the script decides the length. */
   auto?: boolean;
+  /** Content Factory: a reference clip's style brief, applied to the script and the look. */
+  brief?: BriefLook;
+}
+
+/**
+ * How a style brief (src/lib/catalog/content-factory.ts) shapes an episode: lines for the script writer, words
+ * added to every picture and motion prompt, the music's mood, the scene length the writer aims for, the captions.
+ */
+export interface BriefLook {
+  /** For the script writer: format, hook, pacing, shot types, the narrator's tone. */
+  script: string[];
+  /** Added to every picture's prompt (medium, palette, lighting, texture). */
+  look?: string;
+  /** Added to every motion prompt (how the camera moves, how scenes connect). */
+  camera?: string;
+  /** The music bed's mood (instead of the genre's). */
+  music?: string;
+  /** Seconds of narration a scene carries (a faster cut rate: more, shorter scenes). */
+  sceneSeconds?: number;
+  captions?: { position?: "top" | "center" | "bottom"; words?: number };
 }
 
 export interface ScriptBlock {
@@ -415,10 +435,10 @@ export const blockCount = (seconds: number) => Math.max(1, Math.round(seconds / 
 /** Words a block of this length can carry when the script is written. */
 export const wordsFor = (seconds: number) => Math.max(4, Math.floor(seconds * WRITE_WORDS_PER_SECOND));
 
-/** Split a length into blocks of at most 10 s, as even as possible (25 s → 9 + 8 + 8). */
-export function planBlocks(seconds: number): number[] {
+/** Split a length into blocks of at most 10 s (or `max`), as even as possible (25 s → 9 + 8 + 8). */
+export function planBlocks(seconds: number, max = BLOCK_SECONDS): number[] {
   const total = Math.max(MIN_BLOCK, Math.round(seconds));
-  const n = Math.ceil(total / BLOCK_SECONDS);
+  const n = Math.ceil(total / Math.max(MIN_BLOCK, Math.min(BLOCK_SECONDS, max)));
   const base = Math.floor(total / n);
   const extra = total - base * n;
   return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
@@ -715,24 +735,26 @@ export function blockShots(seconds: number, model: ModelDef | undefined): number
 
 const clean = (s: string) => s.replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "");
 
-/** The picture for a block, in the episode's style (or its style references). */
-export function stillPrompt(style: VisualStyle, block: Pick<ScriptBlock, "visual">, o: { aspect: EpisodeAspect; refs: number; sources?: number } = { aspect: "16:9", refs: 0 }): string {
+/** The picture for a block, in the episode's style (or its style references), with a brief's look words. */
+export function stillPrompt(style: VisualStyle, block: Pick<ScriptBlock, "visual">, o: { aspect: EpisodeAspect; refs: number; sources?: number; look?: string } = { aspect: "16:9", refs: 0 }): string {
   const frame = o.aspect === "9:16" ? "Vertical 9:16 composition, the subject centred for a phone screen" : "Wide 16:9 composition";
   const look = o.refs
     ? `Draw it in the exact visual style of the reference image${o.refs > 1 ? "s" : ""}: the same technique, palette, line and texture`
     : `Style: ${style.look}`;
   const sources = o.sources ? `Use the attached source picture${o.sources > 1 ? "s" : ""} for what the subject looks like` : "";
-  return [clean(block.visual), look, sources, frame, "No text, letters, captions or watermarks in the image"].filter(Boolean).join(". ") + ".";
+  const brief = o.look?.trim() && !o.refs ? `Look: ${clean(o.look)}` : "";
+  return [clean(block.visual), look, brief, sources, frame, "No text, letters, captions or watermarks in the image"].filter(Boolean).join(". ") + ".";
 }
 
 /** What moves when a block's still is animated (Fully animated; Frame by frame moves the camera with no model, see sceneMoves). */
-export function motionPrompt(style: VisualStyle, block: Pick<ScriptBlock, "motion">, shot = 0): string {
+export function motionPrompt(style: VisualStyle, block: Pick<ScriptBlock, "motion">, shot = 0, camera?: string): string {
   const then = shot ? "The camera keeps moving from where the last shot ended. " : "";
-  return `${then}${clean(block.motion) || DEFAULT_MOTION}. ${style.motion.charAt(0).toUpperCase()}${style.motion.slice(1)}. Keep the art style, characters and colours exactly as in the first frame. No text.`;
+  const brief = camera?.trim() ? ` Camera: ${clean(camera)}.` : "";
+  return `${then}${clean(block.motion) || DEFAULT_MOTION}. ${style.motion.charAt(0).toUpperCase()}${style.motion.slice(1)}.${brief} Keep the art style, characters and colours exactly as in the first frame. No text.`;
 }
 
-export const musicPrompt = (genre: GenreInfo, style: VisualStyle) =>
-  `Instrumental background music for a narrated video: ${genre.music}. It sits under a voice-over, no vocals, steady level, no sudden hits. Mood to match ${style.name.toLowerCase()} visuals.`;
+export const musicPrompt = (genre: GenreInfo, style: VisualStyle, mood?: string) =>
+  `Instrumental background music for a narrated video: ${mood?.trim() ? clean(mood) : genre.music}. It sits under a voice-over, no vocals, steady level, no sudden hits. Mood to match ${style.name.toLowerCase()} visuals.`;
 
 // ---------------------------------------------------------------------------
 // The render graph
@@ -958,7 +980,7 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
             ...base,
             modelId: models.still,
             ...(models.stillOp && { op: models.stillOp }),
-            prompt: stillPrompt(style, b, { aspect: ar, refs: refCount, sources: stillImages.length - refCount }),
+            prompt: stillPrompt(style, b, { aspect: ar, refs: refCount, sources: stillImages.length - refCount, look: settings.brief?.look }),
             ...(stillImages.length && { inputs: { images: stillImages } }),
             params: { aspectRatio: ar, numOutputs: 1 },
             step: { label, index: i, of: n },
@@ -1006,7 +1028,7 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
               ...base,
               modelId: models.video,
               op: "i2v",
-              prompt: motionPrompt(style, b, s),
+              prompt: motionPrompt(style, b, s, settings.brief?.camera),
               params: {
                 aspectRatio: ar,
                 duration: secs,
@@ -1092,7 +1114,7 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
         ...base,
         modelId: models.music,
         op: "music",
-        prompt: musicPrompt(input.genre, style),
+        prompt: musicPrompt(input.genre, style, settings.brief?.music),
         params: { duration: bed, numOutputs: 1, ...(settings.engine === "open" && { extra: { lyrics: "[Instrumental]" } }) },
         step: { label: "Music", index: n, of: n },
       },
@@ -1154,6 +1176,9 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
   if (models.captions) {
     const words = models.captionsUseWords;
     const vertical = ar === "9:16";
+    // A brief's caption style: where they sit and how many words show at once (the open burn-in has no centre).
+    const cap = settings.brief?.captions;
+    const per = cap?.words ? Math.max(1, Math.min(8, Math.round(cap.words))) : vertical ? 3 : 5;
     steps.push({
       key: "captions",
       part: "captions",
@@ -1166,7 +1191,9 @@ export function buildEpisodeGraph(input: GraphInput, lookup: ModelLookup): Graph
         modelId: models.captions,
         op: "captions",
         title: input.title,
-        params: words ? { extra: { fontSize: vertical ? 4 : 6, wordsPerCaption: vertical ? 3 : 5 } } : { extra: { words_per_subtitle: vertical ? 3 : 5 } },
+        params: words
+          ? { extra: { fontSize: vertical ? 4 : 6, wordsPerCaption: per, ...(cap?.position && { captionPosition: cap.position === "top" ? "top" : "bottom" }) } }
+          : { extra: { words_per_subtitle: per, ...(cap?.position && { position: cap.position }) } },
         step: { label: "Subtitles", index: n, of: n },
       },
     });
@@ -1480,9 +1507,9 @@ export function estimateGraph(graph: GraphStep[], lookup: ModelLookup, only?: It
   return { total: Math.round(total * 100) / 100, parts, unknown };
 }
 
-/** Blocks for an estimate before the script exists: the target length in 10-second blocks. */
-export function placeholderBlocks(seconds: number): ScriptBlock[] {
-  return planBlocks(seconds).map((secs, i) => {
+/** Blocks for an estimate before the script exists: the target length in 10-second blocks (or `sceneSeconds`). */
+export function placeholderBlocks(seconds: number, sceneSeconds = BLOCK_SECONDS): ScriptBlock[] {
+  return planBlocks(seconds, sceneSeconds).map((secs, i) => {
     const words = Math.floor(secs * WRITE_WORDS_PER_SECOND);
     return { id: `p${i}`, narration: Array.from({ length: words }, () => "word").join(" "), visual: "A scene", motion: DEFAULT_MOTION, seconds: secs };
   });
@@ -1686,6 +1713,8 @@ export interface ScriptBrief {
   /** Explainer: the length decides itself. */
   auto?: boolean;
   subtitles?: boolean;
+  /** Content Factory: the reference's style brief (format, hook, pacing, shots, tone). */
+  style?: string[];
 }
 
 export function scriptBrief(b: ScriptBrief): string {
@@ -1699,9 +1728,10 @@ export function scriptBrief(b: ScriptBrief): string {
     b.styleName ? `The pictures are drawn as ${b.styleName}.` : "",
     b.auto
       ? `Use as many scenes as the topic needs: between 4 and 12, each at most ${b.wordsPerScene} words of narration.`
-      : `Write exactly ${b.scenes} scenes, each at most ${b.wordsPerScene} words of narration (about 10 seconds spoken).`,
+      : `Write exactly ${b.scenes} scenes, each at most ${b.wordsPerScene} words of narration (about ${Math.max(MIN_BLOCK, Math.round(b.wordsPerScene / WRITE_WORDS_PER_SECOND))} seconds spoken).`,
     els,
     b.reference ? `Match the pacing and tone of: ${b.reference}` : "",
+    b.style?.length ? `Follow this style brief:\n${b.style.map((l) => `- ${l}`).join("\n")}` : "",
     b.sources?.length ? `Base the facts on these sources:\n${b.sources.map((s, i) => `[${i + 1}] ${s}`).join("\n\n")}` : "",
   ]
     .filter(Boolean)
@@ -1909,7 +1939,7 @@ export interface ChannelReference {
 }
 
 /** Saved on the channel so every episode looks and sounds the same. */
-export type ChannelSettings = Pick<EpisodeSettings, "engine" | "styleId" | "styleRefs" | "voice" | "aspect" | "subtitles" | "music" | "animation" | "length">;
+export type ChannelSettings = Pick<EpisodeSettings, "engine" | "styleId" | "styleRefs" | "voice" | "aspect" | "subtitles" | "music" | "animation" | "length" | "brief">;
 
 export interface FacelessChannel {
   id: string;
