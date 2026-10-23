@@ -40,6 +40,29 @@ describe("record pages (real 404s)", () => {
     }
   });
 
+  it("matches every id page in src/app, and none of the static pages beside them", () => {
+    // The table is written by hand: a page added later under a record path (/shorts/new, /cinema/templates)
+    // would be answered with the 404 page. Scan the app's pages so that can't go unnoticed.
+    const app = path.join(process.cwd(), "src/app");
+    const routes: string[] = [];
+    const walk = (dir: string, segs: string[]) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.isDirectory() && !(segs.length === 0 && e.name === "api") && !e.name.startsWith("_")) walk(path.join(dir, e.name), /^\(.*\)$/.test(e.name) ? segs : [...segs, e.name]);
+        else if (e.name === "page.tsx") routes.push(`/${segs.join("/")}`);
+      }
+    };
+    walk(app, []);
+    expect(routes.length).toBeGreaterThan(40);
+    // Ids the catalog answers for (apps, hub modes), not stored records: the proxy checks those itself.
+    const catalog = /^\/(apps|audio|video-tools|upscale)\/\[/;
+    for (const route of routes) {
+      if (!route.includes("[")) {
+        expect(recordForPath(route), route).toBeNull();
+        expect(unknownHubMode(route), route).toBe(false);
+      } else if (!catalog.test(route)) expect(recordForPath(route.replace(/\[[^\]]+\]/g, "x1")), route).not.toBeNull();
+    }
+  });
+
   it("knows each hub's modes", () => {
     expect(unknownHubMode("/audio/music")).toBe(false);
     expect(unknownHubMode("/video-tools/trim/")).toBe(false);
