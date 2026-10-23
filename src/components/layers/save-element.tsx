@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, BookmarkPlus, Loader2 } from "lucide-react";
+import { BookmarkPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -61,10 +61,7 @@ export function SaveElementDialog({ node, open, onOpenChange }: { node: LayerNod
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Save as element</DialogTitle>
-          <DialogDescription>
-            The layer&apos;s picture (transparency kept) becomes a reusable element. Mention it with <AtSign className="inline size-3" />
-            its name in any prompt to bring it back.
-          </DialogDescription>
+          <DialogDescription>The layer&apos;s picture (transparency kept) becomes a reusable element: mention it by its @name in any prompt to bring it back.</DialogDescription>
         </DialogHeader>
         <form
           className="space-y-4"

@@ -537,7 +537,7 @@ export function Stage(p: StageProps) {
               </>
             )}
             {(mode === "brush" || mode === "eraser" || mode === "inpaint") && (
-              <div className="flex w-32 shrink-0 items-center gap-2 px-2">
+              <div className="flex w-24 shrink-0 items-center gap-2 px-2 xl:w-32">
                 <Slider aria-label="Brush size" min={4} max={Math.max(64, Math.round(Math.max(doc.width, doc.height) / 6))} step={1} value={[p.brushSize]} onValueChange={([v]) => p.setBrushSize(v)} />
               </div>
             )}
