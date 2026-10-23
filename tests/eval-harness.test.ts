@@ -239,7 +239,7 @@ describe("the runner on the demo provider", () => {
     try {
       const dry = await cli(["run", "--suite", "soul", "--engine", "cloud", "--looks", "v2-flash-editorial,v1-general", "--dry-run", "--json"]);
       const plan = JSON.parse(dry.stdout);
-      expect(plan).toMatchObject({ engine: "cloud", runnable: 6, skipped: 0, maxUsd: 5 });
+      expect(plan).toMatchObject({ engine: "cloud", total: 6, runnable: 6, skipped: 0, maxUsd: 5 });
       expect(plan.estimateUsd).toBeGreaterThan(0);
       const flash = plan.jobs.find((j: { case: string }) => j.case === "soul/v2-flash-editorial");
       // On the cloud the civitai Hard Flash LoRA is left out (its link needs a token); fal's LoRA endpoint takes the HF one.

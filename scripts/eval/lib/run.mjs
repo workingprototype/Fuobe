@@ -147,7 +147,8 @@ export async function runEval(opts, io) {
 
   if (opts.dryRun) {
     const final = planSummary(jobs);
-    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, ...final, estimateUsd: estimate, unknownCost, maxUsd, jobs: jobs.map(publicJob) };
+    const { jobs: total, ...counts } = final;
+    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, total, ...counts, estimateUsd: estimate, unknownCost, maxUsd: Number.isFinite(maxUsd) ? maxUsd : null, jobs: jobs.map(publicJob) };
   }
   if (engine === "cloud" && estimate > maxUsd) {
     throw new Error(`This run would cost about ${money(estimate)}, over the spend cap of ${money(maxUsd)}. Raise it with --max-usd ${Math.ceil(estimate)} or run fewer jobs (--looks, --cases, --limit, --prompts).`);

@@ -41,11 +41,12 @@ a { color: var(--accent); }
 .muted { color: var(--muted); }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .chip { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border-radius: 999px; background: var(--chip); font-size: 12px; white-space: nowrap; }
-.chip.good { color: var(--good); } .chip.bad { color: var(--bad); }
+.chip.good, .good-text { color: var(--good); } .chip.bad, .bad-text { color: var(--bad); }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; min-width: 0; }
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
 .media { width: 100%; aspect-ratio: 1; object-fit: contain; background: var(--chip); border-radius: 8px; display: block; }
-.facts { display: grid; gap: 4px 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); margin: 12px 0; }
+.facts { display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); margin: 12px 0; }
+@media (max-width: 480px) { .facts { grid-template-columns: 1fr 1fr; } }
 .facts div { min-width: 0; } .facts b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
 .btn { appearance: none; border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }

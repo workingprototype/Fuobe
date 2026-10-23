@@ -37,7 +37,8 @@ export function jobScores(row, metricsDoc) {
   if (row.status === "succeeded" && ms != null) out.seconds = Math.round(ms / 100) / 10;
   const cost = row.costUsd?.actual ?? row.costUsd?.estimate;
   if (row.status === "succeeded" && cost != null) out.costUsd = cost;
-  const vram = row.vram?.torchPeakGb ?? row.vram?.peakUsedGb;
+  // On a CPU ComfyUI the device's memory is the whole machine's RAM: kept in the row, not scored as VRAM.
+  const vram = row.vram?.type === "cpu" ? null : (row.vram?.torchPeakGb ?? row.vram?.peakUsedGb);
   if (vram != null) out.vramGb = vram;
   return out;
 }
@@ -194,8 +195,9 @@ function chips(scores, keys) {
 
 /** The contact sheet. */
 export function reportHtml(summary) {
-  const keys = summary.metrics.keys;
   const free = summary.engine !== "cloud";
+  // Cost is in each card's first line; per metric it only matters on the cloud.
+  const keys = summary.metrics.keys.filter((k) => !(free && k === "costUsd"));
   const variantCards = Object.entries(summary.variants)
     .map(([v, s]) => {
       const lines = keys.filter((k) => s.mean[k] != null).map((k) => `<div class="stat"><span>${esc(METRIC_INFO[k].label)}</span><span>${k === "costUsd" ? esc(money(s.mean[k])) : esc(fmt(k, s.mean[k]))} <span class="muted">n=${s.n[k]}</span></span></div>`);
@@ -206,8 +208,9 @@ export function reportHtml(summary) {
     .filter((p) => Object.keys(p.metrics).length)
     .map(
       (p) =>
-        `<div class="card"><h3>${esc(p.base)} vs ${esc(p.other)}</h3>${Object.entries(p.metrics)
-          .map(([k, s]) => `<div class="stat"><span>${esc(METRIC_INFO[k].label)}</span><span><span class="chip good">${s.wins} better</span> <span class="chip bad">${s.losses} worse</span> <span class="chip">${s.ties} same</span></span></div>`)
+        `<div class="card"><h3>${esc(p.base)} against ${esc(p.other)}</h3><p class="muted" style="font-size:12px">How often ${esc(p.base)} is better, worse or the same on the same case, prompt and seed</p>${Object.entries(p.metrics)
+          .filter(([k]) => keys.includes(k))
+          .map(([k, s]) => `<div class="stat"><span>${esc(METRIC_INFO[k].label)}</span><span><span class="good-text">${s.wins} better</span> · <span class="bad-text">${s.losses} worse</span> · ${s.ties} same</span></div>`)
           .join("")}</div>`,
     )
     .join("");
@@ -253,7 +256,7 @@ ${summary.comfy ? `<div><b>ComfyUI</b>${esc(summary.comfy.version ?? (summary.co
 ${skipped.length ? `<p class="muted">Not scored: ${skipped.map(([k, v]) => `${esc(k)} (${esc(v)})`).join("; ")}</p>` : ""}
 ${summary.skips.length ? `<p class="muted">Skipped jobs: ${summary.skips.map((s) => `${s.count} × ${esc(s.reason)}`).join("; ")}</p>` : ""}
 <h2>Variants</h2><div class="stats">${variantCards}</div>
-${pairCards ? `<h2>Same case, same seed</h2><div class="stats">${pairCards}</div>` : ""}
+${pairCards ? `<h2>Variant against variant</h2><div class="stats">${pairCards}</div>` : ""}
 ${ratings}
 <h2>Cases</h2>
 ${caseBlocks}

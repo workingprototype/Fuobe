@@ -3,7 +3,8 @@
 // compare A B: the jobs both runs made (same case, prompt, seed and variant; or two variants named
 // with run:variant), per metric how often B is better, worse or the same as A, and the mean gain.
 // With --fail-on, it exits non-zero when a chosen metric's mean gets worse by more than --threshold
-// (an absolute amount in the metric's units, or a percentage of A's mean like 5%).
+// (an absolute amount in the metric's units, a percentage of A's mean like 5%, or by default the
+// metric's noise band from metric-info.mjs).
 //
 // promote: a recipe becomes a look's default only when it wins (see PROMOTE_RULE). The command
 // writes promote.json and says what to change; the catalog default stays a code change a person
@@ -81,7 +82,7 @@ export function compareRuns(a, b, opts = {}) {
       regressions.push({ metric, reason: `no ${metric} scores in both runs`, missing: true });
       continue;
     }
-    const limit = thresholdFor(opts.threshold, row.meanA);
+    const limit = thresholdFor(opts.threshold, row.meanA, metric);
     if (row.meanGain < -limit) regressions.push({ metric, reason: `mean ${fmt(metric, row.meanA)} → ${fmt(metric, row.meanB)} (${signed(metric, row.meanGain)}), worse than the ${fmt(metric, limit)} allowed` });
     if (opts.perCase) {
       for (const c of perCase) {
@@ -104,9 +105,9 @@ export function compareRuns(a, b, opts = {}) {
   };
 }
 
-/** --threshold: a number in the metric's units, "5%" of A's mean, or the metric's tie band when not given. */
-function thresholdFor(t, base) {
-  if (t == null || t === "") return 0;
+/** --threshold: a number in the metric's units, "5%" of A's mean, or (not given) the metric's own noise band. */
+function thresholdFor(t, base, metric) {
+  if (t == null || t === "") return METRIC_INFO[metric]?.tie ?? 0;
   const s = String(t).trim();
   if (s.endsWith("%")) return (Math.abs(base ?? 0) * Number(s.slice(0, -1))) / 100;
   const n = Number(s);

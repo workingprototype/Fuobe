@@ -214,10 +214,10 @@ async function run(args, ctx) {
       if (v.json) return ctx.print(JSON.stringify(result, null, 2)), 0;
       const free = engine !== "cloud";
       ctx.print(`${suite.title} on ${engine} (${result.server})`);
-      ctx.print(`${result.jobs} jobs · ${result.runnable} can run · ${result.skipped} skipped · ${result.cases} cases · estimated ${free ? "Free" : money(result.estimateUsd)}${result.unknownCost ? ` (+${result.unknownCost} without a price)` : ""}${engine === "cloud" ? ` · cap ${money(result.maxUsd)}` : ""}`);
+      ctx.print(`${result.total} jobs · ${result.runnable} can run · ${result.skipped} skipped · ${result.cases} cases · estimated ${free ? "Free" : money(result.estimateUsd)}${result.unknownCost ? ` (+${result.unknownCost} without a price)` : ""}${engine === "cloud" ? ` · cap ${money(result.maxUsd)}` : ""}`);
       if (result.models.length) ctx.print(`Models: ${result.models.join(", ")} · variants: ${result.variants.join(", ")}`);
       for (const [why, n] of Object.entries(result.skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 8)) ctx.print(`  ${n} skipped: ${why}`);
-      if (v.list) for (const j of result.jobs) ctx.print(`  ${j.skip ? "·" : "▸"} ${j.case} · ${j.variant} · ${j.prompt} · s${j.seed} · ${j.model} · ${j.costUsd == null ? "?" : free ? "Free" : money(j.costUsd)}${j.loras?.applied ? ` · ${j.loras.applied.join(" + ") || "no LoRAs"}` : ""}${j.skip ? ` — ${j.skip}` : ""}`);
+      if (v.list) for (const j of result.jobs) ctx.print(`  ${j.skip ? "·" : "▸"} ${j.case} · ${j.variant} · ${j.prompt} · s${j.seed} · ${j.model}${j.skip ? "" : ` · ${j.costUsd == null ? "price unknown" : free ? "Free" : money(j.costUsd)}`}${j.loras?.applied ? ` · ${j.loras.applied.join(" + ") || "no LoRAs"}` : ""}${j.skip ? ` — ${j.skip}` : ""}`);
       return 0;
     }
     if (v["no-report"]) {

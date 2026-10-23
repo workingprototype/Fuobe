@@ -98,15 +98,26 @@ export function writeReview(run, opts = {}) {
 /** The review page: one pair at a time, keyboard first, works on a phone. */
 export function reviewHtml(runId, items) {
   const css = `
+/* Both results stay side by side, on a phone too: an A/B is judged by looking at the two at once. */
 .pair { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
-@media (max-width: 640px) { .pair { grid-template-columns: 1fr; } }
 .side { position: relative; border: 2px solid var(--border); border-radius: 12px; padding: 8px; background: var(--card); min-width: 0; }
 .side.picked { border-color: var(--accent); }
 .side .tag { position: absolute; top: 12px; left: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; font-weight: 600; }
 .side img, .side video { width: 100%; max-height: 62vh; object-fit: contain; display: block; border-radius: 8px; background: var(--chip); }
 .bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 0; margin-top: 16px; }
 .bar .row { justify-content: center; }
+.keys { text-align: center; margin-top: 8px; font-size: 12px; }
 progress { width: 100%; height: 6px; accent-color: var(--accent); }
+@media (max-width: 640px) {
+  .pair { gap: 6px; }
+  .side { padding: 4px; border-radius: 10px; }
+  .side .tag { top: 8px; left: 8px; font-size: 12px; }
+  .bar .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .bar .btn { padding: 10px 6px; }
+  .bar .btn.minor { grid-column: span 1; }
+}
+/* Touch screens: no keyboard hints. */
+@media (hover: none) { .keys, .bar kbd { display: none; } }
 `;
   const body = `<main>
 <div class="row" style="justify-content:space-between"><h1>Blind review</h1><div class="row"><button class="btn" type="button" id="download">Download ratings</button><button class="btn" type="button" onclick="toggleTheme()">Light / dark</button></div></div>
@@ -116,12 +127,12 @@ progress { width: 100%; height: 6px; accent-color: var(--accent); }
 <p id="count" class="muted"></p>
 <section id="stage" aria-live="polite"></section>
 <div class="bar"><div class="row">
-<button class="btn" type="button" data-choice="left"><kbd>←</kbd> Left is better</button>
-<button class="btn" type="button" data-choice="same"><kbd>↓</kbd> About the same</button>
-<button class="btn" type="button" data-choice="right">Right is better <kbd>→</kbd></button>
-<button class="btn" type="button" data-choice="skip"><kbd>S</kbd> Skip</button>
-<button class="btn" type="button" id="undo"><kbd>U</kbd> Undo</button>
-</div><p class="muted" style="text-align:center;margin-top:8px;font-size:12px">Keys: <kbd>←</kbd>/<kbd>1</kbd> left · <kbd>→</kbd>/<kbd>2</kbd> right · <kbd>↓</kbd>/<kbd>0</kbd>/<kbd>Space</kbd> same · <kbd>S</kbd> skip · <kbd>U</kbd> undo</p></div>
+<button class="btn primary" type="button" data-choice="left"><kbd>←</kbd> Left is better</button>
+<button class="btn" type="button" data-choice="same"><kbd>↓</kbd> Same</button>
+<button class="btn primary" type="button" data-choice="right">Right is better <kbd>→</kbd></button>
+<button class="btn minor" type="button" data-choice="skip"><kbd>S</kbd> Skip</button>
+<button class="btn minor" type="button" id="undo"><kbd>U</kbd> Undo</button>
+</div><p class="muted keys">Keys: <kbd>←</kbd>/<kbd>1</kbd> left · <kbd>→</kbd>/<kbd>2</kbd> right · <kbd>↓</kbd>/<kbd>0</kbd>/<kbd>Space</kbd> same · <kbd>S</kbd> skip · <kbd>U</kbd> undo</p></div>
 </main>`;
   const script = `
 const RUN = ${JSON.stringify(runId)};

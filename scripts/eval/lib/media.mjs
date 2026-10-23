@@ -39,6 +39,7 @@ export function localInputs(inputs) {
 export function uploader(client, runDir, { dry = false, log = () => {} } = {}) {
   const cacheFile = runDir ? path.join(runDir, "uploads.json") : null;
   const cache = (cacheFile && readJson(cacheFile, {})) || {};
+  const pending = new Map();
   const keyOf = (abs) => {
     const st = fs.statSync(abs);
     return `${abs}|${st.size}|${Math.round(st.mtimeMs)}`;
@@ -51,15 +52,9 @@ export function uploader(client, runDir, { dry = false, log = () => {} } = {}) {
       if (dry) return `/api/files/uploads/estimate/${path.basename(ref)}`;
       const key = keyOf(ref);
       if (cache[key]) return cache[key];
-      const type = contentType(ref);
-      const blob = typeof fs.openAsBlob === "function" ? await fs.openAsBlob(ref, { type }) : new Blob([fs.readFileSync(ref)], { type });
-      const form = new FormData();
-      form.append("file", blob, path.basename(ref));
-      log(`Uploading ${path.basename(ref)}`);
-      const asset = await client.request("POST", "/api/uploads", { form });
-      cache[key] = asset.url;
-      if (cacheFile) writeJson(cacheFile, cache);
-      return asset.url;
+      // The same file twice in one request (a clip joined to itself) goes up once.
+      if (!pending.has(key)) pending.set(key, send(ref, key).finally(() => pending.delete(key)));
+      return pending.get(key);
     },
     /** The same inputs with every local path replaced by its URL. */
     async inputs(inputs) {
@@ -68,6 +63,18 @@ export function uploader(client, runDir, { dry = false, log = () => {} } = {}) {
       return out;
     },
   };
+  /** Upload one file and remember its URL. */
+  async function send(ref, key) {
+    const type = contentType(ref);
+    const blob = typeof fs.openAsBlob === "function" ? await fs.openAsBlob(ref, { type }) : new Blob([fs.readFileSync(ref)], { type });
+    const form = new FormData();
+    form.append("file", blob, path.basename(ref));
+    log(`Uploading ${path.basename(ref)}`);
+    const asset = await client.request("POST", "/api/uploads", { form });
+    cache[key] = asset.url;
+    if (cacheFile) writeJson(cacheFile, cache);
+    return asset.url;
+  }
 }
 
 /** ffprobe's facts about a clip: {duration, fps, width, height, hasAudio}, or {} when ffprobe isn't there. */
