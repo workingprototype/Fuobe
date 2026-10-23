@@ -1,9 +1,10 @@
 // Cinema Studio's 3D scene in a real browser (the app must be running in demo mode; WebGL runs on SwiftShader).
 // Usage: node tests/e2e/cinema-scene.mjs [appUrl] [--shots=dir]. Exits 1 on the first failure.
 //
-// 1. Cloud: "Create 3D scene" on a still asks first with the price, builds the demo depth map, and the viewer
-//    opens it as a point cloud; W A S D and the arrows move the view; Capture uploads the frame as a PNG in the
-//    frame's ratio and queues a recomposition with the capture as image 1 and the still as image 2.
+// 1. Cloud: "Create 3D scene" on a still asks first with the price, builds the demo depth map (painted with the
+//    Spectral colour map, as Marigold's), and the viewer opens it as a point cloud; W A S D and the arrows move the
+//    view; Capture uploads the frame as a PNG in the frame's ratio and queues a recomposition with the capture as
+//    image 1 and the still as image 2. "Don't ask again" skips the question at that price until the toast's "Ask first".
 // 2. Open engine: the scene is MoGe's mesh (the demo GLB here) and opens with its triangle count; at 390 px the
 //    viewer fits, offers the Camera sheet and keeps Capture in reach.
 import assert from "node:assert/strict";
@@ -75,6 +76,7 @@ try {
   await dialog.getByText("Cloud · Marigold V2 depth").waitFor();
   await dialog.getByRole("button", { name: /Build 3D scene · Demo · free/ }).waitFor();
   await shoot(page, "scene-create-dialog");
+  await dialog.getByRole("checkbox", { name: "Don't ask again at this price" }).click();
   await dialog.getByRole("button", { name: /Build 3D scene/ }).click();
   await page.locator("[data-sonner-toast]").filter({ hasText: "Your 3D scene is ready" }).getByRole("button", { name: "Open" }).click({ timeout: 90_000 });
   await page.getByText(/Point cloud from a depth map · \d+k points/).waitFor({ timeout: 60_000 });
@@ -108,6 +110,16 @@ try {
   const png = Buffer.from(await (await (await api).fetch(app + capture)).body());
   assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [864, 1536], "the capture is the 9:16 frame");
   await page.getByRole("button", { name: "Close the 3D scene" }).click();
+
+  step("Don't ask again holds at this price: the next build names it in its toast, which can turn the question back on");
+  const quick = page.getByRole("button", { name: "Create 3D scene · Demo · free" }).last();
+  await quick.click({ force: true });
+  const built = page.locator("[data-sonner-toast]").filter({ hasText: "Demo · free · It appears next to the still" });
+  await built.getByRole("button", { name: "Ask first" }).click({ timeout: 30_000 });
+  assert.equal(await page.getByRole("dialog").count(), 0, "no question while skipped");
+  await quick.click({ force: true });
+  await page.getByRole("dialog").getByText("Cloud · Marigold V2 depth").waitFor();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await ctx.close();
 
   step("open engine: MoGe's mesh opens, and fits a phone with the Camera sheet");

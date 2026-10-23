@@ -30,7 +30,7 @@ import { foreign, useAutosave, useCinemaGenerate, useCinemaItems, useCinemaProje
 import { cutGrid } from "./media";
 import { ProjectDialog } from "./project-settings";
 import { PromptBar, useAddRefs } from "./prompt-bar";
-import { SceneCreateDialog, sceneTake, skipSceneConfirm, usePlanPrice, useScenePlan, type SceneTake } from "./scene-actions";
+import { SceneCreateDialog, askSceneConfirmAgain, sceneTake, skipSceneConfirm, usePlanPrice, useScenePlan, type SceneTake } from "./scene-actions";
 import { SidePanel } from "./side-panel";
 import { SoulCastDialog, SoulLocationDialog } from "./soul-builders";
 
@@ -214,7 +214,8 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
   const scenePrice = usePlanPrice(useScenePlan(ANY_STILL, undefined, sceneCtx)).label;
   const scenePlan = useScenePlan(sceneFrom?.url ?? null, sceneFrom?.g.request.params?.aspectRatio, sceneCtx);
   const building = useRef(new Set<string>());
-  const createScene = (g: CinemaGeneration, url: string) => {
+  /** `asked` = false when "Don't ask again" skipped the dialog: the toast then names the price and can undo that. */
+  const createScene = (g: CinemaGeneration, url: string, asked = true) => {
     setSceneFrom(null);
     generate.mutate(
       {
@@ -224,7 +225,11 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
       {
         onSuccess: (r) => {
           r.items.forEach((x) => building.current.add(x.id));
-          toast(engine === "open" ? "Building the 3D scene on your ComfyUI…" : "Building the 3D scene…", { description: "It appears next to the still; you'll get a note when it's ready.", duration: 3000 });
+          toast(engine === "open" ? "Building the 3D scene on your ComfyUI…" : "Building the 3D scene…", {
+            description: `${asked ? "" : `${scenePrice} · `}It appears next to the still; you'll get a note when it's ready.`,
+            duration: asked ? 3000 : 6000,
+            ...(asked ? {} : { action: { label: "Ask first", onClick: askSceneConfirmAgain } }),
+          });
         },
         onError: (e) => toast.error((e as Error).message),
       },
@@ -300,7 +305,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           onError: (e) => toast.error((e as Error).message),
         },
       ),
-    onCreateScene: (g, url) => (skipSceneConfirm() ? createScene(g, url) : setSceneFrom({ g, url })),
+    onCreateScene: (g, url) => (skipSceneConfirm(scenePrice) ? createScene(g, url, false) : setSceneFrom({ g, url })),
     onOpenScene: (g) => {
       const t = sceneTake(g);
       if (t) setOpenScene(t);

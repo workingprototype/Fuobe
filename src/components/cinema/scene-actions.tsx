@@ -51,12 +51,22 @@ export function usePlanPrice(plan: CinemaPlan): { cost: number | null; label: st
 
 const SKIP_KEY = "fuobe.cinema.sceneConfirm";
 
-export function skipSceneConfirm(): boolean {
+/**
+ * "Don't ask again" holds for the price it was ticked at (kept in this browser): another price (a different engine,
+ * a key added, demo mode off) asks again, and the toast of a build that didn't ask offers "Ask first".
+ */
+export function skipSceneConfirm(price: string): boolean {
   try {
-    return localStorage.getItem(SKIP_KEY) === "skip";
+    return localStorage.getItem(SKIP_KEY) === `skip:${price}`;
   } catch {
     return false;
   }
+}
+
+export function askSceneConfirmAgain() {
+  try {
+    localStorage.removeItem(SKIP_KEY);
+  } catch {}
 }
 
 export interface ScenePlanContext {
@@ -118,7 +128,7 @@ export function SceneCreateDialog({
           {!open && <p className="text-[12px] text-muted-foreground">Each re-render of a captured view is priced again before it runs.</p>}
         </div>
         <label htmlFor={skipId} className="flex items-center gap-2 text-[13px] text-muted-foreground">
-          <Checkbox id={skipId} checked={skip} onCheckedChange={(v) => setSkip(v === true)} /> Don&apos;t ask again
+          <Checkbox id={skipId} checked={skip} onCheckedChange={(v) => setSkip(v === true)} /> Don&apos;t ask again at this price
         </label>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -129,7 +139,7 @@ export function SceneCreateDialog({
             onClick={() => {
               if (skip)
                 try {
-                  localStorage.setItem(SKIP_KEY, "skip");
+                  localStorage.setItem(SKIP_KEY, `skip:${price.label}`);
                 } catch {}
               onConfirm();
             }}

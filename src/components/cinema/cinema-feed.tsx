@@ -474,7 +474,7 @@ function TileView({
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button type="button" onClick={() => handlers.onCreateScene(g, u.output!.url)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label="Create 3D scene">
+                      <button type="button" onClick={() => handlers.onCreateScene(g, u.output!.url)} className="grid size-7 place-items-center rounded-lg text-white/90 hover:bg-white/20 hover:text-white" aria-label={`Create 3D scene · ${handlers.scenePrice}`}>
                         <Box className="size-4" />
                       </button>
                     </TooltipTrigger>
