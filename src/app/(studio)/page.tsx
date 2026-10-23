@@ -1,10 +1,11 @@
 import { HomeView } from "@/components/home-view";
 import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
 import { homeEffects, toPresetCard } from "@/lib/preset-cards";
+import { starterPriceLine } from "@/lib/starter-prices";
 
 const HOME_MOTIONS = ["motion-crash-zoom-in", "motion-360-orbit", "motion-bullet-time", "motion-fpv-drone", "motion-dolly-zoom-in", "motion-snorricam"];
 
-/** The catalog stays on the server: the home view gets 18 slim cards and three counts. */
+/** The catalog stays on the server: the home view gets 18 slim cards, three counts and the first-run guide's prices. */
 export default function Page() {
   return (
     <HomeView
@@ -15,6 +16,7 @@ export default function Page() {
         .slice(0, 6)
         .map(toPresetCard)}
       effects={homeEffects(EFFECTS, 6).map(toPresetCard)}
+      prices={starterPriceLine()}
     />
   );
 }

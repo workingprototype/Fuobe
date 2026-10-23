@@ -19,13 +19,15 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
+import { GetStarted } from "@/components/get-started";
 import { PageShell } from "@/components/page-shell";
 import { PresetCard } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
+import { nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -136,10 +138,24 @@ function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: P
   );
 }
 
-export function HomeView({ counts, motions, apps, effects }: { counts: Counts; motions: PresetCardData[]; apps: PresetCardData[]; effects: PresetCardData[] }) {
+export function HomeView({
+  counts,
+  motions,
+  apps,
+  effects,
+  prices,
+}: {
+  counts: Counts;
+  motions: PresetCardData[];
+  apps: PresetCardData[];
+  effects: PresetCardData[];
+  /** What a first paid image and clip cost, for the first-run guide. */
+  prices?: string;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
   // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
@@ -147,13 +163,14 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
   const hydrated = useHydrated();
   const statusData = useStatus().data;
   const status = hydrated ? statusData : undefined;
-  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
-  const comfyReady = !!status?.providers.comfyui?.configured;
-  const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
+  const nothingConnected = !!status && noConnection(status);
+  // Until something is connected (or it's put away): three ways to start, under the composer.
+  const firstRun = showFirstRun(status);
 
   const locked = engineMode === "both" ? undefined : engineMode;
 
   const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : ""}`);
+  const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
 
   return (
     <PageShell>
@@ -176,6 +193,7 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
                 go();
               }
             }}
+            ref={box}
             rows={2}
             autoFocus
             aria-label="Describe what to create"
@@ -210,10 +228,21 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
             </div>
           </div>
         </div>
-        {nothingConnected && (
+        {firstRun && status ? (
+          <GetStarted
+            className="mt-6 max-w-[960px]"
+            status={status}
+            prices={prices}
+            onDemo={focusComposer}
+            onMode={(id) => {
+              setMode(MODES.find((m) => m.id === id) ?? MODES[0]);
+              focusComposer();
+            }}
+          />
+        ) : nothingConnected && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
-            <Link href="/settings" className="text-brand-text underline-offset-2 hover:underline">
+            <Link href="/settings#get-started" className="text-brand-text underline underline-offset-2 hover:no-underline">
               {engineMode === "open" ? "Connect ComfyUI" : engineMode === "cloud" ? "Add a fal.ai or Replicate key" : "Add a fal.ai key or connect ComfyUI"}
             </Link>{" "}
             to generate for real.
