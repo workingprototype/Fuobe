@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { keyValue, UsageError } from "./args.mjs";
-import { defaultModel, fileInputs, generationRequest, localFiles, withInputHint } from "./build.mjs";
+import { defaultModel, fileInputs, generationRequest, localFiles, voiceSampleProblem, withInputHint } from "./build.mjs";
 import { ApiError } from "./client.mjs";
 import { configPath, normalizeUrl, readConfig, removeConfig, writeConfig } from "./config.mjs";
 import { clip, countOutputs, formatCost, formatDuration, previewText, statusText, table, TERMINAL, timeAgo } from "./format.mjs";
@@ -92,8 +92,8 @@ async function promptFrom(ctx) {
   return (await ctx.io.readStdin()).trim();
 }
 
-/** Upload a local file through /api/uploads; returns its /api/files/… URL. */
-export async function uploadFile(ctx, file) {
+/** A local input that exists, is a file and isn't too big; returns its absolute path. */
+function checkFile(ctx, file) {
   const abs = path.resolve(ctx.io.cwd, file);
   let st;
   try {
@@ -103,6 +103,15 @@ export async function uploadFile(ctx, file) {
   }
   if (!st.isFile()) throw new UsageError(`${file} isn't a file`);
   if (st.size > MAX_UPLOAD) throw new UsageError(`${file} is ${Math.round(st.size / 1024 / 1024)} MB; Fuobe takes files up to 200 MB`);
+  return abs;
+}
+
+/** Check every file first, so a missing second one fails before the first (maybe big) one goes up. */
+const checkFiles = (ctx, files) => files.forEach((f) => checkFile(ctx, f));
+
+/** Upload a local file through /api/uploads; returns its /api/files/… URL. */
+export async function uploadFile(ctx, file) {
+  const abs = checkFile(ctx, file);
   const ext = path.extname(abs).slice(1).toLowerCase();
   const type = UPLOAD_TYPES[ext] ?? "application/octet-stream";
   const blob = typeof fs.openAsBlob === "function" ? await fs.openAsBlob(abs, { type }) : new Blob([fs.readFileSync(abs)], { type });
@@ -114,23 +123,38 @@ export async function uploadFile(ctx, file) {
 }
 
 async function uploadAll(ctx, values) {
+  const files = localFiles(fileInputs(values));
+  checkFiles(ctx, files);
   const uploaded = new Map();
-  for (const file of localFiles(fileInputs(values))) uploaded.set(file, await uploadFile(ctx, file));
+  for (const file of files) uploaded.set(file, await uploadFile(ctx, file));
   return uploaded;
 }
 
-/** The model to use: --model, else the studio default for --kind / --engine (said on stderr). */
+/**
+ * The model to use: --model, else the studio default for --kind / --engine (said on stderr). With
+ * --voice-audio, a model that clones the sample (a dialogue for two), so none is silently ignored.
+ */
 async function modelFor(ctx) {
   const v = ctx.values;
-  if (v.model) return v.model;
   const inputs = fileInputs(v);
+  const voices = inputs.filter(([slot]) => slot === "voiceAudio" || slot === "voiceAudio2").length;
+  if (v.model) {
+    if (voices) {
+      const list = await ctx.client.request("GET", "/api/models", { query: { q: v.model, hidden: 1 } });
+      const problem = voiceSampleProblem(list.items?.find((m) => m.id === v.model), voices, list.defaults);
+      if (problem) throw new UsageError(problem, ctx.command);
+    }
+    return v.model;
+  }
   const list = await ctx.client.request("GET", "/api/models", { query: { kind: v.kind ?? "image" } });
   const id = defaultModel(list, {
     kind: v.kind,
     engine: v.engine,
+    op: v.op,
     hasImages: inputs.some(([slot]) => slot === "images"),
-    // A voice sample with --kind audio is the voice the default speech model clones.
+    // With --kind audio, voice samples are the voices a cloning model speaks in.
     hasMedia: inputs.some(([slot]) => !["images", "endImage", "mask", ...(v.kind === "audio" ? ["voiceAudio", "voiceAudio2"] : [])].includes(slot)),
+    voices: v.kind === "audio" ? voices : 0,
   });
   const name = list.items?.find((m) => m.id === id)?.name;
   ctx.note(`Using ${name ? `${name} (${id})` : id}. Pick another with --model; fuobe models lists them.`);
@@ -160,10 +184,15 @@ async function postGeneration(ctx, body, { preview = false } = {}) {
 
 const absolute = (ctx, url) => ctx.client.resolve(url);
 
-/** File name for output `i` of a generation: <id>.<ext>, or <id>-<n>.<ext> when it has several. */
+/**
+ * File name for output `i` of a generation: <id>.<ext>, or <id>-<n>.<ext> when it has several. The
+ * id and extension come from the server, so anything but letters, digits, - and _ is replaced: a
+ * name can't climb out of --out or hide as a dot-file.
+ */
 export function outputName(g, i) {
-  const ext = path.extname(new URL(g.outputs[i].url, "http://x").pathname) || ".bin";
-  return `${g.id}${g.outputs.length > 1 ? `-${i + 1}` : ""}${ext}`;
+  const ext = /^\.[a-z\d]{1,10}$/i.exec(path.extname(new URL(g.outputs[i].url, "http://x").pathname))?.[0] ?? ".bin";
+  const id = String(g.id ?? "").replace(/[^\w-]/g, "_") || "output";
+  return `${id}${g.outputs.length > 1 ? `-${i + 1}` : ""}${ext}`;
 }
 
 const megabytes = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -197,9 +226,10 @@ export async function waitFor(ctx, ids) {
   const started = ctx.io.now();
   const gens = new Map();
   const seen = new Map();
-  let stop;
-  const stopped = new Promise((resolve) => (stop = resolve));
-  const off = ctx.io.onInterrupt(() => stop("interrupted"));
+  // Ctrl+C ends the pending sleep too, so the process exits at once (not after --interval).
+  const pause = new AbortController();
+  const stopped = new Promise((resolve) => pause.signal.addEventListener("abort", resolve, { once: true }));
+  const off = ctx.io.onInterrupt(() => pause.abort());
   const live = ctx.io.stderrIsTTY && !v.json;
   try {
     for (;;) {
@@ -217,8 +247,8 @@ export async function waitFor(ctx, ids) {
       }
       if (done === all.length) return { gens: all };
       if (timeout > 0 && ctx.io.now() - started >= timeout) return { gens: all, stopped: "timeout" };
-      const why = await Promise.race([ctx.io.sleep(interval).then(() => null), stopped]);
-      if (why) return { gens: all, stopped: why };
+      await Promise.race([ctx.io.sleep(interval, pause.signal), stopped]);
+      if (pause.signal.aborted) return { gens: all, stopped: "interrupted" };
     }
   } finally {
     off();
@@ -229,10 +259,12 @@ export async function waitFor(ctx, ids) {
 /** Save every output of the finished generations into `dir`. */
 async function saveOutputs(ctx, gens, dir) {
   const files = [];
+  const root = path.resolve(ctx.io.cwd, dir);
   for (const g of gens) {
     if (g.status !== "succeeded") continue;
     for (let i = 0; i < g.outputs.length; i++) {
-      const dest = path.join(path.resolve(ctx.io.cwd, dir), outputName(g, i));
+      const dest = path.join(root, outputName(g, i));
+      if (path.dirname(dest) !== root) throw new ApiError(`The server sent an output name (${g.id}) that would land outside ${dir}; nothing was saved for it.`);
       const bytes = await ctx.client.download(g.outputs[i].url, dest);
       files.push({ id: g.id, url: absolute(ctx, g.outputs[i].url), path: dest, bytes });
       if (!ctx.values.json) ctx.print(`Saved ${path.relative(ctx.io.cwd, dest) || dest} (${megabytes(bytes)})`);
@@ -281,7 +313,12 @@ function needIds(ctx, what = "a generation id") {
 async function login(ctx) {
   const { io, values: v } = ctx;
   const file = configPath(io.env, io.home);
-  const saved = readConfig(file);
+  let saved = {};
+  try {
+    saved = readConfig(file);
+  } catch {
+    ctx.note(`${file} isn't valid JSON; signing in replaces it.`);
+  }
   let url = v.url ?? io.env.FUOBE_URL ?? (io.stdinIsTTY ? await io.ask(`Fuobe server [${saved.url ?? "http://localhost:3000"}]: `) : "") ?? "";
   url = normalizeUrl(url.trim() || saved.url || "http://localhost:3000");
   // Reachable, and does it ask for a token? (A 401 answers both.)
@@ -329,14 +366,18 @@ async function status(ctx) {
   // Reads need the token too once a password is set: this says whether ours works.
   await ctx.client.request("GET", "/api/generations", { query: { limit: 1 } });
   const t = ctx.target;
-  if (ctx.values.json) return ctx.json({ url: t.url, urlFrom: t.urlFrom, token: !!t.token, tokenFrom: t.tokenFrom ?? null, ...s });
+  if (ctx.values.json) return ctx.json({ url: t.url, urlFrom: t.urlFrom, token: !!t.token, tokenFrom: t.tokenFrom ?? null, ...(t.savedTokenFor && { savedTokenFor: t.savedTokenFor }), ...s });
   const providers = Object.values(s.providers ?? {})
     .filter((p) => p.label)
     .map((p) => `${p.label} ${p.configured ? "✓" : "–"}`);
   ctx.print(`Fuobe at ${t.url}${t.urlFrom === "default" ? "" : ` (from ${t.urlFrom})`}`);
   ctx.print(`Engine mode: ${s.engineMode} · Demo mode: ${s.demoMode} · Preferred cloud: ${s.cloudProvider}`);
   ctx.print(`Providers: ${providers.join(", ")}`);
-  ctx.print(t.token ? `API token: accepted (from ${t.tokenFrom})` : "API token: none (this Fuobe has no password)");
+  ctx.print(
+    t.token
+      ? `API token: accepted (from ${t.tokenFrom})`
+      : `API token: none (this Fuobe has no password)${t.savedTokenFor ? `. The saved one is for ${t.savedTokenFor}, so it isn't sent here` : ""}`,
+  );
   return EXIT.ok;
 }
 
@@ -352,10 +393,17 @@ async function models(ctx) {
     ctx.print(`No models match.${res.engineMode !== "both" ? ` This Fuobe runs ${res.engineMode === "open" ? "open-source" : "cloud"} models only (Settings → Engine mode).` : ""}`);
     return EXIT.ok;
   }
-  const rows = items.map((m) => [m.id, m.name, m.engine === "open" ? "open" : "cloud", m.connected ? m.price : `${m.price} (demo)`, m.ops.join(", ")]);
+  // How a run goes today (Settings → Demo mode decides with the providers); an older server only says `connected`.
+  const runs = (m) => m.runs ?? (m.connected ? "real" : "demo");
+  const mark = { real: "", demo: " (demo)", refused: " (not set up)" };
+  const rows = items.map((m) => [m.id, m.name, m.engine === "open" ? "open" : "cloud", `${m.price}${mark[runs(m)] ?? ""}`, m.ops.join(", ")]);
   ctx.print(table(["ID", "NAME", "ENGINE", "PRICE", "DOES"], rows, ctx.io.columns));
-  const demo = items.filter((m) => !m.connected).length;
-  ctx.note(`${items.length} model${items.length === 1 ? "" : "s"}${items.length < res.items.length ? ` of ${res.items.length}` : ""}.${demo ? " Those marked (demo) have no provider set up here yet: they return demo media, for free." : ""}`);
+  const count = (r) => items.filter((m) => runs(m) === r).length;
+  const notes = [`${items.length} model${items.length === 1 ? "" : "s"}${items.length < res.items.length ? ` of ${res.items.length}` : ""}.`];
+  if (res.demoMode === "on") notes.push("Demo mode is on (Settings → Demo mode): every run returns demo media, for free.");
+  else if (count("demo")) notes.push("Those marked (demo) have no provider set up here yet: they return demo media, for free.");
+  if (count("refused")) notes.push("Those marked (not set up) need their provider set up in Settings first (Demo mode is off, so they won't run as a demo).");
+  ctx.note(notes.join(" "));
   return EXIT.ok;
 }
 
@@ -364,6 +412,7 @@ const standIns = (values) => new Map(localFiles(fileInputs(values)).map((f) => [
 
 async function estimate(ctx) {
   const prompt = await promptFrom(ctx);
+  checkFiles(ctx, localFiles(fileInputs(ctx.values)));
   const modelId = await modelFor(ctx);
   const body = generationRequest({ prompt, modelId, values: ctx.values, uploaded: standIns(ctx.values) });
   const p = await postGeneration(ctx, body, { preview: true });
@@ -376,6 +425,7 @@ async function estimate(ctx) {
 async function generate(ctx) {
   const v = ctx.values;
   const prompt = await promptFrom(ctx);
+  checkFiles(ctx, localFiles(fileInputs(v)));
   const modelId = await modelFor(ctx);
   // Built with stand-ins first, so a bad option or a missing input fails before anything is uploaded.
   const draft = generationRequest({ prompt, modelId, values: v, uploaded: standIns(v) });
@@ -384,12 +434,12 @@ async function generate(ctx) {
   const { items } = await postGeneration(ctx, generationRequest({ prompt, modelId, values: v, uploaded }));
   const ids = items.map((g) => g.id);
   if (v.wait || v.out) {
-    if (!v.json) ctx.note(`Started ${ids.length === 1 ? ids[0] : `${ids.length} jobs`} on ${items[0]?.modelName ?? modelId}${items[0]?.provider === "mock" ? " (demo: no provider connected)" : ""}.`);
+    if (!v.json) ctx.note(`Started ${ids.length === 1 ? ids[0] : `${ids.length} jobs`} on ${items[0]?.modelName ?? modelId}${items[0]?.provider === "mock" ? " (a demo: placeholder media, free)" : ""}.`);
     return finish(ctx, ids, { download: !!v.out });
   }
   if (v.json) return ctx.json({ items });
   const g = items[0];
-  ctx.print(`Started ${ids.join(" ")} on ${g?.modelName ?? modelId}${g?.provider === "mock" ? " (demo: no provider connected)" : ""}${g?.costUsd ? `, about ${formatCost(g.costUsd * items.length)}` : ""}.`);
+  ctx.print(`Started ${ids.join(" ")} on ${g?.modelName ?? modelId}${g?.provider === "mock" ? " (a demo: placeholder media, free)" : ""}${g?.costUsd ? `, about ${formatCost(g.costUsd * items.length)}` : ""}.`);
   ctx.print(`Wait for it: fuobe wait ${ids.join(" ")}   Save it: fuobe download ${ids.join(" ")} --out .`);
   return EXIT.ok;
 }
@@ -439,6 +489,7 @@ async function cancel(ctx) {
 
 async function upload(ctx) {
   const files = needIds(ctx, "a file to upload");
+  checkFiles(ctx, files);
   const urls = [];
   for (const f of files) urls.push({ file: f, url: await uploadFile(ctx, f) });
   if (ctx.values.json) return ctx.json({ items: urls });
@@ -675,6 +726,8 @@ async function mcp(ctx) {
   ctx.print(setup.command);
   ctx.note(`\nOther MCP clients (Claude Desktop, Cursor, Codex…) take this server entry:\n${JSON.stringify(setup.config, null, 2)}`);
   if (ctx.target.token) ctx.note("These lines include your API token: keep them out of shared places.");
+  else if (ctx.target.savedTokenFor)
+    ctx.note(`No token in these lines: the one "fuobe login" saved is for ${ctx.target.savedTokenFor}. If ${ctx.target.url} has a password, add --token fuobe_… for it.`);
   return EXIT.ok;
 }
 
@@ -686,6 +739,7 @@ async function mcp(ctx) {
  * @property {string} usage
  * @property {Record<string, OptionSpec>} [options]
  * @property {string[]} [examples]
+ * @property {true} [ownConfig] reads the saved config itself (login, logout), so a broken one doesn't stop it
  * @property {(ctx: any) => Promise<number | void>} run
  */
 
@@ -695,9 +749,10 @@ export const COMMANDS = {
     summary: "Save the server address and API token",
     usage: "fuobe login [--url <url>] [--token <token>]",
     examples: ["fuobe login", "fuobe login --url https://studio.example.com --token fuobe_…"],
+    ownConfig: true,
     run: login,
   },
-  logout: { summary: "Forget the saved address and token", usage: "fuobe logout", run: logout },
+  logout: { summary: "Forget the saved address and token", usage: "fuobe logout", ownConfig: true, run: logout },
   status: {
     summary: "The server (engine, providers, sign-in), or the state of generations",
     usage: "fuobe status [<id>…]",

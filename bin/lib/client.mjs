@@ -33,14 +33,16 @@ export function statusMessage(status, body, ctx) {
   if (status === 401) {
     return ctx.token
       ? `Fuobe at ${ctx.url} refused the API token${ctx.tokenFrom ? ` (from ${ctx.tokenFrom})` : ""}. It may have been revoked: create a new one in Settings → Security → API tokens (${ctx.url}/settings#security), then run "fuobe login".`
-      : `Fuobe at ${ctx.url} has a password, so the CLI needs an API token. Create one in Settings → Security → API tokens (${ctx.url}/settings#security), then run "fuobe login" or set FUOBE_TOKEN.`;
+      : ctx.savedTokenFor
+        ? `Fuobe at ${ctx.url} has a password, so the CLI needs an API token. The token "fuobe login" saved is for ${ctx.savedTokenFor}, so it isn't sent here: pass --token, set FUOBE_TOKEN, or run "fuobe login --url ${ctx.url}" (create a token in Settings → Security → API tokens, ${ctx.url}/settings#security).`
+        : `Fuobe at ${ctx.url} has a password, so the CLI needs an API token. Create one in Settings → Security → API tokens (${ctx.url}/settings#security), then run "fuobe login" or set FUOBE_TOKEN.`;
   }
   if (status === 404 && !said) return `Not found on ${ctx.url}. Is it a Fuobe server, and up to date?`;
   return said || `Fuobe answered HTTP ${status}${status >= 500 ? " — check the server's log" : ""}`;
 }
 
 /**
- * @param {{ url: string, token?: string, tokenFrom?: string, fetch?: typeof fetch }} target
+ * @param {{ url: string, token?: string, tokenFrom?: string, savedTokenFor?: string, fetch?: typeof fetch }} target
  */
 export function createClient(target) {
   const { url, token } = target;

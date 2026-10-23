@@ -116,29 +116,65 @@ export function generationRequest({ prompt, modelId, values: v, uploaded = new M
   };
 }
 
+/** Which of GET /api/models' `defaults` a request without --model takes. */
+function defaultKey(kind, want) {
+  if (kind === "image") return want.hasImages ? "edit" : "image";
+  if (kind !== "audio") return kind;
+  // Voice samples (--voice-audio): a model that clones them; two are a dialogue's speakers.
+  if (want.op === "dialogue" || want.voices === 2) return want.voices ? "cloneDialogue" : "dialogue";
+  return want.voices ? "clone" : "audio";
+}
+
+const DEFAULT_WHAT = { clone: "model that clones a voice sample", cloneDialogue: "dialogue model that clones two voice samples", dialogue: "dialogue model" };
+
 /**
  * The studio's own model when none is named: the Image studio's (Edit's when there are images),
- * Video's or Audio's, on the engine asked for (else cloud, unless the install is open source only).
+ * Video's or Audio's (one that clones the voice for --voice-audio, a dialogue for two samples),
+ * on the engine asked for (else cloud, unless the install is open source only).
  * @param {{ engineMode?: string, defaults?: Record<string, { cloud?: string, open?: string }> }} list GET /api/models
- * @param {{ kind?: string, engine?: string, hasImages?: boolean, hasMedia?: boolean }} want `hasMedia`: a video or audio input
+ * @param {{ kind?: string, engine?: string, op?: string, hasImages?: boolean, hasMedia?: boolean, voices?: number }} want
+ *   `hasMedia`: a video or audio input; `voices`: how many voice samples
  */
 export function defaultModel(list, want) {
   // A clip or a recording can go to many kinds of model (edit, extend, lipsync, transcribe…): that's the user's pick.
   if (want.hasMedia) throw new UsageError("Name the model for a video or audio input with --model (fuobe models --search lipsync, for example).", "generate");
   const kind = want.kind ?? "image";
-  const key = kind === "image" && want.hasImages ? "edit" : kind;
+  const key = defaultKey(kind, want);
   const engine = want.engine ?? (list.engineMode === "open" ? "open" : "cloud");
   const id = list.defaults?.[key]?.[engine];
-  if (!id) {
-    const off = list.engineMode && list.engineMode !== "both" && list.engineMode !== engine;
-    throw new UsageError(
-      off
-        ? `This Fuobe runs ${list.engineMode === "open" ? "open-source" : "cloud"} models only (Settings → Engine mode). Leave out --engine, or pick a model with --model.`
-        : `There's no default ${engine === "open" ? "open-source" : "cloud"} ${kind} model. Pick one with --model (fuobe models --kind ${kind}).`,
-      "generate",
-    );
+  if (id) return id;
+  if (list.engineMode && list.engineMode !== "both" && list.engineMode !== engine) {
+    throw new UsageError(`This Fuobe runs ${list.engineMode === "open" ? "open-source" : "cloud"} models only (Settings → Engine mode). Leave out --engine, or pick a model with --model.`, "generate");
   }
-  return id;
+  const other = engine === "open" ? "cloud" : "open";
+  const alt = list.defaults?.[key]?.[other];
+  const fix = alt ? `Add --engine ${other} (${alt}), or pick a model with --model` : "Pick one with --model";
+  throw new UsageError(`There's no default ${engine === "open" ? "open-source" : "cloud"} ${DEFAULT_WHAT[key] ?? `${kind} model`}. ${fix} (fuobe models --kind ${kind}).`, "generate");
+}
+
+/**
+ * Why a model can't take the voice samples given (null when it can): one sample needs a model
+ * that clones voices, two a dialogue that clones both speakers. The server would otherwise run it
+ * in a premade voice, or as one speaker, without a word.
+ * @param {{ id: string, opIds?: string[], voiceClone?: boolean } | undefined} info the model's GET /api/models item
+ * @param {number} voices how many --voice-audio samples
+ * @param {Record<string, { cloud?: string, open?: string }>} [defaults] GET /api/models' defaults, for a suggestion
+ */
+export function voiceSampleProblem(info, voices, defaults = {}) {
+  if (!info || !voices) return null;
+  const alternatives = (key) => {
+    const ids = Object.values(defaults[key] ?? {}).filter(Boolean);
+    return ids.length ? `--model ${ids.join(" or --model ")}` : null;
+  };
+  if (voices === 2 && !(info.voiceClone && info.opIds?.includes("dialogue"))) {
+    const clone = alternatives("cloneDialogue");
+    return `${info.id} doesn't clone two voices. Two --voice-audio samples are a dialogue's speakers${clone ? `: use ${clone}` : " (fuobe models --op dialogue)"}.`;
+  }
+  if (!info.voiceClone) {
+    const clone = alternatives("clone");
+    return `${info.id} speaks in premade voices (--voice <id>) and doesn't clone a voice sample. Leave out --voice-audio, or use a model that clones one${clone ? ` (${clone})` : " (fuobe models --op tts)"}.`;
+  }
+  return null;
 }
 
 /** What the planner asks for ("Add a portrait and a voice track") → the options that give it. */

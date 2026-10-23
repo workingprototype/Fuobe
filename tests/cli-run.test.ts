@@ -74,7 +74,21 @@ beforeAll(async () => {
     const route = `${s.method} ${url.pathname}`;
     if (route === "POST /api/uploads") return send(201, { id: "up1", url: "/api/files/uploads/2026-10-22/up1.png" });
     if (route === "GET /api/models")
-      return send(200, { engineMode: "both", defaults: { image: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" }, edit: { cloud: "nano-banana-pro", open: "oss-qwen-edit" } }, items: [{ id: "nano-banana-pro", name: "Nano Banana Pro" }] });
+      return send(200, {
+        engineMode: "both",
+        defaults: {
+          image: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" },
+          edit: { cloud: "nano-banana-pro", open: "oss-qwen-edit" },
+          audio: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
+          clone: { cloud: "chatterbox-cloud", open: "oss-chatterbox" },
+          cloneDialogue: { open: "oss-chatterbox-dialogue" },
+        },
+        items: [
+          { id: "nano-banana-pro", name: "Nano Banana Pro" },
+          { id: "elevenlabs-v4", name: "ElevenLabs v4", opIds: ["tts"] },
+          { id: "chatterbox-cloud", name: "Chatterbox", opIds: ["tts"], voiceClone: true },
+        ],
+      });
     if (route === "POST /api/generations" && (s.json as { modelId?: string }).modelId === "kling-3") return send(422, { error: "Add a start frame" });
     if (route === "POST /api/generations" && url.searchParams.get("preview") === "1")
       return send(200, { modelId: "nano-banana-pro", modelName: "Nano Banana Pro", engine: "cloud", kind: "image", op: "edit", opLabel: "Edit", jobs: 1, outputs: 1, demo: false, providerId: "fal", costUsd: 0.15 });
@@ -83,6 +97,9 @@ beforeAll(async () => {
       polls++;
       return send(200, polls < 2 ? generation("running") : generation("succeeded", { outputs: [{ url: "/api/files/outputs/2026-10-22/out1.png", kind: "image" }], completedAt: 5_000 }));
     }
+    // A server that names its output after a path, and a job that never finishes.
+    if (route === "GET /api/generations/evil") return send(200, generation("succeeded", { id: "../escaped", outputs: [{ url: "/api/files/outputs/2026-10-22/out1.png", kind: "image" }] }));
+    if (route === "GET /api/generations/slow") return send(200, generation("running", { id: "slow" }));
     if (route === "GET /api/generations") return send(200, { items: [generation("succeeded")] });
     if (route === "GET /api/files/outputs/2026-10-22/out1.png") {
       res.writeHead(200, { "content-type": "image/png" });
@@ -115,7 +132,11 @@ beforeEach(() => {
   requireAuth = true;
 });
 
-function run(args: string[], env: Record<string, string | undefined> = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+function run(
+  args: string[],
+  env: Record<string, string | undefined> = {},
+  started?: (child: ReturnType<typeof spawn>) => void,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: tmp,
@@ -123,6 +144,7 @@ function run(args: string[], env: Record<string, string | undefined> = {}): Prom
       env: { PATH: process.env.PATH, HOME: tmp, FUOBE_CONFIG: path.join(tmp, "config.json"), FUOBE_URL: base, FUOBE_TOKEN: TOKEN, ...env } as unknown as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    started?.(child);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
@@ -251,6 +273,101 @@ describe("fuobe CLI against a Fuobe server", () => {
     const cancel = await run(["cancel", "nope", "--json"]);
     expect(JSON.parse(cancel.stderr)).toMatchObject({ status: 404 });
     expect(seen.some((s) => s.path.endsWith("/cancel"))).toBe(false);
+  });
+
+  it("never sends the saved token to another server, nor prints it for one", async () => {
+    const file = path.join(tmp, "config.json");
+    fs.writeFileSync(file, JSON.stringify({ url: "https://studio.example.com", token: "fuobe_secret-for-studio" }));
+    const signedOut = { FUOBE_TOKEN: undefined, FUOBE_URL: undefined };
+    try {
+      const list = await run(["list", "--url", base], signedOut);
+      expect(list.code).toBe(1);
+      expect(list.stderr).toMatch(/The token "fuobe login" saved is for https:\/\/studio\.example\.com, so it isn't sent here/);
+      const viaEnv = await run(["list"], { FUOBE_TOKEN: undefined, FUOBE_URL: base });
+      expect(viaEnv.code).toBe(1);
+      expect(seen.length).toBeGreaterThan(1);
+      expect(seen.every((s) => s.auth === null)).toBe(true);
+      const mcp = await run(["mcp", "--url", base], signedOut);
+      expect(mcp.stdout.trim()).toBe(`claude mcp add --transport http fuobe ${base}/api/mcp`);
+      expect(mcp.stdout + mcp.stderr).not.toContain("fuobe_secret-for-studio");
+      expect(mcp.stderr).toMatch(/No token in these lines: the one "fuobe login" saved is for https:\/\/studio\.example\.com/);
+      const status = await run(["status", "--url", base, "--json"], signedOut);
+      expect(JSON.parse(status.stderr)).toMatchObject({ status: 401 });
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  it("logs in and out over a broken config file (the commands its message names)", async () => {
+    const file = path.join(tmp, "config.json");
+    const signedOut = { FUOBE_TOKEN: undefined, FUOBE_URL: undefined };
+    fs.writeFileSync(file, "{broken");
+    try {
+      const list = await run(["list"], signedOut);
+      expect(list.code).toBe(1);
+      expect(list.stderr).toMatch(/isn't valid JSON\. Run "fuobe login" again, or delete the file\./);
+      const login = await run(["login", "--url", base, "--token", TOKEN], signedOut);
+      expect(login.code).toBe(0);
+      expect(login.stderr).toMatch(/isn't valid JSON; signing in replaces it/);
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ url: base, token: TOKEN });
+      fs.writeFileSync(file, "{broken");
+      const logout = await run(["logout"], signedOut);
+      expect(logout.code).toBe(0);
+      expect(fs.existsSync(file)).toBe(false);
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  });
+
+  it("saves a download inside --out whatever id the server sends", async () => {
+    const r = await run(["download", "evil", "--out", "safe"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/^Saved safe\/___escaped\.png \(1 KB\)$/m);
+    expect(fs.existsSync(path.join(tmp, "escaped.png"))).toBe(false);
+    expect(fs.readdirSync(path.join(tmp, "safe"))).toEqual(["___escaped.png"]);
+  });
+
+  it("stops waiting at once on Ctrl+C, not after the next --interval", async () => {
+    const t0 = Date.now();
+    let child: ReturnType<typeof spawn> | undefined;
+    const done = run(["wait", "slow", "--interval", "30"], {}, (c) => (child = c));
+    // Interrupt once the first check has reached the server (the CLI is then asleep for 30 s).
+    while (!seen.some((s) => s.path === "/api/generations/slow")) await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 150));
+    child!.kill("SIGINT");
+    const r = await done;
+    expect(r.code).toBe(130);
+    expect(r.stderr).toMatch(/Stopped waiting\. It keeps running on the server: fuobe wait slow/);
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  });
+
+  it("finds every local file before uploading any", async () => {
+    fs.writeFileSync(path.join(tmp, "me.png"), PNG);
+    const r = await run(["generate", "x", "-m", "nano-banana-pro", "--image", "me.png", "--image", "missin.png"]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/^Can't find missin\.png\./);
+    expect(seen).toHaveLength(0);
+    const up = await run(["upload", "me.png", "missin.png"]);
+    expect(up.code).toBe(2);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("clones a voice sample with a model that takes one, and refuses one that would ignore it", async () => {
+    fs.writeFileSync(path.join(tmp, "me.wav"), "RIFF");
+    const r = await run(["generate", "Hello", "--kind", "audio", "--voice-audio", "me.wav", "--json"]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain("Using Chatterbox (chatterbox-cloud)");
+    expect(seen.find((s) => s.path === "/api/generations" && s.method === "POST")!.json).toMatchObject({ modelId: "chatterbox-cloud", inputs: { voiceAudio: "/api/files/uploads/2026-10-22/up1.png" } });
+    seen = [];
+    const two = await run(["generate", "Hi", "--kind", "audio", "--voice-audio", "me.wav", "--voice-audio", "me.wav"]);
+    expect(two.code).toBe(2);
+    expect(two.stderr).toMatch(/no default cloud dialogue model that clones two voice samples\. Add --engine open \(oss-chatterbox-dialogue\)/);
+    seen = [];
+    const named = await run(["generate", "Hello", "-m", "elevenlabs-v4", "--voice-audio", "me.wav"]);
+    expect(named.code).toBe(2);
+    expect(named.stderr).toMatch(/^elevenlabs-v4 speaks in premade voices .* \(--model chatterbox-cloud or --model oss-chatterbox\)\./);
+    expect(seen.find((s) => s.path.startsWith("/api/models?"))!.path).toBe("/api/models?q=elevenlabs-v4&hidden=1");
+    expect(seen.some((s) => s.path.startsWith("/api/uploads") || s.path.startsWith("/api/generations"))).toBe(false);
   });
 
   it("answers usage mistakes with exit code 2 and help with 0", async () => {

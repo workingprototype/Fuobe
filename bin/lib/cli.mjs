@@ -101,7 +101,8 @@ export async function main(argv, io) {
       print(commandHelp(name));
       return EXIT.ok;
     }
-    const target = { ...resolveTarget(values, io.env, readConfig(configPath(io.env, io.home))), fetch: io.fetch };
+    // login and logout read (or replace) the saved config themselves, so a broken file doesn't stop them.
+    const target = { ...resolveTarget(values, io.env, cmd.ownConfig ? {} : readConfig(configPath(io.env, io.home))), fetch: io.fetch };
     const connect = (t) => createClient({ fetch: io.fetch, ...t });
     const ctx = {
       command: name,

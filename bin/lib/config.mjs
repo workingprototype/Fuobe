@@ -1,5 +1,6 @@
 // Where the CLI finds its server and token: --url / --token, then FUOBE_URL / FUOBE_TOKEN, then
-// the file `fuobe login` writes (~/.config/fuobe/config.json, readable by you only).
+// the file `fuobe login` writes (~/.config/fuobe/config.json, readable by you only). The saved
+// token is only ever sent to the saved server.
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "./args.mjs";
@@ -58,21 +59,41 @@ export function normalizeUrl(raw) {
   return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
 }
 
+/** The saved config's server, normalized (null when the saved address isn't one). */
+function savedServer(config) {
+  try {
+    return normalizeUrl(config.url ?? DEFAULT_URL);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * The server and token to use, and where each came from (shown by `fuobe status`).
+ * The server and token to use, and where each came from (shown by `fuobe status`). The token
+ * `fuobe login` saved belongs to the server it was saved with: a --url or FUOBE_URL that names
+ * another server doesn't get it (`savedTokenFor` then says whose it is). --token and FUOBE_TOKEN
+ * go to whichever server the command talks to.
  * @param {{ url?: string, token?: string }} flags
  * @param {Record<string, string | undefined>} env
  * @param {{ url?: string, token?: string }} config
  */
 export function resolveTarget(flags, env, config) {
-  const pick = (flag, envName) =>
-    flags[flag] ? { value: flags[flag], from: `--${flag}` } : env[envName] ? { value: env[envName], from: envName } : config[flag] ? { value: config[flag], from: "config" } : null;
-  const url = pick("url", "FUOBE_URL");
-  const token = pick("token", "FUOBE_TOKEN");
+  const url = flags.url ? { value: flags.url, from: "--url" } : env.FUOBE_URL ? { value: env.FUOBE_URL, from: "FUOBE_URL" } : config.url ? { value: config.url, from: "config" } : null;
+  const resolved = normalizeUrl(url?.value ?? DEFAULT_URL);
+  const saved = config.token?.trim() ? savedServer(config) : null;
+  const token = flags.token
+    ? { value: flags.token, from: "--token" }
+    : env.FUOBE_TOKEN
+      ? { value: env.FUOBE_TOKEN, from: "FUOBE_TOKEN" }
+      : saved && saved === resolved
+        ? { value: config.token, from: "config" }
+        : null;
+  const value = token?.value?.trim() || undefined;
   return {
-    url: normalizeUrl(url?.value ?? DEFAULT_URL),
+    url: resolved,
     urlFrom: url?.from ?? "default",
-    token: token?.value?.trim() || undefined,
-    tokenFrom: token?.from,
+    token: value,
+    tokenFrom: value ? token?.from : undefined,
+    ...(!value && config.token?.trim() && saved !== resolved && { savedTokenFor: saved ?? String(config.url) }),
   };
 }

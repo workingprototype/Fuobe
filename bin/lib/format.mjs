@@ -50,7 +50,7 @@ export function statusText(g) {
 export function previewText(p) {
   const runs = p.jobs > 1 ? ` in ${p.jobs} jobs` : "";
   const outputs = p.outputs ? `${plural(p.outputs, p.kind === "audio" ? "audio file" : p.kind === "model3d" ? "3D model" : p.kind === "text" ? "text" : p.kind)}${runs}` : "";
-  const price = p.demo ? "a demo (no provider connected), costs nothing" : p.engine === "open" ? "free (open source, your GPU)" : formatCost(p.costUsd) === "price unknown" ? "price unknown" : `about ${formatCost(p.costUsd)}`;
+  const price = p.demo ? "a demo (placeholder media), costs nothing" : p.engine === "open" ? "free (open source, your GPU)" : formatCost(p.costUsd) === "price unknown" ? "price unknown" : `about ${formatCost(p.costUsd)}`;
   return `${p.modelName} (${p.engine === "open" ? "open source" : "cloud"}) · ${p.opLabel ?? p.op}${outputs ? ` · ${outputs}` : ""} · ${price}`;
 }
 

@@ -36,8 +36,12 @@ The CLI finds its server and token in this order:
 |---|---|---|
 | 1 | `--url` | `--token` |
 | 2 | `FUOBE_URL` | `FUOBE_TOKEN` |
-| 3 | the file `fuobe login` saved | the same file |
+| 3 | the file `fuobe login` saved | the same file, for that server only |
 | 4 | `http://localhost:3000` | none |
+
+The saved token goes only to the server it was saved with. A `--url` or `FUOBE_URL` that names
+another server gets no token unless you pass `--token` or set `FUOBE_TOKEN` (those two go to
+whichever server the command talks to); `fuobe status` says when the saved token was left out.
 
 A Fuobe without a password (the default for local use) needs no token. Once a password is set, the
 CLI needs an **API token**: open **Settings → Security → API tokens** in the browser
@@ -74,9 +78,12 @@ fuobe models --op tts --json                   # models that run one operation, 
 fuobe models --hidden                          # also the helper models studios use behind the scenes
 ```
 
-`--kind` is `image`, `video`, `audio`, `text` or `model3d`; `--engine` is `open` or `cloud`. A model
-whose provider isn't set up yet is marked "(demo)": it runs, but returns demo media for free. An
-install set to one engine only (Settings → Engine mode) lists that engine's models only.
+`--kind` is `image`, `video`, `audio`, `text` or `model3d`; `--engine` is `open` or `cloud`. The
+price says how a run goes today, following Settings → Demo mode: "(demo)" runs but returns demo
+media for free (no provider set up yet, or Demo mode is on); "(not set up)" won't run until its
+provider is set up, because Demo mode is off. `--json` gives the same as `runs` (`real`, `demo` or
+`refused`) per model. An install set to one engine only (Settings → Engine mode) lists that
+engine's models only.
 
 ### `fuobe estimate` — price a run first
 
@@ -96,7 +103,7 @@ fuobe generate "make it blue" --image photo.jpg --engine open --out .        # a
 fuobe generate "she turns and smiles" --model kling-3 --image portrait.jpg \
   --aspect 9:16 --duration 5 --out renders/                                  # image to video
 fuobe generate "Welcome to the studio." --kind audio --out audio/            # speech (ElevenLabs v4)
-fuobe generate "Hello there." --kind audio --engine open --voice-audio me.wav --wait   # Chatterbox in your voice
+fuobe generate "Hello there." --kind audio --voice-audio me.wav --wait       # in your voice (Chatterbox; --engine open runs it on ComfyUI)
 fuobe generate --model oss-join-clips --video a.mp4 --video b.mp4 --out .    # join two clips
 fuobe generate "make it rain" --model kling-o3 --video clip.mp4 --wait       # edit a video
 echo "a long prompt…" | fuobe generate - --model seedance-2-5 --wait         # the prompt from stdin
@@ -104,8 +111,12 @@ echo "a long prompt…" | fuobe generate - --model seedance-2-5 --wait         #
 
 With no `--model`, the studio's own pick is used and named on stderr: `--kind image` (the default;
 the Edit studio's model when you pass `--image`), `video` or `audio`, on `--engine` (else the cloud,
-unless the install runs open source only). A video or audio input needs `--model`, because many
-kinds of model take one (edit, extend, lip-sync, transcribe…).
+unless the install runs open source only). With `--kind audio`, a `--voice-audio` sample picks a
+model that clones it (`chatterbox-cloud`, or `oss-chatterbox` on the open engine), and two samples
+pick the open dialogue model (`oss-chatterbox-dialogue`; no cloud dialogue model clones voices). A
+model named with `--model` that would ignore a sample (premade voices only, or one speaker for two
+samples) is refused with a sentence instead. Any other video or audio input needs `--model`,
+because many kinds of model take one (edit, extend, lip-sync, transcribe…).
 
 | option | goes to |
 |---|---|
@@ -128,9 +139,10 @@ kinds of model take one (edit, extend, lip-sync, transcribe…).
 
 Inputs can be local files, `https://` links or `/api/files/…` URLs from earlier results. Local files
 are uploaded through `/api/uploads` first (up to 200 MB each; a file named twice is uploaded once),
-after the request has been checked, so a missing input fails before a big upload. When the server
-can't run a request it says what's missing, and the CLI names the option:
-`Add a portrait and a voice track (use --image <file|url> and --audio <file|url>)`.
+after every file has been found and the request has been checked, so a missing input fails before
+a big upload. Downloads are named `<id>.<ext>` (`<id>-<n>.<ext>` for several outputs) and always
+land in `--out`. When the server can't run a request it says what's missing, and the CLI names the
+option: `Add a portrait and a voice track (use --image <file|url> and --audio <file|url>)`.
 
 Without `--wait` or `--out`, `generate` prints the job ids and returns at once.
 
@@ -253,16 +265,23 @@ server too (`fuobe mcp`).
 - **"… has a password, so the CLI needs an API token"** — create one in Settings → Security → API
   tokens, then `fuobe login` (or set `FUOBE_TOKEN`).
 - **"… refused the API token"** — it was revoked, or belongs to another server: create a new one.
-- **"(demo)" results** — no provider is set up for that model: add a key in Settings (cloud), or
-  start ComfyUI (open source). Demo results cost nothing and are labelled in the Library.
+- **"The token "fuobe login" saved is for …, so it isn't sent here"** — `--url` or `FUOBE_URL` names
+  another server than the one you signed in to: pass `--token`, or `fuobe login --url <that server>`.
+- **"(demo)" results** — no provider is set up for that model, or Settings → Demo mode is on: add a
+  key in Settings (cloud), or start ComfyUI (open source). Demo results cost nothing and are
+  labelled in the Library.
+- **"(not set up)" in `fuobe models`, or "Connect … in Settings to run this model"** — Demo mode is
+  off and the model's provider isn't set up yet.
 - **"… is a cloud model, but you asked for --engine open"** — pick a model of that engine
   (`fuobe models --engine open`) or leave out `--engine`.
 
 ## What it calls
 
 For script writers who'd rather call the API directly: `GET /api/models` (`kind`, `engine`, `op`,
-`q`, `hidden=1`), `POST /api/generations` (with `?preview=1` to price), `GET /api/generations[/<id>]`,
+`q`, `hidden=1`; it answers with the studios' `defaults` per engine, `demoMode`, and per model
+`connected` and `runs`), `POST /api/generations` (with `?preview=1` to price), `GET /api/generations[/<id>]`,
 `POST /api/generations/<id>/cancel`, `POST /api/uploads` (multipart `file`), `GET /api/files/…`,
 `GET /api/status`, `GET|PATCH /api/assist/skills[/<name>]`, `POST /api/assist/skills/upload`
 (`?replace=1`) and `POST /api/mcp` (JSON-RPC). Every call carries `Authorization: Bearer <token>`
-when there is one, and only to the Fuobe server.
+when there is one, and only to the Fuobe server (never to a link elsewhere, and the saved token only
+to the server it was saved for).

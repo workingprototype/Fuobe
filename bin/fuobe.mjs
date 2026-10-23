@@ -54,7 +54,13 @@ process.exitCode = await main(process.argv.slice(2), {
   stdinIsTTY: !!process.stdin.isTTY,
   stderrIsTTY: !!process.stderr.isTTY,
   now: () => Date.now(),
-  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  /** Resolves after `ms`, or at once when `signal` aborts (Ctrl+C mustn't wait out a long --interval). */
+  sleep: (ms, signal) =>
+    new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+    }),
   /** Ctrl+C while waiting stops the wait (the job keeps running on the server). */
   onInterrupt: (fn) => {
     process.on("SIGINT", fn);

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { keyValue, parseArgs, suggest, UsageError } from "../bin/lib/args.mjs";
-import { defaultModel, fileInputs, generationRequest, isRemoteRef, localFiles, withInputHint } from "../bin/lib/build.mjs";
+import { defaultModel, fileInputs, generationRequest, isRemoteRef, localFiles, voiceSampleProblem, withInputHint } from "../bin/lib/build.mjs";
 import { createClient, networkMessage, statusMessage } from "../bin/lib/client.mjs";
 import { GEN_OPTIONS, mcpSetup, outputName, toolFailure } from "../bin/lib/commands.mjs";
 import { configPath, normalizeUrl, readConfig, resolveTarget, writeConfig } from "../bin/lib/config.mjs";
@@ -167,6 +167,45 @@ describe("the generation request", () => {
     expect(usage(() => defaultModel({ engineMode: "open", defaults: { image: { open: "oss-z-image-turbo" } } }, { engine: "cloud" }))).toMatch(/open-source models only/);
     expect(usage(() => defaultModel(list, { hasMedia: true }))).toMatch(/--model/);
   });
+
+  const audio = {
+    engineMode: "both",
+    defaults: {
+      audio: { cloud: "elevenlabs-v4", open: "oss-chatterbox" },
+      dialogue: { cloud: "elevenlabs-dialogue", open: "oss-chatterbox-dialogue" },
+      clone: { cloud: "chatterbox-cloud", open: "oss-chatterbox" },
+      cloneDialogue: { open: "oss-chatterbox-dialogue" },
+    },
+  };
+
+  it("picks a model that clones the voice samples, and a dialogue for two", () => {
+    expect(defaultModel(audio, { kind: "audio" })).toBe("elevenlabs-v4");
+    expect(defaultModel(audio, { kind: "audio", voices: 1 })).toBe("chatterbox-cloud");
+    expect(defaultModel(audio, { kind: "audio", voices: 1, engine: "open" })).toBe("oss-chatterbox");
+    expect(defaultModel(audio, { kind: "audio", voices: 2, engine: "open" })).toBe("oss-chatterbox-dialogue");
+    expect(defaultModel(audio, { kind: "audio", op: "dialogue" })).toBe("elevenlabs-dialogue");
+    // No cloud dialogue clones voices: the open one is named instead of dropping a speaker.
+    expect(usage(() => defaultModel(audio, { kind: "audio", voices: 2 }))).toBe(
+      "There's no default cloud dialogue model that clones two voice samples. Add --engine open (oss-chatterbox-dialogue), or pick a model with --model (fuobe models --kind audio).",
+    );
+    expect(usage(() => defaultModel({ engineMode: "cloud", defaults: { cloneDialogue: {} } }, { kind: "audio", voices: 2 }))).toMatch(/^There's no default cloud dialogue model .* Pick one with --model/);
+  });
+
+  it("refuses a named model that would ignore a voice sample", () => {
+    const tts = { id: "elevenlabs-v4", opIds: ["tts"] };
+    const clone = { id: "chatterbox-cloud", opIds: ["tts"], voiceClone: true };
+    const dialogue = { id: "oss-chatterbox-dialogue", opIds: ["dialogue"], voiceClone: true };
+    expect(voiceSampleProblem(tts, 0, audio.defaults)).toBeNull();
+    expect(voiceSampleProblem(clone, 1, audio.defaults)).toBeNull();
+    expect(voiceSampleProblem(dialogue, 2, audio.defaults)).toBeNull();
+    // An unknown id is the server's to answer.
+    expect(voiceSampleProblem(undefined, 1, audio.defaults)).toBeNull();
+    expect(voiceSampleProblem(tts, 1, audio.defaults)).toBe(
+      "elevenlabs-v4 speaks in premade voices (--voice <id>) and doesn't clone a voice sample. Leave out --voice-audio, or use a model that clones one (--model chatterbox-cloud or --model oss-chatterbox).",
+    );
+    expect(voiceSampleProblem(clone, 2, audio.defaults)).toBe("chatterbox-cloud doesn't clone two voices. Two --voice-audio samples are a dialogue's speakers: use --model oss-chatterbox-dialogue.");
+    expect(voiceSampleProblem({ id: "elevenlabs-dialogue", opIds: ["dialogue"] }, 2)).toMatch(/doesn't clone two voices.*\(fuobe models --op dialogue\)/);
+  });
 });
 
 describe("output", () => {
@@ -184,7 +223,7 @@ describe("output", () => {
     );
     expect(previewText({ modelName: "Wan 2.2", engine: "open", op: "t2v", outputs: 1, jobs: 1, kind: "video", costUsd: 0, demo: false })).toMatch(/free \(open source/);
     expect(previewText({ modelName: "Kling", engine: "cloud", opLabel: "Image to video", outputs: 2, jobs: 2, kind: "video", costUsd: 1, demo: true })).toBe(
-      "Kling (cloud) · Image to video · 2 videos in 2 jobs · a demo (no provider connected), costs nothing",
+      "Kling (cloud) · Image to video · 2 videos in 2 jobs · a demo (placeholder media), costs nothing",
     );
   });
 
@@ -201,6 +240,15 @@ describe("output", () => {
     const g = { id: "abc", outputs: [{ url: "/api/files/outputs/2026-10-22/x1.png" }, { url: "/api/files/outputs/2026-10-22/x2.mp4?v=1" }] };
     expect([outputName(g, 0), outputName(g, 1)]).toEqual(["abc-1.png", "abc-2.mp4"]);
     expect(outputName({ id: "z", outputs: [{ url: "/api/files/x/y.srt" }] }, 0)).toBe("z.srt");
+    // nanoid ids keep their - and _.
+    expect(outputName({ id: "V1St-GX_8", outputs: [{ url: "/api/files/a.webp" }] }, 0)).toBe("V1St-GX_8.webp");
+  });
+
+  it("keeps a server-sent id or extension from naming a path outside --out", () => {
+    expect(outputName({ id: "../escaped", outputs: [{ url: "/api/files/x.sh" }] }, 0)).toBe("___escaped.sh");
+    expect(outputName({ id: "../../.config/fish/config", outputs: [{ url: "/api/files/x.fish" }] }, 0)).toBe("_______config_fish_config.fish");
+    expect(outputName({ id: "a\\b", outputs: [{ url: "/api/files/x.png%2F..%2Fy" }] }, 0)).toBe("a_b.bin");
+    expect(outputName({ id: "", outputs: [{ url: "/api/files/x" }] }, 0)).toBe("output.bin");
   });
 });
 
@@ -217,6 +265,21 @@ describe("config and the server address", () => {
     expect(resolveTarget({}, {}, saved)).toMatchObject({ url: "http://saved:3000", token: "fuobe_saved", tokenFrom: "config" });
     expect(resolveTarget({}, { FUOBE_URL: "studio.lan:3000/", FUOBE_TOKEN: "fuobe_env" }, saved)).toMatchObject({ url: "http://studio.lan:3000", token: "fuobe_env", tokenFrom: "FUOBE_TOKEN" });
     expect(resolveTarget({ url: "https://f.example.com", token: "fuobe_flag" }, { FUOBE_TOKEN: "fuobe_env" }, saved)).toMatchObject({ url: "https://f.example.com", tokenFrom: "--token" });
+  });
+
+  it("sends the saved token only to the server it was saved for", () => {
+    const saved = { url: "https://studio.example.com", token: "fuobe_secret-for-studio" };
+    const elsewhere = { url: "http://127.0.0.1:4000", urlFrom: "--url", token: undefined, tokenFrom: undefined, savedTokenFor: "https://studio.example.com" };
+    expect(resolveTarget({ url: "http://127.0.0.1:4000" }, {}, saved)).toEqual(elsewhere);
+    expect(resolveTarget({}, { FUOBE_URL: "127.0.0.1:4000" }, saved)).toEqual({ ...elsewhere, urlFrom: "FUOBE_URL" });
+    // The same server, however it's spelled, gets it.
+    expect(resolveTarget({ url: "studio.example.com" }, {}, { ...saved, url: "http://studio.example.com/" })).toMatchObject({ token: saved.token, tokenFrom: "config" });
+    expect(resolveTarget({ url: "HTTPS://Studio.Example.com/" }, {}, saved)).toMatchObject({ token: saved.token, tokenFrom: "config" });
+    // A token saved without an address is the default server's.
+    expect(resolveTarget({}, {}, { token: "fuobe_local" })).toMatchObject({ url: "http://localhost:3000", token: "fuobe_local" });
+    expect(resolveTarget({ url: "https://other.test" }, {}, { token: "fuobe_local" })).toMatchObject({ token: undefined, savedTokenFor: "http://localhost:3000" });
+    // A token given for this run goes where the run goes.
+    expect(resolveTarget({ url: "http://127.0.0.1:4000" }, { FUOBE_TOKEN: "fuobe_env" }, saved)).toEqual({ url: "http://127.0.0.1:4000", urlFrom: "--url", token: "fuobe_env", tokenFrom: "FUOBE_TOKEN" });
   });
 
   it("normalizes addresses and refuses what isn't one", () => {
@@ -264,6 +327,9 @@ describe("the REST client", () => {
     const ctx = { url: "http://localhost:3000" };
     expect(statusMessage(401, { error: "Sign in" }, ctx)).toMatch(/has a password, so the CLI needs an API token\. Create one in Settings → Security → API tokens \(http:\/\/localhost:3000\/settings#security\)/);
     expect(statusMessage(401, null, { ...ctx, token: "fuobe_x", tokenFrom: "FUOBE_TOKEN" })).toMatch(/refused the API token \(from FUOBE_TOKEN\)/);
+    expect(statusMessage(401, null, { ...ctx, savedTokenFor: "https://studio.example.com" })).toMatch(
+      /The token "fuobe login" saved is for https:\/\/studio\.example\.com, so it isn't sent here: pass --token, set FUOBE_TOKEN, or run "fuobe login --url http:\/\/localhost:3000"/,
+    );
     expect(statusMessage(422, { error: "Add an image" }, ctx)).toBe("Add an image");
     expect(statusMessage(500, "<html>", ctx)).toMatch(/HTTP 500 — check the server's log/);
   });
