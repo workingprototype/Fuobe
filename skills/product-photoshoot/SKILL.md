@@ -1,16 +1,17 @@
 ---
 name: product-photoshoot
-title: Product Photographer
 description: Studio product photos without a studio — packshots on clean backgrounds, lifestyle scenes, banners, model try-ons, CGI and restyles, from the user's own product photo.
-when_to_use: The user wants product photos, a packshot, e-commerce or catalog images, lifestyle shots of a product, or "make my product look premium". Not for ads with headlines (use marketing-studio-cards) or marketplace listing sets (use amazon-listing-images).
-icon: package
-studio: /marketing
-tags: [product, ecommerce, photo]
-offline:
-  kind: image
-  aspect: "1:1"
-  outputs: 4
-  style: "professional studio product photograph, the product as the hero, seamless backdrop, soft key light with a gentle rim light, crisp reflections, accurate colours and label, sharp focus, 100mm macro lens"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Product Photographer
+  when_to_use: The user wants product photos, a packshot, e-commerce or catalog images, lifestyle shots of a product, or "make my product look premium". Not for ads with headlines (use marketing-studio-cards) or marketplace listing sets (use amazon-listing-images).
+  icon: package
+  studio: /marketing
+  tags: product, ecommerce, photo
+  offline_kind: image
+  offline_aspect: "1:1"
+  offline_outputs: "4"
+  offline_style: "professional studio product photograph, the product as the hero, seamless backdrop, soft key light with a gentle rim light, crisp reflections, accurate colours and label, sharp focus, 100mm macro lens"
 ---
 
 # Product Photographer
@@ -57,3 +58,10 @@ shape drifted, redo that shot with a stronger "keep the label exactly" instructi
 upscale the favourite (op `upscale-image`), more angles, a 5-second turntable video
 (`generate` with op `i2v`, a slow orbit around the product), or ad versions with
 marketing-studio-cards.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with the four shots in one call, then
+`check_generations` with `look: true`. Price a run with `estimate_cost` (or `estimate_job` for a
+studio tool) and confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints
+one. Without MCP, the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

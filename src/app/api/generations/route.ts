@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
-import { createGenerations, listGenerations } from "@/server/generations";
+import { OPERATION_LABELS } from "@/lib/catalog/types";
+import { createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { SignatureSchema } from "@/server/palettes";
 
@@ -98,12 +99,17 @@ export async function GET(request: Request) {
   return Response.json({ items: listGenerations(listOptionsFrom(new URL(request.url).searchParams)) });
 }
 
+/** Start a generation; `?preview=1` only says what it would run as (model, operation, jobs, outputs, cost). */
 export async function POST(request: Request) {
   const parsed = RequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   }
   try {
+    if (new URL(request.url).searchParams.get("preview") === "1") {
+      const { model, ...p } = previewGeneration(parsed.data as Parameters<typeof previewGeneration>[0]);
+      return Response.json({ ...p, modelId: model.id, modelName: model.name, engine: model.engine, kind: outputKind(p.op, model), opLabel: OPERATION_LABELS[p.op] ?? p.op });
+    }
     const items = createGenerations(parsed.data as Parameters<typeof createGenerations>[0]);
     return Response.json({ items }, { status: 201 });
   } catch (e) {

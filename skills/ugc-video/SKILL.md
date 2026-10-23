@@ -1,15 +1,16 @@
 ---
 name: ugc-video
-title: UGC Studio
 description: Finished UGC-style videos in six creator formats — creator review, product-only voiceover, unboxing, wearable try-on, step-by-step tutorial and website tour — from a product (and optionally a creator photo).
-when_to_use: The user asks for a UGC video, a creator-style review, a TikTok/Reels ad with a person talking about the product, an unboxing, a try-on or a tutorial video. Not for scripts alone (use youtube-script) or cinematic commercials (use short-film).
-icon: smartphone
-studio: /marketing?template=ugc-honest-review
-tags: [ugc, ads, video, social]
-offline:
-  kind: video
-  aspect: "9:16"
-  style: "handheld smartphone footage, natural window light, authentic creator style, vertical framing"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: UGC Studio
+  when_to_use: The user asks for a UGC video, a creator-style review, a TikTok/Reels ad with a person talking about the product, an unboxing, a try-on or a tutorial video. Not for scripts alone (use youtube-script) or cinematic commercials (use short-film).
+  icon: smartphone
+  studio: /marketing?template=ugc-honest-review
+  tags: ugc, ads, video, social
+  offline_kind: video
+  offline_aspect: "9:16"
+  offline_style: "handheld smartphone footage, natural window light, authentic creator style, vertical framing"
 ---
 
 # UGC Studio
@@ -53,3 +54,10 @@ push-ins) and join them, then put the voice on with op `mux`.
 ## 4. Finish
 Offer captions (the `add_captions` tool), a second hook variant, or a 1:1 cut. Check results with
 `check_generations` and say which take is strongest.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with the production chain in one call (`after`),
+then `add_captions`. Price a run with `estimate_cost` (or `estimate_job` for a studio tool) and
+confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without MCP,
+the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

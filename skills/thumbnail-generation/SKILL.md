@@ -1,16 +1,17 @@
 ---
 name: thumbnail-generation
-title: Thumbnail Generator
 description: Cinematic, click-worthy YouTube and Instagram thumbnails and video covers, from concept to a final high-resolution frame with short bold text.
-when_to_use: The user asks for a thumbnail, a video cover, a "video preview" image, a YouTube cover or a Reels cover.
-icon: youtube
-studio: /image
-tags: [youtube, thumbnail, cover]
-offline:
-  kind: image
-  aspect: "16:9"
-  outputs: 3
-  style: "high-contrast cinematic YouTube thumbnail, one clear focal subject, expressive face, dramatic rim light, bold readable headline text, uncluttered background, vivid colour grading"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Thumbnail Generator
+  when_to_use: The user asks for a thumbnail, a video cover, a "video preview" image, a YouTube cover or a Reels cover.
+  icon: youtube
+  studio: /image
+  tags: youtube, thumbnail, cover
+  offline_kind: image
+  offline_aspect: "16:9"
+  offline_outputs: "3"
+  offline_style: "high-contrast cinematic YouTube thumbnail, one clear focal subject, expressive face, dramatic rim light, bold readable headline text, uncluttered background, vivid colour grading"
 ---
 
 # Thumbnail Generator
@@ -44,3 +45,10 @@ most 4 words of text.
 `check_generations` with `look: true`: reject any take with misspelled text or a cut-off face and
 redo it. Offer an upscale (op `upscale-image`) of the winner and an A/B pair with a different
 headline.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with the three concepts in one call, then
+`check_generations` with `look: true`. Price a run with `estimate_cost` (or `estimate_job` for a
+studio tool) and confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints
+one. Without MCP, the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

@@ -1,15 +1,16 @@
 ---
 name: faceless-video
-title: Faceless Studio
 description: Finished narrated, illustrated videos — explainers, channel episodes, history and documentary pieces, stories, narrated picture stories and kids songs — with a narrator over stylised scenes, one-off or recurring.
-when_to_use: The user asks for a faceless video, a YouTube/TikTok episode with narration over illustrations, an explainer, a documentary-style piece, a narrated story or a kids video. Not for script-only requests (use youtube-script) or a photo presenter on screen (use narration).
-icon: book-open
-studio: /faceless
-tags: [faceless, explainer, narration, youtube]
-offline:
-  kind: video
-  aspect: "9:16"
-  style: "consistent illustrated style, clean shapes, soft cinematic lighting, gentle camera motion"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Faceless Studio
+  when_to_use: The user asks for a faceless video, a YouTube/TikTok episode with narration over illustrations, an explainer, a documentary-style piece, a narrated story or a kids video. Not for script-only requests (use youtube-script) or a photo presenter on screen (use narration).
+  icon: book-open
+  studio: /faceless
+  tags: faceless, explainer, narration, youtube
+  offline_kind: video
+  offline_aspect: "9:16"
+  offline_style: "consistent illustrated style, clean shapes, soft cinematic lighting, gentle camera motion"
 ---
 
 # Faceless Studio
@@ -52,3 +53,10 @@ use an `@element`). Show the scene list before generating.
 Faceless Studio already adds a music bed and subtitles. Offer changes to a scene (in the studio), and a thumbnail
 (load thumbnail-generation). For a recurring series, suggest saving the style and voice with
 `remember` so the next episode matches.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `faceless_episode` (price it with `estimate_job`), or the
+`generate` chain above. Price a run with `estimate_cost` (or `estimate_job` for a studio tool) and
+confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without MCP,
+the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).
