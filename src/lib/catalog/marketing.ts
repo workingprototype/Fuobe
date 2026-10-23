@@ -65,6 +65,8 @@ export interface BrandKit extends BrandKitFields {
   note?: string | null;
   error?: string | null;
   source: "website" | "manual";
+  /** "assist": made by Fuobe Assist from an ad brief (create_ads without a brand kit); Assist only reuses these. */
+  origin?: "assist";
   productCount?: number;
   /** Ads made for this brand (Ads Studio shelf). */
   adCount?: number;

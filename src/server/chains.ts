@@ -23,7 +23,8 @@ interface ModeStep {
   op: Operation;
 }
 
-const providerNames = (m: ModelDef, op: Operation) => [...new Set(routesFor(m, op).map((r) => (r.provider === "llm" ? "Claude or Ollama" : provider(r.provider).label)))].join(" or ");
+/** Who can run a model's operation, as Settings names them ("fal.ai", "Claude or Ollama"). */
+export const providerNames = (m: ModelDef, op: Operation) => [...new Set(routesFor(m, op).map((r) => (r.provider === "llm" ? "Claude or Ollama" : provider(r.provider).label)))].join(" or ");
 
 /**
  * A chain must not mix paid and demo steps: a demo join of paid clips (or a paid step fed a demo

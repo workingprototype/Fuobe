@@ -4,7 +4,7 @@ title: Translate & Dub
 description: Localise videos, voice-overs, captions and scripts into other languages — dub a video in the speaker's own voice with lip sync, translate subtitles with their timing, or translate ad copy and in-image text.
 when_to_use: The user wants a video dubbed, "the same video in Spanish", translated subtitles, a voice-over in another language, or copy translated for another market.
 icon: languages
-studio: /audio
+studio: /audio/translate
 tags: [dub, translate, localization, captions]
 offline:
   kind: text
@@ -13,9 +13,12 @@ offline:
 # Translate & Dub
 
 ## Dub a video (speech in, speech out)
-Prefer the **`dub_video` tool**: pass the video and the target language(s). It separates the
-voice from the background, transcribes, translates with timing, re-voices in the speaker's own
-voice, optionally lip-syncs, and mixes the new voice over the original background.
+Prefer the **`dub_video` tool**: pass the video and the target language(s). It opens a dub in
+Translate & dub (Audio → Translate): the voice is separated from the background, transcribed and
+translated with timing; the user then reviews every line there and presses Voice, which re-voices
+it in the speaker's own voice, optionally lip-syncs, and mixes it over the original background.
+Tell the user the lines are waiting for their review there. When they want it in one go, pass
+`review: false` (cloud: HeyGen Translate, lip-synced, or ElevenLabs Dubbing with `lipsync: false`).
 Without it, chain `generate` steps with `after`:
 1. op `separate-audio` (`demucs` / `oss-voice-separate`) → voice and background stems
 2. op `transcribe` on the voice (`scribe-v2` / `oss-qwen3-asr`)

@@ -37,8 +37,10 @@ export const planRunnable = (jobs: PlannedJob[]): boolean => jobs.some((j) => !j
 export type AssistItem =
   | { id: string; role: "user"; text: string; attachments?: string[]; skills?: string[] }
   | { id: string; role: "assistant"; text: string }
-  | { id: string; role: "tool"; text: string; href?: string }
-  | { id: string; role: "approval"; summary: string; jobs: PlannedJob[]; totalUsd: number | null; status: "pending" | "approved" | "declined" }
+  /** `studio`: a job a studio took ("Layers"); its card offers "Open in Layers" (href). */
+  | { id: string; role: "tool"; text: string; href?: string; studio?: string }
+  /** `opens`: the studios the plan's jobs open in; `notes`: why a studio job runs in the Library instead. */
+  | { id: string; role: "approval"; summary: string; jobs: PlannedJob[]; totalUsd: number | null; status: "pending" | "approved" | "declined"; opens?: string[]; notes?: string[] }
   | { id: string; role: "generations"; ids: string[]; storyboard?: boolean }
   | { id: string; role: "notice"; text: string; tone: "info" | "error" };
 

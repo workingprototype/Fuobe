@@ -4,7 +4,7 @@ title: UGC Studio
 description: Finished UGC-style videos in six creator formats — creator review, product-only voiceover, unboxing, wearable try-on, step-by-step tutorial and website tour — from a product (and optionally a creator photo).
 when_to_use: The user asks for a UGC video, a creator-style review, a TikTok/Reels ad with a person talking about the product, an unboxing, a try-on or a tutorial video. Not for scripts alone (use youtube-script) or cinematic commercials (use short-film).
 icon: smartphone
-studio: /lipsync
+studio: /marketing?template=ugc-honest-review
 tags: [ugc, ads, video, social]
 offline:
   kind: video

@@ -4,7 +4,7 @@ title: Marketing Studio Cards
 description: Posters, Meta and Instagram ad creatives and marketplace listing cards built around the user's own product photo, with a designed layout, a headline, short copy and a call to action.
 when_to_use: The user wants a designed advertising still around their product — "make a poster", "an Instagram ad", "a sale banner", "a promo card", "an ad with our tagline". The product photo is required. For plain product photos use product-photoshoot; for many ads at once use the create_ads tool.
 icon: megaphone
-studio: /apps/app-ad-creative
+studio: /marketing
 tags: [ads, poster, marketing, social]
 offline:
   kind: image

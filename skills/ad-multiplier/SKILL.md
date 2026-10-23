@@ -4,7 +4,7 @@ title: Ad Multiplier
 description: Turn one winning video ad into many variants — new hooks, new CTAs, new settings, new subjects or products — keeping what works in the original (timing, structure, audio), for testing on paid social.
 when_to_use: The user has an existing video ad (4–30 s) and wants variations, A/B versions, "new hooks for this ad", "the same ad with our other product" or "localised versions". Needs the reference video.
 icon: copy
-studio: /video-edit
+studio: /ads/multiplier
 tags: [ads, variants, video, testing]
 offline:
   kind: video

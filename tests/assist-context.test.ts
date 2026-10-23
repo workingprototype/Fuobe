@@ -251,9 +251,12 @@ describe("studio tools", () => {
     expect(noLips.map((s) => s.request.op)).toEqual(["separate-audio", "transcribe", "translate", "tts", "mux"]);
     // Cloud: one HeyGen job per language.
     expect(studio.fallbackSteps.dub({ video, languages: ["Spanish"] }, { engine: "cloud" }).map((s) => [s.request.modelId, s.request.params?.targetLanguage])).toEqual([["heygen-translate", "Spanish"]]);
-    const jobs = plan("dub_video", { video, languages: ["Spanish"] });
+    // Dubbing in one go on the open engine is the one case the dub studio can't take: the card says so.
+    const jobs = plan("dub_video", { video, languages: ["Spanish"], review: false });
     expect(jobs.jobs).toHaveLength(6);
     expect(jobs.jobs.every((j) => !j.error)).toBe(true);
+    expect(jobs).toMatchObject({ fallback: expect.stringMatching(/cloud service.*Library/) });
+    expect(jobs.studio).toBeUndefined();
   });
 
   it("a faceless episode joins its clips in groups of four on the open engine", () => {
@@ -319,14 +322,20 @@ describe("studio tools", () => {
   });
 
   it("an open-source narrator needs a voice sample to clone once it runs for real", () => {
-    // No sample on a real open engine: the narration step says what to add, and the card can't run.
+    // No sample on a real open engine: the card says what to add and can't run, in Faceless Studio
+    // and in the pipeline it falls back to (a square episode).
     setSetting("demoMode", "off");
     try {
       const p = plan("faceless_episode", { scenes, style: "flat 2D" }, "open");
-      const voice = p.jobs.find((j) => j.note === "Narration")!;
+      expect(p.studio).toBe("Faceless Studio");
+      expect(p.jobs.find((j) => j.error)?.error).toMatch(/Pick the narrator's voice/);
+      expect(planRunnable(p.jobs)).toBe(false);
+      const square = plan("faceless_episode", { scenes, style: "flat 2D", aspect_ratio: "1:1" }, "open");
+      expect(square.fallback).toMatch(/16:9 and 9:16/);
+      const voice = square.jobs.find((j) => j.note === "Narration")!;
       expect(voice).toMatchObject({ modelId: "oss-chatterbox", atomic: true });
       expect(voice.error).toMatch(/Add a voice sample for the narrator/);
-      expect(planRunnable(p.jobs)).toBe(false);
+      expect(planRunnable(square.jobs)).toBe(false);
     } finally {
       setSetting("demoMode", "auto");
     }
@@ -341,11 +350,19 @@ describe("studio tools", () => {
   });
 
   it("a demo faceless episode on the open engine clones a saved demo voice", async () => {
+    // In Faceless Studio…
     const out = await tools.executeTool("faceless_episode", { scenes, style: "flat 2D" }, { engine: "open" });
     expect(out.isError).toBeFalsy();
-    const body = JSON.parse(out.content as string) as { steps: { step: string; id: string }[]; demo: boolean };
-    expect(body.demo).toBe(true);
-    const voiceId = body.steps.find((s) => s.step === "Narration")!.id;
+    const body = JSON.parse(out.content as string) as { episode: string };
+    const plan_ = JSON.parse((db().prepare("SELECT plan_json FROM faceless_episodes WHERE id = ?").get(body.episode) as { plan_json: string }).plan_json) as { ids: Record<string, string> };
+    const narration = db().prepare("SELECT request_json FROM generations WHERE id = ?").get(plan_.ids.narration) as { request_json: string };
+    expect(JSON.parse(narration.request_json).inputs.voiceAudio).toMatch(/^\/api\/files\/uploads\/.+\.wav$/);
+    // …and in the pipeline a square episode falls back to.
+    const square = await tools.executeTool("faceless_episode", { scenes, style: "flat 2D", aspect_ratio: "1:1" }, { engine: "open" });
+    expect(square.isError).toBeFalsy();
+    const steps = JSON.parse(square.content as string) as { steps: { step: string; id: string }[]; demo: boolean; ranIn: string };
+    expect(steps).toMatchObject({ demo: true, ranIn: "Library" });
+    const voiceId = steps.steps.find((s) => s.step === "Narration")!.id;
     const row = db().prepare("SELECT request_json FROM generations WHERE id = ?").get(voiceId) as { request_json: string };
     expect(JSON.parse(row.request_json).inputs.voiceAudio).toMatch(/^\/api\/files\/uploads\/.+\.wav$/);
   });
@@ -360,7 +377,7 @@ describe("studio tools", () => {
   });
 
   it("runs as one demo pipeline, final result in the chat", async () => {
-    const out = await tools.executeTool("dub_video", { video, languages: ["Spanish"], lipsync: false }, { engine: "open" });
+    const out = await tools.executeTool("dub_video", { video, languages: ["Spanish"], lipsync: false, review: false }, { engine: "open" });
     expect(out.isError).toBeFalsy();
     const body = JSON.parse(out.content as string) as { steps: { id: string; waitsFor: string[] }[]; results: string[]; demo: boolean };
     expect(body.steps).toHaveLength(5);
@@ -371,16 +388,18 @@ describe("studio tools", () => {
     expect(JSON.parse(deps.depends_on)).toEqual(body.steps.at(-1)!.waitsFor);
   });
 
-  it("hands the job to a studio module once one is wired in", async () => {
+  it("hands the job to the studio module in STUDIO_ROUTES", async () => {
     const seen: unknown[] = [];
-    studio.STUDIO_ROUTES.split_layers = { run: async (i) => (seen.push(i), { ids: [], href: "/layers/abc", info: { project: "abc" } }) };
+    const real = studio.STUDIO_ROUTES.split_layers;
+    expect(real?.studio).toBe("Layers");
+    studio.STUDIO_ROUTES.split_layers = { studio: "Layers", page: "/layers", run: async (i) => (seen.push(i), { ids: [], href: "/layers/abc", info: { project: "abc" } }) };
     try {
       const out = await tools.executeTool("split_layers", { image: "/api/files/uploads/a.png" }, { engine: "open" });
       expect(seen).toEqual([{ image: "/api/files/uploads/a.png" }]);
-      expect(JSON.parse(out.content as string)).toEqual({ results: [], open: "/layers/abc", project: "abc" });
-      expect(out.items).toEqual([{ id: "", role: "tool", text: "Opened a Layers project", href: "/layers/abc" }]);
+      expect(JSON.parse(out.content as string)).toEqual({ studio: "Layers", href: "/layers/abc", results: [], project: "abc" });
+      expect(out.items).toEqual([{ id: "", role: "tool", text: "Opened a Layers project", href: "/layers/abc", studio: "Layers" }]);
     } finally {
-      delete studio.STUDIO_ROUTES.split_layers;
+      studio.STUDIO_ROUTES.split_layers = real;
     }
   });
 });
@@ -429,9 +448,13 @@ describe("MCP", () => {
     expect(by.dub_video.description).not.toMatch(/approval card/);
     expect(by.remember.description).toMatch(/confirm with the user first/);
     expect(by.remember.description).not.toMatch(/estimate/);
-    const est = (await rpc("tools/call", { name: "estimate_job", arguments: { tool: "add_captions", arguments: { video } } })) as { result: { structuredContent: { jobs: { modelId: string }[] }; isError: boolean } };
+    const est = (await rpc("tools/call", { name: "estimate_job", arguments: { tool: "add_captions", arguments: { video } } })) as {
+      result: { structuredContent: { jobs: { modelId: string }[]; studio: string; href: string }; isError: boolean };
+    };
     expect(est.result.isError).toBe(false);
-    expect(est.result.structuredContent.jobs.map((j) => j.modelId)).toEqual(["auto-subtitle"]);
+    // The Captions studio's quick burn, and the transcript its editor opens with.
+    expect(est.result.structuredContent).toMatchObject({ studio: "Captions", href: "/video-tools/captions" });
+    expect(est.result.structuredContent.jobs.map((j) => j.modelId)).toEqual(["scribe-v2", "auto-subtitle"]);
     expect(await rpc("tools/call", { name: "estimate_job", arguments: { tool: "remember", arguments: {} } })).toMatchObject({ result: { isError: true } });
     // Without a chat, load_skill returns the instructions themselves.
     const ls = (await rpc("tools/call", { name: "load_skill", arguments: { name: "narration" } })) as { result: { content: { text: string }[] } };

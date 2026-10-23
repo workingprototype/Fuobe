@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, AudioLines, Box, Brain, Check, CircleAlert, Clapperboard, FileText, ImageIcon, Loader2, Search, Sparkles, Video } from "lucide-react";
+import { AppWindow, ArrowUpRight, AudioLines, Box, Brain, Captions, Check, CircleAlert, Clapperboard, Film, FileText, ImageIcon, Info, Languages, Layers, Loader2, Megaphone, Scissors, Search, Sparkles, Video } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -125,6 +125,20 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
           );
         })}
       </ul>
+      {!!(item.opens?.length || item.notes?.length) && (
+        <div className="space-y-1 border-t px-4 py-2.5 text-[12px] text-muted-foreground">
+          {item.opens?.length ? (
+            <p className="flex items-start gap-1.5">
+              <AppWindow className="mt-0.5 size-3.5 shrink-0" /> Opens in {item.opens.join(" and ")}, where you can keep working on it
+            </p>
+          ) : null}
+          {item.notes?.map((n, k) => (
+            <p key={k} className="flex items-start gap-1.5">
+              <Info className="mt-0.5 size-3.5 shrink-0" /> {n}
+            </p>
+          ))}
+        </div>
+      )}
       {item.jobs.length > 6 && (
         <button onClick={() => setAll((v) => !v)} className="w-full border-t px-4 py-2 text-left text-[12px] font-medium text-brand-text hover:bg-accent">
           {all ? "Show fewer steps" : `Show all ${item.jobs.length} steps`}
@@ -143,6 +157,31 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const STUDIO_ICON: Record<string, typeof ImageIcon> = { Layers, "Shorts Studio": Clapperboard, "Translate & dub": Languages, "Faceless Studio": Film, "Ads Studio": Megaphone, Captions, Katana: Scissors };
+
+/** A job a studio took: where it lives, and the way there. */
+function StudioCard({ text, studio, href }: { text: string; studio: string; href: string }) {
+  const Icon = STUDIO_ICON[studio] ?? AppWindow;
+  return (
+    <div className="flex animate-fade-up flex-col gap-3 rounded-2xl border bg-background px-4 py-3 shadow-soft sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-faint text-brand-text">
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium break-words">{text}</p>
+          <p className="text-[12px] text-muted-foreground">Follow it and keep editing in {studio}.</p>
+        </div>
+      </div>
+      <Button asChild size="sm" variant="outline" className="w-full rounded-full sm:w-auto">
+        <Link href={href}>
+          Open in {studio} <ArrowUpRight />
+        </Link>
+      </Button>
     </div>
   );
 }
@@ -227,6 +266,7 @@ export function Transcript({
               </div>
             );
           case "tool":
+            if (item.studio && item.href) return <StudioCard key={item.id} text={item.text} studio={item.studio} href={item.href} />;
             return item.href ? (
               <Link key={item.id} href={item.href} className="flex w-fit items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground">
                 <Search className="size-3" /> {item.text} <ArrowUpRight className="size-3" />

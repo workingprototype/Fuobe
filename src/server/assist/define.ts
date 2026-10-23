@@ -27,6 +27,13 @@ export interface ToolOutcome {
   items?: AssistItem[];
 }
 
+/** Where a studio tool's job opens: its studio and that studio's page, or why it runs in the Library instead. */
+export interface JobPlace {
+  studio?: string;
+  href?: string;
+  fallback?: string;
+}
+
 export interface ToolDef<S extends z.ZodType> {
   name: string;
   description: string;
@@ -39,6 +46,8 @@ export interface ToolDef<S extends z.ZodType> {
   plan?: (input: z.infer<S>, ctx: ToolContext) => PlannedJob[];
   /** The approval card's heading for this call (default: its summary field, else the tool's name). */
   title?: (input: z.infer<S>) => string;
+  /** Studio tools: where the job will open (shown on the card, returned by MCP's estimate_job). */
+  place?: (input: z.infer<S>, ctx: ToolContext) => JobPlace;
 }
 
 export const defineTool = <S extends z.ZodType>(def: ToolDef<S>) => def;

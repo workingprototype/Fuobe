@@ -4,7 +4,7 @@ title: Visual Studio
 description: Finished motion-design reels with MiniMax H3 in five modes — classic abstract motion, high-energy kinetic graphics, animated typography, infographics, and product-only commercials — from a brief, a style reference, product assets or a storyboard.
 when_to_use: The user wants a motion-graphics style video, a kinetic typography clip, an animated infographic, an abstract loop, or a product-only commercial without people. Not for still images, live-action stories (short-film) or editing existing footage.
 icon: sparkles
-studio: /video
+studio: /video?model=minimax-h3
 tags: [motion design, typography, infographic, video]
 offline:
   kind: video

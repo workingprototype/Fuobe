@@ -52,16 +52,35 @@ function StageBadge({ stage }: { stage: DubStage }) {
 export function DubStudio({ tabs }: { tabs?: React.ReactNode }) {
   const sessions = useDubSessions();
   const [openId, setOpenId] = useState<string | null>(null);
+  // Hand-off: /audio/translate?dub=<id> opens that dub (Assist and MCP link the dubs they start).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("dub");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once after hydration (no Suspense boundary needed)
+    if (id) setOpenId(id);
+  }, []);
+  // The open dub is in the address, so a reload or a shared link comes back to it.
+  const show = (id: string | null) => {
+    setOpenId(id);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set("dub", id);
+    else url.searchParams.delete("dub");
+    window.history.replaceState(null, "", url);
+  };
   // A dub removed elsewhere (another tab) just closes.
   const open = sessions.data?.find((s) => s.id === openId);
   return (
     <ToolShell title="Audio" tabs={tabs}>
       {open ? (
-        <SessionView key={open.id} s={open} onBack={() => setOpenId(null)} />
+        <SessionView key={open.id} s={open} onBack={() => show(null)} />
+      ) : openId && sessions.isLoading ? (
+        <div className="mx-auto max-w-[760px] space-y-3 pt-4" aria-label="Opening the dub">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="aspect-video w-full rounded-2xl" />
+        </div>
       ) : (
         <>
-          <NewDub onStarted={(id) => setOpenId(id)} />
-          <RecentDubs sessions={sessions.data} loading={sessions.isLoading} onOpen={setOpenId} />
+          <NewDub onStarted={show} />
+          <RecentDubs sessions={sessions.data} loading={sessions.isLoading} onOpen={show} />
         </>
       )}
     </ToolShell>
