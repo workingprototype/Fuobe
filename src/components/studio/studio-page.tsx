@@ -63,11 +63,13 @@ function initialDraft(
   }
   if (sp.get("video")) slots.video = slot(sp.get("video"));
   if (sp.get("audio")) slots.audio = slot(sp.get("audio"));
+  // An output format handed over in the link (Export → "ProRes in the cloud"), when the model writes it.
+  const format = model?.options.formats?.find((f) => f === sp.get("format"));
   return {
     prompt: sp.get("prompt") ?? "",
     negativePrompt: "",
     modelId,
-    params: { ...model?.defaults, ...(preset?.type === "app" ? presetRoute?.params : {}) },
+    params: { ...model?.defaults, ...(preset?.type === "app" ? presetRoute?.params : {}), ...(format && { format }) },
     slots,
     refs,
     presetId: sp.get("preset") ?? config.preset?.id,

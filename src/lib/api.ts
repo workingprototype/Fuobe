@@ -769,7 +769,8 @@ export function useDeleteElement() {
 export type EngineMode = "both" | "open" | "cloud";
 
 export interface StatusInfo {
-  providers: Record<string, { label: string; configured: boolean }>;
+  /** `ramBytes`: the connected ComfyUI's RAM (comfyui only, when it says). */
+  providers: Record<string, { label: string; configured: boolean; ramBytes?: number }>;
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
@@ -804,6 +805,27 @@ export function useStatus() {
     queryFn: async () => json<StatusInfo>(await fetch("/api/status")),
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+}
+
+/** What an uploaded clip's header says: length, size, frame rate and sound (empty for formats the server can't read). */
+export interface ClipFacts {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+/** The attached clip's facts (Upscale hub: prices by its length, "24 → 60 fps"). Only for uploads and results on this server. */
+export function useClipFacts(url: string | undefined) {
+  return useQuery({
+    queryKey: ["clip-facts", url],
+    enabled: !!url && url.startsWith("/api/files/"),
+    queryFn: async () =>
+      json<ClipFacts>(await fetch("/api/media/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) })),
+    staleTime: Infinity,
+    retry: false,
   });
 }
 

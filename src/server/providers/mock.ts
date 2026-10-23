@@ -6,6 +6,7 @@ import { OPERATION_OUTPUT, type MediaKind, type Operation } from "@/lib/catalog/
 import type { ProviderAdapter, RemoteOutput } from "./types";
 import { textOutput } from "./llm";
 import { toDataUri } from "../storage";
+import { zip } from "../zip";
 
 /**
  * Demo provider: lets anyone click through the whole product with no API keys or GPU.
@@ -304,8 +305,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "images-to-video":
       return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } }];
     case "sdr-to-hdr":
-    case "export-video":
-      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, ...(meta.format ? { format: meta.format } : {}) } }];
+    case "export-video": {
+      // EXR frames ride along on the preview clip as a zip (meta.artifacts.exr), as the real routes do.
+      const exr = meta.format === "exr" ? { artifacts: { exr: toDataUri(zip([{ name: "README.txt", data: Buffer.from("Demo mode: a real run puts one 16-bit EXR file per frame here.\n") }]), "application/zip") } } : {};
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, ...(meta.format ? { format: meta.format } : {}), ...exr } }];
+    }
     case "trim":
     case "captions":
     case "mux":

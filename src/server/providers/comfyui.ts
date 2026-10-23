@@ -8,9 +8,11 @@ import {
   alphaBBox,
   applyBindings,
   asrLanguage,
+  bypassNode,
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
   injectLoras,
@@ -20,6 +22,7 @@ import {
   randomSeed,
   splitCueWords,
   swatchPixels,
+  tagMetaBatch,
   whisperLanguage,
   type BindingKey,
   type CaptionCue,
@@ -28,7 +31,9 @@ import {
   type ManifestOutput,
   type ManifestWorkflow,
 } from "@/lib/comfy";
+import { fpsPlan } from "@/lib/av/fps";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
+import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
@@ -36,7 +41,9 @@ import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/t
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
-import { readRef } from "../storage";
+import { probeWebm } from "../webm-probe";
+import { adoptFile, readRef, scratchDir } from "../storage";
+import { zipToFile } from "../zip";
 import { ProviderError, type ProviderAdapter, type RemoteOutput } from "./types";
 
 export const WORKFLOW_DIR = path.join(process.cwd(), "workflows", "comfyui");
@@ -332,24 +339,60 @@ async function withLayerBoxes(outputs: ComfyOutput[]): Promise<ComfyOutput[]> {
   );
 }
 
+/**
+ * An EXR export's frames (role "frames", one file per frame) are zipped into one stored file, one frame
+ * in memory at a time, and ride along on the preview clip as meta.artifacts.exr (as LTX HDR's EXR zip
+ * does on the cloud). Other outputs pass through.
+ */
+async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promise<ComfyOutput[]> {
+  const frames = outputs.filter((o) => o.meta?.role === "frames");
+  if (!frames.length) return outputs;
+  const rest = outputs.filter((o) => o.meta?.role !== "frames");
+  const preview = rest.find((o) => o.kind === "video");
+  if (!preview) throw new ProviderError("The EXR export finished without its preview clip");
+  const dest = path.join(scratchDir(), `${generationId || nanoid(8)}-${nanoid(6)}.zip`);
+  async function* files() {
+    for (const [i, f] of frames.entries()) {
+      const res = await fetch(f.url, { headers: f.headers });
+      if (!res.ok) throw new ProviderError(`ComfyUI answered HTTP ${res.status} for EXR frame ${i + 1}`);
+      yield { name: `frame_${String(i + 1).padStart(5, "0")}.exr`, data: Buffer.from(await res.arrayBuffer()) };
+    }
+  }
+  await zipToFile(files(), dest);
+  const zip = adoptFile({ from: dest, contentType: "application/zip", name: "exr-frames.zip", source: "generation", generationId: generationId || undefined });
+  return rest.map((o) => (o === preview ? { ...o, meta: { ...o.meta, artifacts: { exr: zip.url }, frames: frames.length } } : o));
+}
+
 // ---------------------------------------------------------------------------
 // Reachability. Routing (chooseRoute) is synchronous, so the first check for a server URL is a blocking probe
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
 
 declare global {
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string } | undefined;
+  /** Reachability of the ComfyUI server, and its RAM (bytes) when /system_stats said. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number } | undefined;
 }
 
 export async function probeComfy(force = false): Promise<boolean> {
   const cur = globalThis.__fuobeComfyReach;
   if (!force && cur && cur.url === baseUrl() && Date.now() - cur.at < 10_000) return cur.ok;
   let ok = false;
+  let ram: number | undefined;
   try {
     const r = await fetch(`${baseUrl()}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(2000) });
     ok = r.ok;
+    if (ok) {
+      const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+      if (typeof total === "number" && total > 0) ram = total;
+    }
   } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl() };
+  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl(), ...(ram ? { ram } : {}) };
   return ok;
+}
+
+/** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
+export function comfyRam(): number | undefined {
+  const cur = globalThis.__fuobeComfyReach;
+  return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
 
 const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
@@ -391,6 +434,14 @@ function rememberMedia(name: string, info: MediaInfo) {
   const seen = (globalThis.__fuobeComfyMedia ??= new Map());
   seen.set(name, info);
   if (seen.size > 256) seen.delete(seen.keys().next().value!);
+}
+
+/** A WebM / Matroska clip's header facts in MediaInfo's shape (src/server/webm-probe.ts). */
+function webmInfo(data: Buffer): MediaInfo | null {
+  const w = probeWebm(data);
+  if (!w) return null;
+  const frames = w.duration && w.fps ? Math.round(w.duration * w.fps) : undefined;
+  return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
 }
 
 /** The header facts of a file this server uploaded to ComfyUI (undefined for images and unreadable containers). */
@@ -465,6 +516,80 @@ function captionCues(input: GenInput, extra: Record<string, unknown>): CaptionCu
 const seconds = (n: number) => (n >= 10 ? String(Math.round(n)) : String(Math.round(n * 10) / 10));
 const GB = 2 ** 30;
 
+const clipFacts = (clip: MediaInfo | undefined) => ({ width: clip?.width, height: clip?.height, fps: clip?.fps, frames: clip?.frames, duration: clip?.videoDuration ?? clip?.duration });
+
+/**
+ * Values and graph edits for the Upscale hub's open tools, from the request and the clip's header:
+ * VHS format / profile (export), CreateVideo's colour space (HDR10 PQ or HLG), FPS Boost's multiplier m,
+ * selection n and slow motion (src/lib/av/fps.ts), the chunked upscalers' short side and pass size.
+ * `holds` = frame-sized copies of the whole clip the graph keeps in memory (for the RAM check).
+ */
+function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: MediaInfo | undefined, extra: Record<string, unknown>) {
+  const b = manifest.bindings;
+  const d = manifest.defaults;
+  const facts = clipFacts(clip);
+  const values: Partial<Record<BindingKey, unknown>> = {};
+  const out = { values, wholeClip: null as ReturnType<typeof wholeClipTool>, bypassInterpolation: false, dropSound: false };
+  try {
+    // Export: VideoHelperSuite's format and ProRes profile.
+    if (manifest.capability === "export-video" && b.format) {
+      const v = exportValues(input.format);
+      values.format = v.format;
+      if (v.profile) values.profile = v.profile;
+    }
+    // SDR to HDR: HLG or PQ (HDR10's curve).
+    if (manifest.capability === "sdr-to-hdr" && b.colorSpace) values.colorSpace = hdrColorSpace(input.format);
+  } catch (e) {
+    throw new ProviderError((e as Error).message);
+  }
+  // Graphs that decode the whole clip (src/lib/av/video-finish.ts wholeClipTool says how many copies they hold).
+  if (manifest.capability === "sdr-to-hdr") out.wholeClip = wholeClipTool("sdr-to-hdr", input.format);
+  if (manifest.id === "video-export-exr") out.wholeClip = wholeClipTool("export-video", "exr");
+  // FPS Boost: interpolate by m, keep every n-th frame (the graph computes the output frame rate itself).
+  if (b.every && b.multiplier) {
+    const target = input.targetFps;
+    const slowdown = Math.max(1, Math.round(input.slowdown ?? 1));
+    let m = Number(extra.multiplier ?? d.multiplier ?? 2);
+    let n = 1;
+    // m, n and the slow-motion factor go together: a stray params.extra value can't break the ratio.
+    for (const k of ["multiplier", "every", "slowdown"]) delete extra[k];
+    if (target) {
+      // m and n come from the clip's own rate (the upload's header, else what the server read from it).
+      const sourceFps = clip?.fps && clip.fps > 0 ? clip.fps : input.sourceFps && input.sourceFps > 0 ? input.sourceFps : undefined;
+      if (!sourceFps) {
+        throw new ProviderError(
+          `FPS Boost on the open engine works out its frames from the clip's frame rate, and this file doesn't say what it is, so ${target} fps can't be hit. Re-save it as MP4 (H.264) or WebM and try again`,
+        );
+      }
+      const plan = fpsPlan(sourceFps, target, slowdown, Number(manifest.limits?.maxMultiplier ?? 16));
+      m = plan.multiplier;
+      n = plan.every;
+    } else m = Math.max(2, Math.min(Number(manifest.limits?.maxMultiplier ?? 16), Math.round(m * slowdown)));
+    // m 1 (a target the clip's rate is a whole multiple of: 60 → 30 keeps every 2nd frame): FrameInterpolate is
+    // linked out below, and the graph's frame-rate expression still reads m, so it gets the real 1. Other lower
+    // targets still interpolate (30 → 24 is m 4, n 5).
+    values.multiplier = m;
+    values.every = n;
+    values.slowdown = slowdown;
+    out.bypassInterpolation = m < 2;
+    out.dropSound = slowdown > 1;
+    out.wholeClip = wholeClipTool("interpolate", undefined, m);
+  }
+  // Chunked upscaling: the shorter edge asked for, and passes that hold about 1.5 GB of frames.
+  if (b.shortSide) {
+    const shortSide = upscaleShortSide(input.resolution, Number(d.shortSide ?? 1080));
+    values.shortSide = shortSide;
+    if (b.framesPerBatch && extra.framesPerBatch === undefined) {
+      const seedvr = /seedvr/i.test(manifest.id);
+      // ESRGAN on a big source (1440p → 2160p: about 0.85 GB a frame): down to one frame a pass, to stay near the budget.
+      values.framesPerBatch = framesPerPass(facts, { shortSide, modelScale: seedvr ? 0 : 4, fourNPlusOne: seedvr, min: seedvr ? 5 : 1, max: seedvr ? 33 : 64, fallback: Number(d.framesPerBatch ?? 16) });
+    }
+  } else if (b.framesPerBatch && manifest.capability === "export-video" && extra.framesPerBatch === undefined) {
+    values.framesPerBatch = framesPerPass(facts, { min: 8, max: 256, fallback: Number(d.framesPerBatch ?? 64) });
+  }
+  return out;
+}
+
 /**
  * Turn a canonical request into the exact ComfyUI prompt: picks the workflow variant, maps Fuobe's inputs
  * onto the workflow's bindings (sizes, frames, trim times, languages, palettes, layers…), uploads files the
@@ -492,6 +617,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   }
   // Soundtrack without a background stem: the single-track graph.
   if (ctx.op === "mux" && !audio2 && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
+  // EXR frames have graphs of their own (export, SDR to HDR).
+  if (input.format === "exr" && (ctx.op === "export-video" || ctx.op === "sdr-to-hdr")) {
+    const exr = exrWorkflow(ctx.op);
+    if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
+  }
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
@@ -592,6 +722,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
     values.frames = frames;
   }
+  // Video finishing (Upscale hub): export formats, HDR curves, FPS Boost's m / n, chunked upscaling.
+  const finish = videoFinishValues(manifest, input, clip, extra);
+  Object.assign(values, finish.values);
+
   // Drawn motion paths (normalised to the start frame) → one pixel point per output frame (Wan-Move).
   const paths = extra.motionPaths as MotionPaths | undefined;
   delete extra.motionPaths;
@@ -717,9 +851,26 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
   }
 
+  // Graphs that hold the whole clip in memory (FPS Boost, HDR, EXR): refuse what the server can't hold.
+  if (finish.wholeClip) {
+    const problem = wholeClipProblem(finish.wholeClip, clipFacts(clip), await ctx.serverRam?.());
+    if (problem) throw new ProviderError(problem);
+  }
+
   const bound = applyBindings(graph, b, Object.fromEntries(Object.entries(values).filter(([k]) => !left.includes(k))));
   if (bound.missing.length) throw new ProviderError(`Workflow ${manifest.id} bindings point at missing nodes: ${bound.missing.join(", ")}`);
   let wf = bound.workflow;
+  const outputIds = manifest.outputs.map((o) => o.node);
+  // FPS Boost to a lower rate, or one the clip divides into: no interpolation, only every n-th frame.
+  if (finish.bypassInterpolation) {
+    const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");
+    if (id) wf = bypassNode(wf, id, "images", outputIds);
+  }
+  // Slow motion: the sound would no longer match the picture.
+  if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
+  // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
+  wf = tagMetaBatch(wf, ctx.generationId);
+  if (clip && !clip.hasAudio && clip.hasVideo) wf = dropVhsAudio(wf);
   if (manifest.expand === "captions") {
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
     try {
@@ -799,11 +950,43 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   const j = (await res.json()) as { name: string; subfolder?: string };
   const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
-  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name)) {
-    const info = probeMedia(data);
+  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv)$/i.test(name)) {
+    const info = probeMedia(data) ?? webmInfo(data);
     if (info) rememberMedia(uploaded, info);
   }
   return uploaded;
+}
+
+type QueueEntry = unknown[];
+const postJson = (p: string, body: unknown, worker: ComfyWorker = "main") =>
+  comfyFetch(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, worker).catch(() => undefined);
+
+/**
+ * Take a job off ComfyUI: delete its pending prompts and interrupt the one running. A meta-batch job is
+ * every prompt carrying its filename prefix (VHS re-queues each pass under a new id with a negative queue
+ * number, so the pending pass would run first). Returns whether any prompt of the job was still there.
+ */
+async function stopPrompts(externalId: string | undefined, prefix: string | undefined, worker: ComfyWorker = "main"): Promise<boolean> {
+  const ours = (q: QueueEntry) => (!!externalId && q[1] === externalId) || (!!prefix && promptHasPrefix(q[2], prefix));
+  // Always delete the job's own id, even when the queue can't be read.
+  if (externalId) await postJson("/queue", { delete: [externalId] }, worker);
+  const queue = await comfyJson<{ queue_running?: QueueEntry[]; queue_pending?: QueueEntry[] }>("/queue", worker).catch(() => undefined);
+  if (!queue) return false;
+  const pending = (queue.queue_pending ?? []).filter(ours).map((q) => String(q[1]));
+  if (pending.length) await postJson("/queue", { delete: pending }, worker);
+  const running = (queue.queue_running ?? []).filter(ours);
+  for (const q of running) await postJson("/interrupt", { prompt_id: String(q[1]) }, worker);
+  return pending.length + running.length > 0;
+}
+
+/** Cancel tries for a meta-batch job after the first: a pass that was already saving when interrupted can still queue the next one. */
+export const CANCEL_SWEEPS = { tries: 5, everyMs: 1000 };
+
+async function sweepPasses(prefix: string, worker: ComfyWorker = "main"): Promise<void> {
+  for (let i = 0; i < CANCEL_SWEEPS.tries; i++) {
+    await new Promise((r) => setTimeout(r, CANCEL_SWEEPS.everyMs));
+    if (!(await stopPrompts(undefined, prefix, worker).catch(() => false))) return;
+  }
 }
 
 export const comfyProvider: ProviderAdapter = {
@@ -852,7 +1035,7 @@ export const comfyProvider: ProviderAdapter = {
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
-    return { externalId: body.prompt_id, meta: { ...meta, ...(worker === "isolated" && { worker }) }, payload: wf };
+    return { externalId: body.prompt_id, meta: { ...meta, generationId, ...(worker === "isolated" && { worker }) }, payload: wf };
   },
 
   async poll({ externalId, meta }) {
@@ -878,6 +1061,11 @@ export const comfyProvider: ProviderAdapter = {
       }
       forget(externalId);
       if (!outputs.length) return { state: "failed" as const, error: "Workflow finished without saving any output" };
+      try {
+        outputs = await bundleFrames(outputs, String(meta.generationId ?? String(meta.prefix ?? "").replace(/^fuobe\//, "")));
+      } catch (e) {
+        return { state: "failed" as const, error: (e as Error).message };
+      }
       return { state: "succeeded" as const, outputs: await withLayerBoxes(outputs) };
     };
     const isDone = (e: HistoryEntry | undefined): e is HistoryEntry => !!e && (!!e.status?.completed || e.status?.status_str === "success" || e.status?.status_str === "error");
@@ -915,12 +1103,12 @@ export const comfyProvider: ProviderAdapter = {
   },
 
   async cancel({ externalId, meta }) {
-    const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
+    const worker: ComfyWorker = meta?.worker === "isolated" ? "isolated" : "main";
     forget(externalId);
-    const post = (path: string, body: unknown) => comfyFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, worker);
-    await post("/queue", { delete: [externalId] }).catch(() => {});
-    const q = (await comfyJson<{ queue_running?: unknown[][] }>("/queue", worker).catch(() => ({}))) as { queue_running?: unknown[][] };
-    if (q.queue_running?.some((r) => r[1] === externalId)) await post("/interrupt", { prompt_id: externalId }).catch(() => {});
+    // A meta-batch job's later passes have prompt ids of their own (and jump the queue): find them by prefix.
+    const prefix = meta?.metaBatch && typeof meta.prefix === "string" ? meta.prefix : undefined;
+    const found = await stopPrompts(externalId, prefix, worker);
+    if (prefix && found) void sweepPasses(prefix, worker);
   },
 
   async test(opts) {

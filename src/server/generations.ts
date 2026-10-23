@@ -8,6 +8,7 @@ import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
+import { upscaleTier } from "@/lib/av/upscale";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
 import {
@@ -32,9 +33,11 @@ import { provider } from "./providers";
 import { probeComfy } from "./providers/comfyui";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
+import { mediaFacts } from "./media-facts";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
-import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
+import { fetchRemoteToFile } from "./remote-fetch";
+import { adoptFile, contentTypeFor, deleteAsset, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
   id: string;
@@ -425,7 +428,7 @@ function prepare(original: GenerationRequest) {
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
-  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1) };
+  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op) };
 }
 
 
@@ -715,6 +718,19 @@ async function submit(
       const f = await readRef(ref);
       return adapter.prepareFile(f.data, f.contentType, f.name, route);
     };
+    // The input clip's header (size, frame rate, length): upscalers that take a factor and frame-count routes read it.
+    let source: Pick<GenInput, "sourceSize" | "sourceFps" | "sourceDuration"> = {};
+    const prepVideo = async (ref?: string) => {
+      if (!ref) return undefined;
+      const f = await readRef(ref);
+      const facts = mediaFacts(f.data);
+      source = {
+        ...(facts.width && facts.height ? { sourceSize: { width: facts.width, height: facts.height } } : {}),
+        ...(facts.fps ? { sourceFps: facts.fps } : {}),
+        ...(facts.duration ? { sourceDuration: facts.duration } : {}),
+      };
+      return adapter.prepareFile(f.data, f.contentType, f.name);
+    };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;
       const f = await readRef(ref);
@@ -735,7 +751,7 @@ async function submit(
       images: (await Promise.all((req.inputs?.images ?? []).map(prep))).filter(Boolean) as string[],
       endImage: await prep(req.inputs?.endImage),
       mask: await prepMask(req.inputs?.mask),
-      video: await prep(req.inputs?.video),
+      video: await prepVideo(req.inputs?.video),
       audio: await prep(req.inputs?.audio),
       audio2: await prep(req.inputs?.audio2),
       voiceAudio: await prep(req.inputs?.voiceAudio),
@@ -747,6 +763,18 @@ async function submit(
       // Vary seeds across a batch so N jobs don't return N identical results.
       seed: plan.params.seed !== undefined && plan.params.seed >= 0 ? plan.params.seed + index : undefined,
     };
+    // What the caller said about the clip's length wins; the header fills the rest.
+    Object.assign(input, { ...source, ...(plan.params.sourceDuration !== undefined && { sourceDuration: plan.params.sourceDuration }) });
+    // An upscale that wouldn't enlarge the clip (a 1080p clip at a default 1080p; a 4K clip would even shrink):
+    // a tier the model only defaulted to moves up to the next one it offers, one the caller picked is refused.
+    if (plan.op === "upscale-video" && input.sourceSize) {
+      const tier = upscaleTier(input.resolution, plan.model.options.resolutions, input.sourceSize, req.params?.resolution !== undefined);
+      if ("error" in tier) throw new Error(tier.error);
+      if (tier.resolution !== input.resolution) {
+        input.resolution = tier.resolution;
+        if (providerId !== "mock" && plan.model.engine !== "open") update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, resolution: tier.resolution }, 1, plan.op) });
+      }
+    }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();
     const status = statusOf(id);
@@ -994,7 +1022,38 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
   return { text: text.slice(0, MAX_INLINE_TEXT), meta: { ...meta, truncated: true } };
 }
 
+/**
+ * Extra files a result carries as links (meta.artifacts: LTX HDR's EXR zip, Higgsfield's fbx / zip) are kept
+ * too, so the Library never depends on a provider's expiring URL. Links are streamed to disk (an EXR zip runs
+ * to gigabytes); one that can't be fetched stays as it was (the result's actions still offer it).
+ */
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
+  const links = meta?.artifacts;
+  if (!links || typeof links !== "object" || Array.isArray(links)) return meta;
+  const kept: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(links as Record<string, unknown>)) {
+    kept[k] = v;
+    if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) continue;
+    try {
+      if (v.startsWith("data:")) {
+        const f = await readRef(v);
+        kept[k] = saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+        continue;
+      }
+      const dest = path.join(scratchDir(), `${generationId}-${k}-${nanoid(6)}`);
+      const res = await fetchRemoteToFile(v, dest);
+      const name = new URL(res.url).pathname.split("/").pop() || undefined;
+      const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+      kept[k] = adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
+    } catch (e) {
+      console.warn(`[fuobe] could not keep the ${k} file of ${generationId}: ${(e as Error).message}`);
+    }
+  }
+  return { ...meta, artifacts: kept };
+}
+
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
+  const meta = await persistArtifacts(o.meta, generationId);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1023,7 +1082,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     kind: asset.kind,
     contentType: asset.contentType,
     assetId: asset.id,
-    ...inlineText(text, o.meta),
+    ...inlineText(text, meta),
     ...(o.draftId ? { draftId: o.draftId } : {}),
   };
 }

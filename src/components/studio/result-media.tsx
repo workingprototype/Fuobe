@@ -1,9 +1,11 @@
 "use client";
 
-import { AudioLines, Box, FileText, Layers } from "lucide-react";
+import { AudioLines, Box, FileText, Film, Layers } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
-import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { cuesOf, cueTime, isLayered, layerInfo, modelPreview, textOf, videoPoster } from "@/lib/output-actions";
+import { FORMAT_INFO } from "@/lib/av/formats";
+import type { Generation, OutputFile, VideoFormat } from "@/lib/catalog/types";
+import { extensionOf } from "@/lib/library";
+import { cuesOf, cueTime, editOnlyFormat, isLayered, layerInfo, modelPreview, textOf, videoPoster } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 /** Any result as a tile picture: image, video (plays on hover), audio, text card, 3D preview. */
@@ -17,7 +19,7 @@ export function MediaThumb({
   inset,
 }: {
   output: OutputFile;
-  /** The generation it belongs to (3D models show a sibling turntable or poster; a clip, its start frame as poster). */
+  /** The generation it belongs to (3D models show a sibling turntable or poster; a clip, its start frame as poster; pro exports a file card). */
   g?: Pick<Generation, "outputs"> & Partial<Pick<Generation, "op" | "request">>;
   className?: string;
   autoPlay?: boolean;
@@ -30,24 +32,10 @@ export function MediaThumb({
 }) {
   const object = fit ? "object-contain" : "object-cover";
   if (output.kind === "video") {
+    const pro = editOnlyFormat(g, output);
+    if (pro) return <VideoFileCard output={output} format={pro} className={className} />;
     // With a poster the clip isn't fetched until it plays (a grid of clips no longer loads every one's metadata).
-    const poster = videoPoster(g, output);
-    return (
-      <video
-        src={`${output.url}#t=0.1`}
-        poster={poster}
-        muted
-        loop
-        playsInline
-        preload={poster ? "none" : "metadata"}
-        autoPlay={autoPlay}
-        onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-        onMouseLeave={(e) => {
-          if (!autoPlay) e.currentTarget.pause();
-        }}
-        className={cn("size-full", object, className)}
-      />
-    );
+    return <TileVideo output={output} poster={videoPoster(g, output)} autoPlay={autoPlay} className={cn("size-full", object, className)} />;
   }
   if (output.kind === "audio") {
     return (
@@ -77,6 +65,43 @@ export function MediaThumb({
   }
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={output.url} alt="" loading="lazy" decoding="async" className={cn("size-full", object, className)} />;
+}
+
+/** A muted tile video that plays on hover; a file card when the browser can't decode it (a 10-bit or HEVC file). */
+function TileVideo({ output, poster, autoPlay, className }: { output: OutputFile; poster?: string; autoPlay?: boolean; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <VideoFileCard output={output} className={className} />;
+  return (
+    <video
+      src={`${output.url}#t=0.1`}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      preload={poster ? "none" : "metadata"}
+      autoPlay={autoPlay}
+      onError={() => setFailed(true)}
+      onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+      onMouseLeave={(e) => {
+        if (!autoPlay) e.currentTarget.pause();
+      }}
+      className={className}
+    />
+  );
+}
+
+/** A video the browser doesn't play (ProRes, FFV1, some 10-bit files) as what it is: a file for an editor or player. */
+export function VideoFileCard({ output, format, className }: { output: Pick<OutputFile, "url" | "kind">; format?: VideoFormat; className?: string }) {
+  const info = format ? FORMAT_INFO[format] : undefined;
+  return (
+    <div className={cn("flex size-full flex-col items-center justify-center gap-1.5 bg-muted p-4 text-center text-muted-foreground", className)}>
+      <Film className="size-7" aria-hidden />
+      <span className="text-[13px] font-medium text-foreground">{info?.label ?? "Video file"}</span>
+      <span className="max-w-56 text-[12px] leading-snug">
+        .{extensionOf(output)} · {info ? "made for your editor; browsers don't play it. Download it to use it" : "this browser can't play it here. Download it to watch"}
+      </span>
+    </div>
+  );
 }
 
 /** A 56 px thumbnail for list rows: media where it reads at that size, an icon where it doesn't. */

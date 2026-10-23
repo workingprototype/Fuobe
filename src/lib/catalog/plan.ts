@@ -1,3 +1,4 @@
+import { FORMAT_INFO, formatList } from "@/lib/av/formats";
 import type {
   Engine,
   GenerationRequest,
@@ -230,6 +231,11 @@ export function planGeneration(
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
   if (op === "keyframes") checkKeyframes(model, req.inputs?.images?.length ?? 0, params);
+  // A format the model doesn't write (an API caller, or a request moved to another model).
+  const formats = model.options.formats;
+  if (params.format && formats?.length && !formats.includes(params.format)) {
+    throw new Error(`${model.name} writes ${formatList(formats)}, not ${FORMAT_INFO[params.format]?.short ?? params.format}`);
+  }
   // A join takes as many clips as the API's list does (fal merge-audios: 5); longer joins run in steps.
   const maxAudios = model.options.maxAudios;
   if (op === "audio-join" && maxAudios && (req.inputs?.audios?.length ?? 0) > maxAudios) throw new Error(`${model.name} joins up to ${maxAudios} clips at a time — join the rest in a second step`);
@@ -430,17 +436,31 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
   return { ...list, usd: promo.usd, ...(promo.byResolution ? { byResolution: promo.byResolution } : {}) };
 }
 
+/**
+ * Operations whose result is as long as the clip they're given (upscale, FPS Boost, HDR, export): a per-second
+ * price counts the clip's seconds (params.sourceDuration) when the caller knows them, and slow motion bills
+ * the whole stretched result.
+ */
+const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
-export function estimateCost(model: ModelDef, params: GenParams, jobs = 1): number | null {
+export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   const usd = (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
   let per = usd;
+  const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
-  if (p.unit === "second") per = usd * (params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
+  // Settings that change the price (60 fps, a Pro tier, a cheaper model).
+  for (const f of p.factors ?? []) {
+    const v = f.param === "targetFps" ? (params.targetFps ?? model.defaults?.targetFps) : (params.extra?.[f.param] ?? model.options.controls?.find((c) => c.param === f.param)?.default);
+    const k = v === undefined || v === null ? undefined : f.values[String(v)];
+    if (k !== undefined && k > 0) per *= k;
+  }
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
   return Math.round(per * jobs * 1000) / 1000;
 }

@@ -50,6 +50,8 @@ export interface ManifestModel {
   folder: string;
   url?: string;
   sizeGb?: number;
+  /** An alternative a model control can pick (FILM for RIFE): not needed for the workflow's defaults. */
+  optional?: boolean;
 }
 
 export interface ManifestOutput {
@@ -61,7 +63,8 @@ export interface ManifestOutput {
    * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
    * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
-   * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos.
+   * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos. A "preview" is the clip shown
+   * for an EXR export (the frames ride along zipped).
    */
   role?:
     | "cues"
@@ -81,7 +84,8 @@ export interface ManifestOutput {
     | "brief"
     | "mask"
     | "cutout"
-    | "matte";
+    | "matte"
+    | "preview";
 }
 
 export interface ManifestWorkflow {
@@ -525,6 +529,58 @@ export function bypassReference(wf: ComfyWorkflow, loaderId: string): ComfyWorkf
   return out;
 }
 
+/**
+ * Take a node out of the graph: whatever read its first output reads `input`'s link instead (FPS Boost
+ * without interpolation: Select Every Nth takes the frames straight). Nodes nothing reads any more (its
+ * model loader, its constants) go too, except output nodes (`keep`). Unchanged when `input` isn't a link.
+ */
+export function bypassNode(wf: ComfyWorkflow, nodeId: string, input: string, keep: string[] = []): ComfyWorkflow {
+  const src = wf[nodeId]?.inputs[input];
+  if (!isLinkValue(src)) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && v[0] === nodeId) n.inputs[k] = [...src];
+  delete out[nodeId];
+  return dropUnused(out, keep);
+}
+
+/** Remove nodes whose outputs nothing reads, over and over, keeping the output nodes `keep`. */
+export function dropUnused(wf: ComfyWorkflow, keep: string[]): ComfyWorkflow {
+  const out = cloneWorkflow(wf);
+  for (;;) {
+    const read = new Set(Object.values(out).flatMap((n) => Object.values(n.inputs).filter(isLinkValue).map((v) => v[0])));
+    const gone = Object.keys(out).filter((id) => !read.has(id) && !keep.includes(id));
+    if (!gone.length) return out;
+    for (const id of gone) delete out[id];
+  }
+}
+
+/**
+ * VHS meta-batch graphs: tag each job's VHS_BatchManager with an input of its own. ComfyUI caches a node
+ * whose inputs didn't change, so without it a job right after a failed or canceled meta-batch reuses the
+ * stale manager and silently loses frames (checked on the CPU server: 32 of 48 frames). VHS keeps inputs
+ * it doesn't declare (it adds its own "requeue" the same way).
+ */
+export function tagMetaBatch(wf: ComfyWorkflow, job: string): ComfyWorkflow {
+  if (!Object.values(wf).some((n) => n.class_type === "VHS_BatchManager")) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) if (n.class_type === "VHS_BatchManager") n.inputs.job = job;
+  return out;
+}
+
+/**
+ * A clip with no sound: VHS_LoadVideo fails ("failed to extract audio") once its audio output is read, so
+ * the links from that output (VHS_VideoCombine.audio) are dropped. Only for clips whose header says so.
+ */
+export function dropVhsAudio(wf: ComfyWorkflow): ComfyWorkflow {
+  const loaders = new Set(Object.entries(wf).filter(([, n]) => n.class_type === "VHS_LoadVideo").map(([id]) => id));
+  if (!loaders.size) return wf;
+  const out = cloneWorkflow(wf);
+  for (const n of Object.values(out)) {
+    const a = n.inputs.audio;
+    if (isLinkValue(a) && loaders.has(a[0]) && a[1] === 2) delete n.inputs.audio;
+  }
+  return out;
+}
 /** Codes people use that Whisper spells differently. */
 const WHISPER_ALIASES: Record<string, string> = { fil: "tl", jv: "jw", iw: "he", nb: "no", zh_hans: "zh" };
 

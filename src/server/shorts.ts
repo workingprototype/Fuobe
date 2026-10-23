@@ -30,14 +30,13 @@ import {
   type ShortsStitch,
 } from "@/lib/catalog/shorts";
 import type { Engine, Generation } from "@/lib/catalog/types";
-import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getGeneration, previewChained } from "./generations";
 import { trashGenerations } from "./library";
 import { engineMode } from "./settings";
 import { readRef } from "./storage";
-import { probeWebm } from "./webm-probe";
+import { mediaFacts, type SourceInfo } from "./media-facts";
 
 /**
  * Shorts Studio sessions: a clip cut into segments, each restyled (one or more takes, one of them
@@ -62,13 +61,7 @@ export { maxRefsFor, modelInfos, resolutionFor } from "@/lib/catalog/shorts-mode
 // ---------------------------------------------------------------------------
 // Source clips
 
-export interface SourceInfo {
-  duration?: number;
-  width?: number;
-  height?: number;
-  fps?: number;
-  hasAudio?: boolean;
-}
+export type { SourceInfo } from "./media-facts";
 
 /**
  * What the clip's header says (MP4 / MOV, and WebM / Matroska). A file neither reader knows comes
@@ -87,23 +80,7 @@ export async function probeSource(url: string): Promise<SourceInfo> {
 
 /** What a clip's bytes say (the header readers behind probeSource). */
 export function sourceInfo(data: Buffer): SourceInfo {
-  let info: MediaInfo | null = null;
-  try {
-    info = probeMedia(data);
-  } catch {
-    info = null;
-  }
-  if (!info) {
-    const webm = probeWebm(data);
-    return webm ? { duration: webm.duration, width: webm.width, height: webm.height, fps: webm.fps, hasAudio: webm.hasAudio } : {};
-  }
-  return {
-    duration: info.videoDuration ?? info.duration,
-    width: info.width,
-    height: info.height,
-    fps: info.fps,
-    hasAudio: info.hasAudio,
-  };
+  return mediaFacts(data);
 }
 
 // ---------------------------------------------------------------------------

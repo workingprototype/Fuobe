@@ -119,13 +119,80 @@ export const UPSCALE_STUDIO: StudioConfig = {
   defaultModels: { cloud: "topaz-image", open: "oss-upscale-image" },
   promptOptional: true,
   hidePrompt: true,
+  modelPrompt: "Optional: details to keep or bring out, e.g. “the lettering on the shop sign”",
+  controlsTitle: "Options",
 };
 
+/** Upscale → Video: Topaz Video and Starlight, ByteDance (to 8K), FLUX.3, SeedVR2; SeedVR2 or ESRGAN in passes on the open engine. */
 export const VIDEO_UPSCALE_STUDIO: StudioConfig = {
   ...UPSCALE_STUDIO,
   kind: "video",
+  hero: "Sharper, bigger, cleaner video",
+  subtitle: "Upscale a clip to 1080p, 4K or up to 8K, and restore faces, textures and text.",
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   defaultModels: { cloud: "topaz-video", open: "oss-seedvr2" },
+  clipFacts: true,
+};
+
+/** Upscale → FPS Boost: frame interpolation to 24–120 fps, or slow motion (Topaz, RIFE / FILM). */
+export const FPS_BOOST_STUDIO: StudioConfig = {
+  feature: "fps-boost",
+  title: "Upscale",
+  hero: "Smoother motion, or slow motion",
+  subtitle: "New in-between frames take a clip to 24–120 fps, or stretch it up to 8× slower.",
+  placeholder: "",
+  kind: "video",
+  ops: ["interpolate"],
+  feed: { features: ["fps-boost"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "topaz-fps-boost", open: "oss-rife" },
+  promptOptional: true,
+  hidePrompt: true,
+  clipFacts: true,
+  controlsTitle: "Options",
+};
+
+/** Upscale → SDR to HDR: Topaz Hyperion (HDR10 H.265, ProRes), LTX (EXR frames), or ComfyUI's tone map (HLG, PQ, EXR). */
+export const SDR_TO_HDR_STUDIO: StudioConfig = {
+  feature: "sdr-to-hdr",
+  title: "Upscale",
+  hero: "Take it to HDR",
+  subtitle: "Expands SDR footage to 10-bit HDR: an HDR10 video, ProRes for grading, or 16-bit EXR frames for compositing.",
+  placeholder: "",
+  kind: "video",
+  ops: ["sdr-to-hdr"],
+  feed: { features: ["sdr-to-hdr"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "topaz-sdr-to-hdr", open: "oss-sdr-to-hdr" },
+  promptOptional: true,
+  hidePrompt: true,
+  clipFacts: true,
+  formatPicker: true,
+  controlsTitle: "Options",
+};
+
+/** Upscale → Export: pro codecs written by ComfyUI (no cloud API transcodes a finished clip). */
+export const VIDEO_EXPORT_STUDIO: StudioConfig = {
+  feature: "export-video",
+  title: "Upscale",
+  hero: "Export for the edit",
+  subtitle: "ProRes 422 HQ or 4444, H.265 10-bit, lossless FFV1 or EXR frames, written by ComfyUI on your machine for free.",
+  placeholder: "",
+  kind: "video",
+  ops: ["export-video"],
+  feed: { features: ["export-video"] },
+  slots: [{ key: "video", label: "Video", accept: "video", required: true }],
+  defaultModels: { cloud: "", open: "oss-export-video" },
+  promptOptional: true,
+  hidePrompt: true,
+  clipFacts: true,
+  formatPicker: true,
+  controlsTitle: "Options",
+  // No cloud API transcodes a finished clip, and the server runs no ffmpeg of its own.
+  comfyOnly: {
+    note: "Export formats are written by ComfyUI on your own machine, for free, and no ComfyUI is connected. Connect one under Settings → Open-source engine.",
+    alternative: { label: "ProRes 422 HQ in the cloud: Topaz SDR to HDR (also converts it to HDR)", href: "/upscale/hdr?model=topaz-sdr-to-hdr&format=prores_422_hq" },
+  },
 };
 
 export const AUDIO_STUDIO: StudioConfig = {

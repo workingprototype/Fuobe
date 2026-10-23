@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-ssrf-"));
 process.env.FUOBE_DATA_DIR = dir;
-const { fetchRemote, isPrivateAddress } = await import("@/server/remote-fetch");
+const { fetchRemote, fetchRemoteToFile, isPrivateAddress } = await import("@/server/remote-fetch");
 const { readRef } = await import("@/server/storage");
 
 let server: http.Server;
@@ -35,6 +35,13 @@ beforeAll(async () => {
       return res.end(Buffer.alloc(10_000));
     }
     if (req.url === "/slow") return void setTimeout(() => res.end("late"), 2000);
+    if (req.url === "/frames.zip") {
+      // Sent in pieces, with no length up front (a provider's stream).
+      res.setHeader("content-type", "application/zip");
+      let i = 0;
+      const next = () => (i++ < 50 ? res.write(Buffer.alloc(64 * 1024, i), () => setImmediate(next)) : res.end());
+      return next();
+    }
     res.statusCode = 404;
     res.end();
   });
@@ -79,6 +86,20 @@ describe("remote inputs (S14)", () => {
     await expect(fetchRemote(`http://public.test:${port}/big`, { resolve, blocked, maxBytes: 1000 })).rejects.toThrow(/over/);
     await expect(fetchRemote(`http://public.test:${port}/slow`, { resolve, blocked, timeoutMs: 300 })).rejects.toThrow(/Timed out/);
     await expect(fetchRemote(`http://public.test:${port}/missing`, { resolve, blocked })).rejects.toThrow(/404/);
+  });
+
+  it("streams a big result straight to disk, with the same checks, and leaves nothing behind when it fails", async () => {
+    const dest = path.join(dir, "frames.zip");
+    const res = await fetchRemoteToFile(`http://public.test:${port}/frames.zip`, dest, { resolve, blocked });
+    expect(res).toMatchObject({ bytes: 50 * 64 * 1024, contentType: "application/zip" });
+    expect(fs.statSync(dest).size).toBe(50 * 64 * 1024);
+    expect(fs.readFileSync(dest).subarray(-1)[0]).toBe(50);
+    const capped = path.join(dir, "capped.zip");
+    await expect(fetchRemoteToFile(`http://public.test:${port}/frames.zip`, capped, { resolve, blocked, maxBytes: 100_000 })).rejects.toThrow(/over/);
+    expect(fs.existsSync(capped)).toBe(false);
+    await expect(fetchRemoteToFile(`http://public.test:${port}/to-metadata`, capped, { resolve, blocked })).rejects.toThrow(/won't fetch 169\.254\.169\.254/);
+    await expect(fetchRemoteToFile(`http://public.test:${port}/missing`, capped, { resolve, blocked })).rejects.toThrow(/404/);
+    expect(fs.existsSync(capped)).toBe(false);
   });
 
   it("allows private addresses only when the install opts in", async () => {

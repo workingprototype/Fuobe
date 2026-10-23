@@ -61,7 +61,7 @@ const tools = (c: Counts) => [
   { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network },
   { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2 },
   { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace },
-  { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn },
+  { href: "/upscale", label: "Upscale", desc: "Video, FPS, HDR & images", icon: ZoomIn },
   { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines },
 ];
 

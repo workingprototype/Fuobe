@@ -205,6 +205,58 @@ node validate-workflows.mjs <ids> wan21-vace-14b-ref2v --shared
   VOID (197 frames, 7.880 s of picture and of sound, 672×376) and a window at 50 s of a 60 s clip (0.6 s instead of
   2.6 s with the whole-clip decode). MoGe's guard ran on 1536×3000, 3000×1536 and 1024×768 stills.
 
+### Round-4 video finishing (r4/video-finish, 2026-10-23)
+
+Five hand-built entries for the Upscale hub's FPS Boost, SDR to HDR and Export modes and for R4-38 (open video
+upscaling decoded the whole film: about 38 GB of float frames for 30 s at 480p). No new node pack: core nodes plus
+VHS's `VHS_LoadVideo` meta-batch, `VHS_BatchManager`, `VHS_SelectEveryNthImage` and `VHS_VideoCombine`.
+`video-sdr-to-hdr` also binds `colorSpace` (HLG, or `HDR PQ` for HDR10), and `video-export-exr` saves a preview clip.
+
+```bash
+npm run build -- interpolate-rife-fps upscale-video-esrgan-chunked upscale-video-seedvr2-chunked video-export-pro-chunked video-sdr-to-hdr-exr video-sdr-to-hdr video-export-exr
+node validate-workflows.mjs <the same ids> --shared
+```
+
+| id | capability | what | ran for real here |
+|---|---|---|---|
+| `interpolate-rife-fps` | interpolate | FrameInterpolate by m, keep every n-th: source fps × m / n = target × slowdown; output fps computed in the graph | yes: 24 → 60, 25 → 30 at 2× slow, 30 → 24 |
+| `upscale-video-esrgan-chunked` | upscale-video | Real-ESRGAN in passes of `framesPerBatch` frames, scaled to `shortSide`, one H.264 encode across passes | yes: 30 s 144p → 1080p, 47 passes, +0.87 GB RSS |
+| `upscale-video-seedvr2-chunked` | upscale-video | SeedVR2 3B in passes of 4n+1 frames (no context across passes: a seam is possible) | no (GPU); /prompt only |
+| `video-export-pro-chunked` | export-video | ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264 in passes, with the sound | yes: ProRes, H.265, FFV1 |
+| `video-sdr-to-hdr-exr` | sdr-to-hdr | scene-linear Rec.2020 half-float EXR per frame + an HLG preview | yes: 60 frames + preview |
+
+- **What the provider does** (`src/server/providers/comfyui.ts`, `src/lib/av/fps.ts`, `src/lib/av/video-finish.ts`): m and n
+  from the clip's header frame rate (the cheapest exact pair, the nearest one for 29.97-style rates); FrameInterpolate
+  linked out when m is 1; slow motion drops the sound link; params.format → VHS format / ProRes profile, CreateVideo's
+  colour space, or the EXR graphs; EXR frames zipped one at a time onto the preview clip (`meta.artifacts.exr`);
+  `framesPerBatch` sized from the clip so a pass holds about 1.5 GB of frames; each job tags its `VHS_BatchManager`
+  (ComfyUI otherwise reuses a cached manager after a failed meta-batch run and silently loses frames: 32 of 48 seen
+  here); a silent clip loses the `VHS_LoadVideo` audio link (VHS fails on it); graphs that still decode the whole clip
+  (FPS Boost, HDR, EXR) refuse a clip that needs more than half the server's RAM, and the composer checks the same rule
+  before Generate (`/api/status` reports the ComfyUI's RAM). They hold 2 frame-sized float copies of the clip (decoding
+  stacks the frames; the tone map makes one more; encoders and the EXR writer take a frame at a time), FPS Boost 2 + m
+  (`VHS_SelectEveryNthImage` is a view): measured here, SDR to HDR on 10 s of 640×360 at 30 fps peaked 1.57 GB above idle,
+  2.04 copies. FPS Boost needs the clip's frame rate (header) and refuses without it rather than guess m and n.
+- **Cancel**: VHS re-queues each pass under a new prompt id with a negative queue number (it runs before anything else),
+  so cancelling a meta-batch job deletes every pending prompt carrying the job's filename prefix, interrupts the one
+  running, and looks again for a few seconds (a pass that was already saving can still queue the next). Checked here on a
+  38-pass ProRes 4444 export: cancelled during pass 4, nothing ran after it. VHS keeps that pass's ffmpeg encode open in
+  the cached batch manager (a partial `.mov` without its moov atom stays in `output/`) until ComfyUI drops the cache; the
+  same happens to any meta-batch run that fails or is interrupted.
+- **Real runs**: through Fuobe's API on the dev server (the comfyui provider end to end: upload, bindings, meta-batch
+  follow, EXR zip) and directly with a small runner, on the shared CPU server with own prompt ids only, every output
+  ffprobe-checked. The model graphs ran with random-weight stand-ins (`vftest_rife_random.safetensors`,
+  `vftest_esrgan_x4_random.safetensors`, removed afterwards), so they prove frame counts, sizes, rates, sound and memory,
+  not picture quality. Chunked vs whole-clip ESRGAN: 30 s at 256×144 to 1920×1080 held 0.87 GB above idle in 47 passes;
+  the whole-clip graph held 3.0 GB for 10 s of the same clip at only 1024×576.
+- **Caveat**: VHS's ProRes `hq` profile leaves the pixel format to `prores_ks`, which picks `yuv444p10le` for RGB frames, so
+  "ProRes 422 HQ" is the HQ tag (`apch`) carrying 4:4:4 samples (FFmpeg reads it). A strict 4:2:2 file needs a VHS format
+  with `-pix_fmt yuv422p10le`, a change to the node pack (not made). Core ComfyUI has no H.265 encoder, so the open HDR
+  is H.264 High 10 (HLG or PQ); HDR10 in H.265 comes from Topaz on the cloud.
+- **FILM**: oss-rife's Model control can pick `film_net_fp16.safetensors`; the spec lists it under `optionalModels`, so
+  the manifest carries it with `optional: true` (named with its download when it's missing, not counted as missing on
+  the Workflows page). Its URL is the repo's current name, `Comfy-Org/Frame-Interpolation` (the old lowercase one redirects).
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`

@@ -1015,7 +1015,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
   if (!model) return null;
   const demo = runsAsDemo(model.id, "upscale-video");
   const p = model.pricing;
-  const costUsd = demo ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
+  const costUsd = demo || model.engine === "open" ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
   return { costUsd, demo };
 }
 
@@ -1023,7 +1023,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
 export function upscaleEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
   const modelId = ENGINE_MODELS[ep.settings.engine].upscale;
-  if (!modelId) throw new FacelessError("Upscaling runs on the cloud engine: the open-source upscaler holds every frame of the film in memory", 422);
+  if (!modelId) throw new FacelessError("This engine has no video upscaler", 422);
   const final = finalOf(ep);
   if (!ep.plan || !final) throw new FacelessError("Wait for the episode to finish first", 409);
   const had = ep.plan.upscaled ? getGeneration(ep.plan.upscaled) : null;

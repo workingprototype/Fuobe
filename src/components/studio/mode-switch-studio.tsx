@@ -5,14 +5,17 @@ import {
   AUDIO_STUDIO,
   DIALOGUE_STUDIO,
   FOLEY_STUDIO,
+  FPS_BOOST_STUDIO,
   JOIN_CLIPS_STUDIO,
   MUSIC_STUDIO,
+  SDR_TO_HDR_STUDIO,
   SFX_STUDIO,
   TRANSCRIBE_STUDIO,
   TRANSLATE_STUDIO,
   UPSCALE_STUDIO,
   VIDEO_COLOR_MATCH_STUDIO,
   VIDEO_DEPTH_STUDIO,
+  VIDEO_EXPORT_STUDIO,
   VIDEO_MATTE_STUDIO,
   VIDEO_RELIGHT_STUDIO,
   VIDEO_UPSCALE_STUDIO,
@@ -28,7 +31,7 @@ import { ModeStudio, ModeTabs } from "./mode-studio";
 import type { StudioConfig } from "./studio-context";
 
 const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
-  upscale: { image: UPSCALE_STUDIO, video: VIDEO_UPSCALE_STUDIO },
+  upscale: { image: UPSCALE_STUDIO, video: VIDEO_UPSCALE_STUDIO, fps: FPS_BOOST_STUDIO, hdr: SDR_TO_HDR_STUDIO, export: VIDEO_EXPORT_STUDIO },
   audio: {
     speech: AUDIO_STUDIO,
     dialogue: DIALOGUE_STUDIO,

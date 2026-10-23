@@ -11,12 +11,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { OPERATION_LABELS, type Generation, type OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
 import { trashDaysLeft, userTitle } from "@/lib/library";
-import { isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
+import { editOnlyFormat, isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
 import { CompareSlider } from "./compare-slider";
 import { ACTION_ICONS, downloadUrl, SaveElementForm, useActionRunner } from "./result-actions";
-import { LayersStack, ModelViewer, TextReader } from "./result-media";
+import { LayersStack, ModelViewer, TextReader, VideoFileCard } from "./result-media";
 import { ReviewSelect } from "@/components/library/review";
 
 
@@ -149,6 +149,8 @@ export function Viewer({
   const [allLayers, setAllLayers] = useState(layered);
   const [drawer, setDrawer] = useState(false);
   const [saving, setSaving] = useState(false);
+  // A video this browser can't decode (HEVC or 10-bit H.264 on some systems): shown as a file to download instead.
+  const [failedVideo, setFailedVideo] = useState<string | null>(null);
   const run = useActionRunner({ onReuse: onReuse && ((x) => (onReuse(x), onClose())), onCompare: () => setComparing((v) => !v), onDeleted: onClose });
   const list = useMemo(() => outputActions(g, index, { reuse: !!onReuse, compare: !!source, inViewer: true }), [g, index, onReuse, source]);
 
@@ -261,9 +263,16 @@ export function Viewer({
     );
   };
 
+  const pro = editOnlyFormat(g, o);
   const media =
     o.kind === "video" ? (
-      <video key={o.url} src={o.url} controls autoPlay loop playsInline className="max-h-full max-w-full" />
+      pro || failedVideo === o.url ? (
+        <div className="aspect-video w-[min(90%,560px)] overflow-hidden rounded-xl">
+          <VideoFileCard output={o} format={pro} />
+        </div>
+      ) : (
+        <video key={o.url} src={o.url} controls autoPlay loop playsInline onError={() => setFailedVideo(o.url)} className="max-h-full max-w-full" />
+      )
     ) : o.kind === "audio" ? (
       <audio key={o.url} src={o.url} controls autoPlay className="w-[min(90%,560px)]" />
     ) : o.kind === "text" ? (

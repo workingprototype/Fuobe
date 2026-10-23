@@ -35,6 +35,11 @@ export interface StudioConfig {
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
   hidePrompt?: boolean;
+  /**
+   * The prompt box's placeholder for a model that reads an optional prompt in a studio that hides it
+   * (Upscale: FLUX.3 Upscale's details to preserve or enhance); without it such a model gets no box either.
+   */
+  modelPrompt?: string;
   /** Paint tools offered on the first image: an inpaint mask and/or freehand drawing. */
   sketch?: ("mask" | "draw")[];
   /** Open the editor as soon as an image is attached (Inpaint). */
@@ -47,6 +52,20 @@ export interface StudioConfig {
   signature?: boolean;
   /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
   extraModels?: string[];
+  /**
+   * Read the attached clip's header (length, size, frame rate): prices count its seconds and the composer
+   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes.
+   */
+  clipFacts?: boolean;
+  /** Offer every output format of the studio's models on this engine; picking one another model writes moves the request there (SDR to HDR, Export). */
+  formatPicker?: boolean;
+  /** The models' enum settings chip ("Director" by default; "Options" for a tool's settings such as Topaz's model). */
+  controlsTitle?: string;
+  /**
+   * Tools only ComfyUI runs (Export): what to say when none is connected or the install runs cloud APIs only,
+   * and a cloud route to offer instead (`href` gets `&video=<the attached clip>`).
+   */
+  comfyOnly?: { note: string; alternative?: { label: string; href: string } };
 }
 
 export interface Draft {

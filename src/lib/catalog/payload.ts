@@ -1,4 +1,5 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
+import { upscaleFactorFor } from "@/lib/av/upscale";
 import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
@@ -348,6 +349,11 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numFrames) {
     const n = numFramesValue(map.numFrames, input);
     if (n !== undefined) out[map.numFrames.key] = n;
+  }
+  // Upscalers that take a factor: the tier asked for over the clip's shorter edge (unknown size: the API's default).
+  if (map.upscaleFactor && input.resolution) {
+    const f = upscaleFactorFor(input.resolution, input.sourceSize, map.upscaleFactor.min, map.upscaleFactor.max);
+    if (f !== undefined) out[map.upscaleFactor.key] = f;
   }
   // The API's limits on what Fuobe filled in (params.extra below is sent as given).
   for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);

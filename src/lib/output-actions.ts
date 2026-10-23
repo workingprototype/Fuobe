@@ -5,7 +5,7 @@
  * placement: "primary" = the labelled pill (Animate / Extend …), "bar" = icon buttons on tiles
  * (Download, Favorite), "menu" = the ⋯ menu. The viewer shows them all as labelled buttons.
  */
-import type { Generation, OutputFile } from "./catalog/types";
+import type { Generation, OutputFile, VideoFormat } from "./catalog/types";
 import { cueText, type Cue } from "./cues";
 import { downloadHref, downloadName, extensionOf } from "./library";
 
@@ -30,6 +30,7 @@ export type OutputActionId =
   | "download-srt"
   | "download-vtt"
   | "download-all"
+  | "download-exr"
   | "favorite"
   | "finalize"
   | "compare"
@@ -97,9 +98,18 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("genjutsu", "Animate with Genjutsu", `/genjutsu?mode=motion&image=${q(o.url)}`);
       out.push({ id: "save-character", label: "Save as character", placement: "menu" });
       break;
-    case "video":
+    case "video": {
       link("extend", "Extend", `/extend?video=${q(o.url)}`, "primary");
-      out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
+      out.push(file);
+      // An HDR or export job's EXR frames ride along on its preview clip (meta.artifacts.exr): a stored zip, or
+      // the provider's own link when it couldn't be kept (unreachable when the job finished; it expires).
+      const exr = (o.meta?.artifacts as Record<string, unknown> | undefined)?.exr;
+      if (typeof exr === "string" && /^(\/api\/files\/|https?:\/\/)/.test(exr)) {
+        const zip = name.replace(/\.[^.]+$/, "-exr.zip");
+        const stored = exr.startsWith("/api/files/");
+        out.push({ id: "download-exr", label: stored ? "Download EXR frames (.zip)" : "Download EXR frames (.zip, provider link)", placement: "bar", href: stored ? downloadHref(exr, zip) : exr, download: zip });
+      }
+      out.push({ id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("reframe", "Reframe", `/reframe?video=${q(o.url)}`);
       link("lipsync", "Lipsync", `/lipsync?video=${q(o.url)}`);
       link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
@@ -107,6 +117,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("grade", "Color grade", `/color-grade?video=${q(o.url)}`);
       link("genjutsu", "Use in Genjutsu", `/genjutsu?video=${q(o.url)}`);
       break;
+    }
     case "audio":
       link("lipsync", "Lipsync", `/lipsync?audio=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
@@ -243,6 +254,20 @@ export function videoPoster(g: Partial<Pick<Generation, "op" | "request">> | und
   if (own) return own;
   if (g?.op !== "i2v" && g?.op !== "flf2v") return undefined;
   return g.request?.inputs?.images?.[0] || undefined;
+}
+
+/**
+ * A pro export browsers don't play (ProRes in a .mov, FFV1 in a .mkv): its tile is a file card, not a black
+ * player. Judged by the request (an export or HDR job's format) and the file's extension.
+ */
+export function editOnlyFormat(g: Partial<Pick<Generation, "op" | "request">> | undefined, o: Pick<OutputFile, "url" | "kind">): VideoFormat | undefined {
+  if (o.kind !== "video") return undefined;
+  const ext = extensionOf(o);
+  if (ext === "mkv") return "ffv1";
+  const f = g?.request?.params?.format;
+  // A demo run's placeholder is a plain .mp4, whatever the format asked for.
+  if ((g?.op === "export-video" || g?.op === "sdr-to-hdr") && ext === "mov" && (f === "prores_422_hq" || f === "prores_4444")) return f;
+  return undefined;
 }
 
 /** A 3D model's still and turntable: meta.poster / meta.preview, meta.video / meta.turntable, or a sibling output. */
