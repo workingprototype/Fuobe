@@ -49,6 +49,7 @@ describe("outputActions", () => {
       "menu:reference",
       "menu:grade",
       "menu:layers",
+      "menu:genjutsu",
       "menu:save-character",
       "menu:reuse",
       "menu:copy-prompt",
@@ -62,7 +63,7 @@ describe("outputActions", () => {
 
   it("gives videos Extend first and the video hand-offs", () => {
     const g = gen({ kind: "video", op: "t2v", outputs: [{ url: "/api/files/o/v.mp4", kind: "video", draftId: "d1" }] });
-    expect(ids(g)).toEqual(["primary:extend", "bar:download", "bar:favorite", "menu:reframe", "menu:lipsync", "menu:upscale", "menu:add-sound", "menu:grade", "menu:finalize", "menu:copy-prompt", "menu:delete"]);
+    expect(ids(g)).toEqual(["primary:extend", "bar:download", "bar:favorite", "menu:reframe", "menu:lipsync", "menu:upscale", "menu:add-sound", "menu:grade", "menu:genjutsu", "menu:finalize", "menu:copy-prompt", "menu:delete"]);
   });
 
   it("handles audio, text, 3D, layers, favorites and the Trash", () => {

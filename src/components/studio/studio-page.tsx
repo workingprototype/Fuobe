@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowUp, Loader2, Upload } from "lucide-react";
+import { ArrowRight, ArrowUp, Loader2, Upload } from "lucide-react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -252,6 +253,12 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
           <div className="flex flex-col items-center pt-[16vh] text-center">
             <h2 className="font-heading text-display text-balance">{config.hero}</h2>
             {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
+            {config.related && (
+              <Link href={config.related.href} className="mt-3 inline-flex items-center gap-1 rounded-full bg-muted px-3 py-1 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                {config.related.label}
+                <ArrowRight className="size-3" />
+              </Link>
+            )}
           </div>
         )}
       </main>

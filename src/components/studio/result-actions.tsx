@@ -23,6 +23,7 @@ import {
   Trash2,
   UserRoundPlus,
   Wand2,
+  WandSparkles,
   ZoomIn,
   type LucideIcon,
 } from "lucide-react";
@@ -69,6 +70,7 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   reframe: Crop,
   lipsync: Mic2,
   "add-sound": AudioLines,
+  genjutsu: WandSparkles,
   "voice-change": AudioLines,
   "copy-text": Copy,
   "view-3d": Box,
