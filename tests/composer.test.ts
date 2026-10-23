@@ -5,6 +5,8 @@ import {
   acceptedKinds,
   bestForStudio,
   blockerFor,
+  blockerLine,
+  slotCaption,
   costLabel,
   filterModels,
   firstMissingSlot,
@@ -143,14 +145,42 @@ describe("blockers", () => {
   it("orders blockers from most to least actionable", () => {
     const slot: InputSlot = { key: "image", label: "Target photo", accept: "image", required: true };
     const base = { model: true, uploading: false, promptMissing: false };
-    expect(blockerFor({ ...base, loading: "Loading models…", model: false })).toEqual({ message: "Loading models…" });
+    expect(blockerFor({ ...base, loading: "Loading models…", model: false })).toEqual({ message: "Loading models…", quiet: true });
     expect(blockerFor({ ...base, model: false })).toEqual({ message: "Pick a model" });
     expect(blockerFor({ ...base, missing: slot, uploading: true, planError: "Add an image to edit", promptMissing: true })).toEqual({ message: "Add a target photo", slot: "image" });
-    expect(blockerFor({ ...base, uploading: true, planError: "Add an image to edit" })).toEqual({ message: "Uploading…" });
+    expect(blockerFor({ ...base, uploading: true, planError: "Add an image to edit" })).toEqual({ message: "Uploading…", quiet: true });
     expect(blockerFor({ ...base, planError: "Pick a language to translate into", promptMissing: true })?.message).toBe("Pick a language to translate into");
     expect(blockerFor({ ...base, promptMissing: true })?.message).toBe("Write a prompt first");
     expect(blockerFor({ ...base, engineError: "Face Swap has no cloud version yet", missing: slot })?.message).toMatch(/no cloud version/);
     expect(blockerFor(base)).toBeNull();
+  });
+
+  it("captions a filled tile with the slot's role", () => {
+    expect(slotCaption("Target photo")).toBe("Target");
+    expect(slotCaption("Face")).toBe("Face");
+    expect(slotCaption("Start frame")).toBe("Start");
+    expect(slotCaption("End frame")).toBe("End");
+    expect(slotCaption("Reference images")).toBe("Reference");
+    expect(slotCaption("Your clip")).toBe("Your clip");
+    expect(slotCaption("Image")).toBe("Image");
+    expect(slotCaption("Voice sample")).toBe("Voice sample");
+  });
+
+  it("spells the blocker out under the composer where its tooltip can't be seen", () => {
+    const slot: InputSlot = { key: "image", label: "Target photo", accept: "image", required: true };
+    const base = { model: true, uploading: false, promptMissing: false };
+    const missing = blockerFor({ ...base, missing: slot });
+    // A folded docked composer shows it everywhere; with its tiles open, only screens without hover (the tooltip elsewhere).
+    expect(blockerLine(missing, true)).toBe("always");
+    expect(blockerLine(missing, false)).toBe("touch");
+    expect(blockerLine(blockerFor({ ...base, planError: "Pick a voice" }), false)).toBe("touch");
+    expect(blockerLine(blockerFor({ ...base, engineError: "Face Swap has no cloud version yet" }), true)).toBe("always");
+    // Never for what passes by itself or is plain to see: loading, uploading, the empty prompt box.
+    const plannerPrompt = blockerFor({ ...base, planError: "Write a prompt first", promptMissing: true });
+    for (const quiet of [blockerFor({ ...base, loading: "Loading models…" }), blockerFor({ ...base, uploading: true }), blockerFor({ ...base, promptMissing: true }), plannerPrompt]) {
+      expect(blockerLine(quiet, true)).toBeNull();
+    }
+    expect(blockerLine(null, true)).toBeNull();
   });
 });
 

@@ -3,6 +3,7 @@
 import { ArrowUp, AtSign, Loader2, Sparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -12,7 +13,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape, startStep } from "@/lib/composer";
+import { blockerFor, blockerLine, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape, startStep } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -245,7 +246,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const promptMissing =
     !config.promptOptional && !opts.promptless && !opts.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
-    loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
+    // A model outside the studio's slice (remembered, or handed over) is known once the full catalog arrives: loading until then, not "Pick a model".
+    loading: !catalog.ready || (!model && !catalog.complete) ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
     engineError,
     missing,
@@ -328,6 +330,32 @@ export function Composer({ docked }: { docked: boolean }) {
   const collapsed = docked && !focused;
   // Docked and not focused, the tiles fold into one chip on the toolbar (the composer stays one line).
   const attached = [...slots.map((s) => draft.slots[s.key]), ...draft.refs].filter((v): v is SlotValue => !!v);
+
+  // Phones can't hover Generate for its tooltip, and a folded composer hides the tile it points at:
+  // there the blocker is a line under the toolbar (blockerLine), and tapping it opens that tile (the
+  // file picker, or the paint tool), as the tap is the click the browser needs for a picker.
+  const line = blockerLine(blocker, collapsed);
+  const blockerSlot = blocker?.slot ?? (config.multiRef && config.hidePrompt && draft.refs.length < 2 ? "refs" : undefined);
+  const openBlocked = (key: string) => {
+    flushSync(() => setFocused(true));
+    const tile = root.current?.querySelector<HTMLElement>(`[data-slot-key="${key}"]`);
+    const control = tile?.matches("button") ? tile : tile?.querySelector<HTMLButtonElement>('button[aria-label$=": upload"]');
+    pulseSlot(root.current, key);
+    // The focus moves into the tile (the press itself didn't take it), so leaving the composer folds it again.
+    const target = control ?? tile?.querySelector<HTMLElement>("button");
+    if (target) {
+      target.focus({ preventScroll: true });
+      control?.click();
+      return;
+    }
+    // Nothing to focus: the next press outside the composer folds it.
+    const fold = (e: PointerEvent) => {
+      if (root.current?.contains(e.target as Node) || root.current?.contains(document.activeElement)) return;
+      document.removeEventListener("pointerdown", fold, true);
+      setFocused(false);
+    };
+    document.addEventListener("pointerdown", fold, true);
+  };
 
   // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
   const blocking = blocker?.message;
@@ -454,6 +482,7 @@ export function Composer({ docked }: { docked: boolean }) {
               label={s.label}
               kind={s.accept}
               required={s.required}
+              caption
               value={draft.slots[s.key] ?? null}
               onChange={(v) => attach.setSlotValue(s.key, v)}
               onFile={(f) => attach.uploadToSlot(s.key, f, s.accept)}
@@ -687,7 +716,8 @@ export function Composer({ docked }: { docked: boolean }) {
               onClick={submit}
               disabled={create.isPending || signature.lock.isPending}
               aria-label={blocker ? `Generate — ${blocker.message}` : "Generate"}
-              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
+              // Blocked, it stays the brand colour (paler, the arrow still 3:1 or more): pressing it still says what's missing and points at it.
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/70 hover:bg-primary/80")}
             >
               {create.isPending || signature.lock.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>
@@ -701,6 +731,26 @@ export function Composer({ docked }: { docked: boolean }) {
             )}
           </TooltipContent>
         </Tooltip>
+      </div>
+      <div aria-live="polite">
+        {line && blocker && (
+          // Focused from the keyboard, it stays (the composer unfolding must not hide what has the focus).
+          <p className={cn("px-2 text-[12px] text-muted-foreground", line === "touch" && "[@media(hover:hover)]:hidden [@media(hover:hover)]:focus-within:block")}>
+            {blockerSlot ? (
+              <button
+                type="button"
+                // A mouse press would focus the composer and unfold it under the pointer before the click lands.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openBlocked(blockerSlot)}
+                className="inline-flex min-h-6 items-center text-left underline decoration-border-strong underline-offset-2 hover:text-foreground hover:decoration-current"
+              >
+                {blocker.message}
+              </button>
+            ) : (
+              <span className="inline-flex min-h-6 items-center">{blocker.message}</span>
+            )}
+          </p>
+        )}
       </div>
       {sketched.note && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{sketched.note}</p>}
       {signed.notes.length > 0 && <p className="px-2 pt-1 text-[12px] text-muted-foreground">{signed.notes.join(" · ")}</p>}

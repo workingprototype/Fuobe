@@ -9,6 +9,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { uploadFile } from "@/lib/api";
 import type { MotionPaths } from "@/lib/motion-paths";
+import { keyCombo, useModKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 
 /**
@@ -168,6 +169,7 @@ function SketchCanvas({
   onDone: (r: SketchResult) => void;
   escapeRef: React.RefObject<() => boolean>;
 }) {
+  const mod = useModKey();
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ring = useRef<HTMLSpanElement>(null);
@@ -522,7 +524,7 @@ function SketchCanvas({
         )}
       </div>
       <DialogFooter className="items-center">
-        <p className="mr-auto hidden text-[12px] text-muted-foreground sm:block">[ ] brush size · ⌘Z undo · ⇧⌘Z redo{mode === "draw" ? " · T note" : ""}</p>
+        <p className="mr-auto hidden text-[12px] text-muted-foreground sm:block">[ ] brush size · {keyCombo("Z", { mod })} undo · {keyCombo("Z", { mod, shift: true })} redo{mode === "draw" ? " · T note" : ""}</p>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>
           Cancel
         </Button>

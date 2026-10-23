@@ -139,6 +139,27 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   return out;
 }
 
+/** The hand-offs offered as next steps under a fresh result, best first (UX-18). */
+const NEXT_STEPS: Partial<Record<OutputFile["kind"], OutputActionId[]>> = {
+  image: ["animate", "upscale", "edit"],
+  video: ["extend", "upscale", "add-sound"],
+  audio: ["lipsync", "voice-change"],
+};
+
+/**
+ * Up to `max` next steps for output `index` (Animate, Upscale, Edit for a picture), taken from
+ * outputActions so they go where the tile's own actions go. Only hand-offs to another studio.
+ */
+export function nextSteps(g: Generation, index: number, max = 3): OutputAction[] {
+  const o = g.outputs[index];
+  if (!o || g.status !== "succeeded") return [];
+  const all = outputActions(g, index);
+  return (NEXT_STEPS[o.kind] ?? [])
+    .map((id) => all.find((a) => a.id === id && a.href))
+    .filter((a): a is OutputAction => !!a)
+    .slice(0, max);
+}
+
 /**
  * A vector result (an SVG: Vectorize, Recraft's vector styles, an uploaded .svg). Demo pictures are
  * SVG placeholders standing in for raster results, so they keep the raster hand-offs (except Vectorize's).
@@ -208,6 +229,20 @@ export function layerInfo(o: Pick<OutputFile, "meta">, index: number): { name: s
 /** A generation whose outputs are the layers of one picture (Layers, text layers). */
 export function isLayered(g: Pick<Generation, "op" | "outputs">): boolean {
   return (g.op === "layers" || g.op === "text-layers" || g.outputs.some((o) => !!(o.meta && ("layer" in o.meta || "z" in o.meta)))) && g.outputs.length > 1;
+}
+
+/**
+ * A still for a clip's tile, shown before it loads (and where the browser can't decode it): the
+ * output's own meta.poster / thumbnail, else, for a clip made from a start frame (image-to-video,
+ * start + end frame), that frame. Undefined when there's nothing better than the clip's first frame.
+ */
+export function videoPoster(g: Partial<Pick<Generation, "op" | "request">> | undefined, o: Pick<OutputFile, "kind" | "meta">): string | undefined {
+  if (o.kind !== "video") return undefined;
+  const m = (o.meta ?? {}) as Record<string, unknown>;
+  const own = ["poster", "thumbnail"].map((k) => m[k]).find((v): v is string => typeof v === "string" && v.length > 0);
+  if (own) return own;
+  if (g?.op !== "i2v" && g?.op !== "flf2v") return undefined;
+  return g.request?.inputs?.images?.[0] || undefined;
 }
 
 /** A 3D model's still and turntable: meta.poster / meta.preview, meta.video / meta.turntable, or a sibling output. */

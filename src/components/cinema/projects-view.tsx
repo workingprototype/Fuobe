@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PageShell } from "@/components/page-shell";
 import { PageHeader } from "@/components/page-shell";
+import { HadItemsScript, useHadItems } from "@/components/use-had-items";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -100,11 +101,50 @@ function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettin
   );
 }
 
+const GRID = "grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+
+/**
+ * The first-production block, or (`loading`) a placeholder of exactly its size: a grid skeleton
+ * swapped for this block moved the page (CLS 0.048 in the round-4 audit).
+ */
+function EmptyProjects({ loading, onCreate, className }: { loading?: boolean; onCreate: () => void; className?: string }) {
+  return (
+    <div className={cn("mx-auto flex max-w-md flex-col items-center pt-[8vh] text-center", className)} aria-busy={loading || undefined} aria-label={loading ? "Loading projects" : undefined}>
+      {loading ? (
+        <>
+          <Skeleton className="size-14 rounded-2xl" />
+          <span className="mt-5 flex h-[1lh] w-full items-center justify-center font-heading text-[26px] leading-tight">
+            <Skeleton className="h-6 w-2/3" />
+          </span>
+          {/* Two lines of 15 px text, then the button's 36 px. */}
+          <span className="mt-2 flex h-[2lh] w-full flex-col items-center justify-center gap-2 text-[15px]">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-1/2" />
+          </span>
+          <Skeleton className="mt-6 h-9 w-36 rounded-full" />
+        </>
+      ) : (
+        <>
+          <div className="grid size-14 place-items-center rounded-2xl bg-brand-faint text-brand-text">
+            <Clapperboard className="size-6" />
+          </div>
+          <h2 className="mt-5 font-heading text-[26px] leading-tight">Start your first production</h2>
+          <p className="mt-2 text-[15px] text-muted-foreground">Projects keep your generations, elements, and chats together – create one to start.</p>
+          <Button className="mt-6" onClick={onCreate}>
+            <Plus /> New project
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function CinemaProjects() {
   const { data, isLoading } = useCinemaProjects();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<CinemaProject | null>(null);
+  useHadItems("cinema-projects", data?.length);
   return (
     <PageShell wide>
       <PageHeader title="Cinema Studio" description="Direct films shot by shot: genre, camera, lens, palette and light, with characters and locations that stay the same.">
@@ -113,28 +153,24 @@ export function CinemaProjects() {
         </Button>
       </PageHeader>
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i}>
-              <Skeleton className="aspect-video rounded-xl" />
-              <Skeleton className="mt-3 h-4 w-2/3" />
-              <Skeleton className="mt-2 h-3 w-1/3" />
-            </div>
-          ))}
+        // Both shapes are in the server's shell; the one this browser saw last time shows from the first paint.
+        <div key="loading">
+          <HadItemsScript name="cinema-projects" />
+          <div className={cn(GRID, "hidden [html[data-had-cinema-projects='1']_&]:grid")} aria-busy="true" aria-label="Loading projects">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i}>
+                <Skeleton className="aspect-video rounded-xl" />
+                <Skeleton className="mt-3 h-4 w-2/3" />
+                <Skeleton className="mt-2 h-3 w-1/3" />
+              </div>
+            ))}
+          </div>
+          <EmptyProjects loading className="[html[data-had-cinema-projects='1']_&]:hidden" onCreate={() => setCreating(true)} />
         </div>
       ) : !data?.length ? (
-        <div className="mx-auto flex max-w-md flex-col items-center pt-[8vh] text-center">
-          <div className="grid size-14 place-items-center rounded-2xl bg-brand-faint text-brand-text">
-            <Clapperboard className="size-6" />
-          </div>
-          <h2 className="mt-5 font-heading text-[26px] leading-tight">Start your first production</h2>
-          <p className="mt-2 text-[15px] text-muted-foreground">Projects keep your generations, elements, and chats together – create one to start.</p>
-          <Button className="mt-6" onClick={() => setCreating(true)}>
-            <Plus /> New project
-          </Button>
-        </div>
+        <EmptyProjects key="empty" onCreate={() => setCreating(true)} />
       ) : (
-        <div className="grid grid-cols-1 gap-x-5 gap-y-7 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div key="cards" className={GRID}>
           {data.map((p) => (
             <ProjectCard key={p.id} project={p} onSettings={() => setEditing(p)} />
           ))}

@@ -488,7 +488,7 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
                   onClick={() => void generate()}
                   aria-label={template ? "Recreate template" : "Generate"}
                   aria-disabled={!!blocker || busy}
-                  className={cn("grid size-10 shrink-0 place-items-center rounded-full transition-colors", blocker ? "bg-muted text-subtle-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90")}
+                  className={cn("grid size-10 shrink-0 place-items-center rounded-full text-primary-foreground transition-colors", blocker ? "bg-primary/70 hover:bg-primary/80" : "bg-primary hover:bg-primary/90")}
                 >
                   {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
                 </button>

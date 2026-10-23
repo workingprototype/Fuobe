@@ -41,6 +41,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PromptInput, ELEMENT_ICONS, type PromptInputHandle } from "@/components/studio/prompt-input";
 import { ShotsEditor } from "@/components/studio/shots-editor";
+import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { uploadFile, useAssets, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
@@ -66,7 +67,7 @@ import { modKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { MoveChips, MovePicker } from "./camera-moves";
 import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } from "./director-panel";
-import { draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
+import { directorPicks, draftToInput, type BarAction, type CinemaDraft, type RefItem } from "./draft";
 import { useCinemaGenerate } from "./hooks";
 import { firstFrame, mediaDuration } from "./media";
 import { formatUsd } from "./money";
@@ -119,7 +120,7 @@ function PickChip<T extends string | number>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={cn(chip, chipIdle)} aria-label={label}>
+        <button type="button" className={cn(chip, chipIdle)} aria-label={`${label}: ${f(value)}`}>
           <Icon className="size-3.5" />
           {f(value)}
         </button>
@@ -149,11 +150,14 @@ function DurationChip({ value, effective, onChange }: { value: number; effective
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, chipIdle)} aria-label="Duration">
-          <Clock className="size-3.5" />
+        {/* Named by its content, with the words a screen reader needs hidden from sight: "Duration: 5s, the model makes 6s". */}
+        <button type="button" className={cn(chip, chipIdle)}>
+          <Clock className="size-3.5" aria-hidden />
+          <span className="sr-only">Duration: </span>
           {effective && effective !== value ? (
             <span>
-              <span className="text-muted-foreground line-through">{value}s</span> {effective}s
+              <span className="text-muted-foreground line-through">{value}s</span>
+              <span className="sr-only">, the model makes</span> {effective}s
             </span>
           ) : (
             `${value}s`
@@ -367,6 +371,8 @@ export function PromptBar(props: PromptBarProps) {
   const quietBlocker = !draft.prompt.trim() && !draft.refs.length && blocker === plan.blocker && /^Describe/.test(blocker ?? "");
   const blockerId = useId();
   const [directorRow, directorFade] = useEdgeFade<HTMLDivElement>();
+  const [settingsRow, settingsFade] = useEdgeFade<HTMLDivElement>();
+  const [directorOpen, setDirectorOpen] = useState(false);
   // Reference clips make the take reference-to-video: the first image is then a reference, not the start frame.
   const refMode = plan.steps.find((s) => s.key === "main")?.request.op === "ref2v";
   const video = draft.mode === "video";
@@ -520,8 +526,55 @@ export function PromptBar(props: PromptBarProps) {
   const costShort = demo ? "Demo" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : "≈ ?";
   const costLong = demo ? "Demo · free" : cost === 0 ? "Free" : cost != null ? `≈ ${formatCost(cost)}` : "Price unknown";
 
-  return (
+  // The Director's Panel chips: their own row from sm up; on phones one "Director" chip opens them in a sheet.
+  const directorChips = (
+    <>
+      <FilmSetupChip settings={settings} onChange={onSettings} mode={draft.mode} />
+      <CameraChip
+        settings={settings}
+        onChange={onSettings}
+        mode={draft.mode}
+        engine={engine}
+        moves={draft.moves}
+        onMovesChange={(moves) => setDraft({ moves })}
+        required={draft.mode === "image" && draft.imageTool === "still"}
+      />
+      <PaletteChip settings={settings} onChange={onSettings} engine={engine} saved={props.palettes} onSave={props.onPalettes} />
+      <LightingChip settings={settings} onChange={onSettings} />
+      <EmotionChip settings={settings} onChange={onSettings} characters={characters} />
+      <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden />
+      {/* Cast and Location open their own dialog: the phone sheet closes first. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={() => {
+              setDirectorOpen(false);
+              props.onCast();
+            }} className={cn(chip, chipIdle)} aria-label="Soul Cast: build a character">
+            <UserRoundPlus className="size-3.5" /> Cast
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Soul Cast: build an AI actor and save it as a character</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={() => {
+              setDirectorOpen(false);
+              props.onLocation();
+            }} className={cn(chip, chipIdle)} aria-label="Soul Location: build a location">
+            <MapPin className="size-3.5" /> Location
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Soul Location: keep every scene in the same world</TooltipContent>
+      </Tooltip>
+    </>
+  );
+  const picks = directorPicks(settings, draft.mode);
+  // A cinematic still needs camera, lens and focal length: the folded chip warns as the Camera chip does.
+  const cameraNeeded = draft.mode === "image" && draft.imageTool === "still" && (!settings.camera || !settings.lens || !settings.focal);
+  // Starts with what the chip shows ("Director 2"), so the spoken name contains the visible one.
+  const directorName = `Director${picks ? `: ${picks} set` : "'s Panel"}${cameraNeeded ? ", camera needed" : ""}`;
 
+  return (
     <div
       className="group/composer @container w-full rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
       onKeyDown={(e) => {
@@ -626,45 +679,39 @@ export function PromptBar(props: PromptBarProps) {
       )}
 
       {/* Director's Panel */}
-      {/* Narrow bars scroll this row (with faded edges where more chips hide); wide ones wrap it. */}
-      <div ref={directorRow} style={directorFade} className="scrollbar-none -mx-0.5 flex items-center gap-1.5 overflow-x-auto px-1 pb-1.5 @min-[760px]:flex-wrap @min-[760px]:overflow-visible" role="group" aria-label="Director's Panel">
-
-        <FilmSetupChip settings={settings} onChange={onSettings} mode={draft.mode} />
-        <CameraChip
-          settings={settings}
-          onChange={onSettings}
-          mode={draft.mode}
-          engine={engine}
-          moves={draft.moves}
-          onMovesChange={(moves) => setDraft({ moves })}
-          required={draft.mode === "image" && draft.imageTool === "still"}
-        />
-        <PaletteChip settings={settings} onChange={onSettings} engine={engine} saved={props.palettes} onSave={props.onPalettes} />
-        <LightingChip settings={settings} onChange={onSettings} />
-        <EmotionChip settings={settings} onChange={onSettings} characters={characters} />
-        <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={props.onCast} className={cn(chip, chipIdle)} aria-label="Soul Cast: build a character">
-                <UserRoundPlus className="size-3.5" /> Cast
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Soul Cast: build an AI actor and save it as a character</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={props.onLocation} className={cn(chip, chipIdle)} aria-label="Soul Location: build a location">
-                <MapPin className="size-3.5" /> Location
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Soul Location: keep every scene in the same world</TooltipContent>
-          </Tooltip>
+      {/* Narrow bars scroll this row (with faded edges where more chips hide); wide ones wrap it. Phones fold it into the Director chip below. */}
+      <div ref={directorRow} style={directorFade} className="scrollbar-none -mx-0.5 flex items-center gap-1.5 overflow-x-auto px-1 pb-1.5 max-sm:hidden @min-[760px]:flex-wrap @min-[760px]:overflow-visible" role="group" aria-label="Director's Panel">
+        {directorChips}
       </div>
 
       {/* Generation settings. Narrow bars (phones, a bar squeezed by the side panel) wrap this row and
           fold the secondary settings into one Settings popover, so nothing hides off-screen. */}
       <div className="flex items-end gap-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        {/* Phones: one row that scrolls (faded at the edge), so the bar is the prompt plus one line of chips. */}
+        <div ref={settingsRow} style={settingsFade} className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1 sm:flex-wrap sm:overflow-visible">
+          <span className="contents sm:hidden">
+            <ResponsivePanel
+              open={directorOpen}
+              onOpenChange={setDirectorOpen}
+              title="Director's Panel"
+              description="Film setup, camera, palette, light and emotion: every shot follows them."
+              trigger={
+                <button
+                  type="button"
+                  className={cn(chip, picks ? chipOn : chipIdle, cameraNeeded && "ring-1 ring-warning/60")}
+                  aria-label={directorName}
+                >
+                  <Clapperboard className="size-3.5" /> Director
+                  {picks > 0 && <span className="font-mono text-[11px] tabular-nums">{picks}</span>}
+                  {cameraNeeded && <span className="size-1.5 rounded-full bg-warning" aria-hidden />}
+                </button>
+              }
+            >
+              <div role="group" aria-label="Director's Panel" className="flex flex-wrap gap-1.5">
+                {directorChips}
+              </div>
+            </ResponsivePanel>
+          </span>
           <Segmented
             label="Mode"
             value={draft.mode}
@@ -695,7 +742,7 @@ export function PromptBar(props: PromptBarProps) {
           {/* Model */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild disabled={!pickable}>
-              <button type="button" className={cn(chip, chipIdle, "max-w-[220px] disabled:opacity-100")} aria-label="Model">
+              <button type="button" className={cn(chip, chipIdle, "max-w-[220px] disabled:opacity-100")} aria-label={`Model: ${model.name}`}>
                 <Sparkles className="size-3.5 shrink-0" />
                 <span className="truncate">{model.name}</span>
                 {pickable && <ChevronDown className="size-3 shrink-0 opacity-60" />}
@@ -792,7 +839,7 @@ export function PromptBar(props: PromptBarProps) {
               aria-label={plan.outputs > 1 ? `Generate ${plan.outputs}` : "Generate"}
               aria-disabled={!!blocker || undefined}
               aria-describedby={blocker ? blockerId : undefined}
-              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")}
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/70 hover:bg-primary/80")}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>

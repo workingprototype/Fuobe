@@ -10,6 +10,16 @@ export function modKey(): "⌘" | "Ctrl" {
   return typeof navigator !== "undefined" && isApplePlatform(navigator.platform) ? "⌘" : "Ctrl";
 }
 
+/**
+ * A shortcut as this keyboard writes it: "⌘D" / "⇧⌘Z" on Apple devices, "Ctrl+D" / "Ctrl+Shift+Z"
+ * elsewhere. `mod` defaults to this browser's (modKey).
+ */
+export function keyCombo(key: string, opts: { shift?: boolean; mod?: "⌘" | "Ctrl" } = {}): string {
+  const mod = opts.mod ?? modKey();
+  if (mod === "⌘") return `${opts.shift ? "⇧" : ""}⌘${key}`;
+  return `Ctrl+${opts.shift ? "Shift+" : ""}${key}`;
+}
+
 const noop = () => () => {};
 
 /**

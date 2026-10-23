@@ -92,6 +92,7 @@ import {
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
+import { keyCombo } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
@@ -274,7 +275,7 @@ function MenuItems({ id, kit, items, canConnect, onRename }: { id: string; kit: 
           <DisconnectItems id={id} kit={kit} />
         </kit.SubContent>
       </kit.Sub>
-      {entry({ label: "Duplicate", icon: Copy, onSelect: () => actions.duplicate(id), shortcut: "⌘D", separatorBefore: true })}
+      {entry({ label: "Duplicate", icon: Copy, onSelect: () => actions.duplicate(id), shortcut: keyCombo("D"), separatorBefore: true })}
       {entry({ label: "Delete", icon: Trash2, onSelect: () => actions.remove(id), shortcut: "⌫", destructive: true })}
     </>
   );

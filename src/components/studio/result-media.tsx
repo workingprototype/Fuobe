@@ -3,7 +3,7 @@
 import { AudioLines, Box, FileText, Layers } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { cuesOf, cueTime, isLayered, layerInfo, modelPreview, textOf } from "@/lib/output-actions";
+import { cuesOf, cueTime, isLayered, layerInfo, modelPreview, textOf, videoPoster } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
 /** Any result as a tile picture: image, video (plays on hover), audio, text card, 3D preview. */
@@ -17,8 +17,8 @@ export function MediaThumb({
   inset,
 }: {
   output: OutputFile;
-  /** The generation it belongs to (3D models show a sibling turntable or poster). */
-  g?: Pick<Generation, "outputs">;
+  /** The generation it belongs to (3D models show a sibling turntable or poster; a clip, its start frame as poster). */
+  g?: Pick<Generation, "outputs"> & Partial<Pick<Generation, "op" | "request">>;
   className?: string;
   autoPlay?: boolean;
   /** Letterbox instead of crop (Library "Fit"). */
@@ -30,13 +30,16 @@ export function MediaThumb({
 }) {
   const object = fit ? "object-contain" : "object-cover";
   if (output.kind === "video") {
+    // With a poster the clip isn't fetched until it plays (a grid of clips no longer loads every one's metadata).
+    const poster = videoPoster(g, output);
     return (
       <video
         src={`${output.url}#t=0.1`}
+        poster={poster}
         muted
         loop
         playsInline
-        preload="metadata"
+        preload={poster ? "none" : "metadata"}
         autoPlay={autoPlay}
         onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
         onMouseLeave={(e) => {

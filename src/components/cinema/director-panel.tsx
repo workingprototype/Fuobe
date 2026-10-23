@@ -571,6 +571,7 @@ export function EmotionChip({ settings, onChange, characters }: { settings: Dire
   const emotions = settings.emotions ?? {};
   const active = characters.filter((c) => emotions[c.handle.toLowerCase()]);
   const first = active[0] ? emotionStep(emotions[active[0].handle.toLowerCase()]) : undefined;
+  const chipLabel = first ? `${first.name}${active.length > 1 ? ` +${active.length - 1}` : ""}` : "Emotions";
   const set = (handle: string, v: { family: string; step: number } | null) => {
     const next = { ...emotions };
     if (v) next[handle.toLowerCase()] = v;
@@ -580,7 +581,7 @@ export function EmotionChip({ settings, onChange, characters }: { settings: Dire
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <DirectorChip icon={Smile} label={first ? `${first.name}${active.length > 1 ? ` +${active.length - 1}` : ""}` : "Emotions"} active={active.length > 0} aria-label="Emotion wheel">
+        <DirectorChip icon={Smile} label={chipLabel} active={active.length > 0} aria-label={first ? `Emotions: ${chipLabel}` : "Emotions"}>
           {first && <span className="size-2.5 shrink-0 rounded-full" style={{ background: first.color }} />}
         </DirectorChip>
       </PopoverTrigger>
