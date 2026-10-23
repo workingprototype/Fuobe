@@ -6,6 +6,67 @@ function enumValue(field: string | EnumField, value: string): [string, unknown] 
   return [field.key, field.values && value in field.values ? field.values[value] : value];
 }
 
+/** "16:9" → 16/9; undefined for "auto" and other names. */
+function ratioOf(v: string): number | undefined {
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(v.trim());
+  return m && Number(m[2]) > 0 ? Number(m[1]) / Number(m[2]) : undefined;
+}
+
+/** "720p" → 720, "2k" / "4K" → 2000 / 4000: a size to order resolution tiers by. */
+function tierOf(v: string): number | undefined {
+  const m = /^(\d+(?:\.\d+)?)\s*([pk])$/i.exec(v.trim());
+  return m ? Number(m[1]) * (m[2].toLowerCase() === "k" ? 1000 : 1) : undefined;
+}
+
+/**
+ * The value a route takes for `value` (EnumField.accepts): the value itself (in any case), else the
+ * closest one it takes: the nearest shape for an aspect ratio, the largest tier not above it for a
+ * resolution (the smallest when all are above). Undefined (leave the field out) for "auto" and other
+ * names it doesn't take.
+ */
+export function fitValue(accepts: readonly string[], value: string, kind: "ratio" | "tier"): string | undefined {
+  const same = accepts.find((a) => a.toLowerCase() === value.trim().toLowerCase());
+  if (same !== undefined) return same;
+  const size = kind === "ratio" ? ratioOf : tierOf;
+  const want = size(value);
+  if (want === undefined) return undefined;
+  const sized = accepts.flatMap((a) => {
+    const n = size(a);
+    return n === undefined ? [] : [{ a, n }];
+  });
+  if (!sized.length) return undefined;
+  if (kind === "ratio") return sized.reduce((best, c) => (Math.abs(Math.log(c.n / want)) < Math.abs(Math.log(best.n / want)) ? c : best)).a;
+  const below = sized.filter((c) => c.n <= want);
+  if (below.length) return below.reduce((best, c) => (c.n > best.n ? c : best)).a;
+  return sized.reduce((best, c) => (c.n < best.n ? c : best)).a;
+}
+
+/** Write an enum setting (aspect ratio, resolution) fitted to what the route takes; nothing when it takes nothing close. */
+function putEnum(out: Record<string, unknown>, field: string | EnumField, value: string, kind: "ratio" | "tier") {
+  const v = typeof field !== "string" && field.accepts ? fitValue(field.accepts, value, kind) : value;
+  if (v === undefined) return;
+  const [k, sent] = enumValue(field, v);
+  out[k] = sent;
+}
+
+type Range = NonNullable<FieldMap["ranges"]>[string];
+
+/** A number inside an API's limits: rounded for whole-number fields, then clamped. */
+function inRange(n: number, r: Range): number {
+  let v = r.integer ? Math.round(n) : n;
+  if (r.min !== undefined) v = Math.max(r.min, v);
+  if (r.max !== undefined) v = Math.min(r.max, v);
+  return v;
+}
+
+/** How many frames a frame-count route renders for the clip (FieldMap.numFrames), or undefined when its length is unknown. */
+export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps">): number | undefined {
+  const seconds = input.sourceDuration ?? input.duration;
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fps;
+  return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
+}
+
 /** Path segments that would reach Object.prototype (or a constructor) instead of the payload. */
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -120,13 +181,17 @@ export function keyframesValue(k: NonNullable<FieldMap["keyframes"]>, images: st
     f = Math.max(0, last !== undefined ? Math.min(f, last) : f);
     frames.push(i > 0 ? Math.max(f, frames[i - 1] + 1) : f);
   });
+  // Keyframes nudged apart at the very end (4.99 s and 5 s in a 5 s clip) step back so the last stays on the
+  // clip's final frame: each one frame before the next.
+  if (last !== undefined) for (let i = frames.length - 1; i >= 0; i--) frames[i] = Math.max(0, Math.min(frames[i], i === frames.length - 1 ? last : frames[i + 1] - 1));
   return images.map((url, i) => ({ [k.image]: url, [k.frame]: frames[i] }));
 }
 
 /**
  * A Ken Burns move as one zoom (fal's zoompan zooms from the whole picture toward a focal point, or back
- * out): the factor is the larger zoom over the smaller, the focal point is the pan point at the zoomed-in
- * end. Nothing is sent when the request says nothing about the move (the API's defaults apply).
+ * out to it): the factor is the zoomed-in end (the larger of zoomFrom / zoomTo), so that framing is
+ * exact and the other end is the whole picture; the focal point is the pan point at the zoomed-in end.
+ * Nothing is sent when the request says nothing about the move (the API's defaults apply).
  */
 function zoomValue(z: NonNullable<FieldMap["zoom"]>, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -135,7 +200,7 @@ function zoomValue(z: NonNullable<FieldMap["zoom"]>, input: GenInput): Record<st
     const from = input.zoomFrom ?? 1;
     const to = input.zoomTo ?? from;
     const zoomIn = to >= from;
-    const factor = Math.max(from, to) / Math.max(0.01, Math.min(from, to));
+    const factor = Math.max(1, from, to);
     out[z.factor] = round3(z.max ? Math.min(z.max, factor) : factor);
     if (z.direction) out[z.direction.key] = zoomIn ? z.direction.in : z.direction.out;
     const focus = zoomIn ? (input.panTo ?? input.panFrom) : (input.panFrom ?? input.panTo);
@@ -155,7 +220,7 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   const out: Record<string, unknown> = {};
   // Fallbacks first: every canonical field and params.extra below overrides them.
   for (const [k, v] of Object.entries(map.defaults ?? {})) setPath(out, k, v);
-  if (map.prompt !== false && input.prompt !== undefined) setPath(out, map.prompt ?? "prompt", input.prompt);
+  if (map.prompt !== false && input.prompt !== undefined && !(map.omitEmptyPrompt && !input.prompt.trim())) setPath(out, map.prompt ?? "prompt", input.prompt);
   if (map.negativePrompt && input.negativePrompt) out[map.negativePrompt] = input.negativePrompt;
 
   const images = input.images ?? [];
@@ -183,14 +248,8 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[map.timeline] = timelineTracks(spec, visual, input.audios ?? []);
   }
 
-  if (map.aspectRatio && input.aspectRatio) {
-    const [k, v] = enumValue(map.aspectRatio, input.aspectRatio);
-    out[k] = v;
-  }
-  if (map.resolution && input.resolution) {
-    const [k, v] = enumValue(map.resolution, input.resolution);
-    out[k] = v;
-  }
+  if (map.aspectRatio && input.aspectRatio) putEnum(out, map.aspectRatio, input.aspectRatio, "ratio");
+  if (map.resolution && input.resolution) putEnum(out, map.resolution, input.resolution, "tier");
   if (map.duration && input.duration !== undefined) out[map.duration.key] = timeValue(map.duration, input.duration);
   if (map.numOutputs && input.numOutputs !== undefined) out[map.numOutputs] = input.numOutputs;
   if (map.seed && input.seed !== undefined && input.seed >= 0) {
@@ -274,11 +333,22 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.model3d && input.model3d) out[map.model3d] = input.model3d;
   if (map.animation && input.animation !== undefined && input.animation !== "") {
     const n = typeof input.animation === "number" ? input.animation : Number(input.animation);
-    out[map.animation.key] = Number.isFinite(n) && String(input.animation).trim() !== "" ? n : input.animation;
+    const numeric = Number.isFinite(n) && String(input.animation).trim() !== "";
+    const r = map.ranges?.[map.animation.key];
+    // Meshy's presets are numbered: a name can't be sent.
+    if (r?.integer && !numeric) throw new Error(`Pick the animation by its preset number${r.min !== undefined && r.max !== undefined ? ` (${r.min}–${r.max})` : ""}`);
+    out[map.animation.key] = numeric ? n : input.animation;
     if (map.animation.flag) out[map.animation.flag] = true;
   }
+  if (map.numFrames) {
+    const n = numFramesValue(map.numFrames, input);
+    if (n !== undefined) out[map.numFrames.key] = n;
+  }
+  // The API's limits on what Fuobe filled in (params.extra below is sent as given).
+  for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);
 
-  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline")) setPath(out, k, v);
+  const ignore = new Set(map.ignore ?? []);
+  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline") && !ignore.has(k)) setPath(out, k, v);
   // A background colour given as hex goes out in the palette's shape (Recraft wants {r,g,b}).
   const bg = map.palette?.background;
   if (bg && typeof out[bg] === "string") {

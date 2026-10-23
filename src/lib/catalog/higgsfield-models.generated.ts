@@ -651,6 +651,7 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
         "provider": "higgsfield",
         "endpoint": "higgsfield/genjutsu/object-swap/v1.0",
         "map": {
+          "omitEmptyPrompt": true,
           "images": "image_urls",
           "video": "video_url",
           "resolution": "resolution"
@@ -731,6 +732,7 @@ export const HIGGSFIELD_MODELS: ModelDef[] = [
         "provider": "higgsfield",
         "endpoint": "higgsfield/genjutsu-light/object-swap/v1.0",
         "map": {
+          "omitEmptyPrompt": true,
           "images": "image_urls",
           "video": "video_url",
           "resolution": "resolution"
@@ -1940,8 +1942,27 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "provider": "higgsfield",
       "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
       "map": {
-        "aspectRatio": "aspect_ratio",
-        "resolution": "resolution",
+        "aspectRatio": {
+          "key": "aspect_ratio",
+          "accepts": [
+            "auto",
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3"
+          ]
+        },
+        "resolution": {
+          "key": "resolution",
+          "accepts": [
+            "480p",
+            "720p",
+            "1080p"
+          ]
+        },
         "duration": {
           "key": "duration",
           "type": "number"
@@ -1954,9 +1975,27 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
       "map": {
         "image": "image_url",
-        "images": "image_urls",
-        "aspectRatio": "aspect_ratio",
-        "resolution": "resolution",
+        "aspectRatio": {
+          "key": "aspect_ratio",
+          "accepts": [
+            "auto",
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3"
+          ]
+        },
+        "resolution": {
+          "key": "resolution",
+          "accepts": [
+            "480p",
+            "720p",
+            "1080p"
+          ]
+        },
         "duration": {
           "key": "duration",
           "type": "number"
@@ -1968,10 +2007,27 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "provider": "higgsfield",
       "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
       "map": {
-        "image": "image_url",
         "images": "image_urls",
-        "aspectRatio": "aspect_ratio",
-        "resolution": "resolution",
+        "aspectRatio": {
+          "key": "aspect_ratio",
+          "accepts": [
+            "auto",
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3"
+          ]
+        },
+        "resolution": {
+          "key": "resolution",
+          "accepts": [
+            "480p",
+            "720p"
+          ]
+        },
         "duration": {
           "key": "duration",
           "type": "number"
@@ -1985,8 +2041,28 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "provider": "higgsfield",
       "endpoint": "xai/grok-imagine-image-2.0",
       "map": {
-        "aspectRatio": "aspect_ratio",
-        "resolution": "resolution"
+        "aspectRatio": {
+          "key": "aspect_ratio",
+          "accepts": [
+            "auto",
+            "1:1",
+            "1:2",
+            "2:1",
+            "3:2",
+            "2:3",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16"
+          ]
+        },
+        "resolution": {
+          "key": "resolution",
+          "accepts": [
+            "1k",
+            "2k"
+          ]
+        }
       }
     },
     {
@@ -1995,8 +2071,28 @@ export const HIGGSFIELD_ROUTES: Record<string, ModelRoute[]> = {
       "endpoint": "xai/grok-imagine-image-2.0",
       "map": {
         "images": "image_urls",
-        "aspectRatio": "aspect_ratio",
-        "resolution": "resolution"
+        "aspectRatio": {
+          "key": "aspect_ratio",
+          "accepts": [
+            "auto",
+            "1:1",
+            "1:2",
+            "2:1",
+            "3:2",
+            "2:3",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16"
+          ]
+        },
+        "resolution": {
+          "key": "resolution",
+          "accepts": [
+            "1k",
+            "2k"
+          ]
+        }
       }
     }
   ]

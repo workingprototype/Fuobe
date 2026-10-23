@@ -2,13 +2,19 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { getModel, getPreset, MODELS, modelsFor } from "@/lib/catalog";
 import { CLOUD_MODELS } from "@/lib/catalog/cloud-models.generated";
-import { buildPayload, keyframesValue, pointsValue } from "@/lib/catalog/payload";
+import { buildPayload, fitValue, keyframesValue, pointsValue } from "@/lib/catalog/payload";
 import { estimateCost, inferOperation, planGeneration, pricingAt, promptOptional } from "@/lib/catalog/plan";
 import { OPERATION_LABELS, OPERATION_OUTPUT, type GenerationRequest, type ModelRoute, type Operation } from "@/lib/catalog/types";
 
-type Endpoint = { provider: string; endpoint: string; status?: string; verified?: boolean };
+type Endpoint = { provider: string; endpoint: string; status?: string; verified?: boolean; inputs?: Record<string, { values?: unknown[] }> };
 const research4 = (JSON.parse(fs.readFileSync("docs/research/paid-model-apis-4.json", "utf8")) as { endpoints: Endpoint[] }).endpoints;
 const byId = new Map(research4.map((e) => [`${e.provider}:${e.endpoint}`, e]));
+type HiggsfieldEndpoint = { path: string; method: string; inputs?: Record<string, { enum?: unknown[] }> };
+const higgsfield = new Map(
+  (JSON.parse(fs.readFileSync("docs/research/higgsfield-api.json", "utf8")) as { endpoints: HiggsfieldEndpoint[] }).endpoints
+    .filter((e) => e.method === "POST")
+    .map((e) => [e.path.replace(/^\//, ""), e]),
+);
 
 /** The models round 4 added (research part 4), with the operation each is for. */
 const ROUND4: Record<string, Operation> = {
@@ -167,7 +173,12 @@ describe("round-4 cloud models", () => {
     expect(MODELS.filter((m) => m.id === "grok-imagine-video-1-5")).toHaveLength(1);
     const lite = getModel("genjutsu-lite-object-swap")!;
     expect(lite.routes).toEqual([
-      { op: "video-swap", provider: "higgsfield", endpoint: "higgsfield/genjutsu-light/object-swap/v1.0", map: { images: "image_urls", video: "video_url", resolution: "resolution" } },
+      {
+        op: "video-swap",
+        provider: "higgsfield",
+        endpoint: "higgsfield/genjutsu-light/object-swap/v1.0",
+        map: { omitEmptyPrompt: true, images: "image_urls", video: "video_url", resolution: "resolution" },
+      },
     ]);
     // Duration is read-only on Genjutsu Light (taken from the source): never sent, never offered.
     expect(lite.options.durations).toBeUndefined();
@@ -257,6 +268,9 @@ describe("round-4 payloads", () => {
     expect(keyframesValue(kf, ["a", "b", "c"], undefined, 10).map((k) => k.frame_index)).toEqual([0, 120, 240]);
     // Times past the end are held at the end; equal frames are nudged apart (the API wants them unique).
     expect(keyframesValue(kf, ["a", "b", "c"], [0, 0.01, 9], 5).map((k) => k.frame_index)).toEqual([0, 1, 120]);
+    // Nudged apart at the very end, they step back: the last stays on the final frame (at most duration × 24).
+    expect(keyframesValue(kf, ["a", "b"], [4.99, 5], 5).map((k) => k.frame_index)).toEqual([119, 120]);
+    expect(keyframesValue(kf, ["a", "b", "c"], [4.9, 4.95, 5], 5).map((k) => k.frame_index)).toEqual([118, 119, 120]);
     expect(keyframesValue(kf, ["a"], undefined, 5)).toEqual([{ image_url: "a", frame_index: 0 }]);
     // The keyframes route takes no start or end image fields.
     expect(map("flux-3-max", "keyframes").image).toBeUndefined();
@@ -291,15 +305,19 @@ describe("round-4 payloads", () => {
       zoom_y: 45,
       easing: "ease_in_out",
     });
-    // Zooming out looks from the start point; the factor is the larger zoom over the smaller, at most 2x.
+    // Zooming out looks from the start point. fal's zoompan always starts or ends on the whole picture: the
+    // zoomed-in end is exact (at most 2x) and the other end is the whole still.
     expect(buildPayload(m, { images: ["s.png"], zoomFrom: 1.5, zoomTo: 1.2, panFrom: { x: 0.1, y: 0.9 }, panTo: { x: 0.5, y: 0.5 }, easing: "linear" })).toEqual({
       image_url: "s.png",
-      zoom_factor: 1.25,
+      zoom_factor: 1.5,
       zoom_direction: "out",
       zoom_x: 10,
       zoom_y: 90,
       easing: "linear",
     });
+    expect(buildPayload(m, { images: ["s.png"], zoomFrom: 1.2, zoomTo: 1.5 })).toMatchObject({ zoom_factor: 1.5, zoom_direction: "in" });
+    // A hold tighter than the whole picture ends on that framing (the cloud move can't start there).
+    expect(buildPayload(m, { images: ["s.png"], zoomFrom: 1.5, zoomTo: 1.5 })).toMatchObject({ zoom_factor: 1.5 });
     expect(buildPayload(m, { images: ["s.png"], zoomTo: 3 }).zoom_factor).toBe(2);
     // A static hold for an end card, and nothing said about the move: the API's own defaults.
     expect(buildPayload(m, { images: ["s.png"], zoomFrom: 1, zoomTo: 1 })).toMatchObject({ zoom_factor: 1, zoom_direction: "in" });
@@ -356,7 +374,9 @@ describe("round-4 payloads", () => {
       ref_image_urls: ["car.png"],
     });
     expect(buildPayload(map("bria-video-erase-mask", "remove-object", "replicate"), { video: "v.mp4", mask: "mask.mp4" })).toEqual({ video_url: "v.mp4", mask_url: "mask.mp4", auto_trim: true });
-    expect(buildPayload(map("p-video-replace", "video-swap", "replicate"), { prompt: "", video: "v.mp4", images: ["me.png"] })).toEqual({ instruction_prompt: "", video: "v.mp4", images: ["me.png"] });
+    // Its instruction is optional: an empty one is left out, not sent as "".
+    expect(buildPayload(map("p-video-replace", "video-swap", "replicate"), { prompt: "", video: "v.mp4", images: ["me.png"] })).toEqual({ video: "v.mp4", images: ["me.png"] });
+    expect(buildPayload(map("p-video-replace", "video-swap", "replicate"), { prompt: "Swap the man", video: "v.mp4", images: ["me.png"] })).toMatchObject({ instruction_prompt: "Swap the man" });
   });
 });
 
@@ -444,6 +464,7 @@ describe("round-4 planning", () => {
     expect(promptOptional(getModel("genjutsu-object-swap")!, "video-swap")).toBe(true);
     expect(getModel("p-video-replace")!.options.promptless).toBeFalsy();
     expect(plan({ modelId: "genjutsu-lite-object-swap", inputs: { video, images: ["/r.png"] } }).op).toBe("video-swap");
+    expect(buildPayload(map("genjutsu-lite-object-swap", "video-swap", "higgsfield"), { prompt: "", video: "v.mp4", images: ["r.png"] })).toEqual({ image_urls: ["r.png"], video_url: "v.mp4" });
     expect(fails({ modelId: "kling-o3", op: "video-swap", inputs: { video, images: ["/r.png"] } })).toBe("Write a prompt first");
     expect(fails({ modelId: "sam-3d-objects", inputs: { images: ["/room.png"] } })).toBe("Name the objects to rebuild, e.g. “chair, lamp”");
     expect(plan({ modelId: "pixelcut-looping-video", inputs: { images: ["/bottle.png"] } }).op).toBe("i2v");
@@ -459,5 +480,104 @@ describe("round-4 planning", () => {
     expect(plan({ modelId: "flux-3-max", prompt: "p", inputs: { images: imgs }, params: { keyframeTimes: [0, 2, 8], duration: 8 } }).params.duration).toBe(8);
     const eleven = Array.from({ length: 11 }, (_, i) => `/${i}.png`);
     expect(fails({ modelId: "flux-3-max", op: "keyframes", prompt: "p", inputs: { images: eleven } })).toBe("FLUX 3 Max takes up to 10 keyframes");
+  });
+});
+
+describe("round-4 review fixes", () => {
+  it("fits aspect ratios and resolutions to what each route takes", () => {
+    expect(fitValue(["480p", "720p"], "1080p", "tier")).toBe("720p");
+    expect(fitValue(["720p", "1080p"], "480p", "tier")).toBe("720p");
+    expect(fitValue(["1k", "2k"], "2K", "tier")).toBe("2k");
+    expect(fitValue(["1:1", "2:1", "16:9"], "20:9", "ratio")).toBe("2:1");
+    expect(fitValue(["1:1", "16:9"], "auto", "ratio")).toBeUndefined();
+    expect(fitValue(["auto", "16:9"], "auto", "ratio")).toBe("auto");
+    expect(fitValue(["480p"], "very_low", "tier")).toBeUndefined();
+  });
+
+  it("sends Grok Imagine on fal and Higgsfield only values each route's API lists", () => {
+    const bad: string[] = [];
+    for (const id of ["grok-imagine-video-1-5", "grok-imagine-image-2"]) {
+      const m = getModel(id)!;
+      for (const r of m.routes) {
+        const enumOf = (field: string): unknown[] | undefined =>
+          r.provider === "higgsfield" ? higgsfield.get(r.endpoint)?.inputs?.[field]?.enum : byId.get(`${r.provider}:${r.endpoint}`)?.inputs?.[field]?.values;
+        const images = r.op === "ref2v" || r.op === "edit" ? ["a.png", "b.png"] : r.op === "i2v" ? ["a.png"] : [];
+        for (const aspectRatio of m.options.aspectRatios ?? []) {
+          const sent = buildPayload(r.map!, { prompt: "p", images, aspectRatio }).aspect_ratio;
+          if (sent !== undefined && !enumOf("aspect_ratio")?.includes(sent)) bad.push(`${id} ${r.provider} ${r.op} aspect ${aspectRatio} → ${String(sent)}`);
+        }
+        for (const resolution of m.options.resolutions ?? []) {
+          const sent = buildPayload(r.map!, { prompt: "p", images, resolution }).resolution;
+          if (sent !== undefined && !enumOf("resolution")?.includes(sent)) bad.push(`${id} ${r.provider} ${r.op} resolution ${resolution} → ${String(sent)}`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+    // fal's reference-to-video stops at 720p; text-to-video makes 1080p.
+    expect(buildPayload(map("grok-imagine-video-1-5", "ref2v"), { prompt: "p", images: ["a.png", "b.png"], resolution: "1080p" })).toMatchObject({ reference_image_urls: ["a.png", "b.png"], resolution: "720p" });
+    expect(buildPayload(map("grok-imagine-video-1-5", "t2v"), { prompt: "p", resolution: "1080p" }).resolution).toBe("1080p");
+    // Higgsfield: a start frame or references, never both; references up to 720p.
+    expect(buildPayload(map("grok-imagine-video-1-5", "i2v", "higgsfield"), { prompt: "p", images: ["a.png"], resolution: "1080p" })).toEqual({ prompt: "p", image_url: "a.png", resolution: "1080p" });
+    expect(buildPayload(map("grok-imagine-video-1-5", "ref2v", "higgsfield"), { prompt: "p", images: ["a.png", "b.png"], resolution: "1080p" })).toEqual({ prompt: "p", image_urls: ["a.png", "b.png"], resolution: "720p" });
+    // fal's text-to-image has no "auto" (its edit does); Higgsfield takes the nearest of its shapes.
+    expect(buildPayload(map("grok-imagine-image-2", "t2i"), { prompt: "p", aspectRatio: "auto" })).toEqual({ prompt: "p" });
+    expect(buildPayload(map("grok-imagine-image-2", "edit"), { prompt: "p", images: ["a.png"], aspectRatio: "auto" }).aspect_ratio).toBe("auto");
+    for (const [want, sent] of [["20:9", "2:1"], ["19.5:9", "2:1"], ["9:19.5", "1:2"], ["9:20", "1:2"], ["16:9", "16:9"], ["auto", "auto"]]) {
+      expect(buildPayload(map("grok-imagine-image-2", "t2i", "higgsfield"), { prompt: "p", aspectRatio: want }).aspect_ratio, want).toBe(sent);
+    }
+    // Up to 10 references (Higgsfield); fal's edit route says it takes 5, so a run with more goes to Higgsfield.
+    expect(getModel("grok-imagine-image-2")!.options.maxImages).toBe(10);
+    expect(map("grok-imagine-image-2", "edit").maxImages).toBe(5);
+    expect(map("grok-imagine-image-2", "edit", "higgsfield").maxImages).toBeUndefined();
+  });
+
+  it("asks frame-count routes for as many frames as the clip has", () => {
+    expect(buildPayload(map("ltx-2-3-clean-plate"), { video: "v.mp4", sourceDuration: 10, resolution: "480p" })).toMatchObject({ num_frames: 240, resolution: "480p" });
+    expect(buildPayload(map("ltx-2-3-hdr"), { video: "v.mp4", duration: 4, fps: 30 })).toMatchObject({ num_frames: 120, frames_per_second: 30 });
+    // VOID's window tops out at 197 frames (about 8 s): longer clips are split by the caller.
+    expect(buildPayload(map("void-video-inpainting"), { prompt: "the cup", video: "v.mp4", sourceDuration: 12 }).num_frames).toBe(197);
+    expect(buildPayload(map("void-video-inpainting"), { prompt: "the cup", video: "v.mp4", sourceDuration: 5 }).num_frames).toBe(120);
+    // Unknown length: the API's own default.
+    expect(buildPayload(map("ltx-2-3-clean-plate"), { video: "v.mp4" }).num_frames).toBeUndefined();
+    // VACE matches the input's frame count itself.
+    expect(map("wan-22-vace-inpaint", "remove-object").numFrames).toBeUndefined();
+    expect(route("ltx-2-3-clean-plate").note).toMatch(/480p up to about 15 s/);
+  });
+
+  it("keeps the numbers it fills inside each API's limits", () => {
+    expect(buildPayload(map("topaz-fps-boost"), { video: "v.mp4", targetFps: 200, slowdown: 2.5 })).toMatchObject({ target_fps: 120, slowdown_factor: 3 });
+    expect(buildPayload(map("topaz-fps-boost"), { video: "v.mp4", targetFps: 8 }).target_fps).toBe(16);
+    expect(buildPayload(map("overlay-image"), { images: ["card.png", "logo.png"], scale: 0.1, position: { x: 1.2, y: -0.1 } })).toMatchObject({ scale_percent: 25, x_percent: 100, y_percent: 0 });
+    expect(buildPayload(map("extract-frames"), { video: "v.mp4", frameInterval: 10_000 }).frame_interval).toBe(300);
+    expect(buildPayload(map("ken-burns"), { images: ["s.png"], duration: 45, fps: 12 })).toMatchObject({ duration: 30, frames_per_second: 24 });
+    expect(buildPayload(map("meshy-rigging"), { model3d: "char.glb", animation: 900 }).animation_action_id).toBe(696);
+    expect(() => buildPayload(map("meshy-rigging"), { model3d: "char.glb", animation: "walk" })).toThrow("Pick the animation by its preset number (0–696)");
+    // params.extra is sent as given.
+    expect(buildPayload(map("topaz-fps-boost"), { video: "v.mp4", extra: { target_fps: 200 } }).target_fps).toBe(200);
+  });
+
+  it("joins at most as many audio clips as the API takes", () => {
+    const six = Array.from({ length: 6 }, (_, i) => `/${i}.wav`);
+    expect(fails({ modelId: "join-audio", op: "audio-join", inputs: { audios: six } })).toBe("Join audio joins up to 5 clips at a time — join the rest in a second step");
+    expect(fails({ modelId: "join-audio", op: "audio-join", inputs: { audios: six.slice(0, 5) } })).toBeNull();
+  });
+
+  it("gives Bria Expand a target shape and leaves an empty prompt out", () => {
+    const p = plan({ modelId: "bria-expand", inputs: { images: ["/a.png"] } });
+    expect(p).toMatchObject({ op: "outpaint", params: { aspectRatio: "16:9" } });
+    expect(buildPayload(map("bria-expand"), { prompt: "", images: ["a.png"], aspectRatio: p.params.aspectRatio })).toEqual({ image_url: "a.png", aspect_ratio: "16:9" });
+    expect(buildPayload(map("bria-expand"), { prompt: "more beach", images: ["a.png"], aspectRatio: "9:16" })).toEqual({ prompt: "more beach", image_url: "a.png", aspect_ratio: "9:16" });
+  });
+
+  it("sends a model-wide control only to the routes that have its field", () => {
+    expect(buildPayload(map("ideogram-vector", "vectorize"), { images: ["a.png"], extra: { quality: "high", mode: "simple" } })).toEqual({ image_url: "a.png", mode: "simple" });
+    expect(buildPayload(map("ideogram-vector", "t2i"), { prompt: "a fox", extra: { quality: "high" } })).toMatchObject({ quality: "high" });
+  });
+
+  it("credits the makers, not the host", () => {
+    expect(getModel("void-video-inpainting")!.vendor).toBe("Netflix");
+    expect(getModel("rife-video-cloud")!.vendor).toBe("Open source");
+    expect(getModel("bria-fibo-2")!.tagline).toMatch(/^Structured prompts; Bria says/);
+    expect(getModel("wan-22-vace-inpaint")!.pricing!.note).toMatch(/frames ÷ 16/);
   });
 });

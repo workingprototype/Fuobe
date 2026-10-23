@@ -2072,7 +2072,10 @@ export const CLOUD_MODELS: ModelDef[] = [
               "5:4": "landscape_4_3",
               "4:5": "portrait_4_3"
             }
-          }
+          },
+          "ignore": [
+            "strength"
+          ]
         }
       },
       {
@@ -2102,7 +2105,10 @@ export const CLOUD_MODELS: ModelDef[] = [
               "5:4": "landscape_4_3",
               "4:5": "portrait_4_3"
             }
-          }
+          },
+          "ignore": [
+            "style_preset"
+          ]
         }
       },
       {
@@ -2114,7 +2120,11 @@ export const CLOUD_MODELS: ModelDef[] = [
           "mask": "mask_url",
           "numOutputs": "num_images",
           "seed": "seed",
-          "maskFormat": "black"
+          "maskFormat": "black",
+          "ignore": [
+            "style",
+            "strength"
+          ]
         }
       }
     ],
@@ -12007,7 +12017,7 @@ export const CLOUD_MODELS: ModelDef[] = [
   {
     "id": "void-video-inpainting",
     "name": "VOID Video Eraser",
-    "vendor": "fal",
+    "vendor": "Netflix",
     "family": "void",
     "engine": "cloud",
     "kind": "video",
@@ -12022,10 +12032,17 @@ export const CLOUD_MODELS: ModelDef[] = [
           "negativePrompt": "negative_prompt",
           "video": "video_url",
           "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 1,
+            "max": 197
+          },
           "defaults": {
             "prompt": "The same shot with nothing there: the background continues naturally, matching the light, texture and motion around it"
           }
-        }
+        },
+        "note": "Up to 197 frames (about 8 s at 24 fps): split longer clips"
       }
     ],
     "options": {
@@ -12071,8 +12088,21 @@ export const CLOUD_MODELS: ModelDef[] = [
           "seed": "seed",
           "generateAudio": "generate_audio",
           "fps": "frames_per_second",
-          "resolution": "resolution"
-        }
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481
+          },
+          "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 1,
+              "max": 60
+            }
+          }
+        },
+        "note": "720p up to about 6 s, 480p up to about 15 s"
       }
     ],
     "options": {
@@ -12117,6 +12147,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "fps": "frames_per_second",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
           "defaults": {
             "match_input_num_frames": true,
             "match_input_frames_per_second": true,
@@ -12137,6 +12174,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "fps": "frames_per_second",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
           "defaults": {
             "match_input_num_frames": true,
             "match_input_frames_per_second": true
@@ -12156,6 +12200,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "fps": "frames_per_second",
           "aspectRatio": "aspect_ratio",
           "resolution": "resolution",
+          "ranges": {
+            "frames_per_second": {
+              "min": 5,
+              "max": 30,
+              "integer": true
+            }
+          },
           "defaults": {
             "match_input_num_frames": true,
             "match_input_frames_per_second": true
@@ -12189,7 +12240,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.1,
-      "note": "720p, counted at 16 fps; 580p $0.075, 480p $0.05",
+      "note": "720p, billed as frames \u00f7 16 (a 30 fps clip costs about 1.9\u00d7 its length); 580p $0.075, 480p $0.05",
       "byResolution": {
         "720p": 0.1,
         "580p": 0.075,
@@ -12245,6 +12296,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "prunaai/p-video-replace",
         "map": {
           "prompt": "instruction_prompt",
+          "omitEmptyPrompt": true,
           "images": "images",
           "video": "video",
           "seed": "seed",
@@ -12295,6 +12347,18 @@ export const CLOUD_MODELS: ModelDef[] = [
           "video": "video_url",
           "slowdown": "slowdown_factor",
           "targetFps": "target_fps",
+          "ranges": {
+            "target_fps": {
+              "min": 16,
+              "max": 120,
+              "integer": true
+            },
+            "slowdown_factor": {
+              "min": 1,
+              "max": 8,
+              "integer": true
+            }
+          },
           "defaults": {
             "H264_output": true
           }
@@ -12328,7 +12392,7 @@ export const CLOUD_MODELS: ModelDef[] = [
   {
     "id": "rife-video-cloud",
     "name": "RIFE (hosted)",
-    "vendor": "fal",
+    "vendor": "Open source",
     "family": "rife",
     "engine": "cloud",
     "kind": "video",
@@ -12418,6 +12482,18 @@ export const CLOUD_MODELS: ModelDef[] = [
           "seed": "seed",
           "generateAudio": "generate_audio",
           "fps": "frames_per_second",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481
+          },
+          "ranges": {
+            "frames_per_second": {
+              "min": 1,
+              "max": 60
+            }
+          },
           "defaults": {
             "prompt": "The same shot in high dynamic range: deeper shadows and brighter highlights, every detail and movement unchanged"
           }
@@ -12481,6 +12557,25 @@ export const CLOUD_MODELS: ModelDef[] = [
           "duration": {
             "key": "duration",
             "type": "number"
+          },
+          "ranges": {
+            "zoom_x": {
+              "min": 0,
+              "max": 100
+            },
+            "zoom_y": {
+              "min": 0,
+              "max": 100
+            },
+            "frames_per_second": {
+              "min": 24,
+              "max": 60,
+              "integer": true
+            },
+            "duration": {
+              "min": 1,
+              "max": 30
+            }
           }
         }
       }
@@ -12521,6 +12616,20 @@ export const CLOUD_MODELS: ModelDef[] = [
           "scale": {
             "key": "scale_percent",
             "multiplier": 100
+          },
+          "ranges": {
+            "scale_percent": {
+              "min": 25,
+              "max": 200
+            },
+            "x_percent": {
+              "min": 0,
+              "max": 100
+            },
+            "y_percent": {
+              "min": 0,
+              "max": 100
+            }
           }
         }
       }
@@ -12558,6 +12667,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "video": "video_url",
           "frameInterval": "frame_interval",
+          "ranges": {
+            "frame_interval": {
+              "min": 1,
+              "max": 300,
+              "integer": true
+            }
+          },
           "defaults": {
             "max_frames": 500
           }
@@ -12594,6 +12710,12 @@ export const CLOUD_MODELS: ModelDef[] = [
             "key": "images",
             "url": "url",
             "frames": "frames"
+          },
+          "ranges": {
+            "fps": {
+              "min": 1,
+              "max": 120
+            }
           }
         }
       }
@@ -12873,6 +12995,13 @@ export const CLOUD_MODELS: ModelDef[] = [
           "animation": {
             "key": "animation_action_id",
             "flag": "enable_animation"
+          },
+          "ranges": {
+            "animation_action_id": {
+              "min": 0,
+              "max": 696,
+              "integer": true
+            }
           }
         }
       }
@@ -13168,8 +13297,26 @@ export const CLOUD_MODELS: ModelDef[] = [
         "provider": "fal",
         "endpoint": "xai/grok-imagine-video/v1.5/text-to-video",
         "map": {
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p",
+              "1080p"
+            ]
+          },
           "duration": {
             "key": "duration",
             "type": "number"
@@ -13182,7 +13329,14 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "xai/grok-imagine-video/v1.5/image-to-video",
         "map": {
           "image": "image_url",
-          "resolution": "resolution",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p",
+              "1080p"
+            ]
+          },
           "duration": {
             "key": "duration",
             "type": "number"
@@ -13195,8 +13349,25 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "xai/grok-imagine-video/v1.5/reference-to-video",
         "map": {
           "images": "reference_image_urls",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
           "duration": {
             "key": "duration",
             "type": "number"
@@ -13609,6 +13780,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "provider": "fal",
         "endpoint": "pixelcut/looping-video",
         "map": {
+          "omitEmptyPrompt": true,
           "image": "image_url",
           "generateAudio": "include_audio",
           "resolution": "resolution",
@@ -13899,8 +14071,31 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "xai/grok-imagine-image/v2.0/text-to-image",
         "map": {
           "numOutputs": "num_images",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "1k",
+              "2k"
+            ]
+          }
         }
       },
       {
@@ -13910,8 +14105,33 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "images": "image_urls",
           "numOutputs": "num_images",
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution"
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "2:1",
+              "20:9",
+              "19.5:9",
+              "16:9",
+              "4:3",
+              "3:2",
+              "1:1",
+              "2:3",
+              "3:4",
+              "9:16",
+              "9:19.5",
+              "9:20",
+              "1:2"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "1k",
+              "2k"
+            ]
+          },
+          "maxImages": 5
         }
       }
     ],
@@ -13948,7 +14168,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2k"
       ],
       "maxOutputs": 4,
-      "maxImages": 5
+      "maxImages": 10
     },
     "defaults": {
       "aspectRatio": "1:1",
@@ -13957,7 +14177,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "image",
       "usd": 0.06,
-      "note": "1K medium; low $0.04; 2K $0.06\u20130.08; +$0.01 per input image",
+      "note": "1K medium on fal; low $0.04; 2K $0.06\u20130.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
       "byResolution": {
         "1k": 0.06,
         "2k": 0.08
@@ -13971,7 +14191,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "bria",
     "engine": "cloud",
     "kind": "image",
-    "tagline": "Trained on licensed data only \u2014 safe for commercial work, with structured prompts",
+    "tagline": "Structured prompts; Bria says it is trained on licensed data only",
     "routes": [
       {
         "op": "t2i",
@@ -14071,7 +14291,10 @@ export const CLOUD_MODELS: ModelDef[] = [
         "endpoint": "ideogram/vector/image-to-vector",
         "map": {
           "prompt": false,
-          "image": "image_url"
+          "image": "image_url",
+          "ignore": [
+            "quality"
+          ]
         }
       }
     ],
@@ -14138,6 +14361,7 @@ export const CLOUD_MODELS: ModelDef[] = [
         "provider": "fal",
         "endpoint": "bria/fibo-edit-1.5/expand",
         "map": {
+          "omitEmptyPrompt": true,
           "image": "image_url",
           "seed": "seed",
           "aspectRatio": "aspect_ratio"
@@ -14163,6 +14387,9 @@ export const CLOUD_MODELS: ModelDef[] = [
     "badges": [
       "new"
     ],
+    "defaults": {
+      "aspectRatio": "16:9"
+    },
     "pricing": {
       "unit": "image",
       "usd": 0.04

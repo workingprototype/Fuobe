@@ -49,8 +49,9 @@ def field_map(op, ep, inputs, opts):
     if "prompt" not in inputs:
         fm["prompt"] = False
     elif op in ("video-swap", "video-insert") and not inputs["prompt"].get("required"):
-        # The references say what goes in; words are optional (Genjutsu object swap).
+        # The references say what goes in; words are optional (Genjutsu object swap), and an empty prompt is left out.
         opts["promptOptional"] = True
+        fm["omitEmptyPrompt"] = True
     pick = lambda *names: next((n for n in names if n in inputs), None)  # noqa: E731
     img = pick("image_url", "first_frame_url")
     imgs = "image_urls" if "image_urls" in inputs else None
@@ -165,17 +166,32 @@ def price(ep, default_res=None):
     return {"unit": p["unit"], "usd": usd, "note": "Higgsfield list price"} if usd else None
 
 
-def routes_for(spec, opts):
+def routes_for(spec, opts, fit=False):
+    """spec: (op, endpoint) or (op, endpoint, {drop: [canonical keys], accepts: {aspectRatio | resolution: [values]}}).
+    fit: the model's aspect ratios and resolutions come from its fal routes, so each route lists the ones it
+    takes (EnumField.accepts) and gets the closest of them."""
     out = []
     for r in spec:
         op, ep = r[0], r[1]
+        ro = r[2] if len(r) > 2 else {}
         if ep not in EPS:
             warn(f"{ep} not in research")
             continue
         e = EPS[ep]
         if not e.get("verified"):
             warn(f"{ep} not verified")
-        fm = field_map(op, ep, e.get("inputs") or {}, opts)
+        inputs = e.get("inputs") or {}
+        fm = field_map(op, ep, inputs, opts)
+        for k in ro.get("drop") or []:
+            fm.pop(k, None)
+        if fit:
+            for canon, field in (("aspectRatio", "aspect_ratio"), ("resolution", "resolution")):
+                if fm.get(canon) != field:
+                    continue
+                vals = (ro.get("accepts") or {}).get(canon) or [
+                    str(v) for v in inputs[field].get("enum", []) if canon == "resolution" or RATIO.match(str(v)) or v == "auto"]
+                if vals:
+                    fm[canon] = {"key": field, "accepts": vals}
         out.append({"op": op, "provider": "higgsfield", "endpoint": ep, "map": fm})
         if op == "i2v" and "endImage" in fm:
             out.append({"op": "flf2v", "provider": "higgsfield", "endpoint": ep, "map": fm})
@@ -265,11 +281,18 @@ EXTRA = {
     "z-image-turbo-cloud": [("t2i", "z-image/turbo")],
     "recraft-4-1": [("t2i", "recraft/v4.1/text-to-image")],
     "recraft-4-1-pro": [("t2i", "recraft/v4.1/pro/text-to-image")],
-    # Grok Imagine on fal since round 4 (gen-cloud-models.py); Higgsfield is the second route.
-    "grok-imagine-video-1-5": [("t2v", "xai/grok-imagine-video/v1.5/reference-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/reference-to-video"),
-                               ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video")],
+    # Grok Imagine on fal since round 4 (gen-cloud-models.py); Higgsfield is the second route. "Choose either image_url
+    # or reference media (image_urls/audio_url); do not combine these modes", and "when image_urls or audio_url is
+    # provided, resolution must be 480p or 720p" (the shared schema lists 1080p).
+    "grok-imagine-video-1-5": [("t2v", "xai/grok-imagine-video/v1.5/reference-to-video"),
+                               ("i2v", "xai/grok-imagine-video/v1.5/reference-to-video", {"drop": ["images"]}),
+                               ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video",
+                                {"drop": ["image"], "accepts": {"resolution": ["480p", "720p"]}})],
     "grok-imagine-image-2": [("t2i", "xai/grok-imagine-image-2.0"), ("edit", "xai/grok-imagine-image-2.0")],
 }
+
+# Models whose fal and Higgsfield routes take different aspect ratios or resolutions (see routes_for's fit).
+FIT = {"grok-imagine-video-1-5", "grok-imagine-image-2"}
 
 models = []
 for m in EXCLUSIVE:
@@ -294,7 +317,7 @@ extra = {}
 for mid, spec in EXTRA.items():
     opts = {}
     # The model keeps its own enums and controls: Higgsfield-only fields would break its fal routes.
-    extra[mid] = routes_for(spec, opts)
+    extra[mid] = routes_for(spec, opts, fit=mid in FIT)
 
 out = ROOT / "src/lib/catalog/higgsfield-models.generated.ts"
 out.write_text(

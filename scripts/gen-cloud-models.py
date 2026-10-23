@@ -56,16 +56,19 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False):
+          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
     formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
-    ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it."""
+    ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it.
+    fit_values: the model offers the union of its routes' aspect ratios and resolutions, so each route lists the
+    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine on fal and Higgsfield).
+    A route's options dict may also set max_images (FieldMap.maxImages) and note."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
-                  ranged_durations=ranged_durations))
+                  ranged_durations=ranged_durations, fit_values=fit_values))
 
 
 # ----- Image
@@ -604,14 +607,17 @@ model("bria-video-erase-mask", "Bria Video Eraser · mask video", "Bria", "bria"
       [("remove-object", "bria/video/erase/mask"), ("remove-object", "bria/video-erase-object", "replicate", {"fixed": {"auto_trim": True}})],
       pricing=("second", 0.14, "fal; $0.05/s on Replicate"), hidden=True,
       options={"requires": {"mask": True, "msg": "Add the mask video (white = what to remove)"}})
-model("void-video-inpainting", "VOID Video Eraser", "fal", "void", "video",
+# Netflix's VOID (Apache-2.0 weights on a CogVideoX base, comfyui-oss-4.md), hosted by fal.
+model("void-video-inpainting", "VOID Video Eraser", "Netflix", "void", "video",
       "Removes an object and what it causes — shadows, reflections, ripples — from clips up to ~8 s",
-      [("remove-object", "fal-ai/void-video-inpainting", "fal", {"drop": ["mask"]})], badges=["new"],
+      [("remove-object", "fal-ai/void-video-inpainting", "fal",
+        {"drop": ["mask"], "note": "Up to 197 frames (about 8 s at 24 fps): split longer clips"})], badges=["new"],
       pricing=("request", 0.1, "$0.05 per clip + $0.05 for the mask made from your words; Pass 2 refinement doubles the first part; up to 197 frames"),
       api_defaults={"prompt": SCENE_AFTER_REMOVAL})
 model("ltx-2-3-clean-plate", "LTX 2.3 Clean Plate", "Lightricks", "ltx", "video",
       "Removes every person from a shot for a clean background plate",
-      [("remove-object", "fal-ai/ltx-2.3-quality/clean-plate", "fal", {"drop": ["prompt"]})],
+      # "720p allows up to ~6s, 480p up to ~15s. A request above the budget is rejected" (num_frames from the clip's length).
+      [("remove-object", "fal-ai/ltx-2.3-quality/clean-plate", "fal", {"drop": ["prompt"], "note": "720p up to about 6 s, 480p up to about 15 s"})],
       pricing=("video", 0.27, "121 frames at 720p; billed per megapixel of video"), defaults={"resolution": "720p"})
 # Hosted Wan 2.2 VACE Fun: the painted first-frame mask is tracked through the clip (mask_image_url). Erase with a
 # description of the background (SCENE_AFTER_REMOVAL unless params.extra.prompt says otherwise); swap and insert
@@ -622,7 +628,9 @@ model("wan-22-vace-inpaint", "Wan 2.2 VACE Fun Inpaint (hosted)", "Alibaba Wan",
       "Paint an area on the first frame: erase it, or swap or add something from a reference image",
       [("remove-object", _VACE, "fal", {**_VACE_KEYS, "drop": ["image", "endImage", "images", "prompt"], "defaults": {"prompt": SCENE_AFTER_REMOVAL}}),
        ("video-swap", _VACE, "fal", _VACE_KEYS), ("video-insert", _VACE, "fal", _VACE_KEYS)],
-      pricing=("second", 0.1, "720p, counted at 16 fps; 580p $0.075, 480p $0.05", {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      # "Video seconds calculated at 16 frames per second": the clip keeps its own frame rate, so a 30 fps clip bills ~1.9x its length.
+      pricing=("second", 0.1, "720p, billed as frames ÷ 16 (a 30 fps clip costs about 1.9× its length); 580p $0.075, 480p $0.05",
+               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True},
       options={"requires": {"mask": True, "msg": "Paint the area to change on the first frame"}})
 # The mask maker for the erase and swap chains: what you name or click becomes a black-and-white mask video
@@ -649,7 +657,7 @@ model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
       api_defaults={"H264_output": True}, controls=[("model", "Model")])
 # Doubles the frame rate (one new frame per pair) at the clip's own speed; its fps field only applies with
 # use_calculated_fps off, so a target frame rate is not sent.
-model("rife-video-cloud", "RIFE (hosted)", "fal", "rife", "video",
+model("rife-video-cloud", "RIFE (hosted)", "Open source", "rife", "video",
       "Cheap frame interpolation: twice the frames, same speed",
       [("interpolate", "fal-ai/rife/video", "fal", {"drop": ["fps"]})], badges=["fast"], pricing=("request", 0.001, "billed per compute second ($0.0013/s)"))
 model("topaz-sdr-to-hdr", "Topaz SDR to HDR", "Topaz Labs", "topaz", "video",
@@ -718,10 +726,11 @@ model("heygen-video", "HeyGen Video", "HeyGen", "heygen", "video",
       pricing=("second", 0.02, "480p and 768p; 1080p and 2K $0.06", {"byResolution": {"480p": 0.02, "768p": 0.02, "1080p": 0.06, "2k": 0.06}}),
       controls=[("prompt_enhancement", "Prompt boost")])
 # Higgsfield offers Grok Imagine Video 1.5 too (its Higgsfield route is added by gen-higgsfield-models.py).
+# Its routes take different values (fal's reference-to-video stops at 720p), so each lists its own (fit_values).
 model("grok-imagine-video-1-5", "Grok Imagine Video 1.5", "xAI", "grok", "video", "xAI's video model with references and audio",
       [("t2v", "xai/grok-imagine-video/v1.5/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/image-to-video"),
        ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video")],
-      defaults={"aspectRatio": "16:9", "duration": 6, "resolution": "720p"}, ranged_durations=True,
+      defaults={"aspectRatio": "16:9", "duration": 6, "resolution": "720p"}, ranged_durations=True, fit_values=True,
       pricing=("second", 0.14, "720p; 480p $0.08, 1080p $0.25; +$0.01 per input image", {"byResolution": {"480p": 0.08, "720p": 0.14, "1080p": 0.25}}))
 model("grok-imagine-video-1-5-lite", "Grok Imagine Video 1.5 Lite", "xAI", "grok", "video", "One of the cheapest 720p video models, 1–15 s",
       [("t2v", "xai/grok-imagine-video/v1.5/lite/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/lite/image-to-video")],
@@ -767,13 +776,15 @@ model("krea-3", "Krea 3", "Krea", "krea", "image", "Krea's new image model — g
       # Both APIs take up to 8 images.
       options={"maxImages": 8})
 # Higgsfield offers Grok Imagine Image 2.0 too (its Higgsfield route is added by gen-higgsfield-models.py).
+# fal's text-to-image has no "auto" and Higgsfield no 20:9 / 19.5:9 / 9:19.5 / 9:20: each route lists what it takes (fit_values).
 model("grok-imagine-image-2", "Grok Imagine Image 2.0", "xAI", "grok", "image", "xAI's image model — bold, fast, few refusals",
-      [("t2i", "xai/grok-imagine-image/v2.0/text-to-image"), ("edit", "xai/grok-imagine-image/v2.0/edit")],
-      defaults={"aspectRatio": "1:1", "resolution": "1k"},
-      pricing=("image", 0.06, "1K medium; low $0.04; 2K $0.06–0.08; +$0.01 per input image", {"byResolution": {"1k": 0.06, "2k": 0.08}}),
-      # fal's edit takes "a maximum of 5 images" (Higgsfield's route 10).
-      controls=[("quality", "Quality")], options={"maxImages": 5})
-model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Trained on licensed data only — safe for commercial work, with structured prompts",
+      # fal's edit takes "a maximum of 5 images"; Higgsfield's route takes 10, so a run with more than 5 goes there.
+      [("t2i", "xai/grok-imagine-image/v2.0/text-to-image"), ("edit", "xai/grok-imagine-image/v2.0/edit", "fal", {"max_images": 5})],
+      defaults={"aspectRatio": "1:1", "resolution": "1k"}, fit_values=True,
+      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
+               {"byResolution": {"1k": 0.06, "2k": 0.08}}),
+      controls=[("quality", "Quality")], options={"maxImages": 10})
+model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Structured prompts; Bria says it is trained on licensed data only",
       [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"})
 model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Editable SVGs from a prompt, or any image traced to SVG",
       [("t2i", "ideogram/vector/text-to-vector"), ("vectorize", "ideogram/vector/image-to-vector")], badges=["new"],
@@ -782,7 +793,9 @@ model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Ed
 # Its negative_prompt is refused, not ignored: never sent.
 model("bria-expand", "Bria Expand", "Bria", "bria", "image", "Extend a picture to a new aspect ratio, edges filled to match",
       # Words for the new area are optional ("Omit it and the model is asked only to extend the image").
-      [("outpaint", "bria/fibo-edit-1.5/expand", "fal", {"drop": ["negativePrompt"]})], badges=["new"], options={"promptOptional": True})
+      # It needs a target shape (aspect_ratio or canvas_size): a run without one widens to 16:9.
+      [("outpaint", "bria/fibo-edit-1.5/expand", "fal", {"drop": ["negativePrompt"]})], badges=["new"], options={"promptOptional": True},
+      defaults={"aspectRatio": "16:9"})
 
 # ----- New speech models
 model("heygen-voice-turbo", "HeyGen Voice Turbo", "HeyGen", "heygen", "audio", "24 voices or an instant clone of yours, in 39 languages, for almost nothing",
@@ -911,7 +924,7 @@ def map_fields(fmap):
     for k, v in fmap.items():
         if k in ("fixed", "defaults"):
             out += list(v)
-        elif k in ("seedRange", "maskFormat"):
+        elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
             out.append(v)
@@ -929,6 +942,11 @@ def mask_format(ep):
 
 def enum_of(inputs, key):
     return [v for v in ((inputs.get(key) or {}).get("values") or [])]
+
+
+# Operations research part 4 added (their numeric fields get FieldMap.ranges).
+ROUND4_OPS = ("remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop",
+              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay")
 
 
 def part4_slots(op, kf, inputs, m, opts, fmap):
@@ -1013,6 +1031,38 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
         if "animation" in kf:
             flag = next((k for k, v in inputs.items() if k.startswith("enable_") and "animation" in k and (v or {}).get("type") == "boolean"), None)
             fmap["animation"] = {"key": kf["animation"], **({"flag": flag} if flag else {})}
+    # Routes that render only as many frames as asked (LTX 2.3 clean plate / HDR: "Output duration is num_frames /
+    # frames_per_second"; VOID's window): the frame count follows the clip's length. VACE matches the input itself.
+    if "numFrames" in kf and op in ("remove-object", "sdr-to-hdr", "video-swap", "video-insert") and "match_input_num_frames" not in inputs:
+        spec = inputs.get(kf["numFrames"]) or {}
+        fps_spec = inputs.get(kf.get("fps", "")) or {}
+        # VOID has no frame-rate field: its frame budget is read at 24 fps ("about 8 s at 24 fps", research part 4).
+        fps = num(fps_spec.get("default")) or 24
+        fmap["numFrames"] = {"key": kf["numFrames"], "fps": fps,
+                             **{k: num(spec[f]) for k, f in (("min", "minimum"), ("max", "maximum")) if num(spec.get(f)) is not None}}
+
+
+def part4_ranges(op, inputs, fmap):
+    """The API's limits on the numbers Fuobe fills for the round-4 tools (FieldMap.ranges): rounded and kept inside them."""
+    fields = [fmap.get(k) for k in ("targetFps", "slowdown", "frameInterval", "crossfade")]
+    fields += [(fmap.get(k) or {}).get(f) for k, f in (("scale", "key"), ("position", "x"), ("position", "y"), ("zoom", "x"), ("zoom", "y"), ("animation", "key"))]
+    if op in ROUND4_OPS:
+        fields += [fmap.get("fps"), (fmap.get("duration") or {}).get("key")]
+    ranges = {}
+    for f in fields:
+        spec = inputs.get(f) if isinstance(f, str) else None
+        if not spec or spec.get("type") not in ("integer", "number"):
+            continue
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        # Meshy states its preset range in words: "it must be in [0, 696]".
+        stated = re.search(r"\[(\d+),\s*(\d+)\]", spec.get("desc") or "")
+        if lo is None and hi is None and stated:
+            lo, hi = num(stated[1]), num(stated[2])
+        r = {**({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}), **({"integer": True} if spec["type"] == "integer" else {})}
+        if r:
+            ranges[f] = r
+    if ranges:
+        fmap["ranges"] = ranges
 
 
 def build_route(op, ep, provider, m, opts, ropts=None):
@@ -1073,6 +1123,12 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Swaps whose references say what goes in may also take words (P-Video Replace's instruction): optional.
     elif op in ("video-swap", "video-insert") and "prompt" in kf and not (inputs.get(kf["prompt"]) or {}).get("required"):
         opts["promptOptional"] = True
+    # A model that runs without words leaves an empty prompt out where the API's prompt is optional
+    # (Bria Expand: "Omit it and the model is asked only to extend the image").
+    pkey = fmap.get("prompt", "prompt" if "prompt" in kf else None)
+    if pkey and (m["options"].get("promptOptional") or (op in ("video-swap", "video-insert") and opts.get("promptOptional"))) \
+            and not (inputs.get(pkey.split(".")[0]) or {}).get("required"):
+        fmap["omitEmptyPrompt"] = True
     # Zero-shot TTS takes its reference voice in the "audio" field; voice conversion names it separately.
     if op == "tts" and "audio" in kf:
         kf["referenceVoice"] = kf.pop("audio")
@@ -1206,6 +1262,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]
             if not ratios and spec.get("type") == "string":
                 ratios = ["16:9", "9:16", "1:1"] if m["kind"] == "video" else IMG_AR
+            elif m.get("fit_values") and ratios:
+                fmap["aspectRatio"] = {"key": key, "accepts": ratios}
             opts["aspectRatios"] = union(opts.get("aspectRatios", []), ratios)
     # Resolution
     if "resolution" in kf:
@@ -1215,6 +1273,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         if enum and (inputs.get(key) or {}).get("valueType") in ("integer", "number"):
             # Numeric tiers (TRELLIS 512/1024/1536) are picked as strings and sent as numbers.
             fmap["resolution"] = {"key": key, "values": {str(v): v for v in enum}}
+        elif enum and m.get("fit_values"):
+            fmap["resolution"] = {"key": key, "accepts": [str(v) for v in enum]}
         opts["resolutions"] = union(opts.get("resolutions", []), [str(v) for v in enum])
     # Duration
     if "duration" in kf:
@@ -1243,6 +1303,7 @@ def build_route(op, ep, provider, m, opts, ropts=None):
                 opts["durations"] = union(opts.get("durations", []), [v for v in NICE_DURATIONS if lo <= v <= hi] or [lo])
         if key.endswith("_ms"):
             fmap["duration"]["multiplier"] = 1000
+    part4_ranges(op, inputs, fmap)
     # Text-to-speech etc. carry the prompt in "text".
     if ropts.get("fixed"):
         m = {**m, "fixed": {**m["fixed"], **ropts["fixed"]}}
@@ -1279,6 +1340,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     if "images" in fmap:
         mx = num((inputs.get(fmap["images"]) or {}).get("maxItems")) or None
         opts["maxImages"] = max(opts.get("maxImages", 1), mx or (10 if op == "edit" else 4))
+        # A route that takes fewer than the model's other routes (stated in its docs, not its schema).
+        if ropts.get("max_images"):
+            fmap["maxImages"] = ropts["max_images"]
     elif "image" in fmap:
         opts["maxImages"] = max(opts.get("maxImages", 0), 2 if "image2" in fmap else 1)
     # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
@@ -1340,6 +1404,14 @@ for m in M:
     if all(r["map"].get("prompt") is False for r in routes):
         opts["promptless"] = True
     opts.update(m["options"])
+    # A model-wide control or slider goes only to the routes whose schema has its field (Ideogram Vector's
+    # quality is a text-to-vector setting; image-to-vector has none).
+    offered = [c["param"] for c in opts.get("controls", [])] + [x["param"] for x in opts.get("sliders", [])]
+    for route in routes:
+        inputs = (EPS.get((route["provider"], route["endpoint"])) or {}).get("inputs") or {}
+        missing = [x for x in offered if x.split(".")[0] not in inputs]
+        if missing:
+            route["map"] = {**route["map"], "ignore": missing}
     pricing = None
     if m["pricing"]:
         u, usd, *rest = m["pricing"]

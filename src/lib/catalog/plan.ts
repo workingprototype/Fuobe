@@ -230,6 +230,9 @@ export function planGeneration(
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
   if (op === "keyframes") checkKeyframes(model, req.inputs?.images?.length ?? 0, params);
+  // A join takes as many clips as the API's list does (fal merge-audios: 5); longer joins run in steps.
+  const maxAudios = model.options.maxAudios;
+  if (op === "audio-join" && maxAudios && (req.inputs?.audios?.length ?? 0) > maxAudios) throw new Error(`${model.name} joins up to ${maxAudios} clips at a time — join the rest in a second step`);
   const requires = model.options.requires;
   if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
   if (requires?.prompt && !prompt) throw new Error(requires.msg);

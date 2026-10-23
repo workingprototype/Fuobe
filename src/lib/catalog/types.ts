@@ -251,6 +251,13 @@ export interface EnumField {
   key: string;
   /** Map our canonical value → provider value. Unlisted values pass through. */
   values?: Record<string, string | number | boolean>;
+  /**
+   * The canonical values this route takes, when they differ from the model's own list (a model on two
+   * APIs, e.g. Grok Imagine on fal and Higgsfield). Any other value is sent as the closest one it takes
+   * (aspect ratios by shape, resolutions by size) and left out when none is close ("auto" on an API
+   * without it), so the API's default applies.
+   */
+  accepts?: string[];
 }
 
 /**
@@ -356,9 +363,10 @@ export interface FieldMap {
   /** Seconds of crossfade at each join or loop seam (params.crossfade). */
   crossfade?: string;
   /**
-   * A Ken Burns move sent as one zoom toward a focal point (fal's zoompan): `factor` = the larger of
-   * params.zoomFrom / zoomTo over the smaller (at most `max`), `direction` in or out, the focal point = the pan point at
-   * the zoomed-in end (0–1, or percent), `easing` from params.easing.
+   * A Ken Burns move sent as one zoom toward a focal point (fal's zoompan, which always starts or ends on
+   * the whole picture): `factor` = the zoomed-in end, the larger of params.zoomFrom / zoomTo (at most
+   * `max`), `direction` in or out, the focal point = the pan point at the zoomed-in end (0–1, or percent),
+   * `easing` from params.easing. The other end is the whole picture, whatever params says.
    */
   zoom?: { factor: string; max?: number; direction?: { key: string; in: string; out: string }; x?: string; y?: string; easing?: EnumField; percent?: boolean };
   /** Where an overlay's centre goes (params.position, 0–1 of the background; or percent). */
@@ -383,6 +391,24 @@ export interface FieldMap {
   model3d?: string;
   /** An animation preset (params.animation); `flag` is the API's switch that turns animation on. */
   animation?: { key: string; flag?: string };
+  /**
+   * A frame count for routes that render only as many frames as asked (LTX 2.3 clean plate and HDR, VOID):
+   * the clip's length (params.sourceDuration, else params.duration) × the frame rate (params.fps, else
+   * `fps`), kept within min–max. Nothing is sent when the length is unknown (the API's default applies).
+   */
+  numFrames?: { key: string; fps: number; min?: number; max?: number };
+  /**
+   * Limits the API checks on numeric fields Fuobe fills (round 4: target fps, slow motion, frame interval,
+   * overlay position and scale, Ken Burns length…): a value is rounded when the field takes whole numbers
+   * and kept inside min–max before it is sent. params.extra is sent as given.
+   */
+  ranges?: Record<string, { min?: number; max?: number; integer?: boolean }>;
+  /** The most images this route's image list takes, when fewer than the model's options.maxImages (another route takes more). */
+  maxImages?: number;
+  /** An empty prompt is left out rather than sent as "" (APIs that read a missing prompt as "no words": Bria Expand). */
+  omitEmptyPrompt?: boolean;
+  /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
+  ignore?: string[];
 }
 
 export interface ModelRoute {
@@ -537,7 +563,10 @@ export interface GenParams {
   easing?: "linear" | "ease-in-out";
   /** Seconds of crossfade at each seam (audio-loop, audio-join). */
   crossfade?: number;
-  /** The input clip's length in seconds, when the caller knows it (how many plays a cloud loop needs). */
+  /**
+   * The input clip's length in seconds, when the caller knows it: how many plays a cloud loop needs, and how
+   * many frames a frame-count route renders (LTX 2.3 clean plate / HDR, VOID; FieldMap.numFrames).
+   */
   sourceDuration?: number;
   /** Extract every Nth frame. */
   frameInterval?: number;

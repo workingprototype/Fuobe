@@ -259,15 +259,25 @@ export function deleteGeneration(id: string): void {
 // ---------------------------------------------------------------------------
 // Routing
 
-/** Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off). */
-export function chooseRoute(candidates: ModelRoute[]): { route: ModelRoute; demo: boolean } {
+/**
+ * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
+ * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
+ * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ */
+export function chooseRoute(candidates: ModelRoute[], images = 0): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
-  const real = routes.find(routeReady);
+  const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
+  const real = routes.find((r) => routeReady(r) && takes(r));
   if (real) return { route: real, demo: false };
+  const short = routes.find(routeReady);
+  if (short) {
+    const others = [...new Set(routes.filter((r) => takes(r) && r.provider !== short.provider).map((r) => provider(r.provider).label))];
+    throw new Error(`This model takes up to ${short.map!.maxImages} images on ${provider(short.provider).label} — remove some${others.length ? `, or connect ${others.join(" or ")} for more` : ""}`);
+  }
   if (demo === "off") {
     if (routes.every((r) => r.provider === "llm")) throw new Error(llmMissing(routes[0]));
     const names = [...new Set(routes.map((r) => provider(r.provider).label))].join(" or ");
@@ -305,7 +315,7 @@ function prepare(original: GenerationRequest) {
   const worded = withSignatureWords(original);
   const model = getModel(worded.modelId);
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
-  const plan = planGeneration(req, getModel, getPreset);
+  let plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
@@ -317,7 +327,11 @@ function prepare(original: GenerationRequest) {
   // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
   if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op));
+  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0);
+  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
+  if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
+    plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
+  }
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
