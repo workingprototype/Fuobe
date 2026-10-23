@@ -176,7 +176,8 @@ describe("blockers", () => {
     expect(blockerLine(blockerFor({ ...base, planError: "Pick a voice" }), false)).toBe("touch");
     expect(blockerLine(blockerFor({ ...base, engineError: "Face Swap has no cloud version yet" }), true)).toBe("always");
     // Never for what passes by itself or is plain to see: loading, uploading, the empty prompt box.
-    for (const quiet of [blockerFor({ ...base, loading: "Loading models…" }), blockerFor({ ...base, uploading: true }), blockerFor({ ...base, promptMissing: true })]) {
+    const plannerPrompt = blockerFor({ ...base, planError: "Write a prompt first", promptMissing: true });
+    for (const quiet of [blockerFor({ ...base, loading: "Loading models…" }), blockerFor({ ...base, uploading: true }), blockerFor({ ...base, promptMissing: true }), plannerPrompt]) {
       expect(blockerLine(quiet, true)).toBeNull();
     }
     expect(blockerLine(null, true)).toBeNull();

@@ -228,6 +228,20 @@ export function isLayered(g: Pick<Generation, "op" | "outputs">): boolean {
   return (g.op === "layers" || g.op === "text-layers" || g.outputs.some((o) => !!(o.meta && ("layer" in o.meta || "z" in o.meta)))) && g.outputs.length > 1;
 }
 
+/**
+ * A still for a clip's tile, shown before it loads (and where the browser can't decode it): the
+ * output's own meta.poster / thumbnail, else, for a clip made from a start frame (image-to-video,
+ * start + end frame), that frame. Undefined when there's nothing better than the clip's first frame.
+ */
+export function videoPoster(g: Partial<Pick<Generation, "op" | "request">> | undefined, o: Pick<OutputFile, "kind" | "meta">): string | undefined {
+  if (o.kind !== "video") return undefined;
+  const m = (o.meta ?? {}) as Record<string, unknown>;
+  const own = ["poster", "thumbnail"].map((k) => m[k]).find((v): v is string => typeof v === "string" && v.length > 0);
+  if (own) return own;
+  if (g?.op !== "i2v" && g?.op !== "flf2v") return undefined;
+  return g.request?.inputs?.images?.[0] || undefined;
+}
+
 /** A 3D model's still and turntable: meta.poster / meta.preview, meta.video / meta.turntable, or a sibling output. */
 export function modelPreview(g: Pick<Generation, "outputs">, o: OutputFile): { poster?: string; video?: string } {
   const m = (o.meta ?? {}) as Record<string, unknown>;

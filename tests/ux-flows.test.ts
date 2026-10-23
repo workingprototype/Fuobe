@@ -3,7 +3,7 @@ import { directorPicks } from "@/components/cinema/draft";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { leftLabel, timeLeft, untitledName } from "@/lib/format";
 import { toggleAll } from "@/lib/library";
-import { nextSteps } from "@/lib/output-actions";
+import { nextSteps, videoPoster } from "@/lib/output-actions";
 
 function gen(outputs: Partial<OutputFile>[], over: Partial<Generation> = {}): Generation {
   return {
@@ -100,5 +100,22 @@ describe("Library: select a whole day, or everything", () => {
     expect([...toggleAll(new Set(["a", "x"]), day)].sort()).toEqual(["a", "b", "c", "x"]);
     expect([...toggleAll(new Set(["a", "b", "c", "x"]), day)]).toEqual(["x"]);
     expect([...toggleAll(new Set(["x"]), [])]).toEqual(["x"]);
+  });
+});
+
+describe("video tiles have a poster", () => {
+  const clip = { kind: "video" as const, url: "/api/files/clip.mp4" };
+  it("uses the output's own still, else the start frame it was made from", () => {
+    expect(videoPoster(gen([clip], { op: "t2v" }), { ...clip, meta: { poster: "/api/files/p.jpg" } })).toBe("/api/files/p.jpg");
+    const i2v = gen([clip], { op: "i2v", request: { feature: "video", modelId: "m", prompt: "", inputs: { images: ["/api/files/start.png"] } } });
+    expect(videoPoster(i2v, clip)).toBe("/api/files/start.png");
+    expect(videoPoster({ ...i2v, op: "flf2v" }, clip)).toBe("/api/files/start.png");
+  });
+  it("has none when nothing better than the clip's first frame is known", () => {
+    expect(videoPoster(gen([clip], { op: "t2v" }), clip)).toBeUndefined();
+    // A restyle's input image isn't its first frame.
+    expect(videoPoster(gen([clip], { op: "v2v", request: { feature: "video", modelId: "m", prompt: "", inputs: { images: ["/api/files/ref.png"] } } }), clip)).toBeUndefined();
+    expect(videoPoster(undefined, clip)).toBeUndefined();
+    expect(videoPoster(gen([{ kind: "image" }]), { kind: "image" })).toBeUndefined();
   });
 });

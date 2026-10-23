@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isApplePlatform, modKey } from "@/lib/keys";
+import { isApplePlatform, keyCombo, modKey } from "@/lib/keys";
 
 describe("modifier key name", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -16,5 +16,14 @@ describe("modifier key name", () => {
     expect(modKey()).toBe("⌘");
     vi.stubGlobal("navigator", { platform: "Win32" });
     expect(modKey()).toBe("Ctrl");
+  });
+});
+
+describe("shortcuts as the keyboard writes them", () => {
+  it("uses Apple's symbols on Apple devices and words with + elsewhere", () => {
+    expect(keyCombo("D", { mod: "⌘" })).toBe("⌘D");
+    expect(keyCombo("Z", { mod: "⌘", shift: true })).toBe("⇧⌘Z");
+    expect(keyCombo("D", { mod: "Ctrl" })).toBe("Ctrl+D");
+    expect(keyCombo("Z", { mod: "Ctrl", shift: true })).toBe("Ctrl+Shift+Z");
   });
 });

@@ -120,7 +120,7 @@ function PickChip<T extends string | number>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={cn(chip, chipIdle)} aria-label={label}>
+        <button type="button" className={cn(chip, chipIdle)} aria-label={`${label}: ${f(value)}`}>
           <Icon className="size-3.5" />
           {f(value)}
         </button>
@@ -150,7 +150,7 @@ function DurationChip({ value, effective, onChange }: { value: number; effective
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, chipIdle)} aria-label="Duration">
+        <button type="button" className={cn(chip, chipIdle)} aria-label={effective && effective !== value ? `Duration: ${value}s ${effective}s, the model makes ${effective}s` : `Duration: ${value}s`}>
           <Clock className="size-3.5" />
           {effective && effective !== value ? (
             <span>
@@ -730,7 +730,7 @@ export function PromptBar(props: PromptBarProps) {
           {/* Model */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild disabled={!pickable}>
-              <button type="button" className={cn(chip, chipIdle, "max-w-[220px] disabled:opacity-100")} aria-label="Model">
+              <button type="button" className={cn(chip, chipIdle, "max-w-[220px] disabled:opacity-100")} aria-label={`Model: ${model.name}`}>
                 <Sparkles className="size-3.5 shrink-0" />
                 <span className="truncate">{model.name}</span>
                 {pickable && <ChevronDown className="size-3 shrink-0 opacity-60" />}

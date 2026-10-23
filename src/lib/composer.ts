@@ -174,6 +174,8 @@ export function missingMessage(m: MissingSlot): string {
   return `Add ${orList(m.group.map((s) => slotMessage(s.label).replace(/^Add /, "")))}`;
 }
 
+const WRITE_PROMPT = "Write a prompt first";
+
 export interface Blocker {
   message: string;
   /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile). */
@@ -219,8 +221,9 @@ export function blockerFor(s: {
   if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
   if (s.uploading) return { message: "Uploading…", quiet: true };
   if (s.maskMissing) return { message: "Paint the area to change", slot: "mask" };
-  if (s.planError) return { message: s.planError };
-  if (s.promptMissing) return { message: "Write a prompt first", quiet: true };
+  // The planner says "Write a prompt first" too (an empty prompt on a model that needs one): as quiet as the composer's own.
+  if (s.planError) return s.planError === WRITE_PROMPT ? { message: WRITE_PROMPT, quiet: true } : { message: s.planError };
+  if (s.promptMissing) return { message: WRITE_PROMPT, quiet: true };
   return null;
 }
 
