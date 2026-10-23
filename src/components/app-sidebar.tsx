@@ -156,23 +156,40 @@ function PathWatcher({ onPath }: { onPath: (pathname: string) => void }) {
   return null;
 }
 
+interface ShellState {
+  /** The page that's open (PathWatcher keeps it current). */
+  path: string;
+  /** The expanded/collapsed choice in the cookie. */
+  remembered: boolean;
+  /** Opened or closed by hand on a full-screen studio: lasts while that page is open. */
+  peek: { path: string; open: boolean } | null;
+}
+
 /**
  * SidebarProvider that starts from the remembered expanded/collapsed state (the shadcn cookie). On a
  * full-screen studio (isFullScreenStudio) the sidebar folds to its rail instead; opening it there
  * lasts until you leave that page, and neither writes the cookie.
  */
 export function SidebarShell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  const [remembered, setRemembered] = useState(() => (typeof document === "undefined" ? true : sidebarOpenFromCookie(document.cookie)));
-  // The first client render reads the URL itself, as the pre-paint script does, so hydration matches.
-  const [path, setPath] = useState(() => (typeof window === "undefined" ? "" : window.location.pathname));
-  const [peek, setPeek] = useState<{ path: string; open: boolean } | null>(null);
-  const full = isFullScreenStudio(path);
-  const open = full ? peek?.path === path && peek.open : remembered;
-  const onOpenChange = useCallback((value: boolean) => (full ? setPeek({ path, open: value }) : setRemembered(value)), [full, path]);
+  // The first client render reads the cookie and the URL itself, as the pre-paint script does, so hydration matches.
+  const [state, setState] = useState<ShellState>(() => ({
+    path: typeof window === "undefined" ? "" : window.location.pathname,
+    remembered: typeof document === "undefined" ? true : sidebarOpenFromCookie(document.cookie),
+    peek: null,
+  }));
+  const full = isFullScreenStudio(state.path);
+  const open = full ? state.peek?.path === state.path && state.peek.open : state.remembered;
+  // Both callbacks are stable, so a new page alone leaves the provider's context as it was and the
+  // sidebar doesn't render again on every navigation.
+  const onOpenChange = useCallback(
+    (value: boolean) => setState((s) => (isFullScreenStudio(s.path) ? { ...s, peek: { path: s.path, open: value } } : { ...s, remembered: value })),
+    [],
+  );
+  const onPath = useCallback((path: string) => setState((s) => (s.path === path ? s : { ...s, path })), []);
   return (
     <SidebarProvider open={open} onOpenChange={onOpenChange} persistOpen={!full} style={style}>
       <Suspense fallback={null}>
-        <PathWatcher onPath={setPath} />
+        <PathWatcher onPath={onPath} />
       </Suspense>
       {children}
     </SidebarProvider>
