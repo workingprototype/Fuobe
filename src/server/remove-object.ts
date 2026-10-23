@@ -169,7 +169,7 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
     const per = eraser.window.cap / fps;
     if (len > per + 0.01) {
       notes.push(`${model?.name ?? eraser.label} works on ${eraser.window.cap} frames at a time (${per.toFixed(1)} s of this clip): the clip runs as ${Math.ceil((len * fps) / eraser.window.cap)} windows, joined with its own sound. Seams between windows aren't tested on a GPU yet`);
-      if (eraser.modes.includes("paint")) notes.push("SAM 3.1 hands what you painted on from window to window, so the windows run one after another");
+      if (eraser.modes.includes("paint")) notes.push("SAM 3.1 hands what you painted on from window to window (each starts on the last frame of the one before), so the windows run one after another");
     }
     notes.push(eraser.effects ? "VOID needs a 24–40 GB GPU (unverified). Its CogVideoX base is licensed for commercial use only after registering, up to 1 million visits a month" : "Wan 2.1 VACE 14B needs a 24 GB GPU · Apache-2.0 (SAM 3.1: Meta's SAM License)");
   } else {

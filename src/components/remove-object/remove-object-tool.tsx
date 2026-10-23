@@ -278,7 +278,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                   </div>
                 )}
                 <p className="mt-2 text-[12px] text-muted-foreground">{frameHint(mode, engine, points.length, !!paint)}</p>
-                {preview && <MaskPreview g={preview} engine={engine} />}
+                {preview && <MaskPreview g={preview} />}
               </Panel>
             </div>
 
@@ -498,13 +498,13 @@ function EraserList({ options, value, onChange }: { options: Eraser[]; value: st
   );
 }
 
-/** The mask preview: SAM 3.1's mask video (cloud: white = what goes) or the SAM 3 cut-out of it (open). */
-function MaskPreview({ g, engine }: { g: Generation; engine: "cloud" | "open" }) {
+/** The mask preview: SAM 3.1's mask video (cloud) or the SAM 3 matte (open), white = what goes. */
+function MaskPreview({ g }: { g: Generation }) {
   const out = g.outputs.find((o) => o.kind === "video");
   return (
     <div className="mt-3 rounded-xl border p-2.5">
       <p className="mb-2 text-[12px] font-medium">
-        Mask preview <span className="font-normal text-muted-foreground">· {engine === "open" ? "what goes, cut out" : "white is what goes"}</span>
+        Mask preview <span className="font-normal text-muted-foreground">· white is what goes</span>
       </p>
       {g.status === "succeeded" && out ? (
         <video
@@ -513,7 +513,7 @@ function MaskPreview({ g, engine }: { g: Generation; engine: "cloud" | "open" })
           loop
           muted
           playsInline
-          className={cn("max-h-48 w-full rounded-lg object-contain", engine === "open" ? "bg-[repeating-conic-gradient(var(--muted)_0_25%,transparent_0_50%)] bg-[length:16px_16px]" : "bg-media")}
+          className="max-h-48 w-full rounded-lg bg-media object-contain"
         />
       ) : g.status === "failed" || g.status === "canceled" ? (
         <p className="text-[12px] text-destructive">{g.error ?? "The preview didn't finish"}</p>

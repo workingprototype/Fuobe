@@ -67,7 +67,7 @@ export interface Eraser {
   /** The shortest clip it takes, in seconds. */
   minSeconds?: number;
   /** Open: one job per window of frames: at most `cap`, `step`·n + `base` frames (VACE 4n+1 ≤ 81, VOID 8n+5 ≤ 197). */
-  window?: { cap: number; step: number; base: number };
+  window?: FrameWindow;
   /** The result carries the piece's own sound (otherwise the clip's sound is put back). */
   keepsSound: boolean;
   /** Also removes what the object causes: shadows, reflections, things it moves. */
@@ -78,8 +78,24 @@ export interface Eraser {
   sides?: { min: number; max: number };
 }
 
-const VACE_WINDOW = { cap: 81, step: 4, base: 1 };
-const VOID_WINDOW = { cap: 197, step: 8, base: 5 };
+/**
+ * Windows of `step`·n + `base` frames, at most `cap`. `overlap`: each window after the first starts on the last
+ * `overlap` frames of the one before (dropped again before the join).
+ */
+export interface FrameWindow {
+  cap: number;
+  step: number;
+  base: number;
+  overlap?: number;
+}
+
+const VACE_WINDOW: FrameWindow = { cap: 81, step: 4, base: 1 };
+/**
+ * The painted eraser hands on the tracked mask of a window's last frame, and a mask must be of the window's first
+ * frame: so each window starts on the last frame of the one before (a one-frame overlap, cut off before the join).
+ */
+const VACE_PAINTED_WINDOW: FrameWindow = { ...VACE_WINDOW, overlap: 1 };
+const VOID_WINDOW: FrameWindow = { cap: 197, step: 8, base: 5 };
 /** Bria's erasers take clips "shorter than 5 s": pieces stay a little under. */
 const BRIA_PIECE = 4.8;
 
@@ -147,7 +163,7 @@ export const ERASERS: Eraser[] = [
     modes: ["paint"],
     label: "Wan 2.1 VACE + SAM 3.1",
     note: "SAM 3.1 follows what you painted · 24 GB GPU · Apache-2.0",
-    window: VACE_WINDOW,
+    window: VACE_PAINTED_WINDOW,
     keepsSound: true,
   },
   {
@@ -255,6 +271,8 @@ export interface Piece {
   frames?: number;
   startTime?: number;
   endTime?: number;
+  /** Open: frames at the window's start that the window before already made (cut off before the join). */
+  skip?: number;
 }
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -262,12 +280,14 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 /**
  * Split `total` frames into windows of `step`·n + `base` frames, each at most `cap`, as even as possible
- * (the fewest windows that fit). The windows cover all but fewer than `step` frames at the end.
+ * (the fewest windows that fit). The windows cover all but fewer than `step` frames at the end; with an
+ * overlap, each window after the first also reads the last `overlap` frames of the one before.
  */
-export function frameWindows(total: number, w: { cap: number; step: number; base: number }): number[] {
+export function frameWindows(total: number, w: FrameWindow): number[] {
   if (total < w.base) return [];
-  const k = Math.max(1, Math.ceil(total / w.cap));
-  const units = Math.floor((total - k * w.base) / w.step);
+  const o = w.overlap ?? 0;
+  const k = Math.max(1, Math.ceil((total - o) / (w.cap - o)));
+  const units = Math.floor((total + (k - 1) * o - k * w.base) / w.step);
   if (units < 0) return [];
   const each = Math.floor(units / k);
   const extra = units % k;
@@ -275,19 +295,23 @@ export function frameWindows(total: number, w: { cap: number; step: number; base
 }
 
 /**
- * Open engine: back-to-back windows on whole frames at the clip's own rate, so the joined clip has
- * exactly the range's frames (less fewer than `step` at the end) and stays on the original sound.
- * Each window is read from `(f − ¼)/fps` for `n/fps` seconds: the graph's Video Slice then decodes
- * exactly frames f … f + n − 1 (checked on the live ComfyUI with 24, 29.97 and 30 fps clips).
+ * Open engine: windows on whole frames at the clip's own rate, back to back (or overlapping by `overlap`
+ * frames, which are cut off again), so the joined clip has exactly the range's frames (less fewer than
+ * `step` at the end) and stays on the original sound. Each window is read from `(f − ¼)/fps` for `n/fps`
+ * seconds: the graph's Video Slice then decodes exactly frames f … f + n − 1, and a trim from
+ * `(skip − ¼)/fps` drops exactly `skip` frames (both run on the live ComfyUI with 24, 29.97 and 30 fps clips).
  */
-export function planWindows(range: RemoveRange, fps: number, w: { cap: number; step: number; base: number }): Piece[] {
+export function planWindows(range: RemoveRange, fps: number, w: FrameWindow): Piece[] {
   const first = Math.round(range.start * fps);
   const total = Math.floor((range.end - range.start) * fps + 1e-6);
   let at = first;
   return frameWindows(total, w).map((frames, index) => {
-    const startTime = Math.max(0, (at - 0.25) / fps);
-    const piece = { index, start: r3(at / fps), end: r3((at + frames) / fps), frames, startTime: r6(startTime), endTime: r6(startTime + frames / fps) };
-    at += frames;
+    const skip = index > 0 ? (w.overlap ?? 0) : 0;
+    const from = at - skip;
+    const startTime = Math.max(0, (from - 0.25) / fps);
+    const piece: Piece = { index, start: r3(at / fps), end: r3((from + frames) / fps), frames, startTime: r6(startTime), endTime: r6(startTime + frames / fps) };
+    if (skip) piece.skip = skip;
+    at = from + frames;
     return piece;
   });
 }
@@ -506,6 +530,8 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
   const sound = !!input.source.hasAudio && (n > 1 || !e.keepsSound);
   const eraseFeature = (one: boolean) => (one && !sound ? { ...base, title: input.title } : helper);
 
+  // What each piece's join input is: its erased window, or (an overlapping window) the window less its first frames.
+  const joined = pieces.map((_, i) => `erase${i}`);
   if (e.engine === "open") {
     pieces.forEach((p, i) => {
       const own = eraseRequest(input, p);
@@ -523,6 +549,16 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
         // The painted eraser starts each window from where the last one left the object.
         ...(painted && i > 0 ? { after: [`erase${i - 1}`], chain: [{ slot: "mask" as const }] } : {}),
       });
+      if (p.skip && input.source.fps) {
+        // The frames the window before already made are cut off (a trim from (skip − ¼)/fps keeps the rest).
+        steps.push({
+          key: `keep${i}`,
+          request: { ...helper, modelId: t.cut, op: "trim", params: { startTime: r6((p.skip - 0.25) / input.source.fps) }, step: pieceLabel(p, n, "drop the overlap") },
+          after: [`erase${i}`],
+          chain: [{ slot: "video" }],
+        });
+        joined[i] = `keep${i}`;
+      }
     });
   } else {
     // The range itself, when SAM 3.1 has to see it from its first frame (the clicks and paint are on it).
@@ -581,7 +617,7 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
   }
 
   // Join the pieces in order (folding when the join takes fewer clips than there are).
-  let level = pieces.map((_, i) => `erase${i}`);
+  let level = joined;
   let depth = 0;
   while (level.length > 1) {
     const groups = joinGroups(level.length, t.joinMax);
@@ -650,8 +686,8 @@ export interface PreviewPlanInput {
 
 /**
  * A cheap look at the mask before paying for the removal: the first seconds of the range, segmented by
- * SAM 3.1 (cloud: a mask video of what you named, clicked or painted, about $0.02; open: the object cut
- * out of the clip by the SAM 3 matte graph, free). Null when the engine can't make one (open clicks; open
+ * SAM 3.1 (cloud: a mask video of what you named, clicked or painted, about $0.02; open: the SAM 3 matte
+ * graph's black-and-white matte of what you named, free). Null when the engine can't make one (open clicks; open
  * paint, whose painted overlay is its own preview).
  */
 export function planMaskPreview(input: PreviewPlanInput): PlanStep[] | null {
@@ -672,7 +708,8 @@ export function planMaskPreview(input: PreviewPlanInput): PlanStep[] | null {
         modelId: t.preview,
         op: "bg-remove-video",
         ...(words ? { prompt: words } : {}),
-        params: { ...(input.points?.length && !words ? { points: input.points } : {}), duration: r3(end - input.range.start) },
+        // The open graph's black-and-white matte (white = what goes), like the cloud's mask video.
+        params: { ...(input.points?.length && !words ? { points: input.points } : {}), duration: r3(end - input.range.start), ...(input.engine === "open" ? { matteOutput: "matte" as const } : {}) },
         step: { label: "Mask preview", index: 1, of: 2 },
       },
       after: ["cut"],

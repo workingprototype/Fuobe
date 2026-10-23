@@ -141,6 +141,29 @@ describe("Remove object: windows and pieces", () => {
     expect(late).toEqual([{ index: 0, start: 1, end: 2.875, frames: 45, startTime: 0.989583, endTime: 2.864583 }]);
   });
 
+  it("overlapping windows (the painted eraser): each starts on the last frame of the one before, which is cut off again", () => {
+    const painted = { cap: 81, step: 4, base: 1, overlap: 1 };
+    expect(frameWindows(240, painted)).toEqual([81, 81, 77]);
+    expect(frameWindows(81, painted)).toEqual([81]);
+    // 82 frames: two windows, 41 + 41 read, 81 new.
+    expect(frameWindows(82, painted)).toEqual([41, 41]);
+    for (const total of [82, 161, 240, 1799]) {
+      const got = frameWindows(total, painted);
+      const fresh = got.reduce((a, b) => a + b, 0) - (got.length - 1);
+      expect(fresh).toBeLessThanOrEqual(total);
+      expect(total - fresh).toBeLessThan(4);
+      expect(got.every((n) => n <= 81 && (n - 1) % 4 === 0)).toBe(true);
+    }
+    const w = planWindows({ start: 0, end: 8 }, 30, painted);
+    expect(w).toEqual([
+      { index: 0, start: 0, end: 2.7, frames: 81, startTime: 0, endTime: 2.7 },
+      { index: 1, start: 2.7, end: 5.367, frames: 81, startTime: 2.658333, endTime: 5.358333, skip: 1 },
+      { index: 2, start: 5.367, end: 7.9, frames: 77, startTime: 5.325, endTime: 7.891667, skip: 1 },
+    ]);
+    // The new frames are still back to back.
+    for (let i = 1; i < w.length; i++) expect(w[i].start).toBe(w[i - 1].end);
+  });
+
   it("cuts cloud clips into equal pieces under each eraser's limit, on whole frames", () => {
     expect(planCloudPieces({ start: 0, end: 12 }, 4.8, 30).map((p) => [p.start, p.end])).toEqual([
       [0, 4],
@@ -304,6 +327,11 @@ describe("Remove object: open pipelines", () => {
     expect(step(plan.steps, "erase0").request.prompt).toBeUndefined();
     expect(step(plan.steps, "erase1")).toMatchObject({ after: ["erase0"], chain: [{ slot: "mask" }], request: { inputs: { video: src.url } } });
     expect(step(plan.steps, "erase2")).toMatchObject({ after: ["erase1"], chain: [{ slot: "mask" }] });
+    // Each later window starts on the frame its mask was tracked on, and loses that frame before the join.
+    expect(step(plan.steps, "erase1").request.params).toMatchObject({ startTime: 2.658333, endTime: 5.358333 });
+    expect(step(plan.steps, "keep1")).toMatchObject({ after: ["erase1"], chain: [{ slot: "video" }], request: { modelId: "oss-trim", op: "trim", params: { startTime: 0.025 } } });
+    expect(step(plan.steps, "keep0")).toBeUndefined();
+    expect(step(plan.steps, "join").after).toEqual(["erase0", "keep1", "keep2"]);
   });
 
   it("VOID windows are up to 197 frames", () => {

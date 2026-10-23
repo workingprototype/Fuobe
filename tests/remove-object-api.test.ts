@@ -192,6 +192,8 @@ describe("Remove object: runs", () => {
     expect(windows[1].depends_on).toBe(windows[0].id);
     expect(JSON.parse(windows[2].request_json).chain).toEqual([{ slot: "mask" }]);
     expect(rows.map((r) => r.model_id)).toEqual(expect.arrayContaining(["oss-join-clips", "oss-mux"]));
+    // The later windows start on the frame their mask was tracked on, and lose it again before the join.
+    expect(rows.filter((r) => r.model_id === "oss-trim")).toHaveLength(2);
     // The first window's last tracked frame starts the second one.
     const second = await launched(windows[1].id);
     expect(second.request.inputs?.mask).toMatch(/^\/api\/files\//);
@@ -209,12 +211,14 @@ describe("Remove object: runs", () => {
     expect(final.request.params).toMatchObject({ startTime: 0, endTime: 2.8125 });
   });
 
-  it("mask preview: SAM 3.1 on the first 2 s (cloud), the SAM 3 cut-out (open)", async () => {
+  it("mask preview: SAM 3.1 on the first 2 s (cloud), the SAM 3 matte (open)", async () => {
     const cloud = (await (await previewRoute.POST(json(body({ requestId: "preview-cloud-1" })))).json()) as Generation;
     expect(cloud).toMatchObject({ feature: REMOVE.previewFeature, modelId: "sam-3-1-video-mask", op: "bg-remove-video", prompt: "the skateboard" });
     expect(cloud.request.params?.duration).toBe(2);
     const open = (await (await previewRoute.POST(json(body({ engine: "open" })))).json()) as Generation;
     expect(open.modelId).toBe("oss-video-matte-sam3");
+    // White = what goes, like the cloud's mask video: the graph saves only its matte.
+    expect(open.request.params?.matteOutput).toBe("matte");
     const none = await previewRoute.POST(json(body({ engine: "open", mode: "paint", mask })));
     expect(none.status).toBe(422);
     expect((await settle(cloud.id)).status).toBe("succeeded");
