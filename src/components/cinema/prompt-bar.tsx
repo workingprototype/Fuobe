@@ -827,7 +827,7 @@ export function PromptBar(props: PromptBarProps) {
               aria-label={plan.outputs > 1 ? `Generate ${plan.outputs}` : "Generate"}
               aria-disabled={!!blocker || undefined}
               aria-describedby={blocker ? blockerId : undefined}
-              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/55 hover:bg-primary/65")}
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/70 hover:bg-primary/80")}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>

@@ -241,7 +241,8 @@ export function Composer({ docked }: { docked: boolean }) {
   const promptMissing =
     !config.promptOptional && !opts.promptless && !opts.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
-    loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
+    // A model outside the studio's slice (remembered, or handed over) is known once the full catalog arrives: loading until then, not "Pick a model".
+    loading: !catalog.ready || (!model && !catalog.complete) ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
     engineError,
     missing,
@@ -333,7 +334,20 @@ export function Composer({ docked }: { docked: boolean }) {
     const tile = root.current?.querySelector<HTMLElement>(`[data-slot-key="${key}"]`);
     const control = tile?.matches("button") ? tile : tile?.querySelector<HTMLButtonElement>('button[aria-label$=": upload"]');
     pulseSlot(root.current, key);
-    control?.click();
+    // The focus moves into the tile (the press itself didn't take it), so leaving the composer folds it again.
+    const target = control ?? tile?.querySelector<HTMLElement>("button");
+    if (target) {
+      target.focus({ preventScroll: true });
+      control?.click();
+      return;
+    }
+    // Nothing to focus: the next press outside the composer folds it.
+    const fold = (e: PointerEvent) => {
+      if (root.current?.contains(e.target as Node) || root.current?.contains(document.activeElement)) return;
+      document.removeEventListener("pointerdown", fold, true);
+      setFocused(false);
+    };
+    document.addEventListener("pointerdown", fold, true);
   };
 
   // A blocker toast goes away once it's out of date: the photo attached, the prompt typed (or the next blocker is a different one).
@@ -675,8 +689,8 @@ export function Composer({ docked }: { docked: boolean }) {
               onClick={submit}
               disabled={create.isPending || signature.lock.isPending}
               aria-label={blocker ? `Generate — ${blocker.message}` : "Generate"}
-              // Blocked, it stays the brand colour (paler): pressing it still says what's missing and points at it.
-              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/55 hover:bg-primary/65")}
+              // Blocked, it stays the brand colour (paler, the arrow still 3:1 or more): pressing it still says what's missing and points at it.
+              className={cn("size-10 shrink-0 rounded-full", blocker && "bg-primary/70 hover:bg-primary/80")}
             >
               {create.isPending || signature.lock.isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
             </Button>
