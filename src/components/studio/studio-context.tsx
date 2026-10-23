@@ -131,6 +131,16 @@ export function StudioProvider({
   );
 }
 
+/**
+ * Home's Start (`?go=1`): a count the composer runs its draft for, once per increase, after the
+ * handed-over prompt is in place (HandoffSync raises it). 0: nothing to start.
+ */
+export const StartRequestCtx = createContext(0);
+
+export function useStartRequest(): number {
+  return useContext(StartRequestCtx);
+}
+
 /** Replace a slot value by key, updating only when it's the same upload (async upload callbacks). */
 export function slotUpdater(setSlot: Actions["setSlot"], key: SlotKey) {
   return (v: SlotValue | null) => setSlot(key, v);

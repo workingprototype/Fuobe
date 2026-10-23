@@ -409,6 +409,30 @@ export function mergeHandoff<D extends DraftShape>(base: D, current: D, next: D)
 }
 
 // ---------------------------------------------------------------------------
+// Home's Start: "/image?prompt=…&go=1" runs the handed-over prompt once
+
+/** The query flag that asks a studio to run its handed-over draft once (Home's Start). */
+export const START_PARAM = "go";
+
+/** The same address without the start flag, so a reload or Back doesn't run it again. */
+export function withoutStart(href: string): string {
+  const u = new URL(href, "http://x");
+  u.searchParams.delete(START_PARAM);
+  const rest = `${u.pathname}${u.search}${u.hash}`;
+  return /^https?:\/\//.test(href) ? `${u.origin}${rest}` : rest;
+}
+
+/**
+ * What a studio does with a start request now: wait while models, presets or uploads are still
+ * loading (their blockers are temporary), run when nothing blocks, else explain — the blocker's
+ * toast names what's missing and points at its slot (Edit and Video's photo).
+ */
+export function startStep(s: { settling: boolean; blocker: Blocker | null }): "wait" | "run" | "explain" {
+  if (s.settling) return "wait";
+  return s.blocker ? "explain" : "run";
+}
+
+// ---------------------------------------------------------------------------
 // Models for a studio and the picker's groups
 
 export function filterModels(models: ModelDef[], opts: { kind?: MediaKind; ops?: Operation[] }): ModelDef[] {

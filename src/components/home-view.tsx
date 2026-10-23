@@ -27,7 +27,8 @@ import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
-import { nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
+import { connectedEngines, nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
+import type { StartQuote } from "@/lib/starter-prices";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -144,6 +145,7 @@ export function HomeView({
   apps,
   effects,
   prices,
+  quotes,
 }: {
   counts: Counts;
   motions: PresetCardData[];
@@ -151,6 +153,8 @@ export function HomeView({
   effects: PresetCardData[];
   /** What a first paid image and clip cost, for the first-run guide. */
   prices?: string;
+  /** What Start runs in each mode, and its price on the paid engine. */
+  quotes?: Record<string, StartQuote>;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState(MODES[0]);
@@ -169,7 +173,17 @@ export function HomeView({
 
   const locked = engineMode === "both" ? undefined : engineMode;
 
-  const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : ""}`);
+  // With a prompt, the studio starts the run itself (go=1), or points at the photo it still needs.
+  const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}&go=1` : ""}`);
+  // What Start will run, and what it costs, before it's pressed.
+  const quote = quotes?.[mode.id];
+  const runsFor = (() => {
+    if (!status || nothingConnected || !quote) return null;
+    const engines = connectedEngines(status);
+    const then = mode.id === "image" ? "" : mode.id === "edit" ? " after you add the photo" : "";
+    if (engine === "open") return engines.open && quote.open ? `Start runs ${quote.open.name} on your GPU${then} · Free` : "ComfyUI isn't connected, so Start runs a free demo";
+    return engines.cloud && quote.cloud ? `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` : "No paid API is connected, so Start runs a free demo";
+  })();
   const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
 
   return (
@@ -228,6 +242,7 @@ export function HomeView({
             </div>
           </div>
         </div>
+        {runsFor && <p className="mt-2 text-[12px] text-muted-foreground">{runsFor}</p>}
         {firstRun && status ? (
           <GetStarted
             className="mt-6 max-w-[960px]"

@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { handoffKey, mergeHandoff, promptShown } from "@/lib/composer";
+import { handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
@@ -21,7 +21,7 @@ import { Composer } from "./composer";
 import { EngineSwitch } from "./engine-switch";
 import { Feed } from "./feed";
 import type { SlotValue } from "./media-slot";
-import { StudioProvider, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
+import { StartRequestCtx, StudioProvider, useStudio, useStudioActions, type Draft, type StudioConfig } from "./studio-context";
 
 function kindOfUrl(url: string): MediaKind {
   if (/\.(mp4|webm|mov)(\?|$)/i.test(url)) return "video";
@@ -347,11 +347,13 @@ interface StudioPageProps {
 
 type DraftProps = Omit<StudioPageProps, "catalog">;
 
-/** Reports the URL's hand-off params. It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
-function UrlParams({ onChange }: { onChange: (key: string) => void }) {
-  const key = handoffKey(useSearchParams());
+/** Reports the URL's hand-off params, and whether it asks to start (`go=1`). It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
+function UrlParams({ onChange }: { onChange: (key: string, start: boolean) => void }) {
+  const sp = useSearchParams();
+  const key = handoffKey(sp);
+  const start = sp.get(START_PARAM) === "1";
   // Layout effect: on a client navigation the prefilled draft is in place before the first paint.
-  useLayoutEffect(() => onChange(key), [key, onChange]);
+  useLayoutEffect(() => onChange(key, start), [key, start, onChange]);
   return null;
 }
 
@@ -361,26 +363,64 @@ function UrlParams({ onChange }: { onChange: (key: string) => void }) {
  * of a client navigation. Fields the person already changed — a prompt typed before the page
  * hydrated — are kept. A later change of the params (Animate → Video while on Video) starts a
  * fresh draft instead.
+ *
+ * With `go=1` (Home's Start) it then asks the composer to run the draft once (onStart), after the
+ * draft was built from the loaded models, and takes `go` out of the address so a reload or Back
+ * doesn't run it again.
  */
-function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: string; start: Draft; build: React.RefObject<(key: string) => Draft>; ready: boolean; onNavigate: (key: string) => void }) {
+function HandoffSync({
+  startKey,
+  start,
+  build,
+  ready,
+  onNavigate,
+  onStart,
+}: {
+  startKey: string;
+  start: Draft;
+  build: React.RefObject<(key: string) => Draft>;
+  ready: boolean;
+  onNavigate: (key: string) => void;
+  onStart: () => void;
+}) {
   const { setDraft } = useStudioActions();
-  const [url, setUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<{ key: string; start: boolean } | null>(null);
   const applied = useRef({ key: startKey, ready, base: start, seen: false });
+  const started = useRef(false);
+  const onParams = useCallback((key: string, start: boolean) => setUrl((u) => (u?.key === key && u.start === start ? u : { key, start })), []);
   useLayoutEffect(() => {
     if (url === null) return;
     const a = applied.current;
-    if (a.seen && url !== a.key) return onNavigate(url);
+    if (a.seen && url.key !== a.key) return onNavigate(url.key);
     a.seen = true;
-    if (url === a.key && ready === a.ready) return;
-    const next = build.current(url);
-    const base = a.base;
-    setDraft((d) => mergeHandoff(base, d, next));
-    applied.current = { key: url, ready, base: next, seen: true };
-  }, [url, ready, build, setDraft, onNavigate]);
+    if (url.key !== a.key || ready !== a.ready) {
+      const next = build.current(url.key);
+      const base = a.base;
+      setDraft((d) => mergeHandoff(base, d, next));
+      applied.current = { key: url.key, ready, base: next, seen: true };
+    }
+    if (url.start && ready && !started.current) {
+      started.current = true;
+      onStart();
+      window.history.replaceState(null, "", withoutStart(window.location.href));
+    }
+  }, [url, ready, build, setDraft, onNavigate, onStart]);
   return (
     <Suspense fallback={null}>
-      <UrlParams onChange={setUrl} />
+      <UrlParams onChange={onParams} />
     </Suspense>
+  );
+}
+
+/** One draft's page: the studio and its hand-off. The start request resets with the draft (a new epoch). */
+function StudioSession({ header, tabs, sync }: { header?: React.ReactNode; tabs?: React.ReactNode; sync: Omit<React.ComponentProps<typeof HandoffSync>, "onStart"> }) {
+  const [startRequest, setStartRequest] = useState(0);
+  const onStart = useCallback(() => setStartRequest((n) => n + 1), []);
+  return (
+    <StartRequestCtx.Provider value={startRequest}>
+      <StudioBody header={header} tabs={tabs} />
+      <HandoffSync {...sync} onStart={onStart} />
+    </StartRequestCtx.Provider>
   );
 }
 
@@ -411,8 +451,7 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
       <StudioProvider key={start.epoch} config={config} initial={initial}>
-        <StudioBody header={header} tabs={tabs} />
-        <HandoffSync startKey={start.key} start={initial} build={buildRef} ready={catalog.ready} onNavigate={onNavigate} />
+        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, ready: catalog.ready, onNavigate }} />
       </StudioProvider>
     </ComposerBridgeCtx.Provider>
   );

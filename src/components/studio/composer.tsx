@@ -12,7 +12,7 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, costLabel, filterModels, firstMissingSlot, namedImageSlots, needsMask, PLACEHOLDER, promptShown, pushRecent, settingsShape, startStep } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -29,7 +29,7 @@ import { SettingsChip } from "./settings-panel";
 import { ShotsEditor } from "./shots-editor";
 import { SketchTools } from "./sketch-tools";
 import { RECENT_MODELS, useStoredList } from "./stored-list";
-import { useStudio, type Draft } from "./studio-context";
+import { useStartRequest, useStudio, type Draft } from "./studio-context";
 import { useEdgeFade } from "./use-edge-fade";
 import { useSignature } from "../palettes/use-signature";
 
@@ -327,6 +327,23 @@ export function Composer({ docked }: { docked: boolean }) {
   useEffect(() => {
     toast.dismiss("composer-blocker");
   }, [blocking]);
+
+  // Home's Start (go=1): run the handed-over prompt once the models and uploads have settled. A
+  // blocker (Edit's photo) gets the usual toast, and its slot is pointed at, instead.
+  const startRequest = useStartRequest();
+  const startedFor = useRef(0);
+  const submitRef = useRef(submit);
+  useLayoutEffect(() => {
+    submitRef.current = submit;
+  });
+  const settling = !catalog.ready || presetLoading || uploading || (needsFull && !catalog.complete);
+  const step = startRequest ? startStep({ settling, blocker }) : "wait";
+  useEffect(() => {
+    if (step === "wait" || startRequest <= startedFor.current) return;
+    startedFor.current = startRequest;
+    // After the blocker toast above was cleared for this render.
+    submitRef.current();
+  }, [step, startRequest]);
 
   // Voice, language, motion, style and Director chips: inline from sm up; on phones they live in the settings sheet, so the toolbar fits.
   const voiceChips = (
