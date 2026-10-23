@@ -3,11 +3,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AudioLines, Bot, Clapperboard, Cloud, Copy, Cpu, ExternalLink, ImageIcon, Megaphone, Mic2, Sparkles, Video, Wand2, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConnectField, useSettings } from "@/components/connect-field";
-import { saveSettings, type StatusInfo } from "@/lib/api";
+import { saveSettings, useEngineMode, type StatusInfo } from "@/lib/api";
 import { copyWithToast } from "@/lib/clipboard";
 import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL, nothingConnected } from "@/lib/connections";
 import { cn } from "@/lib/utils";
@@ -58,7 +58,8 @@ export function GetStarted({
   intents = true,
   className,
 }: {
-  status: StatusInfo;
+  /** Undefined while it loads (Home's static shell): the guide is drawn for this browser's engine mode. */
+  status?: StatusInfo;
   /** What a first image and clip cost on the paid route (starterPriceLine on the server). */
   prices?: string;
   /** "Just try it": after the guide is put away (Home focuses its composer). */
@@ -75,7 +76,9 @@ export function GetStarted({
   const settings = useSettings().data;
   const get = (n: string) => settings?.find((s) => s.name === n);
   const [hiding, setHiding] = useState(false);
-  const mode = status.engineMode;
+  const titleId = useId();
+  const cachedMode = useEngineMode();
+  const mode = status?.engineMode ?? cachedMode;
 
   const hide = async () => {
     setHiding(true);
@@ -94,14 +97,14 @@ export function GetStarted({
   const connected = (what: string) => (r: { detail: string }) => toast.success(`${what} connected`, { description: r.detail });
 
   return (
-    <div className={cn("w-full animate-fade-up rounded-2xl border bg-muted/40 p-4 text-left sm:p-5", className)} aria-labelledby="get-started-title">
+    <section className={cn("w-full animate-fade-up rounded-2xl border bg-muted/40 p-4 text-left sm:p-5", className)} aria-labelledby={titleId}>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h2 id="get-started-title" className="font-heading text-[24px] leading-tight">
+          <h2 id={titleId} className="font-heading text-[24px] leading-tight">
             Get started
           </h2>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            {nothingConnected(status)
+            {!status || nothingConnected(status)
               ? "Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:"
               : "Three ways to make things with Fuobe. Connect another one, or check one you set up:"}
           </p>
@@ -201,6 +204,6 @@ export function GetStarted({
           </ul>
         </div>
       )}
-    </div>
+    </section>
   );
 }

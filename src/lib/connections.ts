@@ -113,6 +113,16 @@ export function showFirstRun(s: ConnectionState | undefined): boolean {
   return !!s && !s.onboarded && nothingConnected(s);
 }
 
+/**
+ * This browser's last answer to showFirstRun ("1" or "0"). Home paints the guide in its static
+ * shell, before the status is known, so it doesn't push the page down when it arrives; the
+ * pre-paint script hides it there when this browser already knows it isn't wanted.
+ */
+export const FIRST_RUN_KEY = "fuobe:first-run";
+
+/** Runs while Home's HTML is parsed: `<html data-first-run="0">` when the guide was put away here before. */
+export const FIRST_RUN_SCRIPT = `(function(){try{if(localStorage.getItem("${FIRST_RUN_KEY}")==="0")document.documentElement.setAttribute("data-first-run","0")}catch(e){}})()`;
+
 export const ENGINE_MODE_LABEL: Record<EngineModeName, string> = { both: "Open source + paid", open: "Open source only", cloud: "Paid APIs only" };
 
 export interface ConnectionItem {

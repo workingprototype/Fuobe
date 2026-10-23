@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { candidateValues, connectionSummary, isTestProvider, nothingConnected, settingProblem, showFirstRun, type ConnectionState } from "@/lib/connections";
+import { candidateValues, connectionSummary, FIRST_RUN_KEY, FIRST_RUN_SCRIPT, isTestProvider, nothingConnected, settingProblem, showFirstRun, type ConnectionState } from "@/lib/connections";
 
 /** Settings' "Save & test", the first-run guide's rule and the connection status strip (R4-02, R4-03, R4-33). */
 
@@ -97,6 +97,27 @@ describe("first-run guide and status strip", () => {
     expect(nothingConnected(state(["fal"], "open"))).toBe(true);
     expect(nothingConnected(state(["comfyui"], "cloud"))).toBe(true);
     expect(nothingConnected(state(["higgsfield"], "cloud"))).toBe(false);
+  });
+
+  it("hides Home's shell guide before the first paint only where this browser put it away", () => {
+    const run = (stored: string | null | Error) => {
+      const attrs: Record<string, string> = {};
+      const localStorage = {
+        getItem: (k: string) => {
+          if (stored instanceof Error) throw stored;
+          return k === FIRST_RUN_KEY ? stored : null;
+        },
+      };
+      const document = { documentElement: { setAttribute: (k: string, v: string) => (attrs[k] = v) } };
+      new Function("localStorage", "document", FIRST_RUN_SCRIPT)(localStorage, document);
+      return attrs["data-first-run"];
+    };
+    expect(run("0")).toBe("0");
+    // A first visit, or a guide still wanted: the shell keeps it, so it doesn't push the page down later.
+    expect(run(null)).toBeUndefined();
+    expect(run("1")).toBeUndefined();
+    // Storage blocked (a private window): nothing breaks.
+    expect(run(new Error("denied"))).toBeUndefined();
   });
 
   it("says what each connection is doing, and which ones the mode doesn't use", () => {

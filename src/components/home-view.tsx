@@ -19,7 +19,7 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GetStarted } from "@/components/get-started";
 import { PageShell } from "@/components/page-shell";
 import { PresetCard } from "@/components/preset-gallery";
@@ -27,7 +27,7 @@ import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
-import { connectedEngines, nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
+import { connectedEngines, FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
 import type { StartQuote } from "@/lib/starter-prices";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
@@ -139,6 +139,15 @@ function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: P
   );
 }
 
+/**
+ * Runs while the HTML is parsed, ahead of the guide: hides the shell's guide before the first paint
+ * in a browser that already put it away. On the client it renders as inert text/plain (React warns
+ * about executable scripts it renders itself), like the sidebar's state script.
+ */
+function FirstRunScript() {
+  return <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: FIRST_RUN_SCRIPT }} />;
+}
+
 export function HomeView({
   counts,
   motions,
@@ -168,8 +177,18 @@ export function HomeView({
   const statusData = useStatus().data;
   const status = hydrated ? statusData : undefined;
   const nothingConnected = !!status && noConnection(status);
-  // Until something is connected (or it's put away): three ways to start, under the composer.
+  // Until something is connected (or it's put away): three ways to start, under the composer. It's
+  // in the static shell too (no status yet), so it doesn't push the page down when the status
+  // arrives; FirstRunScript hides it before the first paint in a browser that has put it away.
   const firstRun = showFirstRun(status);
+  const guide = !status || firstRun;
+  useEffect(() => {
+    if (!status) return;
+    try {
+      localStorage.setItem(FIRST_RUN_KEY, firstRun ? "1" : "0");
+    } catch {}
+    document.documentElement.setAttribute("data-first-run", firstRun ? "1" : "0");
+  }, [status, firstRun]);
 
   const locked = engineMode === "both" ? undefined : engineMode;
 
@@ -257,17 +276,20 @@ export function HomeView({
             )}
           </p>
         )}
-        {firstRun && status ? (
-          <GetStarted
-            className="mt-6 max-w-[960px]"
-            status={status}
-            prices={prices}
-            onDemo={focusComposer}
-            onMode={(id) => {
-              setMode(MODES.find((m) => m.id === id) ?? MODES[0]);
-              focusComposer();
-            }}
-          />
+        {guide ? (
+          <>
+            <FirstRunScript />
+            <GetStarted
+              className={cn("mt-6 max-w-[960px]", !status && "[html[data-first-run='0']_&]:hidden")}
+              status={status}
+              prices={prices}
+              onDemo={focusComposer}
+              onMode={(id) => {
+                setMode(MODES.find((m) => m.id === id) ?? MODES[0]);
+                focusComposer();
+              }}
+            />
+          </>
         ) : nothingConnected && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
