@@ -127,6 +127,9 @@ describe("POST /api/providers/test with unsaved values", () => {
     const bad = await withFetch({ "https://queue.fal.run/": [401, { detail: "Unauthorized" }] }, () => post({ provider: "fal", values: { falKey: "fal_only_half" } }));
     expect(bad.result.body.ok).toBe(false);
     expect(bad.result.body.detail).toMatch(/^Key rejected \(401\) — fal\.ai keys look like key_id:key_secret/);
+    // A proxy or an outage isn't a verdict on the key.
+    const blocked = await withFetch({ "https://queue.fal.run/": [405, {}] }, () => post({ provider: "fal", value: "new-id:new-secret" }));
+    expect(blocked.result.body).toEqual({ ok: false, detail: "Couldn't check the key: fal.ai answered 405. Try again in a moment" });
     // Without values it tests the saved key.
     const saved = await withFetch({ "https://queue.fal.run/": [404, {}] }, () => post({ provider: "fal" }));
     expect(saved.seen[0].auth).toBe("Key saved-id:saved-secret");

@@ -123,6 +123,8 @@ export const falProvider: ProviderAdapter = {
       return { ok: false, detail: `Can't reach fal.ai (${(e as Error).message})` };
     }
     if (res.status === 401 || res.status === 403) return { ok: false, detail: `Key rejected (${res.status})` };
-    return { ok: true, detail: "Key accepted" };
+    if (res.ok || [400, 404, 422].includes(res.status)) return { ok: true, detail: "Key accepted" };
+    // A proxy or an outage (405, 407, 5xx) says nothing about the key: don't call it accepted.
+    return { ok: false, detail: `Couldn't check the key: fal.ai answered ${res.status}. Try again in a moment` };
   },
 };
