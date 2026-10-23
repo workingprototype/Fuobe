@@ -55,6 +55,20 @@ export function filterFields(f: Filters, now = Date.now()): FilterFields {
 
 export const hasFilters = (f: Filters) => f.models.length > 0 || f.date.id !== "any" || f.status !== "all" || f.review !== "all" || f.pinned || f.steps || f.subfolders;
 
+/**
+ * The filters that apply in a view, from the ones chosen (which stay across tabs and folders): the
+ * Trash has no Pinned or Show steps chip (it lists steps anyway), Subfolders needs a folder that has
+ * some, and Uploads has no filters. Turned off here, a hidden filter can't empty a view, give it the
+ * wrong empty state ("Nothing pinned here yet" in an empty Trash) or show Clear filters for nothing visible.
+ */
+export function filtersFor(f: Filters, view: { trash?: boolean; uploads?: boolean; subfolders?: boolean }): Filters {
+  if (view.uploads) return NO_FILTERS;
+  const pinned = f.pinned && !view.trash;
+  const steps = f.steps && !view.trash;
+  const subfolders = f.subfolders && !!view.subfolders;
+  return pinned === f.pinned && steps === f.steps && subfolders === f.subfolders ? f : { ...f, pinned, steps, subfolders };
+}
+
 function Chip({ active, children, ...props }: { active: boolean; children: React.ReactNode } & React.ComponentProps<"button">) {
   return (
     <button

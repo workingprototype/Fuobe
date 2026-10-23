@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetCard, cardRatio, type CardApi } from "@/components/library/asset-card";
-import { FilterBar, filterFields, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
+import { FilterBar, filterFields, filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
 import { FolderDialog, FolderHeader, FolderStrip, MoveMenuItems } from "@/components/library/folders";
 import { ReviewMenuItems } from "@/components/library/review";
 import { UploadDeleteProvider } from "@/components/library/upload-delete";
@@ -215,12 +215,15 @@ function Inner() {
   const uploadsTab = tab.id === "uploads";
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 250);
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [chosen, setFilters] = useState<Filters>(NO_FILTERS);
   const [prefs, setPrefs] = useViewPrefs();
-  const facets = useLibraryFacets({ steps: filters.steps });
   const folders = useFolders();
   const allFolders = useMemo(() => folders.data ?? [], [folders.data]);
   const folder = folderId ? allFolders.find((f) => f.id === folderId) : undefined;
+  // The filters chosen stay across tabs and folders; the ones this view hides (Pinned and Show steps
+  // in the Trash, Subfolders in a folder without any, all of them in Uploads) are off here.
+  const filters = useMemo(() => filtersFor(chosen, { trash, uploads: uploadsTab, subfolders: !!folder?.folders }), [chosen, trash, uploadsTab, folder?.folders]);
+  const facets = useLibraryFacets({ steps: filters.steps });
   const actions = useGenerationActions();
   const create = useCreateGeneration();
 
@@ -253,7 +256,8 @@ function Inner() {
   const items = useMemo(() => (pinnedItems.length ? [...pinnedItems, ...mainItems] : mainItems), [pinnedItems, mainItems]);
   const stacks = prefs.stacks && !trash && !uploadsTab;
   const entries = useStableEntries(useMemo(() => buildEntries(mainItems, { stacks }), [mainItems, stacks]));
-  const pinnedEntries = useStableEntries(useMemo(() => buildEntries(pinnedItems, { stacks }), [pinnedItems, stacks]));
+  // Its own stack keys: a batch with pinned and unpinned members has a stack in both sections, expanded and selected apart.
+  const pinnedEntries = useStableEntries(useMemo(() => buildEntries(pinnedItems, { stacks, prefix: "pinned:" }), [pinnedItems, stacks]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const sections = useMemo(() => {
     const when = (e: LibraryEntry) => Math.max(...members(e).map((g) => (trash ? (g.deletedAt ?? g.createdAt) : g.createdAt)));
@@ -475,7 +479,7 @@ function Inner() {
     <PageShell wide>
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-5">
         {folder ? (
-          <FolderHeader folder={folder} all={allFolders} onGo={(f) => go({ folder: f?.id })} onMoveItems={(list, to) => void moveTo(list, to?.id ?? null, to?.name ?? "Library")} />
+          <FolderHeader folder={folder} all={allFolders} steps={filters.steps} onGo={(f) => go({ folder: f?.id })} onMoveItems={(list, to) => void moveTo(list, to?.id ?? null, to?.name ?? "Library")} />
         ) : foldersLoading ? (
           <div className="flex min-w-0 flex-col gap-1.5" aria-busy="true" aria-label="Loading folder">
             <Skeleton className="h-7 w-28 rounded-full" />
@@ -571,7 +575,7 @@ function Inner() {
 
       {(tab.id === "all" && !folderId && (folders.data?.length || !loading)) || (folder && !trash) ? (
         <div className="mb-4">
-          <FolderStrip all={allFolders} parent={folder ?? null} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
         </div>
       ) : null}
 

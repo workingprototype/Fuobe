@@ -28,6 +28,7 @@ import {
 } from "@/lib/library";
 import { toSrt, toVtt } from "@/lib/cues";
 import { cueTime, layerInfo, modelPreview, outputActions, shownOutputs, textOf } from "@/lib/output-actions";
+import { filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
 
 let n = 0;
 function gen(p: Partial<Generation> = {}): Generation {
@@ -512,5 +513,29 @@ describe("round 4: helper steps, pins, review, nested folders, where a file is u
       ]),
     ).toBe("2 results (1 in the Trash), the element “Maya”, the Assist chat “Posters” and 2 canvases");
     expect(describeUses([{ what: "result", key: "g", name: "x", trashed: true }])).toBe("the result “x” (in the Trash)");
+  });
+
+  it("keys the Pinned section's stacks apart from the main list's (one batch can have a stack in each)", () => {
+    const pinned = [gen({ batchId: "bx", pinnedAt: 2 }), gen({ batchId: "bx", pinnedAt: 1 })];
+    const rest = [gen({ batchId: "bx" }), gen({ batchId: "bx" })];
+    const top = buildEntries(pinned, { prefix: "pinned:" });
+    const main = buildEntries(rest);
+    expect(top.map((e) => e.key)).toEqual(["pinned:stack:bx"]);
+    expect(main.map((e) => e.key)).toEqual(["stack:bx"]);
+    // Singles keep their id: a result is in one section only.
+    expect(buildEntries([gen({ id: "solo" })], { prefix: "pinned:" }).map((e) => e.key)).toEqual(["solo"]);
+  });
+
+  it("turns off the filters a view hides, keeping the choice for the views that show them", () => {
+    const chosen: Filters = { ...NO_FILTERS, pinned: true, steps: true, subfolders: true, review: "approved" };
+    // The Trash: no Pinned or Show steps chip, so neither can empty it or ask to be cleared.
+    const trash = filtersFor(chosen, { trash: true, subfolders: true });
+    expect(trash).toMatchObject({ pinned: false, steps: false, subfolders: true, review: "approved" });
+    expect(hasFilters(filtersFor({ ...NO_FILTERS, pinned: true }, { trash: true }))).toBe(false);
+    // A folder without subfolders: no Subfolders chip.
+    expect(filtersFor(chosen, {})).toMatchObject({ pinned: true, steps: true, subfolders: false });
+    expect(filtersFor(chosen, { uploads: true })).toBe(NO_FILTERS);
+    // Nothing hidden: the same object, so memoized lists don't refetch.
+    expect(filtersFor(chosen, { subfolders: true })).toBe(chosen);
   });
 });

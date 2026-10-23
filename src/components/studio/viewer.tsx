@@ -20,22 +20,27 @@ import { LayersStack, ModelViewer, TextReader } from "./result-media";
 import { ReviewSelect } from "@/components/library/review";
 
 
-function Row({ label, value, mono }: { label: string; value?: React.ReactNode; mono?: boolean }) {
+/** One line of the details; `center` lines the label up with a control (the Review picker) instead of a text value's first line. */
+function Row({ label, value, mono, center }: { label: string; value?: React.ReactNode; mono?: boolean; center?: boolean }) {
   if (value === undefined || value === null || value === "") return null;
   return (
-    <div className="flex justify-between gap-4 py-1.5 text-[13px]">
+    <div className={cn("flex justify-between gap-4 py-1.5 text-[13px]", center && "items-center")}>
       <span className="text-muted-foreground">{label}</span>
       <span className={cn("min-w-0 text-right break-words", mono && "font-mono")}>{value}</span>
     </div>
   );
 }
 
-/** Keys the viewer leaves alone: typing, browser shortcuts (⌘F, ⌘D…), held-down repeats, a focused player. */
+/**
+ * Keys the viewer leaves alone: typing, browser shortcuts (⌘F, ⌘D…), held-down repeats, a focused
+ * player, and keys meant for a picker or menu (the Review picker and ⋯ menus jump to the item you
+ * type, R for Rejected, without preventDefault, so R would also Reuse and close the viewer).
+ */
 function ignoreKey(e: KeyboardEvent): boolean {
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return true;
   const t = e.target as HTMLElement | null;
   if (!t) return false;
-  if (t.isContentEditable || t.closest("input,textarea,select,[contenteditable]")) return true;
+  if (t.isContentEditable || t.closest("input,textarea,select,[contenteditable],[role=combobox],[role=listbox],[role=menu]")) return true;
   // Arrows and space seek / play in a focused <video> or <audio>.
   return !!t.closest("video,audio,model-viewer") && (e.key.startsWith("Arrow") || e.key === " ");
 }
@@ -94,7 +99,7 @@ function Details({ g, index }: { g: Generation; index: number }) {
         <Row label="Cost" value={g.costUsd != null ? formatCost(g.costUsd) : undefined} mono />
         <Row label="Made" value={timeAgo(g.createdAt)} />
         {g.deletedAt && <Row label="In Trash" value={`${trashDaysLeft(g.deletedAt)} days left`} />}
-        {!g.deletedAt && <Row label="Review" value={<ReviewSelect g={g} />} />}
+        {!g.deletedAt && <Row label="Review" center value={<ReviewSelect g={g} />} />}
       </div>
       {g.request.negativePrompt && <p className="text-[12px] text-muted-foreground">Negative: {g.request.negativePrompt}</p>}
     </div>

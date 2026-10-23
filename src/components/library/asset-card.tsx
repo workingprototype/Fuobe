@@ -240,7 +240,8 @@ export const AssetCard = memo(function AssetCard({
           <p className="truncate text-[12px] text-muted-foreground">
             {stack ? `${stack.label} · ` : `${g.modelName ?? g.modelId} · ${OPERATION_LABELS[g.op]} · `}
             {trashed ? `${trashDaysLeft(g.deletedAt!)} days left in Trash` : timeAgo(g.createdAt)}
-            {!stack && g.status !== "succeeded" && ` · ${g.status === "failed" ? "Failed" : g.status === "canceled" ? "Canceled" : "In progress"}`}
+            {/* "Rendering", as the Status filter calls it: "In progress" is a review status. */}
+            {!stack && g.status !== "succeeded" && ` · ${g.status === "failed" ? "Failed" : g.status === "canceled" ? "Canceled" : g.status === "queued" ? "Queued" : "Rendering"}`}
           </p>
         </div>
         {g.favorite && !stack && <Heart className="size-4 shrink-0 fill-highlight text-highlight" />}
