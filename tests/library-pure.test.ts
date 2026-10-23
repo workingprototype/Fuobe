@@ -60,6 +60,17 @@ describe("outputActions", () => {
     expect(download.href).toBe("/api/files/outputs/d/abcdef123456.png?download=a-fox-abcdef.png");
   });
 
+  it("gives SVG results no raster hand-offs, but keeps them on demo placeholders", () => {
+    const svg = (p: Partial<Generation>, o: Partial<Generation["outputs"][number]> = {}) => gen({ provider: "fal", outputs: [{ url: "/api/files/outputs/d/logo.svg", kind: "image", contentType: "image/svg+xml", ...o }], ...p });
+    expect(ids(svg({}))).toEqual(["bar:download", "bar:favorite", "menu:copy-prompt", "menu:delete"]);
+    expect(ids(svg({}, { url: "https://v3.fal.media/files/x/logo.svg", contentType: undefined }))[0]).toBe("bar:download");
+    expect(ids(svg({ feature: "upload", provider: "local" }))).toEqual(["bar:download"]);
+    // A demo picture is an SVG standing in for a raster result: it can still be animated (a demo Vectorize result can't).
+    expect(ids(svg({ provider: "mock", op: "t2i" }))[0]).toBe("primary:animate");
+    expect(ids(svg({ provider: "mock", op: "vectorize" }))[0]).toBe("bar:download");
+    expect(ids(gen({ outputs: [{ url: "/api/files/o/a.png", kind: "image", contentType: "image/png" }] }))[0]).toBe("primary:animate");
+  });
+
   it("gives videos Extend first and the video hand-offs", () => {
     const g = gen({ kind: "video", op: "t2v", outputs: [{ url: "/api/files/o/v.mp4", kind: "video", draftId: "d1" }] });
     expect(ids(g)).toEqual(["primary:extend", "bar:download", "bar:favorite", "menu:reframe", "menu:lipsync", "menu:upscale", "menu:add-sound", "menu:grade", "menu:finalize", "menu:copy-prompt", "menu:delete"]);
