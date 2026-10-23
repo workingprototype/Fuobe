@@ -30,7 +30,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind } from "@/lib/catalog/types";
-import { modKey } from "@/lib/keys";
+import { keyCombo, useModKey } from "@/lib/keys";
 import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
@@ -271,6 +271,7 @@ function Inner() {
   // --- Selection ---------------------------------------------------------------------------
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const mod = useModKey();
   const order = useMemo(() => sections.flatMap((s) => s.items.flatMap((e) => [e, ...(e.type === "stack" && expanded.has(e.key) ? e.items.map((g) => ({ type: "single" as const, key: g.id, g })) : [])])), [sections, expanded]);
   const latest = useRef({ order, selected, items });
   useEffect(() => {
@@ -517,8 +518,8 @@ function Inner() {
           {!uploadsTab && (
             <button
               onClick={() => (selecting ? clear() : setSelecting(true))}
-              aria-pressed={selecting}
-              aria-label="Select"
+              // Named for what a press does, and with the word it shows ("Done" while selecting).
+              aria-label={selecting ? "Done selecting" : "Select"}
               title={selecting ? "Done selecting" : "Select several"}
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
@@ -708,9 +709,9 @@ function Inner() {
           <div role="toolbar" aria-label="Selection" className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-full border bg-background p-1.5 shadow-strong">
             {/* Phones show just the count, so every action fits at 390 px. */}
             <span className="shrink-0 px-2.5 text-[13px] font-medium whitespace-nowrap">
-              {selected.size ? (
+              {selectedGens.length ? (
                 <>
-                  {selected.size}
+                  {selectedGens.length}
                   <span className="hidden sm:inline"> selected</span>
                 </>
               ) : (
@@ -719,20 +720,21 @@ function Inner() {
                 </>
               )}
             </span>
-            {items.length > 0 && selected.size < items.length && (
+            {/* Shown while any result in view is unselected (a search or filter can hide some of the selection). */}
+            {items.some((g) => !selected.has(g.id)) && (
               <button
                 onClick={() => setSelected(new Set(items.map((g) => g.id)))}
                 className={cn(BAR, "text-brand-text")}
                 aria-label={`Select all ${items.length}`}
-                title={`Select all ${items.length} shown here (${modKey()}+A)`}
+                title={`Select all ${items.length} shown here (${keyCombo("A", { mod })})`}
               >
                 <CheckCheck className="size-4" /> <span className="hidden sm:inline">Select all</span> <span className="font-mono text-[11px] tabular-nums">{items.length}</span>
               </button>
             )}
             {trash ? (
               <>
-                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
-                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selected.size} onClick={() => confirmForever?.(selectedGens, clear)} />
+                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selectedGens.length} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
+                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selectedGens.length} onClick={() => confirmForever?.(selectedGens, clear)} />
               </>
             ) : (
               <>
@@ -746,16 +748,16 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
-                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selected.size} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
+                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
                 <BarButton
                   icon={allPinned ? PinOff : Pin}
                   label={allPinned ? "Unpin" : "Pin"}
-                  disabled={!selected.size}
+                  disabled={!selectedGens.length}
                   onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
                 />
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size} aria-label="Review status" title="Review status">
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={BAR} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
                       <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -764,8 +766,8 @@ function Inner() {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={BAR} disabled={!selectedGens.length} aria-label="Move to">
                       <FolderInput className="size-4" /> <span className="hidden sm:inline">Move to</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -777,7 +779,7 @@ function Inner() {
                   icon={Trash2}
                   label="Delete"
                   destructive
-                  disabled={!selected.size}
+                  disabled={!selectedGens.length}
                   onClick={() => {
                     void actions.trash(selectedGens);
                     clear();
@@ -786,7 +788,7 @@ function Inner() {
               </>
             )}
             <span className="mx-1 h-5 w-px shrink-0 bg-border" />
-            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all">
+            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all, Esc" aria-keyshortcuts="Escape">
               <X className="size-3.5" /> <span className="hidden sm:inline">Unselect all</span> <Kbd className="hidden sm:inline-flex">Esc</Kbd>
             </button>
           </div>
