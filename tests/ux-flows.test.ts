@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { directorPicks } from "@/components/cinema/draft";
+import { hadItemsScript, hadValue } from "@/components/use-had-items";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { leftLabel, notePace, timeLeft, untitledName, type Pace } from "@/lib/format";
 import { toggleAll } from "@/lib/library";
@@ -150,5 +151,29 @@ describe("video tiles have a poster", () => {
     expect(videoPoster(gen([clip], { op: "v2v", request: { feature: "video", modelId: "m", prompt: "", inputs: { images: ["/api/files/ref.png"] } } }), clip)).toBeUndefined();
     expect(videoPoster(undefined, clip)).toBeUndefined();
     expect(videoPoster(gen([{ kind: "image" }]), { kind: "image" })).toBeUndefined();
+  });
+});
+
+describe("a list's loading shape remembers how many it had", () => {
+  it("reads the stored count back as the <html> attribute's value", () => {
+    expect(hadValue("3")).toBe("3");
+    expect(hadValue("6")).toBe("6");
+    expect(hadValue("0")).toBeNull();
+    expect(hadValue(null)).toBeNull();
+    expect(hadValue("1\" onload=\"x")).toBeNull();
+  });
+
+  it("sets the same value before the first paint", () => {
+    const run = (stored: string | null) => {
+      const attrs: Record<string, string> = {};
+      const localStorage = { getItem: () => stored };
+      const document = { documentElement: { setAttribute: (k: string, v: string) => (attrs[k] = v) } };
+      new Function("localStorage", "document", hadItemsScript("home-recent"))(localStorage, document);
+      return attrs;
+    };
+    expect(run("4")).toEqual({ "data-had-home-recent": "4" });
+    expect(run("0")).toEqual({});
+    expect(run(null)).toEqual({});
+    expect(run("<b>")).toEqual({});
   });
 });

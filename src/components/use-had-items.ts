@@ -3,25 +3,31 @@
 import { createElement, useEffect, useLayoutEffect } from "react";
 
 /*
- * Whether a list was non-empty the last time this browser loaded it, so its loading state can take
- * the shape that's coming (a row of skeletons, or the empty state) instead of a guess swapped for
- * something of another height. The answer lives in localStorage and, for CSS, in a `data-had-<name>`
- * attribute on <html>, set before the first paint by <HadItemsScript> (the server's shell renders
- * both shapes; a class like `[html[data-had-home-recent='1']_&]:block` picks one). A browser that has
- * never loaded the list gets the "empty" shape.
+ * How many items a list had the last time this browser loaded it (capped, 0 for none), so its
+ * loading state can take the shape that's coming (that many skeletons, or the empty state) instead
+ * of a guess swapped for something of another height. The answer lives in localStorage and, for CSS,
+ * in a `data-had-<name>="<count>"` attribute on <html> (absent for none), set before the first paint
+ * by <HadItemsScript> (the server's shell renders both shapes; a class like
+ * `[html[data-had-home-recent]_&]:block` or `[html[data-had-cinema-projects='1']_&]:grid` picks one).
+ * A browser that has never loaded the list gets the "empty" shape.
  */
 
 const storageKey = (name: string) => `fuobe:had:${name}`;
 const attr = (name: string) => `data-had-${name}`;
 
-function apply(name: string, had: boolean) {
-  if (had) document.documentElement.setAttribute(attr(name), "1");
+/** A stored count as the attribute's value: "1"… for some, null for none (or anything unexpected). */
+export function hadValue(stored: string | null): string | null {
+  return stored && /^[1-9][0-9]?$/.test(stored) ? stored : null;
+}
+
+function apply(name: string, value: string | null) {
+  if (value) document.documentElement.setAttribute(attr(name), value);
   else document.documentElement.removeAttribute(attr(name));
 }
 
-/** The pre-paint script's text (exported for tests). */
+/** The pre-paint script's text (exported for tests): hadValue, inlined. */
 export function hadItemsScript(name: string): string {
-  return `(function(){try{if(localStorage.getItem(${JSON.stringify(storageKey(name))})==="1")document.documentElement.setAttribute(${JSON.stringify(attr(name))},"1")}catch(e){}})()`;
+  return `(function(){try{var v=localStorage.getItem(${JSON.stringify(storageKey(name))});if(v&&/^[1-9][0-9]?$/.test(v))document.documentElement.setAttribute(${JSON.stringify(attr(name))},v)}catch(e){}})()`;
 }
 
 /**
@@ -37,18 +43,22 @@ export function HadItemsScript({ name }: { name: string }) {
   });
 }
 
-/** Remember whether the list (`count`, undefined while it loads) had anything, and keep <html>'s attribute in step. */
-export function useHadItems(name: string, count: number | undefined) {
+/**
+ * Remember how many the list had (`count`, undefined while it loads), up to `max` (1: just whether it
+ * had any), and keep <html>'s attribute in step.
+ */
+export function useHadItems(name: string, count: number | undefined, max = 1) {
   useLayoutEffect(() => {
     try {
-      apply(name, localStorage.getItem(storageKey(name)) === "1");
+      apply(name, hadValue(localStorage.getItem(storageKey(name))));
     } catch {}
   }, [name]);
   useEffect(() => {
     if (count === undefined) return;
+    const value = String(Math.max(0, Math.min(count, max, 99)));
     try {
-      localStorage.setItem(storageKey(name), count ? "1" : "0");
+      localStorage.setItem(storageKey(name), value);
     } catch {}
-    apply(name, count > 0);
-  }, [name, count]);
+    apply(name, hadValue(value));
+  }, [name, count, max]);
 }

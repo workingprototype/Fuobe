@@ -145,7 +145,8 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
   const [prompt, setPrompt] = useState("");
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
-  useHadItems("home-recent", recent.data?.length);
+  // How many (up to 6): a phone's grid holds 3 a row, so 1 to 3 results are one row of skeletons, 4 to 6 two.
+  useHadItems("home-recent", recent.data?.length, 6);
   // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
   // the status: render the server's (status-less) view until hydrated, as useEngineMode does.
   const hydrated = useHydrated();
@@ -251,10 +252,17 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
           !recent.data && (
             <>
               <HadItemsScript name="home-recent" />
-              <Row title="Recent" href="/library" className="hidden [html[data-had-home-recent='1']_&]:block">
+              <Row title="Recent" href="/library" className="hidden [html[data-had-home-recent]_&]:block">
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-busy="true" aria-label="Loading recent results">
                   {Array.from({ length: 6 }, (_, i) => (
-                    <Skeleton key={i} className="aspect-square rounded-xl" />
+                    <Skeleton
+                      key={i}
+                      className={cn(
+                        "aspect-square rounded-xl",
+                        // A phone's second row only when the last visit had more than 3.
+                        i >= 3 && "max-sm:hidden [html[data-had-home-recent='4']_&]:block [html[data-had-home-recent='5']_&]:block [html[data-had-home-recent='6']_&]:block",
+                      )}
+                    />
                   ))}
                 </div>
               </Row>
