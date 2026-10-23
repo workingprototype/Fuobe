@@ -273,7 +273,8 @@ export function AssistComposer({
         rows={1}
         placeholder={placeholder}
         aria-label="Message"
-        // A textarea can't be a combobox (axe aria-allowed-role): it stays a text box that names the open skills list and its active row.
+        // A textarea can't be a combobox (axe aria-allowed-role): it stays a text box that says it has a skills list ("/"), and names the open list and its active row.
+        aria-haspopup={skills?.length ? "listbox" : undefined}
         aria-controls={menuOpen ? listId : undefined}
         aria-activedescendant={menuOpen ? `${listId}-${matches[active]?.name}` : undefined}
         aria-autocomplete={skills?.length ? "list" : undefined}
