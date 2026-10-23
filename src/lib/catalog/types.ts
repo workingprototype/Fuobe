@@ -219,8 +219,10 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
 /**
  * Video codecs and containers an export or HDR job can write (params.format): H.264 MP4, 10-bit H.265
  * MP4, ProRes 422 HQ or 4444 in a .mov, lossless FFV1 in a .mkv, or a 16-bit EXR frame sequence.
+ * The open engine's HDR is also written as 10-bit H.264 in BT.2020 with the HLG or PQ (HDR10) curve
+ * (core ComfyUI has no H.265 encoder).
  */
-export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr";
+export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr" | "hlg_10bit" | "pq_10bit";
 
 /** A point on a picture in its own pixels (the first frame of a video). Negative points mark what to keep. */
 export interface PixelPoint {
@@ -409,6 +411,12 @@ export interface FieldMap {
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
   ignore?: string[];
+  /**
+   * An upscaler that takes a factor, not a size (Topaz, FLUX Upscale): params.resolution ("1080p", "4K",
+   * "Original" = 1) becomes target ÷ the clip's shorter edge (GenInput.sourceSize), kept within min–max.
+   * Nothing is sent when the clip's size is unknown (the API's default factor applies).
+   */
+  upscaleFactor?: { key: string; min?: number; max?: number };
 }
 
 export interface ModelRoute {
@@ -454,8 +462,8 @@ export interface ModelOptions {
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
-  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
-  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly (FLUX Upscale's creativity 0 / 1). */
+  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number; labels?: Record<string, string> }[];
   /** Images it needs before it can run (try-on: the person and the garment). */
   minImages?: number;
   /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
@@ -477,6 +485,13 @@ export interface ModelOptions {
   requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
+  /**
+   * Frame rates it can reach (params.targetFps): FPS Boost's 24–120, an upscaler's 24 / 30 / 60. Without a
+   * default target (`defaults.targetFps`) the clip's own frame rate is the first choice ("Original").
+   */
+  fpsTargets?: number[];
+  /** Slow-motion factors it takes (params.slowdown; 1 = the clip's speed). */
+  slowdowns?: number[];
 }
 
 export interface Pricing {
@@ -505,7 +520,7 @@ export interface ModelDef {
   badges?: Badge[];
   routes: ModelRoute[];
   options: ModelOptions;
-  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice">>;
+  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice" | "targetFps" | "format">>;
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
@@ -689,6 +704,9 @@ export interface GenInput extends GenParams {
   audios?: string[];
   model3d?: string;
   loras?: LoraRef[];
+  /** Server-filled from the input clip's header (generations.ts submit): its displayed size and frame rate. */
+  sourceSize?: { width: number; height: number };
+  sourceFps?: number;
 }
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";

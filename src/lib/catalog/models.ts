@@ -1,6 +1,7 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
+import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -29,6 +30,8 @@ const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
 const IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"];
 const VID_AR = ["16:9", "9:16", "1:1"];
+/** Open video upscalers: the result's shorter edge (1080p = 1080 px in any shape). */
+const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 
 
 // ---------------------------------------------------------------------------
@@ -373,15 +376,18 @@ const open: ModelDef[] = [
     options: { aspectRatios: VID_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "9:16" },
   }),
+  // Video upscalers run in passes of a few frames (VHS meta-batch), so memory stays flat whatever the clip's
+  // length (the whole-clip graphs held about 38 GB of frames for 30 s at 480p). params.resolution = the shorter edge.
   o({
     id: "oss-seedvr2",
     name: "SeedVR2 (video)",
     vendor: "ByteDance Seed",
     family: "seedvr",
     kind: "video",
-    tagline: "One-step diffusion upscaler for video",
-    routes: [comfy("upscale-video", "upscale-video-seedvr2")],
-    options: { seed: true },
+    tagline: "One-step diffusion restoration and upscale, in passes so long clips fit",
+    routes: [comfy("upscale-video", "upscale-video-seedvr2-chunked", "33 frames per pass; each pass restored on its own")],
+    options: { seed: true, resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
   o({
     id: "oss-upscale-video-esrgan",
@@ -389,19 +395,57 @@ const open: ModelDef[] = [
     vendor: "Open source",
     family: "esrgan",
     kind: "video",
-    tagline: "Fast frame-by-frame 4x upscale",
-    routes: [comfy("upscale-video", "upscale-video-esrgan")],
-    options: {},
+    tagline: "Fast frame-by-frame 4x upscale, in passes: any length fits in memory",
+    routes: [comfy("upscale-video", "upscale-video-esrgan-chunked", "Real-ESRGAN x4, then scaled to the size asked for")],
+    options: { resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
+  // FPS Boost: interpolate by m and keep every n-th frame (src/lib/av/fps.ts), for an exact target and slow motion.
   o({
     id: "oss-rife",
     name: "RIFE interpolation",
     vendor: "Open source",
     family: "rife",
     kind: "video",
-    tagline: "Smooth slow motion and 2x/4x frame rate",
-    routes: [comfy("interpolate", "interpolate-rife")],
-    options: {},
+    tagline: "FPS Boost to 24–120 fps and slow motion; FILM for large motion",
+    routes: [comfy("interpolate", "interpolate-rife-fps", "frame rate from the clip's header: interpolate by m, keep every n-th")],
+    options: {
+      fpsTargets: [...FPS_TARGETS],
+      slowdowns: [...SLOW_MOTION],
+      controls: [
+        {
+          param: "checkpoint",
+          label: "Model",
+          values: ["rife_v4.26.safetensors", "film_net_fp16.safetensors"],
+          default: "rife_v4.26.safetensors",
+          labels: { "rife_v4.26.safetensors": "RIFE 4.26 (fast)", "film_net_fp16.safetensors": "FILM (large motion, slower)" },
+        },
+      ],
+    },
+    defaults: { targetFps: DEFAULT_FPS_TARGET },
+  }),
+  // SDR to HDR and pro export formats (core ComfyUI and VideoHelperSuite, no model weights).
+  o({
+    id: "oss-sdr-to-hdr",
+    name: "SDR to HDR",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "SDR footage expanded to 10-bit HDR: HLG or HDR10 (PQ) MP4, or 16-bit EXR frames",
+    routes: [comfy("sdr-to-hdr", "video-sdr-to-hdr", "an inverse tone map (core ImageSDRToHDR), not a learned model")],
+    options: { formats: ["hlg_10bit", "pq_10bit", "exr"], sliders: [{ param: "peakNits", label: "Peak brightness (nits)", min: 200, max: 2000, step: 50, default: 650 }] },
+    defaults: { format: "hlg_10bit" },
+  }),
+  o({
+    id: "oss-export-video",
+    name: "Pro export",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "ProRes 422 HQ or 4444, H.265 10-bit, lossless FFV1 or 16-bit EXR frames, made on your machine",
+    routes: [comfy("export-video", "video-export-pro-chunked", "VideoHelperSuite with the server's ffmpeg, in passes; EXR: core SaveImageAdvanced")],
+    options: { formats: ["prores_422_hq", "prores_4444", "h265_10bit", "ffv1", "h264", "exr"] },
+    defaults: { format: "prores_422_hq" },
   }),
   o({
     id: "oss-mmaudio",

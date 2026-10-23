@@ -862,7 +862,7 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   if ("error" in built) return { model, costUsd: null, error: built.error };
   try {
     const plan = planGeneration(withPlaceholders(built.request), getModel, getPreset);
-    return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs) };
+    return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
   } catch (e) {
     return { ...built, model, costUsd: null, error: (e as Error).message };
   }
