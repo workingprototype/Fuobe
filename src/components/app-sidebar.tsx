@@ -40,13 +40,15 @@ function StatusDot({ ok }: { ok: boolean | undefined }) {
 }
 
 /**
- * The row's label. While the clicked row's route loads (useLinkStatus) it shimmers and the row
- * tints, so the click shows at once even when the next page takes a moment.
+ * The row's label. While the clicked row's route loads (useLinkStatus) it marks the row, which tints
+ * (has-[[data-pending]]), so the click shows at once even when the next page takes a moment. Nothing
+ * animates: a shimmer or pulse here costs main-thread frames during the very navigation it waits for
+ * (measured: about +100 ms per click with the CPU slowed 4x).
  */
 function NavLabel({ children }: { children: React.ReactNode }) {
   const { pending } = useLinkStatus();
   return (
-    <span data-pending={pending || undefined} className={cn(pending && "shimmer-text animate-shimmer-text")}>
+    <span data-pending={pending || undefined} className={cn(pending && "opacity-70")}>
       {children}
     </span>
   );
