@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NAV } from "@/components/nav-items";
-import { DEFAULT_NAV_CLOSED, groupId, isFullScreenStudio, navActive, parseClosed, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
+import { DEFAULT_NAV_CLOSED, fullScreenStudio, groupId, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 
 const q = (s = "") => new URLSearchParams(s);
 const LIBRARY = ["/library", "/library?tab=favorites"];
@@ -126,7 +126,24 @@ describe("remembered sidebar state", () => {
 
 describe("full-screen studios", () => {
   it("are an open Cinema, Canvas or Layers project, and Assist", () => {
-    for (const p of ["/cinema/abc", "/canvas/x1", "/layers/l-2/", "/assist", "/assist/memory", "/assist/projects/p1"]) expect(isFullScreenStudio(p)).toBe(true);
-    for (const p of ["/", "/cinema", "/canvas", "/layers", "/assistant", "/apps/app-packshot", "/cinema/a/b", "/library"]) expect(isFullScreenStudio(p)).toBe(false);
+    for (const p of ["/cinema/abc", "/canvas/x1", "/layers/l-2/", "/assist", "/assist/memory", "/assist/projects/p1"]) expect(fullScreenStudio(p)).not.toBeNull();
+    for (const p of ["/", "/cinema", "/canvas", "/layers", "/assistant", "/apps/app-packshot", "/cinema/a/b", "/library"]) expect(fullScreenStudio(p)).toBeNull();
+  });
+
+  it("count every Assist page as one studio, and each project as its own", () => {
+    // Opening the sidebar on a chat keeps it open on Skills; a different project folds it again.
+    expect(fullScreenStudio("/assist")).toBe("/assist");
+    expect(fullScreenStudio("/assist/skills")).toBe(fullScreenStudio("/assist/projects/p1"));
+    expect(fullScreenStudio("/layers/l-2/")).toBe(fullScreenStudio("/layers/l-2"));
+    expect(fullScreenStudio("/cinema/a")).not.toBe(fullScreenStudio("/cinema/b"));
+    expect(fullScreenStudio("/canvas/a")).not.toBe(fullScreenStudio("/cinema/a"));
+  });
+});
+
+describe("the remembered choice's cookie", () => {
+  it("is the one the shadcn provider reads, for a week, site-wide", () => {
+    expect(sidebarCookie(false)).toBe("sidebar_state=false; path=/; max-age=604800");
+    expect(sidebarOpenFromCookie(sidebarCookie(false).split(";")[0])).toBe(false);
+    expect(sidebarOpenFromCookie(sidebarCookie(true).split(";")[0])).toBe(true);
   });
 });

@@ -53,6 +53,11 @@ export function sidebarOpenFromCookie(cookie: string): boolean {
   return !new RegExp(`(?:^|;\\s*)${SIDEBAR_COOKIE}=false(?:;|$)`).test(cookie);
 }
 
+/** The cookie that remembers the expanded/collapsed choice (as the shadcn SidebarProvider writes it). */
+export function sidebarCookie(open: boolean): string {
+  return `${SIDEBAR_COOKIE}=${open}; path=/; max-age=${60 * 60 * 24 * 7}`;
+}
+
 /**
  * Full-screen studios: a project open in Cinema, Canvas or Layers, and Assist (with its own rail of
  * chats). They have a sidebar of their own, so the app sidebar folds to its icon rail while one is
@@ -60,8 +65,14 @@ export function sidebarOpenFromCookie(cookie: string): boolean {
  */
 const FULL_SCREEN = /^\/(?:(?:cinema|canvas|layers)\/[^/]+\/?|assist(?:\/.*)?)$/;
 
-export function isFullScreenStudio(pathname: string): boolean {
-  return FULL_SCREEN.test(pathname);
+/**
+ * Which full-screen studio a path belongs to (null on any other page): the project's own path, or
+ * "/assist" for every Assist page (its chats, projects, skills and memory are one workspace). The
+ * sidebar opened by hand stays open while you move inside one studio, and folds again in the next.
+ */
+export function fullScreenStudio(pathname: string): string | null {
+  if (!FULL_SCREEN.test(pathname)) return null;
+  return /^\/assist(?:\/|$)/.test(pathname) ? "/assist" : pathname.replace(/\/$/, "");
 }
 
 /**

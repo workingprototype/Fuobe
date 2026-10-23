@@ -30,7 +30,7 @@ import { JobNotifications } from "@/components/job-notifications";
 import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { useModKey } from "@/lib/keys";
-import { groupId, isFullScreenStudio, NAV_CLOSED_KEY, navActive, parseClosed, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
+import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 const NO_SEARCH = new URLSearchParams();
@@ -163,14 +163,14 @@ interface ShellState {
   path: string;
   /** The expanded/collapsed choice in the cookie. */
   remembered: boolean;
-  /** Opened or closed by hand on a full-screen studio: lasts while that page is open. */
-  peek: { path: string; open: boolean } | null;
+  /** Opened or closed by hand in a full-screen studio (fullScreenStudio): lasts while you stay in it. */
+  peek: { studio: string; open: boolean } | null;
 }
 
 /**
- * SidebarProvider that starts from the remembered expanded/collapsed state (the shadcn cookie). On a
- * full-screen studio (isFullScreenStudio) the sidebar folds to its rail instead; opening it there
- * lasts until you leave that page, and neither writes the cookie.
+ * SidebarProvider that starts from the remembered expanded/collapsed state (the shadcn cookie). In a
+ * full-screen studio (fullScreenStudio) the sidebar folds to its rail instead; opening it there
+ * lasts until you leave that studio, and neither writes the cookie.
  */
 export function SidebarShell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   // The first client render reads the cookie and the URL itself, as the pre-paint script does, so hydration matches.
@@ -179,17 +179,34 @@ export function SidebarShell({ children, style }: { children: React.ReactNode; s
     remembered: typeof document === "undefined" ? true : sidebarOpenFromCookie(document.cookie),
     peek: null,
   }));
-  const full = isFullScreenStudio(state.path);
-  const open = full ? state.peek?.path === state.path && state.peek.open : state.remembered;
+  const studio = fullScreenStudio(state.path);
+  const open = studio ? state.peek?.studio === studio && state.peek.open : state.remembered;
   // Both callbacks are stable, so a new page alone leaves the provider's context as it was and the
-  // sidebar doesn't render again on every navigation.
+  // sidebar doesn't render again on every navigation. A change is filed by the page it applies to
+  // (the state's own path), never by the page a stale callback was made on.
   const onOpenChange = useCallback(
-    (value: boolean) => setState((s) => (isFullScreenStudio(s.path) ? { ...s, peek: { path: s.path, open: value } } : { ...s, remembered: value })),
+    (value: boolean) =>
+      setState((s) => {
+        const at = fullScreenStudio(s.path);
+        return at ? { ...s, peek: { studio: at, open: value } } : { ...s, remembered: value };
+      }),
     [],
   );
-  const onPath = useCallback((path: string) => setState((s) => (s.path === path ? s : { ...s, path })), []);
+  const onPath = useCallback(
+    (path: string) =>
+      setState((s) => {
+        if (s.path === path) return s;
+        const at = fullScreenStudio(path);
+        return { ...s, path, peek: at && s.peek?.studio === at ? s.peek : null };
+      }),
+    [],
+  );
+  // Only the remembered choice reaches the cookie: a studio's fold or peek never does.
+  useEffect(() => {
+    if (sidebarOpenFromCookie(document.cookie) !== state.remembered) document.cookie = sidebarCookie(state.remembered);
+  }, [state.remembered]);
   return (
-    <SidebarProvider open={open} onOpenChange={onOpenChange} persistOpen={!full} style={style}>
+    <SidebarProvider open={open} onOpenChange={onOpenChange} persistOpen={false} style={style}>
       <Suspense fallback={null}>
         <PathWatcher onPath={onPath} />
       </Suspense>
