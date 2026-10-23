@@ -103,7 +103,7 @@ describe("Frames mode in the Video studio composer", () => {
     expect(framesUploading(framesOf("a", "b"))).toBe(false);
     expect(framesUploading(undefined)).toBe(false);
     const base = { model: true, frames: framesBlocker(getModel("flux-3-max")!, fs.length), promptMissing: false };
-    expect(blockerFor({ ...base, uploading: framesUploading(fs) })).toEqual({ message: "Uploading…" });
+    expect(blockerFor({ ...base, uploading: framesUploading(fs) })).toEqual({ message: "Uploading…", quiet: true });
     // The start frame uploading too: nothing goes until it's in.
     const first = [{ value: still("s", { ref: "", uploading: true }), at: 0 }, ...framesOf("b", "c").slice(1)];
     expect(blockerFor({ ...base, uploading: framesUploading(first) })?.message).toBe("Uploading…");

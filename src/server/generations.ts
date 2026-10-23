@@ -738,7 +738,7 @@ async function submit(
         ...(facts.fps ? { sourceFps: facts.fps } : {}),
         ...(facts.duration ? { sourceDuration: facts.duration } : {}),
       };
-      return adapter.prepareFile(f.data, f.contentType, f.name);
+      return adapter.prepareFile(f.data, f.contentType, f.name, route);
     };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;

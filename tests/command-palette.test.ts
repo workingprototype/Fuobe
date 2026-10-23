@@ -143,8 +143,9 @@ describe("palette index", () => {
 
   it("finds the model on the Models page when nothing else runs it", () => {
     const fallback = index.models.filter((m) => pathOf(m.href) === "/models");
-    // Only models whose studio isn't in this build (or that only run inside chains) are left.
-    expect(fallback.length).toBeLessThan(30);
+    // Only models whose studio isn't in this build (or that only run inside chains) are left. Round 4 adds
+    // the Remove object, Genjutsu, FPS Boost / SDR to HDR / Export and 3D scene models (33 here).
+    expect(fallback.length).toBeLessThan(40);
     for (const m of fallback) {
       const q = new URLSearchParams(m.href.split("?")[1]).get("q");
       // The Models search (ModelsTable) matches q against this text.

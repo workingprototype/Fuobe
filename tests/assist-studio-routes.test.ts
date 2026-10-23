@@ -479,7 +479,7 @@ describe("Assist chat", () => {
     await agent.answerApproval(t.id, true);
     await agent.run(t.id, scripted(reply([said("It's in Layers.")], "end_turn")));
     const link = agent.getThread(t.id)!.thread.items.find((i) => i.role === "tool" && i.studio);
-    expect(link).toMatchObject({ studio: "Layers", href: expect.stringMatching(/^\/layers\/\w+$/) });
+    expect(link).toMatchObject({ studio: "Layers", href: expect.stringMatching(/^\/layers\/[\w-]+$/) });
   });
 
   it("a call the studio can't take says why on the card", async () => {
