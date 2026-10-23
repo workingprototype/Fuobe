@@ -60,10 +60,10 @@ export function PresetHeader({
           <button
             type="button"
             className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label={`About ${preset.name}`}
           >
             <Info className="size-3.5" />
-            <span className="hidden sm:inline">Details</span>
+            <span className="max-sm:sr-only">Details</span>
+            <span className="sr-only"> about {preset.name}</span>
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,360px)] space-y-2 p-3 text-[13px]">
@@ -73,7 +73,7 @@ export function PresetHeader({
               <li key={r.engine} className="flex items-center gap-2">
                 {r.engine === "cloud" ? <Cloud className="size-3.5 shrink-0" /> : <Cpu className="size-3.5 shrink-0" />}
                 <span className="text-muted-foreground">{r.label}</span>
-                <span className={cn("ml-auto truncate font-medium", !r.model && "font-normal text-subtle-foreground")}>{r.model ?? "Not available yet"}</span>
+                <span className={cn("ml-auto truncate font-medium", !r.model && "font-normal text-muted-foreground")}>{r.model ?? "Not available yet"}</span>
               </li>
             ))}
           </ul>

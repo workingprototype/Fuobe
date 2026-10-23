@@ -1,7 +1,8 @@
 "use client";
 
 import { Cloud, Cpu, Info, Search } from "lucide-react";
-import { memo, useDeferredValue, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { memo, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useProgressive } from "@/components/use-progressive";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngine } from "@/lib/api";
@@ -25,12 +26,13 @@ function RouteDetails({ row }: { row: ModelRow }) {
         <button
           type="button"
           className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={`Where ${row.name} runs`}
         >
           <Info className="size-3.5" />
-          <span className="hidden sm:inline">
+          {/* The name starts with the visible text ("3 routes"), so speech users can say it. */}
+          <span className="max-sm:sr-only">
             {row.routes.length} route{row.routes.length === 1 ? "" : "s"}
           </span>
+          <span className="sr-only">: where {row.name} runs</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,420px)] p-3">
@@ -42,7 +44,7 @@ function RouteDetails({ row }: { row: ModelRow }) {
             </li>
           ))}
         </ul>
-        <p className="mt-2 font-mono text-[11px] text-subtle-foreground">id {row.id}</p>
+        <p className="mt-2 font-mono text-[11px] text-muted-foreground">id {row.id}</p>
       </PopoverContent>
     </Popover>
   );
@@ -71,8 +73,8 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         <div className="text-[12px] text-muted-foreground">
           {m.vendor} — {m.tagline}
         </div>
-        {m.note && <div className="mt-0.5 text-[11px] text-subtle-foreground">{m.note}</div>}
-        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">
+        {m.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{m.note}</div>}
+        <div className="mt-1 text-[11px] text-muted-foreground md:hidden">
           <span className="font-mono text-muted-foreground sm:hidden">{m.price} · </span>
           {m.ops.join(" · ")}
         </div>
@@ -92,6 +94,18 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
   );
 });
 
+/**
+ * A link's ?q= (the ⌘K palette's "open this model" for models no studio offers) fills the search.
+ * It reads the URL, so it sits under its own Suspense: the table itself stays in the static page.
+ */
+function UrlQuery({ onQuery }: { onQuery: (q: string) => void }) {
+  const q = useSearchParams().get("q");
+  useEffect(() => {
+    if (q !== null) onQuery(q);
+  }, [q, onQuery]);
+  return null;
+}
+
 export function ModelsTable({ models }: { models: ModelRow[] }) {
   const [engineChoice, setEngine] = useState<Engine | "all">("all");
   const [, , mode] = useEngine();
@@ -110,13 +124,24 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
   const rows = useRef<HTMLTableSectionElement>(null);
   return (
     <div className="space-y-4">
+      <Suspense fallback={null}>
+        <UrlQuery onQuery={setQ} />
+      </Suspense>
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="relative w-full lg:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="search"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              // Typing takes over from the link: drop its ?q=, so the same link fills the search again later.
+              if (new URLSearchParams(window.location.search).has("q")) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete("q");
+                window.history.replaceState(null, "", url);
+              }
+            }}
             placeholder={`Search ${models.length} models`}
             aria-label="Search models"
             className="h-9 w-full rounded-full border bg-background pr-3 pl-9 text-[14px] outline-none placeholder:text-subtle-foreground focus:border-primary focus:ring-4 focus:ring-brand-faint"

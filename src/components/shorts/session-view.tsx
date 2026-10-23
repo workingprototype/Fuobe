@@ -191,7 +191,7 @@ function Session({ s }: { s: View }) {
                 aria-disabled={!canStitch || actions.stitch.isPending}
                 className={cn(
                   "inline-flex h-9 items-center gap-1.5 rounded-full border px-4 text-[13px] font-medium",
-                  canStitch ? "bg-background hover:bg-accent" : "cursor-not-allowed text-subtle-foreground",
+                  canStitch ? "bg-background hover:bg-accent" : "cursor-not-allowed text-muted-foreground",
                 )}
                 title={canStitch ? undefined : "Ready when every segment has rendered"}
               >

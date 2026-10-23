@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Cloud, Cpu, Lock, Search, Sparkles, X } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { CardPending, IntentLink } from "@/components/intent-link";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { PresetPreview, usePreviewPlayback } from "@/components/preset-preview";
 import { GALLERY_GRID } from "@/components/skeletons";
@@ -43,7 +44,8 @@ export const PresetCard = memo(function PresetCard({
   const Icon = PRESET_ICONS[preset.icon] ?? Sparkles;
   const { ref, playing, handlers } = usePreviewPlayback<HTMLAnchorElement>(preset.id);
   return (
-    <Link
+    // Prefetched on hover or touch, not on sight: a gallery shows hundreds of these.
+    <IntentLink
       ref={ref}
       href={href}
       {...handlers}
@@ -62,12 +64,13 @@ export const PresetCard = memo(function PresetCard({
         {preset.top && (
           <span className="absolute top-1.5 left-1.5 rounded-[4px] bg-highlight px-1 text-[10px] font-semibold text-highlight-foreground">Popular</span>
         )}
+        <CardPending />
       </div>
       <div className="min-w-0 px-0.5">
         <p className="truncate text-[13px] font-medium">{preset.name}</p>
         {!compact && <p className="line-clamp-2 text-[12px] leading-snug text-muted-foreground">{preset.description}</p>}
       </div>
-    </Link>
+    </IntentLink>
   );
 });
 

@@ -182,7 +182,7 @@ function ElementForm({ onOpenChange, element, defaultKind = "character", onSaved
         />
         <p className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
           <AtSign className="size-3" />
-          {name.trim() ? handleFor(name) : "handle"} <span className="text-subtle-foreground">— how you mention it in prompts</span>
+          {name.trim() ? handleFor(name) : "handle"} <span className="text-muted-foreground">— how you mention it in prompts</span>
         </p>
       </div>
       <Textarea

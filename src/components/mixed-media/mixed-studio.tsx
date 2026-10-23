@@ -564,7 +564,7 @@ function Editor({
           aria-disabled={!!blocker || previewBusy}
           className={cn(
             "flex h-9 w-full items-center justify-center gap-2 rounded-full border text-[13px] font-medium",
-            blocker ? "text-subtle-foreground" : "bg-background hover:bg-accent",
+            blocker ? "text-muted-foreground" : "bg-background hover:bg-accent",
           )}
         >
           {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
@@ -602,7 +602,7 @@ function Editor({
           aria-describedby={blocker ? "mm-blocker" : undefined}
           className={cn(
             "flex h-11 w-full items-center justify-center gap-2 rounded-full text-[14px] font-medium transition-colors",
-            blocker ? "bg-muted text-subtle-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90",
+            blocker ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90",
           )}
         >
           {actions.render.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}

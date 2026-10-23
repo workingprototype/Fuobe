@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GetStarted } from "@/components/get-started";
 import { PageShell } from "@/components/page-shell";
+import { CardPending, IntentLink } from "@/components/intent-link";
 import { PresetCard } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
@@ -50,16 +51,16 @@ interface Counts {
 
 /** Tool tiles. Append one entry per new destination (the grid holds five per row on wide screens). */
 const tools = (c: Counts) => [
-  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard, hue: 330 },
-  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film, hue: 280 },
-  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles, hue: 20 },
-  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2, hue: 200 },
-  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal, hue: 100 },
-  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network, hue: 260 },
-  { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2, hue: 150 },
-  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace, hue: 320 },
-  { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn, hue: 240 },
-  { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines, hue: 60 },
+  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard },
+  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film },
+  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles },
+  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2 },
+  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal },
+  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network },
+  { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2 },
+  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace },
+  { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn },
+  { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines },
 ];
 
 /** The latest results as a compact strip of square thumbnails; a tap opens the viewer. */
@@ -288,7 +289,7 @@ export function HomeView({
         ) : nothingConnected && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
-            <Link href="/settings#get-started" className="text-brand-text underline underline-offset-2 hover:no-underline">
+            <Link href="/settings#get-started" className="text-brand-text underline underline-offset-2">
               {engineMode === "open" ? "Connect ComfyUI" : engineMode === "cloud" ? "Add a fal.ai or Replicate key" : "Add a fal.ai key or connect ComfyUI"}
             </Link>{" "}
             to generate for real.
@@ -298,15 +299,17 @@ export function HomeView({
 
       <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {tools(counts).map((t) => (
-          <Link key={t.href} href={t.href} className="group flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
-            <span className="grid size-9 place-items-center rounded-lg text-white" style={{ background: `linear-gradient(135deg, oklch(0.75 0.15 ${t.hue}), oklch(0.55 0.2 ${t.hue + 40}))` }}>
-              <t.icon className="size-4 transition-transform group-hover:scale-110" />
+          // Neutral chrome (Liner): the tile tints on hover, the colour stays in the content below.
+          <IntentLink key={t.href} href={t.href} className="group relative flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
+            <span className="grid size-9 place-items-center rounded-lg bg-muted text-foreground transition-colors group-hover:bg-brand-faint group-hover:text-brand-text">
+              <t.icon className="size-4" />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-[13px] font-medium">{t.label}</span>
               <span className="block text-[12px] text-muted-foreground">{t.desc}</span>
             </span>
-          </Link>
+            <CardPending />
+          </IntentLink>
         ))}
       </div>
 

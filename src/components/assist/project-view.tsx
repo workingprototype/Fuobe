@@ -367,7 +367,7 @@ function Sources({ p }: { p: AssistProject }) {
             ) : (
               <p className="px-3 py-4 text-center text-[13px] text-muted-foreground">
                 No elements yet —{" "}
-                <Link href="/elements" className="text-brand-text hover:underline">
+                <Link href="/elements" className="text-brand-text underline underline-offset-2">
                   save a character or product
                 </Link>
                 .

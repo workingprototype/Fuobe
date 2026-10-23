@@ -312,7 +312,7 @@ function DecomposeTool() {
           <p className="mt-2 font-heading text-[19px] leading-snug">{splitNode && state === "processing" ? `Separating ${splitNode.name}` : title}</p>
           <p className="mt-1 text-[12px] text-pretty text-muted-foreground">{state === "failed" ? (job?.result?.error ?? body) : body}</p>
           {state === "processing" && job?.result?.progress ? <Progress value={job.result.progress * 100} className="mt-3 h-1" aria-label="Progress" /> : null}
-          {(state === "processing" || state === "stalled") && <p className="mt-2 text-[11px] text-subtle-foreground">{jobStatusText(job?.result)}</p>}
+          {(state === "processing" || state === "stalled") && <p className="mt-2 text-[11px] text-muted-foreground">{jobStatusText(job?.result)}</p>}
         </div>
         {state === "failed" && job && (
           <div className="flex gap-2">
@@ -382,7 +382,7 @@ function DecomposeTool() {
       {auto ? (
         <div className="space-y-0.5">
           <p className="text-[12px] text-muted-foreground">Model · {model?.name ?? modelId}</p>
-          <p className="text-[11px] text-subtle-foreground">{asked ? "A named element runs on Qwen-Image-Layered Control." : "Name an element to pull it out with Qwen-Image-Layered Control."}</p>
+          <p className="text-[11px] text-muted-foreground">{asked ? "A named element runs on Qwen-Image-Layered Control." : "Name an element to pull it out with Qwen-Image-Layered Control."}</p>
         </div>
       ) : (
         <ModelSelect tool={tool} value={modelId} onChange={picker.setModelId} />
@@ -417,7 +417,7 @@ function DecomposeTool() {
       <Field label="Layers" hint={modelId?.startsWith("seedream") ? `up to ${n}` : n}>
         <Slider aria-label="Layers" min={min} max={Math.max(min, max)} step={1} value={[n]} onValueChange={([v]) => setLayers(v)} />
       </Field>
-      {modelId?.startsWith("seedream") && <p className="text-[11px] text-subtle-foreground">Seedream decides the final count (up to 16) and names each layer.</p>}
+      {modelId?.startsWith("seedream") && <p className="text-[11px] text-muted-foreground">Seedream decides the final count (up to 16) and names each layer.</p>}
       {!model && <p className="text-[12px] text-muted-foreground">No {engine === "open" ? "open-source" : "cloud"} model can split layers yet.</p>}
       <RunRow cost={cost} busy={busy} disabled={!model} onClick={() => void start()}>
         <Layers /> {splitNode ? "Separate layer" : "Separate layers"}
@@ -486,7 +486,7 @@ function EditTextTool() {
             <Button variant="secondary" className="w-full rounded-full" onClick={startDetect} disabled={busy || !!detecting}>
               {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
             </Button>
-            <p className="text-center font-mono text-[11px] text-subtle-foreground">{costLabel(detectModel, isDemo(detectModel))}</p>
+            <p className="text-center font-mono text-[11px] text-muted-foreground">{costLabel(detectModel, isDemo(detectModel))}</p>
             {detect?.result?.status === "succeeded" && loadedFor === detect.id && !rows.length && <p className="text-center text-[12px] text-muted-foreground">No text was found on this image.</p>}
             {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={startDetect} />}
           </div>
@@ -499,7 +499,7 @@ function EditTextTool() {
         <ol className="space-y-2" aria-label="Text on the image">
           {rows.map((r, i) => (
             <li key={i} className="flex items-start gap-2" onPointerEnter={() => setHighlight(r.box)} onPointerLeave={() => setHighlight(null)} onFocus={() => setHighlight(r.box)} onBlur={() => setHighlight(null)}>
-              <span className="mt-2 w-4 shrink-0 text-right font-mono text-[11px] text-subtle-foreground">{i + 1}</span>
+              <span className="mt-2 w-4 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{i + 1}</span>
               <div className="min-w-0 flex-1 space-y-1">
                 {engine === "open" && !r.box ? (
                   <Input value={r.from} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} placeholder="Text on the image now" aria-label={`Text region ${i + 1}: current text`} className="h-8 text-[13px]" />
@@ -553,7 +553,7 @@ function EditTextTool() {
               </RunRow>
             </div>
           </div>
-          {!changes.length && <p className="text-[11px] text-subtle-foreground">Change a line (or empty it to remove that text), then Generate.</p>}
+          {!changes.length && <p className="text-[11px] text-muted-foreground">Change a line (or empty it to remove that text), then Generate.</p>}
         </>
       )}
     </div>
@@ -765,7 +765,7 @@ function RegionalTool() {
           </button>
         </p>
       ) : (
-        <p className="text-[12px] text-subtle-foreground">Drag on the canvas to draw the area.</p>
+        <p className="text-[12px] text-muted-foreground">Drag on the canvas to draw the area.</p>
       )}
       <Field label="Prompt" htmlFor="region-prompt">
         <Textarea id="region-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={2000} placeholder="e.g. “replace the cup with a glass of orange juice”" className="min-h-16 text-[13px]" />
@@ -1027,7 +1027,7 @@ function GradeTool() {
       </Field>
       {groups.map((g) => (
         <fieldset key={g} className="space-y-2.5">
-          <legend className="mb-1 text-[11px] font-semibold tracking-wide text-subtle-foreground uppercase">{g}</legend>
+          <legend className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{g}</legend>
           {CONTROLS.filter((c) => c.group === g).map((c) => (
             <Field key={c.key} label={c.label} hint={grade[c.key]}>
               <Slider aria-label={c.label} min={c.min} max={c.max} step={1} value={[grade[c.key]]} onValueChange={([v]) => setGrade({ ...grade, [c.key]: v })} />
@@ -1051,7 +1051,7 @@ function GradeTool() {
           {saving && <Loader2 className="animate-spin" />} Apply grade
         </Button>
       </div>
-      <p className="text-[11px] text-subtle-foreground">Runs in your browser — free on both engines.</p>
+      <p className="text-[11px] text-muted-foreground">Runs in your browser — free on both engines.</p>
     </div>
   );
 }
@@ -1150,7 +1150,7 @@ export function ToolRail() {
                 </li>
               ))}
             </ul>
-            <p className="hidden px-4 pb-4 text-[11px] text-pretty text-subtle-foreground xl:block">Tools act on the selected layer. Deselect the layer to use a tool on the whole image.</p>
+            <p className="hidden px-4 pb-4 text-[11px] text-pretty text-muted-foreground xl:block">Tools act on the selected layer. Deselect the layer to use a tool on the whole image.</p>
           </div>
         </>
       )}

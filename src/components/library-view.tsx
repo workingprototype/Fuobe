@@ -426,7 +426,7 @@ function Inner() {
       return (
         <Empty title={`No matches for “${dq}”`}>
           Try another word.{" "}
-          <button onClick={() => setQ("")} className="text-brand-text hover:underline">
+          <button onClick={() => setQ("")} className="text-brand-text underline underline-offset-2">
             Clear search
           </button>
         </Empty>
@@ -436,7 +436,7 @@ function Inner() {
       return (
         <Empty title="Nothing pinned here yet">
           Pin results from their ⋯ menu (or select some and choose Pin) to keep them at the top.{" "}
-          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text underline underline-offset-2">
             Show everything
           </button>
         </Empty>
@@ -445,7 +445,7 @@ function Inner() {
     if (hasFilters(filters)) {
       return (
         <Empty title="Nothing matches your filters">
-          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text underline underline-offset-2">
             Clear filters
           </button>
         </Empty>
@@ -456,7 +456,7 @@ function Inner() {
       return (
         <Empty title="Nothing here directly">
           What&apos;s in this folder is in the folders above.{" "}
-          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text underline underline-offset-2">
             Show their results here
           </button>
         </Empty>
@@ -468,7 +468,7 @@ function Inner() {
     return (
       <Empty title="Your creations will appear here">
         Generate something and it lands here.{" "}
-        <Link href="/image" className="text-brand-text hover:underline">
+        <Link href="/image" className="text-brand-text underline underline-offset-2">
           Create an image
         </Link>
       </Empty>
@@ -598,7 +598,7 @@ function Inner() {
       {missingFolder ? (
         <Empty title="This folder no longer exists">
           It may have been deleted; what was in it is back in your Library.{" "}
-          <button onClick={() => go({ folder: undefined })} className="text-brand-text hover:underline">
+          <button onClick={() => go({ folder: undefined })} className="text-brand-text underline underline-offset-2">
             Back to Library
           </button>
         </Empty>
@@ -668,7 +668,7 @@ function Inner() {
                 {isFetchingNextPage && <Loader2 className="size-3.5 animate-spin" />} Load more
               </button>
             ) : (
-              <p className="text-[12px] text-subtle-foreground">{items.length > 12 ? "That's everything" : ""}</p>
+              <p className="text-[12px] text-muted-foreground">{items.length > 12 ? "That's everything" : ""}</p>
             )}
           </div>
         </div>

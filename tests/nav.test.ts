@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupId, navActive, parseClosed, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
+import { NAV } from "@/components/nav-items";
+import { DEFAULT_NAV_CLOSED, fullScreenStudio, groupId, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 
 const q = (s = "") => new URLSearchParams(s);
 const LIBRARY = ["/library", "/library?tab=favorites"];
@@ -39,10 +40,36 @@ describe("remembered sidebar state", () => {
 
   it("parses the collapsed groups defensively", () => {
     expect(parseClosed('["studios","engine"]')).toEqual(["studios", "engine"]);
-    expect(parseClosed("not json")).toEqual([]);
-    expect(parseClosed('{"a":1}')).toEqual([]);
-    expect(parseClosed(null)).toEqual([]);
     expect(parseClosed('["studios", 3]')).toEqual(["studios"]);
+    // The user opened every group: that choice is kept, not replaced by the defaults.
+    expect(parseClosed("[]")).toEqual([]);
+  });
+
+  it("folds Studios and Engine until the user chooses (nothing stored, or nothing readable)", () => {
+    expect(parseClosed(null)).toEqual(["studios", "engine"]);
+    expect(parseClosed(undefined)).toEqual(["studios", "engine"]);
+    expect(parseClosed("not json")).toEqual(["studios", "engine"]);
+    expect(parseClosed('{"a":1}')).toEqual(["studios", "engine"]);
+    // A fresh copy each time: a caller adding to it can't change the defaults.
+    parseClosed(null).push("create");
+    expect(parseClosed(null)).toEqual(["studios", "engine"]);
+  });
+
+  it("only folds groups that can fold, and keeps Create and Library in view", () => {
+    const foldable = NAV.filter((g) => g.collapsible).map((g) => groupId(g.label));
+    for (const id of DEFAULT_NAV_CLOSED) expect(foldable).toContain(id);
+    expect(NAV.map((g) => g.label).slice(0, 2)).toEqual(["Create", "Library"]);
+    // The always-open part of the sidebar is short: Create and Library hold 15 rows, not 46.
+    const open = NAV.filter((g) => !DEFAULT_NAV_CLOSED.includes(groupId(g.label))).flatMap((g) => g.items);
+    expect(open.length).toBeLessThanOrEqual(15);
+  });
+
+  it("prefetches only the rows most visits go to next", () => {
+    const eager = NAV.flatMap((g) => g.items.filter((i) => i.eager).map((i) => i.href));
+    expect(eager).toEqual(["/", "/assist", "/image", "/video", "/library"]);
+    // Every destination is unique (the palette and the sidebar key rows by href).
+    const hrefs = NAV.flatMap((g) => g.items.map((i) => i.href));
+    expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
   it("uses stable group ids", () => {
@@ -56,20 +83,67 @@ describe("remembered sidebar state", () => {
     expect(SIDEBAR_STATE_SCRIPT).toContain("fuobe:nav-closed");
   });
 
-  it("applies the cookie and the collapsed groups to the DOM", () => {
+  /** Runs the pre-paint script against a fake DOM with the given cookie, path and stored folds. */
+  function runScript(cookie: string, pathname: string, stored: string | null) {
     const attrs = new Map<string, Record<string, string>>();
-    const el = (key: string) => ({
+    const el = (key: string, toggle = true) => ({
       setAttribute: (k: string, v: string) => attrs.set(key, { ...attrs.get(key), [k]: v }),
-      querySelector: (s: string) => (s === "[data-nav-toggle]" ? el(`${key}/toggle`) : null),
+      getAttribute: (k: string) => (k === "data-nav-group" ? key : null),
+      querySelector: (s: string) => (s === "[data-nav-toggle]" && toggle ? el(`${key}/toggle`) : null),
     });
     const document = {
-      cookie: "x=1; sidebar_state=false",
-      querySelector: (s: string) => (s === '[data-slot="sidebar"]' ? el("sidebar") : s === '[data-nav-group="studios"]' ? el("studios") : null),
+      cookie,
+      querySelector: (s: string) => (s === '[data-slot="sidebar"]' ? el("sidebar") : null),
+      // Create and Library can't fold (no toggle); Studios and Engine can.
+      querySelectorAll: (s: string) => (s === "[data-nav-group]" ? [el("create", false), el("library", false), el("studios"), el("engine")] : []),
     };
-    const localStorage = { getItem: () => '["studios","gone"]' };
-    new Function("document", "localStorage", SIDEBAR_STATE_SCRIPT)(document, localStorage);
+    const localStorage = { getItem: () => stored };
+    new Function("document", "localStorage", "location", SIDEBAR_STATE_SCRIPT)(document, localStorage, { pathname });
+    return attrs;
+  }
+
+  it("applies the cookie and the remembered folds to the DOM", () => {
+    const attrs = runScript("x=1; sidebar_state=false", "/image", '["studios","gone"]');
     expect(attrs.get("sidebar")).toEqual({ "data-state": "collapsed", "data-collapsible": "icon" });
     expect(attrs.get("studios")).toEqual({ "data-open": "false" });
     expect(attrs.get("studios/toggle")).toEqual({ "aria-expanded": "false" });
+    // Engine was opened by the user: the server's default fold is undone before paint.
+    expect(attrs.get("engine")).toEqual({ "data-open": "true" });
+    expect(attrs.get("engine/toggle")).toEqual({ "aria-expanded": "true" });
+    expect(attrs.has("create")).toBe(false);
+  });
+
+  it("leaves the server's default folds alone when nothing is remembered", () => {
+    const attrs = runScript("", "/image", null);
+    expect([...attrs.keys()]).toEqual([]);
+  });
+
+  it("folds the sidebar to its rail on a full-screen studio, whatever the cookie says", () => {
+    expect(runScript("sidebar_state=true", "/cinema/abc", null).get("sidebar")).toEqual({ "data-state": "collapsed", "data-collapsible": "icon" });
+    expect(runScript("sidebar_state=true", "/cinema", null).get("sidebar")).toBeUndefined();
+  });
+});
+
+describe("full-screen studios", () => {
+  it("are an open Cinema, Canvas or Layers project, and Assist", () => {
+    for (const p of ["/cinema/abc", "/canvas/x1", "/layers/l-2/", "/assist", "/assist/memory", "/assist/projects/p1"]) expect(fullScreenStudio(p)).not.toBeNull();
+    for (const p of ["/", "/cinema", "/canvas", "/layers", "/assistant", "/apps/app-packshot", "/cinema/a/b", "/library"]) expect(fullScreenStudio(p)).toBeNull();
+  });
+
+  it("count every Assist page as one studio, and each project as its own", () => {
+    // Opening the sidebar on a chat keeps it open on Skills; a different project folds it again.
+    expect(fullScreenStudio("/assist")).toBe("/assist");
+    expect(fullScreenStudio("/assist/skills")).toBe(fullScreenStudio("/assist/projects/p1"));
+    expect(fullScreenStudio("/layers/l-2/")).toBe(fullScreenStudio("/layers/l-2"));
+    expect(fullScreenStudio("/cinema/a")).not.toBe(fullScreenStudio("/cinema/b"));
+    expect(fullScreenStudio("/canvas/a")).not.toBe(fullScreenStudio("/cinema/a"));
+  });
+});
+
+describe("the remembered choice's cookie", () => {
+  it("is the one the shadcn provider reads, for a week, site-wide", () => {
+    expect(sidebarCookie(false)).toBe("sidebar_state=false; path=/; max-age=604800");
+    expect(sidebarOpenFromCookie(sidebarCookie(false).split(";")[0])).toBe(false);
+    expect(sidebarOpenFromCookie(sidebarCookie(true).split(";")[0])).toBe(true);
   });
 });

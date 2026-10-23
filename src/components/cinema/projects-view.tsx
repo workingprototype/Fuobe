@@ -54,7 +54,7 @@ function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettin
           )}
         </div>
         <div className="mt-2.5 min-w-0 px-0.5">
-          <h3 className="truncate text-[15px] font-medium">{project.name}</h3>
+          <h2 className="truncate text-[15px] font-medium">{project.name}</h2>
           {project.description && <p className="mt-0.5 line-clamp-2 text-[13px] text-muted-foreground">{project.description}</p>}
           <p className="mt-1 text-[12px] text-muted-foreground">
             Updated {timeAgo(project.updatedAt)}

@@ -40,8 +40,11 @@ function initialDraft(
   lookup: { getModel: (id: string) => ModelDef | undefined; getPreset: (id: string) => Preset | undefined },
 ): Draft {
   const preset = sp.get("preset") ? lookup.getPreset(sp.get("preset")!) : config.preset;
-  const presetRoute = preset ? ((engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open) : null;
   const requested = sp.get("model");
+  // An app opened on one of its own models (?model=, from ⌘K) takes that model's route and params.
+  const presetRoute = preset
+    ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
+    : null;
   const modelId =
     (requested && lookup.getModel(requested)?.id) ||
     (preset?.type === "app" ? presetRoute?.modelId : undefined) ||
@@ -380,6 +383,7 @@ function HandoffSync({
   startKey,
   start,
   build,
+  adopt,
   ready,
   onNavigate,
   onStart,
@@ -387,6 +391,7 @@ function HandoffSync({
   startKey: string;
   start: Draft;
   build: React.RefObject<(key: string) => Draft>;
+  adopt: React.RefObject<(key: string) => void>;
   ready: boolean;
   onNavigate: (key: string) => void;
   onStart: () => void;
@@ -405,6 +410,7 @@ function HandoffSync({
       const next = build.current(url.key);
       const base = a.base;
       setDraft((d) => mergeHandoff(base, d, next));
+      adopt.current(url.key);
       applied.current = { key: url.key, ready, base: next, seen: true };
     }
     if (url.start && ready && !started.current) {
@@ -412,7 +418,7 @@ function HandoffSync({
       if (claimStartToken(url.start)) onStart();
       window.history.replaceState(null, "", withoutStart(window.location.href));
     }
-  }, [url, ready, build, setDraft, onNavigate, onStart]);
+  }, [url, ready, build, adopt, setDraft, onNavigate, onStart]);
   return (
     <Suspense fallback={null}>
       <UrlParams onChange={onParams} />
@@ -438,7 +444,7 @@ function StudioSession({ header, tabs, sync }: { header?: React.ReactNode; tabs?
  * typed or focused before hydration is lost.
  */
 function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: DraftProps) {
-  const [engine] = useEngine();
+  const [engine, setEngine] = useEngine();
   const catalog = useCatalog();
   const bridge = useMemo<ComposerBridge>(() => ({ current: null }), []);
   const build = (key: string) => {
@@ -447,19 +453,31 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
     if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
     return d;
   };
+  // A model named in the URL (?model=, from ⌘K or a hand-off) brings its engine along, as Reuse
+  // does: left on the other engine, the composer would swap it for that engine's default.
+  const adopt = (key: string) => {
+    const id = new URLSearchParams(key).get("model");
+    const m = id ? catalog.getModel(id) : undefined;
+    if (m && m.engine !== engine) setEngine(m.engine);
+  };
   const buildRef = useRef(build);
+  const adoptRef = useRef(adopt);
   useLayoutEffect(() => {
     buildRef.current = build;
+    adoptRef.current = adopt;
   });
   // The draft the composer starts from: the defaults (the URL is unknown in the static shell), or
   // the hand-off params of a client navigation to new ones (a new epoch remounts the provider).
   const [start, setStart] = useState({ key: "", epoch: 0 });
   const initial = useMemo(() => build(start.key), [start, config]); // eslint-disable-line react-hooks/exhaustive-deps
-  const onNavigate = useCallback((key: string) => setStart((s) => ({ key, epoch: s.epoch + 1 })), []);
+  const onNavigate = useCallback((key: string) => {
+    setStart((s) => ({ key, epoch: s.epoch + 1 }));
+    adoptRef.current(key);
+  }, []);
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
       <StudioProvider key={start.epoch} config={config} initial={initial}>
-        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, ready: catalog.ready, onNavigate }} />
+        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, adopt: adoptRef, ready: catalog.ready, onNavigate }} />
       </StudioProvider>
     </ComposerBridgeCtx.Provider>
   );

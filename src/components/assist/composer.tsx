@@ -172,7 +172,7 @@ export function AssistComposer({
           className="max-h-[min(18rem,var(--radix-popover-content-available-height))] w-[min(var(--radix-popover-trigger-width),40rem)] gap-0 overflow-y-auto rounded-2xl border bg-popover p-1 shadow-strong ring-0"
         >
           <div role="listbox" id={listId} aria-label="Skills">
-            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-subtle-foreground">Skills</p>
+            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">Skills</p>
             {matches.map((s, i) => (
               <button
                 key={s.name}

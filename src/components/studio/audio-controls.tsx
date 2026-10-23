@@ -116,7 +116,7 @@ export function VoicePicker({
             ) : (
               <p className="px-2 pb-1 text-[12px] text-muted-foreground">
                 Save voices you reuse in{" "}
-                <Link href="/elements?new=1" className="text-brand-text hover:underline">
+                <Link href="/elements?new=1" className="text-brand-text underline underline-offset-2">
                   Elements
                 </Link>
                 .

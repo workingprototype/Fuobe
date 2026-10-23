@@ -82,11 +82,15 @@ export function EngineSwitch({
               )}
             >
               <o.icon className="size-3.5" />
-              <span className={cn(compact && "hidden sm:inline")}>{size === "sm" && o.value === "open" ? "Open" : o.label}</span>
+              {/* One name at every size ("Open" alone read like a verb next to Home's send button). */}
+              <span className={cn(compact && "hidden sm:inline")}>{o.label}</span>
             </button>
           </TooltipTrigger>
           <TooltipContent>
-            <span className="font-medium">{o.label}</span> · {o.tip}
+            {/* One span: the tooltip lays its children out in a row. */}
+            <span>
+              <span className="font-medium">{o.label}</span> · {o.tip}
+            </span>
           </TooltipContent>
         </Tooltip>
       ))}

@@ -72,7 +72,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
               ) : m.present === false ? (
                 <CircleAlert className="size-3.5 shrink-0 text-warning" aria-label="Missing" />
               ) : (
-                <Circle className="size-3.5 shrink-0 text-subtle-foreground" aria-label="Unknown" />
+                <Circle className="size-3.5 shrink-0 text-muted-foreground" aria-label="Unknown" />
               )}
               <span className="min-w-0 truncate font-mono" title={m.file}>
                 {m.file}
@@ -92,7 +92,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
         <p className="text-[12px] break-words text-muted-foreground">
           Custom nodes:{" "}
           {wf.customNodes.map((n, i) => (
-            <a key={n.repo} href={n.repo} target="_blank" rel="noreferrer" className="text-brand-text hover:underline">
+            <a key={n.repo} href={n.repo} target="_blank" rel="noreferrer" className="text-brand-text underline underline-offset-2">
               {n.name}
               {i < wf.customNodes.length - 1 ? ", " : ""}
             </a>
@@ -176,7 +176,7 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
         <span className="min-w-0 flex-1 basis-56">
           {data.reachable ? "Connected to ComfyUI — model checkmarks below reflect what’s installed." : "ComfyUI is not reachable, so open-source runs fall back to demo output."}
         </span>
-        <Link href="/settings#comfyui" className="text-brand-text hover:underline">
+        <Link href="/settings#comfyui" className="text-brand-text underline underline-offset-2">
           Server settings
         </Link>
       </div>
@@ -212,7 +212,7 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
               )}
             >
               {c}
-              <span className="text-[11px] text-subtle-foreground tabular-nums">{n}</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">{n}</span>
             </button>
           ))}
         </div>

@@ -1,12 +1,20 @@
 // App-shell checks in a real browser (the app must be running; demo mode is fine).
 // Usage: node tests/e2e/shell.mjs [appUrl]   (pnpm test:e2e:shell). Exits 1 on the first failure.
 //
-// 1. Phone: the sidebar drawer closes when a link in it is tapped (nav item, New creation, footer).
-// 2. A collapsed sidebar group still shows the page you're on.
-// 3. Deep links into Settings (/settings#comfyui) scroll to the section after a client navigation.
-// 4. Galleries: "Show more" pressed from the keyboard moves focus to the first new card.
+// 1. Phone: the sidebar drawer closes when a link in it is tapped (nav item, New creation, footer),
+//    and its Search row opens the ⌘K palette.
+// 2. A first visit folds Studios and Engine, with Library right after Create; a collapsed group
+//    still shows the page you're on.
+// 3. Landmarks: "Skip to content" is the first Tab stop, one <main>, the sidebar is <nav "Main">.
+// 4. ⌘K / Ctrl+K opens the palette; a typo still finds a page and Enter opens it; Esc gives focus
+//    back to the composer; an open-source model picked under the Cloud switch opens on its engine.
+// 5. Full-screen studios (Assist, an open Cinema or Layers project…) fold the app sidebar to its rail
+//    without changing the remembered state; opened by hand, it stays open inside that studio only.
+// 6. Deep links into Settings (/settings#comfyui) scroll to the section after a client navigation.
+// 7. Galleries: "Show more" pressed from the keyboard moves focus to the first new card.
 import assert from "node:assert/strict";
-import { DESKTOP, launch, openRoute, PHONE } from "./_browser.mjs";
+import path from "node:path";
+import { DESKTOP, launch, openRoute, PHONE, root } from "./_browser.mjs";
 
 const app = (process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "http://localhost:3000").replace(/\/$/, "");
 const browser = await launch();
@@ -19,7 +27,7 @@ try {
     for (const [from, link, to] of [
       ["/models", /^Effects$/, "/effects"],
       ["/effects", /^New creation/, "/"],
-      ["/", /^Settings$/, "/settings"],
+      ["/", /^Favorites$/, "/library"],
       // The footer's engine status links to Settings too.
       ["/models", /^Cloud models/, "/settings"],
     ]) {
@@ -32,6 +40,120 @@ try {
       await page.waitForURL((u) => new URL(u).pathname === to, { timeout: 20_000 });
       await drawer.waitFor({ state: "detached", timeout: 5_000 });
     }
+    step("phone: Search in the drawer opens the palette");
+    await openRoute(page, `${app}/models`);
+    await page.getByRole("button", { name: "Toggle Sidebar" }).first().tap();
+    await page.locator('[data-mobile="true"]').getByRole("button", { name: /^Search/ }).tap();
+    await page.getByRole("dialog", { name: "Search Fuobe" }).waitFor();
+    await page.locator('[data-mobile="true"]').waitFor({ state: "detached", timeout: 5_000 });
+    await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext(DESKTOP);
+    const page = await ctx.newPage();
+    step("a first visit folds Studios and Engine, and Library follows Create");
+    await openRoute(page, `${app}/image`);
+    const groups = await page.locator("[data-nav-group]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-nav-group"), e.getAttribute("data-open")]));
+    assert.deepEqual(groups, [["create", "true"], ["library", "true"], ["studios", "false"], ["engine", "false"]]);
+
+    step("Skip to content is the first Tab stop; one <main>; the sidebar is a navigation landmark");
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Skip to content");
+    await page.keyboard.press("Enter");
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "content");
+    assert.equal(await page.locator("main").count(), 1, "one <main>");
+    assert.ok((await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Video" }).count()) > 0, "sidebar links are inside <nav aria-label=Main>");
+
+    step("⌘K / Ctrl+K opens the palette; “cinma” finds Cinema Studio; Enter opens it");
+    await page.keyboard.press("ControlOrMeta+k");
+    const dialog = page.getByRole("dialog", { name: "Search Fuobe" });
+    await dialog.waitFor();
+    await page.keyboard.type("cinma");
+    // The start list (which also lists Cinema Studio) gives way to the matches.
+    await dialog.getByRole("option", { name: /^New creation/ }).waitFor({ state: "detached" });
+    await dialog.getByRole("option", { name: /^Cinema Studio/ }).first().waitFor();
+    await page.keyboard.press("Enter");
+    await page.waitForURL((u) => new URL(u).pathname === "/cinema", { timeout: 20_000 });
+    await dialog.waitFor({ state: "detached" });
+
+    step("Esc closes the palette and gives focus back to the composer you were typing in");
+    await openRoute(page, `${app}/image`);
+    const box = page.locator("[data-composer] textarea").first();
+    await box.click();
+    await page.keyboard.type("a red fox");
+    await page.keyboard.press("ControlOrMeta+k");
+    await dialog.waitFor();
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    await page.waitForTimeout(100);
+    assert.ok(await page.evaluate(() => !!document.activeElement?.matches("[data-composer] textarea")), "focus is back in the composer");
+
+    step("an open-source model picked under the Cloud switch opens on the open engine");
+    await page.evaluate(() => localStorage.setItem("fuobe.engine", "cloud"));
+    await openRoute(page, `${app}/video`);
+    await page.keyboard.press("ControlOrMeta+k");
+    await dialog.waitFor();
+    await page.keyboard.type("FLUX.2 [dev]");
+    await dialog.getByRole("option", { name: /^FLUX\.2 \[dev\]/ }).first().waitFor();
+    await page.keyboard.press("Enter");
+    await page.waitForURL((u) => new URL(u).pathname === "/image" && new URL(u).searchParams.get("model") === "oss-flux2-dev", { timeout: 20_000 });
+    await page.getByRole("button", { name: /^Model: FLUX\.2 \[dev\]\./ }).waitFor({ timeout: 20_000 });
+    assert.equal(await page.evaluate(() => localStorage.getItem("fuobe.engine")), "open", "the switch moved to Open source");
+    await ctx.close();
+  }
+  {
+    const ctx = await browser.newContext(DESKTOP);
+    const page = await ctx.newPage();
+    step("full-screen studios fold the app sidebar to its rail, and it comes back on the way out");
+    const sidebar = page.locator('[data-slot="sidebar"]').first();
+    await openRoute(page, `${app}/assist`);
+    assert.equal(await sidebar.getAttribute("data-state"), "collapsed", "folded on Assist");
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Image", exact: true }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/image");
+    await page.waitForFunction(() => document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state") === "expanded");
+    const cookies = await ctx.cookies();
+    assert.ok(!cookies.some((c) => c.name === "sidebar_state" && c.value === "false"), "the remembered state is untouched");
+
+    step("opened by hand in Assist, the sidebar stays open on Assist's own pages, and folds again next time");
+    const nav = page.getByRole("navigation", { name: "Main" });
+    const state = (s) => page.waitForFunction((s) => document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state") === s, s);
+    await nav.getByRole("link", { name: "Assist", exact: true }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/assist");
+    await state("collapsed");
+    await nav.getByRole("button", { name: "Toggle Sidebar" }).click();
+    await state("expanded");
+    await page.evaluate(() => window.next.router.push("/assist/skills"));
+    await page.waitForURL((u) => new URL(u).pathname === "/assist/skills");
+    await page.waitForTimeout(300);
+    assert.equal(await sidebar.getAttribute("data-state"), "expanded", "still open on Skills");
+    await nav.getByRole("link", { name: "Image", exact: true }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/image");
+    await nav.getByRole("link", { name: "Assist", exact: true }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/assist");
+    await state("collapsed");
+    assert.ok(!(await ctx.cookies()).some((c) => c.name === "sidebar_state"), "no cookie written");
+    await ctx.close();
+  }
+  {
+    // Below 1440 px the Layers editor used to fold the sidebar itself, writing the cookie.
+    const ctx = await browser.newContext({ ...DESKTOP, viewport: { width: 1280, height: 860 } });
+    const page = await ctx.newPage();
+    step("reopening a Layers project leaves the remembered sidebar state alone");
+    await openRoute(page, `${app}/layers`);
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Upload Media" }).first().click();
+    await (await chooser).setFiles(path.join(root, "public/samples/grade-sample.jpg"));
+    await page.waitForURL(/\/layers\/[\w-]+$/, { timeout: 60_000 });
+    await page.getByRole("button", { name: "Separate layers" }).waitFor({ timeout: 60_000 });
+    await page.getByRole("link", { name: "All projects" }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/layers");
+    await page.getByRole("link", { name: /^Open project/ }).first().click();
+    await page.waitForURL(/\/layers\/[\w-]+$/);
+    await page.getByRole("button", { name: "Separate layers" }).waitFor({ timeout: 60_000 });
+    await page.getByRole("link", { name: "All projects" }).click();
+    await page.waitForURL((u) => new URL(u).pathname === "/layers");
+    await page.waitForFunction(() => document.querySelector('[data-slot="sidebar"]')?.getAttribute("data-state") === "expanded");
+    assert.ok(!(await ctx.cookies()).some((c) => c.name === "sidebar_state" && c.value === "false"), "the cookie still says expanded");
     await ctx.close();
   }
   {

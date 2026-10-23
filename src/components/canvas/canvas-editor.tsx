@@ -73,6 +73,7 @@ import {
 } from "@/lib/catalog/canvas";
 import type { Engine, MediaKind, ModelDef } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { useModKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import {
   buildViews,
@@ -1022,6 +1023,7 @@ const EditorHeader = memo(function EditorHeader({
   mode: EngineMode;
   ui: HeaderUi;
 }) {
+  const mod = useModKey();
   return (
     <header className="z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
       <SidebarTrigger className="md:hidden" />
@@ -1069,7 +1071,7 @@ const EditorHeader = memo(function EditorHeader({
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              Run every node that changed <Kbd>⌘</Kbd>
+              Run every node that changed <Kbd>{mod}</Kbd>
               <Kbd>↵</Kbd>
             </TooltipContent>
           </Tooltip>

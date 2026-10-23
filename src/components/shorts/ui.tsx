@@ -136,7 +136,7 @@ export function ClipDrop({ accept, limits, onFile, onLibrary }: { accept: string
           </PopoverContent>
         </Popover>
       </div>
-      <p className="text-[11px] text-subtle-foreground">or drop it here</p>
+      <p className="text-[11px] text-muted-foreground">or drop it here</p>
       <input
         ref={input}
         type="file"
