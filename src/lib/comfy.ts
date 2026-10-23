@@ -49,6 +49,8 @@ export interface ManifestModel {
   folder: string;
   url?: string;
   sizeGb?: number;
+  /** An alternative a model control can pick (FILM for RIFE): not needed for the workflow's defaults. */
+  optional?: boolean;
 }
 
 export interface ManifestOutput {

@@ -314,6 +314,20 @@ async function main() {
       }
     }
 
+    // Files a model control can pick instead (FILM for RIFE): listed as optional, so missing-model help names them.
+    for (const file of spec.optionalModels || []) {
+      if (models.has(file)) continue;
+      const known = KNOWN_MODELS[file];
+      if (!known?.url) {
+        errs.push(`optional model ${file}: no download URL known`);
+        continue;
+      }
+      const size = await hfSize(known.url, sizeCache);
+      if (size && typeof size === 'object' && size.error) errs.push(`model ${file}: ${known.url} -> ${size.error}`);
+      const bytes = typeof size === 'number' ? size : size?.size;
+      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? Math.round((bytes / 1e9) * 100) / 100 : null, optional: true });
+    }
+
     // ---- custom nodes
     const custom = new Set();
     for (const n of Object.values(graph)) {

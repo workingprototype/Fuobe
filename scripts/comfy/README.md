@@ -228,7 +228,17 @@ node validate-workflows.mjs <the same ids> --shared
   `framesPerBatch` sized from the clip so a pass holds about 1.5 GB of frames; each job tags its `VHS_BatchManager`
   (ComfyUI otherwise reuses a cached manager after a failed meta-batch run and silently loses frames: 32 of 48 seen
   here); a silent clip loses the `VHS_LoadVideo` audio link (VHS fails on it); graphs that still decode the whole clip
-  (FPS Boost, HDR, EXR) refuse a clip that needs more than half the server's RAM.
+  (FPS Boost, HDR, EXR) refuse a clip that needs more than half the server's RAM, and the composer checks the same rule
+  before Generate (`/api/status` reports the ComfyUI's RAM). They hold 2 frame-sized float copies of the clip (decoding
+  stacks the frames; the tone map makes one more; encoders and the EXR writer take a frame at a time), FPS Boost 2 + m
+  (`VHS_SelectEveryNthImage` is a view): measured here, SDR to HDR on 10 s of 640×360 at 30 fps peaked 1.57 GB above idle,
+  2.04 copies. FPS Boost needs the clip's frame rate (header) and refuses without it rather than guess m and n.
+- **Cancel**: VHS re-queues each pass under a new prompt id with a negative queue number (it runs before anything else),
+  so cancelling a meta-batch job deletes every pending prompt carrying the job's filename prefix, interrupts the one
+  running, and looks again for a few seconds (a pass that was already saving can still queue the next). Checked here on a
+  38-pass ProRes 4444 export: cancelled during pass 4, nothing ran after it. VHS keeps that pass's ffmpeg encode open in
+  the cached batch manager (a partial `.mov` without its moov atom stays in `output/`) until ComfyUI drops the cache; the
+  same happens to any meta-batch run that fails or is interrupted.
 - **Real runs**: through Fuobe's API on the dev server (the comfyui provider end to end: upload, bindings, meta-batch
   follow, EXR zip) and directly with a small runner, on the shared CPU server with own prompt ids only, every output
   ffprobe-checked. The model graphs ran with random-weight stand-ins (`vftest_rife_random.safetensors`,
@@ -239,6 +249,9 @@ node validate-workflows.mjs <the same ids> --shared
   "ProRes 422 HQ" is the HQ tag (`apch`) carrying 4:4:4 samples (FFmpeg reads it). A strict 4:2:2 file needs a VHS format
   with `-pix_fmt yuv422p10le`, a change to the node pack (not made). Core ComfyUI has no H.265 encoder, so the open HDR
   is H.264 High 10 (HLG or PQ); HDR10 in H.265 comes from Topaz on the cloud.
+- **FILM**: oss-rife's Model control can pick `film_net_fp16.safetensors`; the spec lists it under `optionalModels`, so
+  the manifest carries it with `optional: true` (named with its download when it's missing, not counted as missing on
+  the Workflows page). Its URL is the repo's current name, `Comfy-Org/Frame-Interpolation` (the old lowercase one redirects).
 
 ## Adding a workflow
 

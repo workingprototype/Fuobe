@@ -81,7 +81,8 @@
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
-// segment per caption cue before submitting).
+// segment per caption cue before submitting), optionalModels (files a model control can pick instead of the graph's own,
+// listed in the manifest with optional: true so missing-model help can name their download).
 
 import fs from 'node:fs';
 
@@ -116,7 +117,7 @@ export const CUSTOM_NODE_REPOS = {
 export const KNOWN_MODELS = {
   'RealESRGAN_x4plus.safetensors': { folder: 'upscale_models', url: 'https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors' },
   'birefnet.safetensors': { folder: 'background_removal', url: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors' },
-  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
+  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
   'rife_v4.26.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/rife_v4.26.safetensors' },
   'inswapper_128.onnx': { folder: 'insightface', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx' },
   'GFPGANv1.4.pth': { folder: 'facerestore_models', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth' },
@@ -2887,16 +2888,18 @@ export const SPEC = [
     },
     outputs: [{ node: '13', kind: 'video' }],
     defaults: { checkpoint: 'rife_v4.26.safetensors' },
+    // oss-rife's Model control: FILM for large motion.
+    optionalModels: ['film_net_fp16.safetensors'],
     limits: { maxMultiplier: 16 },
     vramGb: 2,
     license: 'RIFE 4.26 and FILM weights from Comfy-Org/frame_interpolation (MIT / Apache-2.0); VideoHelperSuite (GPL-3.0 code) for Select Every Nth',
     notes:
       'Higgsfield\'s FPS Boost targets (24 / 30 / 60 / 90 / 120 fps) and slow motion on the open engine. The provider picks m (multiplier, 2-16) and n (every) from the clip\'s own frame rate (its header) so that ' +
-      'source fps x m / n = target x slowdown (src/lib/av/fps.ts: 24 -> 30 m5 n4, 24 -> 60 m5 n2, 24 -> 90 m15 n4, 24 -> 120 m5, 30 -> 60 m2, 60 -> 90 m3 n2, 60 -> 120 m2; a lower target only drops frames, ' +
-      'and then the provider links FrameInterpolate out). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)), so a clip whose header was unreadable still plays at the right speed. ' +
+      'source fps x m / n = target x slowdown (src/lib/av/fps.ts: 24 -> 30 m5 n4, 24 -> 60 m5 n2, 24 -> 90 m15 n4, 24 -> 120 m5, 30 -> 60 m2, 60 -> 90 m3 n2, 60 -> 120 m2; a target the source rate is a whole multiple of (60 -> 30: m1 n2) only drops frames, ' +
+      'and then the provider links FrameInterpolate out; other lower targets still interpolate (30 -> 24: m4 n5)). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)); m and n need the header\'s rate, so the provider refuses a clip without one rather than guess. ' +
       'The last frame is held once more before interpolating, so the clip keeps its length (N frames become N x m + 1, about one output frame longer than the source) instead of losing a source frame. ' +
       'slowdown > 1 stretches the clip (2 = twice as long); the provider then drops the sound link (it would no longer match). checkpoint film_net_fp16.safetensors runs FILM (better on large motion, about 31x slower on CPU). ' +
-      'Holds the whole interpolated clip in memory (source frames x m before the selection): the provider refuses clips that need more than half the server\'s RAM. ' +
+      'Holds the whole interpolated clip in memory (the source frames, their copy with the last frame held, and source frames x m; the selection is a view): the provider refuses clips that need more than half the server\'s RAM. ' +
       'Ran here through Fuobe (CPU, a random-weight RIFE file standing in for the weights): 24 fps 2 s 320x180 -> 60 fps = 121 frames, 2.017 s (m 5, n 2); 25 fps 3 s with sound -> 30 fps at 2x slow motion = 181 frames, 6.03 s, no sound track; 30 fps 2 s with sound -> 24 fps = 49 frames, 2.04 s, sound kept (m 4, n 5).',
   },
   {
