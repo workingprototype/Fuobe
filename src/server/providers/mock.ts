@@ -2,6 +2,7 @@ import "server-only";
 import { nanoid } from "nanoid";
 import { cueText, parseCues, type Cue } from "@/lib/cues";
 import { OPERATION_OUTPUT, type MediaKind, type Operation } from "@/lib/catalog/types";
+import { spectralColor } from "@/lib/scene3d";
 import type { ProviderAdapter, RemoteOutput } from "./types";
 import { textOutput } from "./llm";
 import { encodePng } from "../png";
@@ -232,10 +233,11 @@ function demoOcr(brief: string): DemoOutput {
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 
 /**
- * A depth map like a depth model's PNG (bright = near), 512 px wide in the request's shape: a back wall, a
- * floor that comes closer toward the bottom of the frame and three rounded subjects standing on it.
+ * A depth map like a depth model's PNG, 512 px wide in the request's shape: a back wall, a floor that comes closer
+ * toward the bottom of the frame and three rounded subjects standing on it. Grey (bright = near) like MoGe's on the
+ * open engine; painted with the Spectral colour map (red = near) like Marigold's on the cloud.
  */
-function demoDepth(prompt: string, aspectRatio: string): DemoOutput {
+function demoDepth(prompt: string, aspectRatio: string, spectral: boolean): DemoOutput {
   const { w: cw, h: ch } = canvas(aspectRatio);
   const w = 512;
   const h = Math.max(16, Math.round((w * ch) / cw));
@@ -251,8 +253,9 @@ function demoDepth(prompt: string, aspectRatio: string): DemoOutput {
         const d = ((u - b.x) / b.rx) ** 2 + ((v - b.y) / b.ry) ** 2;
         if (d < 1) near = Math.max(near, b.near + 0.08 * Math.sqrt(1 - d));
       }
-      const g = Math.round(clamp(near, 0, 1) * 255);
-      data.set([g, g, g, 255], (y * w + x) * 4);
+      const n = clamp(near, 0, 1);
+      const g = Math.round(n * 255);
+      data.set(spectral ? [...spectralColor(1 - n), 255] : [g, g, g, 255], (y * w + x) * 4);
     }
   return { url: toDataUri(encodePng({ width: w, height: h, data }), "image/png"), kind: "image", contentType: "image/png", meta: { role: "depth", demo: true } };
 }
@@ -294,7 +297,7 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     // Round 4. A splat and a rig come back as the demo mesh (a real splat is a .ply or .spz). A scene is the
     // mesh and its depth map on the open engine (MoGe), the depth map alone on the cloud (Marigold).
     case "scene-3d": {
-      const depth = demoDepth(brief, ar);
+      const depth = demoDepth(brief, ar, kind === "image");
       if (kind === "image") return [depth];
       return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true, role: "scene" } }, depth];
     }

@@ -16,13 +16,17 @@ import {
   lensFov,
   lookStep,
   medianDepth,
+  depthEncoding,
   nearIsBright,
   objectStart,
   poseWords,
   ratioOf,
+  readDepth,
   recomposePrompt,
   sceneFov,
   scenePose,
+  spectralColor,
+  spectralValue,
   strafe,
   twoFinger,
   type FlyPose,
@@ -193,6 +197,64 @@ describe("point cloud from a photo and a depth map", () => {
     expect(depths.every((d) => Math.abs(d - 1) < 1e-4 || Math.abs(d - 5) < 1e-4)).toBe(true);
     // Each ramp sample went to the side it is nearer to in 1/z: the first two to the subject, the last two to the wall.
     expect([10, 11, 12, 13].map((x) => Math.round(depths[5 * 40 + x]))).toEqual([1, 1, 5, 5]);
+  });
+});
+
+describe("Marigold's colour-mapped depth (Spectral: red near, violet far)", () => {
+  it("inverts the colour map", () => {
+    expect(spectralColor(0)).toEqual([158, 1, 66]);
+    expect(spectralColor(0.5)).toEqual([255, 255, 191]);
+    expect(spectralColor(1)).toEqual([94, 79, 162]);
+    for (const t of [0, 0.03, 0.25, 0.5, 0.61, 0.9, 1]) {
+      const v = spectralValue(...spectralColor(t));
+      expect(v.t).toBeCloseTo(t, 2);
+      expect(v.off).toBeLessThan(1);
+    }
+    // Colours read off fal's example output (a dog on a bench): the dog, the bench, the grass, the sky.
+    expect(spectralValue(168, 11, 69).t).toBeLessThan(0.05);
+    expect(spectralValue(247, 139, 81).t).toBeCloseTo(0.25, 1);
+    expect(spectralValue(231, 244, 152).t).toBeCloseTo(0.6, 1);
+    expect(spectralValue(44, 139, 183).t).toBeGreaterThan(0.85);
+  });
+
+  // Near at the bottom (red), far at the top (violet), as Marigold paints a photo with a floor.
+  const spectralMap = pixels(20, 10, (_x, y) => spectralColor(1 - y / 9));
+
+  it("tells a Spectral map from a grey one", () => {
+    expect(depthEncoding(spectralMap)).toBe("spectral");
+    expect(depthEncoding(pixels(20, 10, (_x, y) => [y * 20, y * 20, y * 20]))).toBe("grey");
+    // Colour that isn't on the Spectral curve is read by its grey.
+    expect(depthEncoding(pixels(20, 10, (x) => (x % 2 ? [255, 0, 0] : [0, 0, 255])))).toBe("grey");
+  });
+
+  it("reads red as near, as depth (not disparity), whatever the grey guess would say", () => {
+    const field = readDepth(spectralMap);
+    expect(field).toMatchObject({ encoding: "spectral", disparity: false });
+    expect(field.nearness[9 * 20]).toBeCloseTo(1, 2);
+    expect(field.nearness[0]).toBeCloseTo(0, 2);
+    // The red channel alone rises and falls along the map: read as grey, the bottom and the middle would clash.
+    expect(spectralColor(0)[0]).toBeLessThan(spectralColor(0.4)[0]);
+    expect(spectralColor(0.4)[0]).toBeGreaterThan(spectralColor(1)[0]);
+    const photo = pixels(40, 20, () => [128, 128, 128]);
+    const cloud = buildPointCloud(photo, spectralMap, { hFov: 60, near: 1, far: 5, edge: 0 });
+    expect(cloud.encoding).toBe("spectral");
+    const z = (x: number, y: number) => -cloud.positions[(y * 40 + x) * 3 + 2];
+    expect(z(5, 19)).toBeCloseTo(1, 1);
+    expect(z(5, 0)).toBeCloseTo(5, 1);
+    // Linear in depth: halfway down the map is halfway between near and far.
+    const mid = buildPointCloud(photo, pixels(20, 3, (_x, y) => spectralColor([1, 0.5, 0][y])), { hFov: 60, near: 1, far: 5, edge: 0 });
+    expect(-mid.positions[(10 * 40 + 5) * 3 + 2]).toBeCloseTo(3, 0);
+  });
+
+  it("keeps reading grey maps either way round", () => {
+    const grey = pixels(20, 10, (_x, y) => {
+      const g = Math.round((y / 9) * 255);
+      return [g, g, g];
+    });
+    expect(readDepth(grey)).toMatchObject({ encoding: "grey", disparity: true });
+    expect(readDepth(grey, false)).toMatchObject({ encoding: "grey", disparity: false });
+    expect(readDepth(grey).nearness[9 * 20]).toBeCloseTo(1, 5);
+    expect(readDepth(grey, false).nearness[9 * 20]).toBeCloseTo(0, 5);
   });
 });
 

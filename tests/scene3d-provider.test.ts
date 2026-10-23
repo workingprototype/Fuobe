@@ -17,6 +17,7 @@ const { buildPayload, extractOutputs } = await import("@/lib/catalog/payload");
 const { outputKind } = await import("@/server/generations");
 const { mockProvider } = await import("@/server/providers/mock");
 const { decodePng } = await import("@/server/png");
+const { buildPointCloud, depthEncoding } = await import("@/lib/scene3d");
 
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -156,22 +157,33 @@ describe("demo mode", () => {
     return res.outputs;
   }
 
-  it("makes a 16:9 depth map (bright = near, the floor closest at the bottom) for the cloud", async () => {
+  const png = (o: { url: string }) => decodePng(Buffer.from(o.url.split(",")[1], "base64"));
+
+  it("makes a 16:9 depth map painted like Marigold's (Spectral, red = near) that the point cloud reads the right way round", async () => {
     const outs = await demo(getModel("marigold-depth")!);
     expect(outs).toHaveLength(1);
     expect(outs[0]).toMatchObject({ kind: "image", contentType: "image/png", meta: { role: "depth", demo: true } });
-    const png = decodePng(Buffer.from(outs[0].url.split(",")[1], "base64"));
-    expect(png.width).toBe(512);
-    expect(png.height).toBe(288);
-    const grey = (x: number, y: number) => png.data[(y * png.width + x) * 4];
-    expect(grey(4, png.height - 1)).toBeGreaterThan(grey(4, 0) + 100);
+    const map = png(outs[0]);
+    expect(map.width).toBe(512);
+    expect(map.height).toBe(288);
+    expect(depthEncoding(map)).toBe("spectral");
+    // The floor nearest at the bottom, the wall far at the top.
+    const photo = { width: 64, height: 36, data: new Uint8ClampedArray(64 * 36 * 4).fill(128) };
+    const cloud = buildPointCloud(photo, map, { hFov: 74, near: 1, far: 6 });
+    const z = (x: number, y: number) => -cloud.positions[(y * 64 + x) * 3 + 2];
+    expect(z(4, 35)).toBeLessThan(1.5);
+    expect(z(4, 0)).toBeGreaterThan(5);
   });
 
-  it("makes the demo mesh and its depth map for the open engine", async () => {
+  it("makes the demo mesh and its grey depth map (bright = near) for the open engine", async () => {
     const outs = await demo(getModel("oss-scene-moge")!);
     expect(outs.map((o) => [o.kind, o.meta?.role])).toEqual([
       ["model3d", "scene"],
       ["image", "depth"],
     ]);
+    const map = png(outs[1]);
+    expect(depthEncoding(map)).toBe("grey");
+    const grey = (x: number, y: number) => map.data[(y * map.width + x) * 4];
+    expect(grey(4, map.height - 1)).toBeGreaterThan(grey(4, 0) + 100);
   });
 });

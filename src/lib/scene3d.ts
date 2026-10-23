@@ -239,7 +239,7 @@ export interface PointCloudOptions {
   hFov: number;
   /** At most this many points (the sampling stride follows). */
   maxPoints?: number;
-  /** Depth maps differ: bright = near (disparity) or dark = near (depth). Undefined = read it from the map. */
+  /** Grey depth maps differ: bright = near (disparity) or dark = near (depth). Undefined = read it from the map. */
   nearIsBright?: boolean;
   /** Distance of the nearest and the farthest points (scene units ≈ metres). */
   near?: number;
@@ -259,24 +259,136 @@ export interface PointCloud {
   stride: number;
   /** Median distance (the orbit pivot). */
   depth: number;
-}
-
-/** Bilinear grey value (0–1, the red channel) of a depth map at normalised (u, v). */
-function greyAt(px: Pixels, u: number, v: number): number {
-  const x = clamp(u * px.width - 0.5, 0, px.width - 1);
-  const y = clamp(v * px.height - 0.5, 0, px.height - 1);
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const x1 = Math.min(px.width - 1, x0 + 1);
-  const y1 = Math.min(px.height - 1, y0 + 1);
-  const g = (xx: number, yy: number) => px.data[(yy * px.width + xx) * 4];
-  const fx = x - x0;
-  const fy = y - y0;
-  return ((g(x0, y0) * (1 - fx) + g(x1, y0) * fx) * (1 - fy) + (g(x0, y1) * (1 - fx) + g(x1, y1) * fx) * fy) / 255;
+  /** How the depth map was painted. */
+  encoding: "grey" | "spectral";
 }
 
 /**
- * Which way a depth map runs: in a photo the bottom of the frame (the floor, the street) is nearly always nearer
+ * Matplotlib's "Spectral" colour map, ColorBrewer's 11 stops evenly spaced from 0 to 1. Marigold paints its depth
+ * maps with it (fal-ai/marigold-v2 returns this "colorized depth map", not grey): dark red is near, then orange,
+ * yellow, green and blue, to violet far away.
+ */
+export const SPECTRAL: readonly (readonly [number, number, number])[] = [
+  [158, 1, 66],
+  [213, 62, 79],
+  [244, 109, 67],
+  [253, 174, 97],
+  [254, 224, 139],
+  [255, 255, 191],
+  [230, 245, 152],
+  [171, 221, 164],
+  [102, 194, 165],
+  [50, 136, 189],
+  [94, 79, 162],
+];
+
+/** The Spectral colour at t (0–1), as 0–255 RGB. */
+export function spectralColor(t: number): [number, number, number] {
+  const x = clamp(t, 0, 1) * (SPECTRAL.length - 1);
+  const i = Math.min(SPECTRAL.length - 2, Math.floor(x));
+  const f = x - i;
+  const [a, b] = [SPECTRAL[i], SPECTRAL[i + 1]];
+  return [0, 1, 2].map((k) => Math.round(a[k] + (b[k] - a[k]) * f)) as [number, number, number];
+}
+
+/** Where a colour sits along the Spectral map: t (0–1) of the nearest point on it, and how far off it is (0–255 units). */
+export function spectralValue(r: number, g: number, b: number): { t: number; off: number } {
+  let best = Infinity;
+  let t = 0;
+  for (let i = 0; i < SPECTRAL.length - 1; i++) {
+    const a = SPECTRAL[i];
+    const d = [SPECTRAL[i + 1][0] - a[0], SPECTRAL[i + 1][1] - a[1], SPECTRAL[i + 1][2] - a[2]];
+    const q = [r - a[0], g - a[1], b - a[2]];
+    const u = clamp((q[0] * d[0] + q[1] * d[1] + q[2] * d[2]) / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), 0, 1);
+    const e = (q[0] - u * d[0]) ** 2 + (q[1] - u * d[1]) ** 2 + (q[2] - u * d[2]) ** 2;
+    if (e < best) {
+      best = e;
+      t = (i + u) / (SPECTRAL.length - 1);
+    }
+  }
+  return { t, off: Math.sqrt(best) };
+}
+
+/** A grey value 0–1 (luma, so a grey map reads the same on every channel). */
+const lumaAt = (data: ArrayLike<number>, o: number) => (0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2]) / 255;
+
+/**
+ * How a depth map is painted: "grey" (one value per pixel, either way round), or "spectral" (Marigold's colour map).
+ * A map whose pixels carry colour and sit on the Spectral curve is Spectral; any other colour falls back to its grey.
+ */
+export function depthEncoding(depth: Pixels): "grey" | "spectral" {
+  const n = depth.width * depth.height;
+  const step = Math.max(1, Math.floor(n / 4096));
+  let spread = 0;
+  let off = 0;
+  let seen = 0;
+  for (let i = 0; i < n; i += step) {
+    const o = i * 4;
+    const [r, g, b] = [depth.data[o], depth.data[o + 1], depth.data[o + 2]];
+    spread += Math.max(r, g, b) - Math.min(r, g, b);
+    off += spectralValue(r, g, b).off;
+    seen++;
+  }
+  return seen && spread / seen > 16 && off / seen < 12 ? "spectral" : "grey";
+}
+
+/** A depth map read into nearness: 0 (far) … 1 (near) per pixel. */
+export interface DepthField {
+  width: number;
+  height: number;
+  nearness: Float32Array;
+  /** Bright-near grey maps are disparity (1/z, as Depth Anything's); dark-near grey and Marigold's maps are depth (z). */
+  disparity: boolean;
+  encoding: "grey" | "spectral";
+}
+
+/**
+ * Decode a depth map. Spectral maps (Marigold) are inverted along the colour map: red is near, so no guess is
+ * needed. Grey maps run the way `nearIsBright` says, or the way the map itself shows (see nearIsBright).
+ */
+export function readDepth(depth: Pixels, brightNear?: boolean): DepthField {
+  const { width, height, data } = depth;
+  const nearness = new Float32Array(width * height);
+  const encoding = depthEncoding(depth);
+  if (encoding === "spectral") {
+    // Each colour is looked up once: a depth map has far fewer colours than pixels.
+    const seen = new Map<number, number>();
+    for (let i = 0; i < nearness.length; i++) {
+      const o = i * 4;
+      const key = (data[o] << 16) | (data[o + 1] << 8) | data[o + 2];
+      let v = seen.get(key);
+      if (v === undefined) {
+        v = 1 - spectralValue(data[o], data[o + 1], data[o + 2]).t;
+        seen.set(key, v);
+      }
+      nearness[i] = v;
+    }
+    return { width, height, nearness, disparity: false, encoding };
+  }
+  const bright = brightNear ?? nearIsBright(depth);
+  for (let i = 0; i < nearness.length; i++) {
+    const g = lumaAt(data, i * 4);
+    nearness[i] = bright ? g : 1 - g;
+  }
+  return { width, height, nearness, disparity: bright, encoding };
+}
+
+/** Bilinear nearness of a decoded depth map at normalised (u, v). */
+function nearnessAt(f: DepthField, u: number, v: number): number {
+  const x = clamp(u * f.width - 0.5, 0, f.width - 1);
+  const y = clamp(v * f.height - 0.5, 0, f.height - 1);
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = Math.min(f.width - 1, x0 + 1);
+  const y1 = Math.min(f.height - 1, y0 + 1);
+  const g = (xx: number, yy: number) => f.nearness[yy * f.width + xx];
+  const fx = x - x0;
+  const fy = y - y0;
+  return (g(x0, y0) * (1 - fx) + g(x1, y0) * fx) * (1 - fy) + (g(x0, y1) * (1 - fx) + g(x1, y1) * fx) * fy;
+}
+
+/**
+ * Which way a grey depth map runs: in a photo the bottom of the frame (the floor, the street) is nearly always nearer
  * than the top, so the map is "bright = near" when its bottom quarter is brighter than its top quarter.
  */
 export function nearIsBright(depth: Pixels): boolean {
@@ -286,7 +398,7 @@ export function nearIsBright(depth: Pixels): boolean {
     let n = 0;
     for (let y = y0; y < y0 + band; y++)
       for (let x = 0; x < depth.width; x += Math.max(1, Math.floor(depth.width / 64))) {
-        s += depth.data[(y * depth.width + x) * 4];
+        s += lumaAt(depth.data, (y * depth.width + x) * 4);
         n++;
       }
     return s / Math.max(1, n);
@@ -296,15 +408,15 @@ export function nearIsBright(depth: Pixels): boolean {
 
 /**
  * The photo as points: every `stride`-th pixel, pushed back to its distance along its own ray from the origin.
- * Bright-near maps are read as disparity (1/z), dark-near maps as depth (z), each spread between the map's 1st and
- * 99th percentile so every map fills the near–far range.
+ * Bright-near grey maps are read as disparity (1/z); dark-near grey maps and Marigold's Spectral maps as depth (z).
+ * Each is spread between the map's 1st and 99th percentile so every map fills the near–far range.
  */
 export function buildPointCloud(photo: Pixels, depthMap: Pixels, opts: PointCloudOptions): PointCloud {
   const W = photo.width;
   const H = photo.height;
   const near = opts.near ?? 1;
   const far = Math.max(near * 1.05, opts.far ?? 6);
-  const bright = opts.nearIsBright ?? nearIsBright(depthMap);
+  const field = readDepth(depthMap, opts.nearIsBright);
   const stride = Math.max(1, Math.ceil(Math.sqrt((W * H) / Math.max(1, opts.maxPoints ?? 300_000))));
   const cols = Math.ceil(W / stride);
   const rows = Math.ceil(H / stride);
@@ -313,8 +425,7 @@ export function buildPointCloud(photo: Pixels, depthMap: Pixels, opts: PointClou
   const nearness = new Float32Array(cols * rows);
   for (let r = 0; r < rows; r++)
     for (let c = 0; c < cols; c++) {
-      const g = greyAt(depthMap, (Math.min(W - 1, c * stride) + 0.5) / W, (Math.min(H - 1, r * stride) + 0.5) / H);
-      nearness[r * cols + c] = bright ? g : 1 - g;
+      nearness[r * cols + c] = nearnessAt(field, (Math.min(W - 1, c * stride) + 0.5) / W, (Math.min(H - 1, r * stride) + 0.5) / H);
     }
   const sorted = Float32Array.from(nearness).sort();
   const lo = sorted[Math.floor(sorted.length * 0.01)];
@@ -323,7 +434,7 @@ export function buildPointCloud(photo: Pixels, depthMap: Pixels, opts: PointClou
   const z = new Float32Array(cols * rows);
   for (let i = 0; i < z.length; i++) {
     const s = clamp((nearness[i] - lo) / span, 0, 1);
-    z[i] = bright ? 1 / (1 / far + s * (1 / near - 1 / far)) : far - s * (far - near);
+    z[i] = field.disparity ? 1 / (1 / far + s * (1 / near - 1 / far)) : far - s * (far - near);
   }
 
   const fx = W / 2 / Math.tan(clamp(opts.hFov, 1, 179) * DEG * 0.5);
@@ -374,7 +485,7 @@ export function buildPointCloud(photo: Pixels, depthMap: Pixels, opts: PointClou
     colors[i * 3 + 2] = photo.data[o + 2] / 255;
     sizes[i] = ((stride * d) / fx) * 1.5;
   }
-  return { positions, colors, sizes, count, stride, depth: medianDepth(positions) };
+  return { positions, colors, sizes, count, stride, depth: medianDepth(positions), encoding: field.encoding };
 }
 
 /** Whether sample i is the nearest or the farthest of itself and its four neighbours (a side of an edge). */
