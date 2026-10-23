@@ -29,7 +29,10 @@ export interface FeedFilter {
   pinned?: boolean;
   /** Review statuses; "none" is a result without one. */
   reviews?: ReviewFilter[];
-  /** Also helper steps (see isHelperFeature) in a list that doesn't name its features. */
+  /**
+   * Also helper steps (see isHelperFeature). A list that names no features (and no batch) leaves them
+   * out unless this is set, so a list that must see every job (a count of running jobs) sets it.
+   */
   steps?: boolean;
 }
 
@@ -156,11 +159,11 @@ export interface Folder {
   id: string;
   name: string;
   color: string;
-  /** Results directly in it (not in its subfolders, not in the Trash). */
+  /** Results directly in it, as its page shows them by default (not in its subfolders or the Trash, not helper steps). */
   count: number;
   /** Subfolders directly in it. */
   folders: number;
-  /** The newest output in the folder, for its cover. */
+  /** The newest output in the folder (not a helper step's), for its cover. */
   cover: OutputFile | null;
   /** The folder it's in (null: the library root). */
   parentId: string | null;
@@ -436,8 +439,12 @@ export function stackLabel(items: Generation[]): string {
   return `${items.length} results`;
 }
 
-/** Group a newest-first list into cards: generations sharing a batch become one stack, placed where its newest member is. */
-export function buildEntries(items: Generation[], opts: { stacks?: boolean } = {}): LibraryEntry[] {
+/**
+ * Group a newest-first list into cards: generations sharing a batch become one stack, placed where its
+ * newest member is. `prefix` goes in front of stack keys, for a second list on the same page (the
+ * Pinned section): a batch with members in both gets a stack in each, and their keys must differ.
+ */
+export function buildEntries(items: Generation[], opts: { stacks?: boolean; prefix?: string } = {}): LibraryEntry[] {
   if (opts.stacks === false) return items.map((g) => ({ type: "single", key: g.id, g }));
   const groups = new Map<string, Generation[]>();
   for (const g of items) {
@@ -456,7 +463,7 @@ export function buildEntries(items: Generation[], opts: { stacks?: boolean } = {
     if (placed.has(k)) continue;
     placed.add(k);
     const sorted = [...group].sort((a, b) => order(a) - order(b) || a.createdAt - b.createdAt);
-    out.push({ type: "stack", key: `stack:${k}`, title: stackTitle(group), label: stackLabel(group), items: sorted });
+    out.push({ type: "stack", key: `${opts.prefix ?? ""}stack:${k}`, title: stackTitle(group), label: stackLabel(group), items: sorted });
   }
   return out;
 }

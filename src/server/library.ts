@@ -223,6 +223,9 @@ export function setReview(list: string[], review: ReviewStatus | null): number {
 // ---------------------------------------------------------------------------
 // Folders (nested: each has a parent, null at the library root; one folder per generation)
 
+/** The SQL test for a helper step of `g` (isHelperFeature); the names are constants, not input. */
+const HELPER_SQL = `(g.feature LIKE '%${HELPER_SUFFIX}' OR g.feature IN (${HELPER_FEATURES.map((f) => `'${f}'`).join(", ")}))`;
+
 interface FolderRow {
   id: string;
   name: string;
@@ -245,19 +248,20 @@ const toFolder = (r: FolderRow): Folder => {
     count: r.count,
     folders: r.folders,
     cover: outputs[0] ?? null,
-    parentId: r.parent_id ?? null,
+    parentId: r.parent_id || null,
     pinnedAt: r.pinned_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 };
 
+/** A folder's count and cover are what its page shows by default: not the Trash, not helper steps (as the lists). */
 const FOLDER_SELECT = `SELECT f.*,
   (SELECT COUNT(*) FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
-    WHERE i.folder_id = f.id AND t.generation_id IS NULL) AS count,
+    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND NOT ${HELPER_SQL}) AS count,
   (SELECT COUNT(*) FROM folders c WHERE c.parent_id = f.id) AS folders,
   (SELECT g.outputs_json FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
-    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC, g.id DESC LIMIT 1) AS cover_json
+    WHERE i.folder_id = f.id AND t.generation_id IS NULL AND NOT ${HELPER_SQL} AND g.status = 'succeeded' AND g.outputs_json != '[]' ORDER BY g.created_at DESC, g.id DESC LIMIT 1) AS cover_json
   FROM folders f`;
 
 /** Every folder, flat (each with its parentId): pinned first in the order they were pinned, then oldest first. */
@@ -272,7 +276,7 @@ export function getFolder(id: string): Folder | null {
 
 /** The tree without counts or covers (moves, deletes and zips walk it). */
 function folderLinks(): { id: string; name: string; parentId: string | null }[] {
-  return (db().prepare("SELECT id, name, parent_id FROM folders").all() as { id: string; name: string; parent_id: string | null }[]).map((r) => ({ id: r.id, name: r.name, parentId: r.parent_id ?? null }));
+  return (db().prepare("SELECT id, name, parent_id FROM folders").all() as { id: string; name: string; parent_id: string | null }[]).map((r) => ({ id: r.id, name: r.name, parentId: r.parent_id || null }));
 }
 
 /** Folder names are unique among siblings (case-insensitive), like files in a folder. */
@@ -282,11 +286,11 @@ const nameTaken = (name: string, parentId: string | null, except = "") =>
 const GONE = "That folder doesn't exist anymore";
 const colorOf = (c: string | undefined) => (FOLDER_COLORS.some((x) => x.id === c) ? c! : DEFAULT_FOLDER_COLOR);
 
-/** A new folder, at the library root or inside `parentId`. */
+/** A new folder, at the library root or inside `parentId` ("" counts as the root, like null). */
 export function createFolder(input: { name: string; color?: string; parentId?: string | null }): Folder {
   const name = input.name.trim().slice(0, 60);
   if (!name) throw new LibraryError("Give the folder a name", 400);
-  const parentId = input.parentId ?? null;
+  const parentId = input.parentId || null;
   if (parentId) {
     const links = folderLinks();
     if (!links.some((f) => f.id === parentId)) throw new LibraryError(GONE, 404);
@@ -300,7 +304,7 @@ export function createFolder(input: { name: string; color?: string; parentId?: s
 }
 
 /**
- * Rename, recolour, pin or move a folder. A move (`parentId`, null for the root) is refused into
+ * Rename, recolour, pin or move a folder. A move (`parentId`, null or "" for the root) is refused into
  * itself or one of its own subfolders, deeper than MAX_FOLDER_DEPTH, or next to a folder of the same name.
  */
 export function updateFolder(id: string, patch: { name?: string; color?: string; parentId?: string | null; pinned?: boolean }): Folder | null {
@@ -308,7 +312,7 @@ export function updateFolder(id: string, patch: { name?: string; color?: string;
   if (!f) return null;
   const name = patch.name !== undefined ? patch.name.trim().slice(0, 60) : f.name;
   if (!name) throw new LibraryError("Give the folder a name", 400);
-  const parentId = patch.parentId !== undefined ? patch.parentId : f.parentId;
+  const parentId = patch.parentId !== undefined ? patch.parentId || null : f.parentId;
   if (parentId !== f.parentId) {
     const err = folderMoveError(folderLinks(), id, parentId);
     if (err) throw new LibraryError(err, err === GONE ? 404 : 409);
@@ -332,7 +336,7 @@ export const moveFolder = (id: string, parentId: string | null) => updateFolder(
 export function deleteFolder(id: string): boolean {
   const f = db().prepare("SELECT parent_id FROM folders WHERE id = ?").get(id) as { parent_id: string | null } | undefined;
   if (!f) return false;
-  const parentId = f.parent_id ?? null;
+  const parentId = f.parent_id || null;
   const now = Date.now();
   db().transaction(() => {
     const members = (db().prepare("SELECT generation_id FROM folder_items WHERE folder_id = ?").all(id) as { generation_id: string }[]).map((r) => r.generation_id);
@@ -385,9 +389,6 @@ export interface LibraryFacets {
   steps: number;
   reviews: Partial<Record<ReviewStatus, number>>;
 }
-
-/** The SQL test for a helper step (isHelperFeature); the names are constants, not input. */
-const HELPER_SQL = `(g.feature LIKE '%${HELPER_SUFFIX}' OR g.feature IN (${HELPER_FEATURES.map((f) => `'${f}'`).join(", ")}))`;
 
 /** Counts for the Library's tabs and filters; helper steps are left out unless `steps` (as the lists do). */
 export function libraryFacets(opts: { steps?: boolean } = {}): LibraryFacets {
@@ -449,9 +450,10 @@ export function zipEntries(list: string[]): ZipEntry[] {
 
 /**
  * A folder as a zip: its finished outputs at the top and each subfolder's in a folder of its own
- * ("Shots/Close-ups/fox-ab12cd.png"), at any depth. Results in the Trash are left out.
+ * ("Shots/Close-ups/fox-ab12cd.png"), at any depth. It holds what the folder pages show: results in
+ * the Trash are left out, and helper steps too unless `steps` (the Library's Show steps is on).
  */
-export function folderZipEntries(id: string): { name: string; entries: ZipEntry[] } | null {
+export function folderZipEntries(id: string, opts: { steps?: boolean } = {}): { name: string; entries: ZipEntry[] } | null {
   const links = folderLinks();
   const root = links.find((f) => f.id === id);
   if (!root) return null;
@@ -459,7 +461,7 @@ export function folderZipEntries(id: string): { name: string; entries: ZipEntry[
   const members = db()
     .prepare(
       `SELECT i.generation_id AS id, i.folder_id AS folder FROM folder_items i JOIN generations g ON g.id = i.generation_id LEFT JOIN generation_trash t ON t.generation_id = g.id
-       WHERE t.generation_id IS NULL AND i.folder_id IN (${placeholders(tree.length)}) ORDER BY g.created_at DESC, g.id DESC`,
+       WHERE t.generation_id IS NULL${opts.steps ? "" : ` AND NOT ${HELPER_SQL}`} AND i.folder_id IN (${placeholders(tree.length)}) ORDER BY g.created_at DESC, g.id DESC`,
     )
     .all(...tree) as { id: string; folder: string }[];
   if (members.length > FOLDER_ZIP_MAX) throw new LibraryError(`“${root.name}” and its subfolders hold over ${FOLDER_ZIP_MAX.toLocaleString("en-US")} results. Download its subfolders one at a time.`, 413);

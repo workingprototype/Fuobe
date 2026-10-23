@@ -5,8 +5,8 @@ import { deleteFolder, getFolder, LibraryError, updateFolder } from "@/server/li
 const Patch = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   color: z.string().max(20).optional(),
-  /** Move it into another folder, or (null) to the library root. */
-  parentId: z.string().max(40).nullable().optional(),
+  /** Move it into another folder, or (null) to the library root ("" is refused). */
+  parentId: z.string().min(1).max(40).nullable().optional(),
   pinned: z.boolean().optional(),
 });
 
@@ -21,7 +21,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/folders/[id]">)
 export async function PATCH(request: Request, ctx: RouteContext<"/api/folders/[id]">) {
   const { id } = await ctx.params;
   const parsed = Patch.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return Response.json({ error: "Give the folder a name" }, { status: 400 });
+  if (!parsed.success) return Response.json({ error: parsed.error.issues.some((i) => i.path[0] === "parentId") ? "Pick a folder to move it into, or null for the top of the Library" : "Give the folder a name" }, { status: 400 });
   try {
     const f = updateFolder(id, parsed.data);
     return f ? Response.json(f) : Response.json({ error: "Not found" }, { status: 404 });

@@ -222,10 +222,13 @@ export function FolderDialog({
   );
 }
 
-/** Download a folder (and its subfolders) as a zip, after asking the server whether there's anything to zip. */
-async function downloadFolder(f: Folder) {
-  const url = `/api/folders/${encodeURIComponent(f.id)}/zip`;
-  const res = await fetch(`${url}?check=1`).catch(() => null);
+/**
+ * Download a folder (and its subfolders) as a zip, after asking the server whether there's anything
+ * to zip. Helper steps go in only when `steps` (Show steps is on), so the zip has what the pages show.
+ */
+async function downloadFolder(f: Folder, steps?: boolean) {
+  const url = `/api/folders/${encodeURIComponent(f.id)}/zip${steps ? "?steps=1" : ""}`;
+  const res = await fetch(`${url}${steps ? "&" : "?"}check=1`).catch(() => null);
   const body = ((await res?.json().catch(() => null)) ?? {}) as { files?: number; error?: string };
   if (!res?.ok) return void toast(body.error ?? "Couldn't make the zip. Try again in a moment.");
   downloadUrl(url);
@@ -234,9 +237,10 @@ async function downloadFolder(f: Folder) {
 
 /**
  * A folder's ⋯ menu (its card and its page header): open, new folder inside, rename or recolour,
- * pin, move into another folder, download as a zip, delete. `onGone` runs after a delete.
+ * pin, move into another folder, download as a zip, delete. `onGone` runs after a delete; `steps`:
+ * the Library shows helper steps, so the zip takes them too.
  */
-function FolderMenu({ folder, all, onOpen, onGone, triggerClassName }: { folder: Folder; all: Folder[]; onOpen?: () => void; onGone?: () => void; triggerClassName: string }) {
+function FolderMenu({ folder, all, onOpen, onGone, steps, triggerClassName }: { folder: Folder; all: Folder[]; onOpen?: () => void; onGone?: () => void; steps?: boolean; triggerClassName: string }) {
   const actions = useFolderActions();
   const move = useMoveFolder(all);
   const [dialog, setDialog] = useState<null | "edit" | "new" | "delete">(null);
@@ -284,7 +288,7 @@ function FolderMenu({ folder, all, onOpen, onGone, triggerClassName }: { folder:
               ))}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuItem onSelect={() => void downloadFolder(folder)}>
+          <DropdownMenuItem onSelect={() => void downloadFolder(folder, steps)}>
             <Download /> Download (.zip)
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -322,7 +326,7 @@ function FolderMenu({ folder, all, onOpen, onGone, triggerClassName }: { folder:
   );
 }
 
-function FolderCard({ folder, all, onOpen, onDropIds }: { folder: Folder; all: Folder[]; onOpen: () => void; onDropIds: (ids: string[]) => void }) {
+function FolderCard({ folder, all, onOpen, onDropIds, steps }: { folder: Folder; all: Folder[]; onOpen: () => void; onDropIds: (ids: string[]) => void; steps?: boolean }) {
   const move = useMoveFolder(all);
   const drag = useFolderDrag(folder);
   const drop = useDropTarget({ items: onDropIds, folder: (id) => move(id, folder), folderError: (id) => folderMoveError(all, id, folder.id) });
@@ -364,6 +368,7 @@ function FolderCard({ folder, all, onOpen, onDropIds }: { folder: Folder; all: F
         folder={folder}
         all={all}
         onOpen={onOpen}
+        steps={steps}
         // With a mouse it appears over the card's corner on hover, so names keep the full width; touch screens always show it.
         triggerClassName={cn(
           "grid shrink-0 place-items-center rounded-lg text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 data-[state=open]:opacity-100",
@@ -374,15 +379,15 @@ function FolderCard({ folder, all, onOpen, onDropIds }: { folder: Folder; all: F
   );
 }
 
-/** The folders inside `parent` (the library root with null), pinned first, and a New folder tile. */
-export function FolderStrip({ all, parent, onOpen, onMove }: { all: Folder[]; parent: Folder | null; onOpen: (f: Folder) => void; onMove: (ids: string[], f: Folder) => void }) {
+/** The folders inside `parent` (the library root with null), pinned first, and a New folder tile. `steps`: Show steps is on. */
+export function FolderStrip({ all, parent, onOpen, onMove, steps }: { all: Folder[]; parent: Folder | null; onOpen: (f: Folder) => void; onMove: (ids: string[], f: Folder) => void; steps?: boolean }) {
   const [creating, setCreating] = useState(false);
   const kids = childFolders(all, parent?.id ?? null);
   return (
     <div className="scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 py-1" role="list" aria-label={parent ? `Folders in ${parent.name}` : "Folders"}>
       {kids.map((f) => (
         <div role="listitem" key={f.id} className="shrink-0">
-          <FolderCard folder={f} all={all} onOpen={() => onOpen(f)} onDropIds={(ids) => onMove(ids, f)} />
+          <FolderCard folder={f} all={all} onOpen={() => onOpen(f)} onDropIds={(ids) => onMove(ids, f)} steps={steps} />
         </div>
       ))}
       {roomInside(all, parent) && (
@@ -429,7 +434,20 @@ function Crumb({ target, all, label, onGo, onMoveItems, back }: { target: Folder
  * A folder's page header: breadcrumbs back up the tree (each one a drop target, so cards and
  * folders can be moved up), then the folder's name, count and ⋯ menu.
  */
-export function FolderHeader({ folder, all, onGo, onMoveItems }: { folder: Folder; all: Folder[]; onGo: (f: Folder | null) => void; onMoveItems: (ids: string[], target: Folder | null) => void }) {
+export function FolderHeader({
+  folder,
+  all,
+  onGo,
+  onMoveItems,
+  steps,
+}: {
+  folder: Folder;
+  all: Folder[];
+  onGo: (f: Folder | null) => void;
+  onMoveItems: (ids: string[], target: Folder | null) => void;
+  /** Show steps is on (the folder's zip takes them too). */
+  steps?: boolean;
+}) {
   const ancestors = folderPath(all, folder.id).slice(0, -1);
   // Deep folders show the two nearest crumbs; the ones above fold into "…".
   const shown = ancestors.slice(-2);
@@ -463,6 +481,7 @@ export function FolderHeader({ folder, all, onGo, onMoveItems }: { folder: Folde
           folder={folder}
           all={all}
           onGone={() => onGo(all.find((f) => f.id === folder.parentId) ?? null)}
+          steps={steps}
           triggerClassName="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
         />
       </div>

@@ -25,6 +25,7 @@ const generationRoutes = await import("@/app/api/generations/route");
 const generationIdRoutes = await import("@/app/api/generations/[id]/route");
 const assetIdRoutes = await import("@/app/api/assets/[id]/route");
 const { db } = await import("@/server/db");
+const { childFolders, folderTree } = await import("@/lib/library");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -573,6 +574,43 @@ describe("nested folders", () => {
     expect((await folderZipRoute.GET(new Request("http://x/zip"), ctxOf(empty.id))).status).toBe(404);
     expect((await folderZipRoute.GET(new Request("http://x/zip"), ctxOf("missing"))).status).toBe(404);
     for (const f of [deeper, sub, top, empty]) lib.deleteFolder(f.id);
+  });
+
+  it("refuses an empty parentId in the routes, and reads one as the root everywhere else", async () => {
+    const top = lib.createFolder({ name: "Blank parent top" });
+    expect((await folderRoutes.POST(jsonReq("/api/folders", "POST", { name: "Ghost", parentId: "" }))).status).toBe(400);
+    const patch = await folderIdRoutes.PATCH(jsonReq("/x", "PATCH", { parentId: "" }), ctxOf(top.id));
+    expect(patch.status).toBe(400);
+    expect(((await patch.json()) as { error: string }).error).toMatch(/Pick a folder/);
+    // Called directly (Assist, the CLI), "" is the library root: never a parent nothing has.
+    const ghost = lib.createFolder({ name: "Ghost", parentId: "" });
+    expect(ghost.parentId).toBeNull();
+    const sub = lib.createFolder({ name: "Blank parent sub", parentId: top.id });
+    expect(lib.updateFolder(sub.id, { parentId: "" })).toMatchObject({ parentId: null });
+    const all = lib.listFolders();
+    expect(childFolders(all, null).map((f) => f.id)).toEqual(expect.arrayContaining([top.id, ghost.id, sub.id]));
+    expect(folderTree(all).map((t) => t.folder.id)).toEqual(expect.arrayContaining([top.id, ghost.id, sub.id]));
+    expect(db().prepare("SELECT COUNT(*) AS n FROM folders WHERE parent_id = ''").get()).toEqual({ n: 0 });
+    for (const f of [sub, ghost, top]) lib.deleteFolder(f.id);
+  });
+
+  it("counts, covers and zips a folder as its page shows it: helper steps only with Show steps", async () => {
+    const f = lib.createFolder({ name: "Steps inside" });
+    const result = made("steps inside result", "shorts").g;
+    const step = made("steps inside cut", "shorts-step").g;
+    lib.moveToFolder([result.id, step.id], f.id);
+    // The step is the newest, but the cover is the result's.
+    db().prepare("UPDATE generations SET created_at = created_at + 1000 WHERE id = ?").run(step.id);
+    expect(lib.getFolder(f.id)).toMatchObject({ count: 1, cover: { url: result.outputs[0].url } });
+    expect(listIds({ folderId: f.id })).toEqual([result.id]);
+    expect(listIds({ folderId: f.id, steps: true }).sort()).toEqual([result.id, step.id].sort());
+    expect(lib.folderZipEntries(f.id)!.entries).toHaveLength(1);
+    expect(lib.folderZipEntries(f.id, { steps: true })!.entries).toHaveLength(2);
+    const check = async (qs: string) => (await (await folderZipRoute.GET(new Request(`http://x/zip?${qs}`), ctxOf(f.id))).json()) as { files: number };
+    expect((await check("check=1")).files).toBe(1);
+    expect((await check("steps=1&check=1")).files).toBe(2);
+    lib.deleteFolder(f.id);
+    lib.trashGenerations([result.id, step.id]);
   });
 });
 
