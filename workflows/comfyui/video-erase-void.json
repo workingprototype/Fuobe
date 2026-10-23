@@ -12,30 +12,12 @@
     "class_type": "GetVideoComponents",
     "inputs": {
       "video": [
-        "1",
+        "85",
         0
       ]
     },
     "_meta": {
-      "title": "Frames, sound, fps"
-    }
-  },
-  "3": {
-    "class_type": "PrimitiveInt",
-    "inputs": {
-      "value": 0
-    },
-    "_meta": {
-      "title": "First frame of the window (startFrame)"
-    }
-  },
-  "4": {
-    "class_type": "PrimitiveInt",
-    "inputs": {
-      "value": 45
-    },
-    "_meta": {
-      "title": "Frames to process (frames; rounded down so (frames-1)/4+1 is even, e.g. 45, 53, 61 ... 197)"
+      "title": "The window's frames, sound and fps"
     }
   },
   "5": {
@@ -45,17 +27,14 @@
         "2",
         0
       ],
-      "batch_index": [
-        "3",
-        0
-      ],
+      "batch_index": 0,
       "length": [
-        "4",
-        0
+        "86",
+        1
       ]
     },
     "_meta": {
-      "title": "The window"
+      "title": "The window (8n+5 frames)"
     }
   },
   "6": {
@@ -66,12 +45,18 @@
         0
       ],
       "upscale_method": "lanczos",
-      "width": 672,
-      "height": 384,
-      "crop": "center"
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "crop": "disabled"
     },
     "_meta": {
-      "title": "Work size (width, height; VOID trained at 672x384, multiples of 8)"
+      "title": "Work size (scaled, not cropped)"
     }
   },
   "7": {
@@ -215,11 +200,17 @@
         "11",
         0
       ],
-      "width": 672,
-      "height": 384,
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
       "length": [
-        "4",
-        0
+        "86",
+        1
       ],
       "batch_size": 1
     },
@@ -333,6 +324,18 @@
       "title": "Pass 1 frames"
     }
   },
+  "30": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Source size and frames decoded"
+    }
+  },
   "40": {
     "class_type": "OpticalFlowLoader",
     "inputs": {
@@ -353,11 +356,17 @@
         "26",
         0
       ],
-      "width": 672,
-      "height": 384,
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
       "length": [
-        "4",
-        0
+        "86",
+        1
       ],
       "batch_size": 1
     },
@@ -542,30 +551,13 @@
       "title": "Save video"
     }
   },
-  "60": {
-    "class_type": "ComfyMathExpression",
-    "inputs": {
-      "expression": "a / b",
-      "values.a": [
-        "3",
-        0
-      ],
-      "values.b": [
-        "2",
-        2
-      ]
-    },
-    "_meta": {
-      "title": "Window start in seconds"
-    }
-  },
   "61": {
     "class_type": "ComfyMathExpression",
     "inputs": {
       "expression": "a / b",
       "values.a": [
-        "4",
-        0
+        "86",
+        1
       ],
       "values.b": [
         "2",
@@ -583,17 +575,183 @@
         "2",
         1
       ],
-      "start_index": [
-        "60",
-        0
-      ],
+      "start_index": 0,
       "duration": [
         "61",
         0
       ]
     },
     "_meta": {
-      "title": "The window's sound (none for silent clips)"
+      "title": "The window's sound, as long as its frames (none for silent clips)"
+    }
+  },
+  "80": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": 0.1,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "First 0.1 s only: the clip's fps"
+    }
+  },
+  "81": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "80",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The clip's fps"
+    }
+  },
+  "82": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Window length in seconds (duration; 0 = the longest window, 197 frames)"
+    }
+  },
+  "83": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 197
+    },
+    "_meta": {
+      "title": "Frame cap per window (197 = VOID)"
+    }
+  },
+  "84": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "min(a + 1e9 * (a <= 0), (c + 0.5) / b)",
+      "values.a": [
+        "82",
+        0
+      ],
+      "values.b": [
+        "81",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seconds to decode: duration (0 = no limit), at most the frame cap + half a frame"
+    }
+  },
+  "85": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": [
+        "84",
+        0
+      ],
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "Decode only the window (startTime, in seconds)"
+    }
+  },
+  "86": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(5, floor((min(a, c) - 5) / 8) * 8 + 5)",
+      "values.a": [
+        "30",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames in the window: the largest 8n+5 decoded, at most the cap"
+    }
+  },
+  "87": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 672
+    },
+    "_meta": {
+      "title": "Work-size budget: width (width)"
+    }
+  },
+  "88": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 384
+    },
+    "_meta": {
+      "title": "Work-size budget: height (height)"
+    }
+  },
+  "89": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(8, floor(min(sqrt(a * b * c / d), 1024, 1024 * c / d) / 8) * 8)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work width: about width x height pixels in the clip's shape (multiple of 8, <= 1024)"
+    }
+  },
+  "90": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(8, floor(min(sqrt(a * b * d / c), 1024, 1024 * d / c) / 8) * 8)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work height (multiple of 8, <= 1024)"
     }
   }
 }

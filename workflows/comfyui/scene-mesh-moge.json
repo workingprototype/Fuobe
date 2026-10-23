@@ -23,14 +23,18 @@
   "3": {
     "class_type": "ComfyMathExpression",
     "inputs": {
-      "expression": "a > 2048",
+      "expression": "max(a, b) > 2048",
       "values.a": [
         "2",
         0
+      ],
+      "values.b": [
+        "2",
+        1
       ]
     },
     "_meta": {
-      "title": "Longer than 2048 px?"
+      "title": "Longer edge over 2048 px?"
     }
   },
   "4": {

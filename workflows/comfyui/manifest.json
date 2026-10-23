@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-22T23:27:12.402Z",
+  "generatedAt": "2026-10-23T00:20:02.191Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -11580,36 +11580,28 @@
             "input": "file"
           }
         ],
-        "startFrame": [
+        "startTime": [
           {
-            "node": "3",
-            "input": "value"
+            "node": "85",
+            "input": "start_time"
           }
         ],
-        "frames": [
+        "duration": [
           {
-            "node": "4",
+            "node": "82",
             "input": "value"
           }
         ],
         "width": [
           {
-            "node": "6",
-            "input": "width"
-          },
-          {
-            "node": "19",
-            "input": "width"
+            "node": "87",
+            "input": "value"
           }
         ],
         "height": [
           {
-            "node": "6",
-            "input": "height"
-          },
-          {
-            "node": "19",
-            "input": "height"
+            "node": "88",
+            "input": "value"
           }
         ],
         "maskPrompt": [
@@ -11688,14 +11680,13 @@
       "defaults": {
         "width": 832,
         "height": 480,
-        "frames": 81,
         "steps": 4,
         "cfg": 1,
         "shift": 5,
+        "duration": 0,
         "loraStrength": 1,
-        "startFrame": 0,
+        "startTime": 0,
         "maskGrow": 16,
-        "frameStep": 4,
         "checkpoint": "wan2.1_vace_14B_fp16.safetensors"
       },
       "limits": {
@@ -11745,7 +11736,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License (commercial use allowed under its terms); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "maskPrompt = what to remove (SAM 3.1 text prompt, e.g. \"the man in the red jacket\"; up to 4 matching objects are tracked); prompt = the scene WITHOUT it. One window per job: frames (4n+1, at most 81) from startFrame, both in SOURCE frames, because the graph runs at the clip's own fps (GetVideoComponents): the provider computes them with the fps of the clip's header, not the 16 fps default. Longer clips: one job per window, joined with video-concat-N (seams between windows untested, inferred). width x height = the work size VACE renders at (multiple of 16, 832x480 by default); give it the clip's shape (aspect ratio \"auto\"): the window is centre-cropped to it and the result is scaled back to the source size uncropped. SAM3_VideoTrack follows the object through the window, GrowMask (maskGrow px) covers edges and contact shadows, the control video blanks the masked area (as Comfy-Org's video_wan_vace_inpainting template) and WanVaceToVideo regenerates it. The result is pasted into the ORIGINAL frames at full resolution through a 6 px soft mask (GrowMaskWithBlur): every pixel outside the mask stays the source's own. The window's sound is kept (silent clips work). Speed: the template's CausVid LoRA is CC-BY-NC-4.0, so this uses the Apache-2.0 lightx2v T2V 4-step LoRA (4 steps, cfg 1, euler, shift 5; the pairing with VACE is inferred, not GPU-tested); loraStrength 0 + steps 20 + cfg 6 is the slow full-quality path. checkpoint wan2.1_vace_1.3B_fp16.safetensors (4.31 GB) fits 8 GB cards and needs loraStrength 0, steps 20, cfg 6 (no 4-step LoRA for 1.3B). No new download: every default file is already in the library. Validated by /prompt only (no GPU here); the window-and-sound part (ImageFromBatch + TrimAudioDuration at the clip's fps -> CreateVideo) ran on CPU on a clip with sound (the window's 0.84 s kept) and a silent one (no audio track, no error)."
+      "notes": "maskPrompt = what to remove (SAM 3.1 text prompt, e.g. \"the man in the red jacket\"; up to 4 matching objects are tracked); prompt = the scene WITHOUT it. One window per job, in SECONDS: startTime and duration (params.startTime and params.endTime - startTime, which the provider already fills). Video Slice decodes only that window, at most 81 frames + half a frame at the clip's own fps (read from a 0.1 s probe slice), so RAM no longer grows with the clip and one window needs no fps app side. The graph keeps the largest 4n+1 frames it decoded (at most 81: 2.7 s at 30 fps, 3.375 s at 24 fps, 5.06 s at 16 fps) and trims the sound to exactly those frames. duration 0 = the longest window; a longer duration is cut at 81 frames. Longer clips: one job per window, startTime = k x 81 / fps and duration = 81 / fps (fps from the clip's header), joined with video-concat-N (seams between windows untested, inferred). width x height = the work-size BUDGET (832x480 by default): VACE renders about width x height pixels in the CLIP's own shape (multiples of 16, at most 1280 a side; a 9:16 clip renders at 464x832), scaled, never cropped, so the paste-back lines up whatever aspect ratio the request had. SAM3_VideoTrack follows the object through the window, GrowMask (maskGrow px) covers edges and contact shadows, the control video blanks the masked area (as Comfy-Org's video_wan_vace_inpainting template) and WanVaceToVideo regenerates it. The result is pasted into the ORIGINAL frames at full resolution through a 6 px soft mask (GrowMaskWithBlur): every pixel outside the mask stays the source's own. The window's sound is kept (silent clips work). RAM: the window is held at the source size as float32 in several copies (decoded, cut, scaled back, pasted; ~25 MB per 1080p frame, so roughly 10 GB for 81 frames at 1080p, inferred): downscale 4K sources first. Changed from the research graph: the seconds-based window (the research bound startFrame / frames on the whole decoded clip and centre-cropped to width x height). Speed: the template's CausVid LoRA is CC-BY-NC-4.0, so this uses the Apache-2.0 lightx2v T2V 4-step LoRA (4 steps, cfg 1, euler, shift 5; the pairing with VACE is inferred, not GPU-tested); loraStrength 0 + steps 20 + cfg 6 is the slow full-quality path. checkpoint wan2.1_vace_1.3B_fp16.safetensors (4.31 GB) fits 8 GB cards and needs loraStrength 0, steps 20, cfg 6 (no 4-step LoRA for 1.3B). No new download: every default file is already in the library. Validated by /prompt only (no GPU here). The window, sound and work-size nodes ran on CPU (the built graph's own nodes, VACE replaced by the work-size frames scaled back): an 8 s 360x640 30 fps clip with sound, startTime 1, duration 0 -> 81 frames, 2.700 s of picture and 2.700 s of sound, rendered at 464x832 and back, matching source frames 30-110 (27.2 dB PSNR at offset 0 vs 19 dB one frame off; the research graph's centre crop gave 16.4 dB at every offset, i.e. misplaced); startTime 2, duration 1 -> 29 frames, 0.967 s of both; startTime and duration 81/30 -> frames 81-161; a silent clip -> 81 frames, no sound track, no error; a 60 s clip, window at 50 s: 0.6 s instead of 2.6 s with the whole-clip decode."
     },
     {
       "id": "video-inpaint-wan-vace-painted",
@@ -11766,44 +11757,28 @@
             "input": "image"
           }
         ],
-        "startFrame": [
+        "startTime": [
           {
-            "node": "3",
-            "input": "value"
+            "node": "85",
+            "input": "start_time"
           }
         ],
-        "frames": [
+        "duration": [
           {
-            "node": "4",
+            "node": "82",
             "input": "value"
           }
         ],
         "width": [
           {
-            "node": "6",
-            "input": "width"
-          },
-          {
-            "node": "19",
-            "input": "width"
-          },
-          {
-            "node": "72",
-            "input": "width"
+            "node": "87",
+            "input": "value"
           }
         ],
         "height": [
           {
-            "node": "6",
-            "input": "height"
-          },
-          {
-            "node": "19",
-            "input": "height"
-          },
-          {
-            "node": "72",
-            "input": "height"
+            "node": "88",
+            "input": "value"
           }
         ],
         "maskGrow": [
@@ -11876,14 +11851,13 @@
       "defaults": {
         "width": 832,
         "height": 480,
-        "frames": 81,
         "steps": 4,
         "cfg": 1,
         "shift": 5,
+        "duration": 0,
         "loraStrength": 1,
-        "startFrame": 0,
+        "startTime": 0,
         "maskGrow": 16,
-        "frameStep": 4,
         "checkpoint": "wan2.1_vace_14B_fp16.safetensors"
       },
       "limits": {
@@ -11933,7 +11907,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License (commercial use allowed under its terms); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (the clip's shape; it is scaled to the work size like the frames). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. Everything else as video-inpaint-wan-vace: windows of frames (4n+1, at most 81) from startFrame in source frames, width x height in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame. Validated by /prompt only (no GPU here)."
+      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (in the clip's shape). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame. Validated by /prompt only (no GPU here)."
     },
     {
       "id": "video-erase-void",
@@ -11948,44 +11922,28 @@
             "input": "file"
           }
         ],
-        "startFrame": [
+        "startTime": [
           {
-            "node": "3",
-            "input": "value"
+            "node": "85",
+            "input": "start_time"
           }
         ],
-        "frames": [
+        "duration": [
           {
-            "node": "4",
+            "node": "82",
             "input": "value"
           }
         ],
         "width": [
           {
-            "node": "6",
-            "input": "width"
-          },
-          {
-            "node": "19",
-            "input": "width"
-          },
-          {
-            "node": "41",
-            "input": "width"
+            "node": "87",
+            "input": "value"
           }
         ],
         "height": [
           {
-            "node": "6",
-            "input": "height"
-          },
-          {
-            "node": "19",
-            "input": "height"
-          },
-          {
-            "node": "41",
-            "input": "height"
+            "node": "88",
+            "input": "value"
           }
         ],
         "maskPrompt": [
@@ -12060,13 +12018,16 @@
       "defaults": {
         "width": 672,
         "height": 384,
-        "frames": 45,
         "steps": 30,
         "cfg": 6,
-        "startFrame": 0,
-        "maskGrow": 8
+        "duration": 0,
+        "startTime": 0,
+        "maskGrow": 8,
+        "skipPass2": false
       },
       "limits": {
+        "maxWidth": 1024,
+        "maxHeight": 1024,
         "maxFrames": 197,
         "dimensionMultiple": 8
       },
@@ -12112,7 +12073,7 @@
       "vramGb": 40,
       "license": "VOID weights Apache-2.0 (netflix/void-model), BUT fine-tuned from CogVideoX-Fun-V1.5-5b-InP, whose 5B transformer is under the CogVideoX License: free for academic research; commercial use only after registering for its basic commercial licence (open.bigmodel.cn), and at most 1 million service visits a month without a further licence; no military or illegal use. T5-XXL and the CogVideoX VAE Apache-2.0; RAFT BSD-3-Clause; SAM 3.1 under Meta's SAM License",
       "validated": true,
-      "notes": "The premium removal: VOID also removes what the object causes (shadows, reflections, objects it holds falling). Comfy-Org template utility_void_video_inpainting (2026-05-14), flattened, with SAM3_VideoTrack (maskPrompt) instead of per-frame SAM3_Detect. The binary mask goes straight into VOIDInpaintConditioning (1 = remove) as in the template; VOIDQuadmaskPreprocess is only for VOID's own 4-level quadmasks. frames is rounded down by the node so the latent length is even: 45, 53, 61 ... 197 (8n+5), counted in source frames from startFrame like the VACE graphs. Output = the work size (672x384 by default, VOID's training size; multiples of 8), not the source size: the whole frame is re-rendered, so upscale afterwards if needed. The window's sound is kept. Pass 2 re-samples with noise warped along pass 1's optical flow (RAFT) for steadier long clips; skipPass2 true halves the time (pass 1 \"is sufficient for most videos\" per Netflix's card). The switch is lazy, so pass 2 does not run then, but void_pass2 and the RAFT file must still be installed (/prompt checks every loader that feeds the output). Downloads 32.5 GB: 2 x 11.14 GB passes, T5-XXL fp16 9.79 GB (the same file as FLUX's t5xxl_fp16), CogVideoX VAE 0.43 GB, RAFT 0.02 GB. VRAM in ComfyUI is unverified: Netflix's reference code needs 40 GB+, a 24 GB card with offloading is plausible (inferred). Validated by /prompt only (no GPU here)."
+      "notes": "The premium removal: VOID also removes what the object causes (shadows, reflections, objects it holds falling). Comfy-Org template utility_void_video_inpainting (2026-05-14), flattened, with SAM3_VideoTrack (maskPrompt) instead of per-frame SAM3_Detect. The binary mask goes straight into VOIDInpaintConditioning (1 = remove) as in the template; VOIDQuadmaskPreprocess is only for VOID's own 4-level quadmasks. Window in seconds like the VACE graphs (startTime, duration; Video Slice decodes only the window, at most 197 frames + half a frame at the clip's fps): the graph keeps the largest 8n+5 frames it decoded (45, 53 ... 197: an even latent length, which VOIDInpaintConditioning / VOIDWarpedNoise would otherwise round down to) and trims the sound to exactly those frames, so picture and sound stay the same length. duration 0 = the longest window (197 frames, 7.9 s at 25 fps); windows of 197 / fps seconds tile a longer clip. Output = the work size, not the source size: width x height is the budget (672x384 by default, VOID's training size) in the CLIP's shape (multiples of 8, at most 1024 a side; 672x376 for 16:9, 376x672 for 9:16), scaled, never cropped: the whole frame is re-rendered, so upscale afterwards if needed. The window's sound is kept. Pass 2 re-samples with noise warped along pass 1's optical flow (RAFT) for steadier long clips; skipPass2 true halves the time (pass 1 \"is sufficient for most videos\" per Netflix's card). The switch is lazy, so pass 2 does not run then, but void_pass2 and the RAFT file must still be installed (/prompt checks every loader that feeds the output). Downloads 32.5 GB: 2 x 11.14 GB passes, T5-XXL fp16 9.79 GB (the same file as FLUX's t5xxl_fp16), CogVideoX VAE 0.43 GB, RAFT 0.02 GB. VRAM in ComfyUI is unverified: Netflix's reference code needs 40 GB+, a 24 GB card with offloading is plausible (inferred). Validated by /prompt only (no GPU here). Changed from the research graph: the seconds-based window, the in-graph 8n+5 count and the aspect-keeping work size (the research bound startFrame / frames and centre-cropped). The window and work-size nodes ran on CPU: a 10 s 640x360 25 fps clip with sound, startTime 0.5, duration 0 -> 197 frames at 672x376, 7.880 s of picture and of sound; duration 2 -> 45 frames, 1.800 s of both."
     },
     {
       "id": "video-swap-wan-vace",
@@ -12133,36 +12094,28 @@
             "input": "image"
           }
         ],
-        "startFrame": [
+        "startTime": [
           {
-            "node": "3",
-            "input": "value"
+            "node": "85",
+            "input": "start_time"
           }
         ],
-        "frames": [
+        "duration": [
           {
-            "node": "4",
+            "node": "82",
             "input": "value"
           }
         ],
         "width": [
           {
-            "node": "6",
-            "input": "width"
-          },
-          {
-            "node": "19",
-            "input": "width"
+            "node": "87",
+            "input": "value"
           }
         ],
         "height": [
           {
-            "node": "6",
-            "input": "height"
-          },
-          {
-            "node": "19",
-            "input": "height"
+            "node": "88",
+            "input": "value"
           }
         ],
         "maskPrompt": [
@@ -12241,14 +12194,13 @@
       "defaults": {
         "width": 832,
         "height": 480,
-        "frames": 81,
         "steps": 4,
         "cfg": 1,
         "shift": 5,
+        "duration": 0,
         "loraStrength": 1,
-        "startFrame": 0,
+        "startTime": 0,
         "maskGrow": 16,
-        "frameStep": 4,
         "checkpoint": "wan2.1_vace_14B_fp16.safetensors"
       },
       "limits": {
@@ -12298,7 +12250,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License (commercial use allowed under its terms); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "Genjutsu \"Object Swap\" on the open engine. maskPrompt = what to replace (the tracked mask, as video-inpaint-wan-vace); image = the new object, product or character, best cut out on a plain or white background (bg-remove-birefnet); prompt describes the result. The reference goes to WanVaceToVideo.reference_image (one extra latent frame that TrimVideoLatent drops) and the masked area is regenerated following the original motion. One image: with several references the provider sends the first (or a collage). Window rules (frames 4n+1 <= 81 from startFrame in source frames, width x height in the clip's shape), the paste-back into the original frames and the kept sound are as video-inpaint-wan-vace. For a whole person, SCAIL-2 Character Replacement (template video_wan21_scail2_character_replacement) keeps the body motion better (not built). Validated by /prompt only (no GPU here)."
+      "notes": "Genjutsu \"Object Swap\" on the open engine. maskPrompt = what to replace (the tracked mask, as video-inpaint-wan-vace); image = the new object, product or character, best cut out on a plain or white background (bg-remove-birefnet); prompt describes the result. The reference goes to WanVaceToVideo.reference_image (one extra latent frame that TrimVideoLatent drops) and the masked area is regenerated following the original motion. One image: with several references the provider sends the first (or a collage). Window rules (startTime / duration in seconds, at most 81 frames; width x height = the work-size budget in the clip's shape), the paste-back into the original frames and the kept sound are as video-inpaint-wan-vace. For a whole person, SCAIL-2 Character Replacement (template video_wan21_scail2_character_replacement) keeps the body motion better (not built). Validated by /prompt only (no GPU here)."
     },
     {
       "id": "video-insert-wan-vace",
@@ -12325,44 +12277,28 @@
             "input": "image"
           }
         ],
-        "startFrame": [
+        "startTime": [
           {
-            "node": "3",
-            "input": "value"
+            "node": "85",
+            "input": "start_time"
           }
         ],
-        "frames": [
+        "duration": [
           {
-            "node": "4",
+            "node": "82",
             "input": "value"
           }
         ],
         "width": [
           {
-            "node": "6",
-            "input": "width"
-          },
-          {
-            "node": "19",
-            "input": "width"
-          },
-          {
-            "node": "72",
-            "input": "width"
+            "node": "87",
+            "input": "value"
           }
         ],
         "height": [
           {
-            "node": "6",
-            "input": "height"
-          },
-          {
-            "node": "19",
-            "input": "height"
-          },
-          {
-            "node": "72",
-            "input": "height"
+            "node": "88",
+            "input": "value"
           }
         ],
         "maskGrow": [
@@ -12435,14 +12371,13 @@
       "defaults": {
         "width": 832,
         "height": 480,
-        "frames": 81,
         "steps": 4,
         "cfg": 1,
         "shift": 5,
+        "duration": 0,
         "loraStrength": 1,
-        "startFrame": 0,
+        "startTime": 0,
         "maskGrow": 16,
-        "frameStep": 4,
         "checkpoint": "wan2.1_vace_14B_fp16.safetensors"
       },
       "limits": {
@@ -12486,7 +12421,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "mask = the region where the new object should appear, a PNG in the clip's shape read from the red channel (white = the region, black = keep); it is held for every frame of the window (RepeatImageBatch), so it suits a static or slow camera (without the repeat WanVaceToVideo would pad a one-frame mask with 1 = generate and regenerate the whole clip). image = the object (best cut out on white); prompt = what appears where and what it does. No SAM. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention) instead of alpha. Window rules, paste-back and the kept sound as video-inpaint-wan-vace. Validated by /prompt only (no GPU here)."
+      "notes": "mask = the region where the new object should appear, a PNG in the clip's shape read from the red channel (white = the region, black = keep), scaled (not cropped) to the work size; it is held for every frame of the window (RepeatImageBatch), so it suits a static or slow camera (without the repeat WanVaceToVideo would pad a one-frame mask with 1 = generate and regenerate the whole clip). image = the object (best cut out on white); prompt = what appears where and what it does. No SAM. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention) instead of alpha. Window rules (startTime / duration in seconds, at most 81 frames), the work-size budget, paste-back and the kept sound as video-inpaint-wan-vace. Validated by /prompt only (no GPU here)."
     },
     {
       "id": "kenburns-still",
@@ -12803,7 +12738,7 @@
       "vramGb": 0,
       "license": "n/a (no model; VideoHelperSuite GPL-3.0 code and the system ffmpeg's prores_ks / libx265 / ffv1 / libx264 encoders)",
       "validated": true,
-      "notes": "params.format -> format (+ profile): prores_422_hq -> video/ProRes + hq; prores_4444 -> video/ProRes + 4444 (also lt, standard, 4444xq); h265_10bit -> video/h265-mp4 (pix_fmt yuv420p10le, its first option); ffv1 -> video/ffv1-mkv (lossless, rgba64le); h264 -> video/h264-mp4; exr -> video-export-exr. VHS falls back to each format widget's default when an input is missing, and adds profile only for ProRes. VHS writes <prefix>_00001.<ext> (.mov ProRes, .mp4 H.264/H.265, .mkv FFV1; no sound) and, when the clip has sound, <prefix>_00001-audio.<ext>, the only file the history lists (under \"gifs\"); it also leaves a first-frame .png next to them. Decodes the whole clip (GetVideoComponents): RAM grows with the length. Ran here (CPU, two sessions, a 1 s 64x64 16 fps clip with AAC sound, 0.16-0.4 s each, checked with ffprobe): ProRes HQ .mov yuv444p10le + pcm_s16le; ProRes 4444 yuv444p12le; h265-mp4 HEVC Main 10 yuv420p10le + AAC; ffv1-mkv gbrap16le + FLAC; h264-mp4 High yuv420p + AAC; 16 frames and 1.000 s in every file; bt709 tags (FFV1: gbr matrix, sRGB transfer, bt709 primaries)."
+      "notes": "params.format -> format (+ profile): prores_422_hq -> video/ProRes + hq; prores_4444 -> video/ProRes + 4444 (also lt, standard, 4444xq); h265_10bit -> video/h265-mp4 (pix_fmt yuv420p10le, its first option); ffv1 -> video/ffv1-mkv (lossless, rgba64le); h264 -> video/h264-mp4; exr -> video-export-exr. VHS falls back to each format widget's default when an input is missing, and adds profile only for ProRes. VHS writes <prefix>_00001.<ext> (.mov ProRes, .mp4 H.264/H.265, .mkv FFV1; no sound) and, when the clip has sound, <prefix>_00001-audio.<ext>, the only file the history lists (under \"gifs\"); it also leaves a first-frame .png next to them. Storage: /view serves .mkv as video/x-matroska, which storage.ts has no extension for, so an FFV1 export is saved as <id>.bin (kind video) until EXT_BY_TYPE / TYPE_BY_EXT know mkv (feature package). Decodes the whole clip (GetVideoComponents): RAM grows with the length. Ran here (CPU, two sessions, a 1 s 64x64 16 fps clip with AAC sound, 0.16-0.4 s each, checked with ffprobe): ProRes HQ .mov yuv444p10le + pcm_s16le; ProRes 4444 yuv444p12le; h265-mp4 HEVC Main 10 yuv420p10le + AAC; ffv1-mkv gbrap16le + FLAC; h264-mp4 High yuv420p + AAC; 16 frames and 1.000 s in every file; bt709 tags (FFV1: gbr matrix, sRGB transfer, bt709 primaries)."
     },
     {
       "id": "video-sdr-to-hdr",
@@ -12882,7 +12817,7 @@
       "vramGb": 0,
       "license": "n/a (no model; ComfyUI core)",
       "validated": true,
-      "notes": "params.format \"exr\" of the export-video operation. One half-float .exr per frame (role frames, in frame order); input_color_space sRGB applies the inverse sRGB curve, so the files are scene-linear Rec.709. The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer."
+      "notes": "params.format \"exr\" of the export-video operation. One half-float .exr per frame (role frames, in frame order); input_color_space sRGB applies the inverse sRGB curve, so the files are scene-linear Rec.709. The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Storage: /view serves .exr as image/aces, which storage.ts has no extension for, so each frame is saved as an image .bin until EXT_BY_TYPE / TYPE_BY_EXT know exr (feature package; the zip is the deliverable anyway). Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer."
     },
     {
       "id": "still-to-clip",
@@ -13107,7 +13042,7 @@
       "vramGb": 4,
       "license": "MIT (microsoft/MoGe 2 and 3, Comfy-Org/MoGe repack)",
       "validated": true,
-      "notes": "Cinema Studio \"Create 3D scene\": photo -> textured GLB of the WHOLE frame (role scene) + a depth PNG (role depth). From the official template 3d_moge_perspective_to_mesh (2026-05-15): normal-map previews dropped, the depth PNG added; images over 2048 px are resized first. The browser orbits the GLB, captures a view, and qwen-image-edit-2511 re-renders it with the original photo. resolutionLevel 0-9 (detail), fovX = horizontal field of view in degrees (0 = estimate), decimation 2 for phones (about 4x fewer triangles, inferred). checkpoint moge_2_vitl_normal_fp16 (0.66 GB) by default; moge_3_vitl_fp16 (0.74 GB) and moge_3_vitg_fp16 (2.50 GB) load through the same node. Research run on the 4-core CPU: a 768x768 living-room photo became a 25.2 MB GLB (556k vertices, 1.08M triangles, one texture, depth 0.35-6.58 m) in 42 s, +1.6 GB RSS. VRAM unverified (MoGe 2 ViT-L is ~0.33B parameters). TripoSplat (image-to-splat-triposplat) rebuilds the subject only, not the scene."
+      "notes": "Cinema Studio \"Create 3D scene\": photo -> textured GLB of the WHOLE frame (role scene) + a depth PNG (role depth). From the official template 3d_moge_perspective_to_mesh (2026-05-15): normal-map previews dropped, the depth PNG added; images with a longer edge over 2048 px are resized to 2048 first (changed from the research graph, which tested the width only, so tall portraits went through at full size; checked on CPU: 1536x3000 -> 1048x2048, 3000x1536 -> 2048x1048, 1024x768 unchanged). The browser orbits the GLB, captures a view, and qwen-image-edit-2511 re-renders it with the original photo. resolutionLevel 0-9 (detail), fovX = horizontal field of view in degrees (0 = estimate), decimation 2 for phones (about 4x fewer triangles, inferred). checkpoint moge_2_vitl_normal_fp16 (0.66 GB) by default; moge_3_vitl_fp16 (0.74 GB) and moge_3_vitg_fp16 (2.50 GB) load through the same node. Research run on the 4-core CPU: a 768x768 living-room photo became a 25.2 MB GLB (556k vertices, 1.08M triangles, one texture, depth 0.35-6.58 m) in 42 s, +1.6 GB RSS. VRAM unverified (MoGe 2 ViT-L is ~0.33B parameters). TripoSplat (image-to-splat-triposplat) rebuilds the subject only, not the scene."
     },
     {
       "id": "image-to-splat-triposplat",
@@ -13196,7 +13131,8 @@
         "cfg": 3,
         "numGaussians": 262144,
         "orbitFrames": 75,
-        "splatFormat": "spz"
+        "splatFormat": "spz",
+        "cutout": true
       },
       "limits": {
         "maxGaussians": 1048576
@@ -13237,7 +13173,7 @@
       "vramGb": 8,
       "license": "MIT (VAST-AI/TripoSplat weights); the dino_v3_vit_h image encoder is under the DINOv3 License (royalty-free, commercial use allowed, trade-control limits; the app must show a \"Built with DINOv3\" notice); FLUX.2 VAE Apache-2.0; BiRefNet MIT",
       "validated": true,
-      "notes": "Subject or product splat (3D Angles, 3D Jutsu props, a splat alternative to TRELLIS.2 spins). The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02) with the UI-only live-preview patch removed and a 75-frame H.264 orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5; role turntable, 25 fps). Subject only: BiRefNet cuts it out first (cutout false = use the image's own alpha). Output 1 (role splat): splatFormat spz (Niantic, gzip, ~10x smaller, base colour), ply (full spherical harmonics) or ksplat, saved by SaveGLB under that extension (meta.format = the extension). numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. 3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only."
+      "notes": "Subject or product splat (3D Angles, 3D Jutsu props, a splat alternative to TRELLIS.2 spins). The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02) with the UI-only live-preview patch removed and a 75-frame H.264 orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5; role turntable, 25 fps). Subject only: BiRefNet cuts it out first (cutout false = use the image's own alpha). Output 1 (role splat): splatFormat spz (Niantic, gzip, ~10x smaller, base colour), ply (full spherical harmonics) or ksplat, saved by SaveGLB under that extension (meta.format = the extension). Storage: ComfyUI's /view serves all three as application/octet-stream (Python mimetypes knows none), so persistOutput falls back to the extension: storage.ts maps spz / ply to model/x-spz / model/ply (added by catalog-4) and so kind model3d, but ksplat has no mapping and lands as an image .bin; collectOutputs sets only meta.role, so the provider sets meta.format (and a contentType for ksplat). cutout is true by default (manifest defaults). numGaussians up to 1,048,576 (262,144 by default); seed drives both the sampler and the decoder. RenderSplat also takes a look_at camera, so a view picked in the browser can be rendered on the server. 3.78 GB of weights (TripoSplat 0.74, DINOv3 ViT-H 1.68, TripoSplat VAE decoder 0.58, FLUX.2 VAE 0.34, BiRefNet 0.44). VRAM unverified. Validated by /prompt only."
     },
     {
       "id": "reference-brief-gemma4",

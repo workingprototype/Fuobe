@@ -3,13 +3,13 @@
     "sha256": "f18c08cd22f37ccadb81cf557c4624e894c71dd718685e7b3030c92c9893be6a",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:06.665Z"
+    "at": "2026-10-23T00:12:21.245Z"
   },
   "audio-loop-crossfade": {
     "sha256": "97a181dd41506ca676dd88cb238da5e7871ce7101b74186991e4be33a0a2654c",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:05.393Z"
+    "at": "2026-10-23T00:12:21.235Z"
   },
   "audio-timeline": {
     "sha256": "b483019231d6add28874dc3c835a85726eaccdaf0c1d60c0d2f0431159a7711a",
@@ -33,7 +33,7 @@
     "sha256": "8bb4d7bca5145d94ee1d509e50e23ef40e4cd21cb7c152bbba32751eca4ea013",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.274Z"
+    "at": "2026-10-23T00:12:16.404Z"
   },
   "captions-qwen3-asr": {
     "sha256": "75286c2efad353c7285df2eea90782db99e7b7e994adeeaaf242a2e70c790bf7",
@@ -69,7 +69,7 @@
     "sha256": "62de41ccfa9c0fcce1599c8f5f712b983e767800af5b73a4e06cb71a1aa649ea",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:25.995Z"
+    "at": "2026-10-23T00:12:12.541Z"
   },
   "flux1-fill-inpaint": {
     "sha256": "1805c40665be21f24ac3f48c9bb5f3a8a901ac4e8ac3f75578d1f66bd83a5bbb",
@@ -165,13 +165,13 @@
     "sha256": "7bfa7ebe14aa128a4b9b513e653998c5293ddc9221ca1d668191d27dc52725f6",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.415Z"
+    "at": "2026-10-23T00:12:16.834Z"
   },
   "image-to-splat-triposplat": {
     "sha256": "cb65f4660b4d5fef3c0544146ed51b7d3acf059f3190a102dccf8166908f5413",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:40.971Z"
+    "at": "2026-10-23T00:12:21.310Z"
   },
   "infinitetalk-native": {
     "sha256": "816327852679ebc006a3842668c35a0c9127f724690abc4d58d7e820d2cf0de5",
@@ -195,7 +195,7 @@
     "sha256": "83a7470b9574b0e297e0fc2c8e1eb3e280f0bf77784f397b4f01516f8f18604e",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.098Z"
+    "at": "2026-10-23T00:12:15.716Z"
   },
   "interpolate-rife-vfi": {
     "sha256": "bec30ae2655d256ad465f02fb5249b7a6ec08c57cd3d6ca2f5425428f1f6f95c",
@@ -207,7 +207,7 @@
     "sha256": "34c5bdc4b0a425d82b5971ca31eae697da6b7363ea48b30dfe055d7a8573976d",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:05.238Z"
+    "at": "2026-10-23T00:12:21.225Z"
   },
   "layers-qwen-image-layered": {
     "sha256": "7e8aae04b028f3e0000ca59ab953c4af5be0a1a65f734481d8162179d6cc9e77",
@@ -273,7 +273,7 @@
     "sha256": "2cc591a75dbc160f91475e1f0e06c4a6a321adf6ad3a90b92648eea456322705",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:02.691Z"
+    "at": "2026-10-23T00:12:19.538Z"
   },
   "palette-transfer-image": {
     "sha256": "3287bd729386b870c9797679512d46526e17e66b09736029ca55867c6670e43f",
@@ -333,7 +333,7 @@
     "sha256": "4c941f187a7278ba7996e2d30c3ac65b295472b05b746958d1e87294f18ec1ef",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:09.261Z"
+    "at": "2026-10-23T00:12:21.322Z"
   },
   "relight-qwen-edit-2509": {
     "sha256": "06aa8787ebbc6fd40a4e95b3040a748c4544598ee7b795530c0e90e841a96ac8",
@@ -348,10 +348,10 @@
     "at": "2026-10-16T23:33:15.071Z"
   },
   "scene-mesh-moge": {
-    "sha256": "23eb02752b1e13077b037faeeef57de4b2959d3000ae4e9eaa50411f70bc0df3",
+    "sha256": "5557989f94b8b498adbfc576b7b85a54be71892de14180a8aa7e607e90137c8e",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:07.669Z"
+    "at": "2026-10-23T00:12:21.301Z"
   },
   "sdxl-t2i": {
     "sha256": "ae16cc9b74193179da08136571719871c3e31e2abacf5297985657c2fe5e9fbf",
@@ -411,7 +411,7 @@
     "sha256": "cd21914faa22195c7cf3fd4346c20ba1306d434bf565456ac6bfaa24743d08e3",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:07.304Z"
+    "at": "2026-10-23T00:12:21.280Z"
   },
   "storyboard-qwen-edit-2509-next-scene": {
     "sha256": "779d2a53bb5d45cfad1fe9da71e9258b4cf04af0036ae4708d74cc3788938106",
@@ -447,7 +447,7 @@
     "sha256": "0cbdf80883b7249dda9128050fc9c4f3c3df414b3cb3283bc057f389251fa010",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.313Z"
+    "at": "2026-10-23T00:12:16.529Z"
   },
   "tryon-flux2-klein-4b": {
     "sha256": "3e697e48a436c9340b26524a1303c1c13a300d116ecab604e3981dbebd9195ef",
@@ -513,7 +513,7 @@
     "sha256": "2b3f625be7e9c9356384f601edaca89f582bc4c1315e9f8d449b3cf2d7e08c8c",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:07.490Z"
+    "at": "2026-10-23T00:12:21.293Z"
   },
   "video-bg-remove-birefnet": {
     "sha256": "08da8d310a04add6eb729fb67f3a82b63b0a806368ce49fc498dfe6aeb58c83e",
@@ -549,7 +549,7 @@
     "sha256": "70ed1a9d7d25e3022e0289e8c1c4db3a6471e616201e3c1575150ce68cfef108",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.125Z"
+    "at": "2026-10-23T00:12:15.938Z"
   },
   "video-concat-sound1-3": {
     "sha256": "fde35477afe1883be1078a91cb0d1fda6548d9aefec2a78c74fc63c3a9a7dec0",
@@ -594,22 +594,22 @@
     "at": "2026-10-16T23:33:22.128Z"
   },
   "video-erase-void": {
-    "sha256": "6a2f22e04b9427b587f5e61a826c35b15aba351e11e556c94eb8d84482407e6b",
+    "sha256": "667f8b59d931311b5081e2407ef53aee0b39a36007cf838ba18b64d5d2681bdc",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:40.640Z"
+    "at": "2026-10-23T00:12:20.436Z"
   },
   "video-export-exr": {
     "sha256": "59de86f898829c9ed60d059d038e3a5b3f5df8fdd675a76579eacaae1526c6a8",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:07.142Z"
+    "at": "2026-10-23T00:12:21.270Z"
   },
   "video-export-pro": {
     "sha256": "94b6ad366376bad9348ddd79e137b012bed54184e7d269cb66952cee5c1d6ca4",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:06.854Z"
+    "at": "2026-10-23T00:12:21.253Z"
   },
   "video-extend-wan22-fun-vace": {
     "sha256": "c6e30d4d5acf5d3d97c59fe02194e4b80fc21278ea0e946547060b80efd70ae0",
@@ -618,22 +618,22 @@
     "at": "2026-10-16T23:33:13.889Z"
   },
   "video-inpaint-wan-vace": {
-    "sha256": "2ec20430ca30fed0354cd00f9a87679073162c3a6cafe9292ab08b8b318ff4fc",
+    "sha256": "71aaa43c8ac4bb0a764a9a835d96d1c47b33244f741611c7036ebea8ffcef3a7",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:03.404Z"
+    "at": "2026-10-23T00:12:19.803Z"
   },
   "video-inpaint-wan-vace-painted": {
-    "sha256": "b5528dfa2ebd1d21ee8576071d905fd862a97c0b1c3aded5117c0a32a083727d",
+    "sha256": "2563d3d6a4ecac8d21d7831324eb4c0e93797afce58eaed71015bca3aa7549ab",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:03.638Z"
+    "at": "2026-10-23T00:12:20.124Z"
   },
   "video-insert-wan-vace": {
-    "sha256": "713f6c7ac94738c043abc035babfe9afac045a902b7d230152be51d4c37f1df4",
+    "sha256": "5f57a143e6b2357badf59ebaa3d6d5c834c03330dee79f8af96d9b2307b5be24",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:05.062Z"
+    "at": "2026-10-23T00:12:21.209Z"
   },
   "video-mux-audio": {
     "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",
@@ -669,7 +669,7 @@
     "sha256": "f51f27af77dd2f61d51553241b15f6b5af14e6c06ff3342b24e810dff3e87f93",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:07.018Z"
+    "at": "2026-10-23T00:12:21.261Z"
   },
   "video-segment-resample": {
     "sha256": "957899bf0bd99a4bf9e2407a6149392eccc2ee6d8338088809992025e4d4b45d",
@@ -678,16 +678,16 @@
     "at": "2026-10-17T21:02:01.523Z"
   },
   "video-swap-wan-vace": {
-    "sha256": "47d216d2c2237d0c422c31be82c6af53b12b9e8e2b7a7e9466755b8a17720c41",
+    "sha256": "717e31d787cd715e09c343d321c4106277fa41e76c896c54453fe0d49dbe050c",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:04.932Z"
+    "at": "2026-10-23T00:12:20.787Z"
   },
   "video-trim": {
     "sha256": "7c611e027051c751670b1716031b6bbe61e21d5db990410fde4d7a54994815e8",
     "validated": true,
     "error": null,
-    "at": "2026-10-17T21:29:21.076Z"
+    "at": "2026-10-23T00:12:16.143Z"
   },
   "voice-change-chatterbox": {
     "sha256": "ad8b9d59f8cb4632f2859db6a0ee2e8b6114263a9507f144554cd827ceea3f0c",
@@ -705,7 +705,7 @@
     "sha256": "c78c05dc0d19131b8ccbc40aebff19323d0c7de70f6d93a4aeb2e76773637e27",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:20:02.570Z"
+    "at": "2026-10-23T00:12:15.574Z"
   },
   "wan22-flf2v-14b": {
     "sha256": "8fe5dfa9f3705bdc640960bc8fdb7d4fe28a2cf21e9c942a28c90d1dcc8c4e11",
@@ -735,7 +735,7 @@
     "sha256": "344df9a302da8ec9afe0bcd6606e241f7e4f301bb337d78987d7030edf6b68ba",
     "validated": true,
     "error": null,
-    "at": "2026-10-22T23:27:26.063Z"
+    "at": "2026-10-23T00:12:12.945Z"
   },
   "wan22-i2v-14b-lora": {
     "sha256": "95908d67a56cb8eb7db7e7fc36047b5480b416e9a1a6a5712da691daf9cfe000",

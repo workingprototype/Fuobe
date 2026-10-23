@@ -87,7 +87,7 @@ export interface ManifestWorkflow {
   source: string;
   bindings: Partial<Record<BindingKey, BindingTarget[]>>;
   outputs: ManifestOutput[];
-  defaults: Record<string, number | string>;
+  defaults: Record<string, number | string | boolean>;
   limits?: Record<string, number>;
   models: ManifestModel[];
   customNodes: { name: string; repo: string }[];

@@ -9756,8 +9756,6 @@
       "required": {
         "image": [
           [
-            "example.png",
-            "fuobe_6hmQxYQr.png",
             "fuobe_validate.png",
             "fuobe_validate_mask.png"
           ],
@@ -9808,8 +9806,6 @@
       "required": {
         "image": [
           [
-            "example.png",
-            "fuobe_6hmQxYQr.png",
             "fuobe_validate.png",
             "fuobe_validate_mask.png"
           ],
