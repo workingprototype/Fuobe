@@ -4,6 +4,9 @@ import { createGenerations, listGenerations } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { SignatureSchema } from "@/server/palettes";
 
+/** A point on a picture as fractions of its width and height. */
+const Focus = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+
 const RequestSchema = z.object({
   feature: z.string().min(1),
   presetId: z.string().optional(),
@@ -25,6 +28,8 @@ const RequestSchema = z.object({
       videos: z.array(z.string()).max(24).optional(),
       // Reference audio clips for reference-to-video (Seedance 2.5 / Cinema Studio take up to 10).
       audios: z.array(z.string()).max(10).optional(),
+      // A .glb to rig.
+      model3d: z.string().optional(),
     })
     .optional(),
   params: z
@@ -50,6 +55,24 @@ const RequestSchema = z.object({
       styleId: z.string().max(200).optional(),
       sourceLanguage: z.string().max(80).optional(),
       numLayers: z.number().int().min(1).max(20).optional(),
+      // Round 4: clicked points, keyframe times, output formats, Ken Burns moves, crossfades, retiming, overlays, rigging.
+      points: z.array(z.object({ x: z.number(), y: z.number(), label: z.enum(["positive", "negative"]).optional() })).max(64).optional(),
+      keyframeTimes: z.array(z.number().min(0).max(600)).max(10).optional(),
+      format: z.enum(["h264", "h265_10bit", "prores_422_hq", "prores_4444", "ffv1", "exr"]).optional(),
+      zoomFrom: z.number().min(0.1).max(10).optional(),
+      zoomTo: z.number().min(0.1).max(10).optional(),
+      panFrom: Focus.optional(),
+      panTo: Focus.optional(),
+      easing: z.enum(["linear", "ease-in-out"]).optional(),
+      crossfade: z.number().min(0).max(30).optional(),
+      sourceDuration: z.number().positive().max(36_000).optional(),
+      frameInterval: z.number().int().min(1).max(10_000).optional(),
+      targetFps: z.number().positive().max(240).optional(),
+      slowdown: z.number().min(1).max(8).optional(),
+      colormap: z.string().max(40).optional(),
+      position: Focus.optional(),
+      scale: z.number().positive().max(10).optional(),
+      animation: z.union([z.string().max(200), z.number()]).optional(),
       extra: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),

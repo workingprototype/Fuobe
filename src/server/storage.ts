@@ -31,6 +31,9 @@ const EXT_BY_TYPE: Record<string, string> = {
   "application/json": "json",
   "model/gltf-binary": "glb",
   "model/gltf+json": "gltf",
+  // Gaussian splats (TripoSplat on fal writes .ply; the open TripoSplat graph writes .spz).
+  "model/ply": "ply",
+  "model/x-spz": "spz",
 };
 
 const TYPE_BY_EXT: Record<string, string> = {
@@ -55,6 +58,8 @@ const TYPE_BY_EXT: Record<string, string> = {
   json: "application/json",
   glb: "model/gltf-binary",
   gltf: "model/gltf+json",
+  ply: "model/ply",
+  spz: "model/x-spz",
 };
 
 export function contentTypeFor(fileName: string, fallback = "application/octet-stream"): string {

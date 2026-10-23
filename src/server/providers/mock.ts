@@ -10,7 +10,8 @@ import { toDataUri } from "../storage";
  * Demo provider: lets anyone click through the whole product with no API keys or GPU.
  * Produces abstract placeholder art (SVG) for images, a bundled sample clip for video, a short
  * tone for audio, labelled text for transcripts/translations/scripts and a sample .glb for 3D,
- * with the structured extras real providers return (layer boxes, cues, text blocks, stems).
+ * with the structured extras real providers return (layer boxes, cues, text blocks, stems, OCR lines with boxes,
+ * numbered frames).
  * Clearly labelled as demo output.
  */
 
@@ -217,6 +218,18 @@ function demoWrite(brief: string): DemoOutput {
 
 const sampleClip = (ar: string) => (ar === "9:16" || ar === "3:4" || ar === "2:3" ? "demo-portrait.mp4" : ar === "1:1" ? "demo-square.mp4" : "demo-landscape.mp4");
 
+/** OCR: a few lines with their boxes (x, y, w, h as fractions of the picture), as a real reader returns them. */
+function demoOcr(brief: string): DemoOutput {
+  const lines = [
+    { text: "DEMO TEXT", bbox: [0.08, 0.1, 0.52, 0.09] },
+    { text: brief ? brief.slice(0, 60) : "Every line comes with its box", bbox: [0.08, 0.24, 0.7, 0.05] },
+    { text: "Connect fal or start ComfyUI to read the real text", bbox: [0.08, 0.84, 0.78, 0.04] },
+  ];
+  return textOutput(lines.map((l) => l.text).join("\n"), null, { lines, demo: true });
+}
+
+const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
+
 function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string, ar: string, meta: Record<string, unknown>): DemoOutput[] {
   // The prompt falls back to the op name when a step has none.
   const brief = prompt === op ? "" : prompt;
@@ -246,10 +259,39 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
       return stems;
     }
     case "image-to-3d":
+    case "text-to-3d":
       return [
         { url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb" } },
         { url: "sample:demo-turntable.mp4", kind: "video", contentType: "video/mp4", meta: { demo: true, turntable: true } },
       ];
+    // Round 4. A scene, a splat and a rig all come back as the demo mesh (a real splat is a .ply or .spz).
+    case "scene-3d":
+      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true } }];
+    case "splat":
+      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", splat: true } }];
+    case "rig-3d":
+      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", rigged: true } }];
+    case "ocr":
+      return [demoOcr(brief)];
+    case "extract-frames":
+      return Array.from({ length: 4 }, (_, index) => ({ url: svgUri(demoSvg(`frame ${index + 1}`, ar, index)), kind: "image" as const, contentType: "image/svg+xml", meta: { index, demo: true } }));
+    case "overlay":
+      return [{ url: svgUri(demoSvg(brief || "overlay", ar, 5)), kind: "image", contentType: "image/svg+xml", meta: { demo: true } }];
+    // The same tone, as long as the loop was asked to be (or the clips joined end to end).
+    case "audio-loop":
+      return [{ url: toDataUri(demoWav(clamp(Math.round(Number(meta.duration ?? 12)), 4, 30)), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { demo: true } }];
+    case "audio-join":
+      return [{ url: toDataUri(demoWav(clamp(3 * Number(meta.clips ?? 2), 4, 30), [330, 495]), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { demo: true } }];
+    case "remove-object":
+    case "video-swap":
+    case "video-insert":
+    case "keyframes":
+    case "still-motion":
+    case "images-to-video":
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } }];
+    case "sdr-to-hdr":
+    case "export-video":
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, ...(meta.format ? { format: meta.format } : {}) } }];
     case "trim":
     case "captions":
     case "mux":
@@ -293,6 +335,9 @@ export const mockProvider: ProviderAdapter = {
         targetLanguage: input.targetLanguage,
         sourceLanguage: input.sourceLanguage,
         numLayers: input.numLayers,
+        duration: input.duration,
+        format: input.format,
+        clips: input.audios?.length,
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).

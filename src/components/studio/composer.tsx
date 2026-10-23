@@ -236,9 +236,9 @@ export function Composer({ docked }: { docked: boolean }) {
     }
   }
   if (signed.blocker) planError = signed.blocker;
-  // Models that take no prompt (try-on, 3D, transcription, upscalers) never ask for one.
+  // Models that take no prompt (try-on, 3D, transcription, upscalers), or can run without one, never ask for one.
   const promptMissing =
-    !config.promptOptional && !opts.promptless && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
+    !config.promptOptional && !opts.promptless && !opts.promptOptional && preset?.userPrompt !== "none" && preset?.userPrompt !== "optional" && !draft.prompt.trim() && !draft.params.shots?.some((s) => s.prompt.trim());
   const blocker = blockerFor({
     loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
