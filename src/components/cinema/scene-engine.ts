@@ -1,0 +1,487 @@
+"use client";
+
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
+import {
+  LENS,
+  blurScale,
+  buildPointCloud,
+  canvasFov,
+  dolly,
+  flySpeed,
+  flyStep,
+  focalForFov,
+  focusDistance,
+  keysToInput,
+  lensFov,
+  lookStep,
+  medianDepth,
+  objectStart,
+  sceneFov,
+  strafe,
+  type FlyPose,
+  type Pixels,
+  type Rect,
+} from "@/lib/scene3d";
+import type { SceneSource } from "./scene-actions";
+
+/**
+ * The 3D scene viewer's renderer (three.js, loaded only when a scene opens): a MoGe mesh (GLB) or a point cloud
+ * built from the still and its depth map, a fly camera, the frame-fitted lens, a depth-of-field pass, and the
+ * capture of exactly what the frame shows. The maths is in src/lib/scene3d.ts; this file only draws.
+ */
+
+export type { SceneSource };
+
+export interface SceneInfo {
+  kind: "mesh" | "points";
+  /** "scene": in the photo's camera space, so the start is the photo's view; "object": a model framed from the front. */
+  layout: "scene" | "object";
+  /** The lens (mm) that shows the photo's own view from the start. */
+  photoLens: number;
+  /** The subject distance: the orbit pivot for the re-shot angles. */
+  pivotDepth: number;
+  /** Points, or triangles, drawn. */
+  size: number;
+}
+
+export interface ViewSettings {
+  lens: number;
+  aperture: number;
+  aspect: number;
+  dof: boolean;
+  /** The frame, in CSS px of the canvas. */
+  frame: Rect;
+  /** Flying speed multiplier. */
+  speed: number;
+}
+
+const POINTS_VERT = /* glsl */ `
+attribute float size;
+attribute vec3 rgb;
+uniform float scale;
+varying vec3 vColor;
+vec3 toLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mv;
+  gl_PointSize = clamp(size * scale / max(-mv.z, 1e-4), 1.0, 256.0);
+  vColor = toLinear(rgb);
+}`;
+
+const POINTS_FRAG = /* glsl */ `
+varying vec3 vColor;
+void main() { gl_FragColor = vec4(vColor, 1.0); }`;
+
+const POST_VERT = /* glsl */ `
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+
+/** Thin-lens blur gathered over a golden-angle disc (a sample only counts where its own blur reaches), then sRGB. */
+const POST_FRAG = /* glsl */ `
+#include <packing>
+uniform sampler2D tColor;
+uniform sampler2D tDepth;
+uniform vec2 texel;
+uniform float cameraNear;
+uniform float cameraFar;
+uniform float focus;
+uniform float blur;
+uniform float framePx;
+uniform float maxRadius;
+varying vec2 vUv;
+float distAt(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
+float coc(float d) { return min(maxRadius, 0.5 * blur * framePx * abs(d - focus) / max(d, 1e-4)); }
+vec3 toSRGB(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+void main() {
+  vec3 base = texture2D(tColor, vUv).rgb;
+  float r0 = blur > 0.0 ? coc(distAt(vUv)) : 0.0;
+  if (r0 > 0.75) {
+    vec3 acc = base;
+    float wsum = 1.0;
+    for (int i = 0; i < 40; i++) {
+      float fi = float(i) + 0.5;
+      float r = sqrt(fi / 40.0) * r0;
+      float a = fi * 2.39996323;
+      vec2 uv = vUv + vec2(cos(a), sin(a)) * r * texel;
+      float w = clamp(coc(distAt(uv)) / max(r, 0.5), 0.0, 1.0);
+      acc += texture2D(tColor, uv).rgb * w;
+      wsum += w;
+    }
+    base = acc / wsum;
+  }
+  gl_FragColor = vec4(toSRGB(base), 1.0);
+}`;
+
+const VOID = 0x0b0b0c;
+const START: FlyPose = { position: [0, 0, 0], yaw: 0, pitch: 0 };
+
+async function pixelsOf(url: string, maxSide: number, signal?: AbortSignal): Promise<Pixels> {
+  const img = new Image();
+  img.decoding = "async";
+  img.src = url;
+  await img.decode();
+  if (signal?.aborted) throw new DOMException("Closed", "AbortError");
+  const w0 = img.naturalWidth || 1024;
+  const h0 = img.naturalHeight || 1024;
+  const k = Math.min(1, maxSide / Math.max(w0, h0));
+  const width = Math.max(1, Math.round(w0 * k));
+  const height = Math.max(1, Math.round(h0 * k));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height);
+}
+
+/** Every vertex of the loaded model in world space, at most `max` of them (for the field of view, depth and focus). */
+function sampleVertices(root: THREE.Object3D, max = 80_000): Float32Array {
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
+  });
+  const total = meshes.reduce((n, m) => n + (m.geometry.getAttribute("position")?.count ?? 0), 0);
+  const step = Math.max(1, Math.ceil(total / max));
+  const out: number[] = [];
+  const v = new THREE.Vector3();
+  for (const m of meshes) {
+    const pos = m.geometry.getAttribute("position");
+    if (!pos) continue;
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      out.push(v.x, v.y, v.z);
+    }
+  }
+  return Float32Array.from(out);
+}
+
+export class SceneEngine {
+  info: SceneInfo | null = null;
+  /** Called when the autofocus distance changes (scene units ≈ m). */
+  onFocus?: (distance: number) => void;
+
+  private renderer: THREE.WebGLRenderer;
+  private scene = new THREE.Scene();
+  private camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+  private target: THREE.WebGLRenderTarget;
+  private postMat: THREE.ShaderMaterial;
+  private post: FullScreenQuad;
+  private pointsMat: THREE.ShaderMaterial | null = null;
+  private sample: Float32Array = new Float32Array(0);
+  /** The loaded model (mesh scenes), for focusing on the surface the frame's centre sees. */
+  private model: THREE.Object3D | null = null;
+  private raycaster = new THREE.Raycaster();
+  private pose: FlyPose = START;
+  private view: ViewSettings | null = null;
+  private keys = new Set<string>();
+  private boost = false;
+  private focus = 1;
+  private dirty = true;
+  private raf = 0;
+  private last = 0;
+  private focusTimer: ReturnType<typeof setTimeout> | undefined;
+  private size = { w: 1, h: 1, dpr: 1 };
+  private disposed = false;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
+    this.renderer.setClearColor(VOID, 1);
+    const ext = this.renderer.extensions;
+    const half = ext.has("EXT_color_buffer_float") || ext.has("EXT_color_buffer_half_float");
+    this.target = new THREE.WebGLRenderTarget(1, 1, { type: half ? THREE.HalfFloatType : THREE.UnsignedByteType, depthTexture: new THREE.DepthTexture(1, 1) });
+    this.postMat = new THREE.ShaderMaterial({
+      vertexShader: POST_VERT,
+      fragmentShader: POST_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tColor: { value: null },
+        tDepth: { value: null },
+        texel: { value: new THREE.Vector2(1, 1) },
+        cameraNear: { value: 0.01 },
+        cameraFar: { value: 1000 },
+        focus: { value: 1 },
+        blur: { value: 0 },
+        framePx: { value: 1 },
+        maxRadius: { value: 0 },
+      },
+    });
+    this.post = new FullScreenQuad(this.postMat);
+    const tick = (t: number) => {
+      if (this.disposed) return;
+      this.raf = requestAnimationFrame(tick);
+      const dt = this.last ? (t - this.last) / 1000 : 0;
+      this.last = t;
+      this.step(dt);
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+
+  /** Load the scene; resolves with what the panel needs (the photo's lens, the scene's scale). */
+  async load(source: SceneSource, opts: { maxPoints: number; signal?: AbortSignal }): Promise<SceneInfo> {
+    let info: SceneInfo;
+    if (source.kind === "mesh") {
+      const gltf = await new GLTFLoader().loadAsync(source.url);
+      if (this.disposed || opts.signal?.aborted) throw new DOMException("Closed", "AbortError");
+      const root = gltf.scene;
+      let triangles = 0;
+      let lit = false;
+      root.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const geo = mesh.geometry;
+        triangles += (geo.index?.count ?? geo.getAttribute("position").count) / 3;
+        const mats = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[];
+        // A scanned scene carries its light in the texture: show it unlit. Untextured models keep their shading.
+        const next = mats.map((m) => {
+          if (m.map) {
+            const basic = new THREE.MeshBasicMaterial({ map: m.map, side: THREE.DoubleSide, vertexColors: !!geo.getAttribute("color") });
+            m.dispose();
+            return basic;
+          }
+          lit = true;
+          m.side = THREE.DoubleSide;
+          return m;
+        });
+        mesh.material = Array.isArray(mesh.material) ? next : next[0];
+      });
+      if (lit) {
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 2.2));
+        const sun = new THREE.DirectionalLight(0xffffff, 2);
+        sun.position.set(2, 3, 4);
+        this.scene.add(sun);
+      }
+      root.updateMatrixWorld(true);
+      let sample = sampleVertices(root);
+      const fov = sceneFov(sample);
+      if (fov) {
+        const aspect = Math.tan((fov.h * Math.PI) / 360) / Math.tan((fov.v * Math.PI) / 360);
+        info = { kind: "mesh", layout: "scene", photoLens: focalForFov(fov.h, aspect), pivotDepth: medianDepth(sample), size: Math.round(triangles) };
+      } else {
+        // An object around its centre: move it so the camera starts at the origin, looking at it from the front.
+        const sphere = new THREE.Box3().setFromObject(root).getBoundingSphere(new THREE.Sphere());
+        const lens = 35;
+        const start = objectStart([sphere.center.x, sphere.center.y, sphere.center.z], sphere.radius, lensFov(lens, 16 / 9).v);
+        root.position.sub(new THREE.Vector3(...start.position));
+        root.updateMatrixWorld(true);
+        sample = sampleVertices(root);
+        info = { kind: "mesh", layout: "object", photoLens: lens, pivotDepth: start.position[2] - sphere.center.z, size: Math.round(triangles) };
+      }
+      this.sample = sample;
+      this.model = root;
+      this.scene.add(root);
+    } else {
+      const [photo, depth] = await Promise.all([pixelsOf(source.photo, 1600, opts.signal), pixelsOf(source.depth, 1600, opts.signal)]);
+      if (this.disposed) throw new DOMException("Closed", "AbortError");
+      // Built as a 24 mm view of the still, so the default lens starts on the photo.
+      const aspect = photo.width / photo.height;
+      const cloud = buildPointCloud(photo, depth, { hFov: lensFov(LENS.default, aspect).h, maxPoints: opts.maxPoints });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(cloud.positions, 3));
+      geo.setAttribute("rgb", new THREE.BufferAttribute(cloud.colors, 3));
+      geo.setAttribute("size", new THREE.BufferAttribute(cloud.sizes, 1));
+      this.pointsMat = new THREE.ShaderMaterial({ vertexShader: POINTS_VERT, fragmentShader: POINTS_FRAG, uniforms: { scale: { value: 1 } } });
+      const points = new THREE.Points(geo, this.pointsMat);
+      points.frustumCulled = false;
+      this.scene.add(points);
+      this.sample = cloud.positions;
+      info = { kind: "points", layout: "scene", photoLens: LENS.default, pivotDepth: cloud.depth, size: cloud.count };
+    }
+    this.info = info;
+    this.camera.near = Math.max(0.005, info.pivotDepth * 0.01);
+    this.camera.far = info.pivotDepth * 80;
+    this.pose = START;
+    this.refocus(0);
+    this.dirty = true;
+    return info;
+  }
+
+  setView(view: ViewSettings) {
+    this.view = view;
+    this.dirty = true;
+  }
+
+  resize(w: number, h: number, dpr: number) {
+    this.size = { w: Math.max(1, w), h: Math.max(1, h), dpr };
+    this.renderer.setPixelRatio(dpr);
+    this.renderer.setSize(this.size.w, this.size.h, false);
+    this.target.setSize(Math.round(this.size.w * dpr), Math.round(this.size.h * dpr));
+    this.dirty = true;
+  }
+
+  // ---- Input
+
+  key(code: string, down: boolean) {
+    if (down) this.keys.add(code);
+    else this.keys.delete(code);
+  }
+
+  setBoost(on: boolean) {
+    this.boost = on;
+  }
+
+  releaseKeys() {
+    this.keys.clear();
+    this.boost = false;
+  }
+
+  /** Drag to look: across the frame's height turns by the lens's vertical field of view. */
+  look(dxPx: number, dyPx: number) {
+    if (!this.view) return;
+    const perPx = (lensFov(this.view.lens, this.view.aspect).v * Math.PI) / 180 / Math.max(100, this.view.frame.height);
+    this.move(lookStep(this.pose, dxPx, dyPx, perPx));
+  }
+
+  /** Turn by degrees (the arrow keys). */
+  turn(yawDeg: number, pitchDeg: number) {
+    this.move(lookStep(this.pose, -yawDeg, -pitchDeg, Math.PI / 180));
+  }
+
+  /** The wheel and pinches move along the view, in steps of the scene's size. */
+  dolly(amount: number) {
+    if (!this.info) return;
+    this.move(dolly(this.pose, amount * this.info.pivotDepth));
+  }
+
+  /** Two fingers: the scene follows them (px at the subject's distance). */
+  pan(dxPx: number, dyPx: number) {
+    if (!this.info || !this.view) return;
+    const perPx = (2 * Math.tan((lensFov(this.view.lens, this.view.aspect).v * Math.PI) / 360) * this.info.pivotDepth) / Math.max(100, this.view.frame.height);
+    this.move(strafe(this.pose, -dxPx * perPx, dyPx * perPx));
+  }
+
+  reset() {
+    this.move(START);
+  }
+
+  getPose(): FlyPose {
+    return this.pose;
+  }
+
+  private move(pose: FlyPose) {
+    this.pose = pose;
+    this.dirty = true;
+    this.refocus();
+  }
+
+  /** Focus on what the frame's centre sees once the camera settles. */
+  private refocus(delay = 120) {
+    clearTimeout(this.focusTimer);
+    this.focusTimer = setTimeout(() => {
+      if (this.disposed || !this.info) return;
+      const d = this.surfaceAhead() ?? focusDistance(this.sample, this.pose) ?? this.info.pivotDepth;
+      if (Math.abs(d - this.focus) > 1e-4) {
+        this.focus = d;
+        this.dirty = true;
+        this.onFocus?.(d);
+      }
+    }, delay);
+  }
+
+  /** A mesh's surface straight ahead (a low-poly model has too few vertices to sample). */
+  private surfaceAhead(): number | null {
+    if (!this.model) return null;
+    const cam = this.camera;
+    cam.position.set(...this.pose.position);
+    cam.rotation.set(this.pose.pitch, this.pose.yaw, 0, "YXZ");
+    cam.updateMatrixWorld();
+    this.raycaster.setFromCamera(new THREE.Vector2(0, 0), cam);
+    return this.raycaster.intersectObject(this.model, true)[0]?.distance ?? null;
+  }
+
+  // ---- Drawing
+
+  private step(dt: number) {
+    if (this.info && this.view && this.keys.size) {
+      const input = keysToInput(this.keys);
+      if (input.forward || input.right || input.up) {
+        this.pose = flyStep(this.pose, input, dt, flySpeed(this.info.pivotDepth) * this.view.speed, this.boost);
+        this.dirty = true;
+        this.refocus();
+      }
+    }
+    if (this.dirty && this.view && this.info) {
+      this.dirty = false;
+      this.draw(null, Math.round(this.size.w * this.size.dpr), Math.round(this.size.h * this.size.dpr), this.view.frame.width * this.size.dpr, this.view.frame.height * this.size.dpr);
+    }
+  }
+
+  /** Render into `out` (null = the screen) at w×h px; the frame is frameW×frameH px of it, centred. */
+  private draw(out: THREE.WebGLRenderTarget | null, w: number, h: number, frameW: number, frameH: number, color = this.target) {
+    const v = this.view!;
+    const cam = this.camera;
+    const frameFov = lensFov(v.lens, v.aspect).v;
+    cam.fov = canvasFov(frameFov, frameH, h);
+    cam.aspect = w / h;
+    cam.position.set(...this.pose.position);
+    cam.rotation.set(this.pose.pitch, this.pose.yaw, 0, "YXZ");
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+    if (this.pointsMat) this.pointsMat.uniforms.scale.value = h / 2 / Math.tan((cam.fov * Math.PI) / 360);
+    this.renderer.setRenderTarget(color);
+    this.renderer.clear();
+    this.renderer.render(this.scene, cam);
+    const u = this.postMat.uniforms;
+    u.tColor.value = color.texture;
+    u.tDepth.value = color.depthTexture;
+    u.texel.value.set(1 / w, 1 / h);
+    u.cameraNear.value = cam.near;
+    u.cameraFar.value = cam.far;
+    u.focus.value = this.focus;
+    u.blur.value = v.dof ? blurScale(v.lens, v.aperture, this.focus, v.aspect) : 0;
+    u.framePx.value = frameW;
+    u.maxRadius.value = Math.min(0.025 * frameW, 48);
+    this.renderer.setRenderTarget(out);
+    this.post.render(this.renderer);
+  }
+
+  /** What the frame shows, rendered at width×height (the frame's ratio), as a PNG. */
+  async capture(width: number, height: number): Promise<Blob> {
+    if (!this.view || !this.info) throw new Error("The scene isn't ready yet");
+    const color = new THREE.WebGLRenderTarget(width, height, { type: this.target.texture.type, depthTexture: new THREE.DepthTexture(width, height) });
+    const out = new THREE.WebGLRenderTarget(width, height);
+    try {
+      this.draw(out, width, height, width, height, color);
+      const buf = new Uint8Array(width * height * 4);
+      this.renderer.readRenderTargetPixels(out, 0, 0, width, height, buf);
+      const img = new ImageData(width, height);
+      // WebGL reads bottom-up.
+      for (let y = 0; y < height; y++) img.data.set(buf.subarray((height - 1 - y) * width * 4, (height - y) * width * 4), y * width * 4);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d")!.putImageData(img, 0, 0);
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+      if (!blob) throw new Error("Couldn't save the capture");
+      return blob;
+    } finally {
+      color.depthTexture?.dispose();
+      color.dispose();
+      out.dispose();
+      this.renderer.setRenderTarget(null);
+      this.dirty = true;
+    }
+  }
+
+  dispose() {
+    this.disposed = true;
+    cancelAnimationFrame(this.raf);
+    clearTimeout(this.focusTimer);
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      m.geometry?.dispose();
+      for (const mat of (Array.isArray(m.material) ? m.material : m.material ? [m.material] : []) as THREE.MeshBasicMaterial[]) {
+        mat.map?.dispose();
+        mat.dispose();
+      }
+    });
+    this.target.depthTexture?.dispose();
+    this.target.dispose();
+    this.postMat.dispose();
+    this.post.dispose();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+}

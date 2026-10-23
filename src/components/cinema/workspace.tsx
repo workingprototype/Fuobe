@@ -2,6 +2,7 @@
 
 import { Bot, ChevronLeft, Clapperboard, Copy, FileText, Folder, FolderOpen, FolderTree, Heart, Library, MoreHorizontal, Pin, PinOff, Settings2, Upload } from "lucide-react";
 import { nanoid } from "nanoid";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -25,12 +26,23 @@ import { initialDraft, type CinemaDraft } from "./draft";
 import { ElementsPanel } from "./elements-panel";
 import { FolderSidebar, subtree, viewKey, type CinemaView } from "./folder-sidebar";
 import { formatUsd } from "./money";
-import { useAutosave, useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
+import { foreign, useAutosave, useCinemaGenerate, useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
 import { cutGrid } from "./media";
 import { ProjectDialog } from "./project-settings";
 import { PromptBar, useAddRefs } from "./prompt-bar";
+import { SceneCreateDialog, sceneTake, skipSceneConfirm, usePlanPrice, useScenePlan, type SceneTake } from "./scene-actions";
 import { SidePanel } from "./side-panel";
 import { SoulCastDialog, SoulLocationDialog } from "./soul-builders";
+
+/** The 3D viewer (and three.js inside it) loads when a scene is opened. */
+const SceneViewer = dynamic(() => import("./scene-viewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#0b0b0c] text-[14px] text-white" role="status">
+      Opening the 3D scene…
+    </div>
+  ),
+});
 
 function useMedia(query: string): boolean {
   return useSyncExternalStore(
@@ -68,6 +80,9 @@ function nameFrom(prompt: string | undefined, fallback: string): string {
   const words = (prompt ?? "").replace(/@\S+/g, "").replace(/[^\p{L}\p{N}\s'-]/gu, " ").split(/\s+/).filter((w) => w.length > 2 && !/^(the|and|with|from|who|shot|wide|close|establishing|film|location)$/i.test(w));
   return words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || fallback;
 }
+
+/** Any still prices "Create 3D scene" the same: the menu shows it before one is picked. */
+const ANY_STILL = "/api/files/placeholder.png";
 
 const DRAFT_KEY = (id: string) => `fuobe.cinema.draft.${id}`;
 const KEPT = ["mode", "imageTool", "prompt", "moves", "models", "duration", "resolution", "aspect", "batch", "audio", "multiShot", "grid"] as const;
@@ -191,6 +206,41 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
   const addRefs = useAddRefs((fn) => setDraft(fn));
   useGridTiles(id, items);
 
+  // 3D scenes: "Create 3D scene" on a still (priced, asks first), the viewer, and a toast when one is built.
+  const generate = useCinemaGenerate(id);
+  const [sceneFrom, setSceneFrom] = useState<{ g: CinemaGeneration; url: string } | null>(null);
+  const [openScene, setOpenScene] = useState<SceneTake | null>(null);
+  const sceneCtx = useMemo(() => ({ engine, settings, context, brief: project.brief.body }), [engine, settings, context, project.brief.body]);
+  const scenePrice = usePlanPrice(useScenePlan(ANY_STILL, undefined, sceneCtx)).label;
+  const scenePlan = useScenePlan(sceneFrom?.url ?? null, sceneFrom?.g.request.params?.aspectRatio, sceneCtx);
+  const building = useRef(new Set<string>());
+  const createScene = (g: CinemaGeneration, url: string) => {
+    setSceneFrom(null);
+    generate.mutate(
+      {
+        input: { engine, mode: "image", action: "scene", prompt: "", settings, source: { url, kind: "image" }, aspectRatio: g.request.params?.aspectRatio },
+        folderId: foreign(g, id) ? null : g.folderId,
+      },
+      {
+        onSuccess: (r) => {
+          r.items.forEach((x) => building.current.add(x.id));
+          toast(engine === "open" ? "Building the 3D scene on your ComfyUI…" : "Building the 3D scene…", { description: "It appears next to the still; you'll get a note when it's ready.", duration: 3000 });
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+  useEffect(() => {
+    for (const gid of [...building.current]) {
+      const g = items.find((x) => x.id === gid);
+      if (!g || g.status === "queued" || g.status === "running") continue;
+      building.current.delete(gid);
+      const t = sceneTake(g);
+      if (t) toast.success("Your 3D scene is ready", { action: { label: "Open", onClick: () => setOpenScene(t) }, duration: 8000 });
+      else toast.error(`The 3D scene couldn't be built${g.error ? `: ${g.error}` : ""}`);
+    }
+  }, [items]);
+
   const currentView: CinemaView = useMemo(() => (view.kind === "folder" && !folders.some((f) => f.id === view.id) ? { kind: "home" } : view), [view, folders]);
   const folderId = currentView.kind === "folder" ? currentView.id : null;
   const shown = useMemo(() => {
@@ -250,6 +300,13 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
           onError: (e) => toast.error((e as Error).message),
         },
       ),
+    onCreateScene: (g, url) => (skipSceneConfirm() ? createScene(g, url) : setSceneFrom({ g, url })),
+    onOpenScene: (g) => {
+      const t = sceneTake(g);
+      if (t) setOpenScene(t);
+      else toast("This 3D scene isn't ready yet");
+    },
+    scenePrice,
   };
   const onLoadShot = (shot: DirectorShot) => {
     setDraft({ mode: "video", prompt: shot.prompt, moves: shot.moves, duration: shot.duration, source: null, action: "generate", multiShot: { mode: "off", shots: [] } });
@@ -505,6 +562,25 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
         </SheetContent>
       </Sheet>
 
+      <SceneCreateDialog
+        still={sceneFrom?.url ?? null}
+        aspect={sceneFrom?.g.request.params?.aspectRatio}
+        plan={scenePlan}
+        onOpenChange={(o) => !o && setSceneFrom(null)}
+        onConfirm={() => sceneFrom && createScene(sceneFrom.g, sceneFrom.url)}
+      />
+      {openScene && (
+        <SceneViewer
+          take={openScene}
+          projectId={id}
+          engine={engine}
+          onEngine={setEngine}
+          settings={settings}
+          context={context}
+          brief={project.brief.body}
+          onClose={() => setOpenScene(null)}
+        />
+      )}
       <SoulCastDialog open={castOpen} onOpenChange={setCastOpen} {...builderProps} />
       <SoulLocationDialog open={locationOpen} onOpenChange={setLocationOpen} {...builderProps} />
       <ProjectDialog open={settingsOpen} onOpenChange={setSettingsOpen} project={project} spentUsd={spentUsd} onDone={() => setSettingsOpen(false)} onDeleted={() => router.push("/cinema")} />
