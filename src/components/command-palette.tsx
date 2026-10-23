@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Clapperboard, Cpu, Film, KeyRound, LayoutGrid, Loader2, Plus, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { NAV } from "@/components/nav-items";
 import { MediaThumb } from "@/components/studio/result-media";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
@@ -29,9 +29,19 @@ const PaletteContext = createContext<PaletteState>({ open: false, setOpen: () =>
 /** Opens and closes the ⌘K palette from anywhere in the app frame (the sidebar's Search row, the phone header, ⌘K). */
 export const useCommandPalette = () => useContext(PaletteContext);
 
+/** What had focus when the palette opened: it gets focus back when the palette closes without going anywhere. */
+const returnFocus: { current: Element | null } = { current: null };
+
 export function CommandPaletteProvider({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const value = useMemo(() => ({ open, setOpen }), [open]);
+  const [open, setOpenState] = useState(false);
+  const openRef = useRef(false);
+  const setOpen = useCallback((v: boolean | ((open: boolean) => boolean)) => {
+    const next = typeof v === "function" ? v(openRef.current) : v;
+    if (next && !openRef.current) returnFocus.current = document.activeElement;
+    openRef.current = next;
+    setOpenState(next);
+  }, []);
+  const value = useMemo(() => ({ open, setOpen }), [open, setOpen]);
   return <PaletteContext.Provider value={value}>{children}</PaletteContext.Provider>;
 }
 
@@ -117,7 +127,7 @@ function Hints() {
 }
 
 /** What the palette lists and searches; mounted only while it's open. */
-function PaletteBody({ onPick, onOpenRecent }: { onPick: (e: PaletteEntry) => void; onOpenRecent: (g: Generation) => void }) {
+function PaletteBody({ onPick, onOpenRecent, onClose }: { onPick: (e: PaletteEntry) => void; onOpenRecent: (g: Generation) => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   // Not deferred: ranking ~900 entries takes a millisecond, and Enter must act on the list for what was typed.
   const query = q;
@@ -152,6 +162,14 @@ function PaletteBody({ onPick, onOpenRecent }: { onPick: (e: PaletteEntry) => vo
           className="h-12 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-subtle-foreground"
         />
         {index.isLoading && searching && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-label="Loading the catalog" />}
+        {/* Touch screens have no Esc (and the hint row is hidden there): a visible way out. */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="-mr-1 hidden h-8 shrink-0 items-center rounded-md px-2 text-[14px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground [@media(hover:none)]:inline-flex"
+        >
+          Cancel
+        </button>
       </div>
       <CommandList className="max-h-[min(60vh,440px)] p-1.5">
         {searching ? (
@@ -230,8 +248,11 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey);
   }, [setOpen]);
 
+  // Set when the palette closes onto something else (a page, the viewer): focus stays with that.
+  const leaving = useRef(false);
   const pick = useCallback(
     (e: PaletteEntry) => {
+      leaving.current = true;
       setOpen(false);
       router.push(e.href);
     },
@@ -239,11 +260,25 @@ export function CommandPalette() {
   );
   const openRecent = useCallback(
     (g: Generation) => {
+      leaving.current = true;
       setOpen(false);
       setViewing(g);
     },
     [setOpen],
   );
+  const close = useCallback(() => setOpen(false), [setOpen]);
+  // Dismissed (Esc, Cancel, a click outside, ⌘K again): focus goes back to where it was, the
+  // composer you were typing in or the Search row, not to the top of the page.
+  const restoreFocus = useCallback((e: Event) => {
+    e.preventDefault();
+    const el = returnFocus.current;
+    returnFocus.current = null;
+    if (leaving.current) {
+      leaving.current = false;
+      return;
+    }
+    if (el instanceof HTMLElement && el.isConnected) el.focus({ preventScroll: true });
+  }, []);
 
   return (
     <>
@@ -253,8 +288,9 @@ export function CommandPalette() {
         title="Search Fuobe"
         description="Go to a page, an app, a camera motion, an effect, a model, a settings section or a recent creation."
         className={cn("top-[8vh] gap-0 p-0 sm:top-[14vh] sm:max-w-xl")}
+        onCloseAutoFocus={restoreFocus}
       >
-        <PaletteBody onPick={pick} onOpenRecent={openRecent} />
+        <PaletteBody onPick={pick} onOpenRecent={openRecent} onClose={close} />
       </CommandDialog>
       {viewing && (
         <Suspense fallback={null}>

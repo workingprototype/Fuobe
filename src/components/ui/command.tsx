@@ -39,12 +39,15 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  /** Where focus goes once it closes (a dialog with no trigger has nothing to give it back to). */
+  onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>["onCloseAutoFocus"]
 }) {
   return (
     <Dialog {...props}>
@@ -54,6 +57,7 @@ function CommandDialog({
           className
         )}
         showCloseButton={showCloseButton}
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         {/* Inside the content: outside it, the hidden title sat in the page, closed, outside every landmark. */}
         <DialogHeader className="sr-only">
