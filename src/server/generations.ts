@@ -385,7 +385,8 @@ const routeReady = (r: ModelRoute) => (r.provider === "llm" ? llmBackends(r).len
 
 /** What a run produces: colour matching works on images and videos, and fal renders a timeline as a video, so those follow the model. */
 export function outputKind(op: Generation["op"], model: { kind: MediaKind }): MediaKind {
-  return op === "color-match" || op === "timeline" ? model.kind : OPERATION_OUTPUT[op];
+  // A 3D scene is a mesh on the open engine and a depth map (an image) on the cloud.
+  return op === "color-match" || op === "timeline" || op === "scene-3d" ? model.kind : OPERATION_OUTPUT[op];
 }
 
 // Live updates: every write to the table becomes an event (src/server/live.ts). A trashed row

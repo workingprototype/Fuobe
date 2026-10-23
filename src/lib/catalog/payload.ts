@@ -671,6 +671,17 @@ function model3dOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * A 3D scene: the whole-scene mesh when the model builds one, else (Marigold's `image`) the depth map that
+ * Cinema Studio turns into a point cloud in the browser, as an image with meta.role "depth".
+ */
+function sceneOutputs(response: unknown): ExtractedOutput[] {
+  const media = extractMedia(response);
+  const depth = media.find((m) => m.kind === "image");
+  if (!depth || media.some((m) => m.kind === "model3d" || /\.(obj|fbx|ply|usdz)(\?|$)/i.test(m.url))) return model3dOutputs(response);
+  return [{ ...depth, meta: { role: "depth" } }];
+}
+
+/**
  * Gaussian splats (TripoSplat's model_mesh, a .ply unless it says .spz) with meta.format; the cut-out the
  * model actually saw is the preview.
  */
@@ -808,8 +819,10 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "image-to-3d":
     case "text-to-3d":
-    case "scene-3d":
       out = model3dOutputs(response);
+      break;
+    case "scene-3d":
+      out = sceneOutputs(response);
       break;
     case "splat":
       out = splatOutputs(response);

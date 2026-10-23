@@ -136,6 +136,7 @@ export function generateInProject(projectId: string, input: CinemaRequest, folde
     prompt: input.prompt.slice(0, 4000),
     ...(input.moves?.length ? { moves: input.moves } : {}),
     ...(input.action === "grid" && input.grid ? { grid: input.grid } : {}),
+    ...(input.action === "recompose" && input.capture ? { camera: { lens: input.capture.lens, aperture: input.capture.aperture, pose: input.capture.pose } } : {}),
   };
   const batchId = nanoid(10);
   const made: Record<string, Generation[]> = {};

@@ -160,7 +160,10 @@ export function spentUsd(projectId: string): number {
   return round3(r.s);
 }
 
-/** Newest finished image (or video) of a project: the card cover when none was picked. One query. */
+/**
+ * Newest finished image (or video) of a project: the card cover when none was picked. One query. A 3D scene's
+ * depth map is an image output too, but not a picture of the project: it is skipped.
+ */
 function autoCover(projectId: string): string | null {
   const rows = db()
     .prepare(
@@ -170,8 +173,8 @@ function autoCover(projectId: string): string | null {
     .all(projectId) as { outputs_json: string }[];
   let video: string | null = null;
   for (const r of rows) {
-    const outs = parse<{ url: string; kind: string }[]>(r.outputs_json, []);
-    const img = outs.find((o) => o.kind === "image");
+    const outs = parse<{ url: string; kind: string; meta?: { role?: unknown } }[]>(r.outputs_json, []);
+    const img = outs.find((o) => o.kind === "image" && o.meta?.role !== "depth");
     if (img) return img.url;
     video ??= outs.find((o) => o.kind === "video")?.url ?? null;
   }
