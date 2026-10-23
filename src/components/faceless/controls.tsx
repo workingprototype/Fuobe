@@ -103,6 +103,14 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
             </dl>
           )}
           {data.demo && <p className="mt-2 text-[12px] text-muted-foreground">Nothing is connected for some steps, so this runs as a free demo with placeholder results.</p>}
+          {/* The notes again: on a phone they live here only, so the bar stays one or two lines tall. */}
+          {!data.error && !!data.notes?.length && (
+            <ul className="mt-2.5 space-y-1 border-t pt-2.5 text-[12px] text-muted-foreground">
+              {data.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
         </PopoverContent>
       </Popover>
       <span className="font-mono text-[12px] text-muted-foreground tabular-nums">
@@ -116,7 +124,7 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
       )}
       {!data.error &&
         data.notes?.map((n) => (
-          <span key={n} className="inline-flex min-w-0 items-start gap-1 text-[12px] text-muted-foreground">
+          <span key={n} className="hidden min-w-0 items-start gap-1 text-[12px] text-muted-foreground sm:inline-flex">
             <Info className="mt-0.5 size-3 shrink-0" />
             <span className="min-w-0">{n}</span>
           </span>
