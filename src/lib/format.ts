@@ -26,3 +26,10 @@ export function elapsed(from: number, to = Date.now()): string {
   const s = Math.max(0, Math.round((to - from) / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
+
+/** The first of "Untitled project", "Untitled project 2", "Untitled project 3"… that isn't taken (case-insensitive). */
+export function untitledName(taken: readonly string[], base = "Untitled project"): string {
+  const used = new Set(taken.map((n) => n.trim().toLowerCase()));
+  if (!used.has(base.toLowerCase())) return base;
+  for (let i = 2; ; i++) if (!used.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+}
