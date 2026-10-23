@@ -706,6 +706,10 @@ model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "O
       controls=[("topology", "Topology")])
 model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
       [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+# Cinema Studio's "Create 3D scene" on the cloud (part 4 §8): a depth map of the whole frame, which the browser
+# turns into a point cloud with the photo's colours. So scene-3d answers with an image on this model.
+model("marigold-depth", "Marigold V2 Depth", "Marigold", "marigold", "image", "A depth map of the whole frame, for the 3D scene your browser builds",
+      [("scene-3d", "fal-ai/marigold-v2")], hidden=True, fixed={"prediction_type": "depth"})
 
 # ----- New video models
 model("flux-3-max", "FLUX 3 Max", "Black Forest Labs", "flux", "video",

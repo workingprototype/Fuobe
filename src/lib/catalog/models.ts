@@ -1035,6 +1035,24 @@ const open: ModelDef[] = [
     routes: [comfy("image-to-3d", "image-to-3d-hunyuan3d-21")],
     options: { seed: true },
   }),
+  // Round 4 (r4/cinema-3d): Cinema Studio's "Create 3D scene". The mesh is in the photo's own camera space
+  // (glTF axes, metres), so the viewer starts where the photo was taken.
+  o({
+    id: "oss-scene-moge",
+    name: "MoGe 2 scene",
+    vendor: "Microsoft",
+    family: "moge",
+    kind: "model3d",
+    tagline: "The whole photo as a textured 3D mesh to fly a camera through, plus its depth map · runs on a CPU (about 40 s) · MIT",
+    badges: ["new"],
+    routes: [comfy("scene-3d", "scene-mesh-moge", "MoGe 2 point map → textured GLB of the whole frame + a depth PNG")],
+    options: {
+      sliders: [
+        { param: "resolutionLevel", label: "Detail", min: 0, max: 9, step: 1, default: 9 },
+        { param: "decimation", label: "Mesh thinning (1 = every pixel)", min: 1, max: 4, step: 1, default: 1 },
+      ],
+    },
+  }),
   o({
     id: "oss-tryon-klein",
     name: "FLUX.2 [klein] Try-On",

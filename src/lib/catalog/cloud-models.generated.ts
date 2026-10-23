@@ -13019,6 +13019,40 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "marigold-depth",
+    "name": "Marigold V2 Depth",
+    "vendor": "Marigold",
+    "family": "marigold",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "A depth map of the whole frame, for the 3D scene your browser builds",
+    "routes": [
+      {
+        "op": "scene-3d",
+        "provider": "fal",
+        "endpoint": "fal-ai/marigold-v2",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "seed": "seed",
+          "fixed": {
+            "prediction_type": "depth"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxImages": 1,
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.03
+    },
+    "hidden": true
+  },
+  {
     "id": "flux-3-max",
     "name": "FLUX 3 Max",
     "vendor": "Black Forest Labs",

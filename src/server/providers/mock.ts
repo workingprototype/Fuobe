@@ -4,6 +4,7 @@ import { cueText, parseCues, type Cue } from "@/lib/cues";
 import { OPERATION_OUTPUT, type MediaKind, type Operation } from "@/lib/catalog/types";
 import type { ProviderAdapter, RemoteOutput } from "./types";
 import { textOutput } from "./llm";
+import { encodePng } from "../png";
 import { toDataUri } from "../storage";
 
 /**
@@ -230,6 +231,32 @@ function demoOcr(brief: string): DemoOutput {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
 
+/**
+ * A depth map like a depth model's PNG (bright = near), 512 px wide in the request's shape: a back wall, a
+ * floor that comes closer toward the bottom of the frame and three rounded subjects standing on it.
+ */
+function demoDepth(prompt: string, aspectRatio: string): DemoOutput {
+  const { w: cw, h: ch } = canvas(aspectRatio);
+  const w = 512;
+  const h = Math.max(16, Math.round((w * ch) / cw));
+  const r = rng(hash(`${prompt}#depth`));
+  const blobs = Array.from({ length: 3 }, (_, i) => ({ x: 0.2 + i * 0.3 + (r() - 0.5) * 0.1, y: 0.5 + r() * 0.2, rx: 0.07 + r() * 0.07, ry: 0.14 + r() * 0.12, near: 0.5 + r() * 0.3 }));
+  const data = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const v = y / (h - 1);
+      let near = 0.12 + 0.68 * Math.max(0, (v - 0.4) / 0.6) ** 1.3;
+      for (const b of blobs) {
+        const d = ((u - b.x) / b.rx) ** 2 + ((v - b.y) / b.ry) ** 2;
+        if (d < 1) near = Math.max(near, b.near + 0.08 * Math.sqrt(1 - d));
+      }
+      const g = Math.round(clamp(near, 0, 1) * 255);
+      data.set([g, g, g, 255], (y * w + x) * 4);
+    }
+  return { url: toDataUri(encodePng({ width: w, height: h, data }), "image/png"), kind: "image", contentType: "image/png", meta: { role: "depth", demo: true } };
+}
+
 function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string, ar: string, meta: Record<string, unknown>): DemoOutput[] {
   // The prompt falls back to the op name when a step has none.
   const brief = prompt === op ? "" : prompt;
@@ -264,9 +291,13 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
         { url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb" } },
         { url: "sample:demo-turntable.mp4", kind: "video", contentType: "video/mp4", meta: { demo: true, turntable: true } },
       ];
-    // Round 4. A scene, a splat and a rig all come back as the demo mesh (a real splat is a .ply or .spz).
-    case "scene-3d":
-      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true } }];
+    // Round 4. A splat and a rig come back as the demo mesh (a real splat is a .ply or .spz). A scene is the
+    // mesh and its depth map on the open engine (MoGe), the depth map alone on the cloud (Marigold).
+    case "scene-3d": {
+      const depth = demoDepth(brief, ar);
+      if (kind === "image") return [depth];
+      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true, role: "scene" } }, depth];
+    }
     case "splat":
       return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", splat: true } }];
     case "rig-3d":
@@ -325,8 +356,9 @@ export const mockProvider: ProviderAdapter = {
       meta: {
         startedAt: Date.now(),
         op: route.op,
-        // Colour matching keeps the input's kind (an image or a video); a timeline is audio or (fal) a video.
-        kind: route.op === "color-match" || route.op === "timeline" ? model.kind : OPERATION_OUTPUT[route.op],
+        // Colour matching keeps the input's kind (an image or a video); a timeline is audio or (fal) a video;
+        // a 3D scene is a mesh (open) or a depth map (cloud).
+        kind: route.op === "color-match" || route.op === "timeline" || route.op === "scene-3d" ? model.kind : OPERATION_OUTPUT[route.op],
         prompt: input.prompt ?? route.op,
         aspectRatio: input.aspectRatio ?? "1:1",
         count: Math.max(1, Math.min(4, input.numOutputs ?? 1)),
