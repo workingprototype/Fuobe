@@ -114,6 +114,24 @@ describe("isolated ComfyUI worker", () => {
       return comfy(url);
     };
     await expect(comfyProvider.prepareFile(Buffer.from("video"), "video/mp4", "clip.mp4", route)).rejects.toThrow(/The isolated ComfyUI worker at http:\/\/iso\.test:8189 doesn't answer \(fetch failed\)\. Start it \(scripts\/comfy\/README\.md\) or check Settings → Open-source engine · ComfyUI → Isolated worker URL/);
+    // A proxy in front of a stopped worker answers 502: the message still says which server and where it's set.
+    handler = (url) => {
+      if (url.startsWith("http://iso.test")) return new Response("<html><body><h1>502 Bad Gateway</h1></body></html>", { status: 502, headers: { "Content-Type": "text/html" } });
+      return comfy(url);
+    };
+    const said = /The isolated ComfyUI worker at http:\/\/iso\.test:8189 answered HTTP 502 to (an upload|the prompt|\/history\/iso-1) — check that it's running \(scripts\/comfy\/README\.md\) and its address in Settings → Open-source engine · ComfyUI → Isolated worker URL$/;
+    await expect(comfyProvider.prepareFile(Buffer.from("video"), "video/mp4", "clip.mp4", route)).rejects.toThrow(said);
+    await expect(comfyProvider.submit({ generationId: "g2", model: latent, route, input: { video: "v.mp4", audio: "a.wav" } })).rejects.toThrow(said);
+    await expect(comfyProvider.poll({ externalId: "iso-1", meta: { workflowId: "lipsync-latentsync16", worker: "isolated" }, route, model: latent, createdAt: Date.now() })).rejects.toThrow(said);
+    handler = (url) => (url.startsWith("http://iso.test") ? new Response("upload folder is read-only", { status: 500 }) : comfy(url));
+    await expect(comfyProvider.prepareFile(Buffer.from("video"), "video/mp4", "clip.mp4", route)).rejects.toThrow(/answered HTTP 500 to an upload \(upload folder is read-only\) — check/);
+    // The main server's messages are unchanged.
+    handler = (url) => (url.endsWith("/upload/image") ? new Response("nope", { status: 500 }) : comfy(url));
+    await expect(comfyProvider.prepareFile(Buffer.from("png"), "image/png", "a.png")).rejects.toThrow(/^ComfyUI upload failed: 500 nope$/);
+    handler = (url) => {
+      if (url.startsWith("http://iso.test")) throw new TypeError("fetch failed");
+      return comfy(url);
+    };
     // The connection test reports it next to the main server, which still passes.
     expect(await comfyProvider.test!()).toEqual({ ok: true, detail: "ComfyUI 0.41.0 · cuda:0 · 24 GB · the isolated worker at http://iso.test:8189 doesn't answer" });
     handler = comfy;

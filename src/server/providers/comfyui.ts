@@ -95,14 +95,31 @@ async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker
   }
 }
 
+/**
+ * The isolated worker answered, but not with what was asked (an HTTP error, or a proxy's error page
+ * when the worker behind it is down): say it's that server and where its address is set, so it doesn't
+ * read like the main ComfyUI failed.
+ */
+function isolatedAnswer(what: string, status?: number, detail?: string): ProviderError {
+  const said = status ? `HTTP ${status}` : "something that isn't JSON";
+  return new ProviderError(
+    `The isolated ComfyUI worker at ${baseUrl("isolated")} answered ${said} to ${what}${detail ? ` (${detail})` : ""} — check that it's running (scripts/comfy/README.md) and its address in ${ISOLATED_SETTING}`,
+    status,
+  );
+}
+
+/** A short reason from an error body: its text, unless it's an HTML error page. */
+const reasonOf = (text: string) => (/^\s*</.test(text) ? "" : text.trim().slice(0, 200));
+
 /** GET a ComfyUI JSON endpoint. A non-2xx answer or a body that isn't JSON (a proxy's error page) throws, so the runner retries. */
 async function comfyJson<T>(p: string, worker: ComfyWorker = "main"): Promise<T> {
   const res = await comfyFetch(p, {}, worker);
-  if (!res.ok) throw new ProviderError(`ComfyUI ${p.split("?")[0]} answered HTTP ${res.status}`, res.status);
+  const path = p.split("?")[0];
+  if (!res.ok) throw worker === "isolated" ? isolatedAnswer(path, res.status) : new ProviderError(`ComfyUI ${path} answered HTTP ${res.status}`, res.status);
   try {
     return (await res.json()) as T;
   } catch {
-    throw new ProviderError(`ComfyUI ${p.split("?")[0]} sent something that isn't JSON (a proxy error page?)`);
+    throw worker === "isolated" ? isolatedAnswer(path) : new ProviderError(`ComfyUI ${path} sent something that isn't JSON (a proxy error page?)`);
   }
 }
 
@@ -719,7 +736,10 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   form.append("type", "input");
   form.append("overwrite", "true");
   const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
-  if (!res.ok) throw new ProviderError(`ComfyUI upload failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);
+  }
   const j = (await res.json()) as { name: string; subfolder?: string };
   const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
@@ -773,6 +793,7 @@ export const comfyProvider: ProviderAdapter = {
       const missingPack =
         body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
       const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
+      if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
     return { externalId: body.prompt_id, meta: { ...meta, ...(worker === "isolated" && { worker }) }, payload: wf };
