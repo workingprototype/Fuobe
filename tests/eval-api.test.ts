@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
-import { planGeneration } from "@/lib/catalog/plan";
+import { planGeneration, routeLoras } from "@/lib/catalog/plan";
 
-/** The REST seam the evaluation harness (scripts/eval) needs: a recipe's LoRAs on POST /api/generations. */
+/** The REST seams the evaluation harness (scripts/eval) needs: a recipe's LoRAs on POST /api/generations, and a preview that says which ones run. */
 
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
 
@@ -74,5 +74,34 @@ describe("planGeneration with request LoRAs", () => {
     expect(full.loras.length).toBeGreaterThan(0);
     expect(none.loras).toEqual([]);
     expect(none.prompt).toBe(full.prompt);
+  });
+});
+
+describe("the preview says what the route runs", () => {
+  const hf = { file: "AWPortrait-Z.safetensors", url: "https://huggingface.co/Shakker-Labs/AWPortrait-Z/resolve/main/AWPortrait-Z.safetensors", strength: 0.6 };
+  const local = { file: "civitai-2463391-hardflash.safetensors", strength: 0.7, trigger: "hardflashy" };
+
+  it("routeLoras: ComfyUI loads every file, fal's LoRA endpoint the ones with a URL, other routes none", () => {
+    expect(routeLoras({ provider: "comfyui" }, [hf, local])).toEqual({ applied: [hf, local], dropped: [] });
+    expect(routeLoras({ provider: "fal", loraEndpoint: "fal-ai/z-image/turbo/lora" }, [hf, local])).toEqual({
+      applied: [hf],
+      dropped: [{ file: local.file, reason: "no URL to send to the LoRA endpoint" }],
+    });
+    expect(routeLoras({ provider: "fal" }, [hf]).dropped).toEqual([{ file: hf.file, reason: "this route takes no LoRAs" }]);
+    expect(routeLoras({ provider: "replicate", loraEndpoint: "x" }, [hf]).applied).toEqual([]);
+  });
+
+  it("returns the endpoint, the final prompt and the LoRAs on the open engine (demo mode, no ComfyUI here)", async () => {
+    const r = await post({ ...soul, loras: [hf, local] });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ demo: true, route: { provider: "comfyui", endpoint: "z-image-turbo-t2i" }, loras: { applied: [hf, local], dropped: [] } });
+    expect(r.body.prompt).toContain("a portrait in soft daylight");
+  });
+
+  it("on the cloud: the LoRA endpoint when a LoRA has a URL, and what was left out", async () => {
+    const r = await post({ ...soul, modelId: "z-image-turbo-cloud", loras: [hf, local] });
+    expect(r.body).toMatchObject({ route: { provider: "fal", endpoint: "fal-ai/z-image/turbo/lora" }, loras: { applied: [hf], dropped: [{ file: local.file }] } });
+    const none = await post({ ...soul, modelId: "z-image-turbo-cloud" });
+    expect(none.body.route).toMatchObject({ endpoint: expect.not.stringMatching(/lora/) });
   });
 });

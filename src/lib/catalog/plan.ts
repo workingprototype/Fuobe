@@ -459,6 +459,23 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
  */
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
+/**
+ * Which of a plan's LoRAs a route really applies, and why the others are left out: ComfyUI loads every file
+ * (injectLoras); fal switches to the model's LoRA endpoint for LoRAs with a URL; other routes take none.
+ * The preview reports it, so a caller (the evaluation harness) records the recipe that ran, not the one it asked for.
+ */
+export function routeLoras(route: Pick<ModelRoute, "provider" | "loraEndpoint">, loras: LoraRef[]): { applied: LoraRef[]; dropped: { file: string; reason: string }[] } {
+  if (route.provider === "comfyui") return { applied: loras, dropped: [] };
+  const applied: LoraRef[] = [];
+  const dropped: { file: string; reason: string }[] = [];
+  for (const l of loras) {
+    if (route.provider !== "fal" || !route.loraEndpoint) dropped.push({ file: l.file, reason: "this route takes no LoRAs" });
+    else if (!l.url) dropped.push({ file: l.file, reason: "no URL to send to the LoRA endpoint" });
+    else applied.push(l);
+  }
+  return { applied, dropped };
+}
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
 export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
