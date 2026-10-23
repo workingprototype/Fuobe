@@ -313,7 +313,7 @@ function Ruler({ frames, times, duration, onMove }: { frames: FrameAttachment<Sl
       </div>
       <div aria-hidden className="relative h-3.5 text-[10px] text-subtle-foreground tabular-nums">
         {labels.map((t, k) => (
-          <span key={t} className={cn("absolute top-0", k === 0 ? "" : t === duration ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: pct(t, duration) }}>
+          <span key={t} className={cn("absolute top-0 whitespace-nowrap", k === 0 ? "" : t === duration ? "-translate-x-full" : "-translate-x-1/2")} style={{ left: pct(t, duration) }}>
             {secondsLabel(t)}
           </span>
         ))}
