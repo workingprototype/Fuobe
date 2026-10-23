@@ -88,3 +88,45 @@ export function PageSkeleton({ title, wide, rows = 4 }: { title?: string; wide?:
     </PageShell>
   );
 }
+
+/** Marketing Studio: header with its tool tabs, the hero, the template grid and the docked composer. */
+export function MarketingSkeleton() {
+  return (
+    <div className="flex min-h-svh min-w-0 flex-col" aria-busy="true" aria-label="Loading">
+      <div className="sticky top-0 z-20 bg-background/85 px-3 sm:px-6">
+        <div className="flex h-14 items-center gap-2">
+          <Skeleton className="h-6 w-44 rounded-lg" />
+          <Skeleton className="ml-auto h-9 w-40 rounded-full max-sm:w-20" />
+        </div>
+        <div className="flex gap-2 overflow-hidden pb-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-7 w-24 shrink-0 rounded-full" />
+          ))}
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-[1240px] flex-1 px-3 sm:px-6">
+        <div className="flex flex-col items-center pt-6 pb-2 sm:pt-10">
+          <Skeleton className="h-10 w-3/4 max-w-[560px] rounded-xl" />
+          <Skeleton className="mt-3 h-4 w-2/3 max-w-[420px]" />
+          <Skeleton className="mt-6 h-9 w-56 rounded-full" />
+        </div>
+        <div className="mt-6 flex gap-1.5 overflow-hidden">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} className="h-8 w-24 shrink-0 rounded-full" />
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 10 }, (_, i) => (
+            <div key={i} className="space-y-2">
+              <Skeleton className="aspect-[3/4] rounded-2xl" />
+              <Skeleton className="h-3.5 w-2/3" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="sticky bottom-0 px-3 pb-3 sm:px-6">
+        <Skeleton className="mx-auto h-14 w-full max-w-[860px] rounded-[20px] sm:rounded-composer" />
+      </div>
+    </div>
+  );
+}
