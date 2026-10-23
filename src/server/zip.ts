@@ -132,3 +132,44 @@ export function zipStream(entries: ZipEntry[]): ReadableStream<Uint8Array> {
     },
   });
 }
+
+/** The largest stored zip these writers make (no ZIP64). */
+export const ZIP_MAX = 0xffffffff;
+
+/**
+ * Write a stored zip to `dest` from files that arrive one at a time (frames downloaded from a provider):
+ * one file in memory at once, the central directory at the end. Throws (and removes `dest`) past 4 GB.
+ * Returns the zip's size in bytes.
+ */
+export async function zipToFile(files: AsyncIterable<{ name: string; data: Buffer }>, dest: string): Promise<number> {
+  const out = fs.openSync(dest, "w");
+  const central: Buffer[] = [];
+  let offset = 0;
+  let count = 0;
+  let size = 0;
+  try {
+    const when = dosTime(Date.now());
+    for await (const f of files) {
+      const name = Buffer.from(f.name, "utf8");
+      const crc = zlib.crc32(f.data);
+      const head = localHeader(name, crc, f.data.length, when);
+      if (offset + head.length + name.length + f.data.length > ZIP_MAX) throw new Error("The frames add up to more than 4 GB — export a shorter part of the clip");
+      fs.writeSync(out, head);
+      fs.writeSync(out, name);
+      fs.writeSync(out, f.data);
+      central.push(centralHeader(name, crc, f.data.length, offset, when), name);
+      offset += head.length + name.length + f.data.length;
+      count++;
+    }
+    const cd = Buffer.concat(central);
+    fs.writeSync(out, cd);
+    fs.writeSync(out, endRecord(count, cd.length, offset));
+    size = offset + cd.length + 22;
+  } catch (e) {
+    fs.closeSync(out);
+    fs.rmSync(dest, { force: true });
+    throw e;
+  }
+  fs.closeSync(out);
+  return size;
+}
