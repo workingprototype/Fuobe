@@ -1043,7 +1043,7 @@ const open: ModelDef[] = [
     vendor: "Microsoft",
     family: "moge",
     kind: "model3d",
-    tagline: "The whole photo as a textured 3D mesh to fly a camera through, plus its depth map · runs on a CPU (about 40 s) · MIT",
+    tagline: "The whole photo as a textured 3D mesh to fly a camera through, plus its depth map · runs on a CPU too (a minute or two) · MIT",
     badges: ["new"],
     routes: [comfy("scene-3d", "scene-mesh-moge", "MoGe 2 point map → textured GLB of the whole frame + a depth PNG")],
     options: {

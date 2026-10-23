@@ -1475,7 +1475,7 @@ function planScene(input: CinemaGenerateInput): CinemaPlan {
   const src = input.source?.kind === "image" ? input.source.url : undefined;
   const notes = [
     open
-      ? "MoGe 2 turns the whole frame into a textured 3D mesh on your ComfyUI (about 40 s on a CPU)"
+      ? "MoGe 2 turns the whole frame into a textured 3D mesh on your ComfyUI (a minute or two on a CPU, faster on a GPU)"
       : "Marigold makes a depth map of the frame, and your browser turns it and the still into a 3D point cloud",
   ];
   const params: GenParams = { numOutputs: 1, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(open ? { extra: { decimation: SCENE_DECIMATION } } : {}) };
