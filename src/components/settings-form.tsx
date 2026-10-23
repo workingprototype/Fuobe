@@ -239,12 +239,16 @@ export function SettingsForm({ prices }: { prices?: string }) {
       <StatusStrip status={status} guideOpen={guideOpen} onGuide={() => setGuide(true)} />
       {guideOpen && status && (
         <div id="get-started" className="scroll-mt-28 pt-6 md:scroll-mt-20">
-          <GetStarted status={status} prices={prices} intents={false} onDemo={() => router.push("/")} />
-          {!firstRun && (
-            <button type="button" onClick={() => setGuide(false)} className="mt-2 text-[12px] text-muted-foreground underline-offset-2 hover:underline">
-              Close the guide
-            </button>
-          )}
+          <GetStarted
+            status={status}
+            prices={prices}
+            intents={false}
+            onDemo={() => router.push("/")}
+            onHide={() => {
+              setGuide(false);
+              if (window.location.hash === "#get-started") history.replaceState(null, "", window.location.pathname);
+            }}
+          />
         </div>
       )}
 

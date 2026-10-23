@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ConnectField, useSettings } from "@/components/connect-field";
 import { saveSettings, type StatusInfo } from "@/lib/api";
 import { copyWithToast } from "@/lib/clipboard";
-import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL } from "@/lib/connections";
+import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL, nothingConnected } from "@/lib/connections";
 import { cn } from "@/lib/utils";
 
 /** "What do you want to do?" — Liner's first-run question, as one tap to the right place. */
@@ -53,6 +53,7 @@ export function GetStarted({
   status,
   prices,
   onDemo,
+  onHide,
   onMode,
   intents = true,
   className,
@@ -62,6 +63,8 @@ export function GetStarted({
   prices?: string;
   /** "Just try it": after the guide is put away (Home focuses its composer). */
   onDemo?: () => void;
+  /** After Hide or "Try the demo" put it away (Settings closes a guide it reopened). */
+  onHide?: () => void;
   /** An image / video / edit chip: Home switches its composer instead of leaving the page. */
   onMode?: (mode: IntentMode) => void;
   /** Show the "What do you want to do?" chips. */
@@ -79,6 +82,7 @@ export function GetStarted({
     try {
       await saveSettings({ onboarded: "1" });
       await qc.invalidateQueries({ queryKey: ["status"] });
+      onHide?.();
       return true;
     } catch (e) {
       toast.error((e as Error).message);
@@ -96,7 +100,11 @@ export function GetStarted({
           <h2 id="get-started-title" className="font-heading text-[24px] leading-tight">
             Get started
           </h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:</p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {nothingConnected(status)
+              ? "Nothing is connected yet, so every run is a free demo with placeholder results. Connect a model to make the real thing:"
+              : "Three ways to make things with Fuobe. Connect another one, or check one you set up:"}
+          </p>
         </div>
         <Button variant="ghost" size="sm" className="-mt-1 -mr-2 shrink-0 text-muted-foreground" disabled={hiding} onClick={() => void hide()} aria-label="Hide the setup guide">
           <X /> <span className="hidden sm:inline">Hide</span>
