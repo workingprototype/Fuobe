@@ -177,12 +177,14 @@ export function HomeView({
   const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}&go=1` : ""}`);
   // What Start will run, and what it costs, before it's pressed.
   const quote = quotes?.[mode.id];
-  const runsFor = (() => {
+  const runsFor = ((): { text: string; other?: "cloud" | "open" | null } | null => {
     if (!status || nothingConnected || !quote) return null;
     const engines = connectedEngines(status);
     const then = mode.id === "image" ? "" : mode.id === "edit" ? " after you add the photo" : "";
-    if (engine === "open") return engines.open && quote.open ? `Start runs ${quote.open.name} on your GPU${then} · Free` : "ComfyUI isn't connected, so Start runs a free demo";
-    return engines.cloud && quote.cloud ? `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` : "No paid API is connected, so Start runs a free demo";
+    // The other engine is connected: offer it rather than a demo run.
+    const other = engineMode === "both" ? (engine === "open" ? engines.cloud && "cloud" : engines.open && "open") || null : null;
+    if (engine === "open") return engines.open && quote.open ? { text: `Start runs ${quote.open.name} on your GPU${then} · Free` } : { text: "ComfyUI isn't connected, so Start runs a free demo", other };
+    return engines.cloud && quote.cloud ? { text: `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` } : { text: "No paid API is connected, so Start runs a free demo", other };
   })();
   const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
 
@@ -242,7 +244,19 @@ export function HomeView({
             </div>
           </div>
         </div>
-        {runsFor && <p className="mt-2 text-[12px] text-muted-foreground">{runsFor}</p>}
+        {runsFor && (
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            {runsFor.text}
+            {runsFor.other && (
+              <>
+                {" · "}
+                <button type="button" onClick={() => setEngine(runsFor.other!)} className="text-brand-text underline underline-offset-2 hover:no-underline">
+                  {runsFor.other === "open" ? "Run it free on your GPU" : "Use your paid key"}
+                </button>
+              </>
+            )}
+          </p>
+        )}
         {firstRun && status ? (
           <GetStarted
             className="mt-6 max-w-[960px]"

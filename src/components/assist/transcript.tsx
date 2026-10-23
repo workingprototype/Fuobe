@@ -208,10 +208,15 @@ export function GenerationCards({ ids, all, storyboard, onOpen }: { ids: string[
           >
             {/* A text card says "Demo" in its own header row: on a narrow tile a corner badge would cover its label. */}
             <MediaThumb output={o} className="transition duration-300 group-hover:scale-[1.02]" tag={g.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
-            {g.provider === "mock" && o.kind !== "text" && <span className="absolute top-2 right-2 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
-            {n > 0 && (
-              <span aria-hidden className="absolute bottom-2 left-2 grid size-6 place-items-center rounded-full bg-background/85 text-[12px] font-medium tabular-nums shadow-soft">
-                {n}
+            {/* Top right, next to "Demo": the other corners hold the picture's own caption on demo stills. */}
+            {(n > 0 || (g.provider === "mock" && o.kind !== "text")) && (
+              <span className="absolute top-2 right-2 flex items-center gap-1">
+                {n > 0 && (
+                  <span aria-hidden className="grid size-6 place-items-center rounded-full bg-background/85 text-[12px] font-medium tabular-nums shadow-soft">
+                    {n}
+                  </span>
+                )}
+                {g.provider === "mock" && o.kind !== "text" && <span className="rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium">Demo</span>}
               </span>
             )}
           </button>
