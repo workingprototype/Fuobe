@@ -55,13 +55,15 @@ const pt = (p: FocusPoint, k = 1000): FocusPoint => ({ x: inward(p.x, k), y: inw
 export function readMove(text: string): MoveKind | null {
   const t = ` ${text.toLowerCase()} `;
   // Camera words only: "smoke rising" is not a tilt.
-  if (/\b(zoom(s|ing)? out|pull(s|ing)?[- ](back|out|away)|dolly(ing)? out|widen(s|ing)?|reveal(s|ing)?|draw(s|ing)? back)\b/.test(t)) return "pull-out";
-  if (/\b(zoom(s|ing)? in|push(es|ing)?[- ]in|push(es|ing)? (slowly |gently )?(towards?|closer|into)|dolly(ing)? in|clos(e|es|ing) in|(camera|it) moves? (in|closer))\b/.test(t)) return "push-in";
+  if (/\b(zoom(s|ed|ing)?[- ]?(out|back|away)|pull(s|ed|ing)?[- ](back|out|away)|dolly(ing)?[- ]out|widen(s|ing)?|reveal(s|ing)?|draw(s|ing)? back)\b/.test(t)) return "pull-out";
+  if (/\b(zoom(s|ed|ing)?[- ]?(in|into|onto|on|towards?|closer|close)|push(es|ed|ing)?[- ]in|push(es|ing)? (slowly |gently )?(towards?|closer|into)|dolly(ing)?[- ]in|clos(e|es|ing) in|(camera|it) moves? (in|closer))\b/.test(t)) return "push-in";
   if (/\bpan(s|ning)? (slowly |gently )?(to the |towards? the )?left\b|\bright[- ]to[- ]left\b|\bleftwards?\b/.test(t)) return "pan-left";
   if (/\bpan(s|ning)? (slowly |gently )?(to the |towards? the )?right\b|\bleft[- ]to[- ]right\b|\brightwards?\b/.test(t)) return "pan-right";
   if (/\b(tilt(s|ing)?|crane(s|ing)?|pan(s|ning)?) (slowly |gently )?up(wards?)?\b|\bcamera (rises|rising|moves up)\b/.test(t)) return "tilt-up";
   if (/\b(tilt(s|ing)?|crane(s|ing)?|pan(s|ning)?) (slowly |gently )?down(wards?)?\b|\bcamera (descends|descending|moves down)\b/.test(t)) return "tilt-down";
   if (/\b(pan(s|ning)?|tracking shot|track(s|ing)? across)\b/.test(t)) return "pan-right";
+  // A zoom that says no more ("a slow zoom") goes in.
+  if (/\bzoom(s|ed|ing)?\b/.test(t)) return "push-in";
   return null;
 }
 

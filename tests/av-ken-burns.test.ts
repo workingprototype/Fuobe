@@ -22,6 +22,11 @@ describe("Ken Burns moves", () => {
     expect(readMove("smoke rising from the chimney")).toBeNull();
     expect(readMove("camera pans across the market")).toBe("pan-right");
     expect(readMove("leaves flutter in the wind")).toBeNull();
+    // The common ways of asking for a zoom (the timeline's Motion change).
+    for (const t of ["zoom into the lighthouse", "zoom-in on the map", "slow zoom toward the castle", "zoom on the face", "a slow zoom", "zoomed in", "push-in"]) expect(readMove(t), t).toBe("push-in");
+    for (const t of ["zoom-out", "zooming back to the whole street", "slowly zoom out to reveal the bay", "pulled back"]) expect(readMove(t), t).toBe("pull-out");
+    expect(readMove("the flags wave in the wind")).toBeNull();
+    expect(readMove("the boat moves closer to the shore")).toBeNull();
   });
 
   it("finds the place the words name, and not a past tense of leave", () => {

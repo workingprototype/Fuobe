@@ -6,6 +6,7 @@ import {
   AUTO_SECONDS,
   blockCount,
   buildEpisodeGraph,
+  CAMERA_WORDS,
   changedKeys,
   channelName,
   defaultSettings,
@@ -31,12 +32,14 @@ import {
   planRerun,
   previewLine,
   resolveModels,
+  sameCameraMove,
   sceneSpans,
   sceneTiming,
   scriptBrief,
   scriptSystem,
   splitScript,
   spokenTimes,
+  staleSteps,
   styleRefLimit,
   TIMING_PARTS,
   topicsBrief,
@@ -794,16 +797,13 @@ function advance(ep: FacelessEpisode): FacelessEpisode {
   const part = partOf(graph);
   const status = statusMap(plan.ids);
   const moved = new Set(blocks.filter((b) => plan.timing?.[b.id] !== timing[b.id]).map((b) => b.id));
+  // A step kept from before that the graph now asks for differently is made again too: a bed (or its loop)
+  // that no longer fits the film, or a clip made by another model (a Frame by frame episode rendered before
+  // its scenes became Ken Burns moves).
+  const stale = new Set(staleKeys(graph, plan.ids));
   const changed = graph
-    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || (s.part === "clip" && moved.has(blocks[s.block!].id)))
+    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || stale.has(s.key) || (s.part === "clip" && moved.has(blocks[s.block!].id)))
     .map((s) => s.key);
-  // A bed (or its loop) that no longer covers the film is made again.
-  for (const key of ["music", "music-loop"]) {
-    const step = graph.find((s) => s.key === key);
-    if (!step || !plan.ids[key] || changed.includes(key)) continue;
-    const had = getGeneration(plan.ids[key], { includeDeleted: true })?.request.params?.duration ?? 0;
-    if (had < (step.request.params?.duration ?? 0)) changed.push(key);
-  }
   const rerun = planRerun(graph, changed).rerun.filter((k) => !TIMING_PARTS.has(part(k)));
   const ids = prune(relaunch(graph, plan.ids, rerun, plan.batchId), graph);
   const next: EpisodePlan = { ...plan, ids, timing, untimed: !spoken, awaiting: false };
@@ -833,6 +833,9 @@ export function renderEpisode(id: string): FacelessEpisode {
 const statusMap = (ids: Record<string, string>) =>
   Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, getGeneration(id, { includeDeleted: true })?.status])) as Record<string, string | undefined>;
 
+/** Kept steps whose generation isn't what the graph asks for now (another model or op, a clip of another length, a bed that no longer fits). */
+const staleKeys = (graph: GraphStep[], ids: Record<string, string>) => staleSteps(graph, (k) => (ids[k] ? getGeneration(ids[k], { includeDeleted: true })?.request : undefined));
+
 /** Redo the steps that failed (and what waited on them); finished steps are kept. */
 export function retryEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
@@ -854,6 +857,8 @@ export function retryEpisode(id: string): FacelessEpisode {
     })
     .map((s) => s.key);
   if (!broken.length && !ep.plan.awaiting) return ep;
+  // Kept steps made for an older graph (another model, another length) are redone with what failed.
+  broken.push(...staleKeys(graph, ep.plan.ids).filter((k) => !broken.includes(k)));
   for (const k of planRerun(graph, broken).rerun) if (ep.plan.ids[k]) void cancelGeneration(ep.plan.ids[k]);
   const { ids, awaiting, started } = launch(ep, graph, ep.plan.ids, broken, ep.plan.batchId);
   updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify({ ...ep.plan, ids, awaiting } satisfies EpisodePlan) });
@@ -908,11 +913,21 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
     }
   }
   const graph = buildGraph(ep, withTiming(blocks, ep.plan.timing), stillEdits);
-  // Steps that failed earlier are redone with the change, so the new version can finish.
+  // Frame by frame: words that read as the move the scene already has would render the same clip again.
+  if (c.part === "motion") {
+    const moves = graph.filter((s) => s.part === "clip" && s.request.op === "still-motion" && ids.includes(blocks[s.block!].id));
+    const same = moves.every((s) => {
+      const g = getGeneration(ep.plan!.ids[s.key] ?? "", { includeDeleted: true });
+      return g?.status === "succeeded" && sameCameraMove(g.request, s.request);
+    });
+    if (moves.length && same) throw new FacelessError(CAMERA_WORDS[ep.settings.engine].same, 422);
+  }
+  // Steps that failed earlier are redone with the change, so the new version can finish; so are kept steps
+  // made for an older graph (another model, another length).
   const status = statusMap(ep.plan.ids);
   const part = partOf(graph);
   const broken = graph.filter((s) => (!status[s.key] && (!ep.plan!.awaiting || TIMING_PARTS.has(part(s.key)))) || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
-  const keys = [...changedKeys(graph, ids, c.part), ...broken];
+  const keys = [...new Set([...changedKeys(graph, ids, c.part), ...broken, ...staleKeys(graph, ep.plan.ids)])];
   return { graph, blocks, stillEdits, keys, plan: planRerun(graph, keys), ids };
 }
 

@@ -1363,6 +1363,73 @@ export function planRetry(graph: GraphStep[], status: Record<string, string | un
   return planRerun(graph, broken);
 }
 
+/** What a kept step's generation was asked for (its stored request). */
+export type MadeRequest = Pick<GenerationRequest, "modelId" | "op" | "params">;
+
+/**
+ * Whether a bed (or its loop) made with `had` still serves a film that now needs `want`. It has to cover the
+ * film; a whole-play loop (cloud) covers its plays of the bed, whatever length was asked (the route plays
+ * ⌈duration / bed⌉ times, at least twice). A crossfaded loop (open) fades out at its end, so one left longer
+ * than the film by a second or more is made again: its fade-out would fall past the end and the music stop dead.
+ */
+export function bedFits(had: GenerationRequest["params"], want: GenerationRequest["params"]): boolean {
+  const h = had?.duration ?? 0;
+  const w = want?.duration ?? 0;
+  if (want?.crossfade) return h >= w && h - w < 1 && had?.crossfade === want.crossfade;
+  if (want?.sourceDuration && had?.sourceDuration) return Math.max(2, Math.ceil(h / had.sourceDuration - 1e-6)) * had.sourceDuration >= w;
+  return h >= w;
+}
+
+/**
+ * Steps whose kept generation isn't what the graph asks for now, to make again with everything after them:
+ * made by another model or operation (a Frame by frame episode rendered before its scenes became Ken Burns
+ * moves still holds video-model clips, of other lengths, under the same keys), a clip of another length, or
+ * a music bed that no longer serves the film (bedFits).
+ */
+export function staleSteps(graph: GraphStep[], made: (key: string) => MadeRequest | undefined): string[] {
+  return graph
+    .filter((s) => {
+      const r = made(s.key);
+      if (!r) return false;
+      if (r.modelId !== s.request.modelId || (r.op ?? null) !== (s.request.op ?? null)) return true;
+      if (s.part === "clip") return (r.params?.duration ?? null) !== (s.request.params?.duration ?? null);
+      if (s.part === "music" && s.request.params?.duration !== undefined) return !bedFits(r.params, s.request.params);
+      return false;
+    })
+    .map((s) => s.key);
+}
+
+/** Whether two Ken Burns requests make the same camera move (a Motion change that reads as the move a scene has). */
+export function sameCameraMove(a: MadeRequest, b: MadeRequest): boolean {
+  const pa = a.params ?? {};
+  const pb = b.params ?? {};
+  const pt = (p?: { x: number; y: number }) => (p ? `${p.x},${p.y}` : "");
+  return (
+    a.modelId === b.modelId &&
+    a.op === b.op &&
+    pa.duration === pb.duration &&
+    pa.zoomFrom === pb.zoomFrom &&
+    pa.zoomTo === pb.zoomTo &&
+    pt(pa.panFrom) === pt(pb.panFrom) &&
+    pt(pa.panTo) === pt(pb.panTo) &&
+    pa.easing === pb.easing
+  );
+}
+
+/** The camera words a Frame by frame Motion change reads, per engine (the cloud's Ken Burns only zooms). */
+export const CAMERA_WORDS: Record<Engine, { placeholder: string; hint: string; same: string }> = {
+  open: {
+    placeholder: "e.g. slow zoom out, pan left toward the tower",
+    hint: "The picture is kept; the camera moves again: zoom in or out, pan left or right, tilt up or down, toward a place you name.",
+    same: "That's the camera move this scene already has. Name another: zoom in or out, pan left or right, tilt up or down, or a place to head for (the upper left, the sky).",
+  },
+  cloud: {
+    placeholder: "e.g. zoom out, or zoom in toward the upper left",
+    hint: "The picture is kept; the camera moves again: a zoom in or out, toward a place you name.",
+    same: "That's the camera move this scene already has. Name another: zoom in or zoom out, or a place to head for (the upper left, the sky).",
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Cost
 

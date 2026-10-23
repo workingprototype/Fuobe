@@ -5,6 +5,7 @@ import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
 import type { GenerationRequest } from "@/lib/catalog/types";
 import {
+  bedFits,
   blockCount,
   blockShots,
   buildEpisodeGraph,
@@ -49,9 +50,11 @@ import {
   musicPlan,
   plannedTiming,
   resolveModels,
+  sameCameraMove,
   sceneSpans,
   sceneTiming,
   spokenTimes,
+  staleSteps,
   styleRefLimit,
   withTiming,
   type EpisodeSettings,
@@ -336,6 +339,58 @@ describe("timeline re-runs and retries", () => {
     expect(plan.rerun).not.toContain("still-b5");
     expect(plan.rerun).not.toContain("narration");
     expect(planRetry(g, Object.fromEntries(g.map((s) => [s.key, "succeeded"]))).rerun).toEqual([]);
+  });
+
+  it("makes again what an older render kept for a step the graph now asks for differently", () => {
+    // A Frame by frame episode rendered before its scenes became Ken Burns moves: Wan 2.2 made each 8 s scene
+    // as a 5 s and a 3 s shot. Its Ken Burns graph has one 8 s move per scene under the first shot's key.
+    const scenes = [block(0, 20, 8), block(1, 20, 8), block(2, 20, 8)];
+    const wan = graphFor({ engine: "open", animation: "animated", music: false, voice: null }, scenes);
+    expect(wan.filter((s) => s.block === 0 && s.part === "clip").map((s) => s.seconds)).toEqual([5, 3]);
+    const kb = graphFor({ engine: "open", animation: "frames", music: false, voice: null }, scenes);
+    expect(kb.filter((s) => s.part === "clip").map((s) => [s.key, s.seconds])).toEqual([
+      ["clip-b0-1", 8],
+      ["clip-b1-1", 8],
+      ["clip-b2-1", 8],
+    ]);
+    const old = new Map(wan.map((s) => [s.key, s.request]));
+    const stale = staleSteps(kb, (k) => old.get(k));
+    expect(stale).toEqual(expect.arrayContaining(["clip-b0-1", "clip-b1-1", "clip-b2-1", "join"]));
+    expect(stale).not.toContain("still-b0");
+    expect(stale).not.toContain("narration");
+    // Its own requests are never stale; a clip of another length is.
+    const own = new Map(kb.map((s) => [s.key, s.request]));
+    expect(staleSteps(kb, (k) => own.get(k))).toEqual([]);
+    const longer = (k: string) => (k === "clip-b1-1" ? { ...own.get(k)!, params: { ...own.get(k)!.params, duration: 9 } } : own.get(k));
+    expect(staleSteps(kb, longer)).toEqual(["clip-b1-1"]);
+  });
+
+  it("keeps a music bed while it still serves the film", () => {
+    // A plain bed: as long as it covers the film.
+    expect(bedFits({ duration: 61 }, { duration: 55 })).toBe(true);
+    expect(bedFits({ duration: 61 }, { duration: 70 })).toBe(false);
+    // Whole plays (cloud): 2 plays of 600 s cover a film that grew from 650 s to 660 s.
+    expect(bedFits({ duration: 651, sourceDuration: 600 }, { duration: 661, sourceDuration: 600 })).toBe(true);
+    expect(bedFits({ duration: 651, sourceDuration: 600 }, { duration: 1201, sourceDuration: 600 })).toBe(false);
+    // A crossfaded loop (open) ends on its fade-out: remade when the film grows, or shrinks by a second or more.
+    const loop = { duration: 301, sourceDuration: 240, crossfade: 3 };
+    expect(bedFits(loop, loop)).toBe(true);
+    expect(bedFits(loop, { ...loop, duration: 305 })).toBe(false);
+    expect(bedFits(loop, { ...loop, duration: 299 })).toBe(false);
+    // In a graph: the loop step is judged so, the bed itself by length.
+    const g = graphFor({ engine: "open", music: true, voice: null }, placeholderBlocks(300));
+    const made = new Map(g.map((s) => [s.key, s.request]));
+    const shorter = graphFor({ engine: "open", music: true, voice: null }, placeholderBlocks(280));
+    expect(staleSteps(shorter, (k) => made.get(k))).toEqual(["music-loop"]);
+  });
+
+  it("knows a Motion change that reads as the move a scene already has", () => {
+    const moves = (motion: string) => graphFor({ engine: "open", animation: "frames", music: false, voice: null }, [block(0), { ...block(1), motion }]).find((s) => s.key === "clip-b1-1")!.request;
+    // Scene 2 pans right by the cycle: words with no camera move keep it, a zoom is another move.
+    const cycle = moves("");
+    expect(sameCameraMove(cycle, moves("the flags wave in the wind"))).toBe(true);
+    expect(sameCameraMove(cycle, moves("zoom into the lighthouse"))).toBe(false);
+    expect(sameCameraMove(cycle, moves("pan right toward the upper left"))).toBe(false);
   });
 });
 

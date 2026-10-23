@@ -436,6 +436,57 @@ describe("Explainer", () => {
     }
   });
 
+  it(
+    "makes Ken Burns moves again for clips an older Frame by frame render made with a video model, and refuses a Motion change that keeps the move",
+    async () => {
+      const res = await explainerRoute.POST(json("POST", { prompt: "How lighthouses guide ships", settings: { ...open, music: false, subtitles: false, length: 20 } }));
+      const ep: FacelessEpisode = await res.json();
+      await faceless.scriptWritten(ep.id);
+      const done = await settled(ep.id);
+      expect(done.episode.status).toBe("done");
+      const blocks = done.episode.script.blocks;
+      expect(blocks.length).toBeGreaterThanOrEqual(2);
+      const ids = done.episode.plan!.ids;
+      const clips = Object.keys(ids).filter((k) => k.startsWith("clip-"));
+      expect(clips.every((k) => gens.getGeneration(ids[k])!.modelId === "oss-ken-burns")).toBe(true);
+
+      // Motion in Frame by frame is a camera move: words that read as the move a scene has would remake the same clip.
+      const motion = (instruction: string) => changeRoute.POST(json("POST", { blocks: [blocks[1].id], part: "motion", instruction }), params({ id: ep.id }));
+      for (const words of ["the flags wave in the wind", blocks[1].motion]) {
+        const same = await motion(words);
+        expect(same.status, words).toBe(422);
+        expect((await same.json()).error).toMatch(/^That's the camera move this scene already has\. Name another: zoom in or out, pan left or right/);
+      }
+      // Scene 2 pans by the cycle; a zoom is another move.
+      const zoom = await (await motion("zoom into the lighthouse")).json();
+      expect(zoom.rerun).toEqual([...clips.filter((k) => k.startsWith(`clip-${blocks[1].id}-`)), "join", "mix"]);
+
+      // As an episode rendered before Frame by frame moved a camera: every clip was a Wan 2.2 shot of 5 s.
+      for (const k of clips) {
+        const g = gens.getGeneration(ids[k])!;
+        const request = { ...g.request, modelId: "oss-wan22-14b-fast", op: "i2v", params: { ...g.request.params, duration: 5 } };
+        db().prepare("UPDATE generations SET model_id = ?, op = ?, request_json = ? WHERE id = ?").run("oss-wan22-14b-fast", "i2v", JSON.stringify(request), ids[k]);
+      }
+      // A picture change on scene 1 makes every scene's move again (no old clip is kept under a Ken Burns key).
+      const preview = await (await changeRoute.POST(json("POST", { blocks: [blocks[0].id], part: "picture", instruction: "make it stormy" }), params({ id: ep.id }))).json();
+      expect(preview.rerun).toEqual(expect.arrayContaining([`still-${blocks[0].id}`, ...clips, "join", "mix"]));
+      expect(preview.rerun).not.toContain(`still-${blocks[1].id}`);
+      const applied = await changeRoute.POST(json("POST", { blocks: [blocks[0].id], part: "picture", instruction: "make it stormy", apply: true }), params({ id: ep.id }));
+      expect(applied.status).toBe(201);
+      const redone = await settled(ep.id);
+      expect(redone.episode.status).toBe("done");
+      const now = redone.episode.plan!.ids;
+      for (const k of clips) {
+        expect(now[k], k).not.toBe(ids[k]);
+        expect(gens.getGeneration(now[k])!.request).toMatchObject({ modelId: "oss-ken-burns", op: "still-motion" });
+      }
+      expect(now[`still-${blocks[1].id}`]).toBe(ids[`still-${blocks[1].id}`]);
+      expect(now.narration).toBe(ids.narration);
+      await faceless.deleteEpisode(ep.id);
+    },
+    120_000,
+  );
+
   it("draws open pictures from the attached images", async () => {
     const img = (await import("@/server/storage")).saveFile({ data: Buffer.from("x"), contentType: "image/png", name: "subject.png", source: "upload" }).url;
     const ep = faceless.createEpisode({ kind: "explainer", topic: "Our new kettle", sources: [{ kind: "image", url: img }], settings: { ...open, length: 20 }, autoRender: true });
