@@ -28,6 +28,8 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
+On Windows, double-click `start.bat` instead: it installs pnpm and dependencies when they're missing, rebuilds when the source changed, starts the production server and opens the browser (`start.bat dev` runs the dev server; set `PORT` for another port; if it's taken, the next free one is used).
+
 Open **Settings** and pick an **Engine mode**:
 
 | Engine mode | What the install offers | Needs |
