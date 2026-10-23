@@ -245,6 +245,17 @@ describe("Explainer document sources", () => {
     expect(asked).toHaveLength(0);
   });
 
+  it("says how many pages of a long PDF were read", async () => {
+    const line = "High water at the harbour is about twelve hours and twenty-five minutes apart.";
+    const pdf = makePdf(Array.from({ length: 30 }, () => Array.from({ length: 36 }, () => line)));
+    const r = await faceless.readDocument({ name: "tables.pdf", data: pdf }, "cloud");
+    // 30 pages of about 2,900 characters: the 40,000 the summary is written from run into page 15.
+    expect(r).toMatchObject({ pages: 30, readPages: 15, summarized: false });
+    const short = await faceless.readDocument({ name: "two.pdf", data: makePdf([[line], [line]]) }, "cloud");
+    expect(short.pages).toBe(2);
+    expect(short.readPages).toBeUndefined();
+  });
+
   it("summarises a long document with the engine's text model, and keeps the beginning without one", async () => {
     const lines = Array.from({ length: 400 }, (_, i) => para(t(`Paragraph ${i + 1}: the tide tables for the harbour list high and low water for every day of the month.`)));
     const docx = makeDocx(lines.join(""), { title: "Harbour tides" });

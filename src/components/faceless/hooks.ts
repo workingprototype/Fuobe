@@ -258,7 +258,7 @@ export async function readDocument(file: File, engine: Engine) {
   const form = new FormData();
   form.append("file", file);
   form.append("engine", engine);
-  return json<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; summarized: boolean }>(await fetch("/api/explainer/document", { method: "POST", body: form }));
+  return json<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; readPages?: number; summarized: boolean }>(await fetch("/api/explainer/document", { method: "POST", body: form }));
 }
 
 export function useLikeEpisode() {

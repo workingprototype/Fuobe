@@ -45,6 +45,10 @@ const READ_TYPES = /\.(pdf|docx)$/i;
 const READ_MIME = /^application\/(pdf|vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/;
 const MAX_READ_MB = 20;
 
+/** " (12 pages)", or " (the first 20 of 150 pages)" when a long PDF was read only in part. */
+const pagesNote = (r: { pages?: number; readPages?: number }) =>
+  !r.pages ? "" : r.readPages ? ` (the first ${r.readPages} of ${r.pages} pages)` : ` (${r.pages} page${r.pages === 1 ? "" : "s"})`;
+
 type Draft =
   | { kind: "image"; id: string; url: string; name: string; preview: string; uploading?: boolean }
   /** A PDF or Word file being read on the server. */
@@ -212,7 +216,7 @@ export function ExplainerStudio({ picker }: { picker: PickerData }) {
           (r) => {
             // A source removed while it's read stays removed.
             setSources((xs) => xs.map((x) => (x.kind === "reading" && x.id === id ? r.source : x)));
-            toast.success(`Read ${f.name}${r.pages ? ` (${r.pages} page${r.pages === 1 ? "" : "s"})` : ""}${r.summarized ? " and summarised it for the script" : ""}`);
+            toast.success(`Read ${f.name}${pagesNote(r)}${r.summarized ? " and summarised it for the script" : ""}`);
           },
           (e: Error) => {
             setSources((xs) => xs.filter((x) => !(x.kind === "reading" && x.id === id)));

@@ -1357,11 +1357,11 @@ export function documentKind(file: { name: string; data: Buffer; type?: string }
 export async function readDocument(
   file: { name: string; data: Buffer; type?: string },
   engine: Engine,
-): Promise<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; summarized: boolean }> {
+): Promise<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; readPages?: number; summarized: boolean }> {
   if (file.data.length > MAX_DOCUMENT_BYTES) throw new FacelessError(`${file.name} is over ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB — add the part that matters, or paste its text into the prompt`, 413);
   const kind = documentKind(file);
   if (!kind) throw new FacelessError(`${file.name} isn't a PDF or a Word file (.docx)`, 415);
-  let read: { text: string; title?: string; pages?: number };
+  let read: { text: string; title?: string; pages?: number; pagesRead?: number };
   try {
     read = kind === "pdf" ? await pdfText(file.data, { maxChars: SUMMARY_INPUT_CHARS, maxPages: 200 }) : docxText(file.data, { maxChars: SUMMARY_INPUT_CHARS });
   } catch (e) {
@@ -1378,7 +1378,9 @@ export async function readDocument(
         { timeoutMs: 2 * 60_000 },
       )
     : null;
-  return { source: { kind: "text", name, text: (summary ?? read.text).slice(0, 20_000) }, ...(read.pages && { pages: read.pages }), summarized: !!summary };
+  // A PDF read only in part (its first SUMMARY_INPUT_CHARS) says how many of its pages were read.
+  const partial = read.pages && read.pagesRead !== undefined && read.pagesRead < read.pages ? { readPages: read.pagesRead } : {};
+  return { source: { kind: "text", name, text: (summary ?? read.text).slice(0, 20_000) }, ...(read.pages && { pages: read.pages }), ...partial, summarized: !!summary };
 }
 
 // ---------------------------------------------------------------------------

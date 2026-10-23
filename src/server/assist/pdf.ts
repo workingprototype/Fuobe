@@ -9,7 +9,8 @@ import "server-only";
 
 export class PdfError extends Error {}
 
-export async function pdfText(data: Buffer, opts: { maxChars: number; maxPages?: number }): Promise<{ text: string; pages: number; title?: string }> {
+/** `pages` is the document's page count; `pagesRead` how many of them were read before a limit stopped it. */
+export async function pdfText(data: Buffer, opts: { maxChars: number; maxPages?: number }): Promise<{ text: string; pages: number; pagesRead: number; title?: string }> {
   const { getDocumentProxy } = await import("unpdf");
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
   try {
@@ -23,7 +24,9 @@ export async function pdfText(data: Buffer, opts: { maxChars: number; maxPages?:
     const pages = Math.min(pdf.numPages, opts.maxPages ?? 300);
     const parts: string[] = [];
     let chars = 0;
+    let read = 0;
     for (let n = 1; n <= pages && chars < opts.maxChars; n++) {
+      read = n;
       const page = await pdf.getPage(n);
       const content = await page.getTextContent();
       let line = "";
@@ -46,7 +49,7 @@ export async function pdfText(data: Buffer, opts: { maxChars: number; maxPages?:
     if (!text.trim()) throw new PdfError("This PDF has no text to read (it may be scanned images) — paste the text as a note instead");
     const meta = await pdf.getMetadata().catch(() => null);
     const title = typeof (meta?.info as { Title?: unknown } | undefined)?.Title === "string" ? ((meta!.info as { Title: string }).Title.trim() || undefined) : undefined;
-    return { text, pages: pdf.numPages, ...(title && { title }) };
+    return { text, pages: pdf.numPages, pagesRead: read, ...(title && { title }) };
   } finally {
     await pdf.loadingTask.destroy().catch(() => {});
   }
