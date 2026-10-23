@@ -1,5 +1,6 @@
 import { getModel } from "@/lib/catalog";
 import { estimateCost } from "@/lib/catalog/plan";
+import type { StartQuote } from "@/lib/connections";
 import { formatCost } from "@/lib/format";
 import { EDIT_STUDIO, IMAGE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 
@@ -17,11 +18,7 @@ export function starterPriceLine(): string {
   return [quote(IMAGE_STUDIO.defaultModels.cloud, () => "an image"), quote(VIDEO_STUDIO.defaultModels.cloud, (d) => (d ? `a ${d} s clip` : "a clip"))].filter(Boolean).join(" · ");
 }
 
-/** What Home's Start runs in a mode: the studio's default model on each engine, and what one run costs on the paid one. */
-export interface StartQuote {
-  cloud: { name: string; price: string } | null;
-  open: { name: string } | null;
-}
+export type { StartQuote };
 
 /** Home's Start quotes, by mode (image, video, edit), so the price is known before a paid run starts. */
 export function startQuotes(): Record<"image" | "video" | "edit", StartQuote> {
@@ -29,9 +26,11 @@ export function startQuotes(): Record<"image" | "video" | "edit", StartQuote> {
     const cloud = getModel(d.cloud);
     const open = getModel(d.open);
     const usd = cloud ? estimateCost(cloud, { ...cloud.defaults }) : null;
+    // The providers that host each model: a key for another one runs it as a demo.
+    const providers = (m: NonNullable<typeof cloud>) => [...new Set(m.routes.map((r) => r.provider))];
     return {
-      cloud: cloud ? { name: cloud.name, price: usd ? `about ${formatCost(usd)} ${what(cloud.defaults?.duration)}` : "priced by the provider" } : null,
-      open: open ? { name: open.name } : null,
+      cloud: cloud ? { name: cloud.name, price: usd ? `about ${formatCost(usd)} ${what(cloud.defaults?.duration)}` : "priced by the provider", providers: providers(cloud) } : null,
+      open: open ? { name: open.name, providers: providers(open) } : null,
     };
   };
   return {

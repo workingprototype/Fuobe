@@ -132,8 +132,9 @@ export function StudioProvider({
 }
 
 /**
- * Home's Start (`?go=1`): a count the composer runs its draft for, once per increase, after the
- * handed-over prompt is in place (HandoffSync raises it). 0: nothing to start.
+ * Home's Start (`?go=<token>`, the token this tab's Home issued): a count the composer runs its
+ * draft for, once per increase, after the handed-over prompt is in place (HandoffSync raises it).
+ * 0: nothing to start.
  */
 export const StartRequestCtx = createContext(0);
 

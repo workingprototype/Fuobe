@@ -409,10 +409,42 @@ export function mergeHandoff<D extends DraftShape>(base: D, current: D, next: D)
 }
 
 // ---------------------------------------------------------------------------
-// Home's Start: "/image?prompt=…&go=1" runs the handed-over prompt once
+// Home's Start: "/image?prompt=…&go=<token>" runs the handed-over prompt once
 
-/** The query flag that asks a studio to run its handed-over draft once (Home's Start). */
+/** The query flag that asks a studio to run its handed-over draft once (Home's Start). Its value is a one-time token. */
 export const START_PARAM = "go";
+
+/** Where this tab keeps the token Home's Start just issued (sessionStorage, with a copy in memory). */
+const START_TOKEN_KEY = "fuobe:start";
+let startToken: string | null = null;
+
+/**
+ * Home's Start: a one-time token for `go=<token>`, kept in this tab. A studio runs the hand-off
+ * only when `go` carries it, so a link from anywhere else (another site, an email, a chat) with a
+ * `go` flag only prefills the studio and never starts a job on the user's keys. It is random, not
+ * a counter: a tab that came from elsewhere can't guess one Home left behind.
+ */
+export function issueStartToken(): string {
+  // getRandomValues, not randomUUID: it also works on a plain-http LAN address.
+  const token = Array.from(crypto.getRandomValues(new Uint32Array(3)), (n) => n.toString(36)).join("");
+  startToken = token;
+  try {
+    sessionStorage.setItem(START_TOKEN_KEY, token);
+  } catch {}
+  return token;
+}
+
+/** Whether a `go` value is the token this tab's Home issued. The token is used up either way, so it runs once. */
+export function claimStartToken(value: string | null | undefined): boolean {
+  let stored: string | null = null;
+  try {
+    stored = sessionStorage.getItem(START_TOKEN_KEY);
+    sessionStorage.removeItem(START_TOKEN_KEY);
+  } catch {}
+  const issued = [startToken, stored];
+  startToken = null;
+  return !!value && issued.includes(value);
+}
 
 /** The same address without the start flag, so a reload or Back doesn't run it again. */
 export function withoutStart(href: string): string {

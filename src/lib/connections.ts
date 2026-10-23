@@ -91,8 +91,10 @@ export type EngineModeName = "both" | "open" | "cloud";
 export interface ConnectionState {
   providers: Record<string, { configured: boolean } | undefined>;
   engineMode: EngineModeName;
-  /** The first-run guide was dismissed, or something tested green (Settings → `onboarded`). */
+  /** The first-run guide was put away, or something this engine mode uses was connected once (Settings → `onboarded`). */
   onboarded?: boolean;
+  /** Settings → Demo mode: auto (a demo when no provider hosts the model), on (always a demo), off (never). */
+  demoMode?: string;
 }
 
 const CLOUD_PROVIDERS = ["fal", "replicate", "higgsfield"] as const;
@@ -108,9 +110,41 @@ export function nothingConnected(s: ConnectionState): boolean {
   return s.engineMode === "open" ? !c.open : s.engineMode === "cloud" ? !c.cloud : !c.cloud && !c.open;
 }
 
-/** The first-run guide shows until something is connected or it was dismissed. Unknown status: not yet. */
+/** The first-run guide shows until something is connected or it was put away. Unknown status: not yet. */
 export function showFirstRun(s: ConnectionState | undefined): boolean {
   return !!s && !s.onboarded && nothingConnected(s);
+}
+
+/** What Home's Start runs in a mode: the studio's default model on each engine, the providers that host it, and one run's price on the paid one. */
+export interface StartQuote {
+  cloud: { name: string; price: string; providers: string[] } | null;
+  open: { name: string; providers: string[] } | null;
+}
+
+const PROVIDER_LABEL: Record<string, string> = { fal: "fal.ai", replicate: "Replicate", higgsfield: "Higgsfield", comfyui: "ComfyUI" };
+
+/**
+ * The line under Home's composer, before Start is pressed: the model it runs and its price, or why
+ * it runs a free demo (no key for a provider that hosts that model, the same rule the composer's
+ * "Demo" label follows), plus the other engine when that one would run it for real. Null when
+ * nothing is connected: Home's demo notice says so instead.
+ */
+export function startLine(s: ConnectionState, quote: StartQuote | undefined, engine: "cloud" | "open", mode: "image" | "video" | "edit"): { text: string; other?: "cloud" | "open" } | null {
+  if (!quote || nothingConnected(s)) return null;
+  if (s.demoMode === "on") return { text: "Demo mode is on (Settings), so Start runs a free demo" };
+  const hosted = (q: { providers: string[] } | null) => !!q && q.providers.some((p) => s.providers[p]?.configured);
+  const otherEngine = engine === "open" ? "cloud" : "open";
+  const other = s.engineMode === "both" && hosted(quote[otherEngine]) ? otherEngine : undefined;
+  const then = mode === "edit" ? " after you add the photo" : "";
+  if (engine === "open" && quote.open && hosted(quote.open)) return { text: `Start runs ${quote.open.name} on your GPU${then} · Free` };
+  if (engine === "cloud" && quote.cloud && hosted(quote.cloud)) return { text: `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` };
+  const q = quote[engine];
+  const connected = connectedEngines(s)[engine];
+  const hosts = q ? q.providers.map((p) => PROVIDER_LABEL[p] ?? p).join(" or ") : "";
+  let why: string;
+  if (!connected) why = engine === "open" ? "ComfyUI isn't connected" : "No paid API is connected";
+  else why = q ? `${q.name} needs ${engine === "open" ? hosts : `a ${hosts} key`}` : "No model is set for this";
+  return { text: `${why}, so Start ${s.demoMode === "off" ? "can't run it yet" : "runs a free demo"}`, ...(other && { other }) };
 }
 
 /**

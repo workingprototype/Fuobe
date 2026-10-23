@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { claimStartToken, handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
@@ -347,11 +347,11 @@ interface StudioPageProps {
 
 type DraftProps = Omit<StudioPageProps, "catalog">;
 
-/** Reports the URL's hand-off params, and whether it asks to start (`go=1`). It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
-function UrlParams({ onChange }: { onChange: (key: string, start: boolean) => void }) {
+/** Reports the URL's hand-off params, and its start token (`go`), if any. It reads the URL, so it sits under its own Suspense: the static shell renders without it. */
+function UrlParams({ onChange }: { onChange: (key: string, start: string | null) => void }) {
   const sp = useSearchParams();
   const key = handoffKey(sp);
-  const start = sp.get(START_PARAM) === "1";
+  const start = sp.get(START_PARAM) || null;
   // Layout effect: on a client navigation the prefilled draft is in place before the first paint.
   useLayoutEffect(() => onChange(key, start), [key, start, onChange]);
   return null;
@@ -364,9 +364,10 @@ function UrlParams({ onChange }: { onChange: (key: string, start: boolean) => vo
  * hydrated — are kept. A later change of the params (Animate → Video while on Video) starts a
  * fresh draft instead.
  *
- * With `go=1` (Home's Start) it then asks the composer to run the draft once (onStart), after the
- * draft was built from the loaded models, and takes `go` out of the address so a reload or Back
- * doesn't run it again.
+ * With `go=<token>` (Home's Start) it then asks the composer to run the draft once (onStart), after
+ * the draft was built from the loaded models, and takes `go` out of the address so a reload or Back
+ * doesn't run it again. Only the one-time token this tab's Home issued starts a run: a `go` in a
+ * link from elsewhere just prefills the studio, so no website or message can spend the user's keys.
  */
 function HandoffSync({
   startKey,
@@ -384,10 +385,10 @@ function HandoffSync({
   onStart: () => void;
 }) {
   const { setDraft } = useStudioActions();
-  const [url, setUrl] = useState<{ key: string; start: boolean } | null>(null);
+  const [url, setUrl] = useState<{ key: string; start: string | null } | null>(null);
   const applied = useRef({ key: startKey, ready, base: start, seen: false });
   const started = useRef(false);
-  const onParams = useCallback((key: string, start: boolean) => setUrl((u) => (u?.key === key && u.start === start ? u : { key, start })), []);
+  const onParams = useCallback((key: string, start: string | null) => setUrl((u) => (u?.key === key && u.start === start ? u : { key, start })), []);
   useLayoutEffect(() => {
     if (url === null) return;
     const a = applied.current;
@@ -401,7 +402,7 @@ function HandoffSync({
     }
     if (url.start && ready && !started.current) {
       started.current = true;
-      onStart();
+      if (claimStartToken(url.start)) onStart();
       window.history.replaceState(null, "", withoutStart(window.location.href));
     }
   }, [url, ready, build, setDraft, onNavigate, onStart]);

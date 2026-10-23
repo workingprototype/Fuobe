@@ -27,8 +27,8 @@ import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
-import { connectedEngines, FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun } from "@/lib/connections";
-import type { StartQuote } from "@/lib/starter-prices";
+import { issueStartToken, START_PARAM } from "@/lib/composer";
+import { FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun, startLine, type StartQuote } from "@/lib/connections";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -192,19 +192,14 @@ export function HomeView({
 
   const locked = engineMode === "both" ? undefined : engineMode;
 
-  // With a prompt, the studio starts the run itself (go=1), or points at the photo it still needs.
-  const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}&go=1` : ""}`);
-  // What Start will run, and what it costs, before it's pressed.
-  const quote = quotes?.[mode.id];
-  const runsFor = ((): { text: string; other?: "cloud" | "open" | null } | null => {
-    if (!status || nothingConnected || !quote) return null;
-    const engines = connectedEngines(status);
-    const then = mode.id === "image" ? "" : mode.id === "edit" ? " after you add the photo" : "";
-    // The other engine is connected: offer it rather than a demo run.
-    const other = engineMode === "both" ? (engine === "open" ? engines.cloud && "cloud" : engines.open && "open") || null : null;
-    if (engine === "open") return engines.open && quote.open ? { text: `Start runs ${quote.open.name} on your GPU${then} · Free` } : { text: "ComfyUI isn't connected, so Start runs a free demo", other };
-    return engines.cloud && quote.cloud ? { text: `Start runs ${quote.cloud.name}${then} · ${quote.cloud.price}` } : { text: "No paid API is connected, so Start runs a free demo", other };
-  })();
+  // With a prompt, the studio starts the run itself, or points at the photo it still needs. `go`
+  // carries a one-time token from this tab, so only this button can start a run that way.
+  const go = () => {
+    const p = prompt.trim();
+    router.push(p ? `${mode.href}?prompt=${encodeURIComponent(p)}&${START_PARAM}=${issueStartToken()}` : mode.href);
+  };
+  // What Start will run, and what it costs, before it's pressed (or why it's a demo, and the engine that would run it).
+  const runsFor = status ? startLine(status, quotes?.[mode.id], engine, mode.id as "image" | "video" | "edit") : null;
   const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
 
   return (

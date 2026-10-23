@@ -335,7 +335,7 @@ export function Composer({ docked }: { docked: boolean }) {
     toast.dismiss("composer-blocker");
   }, [blocking]);
 
-  // Home's Start (go=1): run the handed-over prompt once the models and uploads have settled. A
+  // Home's Start (go=<token>): run the handed-over prompt once the models and uploads have settled. A
   // blocker (Edit's photo) gets the usual toast, and its slot is pointed at, instead.
   const startRequest = useStartRequest();
   const startedFor = useRef(0);
