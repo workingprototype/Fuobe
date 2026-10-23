@@ -30,6 +30,7 @@ import {
 } from "@/lib/comfy";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { guessKind } from "@/lib/catalog/payload";
+import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
@@ -352,6 +353,8 @@ const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?:
   "palette-transfer-video": { hints: { image: "Pick a palette or add a reference image" } },
   "relight-qwen-edit-2509-reference": { hints: { image2: "Add the photo whose light to copy" } },
   "face-swap-reactor": { hints: { image2: "Add the face to put in" } },
+  "video-swap-wan-vace": { hints: { image: "Add a picture of what goes in" } },
+  "video-insert-wan-vace": { hints: { image: "Add a picture of what to add", mask: "Paint where it goes on the first frame" } },
 };
 
 const MEDIA_HINT: Record<string, string> = {
@@ -585,6 +588,23 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
       if (words) values.maskPrompt = targetPhrase(words);
     }
     if (b.prompt) values.prompt = REMOVE_SCENE;
+  }
+  // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
+  // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
+  // reference, the prompt says what appears there. Neither graph takes clicked points.
+  if (ctx.op === "video-swap" || ctx.op === "video-insert") {
+    if (input.points?.length && !input.mask && typeof extra.maskPrompt !== "string") throw new ProviderError(OPEN_TARGET_PROBLEM.swap!);
+    const words = input.prompt?.trim() ?? "";
+    const vace = getMaker(ctx.op === "video-swap" ? "oss-vace-swap" : "oss-vace-insert")!;
+    if (ctx.op === "video-swap" && b.maskPrompt) {
+      const named = typeof extra.maskPrompt === "string" ? extra.maskPrompt.trim() : "";
+      if (!named && !words) throw new ProviderError("Say what to swap, e.g. “the red car”");
+      // Named apart: the prompt is the result's own words. Only a sentence: it says both what goes and what comes in.
+      values.maskPrompt = swapTarget(named || words);
+      delete extra.maskPrompt;
+      if (!named) values.prompt = makerPrompt({ mode: "swap", maker: vace, subject: words, refs: 1 });
+    }
+    if (!words && b.prompt) values.prompt = makerPrompt({ mode: ctx.op === "video-swap" ? "swap" : "insert", maker: vace, subject: String(values.maskPrompt ?? ""), refs: 1 });
   }
   // Depth maps: Video Depth Anything draws gray or inferno (the other graphs grayscale only), and can put the
   // original clip next to the map.
