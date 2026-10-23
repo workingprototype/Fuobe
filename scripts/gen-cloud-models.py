@@ -489,14 +489,17 @@ model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", 
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
       [("music", "fal-ai/elevenlabs/music")], pricing=("minute", 0.6), defaults={"duration": 30}, options={"durations": [15, 30, 60, 120]})
-model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject",
-      [("bg-remove-video", "fal-ai/birefnet/v2/video")], pricing=("second", 0.0), fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
+# Remove background (Video tools): the cut-out, or (BiRefNet: output_mask adds mask_video) its alpha mask.
+model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject, or their alpha mask",
+      [("bg-remove-video", "fal-ai/birefnet/v2/video", "fal", {"keys": {"maskOutput": "output_mask"}})], pricing=("second", 0.0),
+      fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
 model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video", "Production-grade video matting with audio kept",
       [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
-      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
+      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"}, options={"matteOutputs": ["cutout"]})
 model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
-      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked.
-      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap"}})], pricing=("second", 0.04),
+      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked. Side by side
+      # puts the original clip next to the map.
+      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap", "sideBySide": "side_by_side"}})], pricing=("second", 0.04),
       fixed={"model": "VDA-Base"}, api_defaults={"colormap": "grayscale"})
 model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
       [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
@@ -633,12 +636,13 @@ model("wan-22-vace-inpaint", "Wan 2.2 VACE Fun Inpaint (hosted)", "Alibaba Wan",
                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True},
       options={"requires": {"mask": True, "msg": "Paint the area to change on the first frame"}})
-# The mask maker for the erase and swap chains: what you name or click becomes a black-and-white mask video
-# (apply_mask off; whether the matte is clean black and white is unverified without a run).
+# The mask maker for the erase and swap chains, and Remove background's "keep what you name" on the cloud (Higgsfield
+# runs SAM 3 video there): what you name or click becomes a black-and-white mask video (apply_mask off; whether the
+# matte is clean black and white is unverified without a run). fal can't cut out by words, so it makes the mask only.
 model("sam-3-1-video-mask", "SAM 3.1 video mask", "Meta", "sam", "video",
-      "A mask video of what you name or click, tracked through the clip",
-      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False}, hidden=True,
-      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"))
+      "The alpha mask of what you name (“the dog”), tracked through the clip",
+      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False},
+      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"), options={"keepsNamed": True, "matteOutputs": ["matte"]})
 
 # ----- Swap who or what is on camera
 model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
@@ -1019,6 +1023,15 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
         fmap["frameInterval"] = kf["frameInterval"]
     if "colormap" in kf and op == "depth-video":
         fmap["colormap"] = kf["colormap"]
+        # The picker offers the API's own maps (Higgsfield's Depth Map: Grayscale, Turbo, Inferno, Magma, Viridis).
+        opts["colormaps"] = union(opts.get("colormaps", []), [str(v) for v in enum_of(inputs, kf["colormap"])])
+    # Depth maps beside the original clip, and Remove background's alpha mask (Higgsfield's Video tools options).
+    if "sideBySide" in kf and op == "depth-video" and (inputs.get(kf["sideBySide"]) or {}).get("type") == "boolean":
+        fmap["sideBySide"] = kf["sideBySide"]
+        opts["sideBySide"] = True
+    if "maskOutput" in kf and op == "bg-remove-video" and (inputs.get(kf["maskOutput"]) or {}).get("type") == "boolean":
+        fmap["matteOutput"] = {"key": kf["maskOutput"], "values": {"cutout": False, "matte": True}}
+        opts["matteOutputs"] = ["cutout", "matte"]
     if "frames" in kf and op == "images-to-video":
         item = (inputs.get(kf["frames"]) or {}).get("itemSchema") or {}
         url, frames = next((k for k in item if "url" in k), None), next((k for k in item if "frame" in k), None)

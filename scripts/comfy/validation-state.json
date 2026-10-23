@@ -525,13 +525,13 @@
     "sha256": "08da8d310a04add6eb729fb67f3a82b63b0a806368ce49fc498dfe6aeb58c83e",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.314Z"
+    "at": "2026-10-23T16:47:53.381Z"
   },
   "video-bg-remove-sam3": {
-    "sha256": "111df3bc07d19b0b7c05b31150a260799a991fdd82f5b0407fa476338489452a",
+    "sha256": "0d8eb4714dee686b9c5b63a74ff2edd7feccf8eae825e3c6843e00efe1bac1b9",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.559Z"
+    "at": "2026-10-23T16:47:53.446Z"
   },
   "video-concat-2": {
     "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
@@ -588,22 +588,22 @@
     "at": "2026-10-21T16:25:18.439Z"
   },
   "video-depth-da3": {
-    "sha256": "4c2dd5a6ee8b99eb9eeaf3ea5c9e7b3439964dc87171afef8dbbe2db53676f81",
+    "sha256": "732796f61d7404fe06f9e1132262778692c7e51ebca7316841ed14b91493e4f7",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.879Z"
+    "at": "2026-10-23T16:47:54.176Z"
   },
   "video-depth-vda-small": {
-    "sha256": "aa686ba74bb94dad4ef71f54eed453589d6330e3b25ae79ed5721637fe8902bb",
+    "sha256": "dc83a7795e72cde121a462cc9b3cc684e9619711521d3935fee015209f932dfe",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:22.128Z"
+    "at": "2026-10-23T16:47:54.852Z"
   },
   "video-erase-void": {
     "sha256": "667f8b59d931311b5081e2407ef53aee0b39a36007cf838ba18b64d5d2681bdc",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.436Z"
+    "at": "2026-10-23T04:45:42.666Z"
   },
   "video-export-exr": {
     "sha256": "59de86f898829c9ed60d059d038e3a5b3f5df8fdd675a76579eacaae1526c6a8",
@@ -627,13 +627,13 @@
     "sha256": "71aaa43c8ac4bb0a764a9a835d96d1c47b33244f741611c7036ebea8ffcef3a7",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:19.803Z"
+    "at": "2026-10-23T04:45:37.134Z"
   },
   "video-inpaint-wan-vace-painted": {
-    "sha256": "2563d3d6a4ecac8d21d7831324eb4c0e93797afce58eaed71015bca3aa7549ab",
+    "sha256": "97d00c52d4c177c408528604cf20116bebf7128fba216021fefe5560f9a8d3fb",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.124Z"
+    "at": "2026-10-23T16:47:59.267Z"
   },
   "video-insert-wan-vace": {
     "sha256": "5f57a143e6b2357badf59ebaa3d6d5c834c03330dee79f8af96d9b2307b5be24",

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-23T01:27:37.655Z",
+  "generatedAt": "2026-10-23T16:47:52.036Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -102,7 +102,7 @@
       "customNodes": [],
       "vramGb": 24,
       "validated": true,
-      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) \u2014 ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
+      "notes": "No negative prompt (cfg 1, distilled guidance). FluxGuidance node 1001 added so guidance is bindable (template implicit default is also 3.5). fp16 weights (23.8 GB) — ComfyUI offloads on 16-24 GB cards; set weight_dtype fp8 in node 194:46 for lower VRAM."
     },
     {
       "id": "flux1-krea-dev-t2i",
@@ -6199,7 +6199,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, Relight LoRA, Lightning LoRA)",
       "validated": true,
-      "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"\u91cd\u65b0\u7167\u660e,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
+      "notes": "Official template image_qwen_image_edit_2509_relight = library qwen-image-edit-2509 + node 1001 (Relight LoRA after the Lightning LoRA) + node 1002 (StringConcatenate prefixing the LoRA trigger \"重新照明,\" = \"relight,\"). prompt = the light to apply, e.g. \"relight with neon magenta and cyan rim lights\" (Chinese prompts follow the LoRA captions best). Output size follows the input (~1 MP). 4 steps, cfg 1."
     },
     {
       "id": "relight-qwen-edit-2509-reference",
@@ -6314,7 +6314,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, Light-Migration LoRA, Lightning LoRA)",
       "validated": true,
-      "notes": "Template templates-portrait_light_migration: image = subject, image2 = lighting reference (wired as image2 of both TextEncodeQwenImageEditPlus). Node 1002 prefixes the template instruction (\"\u53c2\u8003\u8272\u8c03\uff0c\u79fb\u9664\u56fe1\u539f\u6709\u7684\u5149\u7167\u5e76\u53c2\u8003\u56fe2\u7684\u5149\u7167\u548c\u8272\u8c03\u5bf9\u56fe1\u91cd\u65b0\u7167\u660e\" = remove image 1's lighting and relight it with image 2's light and tone); prompt may stay empty or add constraints. 4 steps, cfg 1."
+      "notes": "Template templates-portrait_light_migration: image = subject, image2 = lighting reference (wired as image2 of both TextEncodeQwenImageEditPlus). Node 1002 prefixes the template instruction (\"参考色调，移除图1原有的光照并参考图2的光照和色调对图1重新照明\" = remove image 1's lighting and relight it with image 2's light and tone); prompt may stay empty or add constraints. 4 steps, cfg 1."
     },
     {
       "id": "video-relight-bernini-r",
@@ -7652,11 +7652,13 @@
       "outputs": [
         {
           "node": "7",
-          "kind": "video"
+          "kind": "video",
+          "role": "cutout"
         },
         {
           "node": "10",
-          "kind": "video"
+          "kind": "video",
+          "role": "matte"
         }
       ],
       "defaults": {},
@@ -7676,7 +7678,7 @@
       "vramGb": 4,
       "license": "MIT (BiRefNet)",
       "validated": true,
-      "notes": "Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs \"images\" (animated: true), not \"videos\": classify by the .webm extension / the declared kind. Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For \"keep only X\" use video-bg-remove-sam3."
+      "notes": "Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs \"images\" (animated: true), not \"videos\": classify by the .webm extension / the declared kind. Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For \"keep only X\" use video-bg-remove-sam3. Roles: node 7 \"cutout\", node 10 \"matte\"; params.matteOutput (\"cutout\" | \"matte\", on a Remove background job: op bg-remove-video) makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask)."
     },
     {
       "id": "video-bg-remove-sam3",
@@ -7701,13 +7703,23 @@
           {
             "node": "9",
             "input": "filename_prefix"
+          },
+          {
+            "node": "12",
+            "input": "filename_prefix"
           }
         ]
       },
       "outputs": [
         {
           "node": "9",
-          "kind": "video"
+          "kind": "video",
+          "role": "cutout"
+        },
+        {
+          "node": "12",
+          "kind": "video",
+          "role": "matte"
         }
       ],
       "defaults": {},
@@ -7727,7 +7739,7 @@
       "vramGb": 6,
       "license": "Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)",
       "validated": true,
-      "notes": "prompt = what to KEEP (\"person\", \"red car\"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices \"\" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history \"images\" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead."
+      "notes": "prompt = what to KEEP (\"person\", \"red car\"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices \"\" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history \"images\" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. Second output (node 12, role \"matte\", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); params.matteOutput (\"cutout\" | \"matte\", on a Remove background job: op bg-remove-video) makes the provider drop the other save node, so only the chosen one is encoded."
     },
     {
       "id": "video-depth-da3",
@@ -7740,6 +7752,12 @@
           {
             "node": "1",
             "input": "file"
+          }
+        ],
+        "sideBySide": [
+          {
+            "node": "9",
+            "input": "value"
           }
         ],
         "filenamePrefix": [
@@ -7755,7 +7773,9 @@
           "kind": "video"
         }
       ],
-      "defaults": {},
+      "defaults": {
+        "sideBySide": false
+      },
       "limits": {
         "maxWidth": 2048,
         "maxHeight": 2048
@@ -7787,6 +7807,18 @@
             "input": "file"
           }
         ],
+        "colormap": [
+          {
+            "node": "5",
+            "input": "colormap"
+          }
+        ],
+        "sideBySide": [
+          {
+            "node": "9",
+            "input": "value"
+          }
+        ],
         "filenamePrefix": [
           {
             "node": "7",
@@ -7800,7 +7832,10 @@
           "kind": "video"
         }
       ],
-      "defaults": {},
+      "defaults": {
+        "colormap": "gray",
+        "sideBySide": false
+      },
       "limits": {
         "maxWidth": 2048,
         "maxHeight": 2048
@@ -7815,7 +7850,7 @@
       "vramGb": 4,
       "license": "Apache-2.0 (Video-Depth-Anything-Small); Base/Large and metric variants are CC-BY-NC-4.0 (non-commercial) - keep the vits model",
       "validated": true,
-      "notes": "yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default \".safetensors\" is not in its own option list) -> VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.",
+      "notes": "yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default \".safetensors\" is not in its own option list) -> VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, the depth map scaled to the clip's size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).",
       "autoDownloads": [
         "LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run"
       ]
@@ -7949,7 +7984,7 @@
           "kind": "image"
         }
       ],
-      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings \u2192 Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
+      "notes": "Runs on any ComfyUI (CPU is fine). Used by Settings → Run self-test and the e2e test. Validated by actually running it end to end through Fuobe on ComfyUI 0.41 (CPU).",
       "customNodes": [],
       "models": [],
       "vramGb": 0,
@@ -11437,7 +11472,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Qwen-Image-Edit-2509, White_to_Scene and Lightning LoRAs); BiRefNet MIT",
       "validated": true,
-      "notes": "relight-qwen-edit-2509 with a cut-out in front: core RemoveBackground (BiRefNet) masks the product, Image Composite Masked puts it on a white backdrop the size of the photo, then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger \"\u767d\u5e95\u56fe\u8f6c\u573a\u666f,\" = \"white background to scene\", prefixed by node 1002) places and relights it in the scene the prompt describes. The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud)."
+      "notes": "relight-qwen-edit-2509 with a cut-out in front: core RemoveBackground (BiRefNet) masks the product, Image Composite Masked puts it on a white backdrop the size of the photo, then Qwen-Image-Edit 2509 + Lightning (4 steps, cfg 1) + dx8152 White_to_Scene LoRA (trigger \"白底图转场景,\" = \"white background to scene\", prefixed by node 1002) places and relights it in the scene the prompt describes. The open route of the Product shot app (Bria Product Shot / Product Photography on the cloud)."
     },
     {
       "id": "audio-timeline",
@@ -11839,6 +11874,10 @@
           {
             "node": "38",
             "input": "filename_prefix"
+          },
+          {
+            "node": "77",
+            "input": "filename_prefix"
           }
         ]
       },
@@ -11846,6 +11885,11 @@
         {
           "node": "38",
           "kind": "video"
+        },
+        {
+          "node": "77",
+          "kind": "image",
+          "role": "mask"
         }
       ],
       "defaults": {
@@ -11877,19 +11921,19 @@
           "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
           "folder": "text_encoders",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-          "sizeGb": 6.74
+          "sizeGb": null
         },
         {
           "file": "wan_2.1_vae.safetensors",
           "folder": "vae",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
-          "sizeGb": 0.25
+          "sizeGb": null
         },
         {
           "file": "wan2.1_vace_14B_fp16.safetensors",
           "folder": "diffusion_models",
           "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors",
-          "sizeGb": 34.68
+          "sizeGb": null
         },
         {
           "file": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
@@ -11907,7 +11951,12 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License (commercial use allowed under its terms); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (in the clip's shape). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame. Validated by /prompt only (no GPU here)."
+      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (in the clip's shape). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame: the second output (node 77, role \"mask\", added by the remove-object package) is the tracked mask of the window's LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. The provider keeps node 77 only when params.extra.handOffMask is true (a window another one waits on); otherwise it is dropped, so a single or last window saves just the video. Validated by /prompt only (no GPU here).",
+      "buildWarnings": [
+        "model umt5_xxl_fp8_e4m3fn_scaled.safetensors: https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors -> no size (HTTP 307)",
+        "model wan_2.1_vae.safetensors: https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors -> no size (HTTP 307)",
+        "model wan2.1_vace_14B_fp16.safetensors: https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_14B_fp16.safetensors -> no size (HTTP 307)"
+      ]
     },
     {
       "id": "video-erase-void",

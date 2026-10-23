@@ -3,7 +3,7 @@
  * blocker messages, attachment placement and model-picker grouping. No catalog import here, so
  * nothing in this file pulls the model list into the browser bundle.
  */
-import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, Preset } from "./catalog/types";
+import { COLORMAPS, type Engine, type GenParams, type InputSlot, type MatteOutput, type MediaKind, type ModelDef, type Operation, type Preset } from "./catalog/types";
 import { spokenLanguageName } from "./speech-languages";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +32,12 @@ export interface SettingsShape {
   negativePrompt: boolean;
   /** The spoken languages a transcriber can be told (unset = it detects): the "Spoken language" picker. */
   sourceLanguages: string[] | null;
+  /** Remove background: the cut-out or its alpha mask, as far as the model makes them (one is still shown, with a note). */
+  matteOutput: MatteOutput[] | null;
+  /** Depth maps: the colour maps the model draws (grayscale alone is still shown, with where the others are). */
+  colormap: string[] | null;
+  /** Depth maps: the original clip next to the map. */
+  sideBySide: boolean;
 }
 
 /**
@@ -50,6 +56,8 @@ export function settingsShape(
   const o = model?.options ?? {};
   const many = <T,>(xs: T[] | undefined) => (xs && xs.length > 1 ? xs : null);
   const single = op ? SINGLE_TAKE.has(op) : studioOps.length > 0 && studioOps.every((x) => SINGLE_TAKE.has(x));
+  // The operation, or the studio's only one before anything is attached (Video tools → Depth map).
+  const is = (x: Operation) => op === x || (!op && studioOps.length > 0 && studioOps.every((y) => y === x));
   return {
     aspect: op === "i2v" || op === "flf2v" ? null : many(o.aspectRatios),
     resolution: many(o.resolutions),
@@ -62,7 +70,37 @@ export function settingsShape(
     sliders: !!o.sliders?.length,
     negativePrompt: !!o.negativePrompt,
     sourceLanguages: o.sourceLanguages?.length ? o.sourceLanguages : null,
+    matteOutput: is("bg-remove-video") && model ? (o.matteOutputs ?? ["cutout"]) : null,
+    colormap: is("depth-video") && model ? (o.colormaps ?? ["grayscale"]) : null,
+    sideBySide: is("depth-video") && !!o.sideBySide,
   };
+}
+
+export const MATTE_OUTPUT_LABELS: Record<MatteOutput, string> = { cutout: "Cutout video", matte: "Alpha mask" };
+export const colormapLabel = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+
+/**
+ * What a Remove background or Depth map model can't make, said under its picker (Higgsfield offers five colour
+ * maps and both outputs on one model; here they depend on the model and the engine).
+ */
+export function videoToolNote(model: Pick<ModelDef, "name" | "engine" | "options">, what: "matte" | "colormap"): string | null {
+  const o = model.options;
+  if (what === "matte") {
+    const outs = o.matteOutputs ?? ["cutout"];
+    if (outs.length > 1) return null;
+    if (outs[0] === "cutout") return `${model.name} makes the cut-out only — BiRefNet and SAM also make the alpha mask.`;
+    return model.engine === "cloud"
+      ? "The cloud gives the alpha mask of what you name — cut it out by words with SAM 3 on your ComfyUI, or cut out the whole subject with BiRefNet or Bria."
+      : `${model.name} makes the alpha mask only.`;
+  }
+  const maps = o.colormaps ?? ["grayscale"];
+  if (maps.length >= COLORMAPS.length) return null;
+  if (model.engine === "open") {
+    return maps.length > 1
+      ? `The open engine draws ${maps.map(colormapLabel).join(" and ")} — Turbo, Magma and Viridis need the cloud engine.`
+      : `${model.name} draws grayscale only — Video Depth Anything adds Inferno; Turbo, Magma and Viridis need the cloud engine.`;
+  }
+  return `${model.name} draws ${maps.map(colormapLabel).join(", ")}.`;
 }
 
 /** The parts of the summary chip label, in reading order. */
@@ -83,6 +121,9 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
   if (shape.enhance && params.enhancePrompt) parts.push("Enhance");
   // Detecting the language is the default, so only a picked one is worth a word.
   if (shape.sourceLanguages && params.sourceLanguage) parts.push(spokenLanguageName(params.sourceLanguage));
+  if (shape.matteOutput) parts.push(MATTE_OUTPUT_LABELS[params.matteOutput && shape.matteOutput.includes(params.matteOutput) ? params.matteOutput : shape.matteOutput[0]]);
+  if (shape.colormap) parts.push(colormapLabel(params.colormap ?? shape.colormap[0]));
+  if (shape.sideBySide && params.sideBySide) parts.push("Side by side");
   return parts;
 }
 

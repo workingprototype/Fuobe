@@ -112,6 +112,8 @@ export const BINDING_KEYS = new Set([
   'decimation', 'cutout', 'numGaussians', 'splatFormat', 'orbitFrames', 'frameWidth',
   // round 4 (engine seams, see library.spec.mjs header)
   'curveMode', 'filterSpeckle', 'colorPrecision',
+  // remove-object package (round 4)
+  'colormap', 'sideBySide',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

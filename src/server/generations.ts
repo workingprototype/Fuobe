@@ -9,6 +9,7 @@ import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { keepMatte } from "@/lib/catalog/payload";
 import {
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
@@ -533,6 +534,7 @@ const SLOT_KIND: Record<ChainSlot["slot"], MediaKind> = {
   audio2: "audio",
   audios: "audio",
   model3d: "model3d",
+  mask: "video",
   prompt: "text",
 };
 
@@ -551,13 +553,15 @@ const SOUNDTRACK_SLOTS = new Set<ChainSlot["slot"]>(["audio", "audio2"]);
 
 /** The dependency output a slot takes: the first of the slot's kind, or the one with the slot's `stem`. */
 export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | undefined {
+  // A mask: the output made as one (meta.role "mask": a painted window's last tracked frame), else a mask video, else a still.
+  if (s.slot === "mask") return outputs.find((o) => o.meta?.role === "mask") ?? outputs.find((o) => o.kind === "video") ?? outputs.find((o) => o.kind === "image");
   const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
   if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
   const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
   return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
 }
 
-const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : SLOT_KIND[s.slot]);
+const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : s.slot === "mask" ? "mask" : SLOT_KIND[s.slot]);
 
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
@@ -956,7 +960,9 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
-  for (const o of res.outputs as RichOutput[]) {
+  // Remove background: of a cut-out and its mask (BiRefNet's answer), the one asked for (params.matteOutput).
+  const matte = r.op === "bg-remove-video" ? (JSON.parse(r.request_json) as GenerationRequest).params?.matteOutput : undefined;
+  for (const o of keepMatte(res.outputs as RichOutput[], matte)) {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {

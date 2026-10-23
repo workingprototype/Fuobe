@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { OPERATION_LABELS, type GenParams, type ModelDef, type Operation } from "@/lib/catalog/types";
-import { durationLabel, hiddenChanges, settingsSummary, type SettingsShape } from "@/lib/composer";
+import { colormapLabel, durationLabel, hiddenChanges, MATTE_OUTPUT_LABELS, settingsSummary, videoToolNote, type SettingsShape } from "@/lib/composer";
 import { ratioValue } from "@/lib/format";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { cn } from "@/lib/utils";
@@ -131,6 +131,11 @@ function Toggle({ label, hint, checked, onChange, children }: { label: string; h
   );
 }
 
+/** What the model can't do of an option the studio offers (open depth maps: grayscale and inferno only). */
+function OptionNote({ text }: { text: string | null }) {
+  return text ? <p className="text-[12px] leading-snug text-muted-foreground">{text}</p> : null;
+}
+
 export interface SettingsPanelProps {
   model?: ModelDef;
   op?: Operation;
@@ -244,13 +249,26 @@ function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePro
           <SpokenLanguage codes={shape.sourceLanguages} value={p.sourceLanguage} onChange={(sourceLanguage) => setP({ sourceLanguage })} />
         </Section>
       )}
+      {shape.matteOutput && model && (
+        <Section label="Output">
+          <Segmented label="Output" options={shape.matteOutput} value={p.matteOutput ?? shape.matteOutput[0]} onChange={(v) => setP({ matteOutput: v })} format={(v) => MATTE_OUTPUT_LABELS[v]} />
+          <OptionNote text={videoToolNote(model, "matte")} />
+        </Section>
+      )}
+      {shape.colormap && model && (
+        <Section label="Color map">
+          <Segmented label="Color map" options={shape.colormap} value={p.colormap ?? shape.colormap[0]} onChange={(v) => setP({ colormap: v })} format={colormapLabel} />
+          <OptionNote text={videoToolNote(model, "colormap")} />
+        </Section>
+      )}
       {shape.multiShot && model && (
         <Section label="Multi-shot">
           <MultiShotControl model={model} params={p} onChange={setP} />
         </Section>
       )}
-      {(shape.draft || shape.audio || shape.enhance) && (
+      {(shape.draft || shape.audio || shape.enhance || shape.sideBySide) && (
         <div className="divide-y rounded-xl border px-3">
+          {shape.sideBySide && <Toggle label="Side by side" hint="Put the original video next to the depth map" checked={!!p.sideBySide} onChange={(v) => setP({ sideBySide: v })} />}
           {shape.draft && (
             <Toggle label="Draft" hint={p.draft ? "Cheap 480p take — finish the one you like in 1080p" : "Preview at 480p first, then render the keeper in 1080p"} checked={!!p.draft} onChange={(v) => setP({ draft: v })} />
           )}

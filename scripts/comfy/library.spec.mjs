@@ -75,9 +75,13 @@
 //   frameWidth                            (reference brief: width the clip's frames are scaled to, px)
 // Keys added with round 4 (engine seams):
 //   curveMode, filterSpeckle, colorPrecision (VTracer: spline | polygon | none curves, specks dropped (px), colour precision bits)
+// Keys added by the remove-object package (round 4):
+//   colormap*                             (Video Depth Anything's colour map: gray | inferno; params.colormap grayscale → gray)
+//   sideBySide                            (depth maps: the original clip next to the depth map)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
-// "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
+// "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
+// and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
 // segment per caption cue before submitting).
 
 import fs from 'node:fs';
@@ -1694,8 +1698,8 @@ export const SPEC = [
     handBuilt: 'hand-built/video-bg-remove-birefnet.json',
     bindings: { video: [b('1', 'file')] },
     outputs: [
-      { node: '7', kind: 'video' },
-      { node: '10', kind: 'video' },
+      { node: '7', kind: 'video', role: 'cutout' },
+      { node: '10', kind: 'video', role: 'matte' },
     ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1703,7 +1707,8 @@ export const SPEC = [
     notes:
       'Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). ' +
       'Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs "images" (animated: true), not "videos": classify by the .webm extension / the declared kind. ' +
-      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3.',
+      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3. ' +
+      'Roles: node 7 "cutout", node 10 "matte"; params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask).',
   },
   {
     id: 'video-bg-remove-sam3',
@@ -1714,20 +1719,26 @@ export const SPEC = [
       video: [b('1', 'file')],
       prompt: [b('4', 'text')],
     },
-    outputs: [{ node: '9', kind: 'video' }],
+    outputs: [
+      { node: '9', kind: 'video', role: 'cutout' },
+      { node: '12', kind: 'video', role: 'matte' },
+    ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 6,
     license: 'Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)',
     notes:
       'prompt = what to KEEP ("person", "red car"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices "" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). ' +
-      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead.',
+      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. ' +
+      'Second output (node 12, role "matte", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); ' +
+      'params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node, so only the chosen one is encoded.',
   },
   {
     id: 'video-depth-da3',
     title: 'Video Depth Map (Depth Anything 3 Mono)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-da3.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], sideBySide: [b('9', 'value')] },
+    defaults: { sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1741,7 +1752,8 @@ export const SPEC = [
     title: 'Video Depth Map (Video Depth Anything Small, temporally stable)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-vda-small.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], colormap: [b('5', 'colormap')], sideBySide: [b('9', 'value')] },
+    defaults: { colormap: 'gray', sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1749,7 +1761,9 @@ export const SPEC = [
     autoDownloads: ['LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run'],
     notes:
       'yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default ".safetensors" is not in its own option list) -> ' +
-      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.',
+      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. ' +
+      'colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, ' +
+      'the depth map scaled to the clip\'s size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).',
   },
 
   // ---- palette / colour lock ----------------------------------------------
@@ -2541,7 +2555,10 @@ export const SPEC = [
       maskGrow: [b('11', 'expand')], prompt: [b('16', 'text')], negativePrompt: [b('17', 'text')], checkpoint: [b('20', 'unet_name')],
       loraStrength: [b('21', 'strength_model')], shift: [b('22', 'shift')], seed: [b('23', 'seed')], steps: [b('23', 'steps')], cfg: [b('23', 'cfg')],
     },
-    outputs: [{ node: '38', kind: 'video' }],
+    outputs: [
+      { node: '38', kind: 'video' },
+      { node: '77', kind: 'image', role: 'mask' },
+    ],
     defaults: { checkpoint: 'wan2.1_vace_14B_fp16.safetensors' },
     limits: { maxWidth: 1280, maxHeight: 1280, maxFrames: 81, dimensionMultiple: 16 },
     vramGb: 24,
@@ -2552,7 +2569,10 @@ export const SPEC = [
       'The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. ' +
       'Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip\'s shape, ' +
       'paste-back into the original frames, the window\'s sound kept. ' +
-      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame. Validated by /prompt only (no GPU here).',
+      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame: the second output (node 77, role "mask", added by the remove-object package) ' +
+      'is the tracked mask of the window\'s LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. ' +
+      'The provider keeps node 77 only when params.extra.handOffMask is true (a window another one waits on); otherwise it is dropped, so a single or last window saves just the video. ' +
+      'Validated by /prompt only (no GPU here).',
   },
   {
     id: 'video-erase-void',

@@ -521,9 +521,10 @@ const open: ModelDef[] = [
     vendor: "ZhengPeng7",
     family: "birefnet",
     kind: "video",
-    tagline: "Cut the subject out of every frame — transparent WebM plus a matte",
+    tagline: "Cut the subject out of every frame — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-birefnet")],
-    options: {},
+    // The graph saves both; params.matteOutput keeps one (Video tools → Remove background: Cutout video / Alpha mask).
+    options: { promptless: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-matte-sam3",
@@ -531,9 +532,9 @@ const open: ModelDef[] = [
     vendor: "Meta",
     family: "sam",
     kind: "video",
-    tagline: "Keep just the object you name (“the dog”, “the red car”)",
+    tagline: "Keep just what you name (“the dog”, “the red car”) — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-sam3")],
-    options: {},
+    options: { keepsNamed: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-depth-da3",
@@ -541,9 +542,9 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Per-frame depth maps for compositing and 3D effects",
+    tagline: "Per-frame depth maps for compositing and 3D effects · grayscale",
     routes: [comfy("depth-video", "video-depth-da3")],
-    options: {},
+    options: { colormaps: ["grayscale"], sideBySide: true },
   }),
   o({
     id: "oss-video-depth-vda",
@@ -551,9 +552,47 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Temporally stable, flicker-free depth",
+    tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
-    options: {},
+    // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
+  }),
+  // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
+  // (the provider sends the objects in it to SAM 3.1 as maskPrompt; the scene the gap is filled with is
+  // params.extra.prompt or a neutral default). One window per job: src/lib/catalog/remove-object.ts tiles longer clips
+  // and joins them; run on its own (a Canvas node) a job does the first window only, which the taglines say.
+  o({
+    id: "oss-vace-remove",
+    name: "Wan 2.1 VACE Remove",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to remove: SAM 3.1 follows it, VACE fills the gap, every other pixel stays the original · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the lightx2v 4-step LoRA; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true },
+  }),
+  o({
+    id: "oss-vace-remove-painted",
+    name: "Wan 2.1 VACE Remove (painted)",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint what to remove on the first frame: SAM 3.1 follows it, VACE fills the gap · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace-painted", "first-frame mask (white = remove) tracked by SAM 3.1; the last frame's mask starts the next window")],
+    options: { seed: true, negativePrompt: true, requires: { mask: true, msg: "Paint what to remove on the first frame" } },
+  }),
+  o({
+    id: "oss-void-remove",
+    name: "VOID Remove",
+    vendor: "Netflix",
+    family: "void",
+    kind: "video",
+    tagline: "Removes the object and what it causes — shadows, reflections, things it moves · 197 frames a run (Video tools → Remove object does whole clips) · 24–40 GB GPU (unverified) · CogVideoX License: commercial use needs registration",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-erase-void", "SAM 3.1 text track + VOID (CogVideoX-5B fine-tune), two passes; up to 197 frames per window")],
+    options: { seed: true, negativePrompt: true },
   }),
   o({
     id: "oss-qwen-relight",

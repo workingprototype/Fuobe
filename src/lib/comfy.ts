@@ -60,7 +60,8 @@ export interface ManifestOutput {
   /**
    * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
    * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
-   * "depth" map, a Gaussian "splat", a reference video's style "brief".
+   * "depth" map, a Gaussian "splat", a reference video's style "brief"; a painted eraser's last tracked "mask" (handed to the next
+   * window), and a matte graph's "cutout" (transparent video) and "matte" (black and white) videos.
    */
   role?:
     | "cues"
@@ -77,7 +78,10 @@ export interface ManifestOutput {
     | "scene"
     | "depth"
     | "splat"
-    | "brief";
+    | "brief"
+    | "mask"
+    | "cutout"
+    | "matte";
 }
 
 export interface ManifestWorkflow {
