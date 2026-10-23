@@ -140,7 +140,7 @@ interface ClientStreamState {
   hiddenTimer: ReturnType<typeof setTimeout> | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
   hooked: boolean;
-  /** Keep the stream (or our place in line) while hidden: browser notifications are on and a job runs. */
+  /** Keep the stream (or our place in line) while hidden: browser notifications are on and a job hasn't had its notification yet. */
   keepHidden: (() => boolean) | null;
   /** "Anyone on screen?" questions waiting for an answer, by id. */
   seen: Map<string, () => void>;
@@ -329,7 +329,7 @@ function onVisibility() {
   if (document.visibilityState === "hidden") {
     const arm = () =>
       setTimeout(() => {
-        // Notifications on and a job running: the stream is how we hear it finish, so keep it.
+        // Notifications on and a job not yet notified (running, or finished and settling): the stream is how we hear it, so keep it.
         if (s.keepHidden?.()) return void (s.hiddenTimer = arm());
         s.hiddenTimer = null;
         stop();

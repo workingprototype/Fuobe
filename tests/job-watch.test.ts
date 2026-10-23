@@ -3,6 +3,7 @@ import type { Generation } from "@/lib/catalog/types";
 import type { StreamEvent } from "@/lib/generation-stream";
 import {
   dueJobs,
+  keepListening,
   longestRunning,
   notificationText,
   OFFER_AFTER_MS,
@@ -127,6 +128,27 @@ describe("a finished job (watchEvent → dueJobs)", () => {
     // Moved to the Trash while running: gone too.
     s = watchEvent(watchEvent({}, ev(g), 0), ev({ ...g, deletedAt: 50 }), 50);
     expect(s).toEqual({});
+  });
+
+  it("keeps a hidden tab's stream until every watched job has had its notification, settling ones too", () => {
+    const g = gen();
+    let s = play({}, [
+      [g, 0],
+      [{ ...g, status: "running" }, 1000],
+    ]);
+    expect(keepListening({ enabled: true, watched: s, notifying: 0 })).toBe(true);
+    // Finished 2 s before the 30 s grace runs out: quiet but not due for another 4 s. Letting go
+    // now would lose its notification (only a tab reading the stream sends one).
+    s = watchEvent(s, ev({ ...g, status: "succeeded", outputs: [{ url: "/api/files/o.mp4", kind: "video" }] }), 28_000);
+    expect(dueJobs(s, 30_000).done).toEqual([]);
+    expect(keepListening({ enabled: true, watched: s, notifying: 0 })).toBe(true);
+    const { state, done } = dueJobs(s, 28_000 + SETTLE_MS);
+    expect(done).toHaveLength(1);
+    // While it asks the other tabs whether one is on screen, still listening; then it lets go.
+    expect(keepListening({ enabled: true, watched: state, notifying: 1 })).toBe(true);
+    expect(keepListening({ enabled: true, watched: state, notifying: 0 })).toBe(false);
+    // Notifications off: the usual grace, whatever runs.
+    expect(keepListening({ enabled: false, watched: s, notifying: 1 })).toBe(false);
   });
 
   it("watches what was already running when the page opened", () => {

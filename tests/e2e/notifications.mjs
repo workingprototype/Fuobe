@@ -7,7 +7,8 @@
 //
 // 1. The title shows "(1) …" while a job runs and drops it when it's done.
 // 2. A job finishing while the tab is hidden → one notification ("Your image is ready" + its prompt);
-//    clicking it opens the result in the viewer.
+//    clicking it opens the result in the viewer. Also when it finishes just before the hidden tab's
+//    30 s grace runs out (the clock held there): the tab keeps its stream until the job has settled.
 // 3. A job finishing while you look at the tab → no notification.
 // 4. The leader tab hidden while another tab is on screen → none; two hidden tabs → one (only the
 //    stream's leader notifies).
@@ -66,6 +67,12 @@ const start = (page, prompt) =>
 
 const shown = (page) => page.evaluate(() => window.__shown.map((n) => ({ title: n.title, body: n.body, tag: n.tag })));
 
+/** Poll in real time (the page's own clock may be held). */
+async function until(check, what, ms = 30_000) {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 250))) if (await check()) return;
+  throw new Error(`timed out waiting for ${what}`);
+}
+
 try {
   {
     const ctx = await browser.newContext(DESKTOP);
@@ -99,6 +106,31 @@ try {
     });
     await page.getByRole("dialog").first().waitFor({ timeout: 15_000 });
     await page.keyboard.press("Escape");
+    await ctx.close();
+  }
+  {
+    step("finished 3 s before the hidden tab's 30 s grace ends: the tab keeps the stream until it settles, then notifies");
+    const ctx = await browser.newContext(DESKTOP);
+    await ctx.addInitScript(...fakes());
+    const page = await ctx.newPage();
+    await page.clock.install();
+    await openRoute(page, `${app}/library`);
+    await page.clock.runFor(1500);
+    await page.evaluate(() => window.__setHidden(true));
+    const hiddenAt = await page.evaluate(() => Date.now());
+    // 27 s into the grace, with the clock held there while the job runs (in real time): it goes quiet
+    // 3 s before the grace ends and is due (settled) 3 s after.
+    await page.clock.pauseAt(hiddenAt + 27_000);
+    const id = await start(page, "just before the grace runs out");
+    await until(() => page.evaluate((id) => fetch(`/api/generations/${id}`).then((r) => r.json()).then((g) => g.status === "succeeded"), id), "the job to finish");
+    await until(() => page.evaluate(() => !/^\(\d+\) /.test(document.title)), "the tab to hear it finish");
+    await page.clock.runFor(3_500);
+    assert.deepEqual(await shown(page), [], "nothing before the job has settled");
+    await page.clock.runFor(4_000);
+    await until(() => shown(page).then((l) => l.length > 0), "the notification", 5_000);
+    const list = await shown(page);
+    assert.equal(list.length, 1, JSON.stringify(list));
+    assert.deepEqual([list[0].title, list[0].body], ["Your image is ready", "just before the grace runs out"]);
     await ctx.close();
   }
   {

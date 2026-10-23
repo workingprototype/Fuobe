@@ -8,6 +8,7 @@ import { anotherTabVisible, keepStreamWhileHidden, leadsStream, useGenerationEve
 import type { Generation } from "@/lib/catalog/types";
 import {
   dueJobs,
+  keepListening,
   longestRunning,
   notificationText,
   runningJobs,
@@ -82,14 +83,23 @@ export function JobNotifications() {
     [router],
   );
 
+  const notifying = useRef(0);
   const notify = useCallback(
     async (job: FinishedJob) => {
-      if (!notificationsEnabled() || !leadsStream() || document.visibilityState !== "hidden") return;
-      const otherVisible = await anotherTabVisible();
+      // Whether this tab heard the job finish as the stream's reader: asked before the wait below.
+      const leader = leadsStream();
+      if (!notificationsEnabled() || !leader || document.visibilityState !== "hidden") return;
+      notifying.current++;
+      let otherVisible: boolean;
+      try {
+        otherVisible = await anotherTabVisible();
+      } finally {
+        notifying.current--;
+      }
       const ok = shouldNotify({
         enabled: notificationsEnabled(),
         permission: notificationPermission(),
-        leader: leadsStream(),
+        leader,
         hidden: document.visibilityState === "hidden",
         otherVisible,
       });
@@ -153,9 +163,10 @@ export function JobNotifications() {
     return () => clearInterval(t);
   }, [busy, check]);
 
-  // Hidden for a while, a tab lets go of the stream; with notifications on it keeps listening while a job runs.
+  // Hidden for a while, a tab lets go of the stream; with notifications on it keeps listening until
+  // every job it watches has had its notification (one that just finished is still settling).
   useEffect(() => {
-    keepStreamWhileHidden(() => notificationsEnabled() && Object.values(watch.current).some((j) => j.quietSince == null));
+    keepStreamWhileHidden(() => keepListening({ enabled: notificationsEnabled(), watched: watch.current, notifying: notifying.current }));
     return () => keepStreamWhileHidden(null);
   }, []);
 

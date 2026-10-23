@@ -129,6 +129,16 @@ export function dueJobs(state: WatchState, now: number, settle = SETTLE_MS): { s
   return { state: next, done };
 }
 
+/**
+ * Whether a hidden tab keeps the live stream past its 30 s grace: notifications are on and a job it
+ * watches hasn't been told about yet, still running or finished but not settled (letting go then
+ * would lose the job's notification: only a tab that reads the stream sends one), or a notification
+ * is on its way (asking the other tabs whether one is on screen).
+ */
+export function keepListening(s: { enabled: boolean; watched: WatchState; notifying: number }): boolean {
+  return s.enabled && (Object.keys(s.watched).length > 0 || s.notifying > 0);
+}
+
 /** The longest any watched job has been running (for the one-time offer). */
 export function longestRunning(state: WatchState, now: number): number {
   return Math.max(0, ...Object.values(state).filter((j) => j.quietSince == null).map((j) => now - j.since));
