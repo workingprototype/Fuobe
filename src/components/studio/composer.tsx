@@ -223,7 +223,12 @@ export function Composer({ docked }: { docked: boolean }) {
   const anyOf = preset?.inputs ? undefined : config.anyOf;
   const missing = firstMissingSlot(slots, draft.slots, anyOf);
   const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading);
-  const engineError = lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null;
+  // Export without a ComfyUI to write it (none connected, or the install runs cloud APIs only): say so and offer the cloud route.
+  // A cloud-only install refuses open models, and with demo mode off nothing else runs it, so Generate says why.
+  const comfyMissing = !!config.comfyOnly && !!status && (engineMode === "cloud" || !status.providers.comfyui?.configured);
+  const comfyBlock = comfyMissing && model?.engine === "open" && (engineMode === "cloud" || status?.demoMode === "off") ? "Needs ComfyUI: see the note below" : null;
+  const engineError =
+    (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null) ?? comfyBlock;
   let op: Operation | undefined;
   let cost: number | null = null;
   let planError: string | null = null;
@@ -328,12 +333,11 @@ export function Composer({ docked }: { docked: boolean }) {
   };
   const formatVia = (f: VideoFormat) => {
     const m = writerOf(f);
-    return m && m.id !== model?.id ? `via ${m.name}` : undefined;
+    // "via LTX 2.3 HDR": the name without what it makes in brackets (the format already says it).
+    return m && m.id !== model?.id ? `via ${m.name.replace(/\s*\([^)]*\)$/, "")}` : undefined;
   };
   const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops, studioFormats);
   const outcome = config.clipFacts && draft.slots.video?.ref ? clipOutcome(effectiveOp, facts, p, model) : null;
-  // Export without a ComfyUI to write it (none connected, or the install runs cloud APIs only): say so and offer the cloud route.
-  const comfyMissing = !!config.comfyOnly && !!status && (engineMode === "cloud" || !status.providers.comfyui?.configured);
   const video = draft.slots.video?.ref;
   const alternative = config.comfyOnly?.alternative;
   const alternativeHref = alternative && `${alternative.href}${video?.startsWith("/api/files/") ? `&video=${encodeURIComponent(video)}` : ""}`;
