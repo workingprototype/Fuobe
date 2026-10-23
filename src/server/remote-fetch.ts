@@ -1,5 +1,6 @@
 import "server-only";
 import dns from "node:dns/promises";
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
@@ -88,6 +89,28 @@ function refuse(host: string): RemoteFetchError {
 
 /** GET a public http(s) URL into memory, with a timeout, a size cap and checked redirects. */
 export async function fetchRemote(url: string, o: RemoteFetchOptions = {}): Promise<{ data: Buffer; contentType: string | null; url: string }> {
+  const res = await download(url, o);
+  return { data: res.data!, contentType: res.contentType, url: res.url };
+}
+
+/** Big results a provider links to (LTX HDR's EXR frames as a zip): streamed to disk, never held in memory. */
+export const MAX_REMOTE_FILE_BYTES = 16 * 2 ** 30;
+
+/**
+ * GET a public http(s) URL straight into the file `dest` (the same checks as fetchRemote; the cap defaults
+ * to MAX_REMOTE_FILE_BYTES and the deadline to 30 minutes). A failed download leaves no file behind.
+ */
+export async function fetchRemoteToFile(url: string, dest: string, o: RemoteFetchOptions = {}): Promise<{ bytes: number; contentType: string | null; url: string }> {
+  try {
+    const res = await download(url, { maxBytes: MAX_REMOTE_FILE_BYTES, timeoutMs: 30 * 60_000, ...o }, dest);
+    return { bytes: res.bytes, contentType: res.contentType, url: res.url };
+  } catch (e) {
+    fs.rmSync(dest, { force: true });
+    throw e;
+  }
+}
+
+async function download(url: string, o: RemoteFetchOptions, dest?: string): Promise<{ data?: Buffer; bytes: number; contentType: string | null; url: string }> {
   const maxBytes = o.maxBytes ?? MAX_REMOTE_BYTES;
   const blocked = o.blocked ?? ((ip: string) => !allowPrivate() && isPrivateAddress(ip));
   const resolve = o.resolve ?? (async (host: string) => (await dns.lookup(host, { all: true, verbatim: true })).map((a) => a.address));
@@ -98,20 +121,20 @@ export async function fetchRemote(url: string, o: RemoteFetchOptions = {}): Prom
     if (current.username || current.password) throw new RemoteFetchError("Links with a user name or password aren't fetched");
     const host = current.hostname.replace(/^\[|\]$/g, "");
     if (net.isIP(host) && blocked(host)) throw refuse(current.host);
-    const res = await get(current, { host, maxBytes, deadline, resolve, blocked });
+    const res = await get(current, { host, maxBytes, deadline, resolve, blocked, dest });
     if (res.location) {
       current = new URL(res.location, current);
       continue;
     }
-    return { data: res.data!, contentType: res.contentType, url: current.toString() };
+    return { data: res.data, bytes: res.bytes ?? 0, contentType: res.contentType, url: current.toString() };
   }
   throw new RemoteFetchError(`Too many redirects fetching ${url}`);
 }
 
 function get(
   url: URL,
-  o: { host: string; maxBytes: number; deadline: number; resolve: (host: string) => Promise<string[]>; blocked: (ip: string) => boolean },
-): Promise<{ location?: string; data?: Buffer; contentType: string | null }> {
+  o: { host: string; maxBytes: number; deadline: number; resolve: (host: string) => Promise<string[]>; blocked: (ip: string) => boolean; dest?: string },
+): Promise<{ location?: string; data?: Buffer; bytes?: number; contentType: string | null }> {
   // Checked at connect time, on the address actually used.
   const lookup: net.LookupFunction = (hostname, options, cb) => {
     o.resolve(hostname).then(
@@ -132,12 +155,15 @@ function get(
       req.destroy();
       reject(new RemoteFetchError(`Timed out fetching ${url.host}`));
     }, left);
-    const resolvePromise = (v: { location?: string; data?: Buffer; contentType: string | null }) => {
+    const resolvePromise = (v: { location?: string; data?: Buffer; bytes?: number; contentType: string | null }) => {
       clearTimeout(timer);
       resolveOuter(v);
     };
+    // To a file (o.dest): written as it arrives; closed on any failure.
+    let file: fs.WriteStream | null = null;
     const reject = (e: Error) => {
       clearTimeout(timer);
+      file?.destroy();
       rejectOuter(e);
     };
     const req = (url.protocol === "https:" ? https : http).request(url, { method: "GET", lookup, headers: { "User-Agent": "Fuobe", Accept: "*/*" }, timeout: left }, (res) => {
@@ -155,7 +181,15 @@ function get(
         res.destroy();
         return reject(new RemoteFetchError(`That file is over ${Math.round(o.maxBytes / 1024 / 1024)} MB`));
       }
+      const contentType = res.headers["content-type"]?.split(";")[0].trim() || null;
       const chunks: Buffer[] = [];
+      // The response pauses while the disk catches up.
+      file = o.dest ? fs.createWriteStream(o.dest) : null;
+      file?.on("error", (e) => {
+        res.destroy();
+        req.destroy();
+        reject(e);
+      });
       let size = 0;
       res.on("data", (c: Buffer) => {
         size += c.length;
@@ -165,9 +199,16 @@ function get(
           reject(new RemoteFetchError(`That file is over ${Math.round(o.maxBytes / 1024 / 1024)} MB`));
           return;
         }
-        chunks.push(c);
+        if (!file) return void chunks.push(c);
+        if (!file.write(c)) {
+          res.pause();
+          file.once("drain", () => res.resume());
+        }
       });
-      res.on("end", () => resolvePromise({ data: Buffer.concat(chunks), contentType: res.headers["content-type"]?.split(";")[0].trim() || null }));
+      res.on("end", () => {
+        if (!file) return resolvePromise({ data: Buffer.concat(chunks), bytes: size, contentType });
+        file.end(() => resolvePromise({ bytes: size, contentType }));
+      });
       res.on("error", reject);
     });
     req.on("timeout", () => req.destroy(new RemoteFetchError(`Timed out fetching ${url.host}`)));

@@ -91,11 +91,13 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
     case "video": {
       link("extend", "Extend", `/extend?video=${q(o.url)}`, "primary");
       out.push(file);
-      // An HDR or export job's EXR frames ride along on its preview clip (meta.artifacts.exr, a stored zip).
+      // An HDR or export job's EXR frames ride along on its preview clip (meta.artifacts.exr): a stored zip, or
+      // the provider's own link when it couldn't be kept (unreachable when the job finished; it expires).
       const exr = (o.meta?.artifacts as Record<string, unknown> | undefined)?.exr;
-      if (typeof exr === "string" && exr.startsWith("/api/files/")) {
+      if (typeof exr === "string" && /^(\/api\/files\/|https?:\/\/)/.test(exr)) {
         const zip = name.replace(/\.[^.]+$/, "-exr.zip");
-        out.push({ id: "download-exr", label: "Download EXR frames (.zip)", placement: "bar", href: downloadHref(exr, zip), download: zip });
+        const stored = exr.startsWith("/api/files/");
+        out.push({ id: "download-exr", label: stored ? "Download EXR frames (.zip)" : "Download EXR frames (.zip, provider link)", placement: "bar", href: stored ? downloadHref(exr, zip) : exr, download: zip });
       }
       out.push({ id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("reframe", "Reframe", `/reframe?video=${q(o.url)}`);

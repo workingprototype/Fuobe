@@ -33,7 +33,8 @@ import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
 import { convertMask } from "./png";
 import { engineMode, getSetting } from "./settings";
-import { contentTypeFor, deleteAsset, readRef, saveFile } from "./storage";
+import { fetchRemoteToFile } from "./remote-fetch";
+import { adoptFile, contentTypeFor, deleteAsset, readRef, saveFile, scratchDir } from "./storage";
 
 interface Row {
   id: string;
@@ -917,9 +918,10 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
 
 /**
  * Extra files a result carries as links (meta.artifacts: LTX HDR's EXR zip, Higgsfield's fbx / zip) are kept
- * too, so the Library never depends on a provider's expiring URL. A link that can't be fetched stays as it was.
+ * too, so the Library never depends on a provider's expiring URL. Links are streamed to disk (an EXR zip runs
+ * to gigabytes); one that can't be fetched stays as it was (the result's actions still offer it).
  */
-async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
   const links = meta?.artifacts;
   if (!links || typeof links !== "object" || Array.isArray(links)) return meta;
   const kept: Record<string, unknown> = {};
@@ -927,10 +929,16 @@ async function persistArtifacts(meta: Record<string, unknown> | undefined, gener
     kept[k] = v;
     if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) continue;
     try {
-      const f = await readRef(v);
-      const name = /^https?:/.test(v) ? new URL(v).pathname.split("/").pop() || undefined : undefined;
-      const type = f.contentType === "application/octet-stream" ? contentTypeFor(name ?? "", f.contentType) : f.contentType;
-      kept[k] = saveFile({ data: f.data, contentType: type, name, source: "generation", generationId }).url;
+      if (v.startsWith("data:")) {
+        const f = await readRef(v);
+        kept[k] = saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+        continue;
+      }
+      const dest = path.join(scratchDir(), `${generationId}-${k}-${nanoid(6)}`);
+      const res = await fetchRemoteToFile(v, dest);
+      const name = new URL(res.url).pathname.split("/").pop() || undefined;
+      const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+      kept[k] = adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
     } catch (e) {
       console.warn(`[fuobe] could not keep the ${k} file of ${generationId}: ${(e as Error).message}`);
     }
