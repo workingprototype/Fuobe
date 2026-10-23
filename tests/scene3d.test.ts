@@ -239,6 +239,15 @@ describe("the captured camera → a recomposition", () => {
     expect(poseWords({ horizontal: 200, vertical: -25, zoom: 1 })).toBe("back view low-angle shot wide shot");
   });
 
+  it("sends clean numbers: whole degrees and one decimal of zoom, with no float noise", () => {
+    for (let z = -2.5; z <= 2.5; z += 0.13) {
+      const p = scenePose({ position: [0.37 * z, 0.21, z], yaw: 0.3, pitch: -0.1 }, 35, 24, 3);
+      expect(String(p.zoom)).toMatch(/^\d+(\.\d)?$/);
+      expect(String(p.vertical)).toMatch(/^-?\d+(\.\d)?$/);
+      expect(Number.isInteger(p.horizontal)).toBe(true);
+    }
+  });
+
   it("asks to re-render the exact view with the photo's look, the lens and the user's note", () => {
     const p = recomposePrompt(85, 1.4, "make it dusk.");
     expect(p).toMatch(/^Re-render this exact camera view of the scene photorealistically\./);

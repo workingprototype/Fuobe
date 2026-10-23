@@ -24,7 +24,8 @@ export const SENSOR = { width: 36, height: 24 } as const;
 
 const DEG = Math.PI / 180;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
-const round = (n: number, step = 0.1) => Math.round(n / step) * step;
+// Divided by the whole number of steps per unit, so 78 steps of 0.1 come out as 7.8, not 7.800000000000001.
+const round = (n: number, step = 0.1) => Math.round(n / step) / Math.round(1 / step);
 
 /** "16:9" → 1.777…; anything unreadable is square. */
 export function ratioOf(aspect: string): number {

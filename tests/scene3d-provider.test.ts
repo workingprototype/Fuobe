@@ -81,6 +81,41 @@ describe("open engine: MoGe 2 scene (scene-mesh-moge)", () => {
   });
 });
 
+describe("open engine: the recomposition on Qwen-Image-Edit 2511 (qwen-image-edit-2511-multi)", () => {
+  it("binds the capture as image 1, the still as image 2, the Multiple-Angles LoRA and the camera words", async () => {
+    const { planCinema } = await import("@/lib/catalog/cinema");
+    const plan = planCinema(
+      {
+        engine: "open",
+        mode: "image",
+        action: "recompose",
+        prompt: "",
+        settings: {},
+        aspectRatio: "16:9",
+        source: { url: "/api/files/uploads/still.png", kind: "image" },
+        capture: { url: "/api/files/uploads/capture.png", lens: 50, aperture: 2.8, pose: { horizontal: 300, vertical: 0, zoom: 5 } },
+      },
+      { higgsfield: false },
+    );
+    const req = plan.steps[0].request;
+    const route = getModel(req.modelId!)!.routes[0];
+    expect(route.endpoint).toBe("qwen-image-edit-2511-multi");
+    const { workflow } = await prepareWorkflow(route.endpoint, { prompt: req.prompt, images: ["capture.png", "still.png"], loras: req.loras, aspectRatio: "16:9" }, {
+      generationId: "gen-recompose",
+      op: "edit",
+      upload: async (_d, _t, name) => `up_${name}`,
+    });
+    expect(workflow["41"].inputs.image).toBe("capture.png");
+    expect(workflow["83"].inputs.image).toBe("still.png");
+    // No third reference: the still again, which the Qwen edit encoder takes harmlessly.
+    expect(workflow["1201"].inputs.image).toBe("still.png");
+    const lora = Object.values(workflow).find((n) => n.class_type === "LoraLoaderModelOnly");
+    expect(lora?.inputs).toMatchObject({ lora_name: "qwen-image-edit-2511-multiple-angles-lora.safetensors", strength_model: 1 });
+    expect(String(workflow["170:151"].inputs.prompt)).toMatch(/^<sks> front-left quarter view eye-level shot medium shot\. Re-render this exact camera view/);
+    expect(String(workflow["170:151"].inputs.prompt)).toContain("a 50 mm standard lens at f/2.8");
+  });
+});
+
 describe("cloud: Marigold V2 depth (fal-ai/marigold-v2)", () => {
   const m = getModel("marigold-depth") as ModelDef;
   const route = m.routes[0] as ModelRoute;
