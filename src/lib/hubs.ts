@@ -21,6 +21,7 @@ export const HUB_MODES: Record<HubKind, { id: string; label: string }[]> = {
   ],
   "video-tools": [
     { id: "matte", label: "Remove background" },
+    { id: "remove-object", label: "Remove object" },
     { id: "relight", label: "Relight" },
     { id: "depth", label: "Depth map" },
     { id: "captions", label: "Captions" },
