@@ -131,6 +131,19 @@ export function slotMessage(label: string): string {
   return `Add ${VOWEL.test(word) ? "an" : "a"} ${word}`;
 }
 
+const GENERIC_NOUN = /^(photo|image|picture|frame|clip|video|file|shot)s?$/i;
+
+/**
+ * A filled tile's caption, in the slot's own words without the generic noun the thumbnail already
+ * shows: "Target photo" → "Target", "Start frame" → "Start", "Face" → "Face". Labels that would
+ * lose their meaning ("Your clip", "Image") stay whole.
+ */
+export function slotCaption(label: string): string {
+  const words = label.trim().split(/\s+/);
+  if (words.length > 1 && GENERIC_NOUN.test(words[words.length - 1]) && !DETERMINER.test(words[0])) return words.slice(0, -1).join(" ");
+  return words.join(" ");
+}
+
 type SlotValues = Partial<Record<InputSlot["key"], { ref: string; uploading?: boolean } | null>>;
 
 /** A missing input: one required slot, or (`group`) a set of optional slots of which one is needed ("a portrait or a video"). */
@@ -165,6 +178,8 @@ export interface Blocker {
   message: string;
   /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile). */
   slot?: InputSlot["key"];
+  /** Passes by itself or is plain to see (loading, uploading, the empty prompt box): never spelled out under the composer. */
+  quiet?: boolean;
 }
 
 /**
@@ -198,15 +213,27 @@ export function blockerFor(s: {
   planError?: string | null;
   promptMissing: boolean;
 }): Blocker | null {
-  if (s.loading) return { message: s.loading };
+  if (s.loading) return { message: s.loading, quiet: true };
   if (!s.model) return { message: "Pick a model" };
   if (s.engineError) return { message: s.engineError };
   if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
-  if (s.uploading) return { message: "Uploading…" };
+  if (s.uploading) return { message: "Uploading…", quiet: true };
   if (s.maskMissing) return { message: "Paint the area to change", slot: "mask" };
   if (s.planError) return { message: s.planError };
-  if (s.promptMissing) return { message: "Write a prompt first" };
+  if (s.promptMissing) return { message: "Write a prompt first", quiet: true };
   return null;
+}
+
+/**
+ * Where the composer spells its blocker out in a line under the toolbar ("Add a target photo",
+ * which opens that tile when tapped): wherever the tiles it points at are folded away (docked and
+ * collapsed: "always"), else only where the Generate button's tooltip can't be seen (no hover:
+ * phones and tablets, "touch", which the page decides with a media query so the server's HTML is
+ * the same). Never for a quiet blocker.
+ */
+export function blockerLine(b: Blocker | null, collapsed: boolean): "always" | "touch" | null {
+  if (!b || b.quiet) return null;
+  return collapsed ? "always" : "touch";
 }
 
 /**
