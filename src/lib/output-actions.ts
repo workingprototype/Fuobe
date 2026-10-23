@@ -136,6 +136,27 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   return out;
 }
 
+/** The hand-offs offered as next steps under a fresh result, best first (UX-18). */
+const NEXT_STEPS: Partial<Record<OutputFile["kind"], OutputActionId[]>> = {
+  image: ["animate", "upscale", "edit"],
+  video: ["extend", "upscale", "add-sound"],
+  audio: ["lipsync", "voice-change"],
+};
+
+/**
+ * Up to `max` next steps for output `index` (Animate, Upscale, Edit for a picture), taken from
+ * outputActions so they go where the tile's own actions go. Only hand-offs to another studio.
+ */
+export function nextSteps(g: Generation, index: number, max = 3): OutputAction[] {
+  const o = g.outputs[index];
+  if (!o || g.status !== "succeeded") return [];
+  const all = outputActions(g, index);
+  return (NEXT_STEPS[o.kind] ?? [])
+    .map((id) => all.find((a) => a.id === id && a.href))
+    .filter((a): a is OutputAction => !!a)
+    .slice(0, max);
+}
+
 /**
  * A vector result (an SVG: Vectorize, Recraft's vector styles, an uploaded .svg). Demo pictures are
  * SVG placeholders standing in for raster results, so they keep the raster hand-offs (except Vectorize's).

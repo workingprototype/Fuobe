@@ -1,6 +1,6 @@
 "use client";
 
-import { ArchiveRestore, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -30,7 +30,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind } from "@/lib/catalog/types";
-import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
+import { modKey } from "@/lib/keys";
+import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
@@ -349,7 +350,8 @@ function Inner() {
       if (e.key === "Escape" && (selecting || latest.current.selected.size)) {
         e.preventDefault();
         clear();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selecting) {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && (selecting || latest.current.selected.size)) {
+        // In selection mode ⌘/Ctrl+A takes every result loaded under the filters (elsewhere it selects text as usual).
         e.preventDefault();
         setSelected(new Set(latest.current.items.map((g) => g.id)));
       }
@@ -625,12 +627,27 @@ function Inner() {
       ) : (
         <div className={cn("space-y-7 transition-opacity", refreshing && "opacity-70")}>
           {sections.map((s) => (
-            <section key={s.key} aria-label={s.label || "Results"}>
+            <section key={s.key} aria-label={s.label || "Results"} className="group/section">
               {s.label && (
-                <h2 className="mb-2.5 flex items-center gap-1.5 text-[13px] font-medium">
-                  {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
-                  {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
-                </h2>
+                <div className="mb-2.5 flex items-center gap-3">
+                  <h2 className="flex items-center gap-1.5 text-[13px] font-medium">
+                    {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
+                    {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
+                  </h2>
+                  {/* Select a whole day (or the pinned ones) at once; again to unselect them. */}
+                  {!uploadsTab && (
+                    <SectionSelect
+                      label={s.label}
+                      ids={s.items.flatMap(ids)}
+                      selected={selected}
+                      quiet={!selecting}
+                      onToggle={(list) => {
+                        setSelecting(true);
+                        setSelected((cur) => toggleAll(cur, list));
+                      }}
+                    />
+                  )}
+                </div>
               )}
               <Cards
                 entries={s.items}
@@ -702,6 +719,16 @@ function Inner() {
                 </>
               )}
             </span>
+            {items.length > 0 && selected.size < items.length && (
+              <button
+                onClick={() => setSelected(new Set(items.map((g) => g.id)))}
+                className={cn(BAR, "text-brand-text")}
+                aria-label={`Select all ${items.length}`}
+                title={`Select all ${items.length} shown here (${modKey()}+A)`}
+              >
+                <CheckCheck className="size-4" /> <span className="hidden sm:inline">Select all</span> <span className="font-mono text-[11px] tabular-nums">{items.length}</span>
+              </button>
+            )}
             {trash ? (
               <>
                 <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
@@ -809,6 +836,24 @@ function Inner() {
         />
       )}
     </PageShell>
+  );
+}
+
+/** A date header's "Select" / "Unselect": shown on hover from a mouse, always while selecting or on touch. */
+function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: string; ids: string[]; selected: ReadonlySet<string>; quiet: boolean; onToggle: (ids: string[]) => void }) {
+  const all = ids.length > 0 && ids.every((id) => selected.has(id));
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(ids)}
+      aria-label={`${all ? "Unselect" : "Select"} ${label}, ${ids.length}`}
+      className={cn(
+        "inline-flex h-6 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+        quiet && "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+      )}
+    >
+      {all ? "Unselect" : "Select"}
+    </button>
   );
 }
 
