@@ -15,6 +15,8 @@ export interface StudioConfig {
   hero: string;
   /** Small line under the hero (e.g. which models an app runs on). */
   subtitle?: string;
+  /** A studio that does the job in more depth, linked under the hero (Edit video → Genjutsu). */
+  related?: { href: string; label: string };
   placeholder: string;
   kind: MediaKind;
   /** Operations whose models appear in the picker. */

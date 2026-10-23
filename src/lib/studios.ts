@@ -285,6 +285,7 @@ export const MOTION_CONTROL_STUDIO: StudioConfig = {
   ],
   defaultModels: { cloud: "kling-motion-control", open: "oss-wan22-animate" },
   promptOptional: true,
+  related: { href: "/genjutsu?mode=motion", label: "Up to 30 s and 8 character images with Genjutsu" },
 };
 
 export const VIDEO_EDIT_STUDIO: StudioConfig = {
@@ -298,6 +299,7 @@ export const VIDEO_EDIT_STUDIO: StudioConfig = {
   slots: [{ key: "video", label: "Video", accept: "video", required: true }],
   multiRef: { label: "Add ref", max: 4 },
   defaultModels: { cloud: "kling-o3", open: "oss-wan22-fun-control" },
+  related: { href: "/genjutsu?mode=swap", label: "Swap an object or restyle it with Genjutsu" },
 };
 
 export const EXTEND_STUDIO: StudioConfig = {

@@ -21,6 +21,7 @@ export type OutputActionId =
   | "reframe"
   | "lipsync"
   | "add-sound"
+  | "genjutsu"
   | "voice-change"
   | "copy-text"
   | "view-3d"
@@ -93,6 +94,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("reference", "Use as reference", `/image?ref=${q(o.url)}`);
       link("grade", "Color grade", `/color-grade?image=${q(o.url)}`);
       link("layers", "Open in Layers", layersHref(g, o.url));
+      link("genjutsu", "Animate with Genjutsu", `/genjutsu?mode=motion&image=${q(o.url)}`);
       out.push({ id: "save-character", label: "Save as character", placement: "menu" });
       break;
     case "video":
@@ -103,6 +105,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
       link("add-sound", "Add sound", `/audio/video?video=${q(o.url)}`);
       link("grade", "Color grade", `/color-grade?video=${q(o.url)}`);
+      link("genjutsu", "Use in Genjutsu", `/genjutsu?video=${q(o.url)}`);
       break;
     case "audio":
       link("lipsync", "Lipsync", `/lipsync?audio=${q(o.url)}`, "primary");

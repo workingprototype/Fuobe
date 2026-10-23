@@ -97,7 +97,7 @@ export interface FrameWindow {
   overlap?: number;
 }
 
-const VACE_WINDOW: FrameWindow = { cap: 81, step: 4, base: 1 };
+export const VACE_WINDOW: FrameWindow = { cap: 81, step: 4, base: 1 };
 /**
  * The painted eraser hands on the tracked mask of a window's last frame, and a mask must be of the window's first
  * frame: so each window starts on the last frame of the one before (a one-frame overlap, cut off before the join).
@@ -701,8 +701,39 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
     });
   }
 
-  // Join the pieces in order (folding when the join takes fewer clips than there are).
-  let level = joined;
+  // Erasers that work in whole frames leave out the last few (fewer than a step): the sound is cut to the picture's end,
+  // except on the open engine, whose mux trims the sound to the picture itself.
+  const end = e.window && e.engine === "cloud" ? pieces[n - 1].end : input.range.end;
+  const final = joinWithSound(steps, { engine: input.engine, title: input.title, base, helper, source: input.source, range: input.range, pieces: joined, sound, end });
+  return { steps, final, pieces, sound, tracked };
+}
+
+export interface JoinInput {
+  engine: Engine;
+  title: string;
+  /** The finished video's feature, and the steps' in between. */
+  base: { feature: string; batchTitle: string };
+  helper: { feature: string; batchTitle: string };
+  source: RemoveSource;
+  range: RemoveRange;
+  /** The keys of the pieces' videos, in order. */
+  pieces: string[];
+  /** Put the clip's own sound back under the joined picture. */
+  sound: boolean;
+  /** Where the sound ends in the source (the last piece's end, when pieces stop a few frames short). */
+  end?: number;
+  /** What the sound step says (default "Put the sound back"). */
+  soundLabel?: string;
+}
+
+/**
+ * Join pieces in order (folding when the join takes fewer clips than there are), then put the clip's own sound
+ * back: the upload's (the whole clip) or the range cut out of it. Pushes the steps; returns the finished video's key
+ * (a lone piece with no sound to add is the result itself; its step should carry the finished feature).
+ */
+export function joinWithSound(steps: PlanStep[], j: JoinInput): string {
+  const t = REMOVE_TOOLS[j.engine];
+  let level = j.pieces;
   let depth = 0;
   while (level.length > 1) {
     const groups = joinGroups(level.length, t.joinMax);
@@ -713,12 +744,12 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
       steps.push({
         key,
         request: {
-          ...(last && !sound ? { ...base, title: input.title } : helper),
+          ...(last && !j.sound ? { ...j.base, title: j.title } : j.helper),
           modelId: t.join,
           op: "concat",
-          prompt: input.title,
+          prompt: j.title,
           // The open join scales to one size: the clip's own shape at its own size.
-          params: input.engine === "open" ? { aspectRatio: "auto", resolution: tierFor(input.source) } : {},
+          params: j.engine === "open" ? { aspectRatio: "auto", resolution: tierFor(j.source) } : {},
           step: { label: last ? "Join the pieces" : "Joining", index: 1000 + depth, of: 1000 },
         },
         after,
@@ -729,28 +760,25 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
     depth++;
   }
   const picture = level[0];
-  if (!sound) return { steps, final: picture, pieces, sound, tracked };
+  if (!j.sound) return picture;
 
-  // The clip's own sound under the erased picture: the upload (whole clip), or the range cut out of it. Erasers that
-  // work in whole frames leave out the last few (fewer than a step): the sound is cut to the picture's end, except on
-  // the open engine, whose mux trims the sound to the picture itself.
   const after = [picture];
   const chain: ChainSlot[] = [{ slot: "video" }];
   const inputs: GenerationRequest["inputs"] = {};
-  const end = e.window && e.engine === "cloud" ? pieces[n - 1].end : input.range.end;
-  if (whole && end >= (input.source.duration ?? 0) - 0.05) inputs.audio = input.source.url;
+  const end = j.end ?? j.range.end;
+  if (wholeClip(j.range, j.source.duration) && end >= (j.source.duration ?? 0) - 0.05) inputs.audio = j.source.url;
   else {
-    steps.push({ key: "sound", request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: end }, step: { label: "Original sound", index: 1100, of: 1000 } } });
+    steps.push({ key: "sound", request: { ...j.helper, modelId: t.cut, op: "trim", inputs: { video: j.source.url }, params: { startTime: j.range.start, endTime: end }, step: { label: "Original sound", index: 1100, of: 1000 } } });
     after.push("sound");
     chain.push({ slot: "audio" });
   }
   steps.push({
     key: "final",
-    request: { ...base, title: input.title, modelId: t.mux, op: "mux", ...(Object.keys(inputs).length ? { inputs } : {}), step: { label: "Put the sound back", index: 1200, of: 1000 } },
+    request: { ...j.base, title: j.title, modelId: t.mux, op: "mux", ...(Object.keys(inputs).length ? { inputs } : {}), step: { label: j.soundLabel ?? "Put the sound back", index: 1200, of: 1000 } },
     after,
     chain,
   });
-  return { steps, final: "final", pieces, sound, tracked };
+  return "final";
 }
 
 /** The open join's size tier: the clip's own (480p, 720p or 1080p by its short side). */

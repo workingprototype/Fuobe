@@ -51,6 +51,7 @@ import {
   Presentation,
   Box,
   Swords,
+  WandSparkles,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -137,6 +138,7 @@ const NAV: NavGroupDef[] = [
       { href: "/faceless", label: "Faceless Studio", icon: Tv },
       { href: "/explainer", label: "Explainer", icon: Presentation },
       { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
+      { href: "/genjutsu", label: "Genjutsu", icon: WandSparkles },
       { href: "/motion-control", label: "Motion control", icon: PersonStanding },
       { href: "/video-edit", label: "Edit video", icon: Scissors },
       { href: "/extend", label: "Extend video", icon: FastForward },

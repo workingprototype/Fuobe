@@ -1,6 +1,7 @@
 "use client";
 
 import { Brush, Cloud, Download, Eraser as EraserIcon, Eye, Loader2, RotateCcw, Sparkles, Type, Undo2 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -393,6 +394,15 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                     {engine === "open" ? "SAM 3.1 follows what you paint through the clip." : "SAM 3.1 follows what you paint through the clip, then Bria erases it."} Painting needs a mouse, pen or finger — Type it works from the keyboard.
                   </p>
                 </div>
+              )}
+
+              {clip?.url && (
+                <p className="text-[12px] text-muted-foreground">
+                  Want something in its place?{" "}
+                  <Link href={`/genjutsu?mode=swap&video=${encodeURIComponent(clip.url)}`} className="font-medium text-foreground underline-offset-2 hover:underline">
+                    Swap it with Genjutsu
+                  </Link>
+                </p>
               )}
 
               {mode === "type" && (

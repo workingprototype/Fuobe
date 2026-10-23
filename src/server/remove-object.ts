@@ -123,7 +123,7 @@ const mustMatchMode = (engine: Engine) => {
 };
 
 /** Points a SAM 3.1 track starts from: the deepest points of the paint, in the clip's pixels. */
-async function pointsFromPaint(mask: string, size: { width?: number; height?: number }): Promise<PixelPoint[]> {
+export async function pointsFromPaint(mask: string, size: { width?: number; height?: number }, empty = "Paint over what to remove first"): Promise<PixelPoint[]> {
   let png: ReturnType<typeof decodePng>;
   try {
     png = decodePng((await readRef(mask)).data);
@@ -133,7 +133,7 @@ async function pointsFromPaint(mask: string, size: { width?: number; height?: nu
   const on = new Uint8Array(png.width * png.height);
   for (let i = 0; i < on.length; i++) on[i] = png.data[i * 4] > 127 ? 1 : 0;
   const found = paintedPoints(on, png.width, png.height);
-  if (!found.length) throw new ShortsError("Paint over what to remove first");
+  if (!found.length) throw new ShortsError(empty);
   return size.width && size.height ? scalePoints(found, png, { width: size.width, height: size.height }) : found;
 }
 
