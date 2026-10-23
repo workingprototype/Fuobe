@@ -1,9 +1,9 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue } from "react";
 import type { RemoveMode } from "@/lib/catalog/remove-object";
 import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
+import { useDebounced } from "@/components/faceless/hooks";
 import { send } from "@/components/shorts/hooks";
 
 /** React Query hooks for /api/remove-object/** (the Remove object tab of Video tools). */
@@ -33,11 +33,13 @@ export interface RemovalEstimate {
   steps: number;
   notes: string[];
   previewUsd: number | null;
+  /** The preview is the mask the eraser works from (false: SAM 3.1's reading of the words or clicks). */
+  previewExact: boolean;
 }
 
-/** The price and shape of a removal for the current settings (debounced by React's deferred value). */
+/** The price and shape of a removal for the current settings, asked for once typing pauses (300 ms). */
 export function useRemovalEstimate(body: RemovalBody | null) {
-  const key = useDeferredValue(body ? JSON.stringify(body) : null);
+  const key = useDebounced(body ? JSON.stringify(body) : null, 300);
   return useQuery({
     queryKey: ["remove-object", "estimate", key],
     queryFn: async () => send<RemovalEstimate>("/api/remove-object/estimate", "POST", JSON.parse(key!)),

@@ -43,6 +43,13 @@ interface Paint {
   strokes: Stroke[];
 }
 
+/** The mask preview being shown, and whether it is the eraser's own mask (see previewIsEraserMask). */
+interface PreviewOf {
+  id: string;
+  exact: boolean;
+  eraser: string;
+}
+
 interface Run {
   final: string;
   ids: string[];
@@ -76,7 +83,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
   const [painting, setPainting] = useState(false);
   const [frame, setFrame] = useState<Frame | null>(null);
   const [frameError, setFrameError] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewOf, setPreviewOf] = useState<PreviewOf | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const actions = useRemovalActions();
   const runGuard = useSubmitGuard();
@@ -123,12 +130,12 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
       setPoints([]);
       setPaint(null);
     }
-    setPreviewId(null);
+    setPreviewOf(null);
   }
 
   const pickMode = (m: RemoveMode) => {
     setMode(m);
-    setPreviewId(null);
+    setPreviewOf(null);
     // Clicking and painting happen on the first frame: bring it into view when it's off screen.
     const el = framePanel.current;
     if (m === "type" || !el) return;
@@ -145,7 +152,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
     setFrameError(false);
     setPoints([]);
     setPaint(null);
-    setPreviewId(null);
+    setPreviewOf(null);
   };
 
   const ready = !!clip?.url && !clip.uploading && !clip.error && !!duration && !!range;
@@ -209,12 +216,13 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
 
   const canPreview = !!body && est?.previewUsd != null;
   const makePreview = () => {
-    if (!body || !canPreview) return;
+    if (!body || !canPreview || !est) return;
+    const of = { exact: est.previewExact, eraser: est.modelName };
     void previewGuard(JSON.stringify(body), (requestId) => actions.preview.mutateAsync({ ...body, requestId }))
-      .then((g) => g && setPreviewId(g.id))
+      .then((g) => g && setPreviewOf({ id: g.id, ...of }))
       .catch((e: Error) => toast.error(e.message));
   };
-  const preview = useGeneration(previewId).data;
+  const preview = useGeneration(previewOf?.id ?? null).data;
 
   return (
     <ToolShell title="Video tools" tabs={tabs} wide>
@@ -297,7 +305,8 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                     </div>
                   )}
                   <p className="mt-2 text-[12px] text-muted-foreground">{frameHint(mode, engine, points.length, !!paint)}</p>
-                  {preview && <MaskPreview g={preview} />}
+                  {/* Said for the eraser picked now (the preview itself is SAM's, whichever eraser runs). */}
+                  {preview && previewOf && <MaskPreview g={preview} exact={est?.previewExact ?? previewOf.exact} eraser={est?.modelName ?? previewOf.eraser} />}
                 </Panel>
               </div>
             </div>
@@ -319,7 +328,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     disabled={everyone}
-                    maxLength={2500}
+                    maxLength={REMOVE.maxPromptChars}
                     rows={3}
                     placeholder="e.g. “the coffee cup in her hand”"
                     className="resize-none"
@@ -413,8 +422,9 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                     <Button variant="outline" size="sm" className="rounded-full" onClick={makePreview} disabled={actions.preview.isPending || (preview && (preview.status === "queued" || preview.status === "running"))}>
                       {actions.preview.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Eye className="size-3.5" />} Preview the mask
                     </Button>
-                    <span className="text-[12px] text-muted-foreground">
+                    <span className="min-w-0 text-[12px] leading-snug text-muted-foreground">
                       first {REMOVE.previewSeconds} s · {est.demo ? "demo" : engine === "open" ? "free" : costText({ costUsd: est.previewUsd, demo: false }, "cloud")}
+                      {!est.previewExact && ` · how SAM 3.1 reads it — ${est.modelName} finds the object itself`}
                     </span>
                   </div>
                 )}
@@ -515,13 +525,24 @@ function EraserList({ options, value, onChange }: { options: Eraser[]; value: st
   );
 }
 
-/** The mask preview: SAM 3.1's mask video (cloud) or the SAM 3 matte (open), white = what goes. */
-function MaskPreview({ g }: { g: Generation }) {
+/**
+ * The mask preview: SAM 3.1's mask video (cloud) or the SAM 3 matte (open), white = what goes. When the eraser finds
+ * the object itself (Kling O3 edit, Bria by name, Bria's own clicks), it's only SAM 3.1's reading of what you said.
+ */
+function MaskPreview({ g, exact, eraser }: { g: Generation; exact: boolean; eraser: string }) {
   const out = g.outputs.find((o) => o.kind === "video");
   return (
     <div className="mt-3 rounded-xl border p-2.5">
       <p className="mb-2 text-[12px] font-medium">
-        Mask preview <span className="font-normal text-muted-foreground">· white is what goes</span>
+        {exact ? (
+          <>
+            Mask preview <span className="font-normal text-muted-foreground">· white is what goes</span>
+          </>
+        ) : (
+          <>
+            How SAM 3.1 reads it <span className="font-normal text-muted-foreground">· white is what it finds; {eraser} finds the object itself, so its result can differ</span>
+          </>
+        )}
       </p>
       {g.status === "succeeded" && out ? (
         <video
