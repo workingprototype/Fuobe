@@ -34,8 +34,9 @@ const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: 
   "audio-loop-crossfade": { capability: "audio-loop", bindings: ["audio", "fadeCurve", "crossfade", "duration", "headroomDb", "filenamePrefix"], outputs: [["audio"]] },
   "audio-join-crossfade": { capability: "audio-join", bindings: ["audio", "audio2", "fadeCurve", "crossfade", "filenamePrefix"], outputs: [["audio"]] },
   "video-export-pro": { capability: "export-video", bindings: ["video", "format", "profile", "filenamePrefix"], outputs: [["video"]] },
-  "video-sdr-to-hdr": { capability: "sdr-to-hdr", bindings: ["video", "peakNits", "filenamePrefix"], outputs: [["video"]] },
-  "video-export-exr": { capability: "export-video", bindings: ["video", "filenamePrefix"], outputs: [["image", "frames"]] },
+  // r4/video-finish: colorSpace picks HLG or PQ (HDR10); the EXR export also saves a preview clip to show in the feed.
+  "video-sdr-to-hdr": { capability: "sdr-to-hdr", bindings: ["video", "peakNits", "colorSpace", "filenamePrefix"], outputs: [["video"]] },
+  "video-export-exr": { capability: "export-video", bindings: ["video", "filenamePrefix"], outputs: [["video", "preview"], ["image", "frames"]] },
   "still-to-clip": { capability: "still-motion", bindings: ["image", "width", "height", "duration", "fps", "filenamePrefix"], outputs: [["video"]] },
   "video-append-endcard": { capability: "concat", bindings: ["video", "image", "width", "height", "fps", "duration", "filenamePrefix"], outputs: [["video"]] },
   "scene-mesh-moge": { capability: "scene-3d", bindings: ["image", "checkpoint", "resolutionLevel", "fovX", "decimation", "filenamePrefix"], outputs: [["model3d", "scene"], ["image", "depth"]] },
@@ -53,7 +54,7 @@ const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: 
 /** Loaders whose input is an upload: every one must be a binding, or the graph points at a researcher's file. */
 const MEDIA: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio" };
 const ROLES: NonNullable<ManifestOutput["role"]>[] = [
-  "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief",
+  "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief", "preview",
 ];
 
 describe("round-4 ComfyUI workflows", () => {

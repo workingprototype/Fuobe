@@ -86,6 +86,8 @@ const NUMERIC_DEFAULT_KEYS = [
   // comfyui-oss-4 additions
   'maskGrow', 'supersample', 'zoomStart', 'zoomEnd', 'panStartX', 'panStartY', 'panEndX', 'panEndY', 'easeInOut', 'chunkFrames',
   'crossfade', 'headroomDb', 'peakNits', 'resolutionLevel', 'fovX', 'decimation', 'numGaussians', 'orbitFrames', 'frameWidth',
+  // round 4 (r4/video-finish)
+  'every', 'slowdown', 'shortSide',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -108,6 +110,8 @@ export const BINDING_KEYS = new Set([
   'maskPrompt', 'maskGrow', 'skipPass2', 'supersample', 'zoomStart', 'zoomEnd', 'panStartX', 'panStartY', 'panEndX', 'panEndY',
   'easeInOut', 'chunkFrames', 'crossfade', 'headroomDb', 'fadeCurve', 'format', 'profile', 'peakNits', 'resolutionLevel', 'fovX',
   'decimation', 'cutout', 'numGaussians', 'splatFormat', 'orbitFrames', 'frameWidth',
+  // round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling, HDR10 (PQ)
+  'every', 'slowdown', 'shortSide', 'colorSpace',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

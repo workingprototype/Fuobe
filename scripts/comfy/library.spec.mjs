@@ -73,6 +73,11 @@
 //   cutout, numGaussians, splatFormat     (TripoSplat: BiRefNet cut-out on/off, number of Gaussians, ply | ksplat | spz)
 //   orbitFrames                           (TripoSplat orbit preview length in frames)
 //   frameWidth                            (reference brief: width the clip's frames are scaled to, px)
+// Keys added with the round-4 video-finish workflows (FPS Boost, chunked upscaling, HDR formats). * = the provider fills it:
+//   every*                                (FPS Boost: keep every n-th interpolated frame; source fps x multiplier / every = the target)
+//   slowdown*                             (FPS Boost: slow-motion factor, params.slowdown; the output fps is divided by it)
+//   shortSide*                            (chunked upscalers: the output's shorter edge in px, params.resolution: 1080p -> 1080)
+//   colorSpace*                           (SDR to HDR: CreateVideo color space, "HDR" = BT.2020 HLG, "HDR PQ" = BT.2020 PQ (HDR10): params.format)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
@@ -204,6 +209,9 @@ export const KNOWN_MODELS = {
   'dino_v3_vit_h.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/clip_vision/dino_v3_vit_h.safetensors' },
   'triposplat_vae_decoder_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/vae/triposplat_vae_decoder_fp16.safetensors' },
   'triposplat_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/diffusion_models/triposplat_fp16.safetensors' },
+  // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
+  'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
+  'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -2723,13 +2731,15 @@ export const SPEC = [
     title: 'SDR to HDR: expand to Rec.2020 HLG and save 10-bit H.264 (core ImageSDRToHDR, no model)',
     capability: 'sdr-to-hdr',
     handBuilt: 'hand-built/video-sdr-to-hdr.json',
-    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')], colorSpace: [b('4', 'color_space')] },
     outputs: [{ node: '5', kind: 'video' }],
+    defaults: { colorSpace: 'HDR' },
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'An algorithmic inverse tone map (Lottes-style curve blended with a log-gain curve), not a learned model: the open stand-in for Topaz\'s SDR to HDR. peakNits = the target peak white (650 by default, 0 = the calibrated rendering). ' +
-      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format "hlg" is this graph; PQ would be color_space "HDR PQ" on node 4 (not bound). ' +
+      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format hlg_10bit is this graph as built; pq_10bit binds colorSpace "HDR PQ" ' +
+      '(BT.2020 PQ, HDR10\'s transfer, still H.264 High 10: core ComfyUI has no H.265 encoder); exr -> video-sdr-to-hdr-exr. ' +
       'The learned alternative is the LTX-2.5 SDR-To-HDR IC-LoRA (LTX community licence, not built). Decodes the whole clip: RAM grows with the length. ' +
       'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept.',
   },
@@ -2739,11 +2749,12 @@ export const SPEC = [
     capability: 'export-video',
     handBuilt: 'hand-built/video-export-exr.json',
     bindings: { video: [b('1', 'file')] },
-    outputs: [{ node: '3', kind: 'image', role: 'frames' }],
+    outputs: [{ node: '5', kind: 'video', role: 'preview' }, { node: '3', kind: 'image', role: 'frames' }],
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'params.format "exr" of the export-video operation. One half-float .exr per frame (role frames, in frame order); input_color_space sRGB applies the inverse sRGB curve, so the files are scene-linear Rec.709. ' +
+      'Node 5 saves an H.264 preview with the clip\'s sound (role preview, added by r4/video-finish): the result shown in the feed; the provider zips the frames onto it (meta.artifacts.exr). ' +
       'The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Storage: /view serves .exr as image/aces, which storage.ts has no extension for, ' +
       'so each frame is saved as an image .bin until EXT_BY_TYPE / TYPE_BY_EXT know exr (feature package; the zip is the deliverable anyway). ' +
       'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer.',
@@ -2861,5 +2872,97 @@ export const SPEC = [
       'VHS_LoadVideo resamples to 24 fps (fixed: TextGenerate assumes 24 fps and keeps every 24th frame, i.e. 1 fps, each capped at 70 soft tokens); frames = the frame cap at 24 fps (720 = the first 30 s), ' +
       'startFrame = frames skipped at 24 fps, frameWidth = 384 px wide (about 0.7 GB of frames for 720, inferred). In ComfyUI v0.41 only the Gemma 4 and MiniMax text encoders read a video input ' +
       '(the Qwen3.5 encoder ignores it). Same model file as speech-translate-gemma4 (no new download). Whether Gemma 4 E4B takes 30 s of audio in one call is unverified. Validated by /prompt only.',
+  },
+
+  // ---- round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling and export, HDR EXR ------------------
+  {
+    id: 'interpolate-rife-fps',
+    title: 'FPS Boost and slow motion to an exact frame rate: interpolate by m, keep every n-th frame (core FrameInterpolate)',
+    capability: 'interpolate',
+    handBuilt: 'hand-built/interpolate-rife-fps.json',
+    bindings: {
+      video: [b('1', 'file')], checkpoint: [b('5', 'model_name')], multiplier: [b('6', 'value')], every: [b('8', 'value')], slowdown: [b('10', 'value')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { checkpoint: 'rife_v4.26.safetensors' },
+    limits: { maxMultiplier: 16 },
+    vramGb: 2,
+    license: 'RIFE 4.26 and FILM weights from Comfy-Org/frame_interpolation (MIT / Apache-2.0); VideoHelperSuite (GPL-3.0 code) for Select Every Nth',
+    notes:
+      'Higgsfield\'s FPS Boost targets (24 / 30 / 60 / 90 / 120 fps) and slow motion on the open engine. The provider picks m (multiplier, 2-16) and n (every) from the clip\'s own frame rate (its header) so that ' +
+      'source fps x m / n = target x slowdown (src/lib/av/fps.ts: 24 -> 30 m5 n4, 24 -> 60 m5 n2, 24 -> 90 m15 n4, 24 -> 120 m5, 30 -> 60 m2, 60 -> 90 m3 n2, 60 -> 120 m2; a lower target only drops frames, ' +
+      'and then the provider links FrameInterpolate out). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)), so a clip whose header was unreadable still plays at the right speed. ' +
+      'The last frame is held once more before interpolating, so the clip keeps its length (N frames become N x m + 1, about one output frame longer than the source) instead of losing a source frame. ' +
+      'slowdown > 1 stretches the clip (2 = twice as long); the provider then drops the sound link (it would no longer match). checkpoint film_net_fp16.safetensors runs FILM (better on large motion, about 31x slower on CPU). ' +
+      'Holds the whole interpolated clip in memory (source frames x m before the selection): the provider refuses clips that need more than half the server\'s RAM.',
+  },
+  {
+    id: 'upscale-video-esrgan-chunked',
+    title: 'Video Upscale (Real-ESRGAN 4x) in passes of a few frames: memory stays flat whatever the length (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-esrgan-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], upscaleModel: [b('3', 'model_name')], shortSide: [b('5', 'resize_type.shorter_size')],
+    },
+    outputs: [{ node: '7', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 4,
+    license: 'Real-ESRGAN weights (BSD-3-Clause); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'R4-38: upscale-video-esrgan decodes the whole film (about 38 GB of float frames for 30 s at 480p before the 4x model). This one decodes framesPerBatch frames per pass (VHS_BatchManager re-queues the prompt ' +
+      'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (tiled), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
+      'into one ffmpeg H.264 encode that stays open across passes; the last pass writes the file with the source\'s sound at the source frame rate. The provider follows the passes by their filename prefix. ' +
+      'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4).',
+  },
+  {
+    id: 'upscale-video-seedvr2-chunked',
+    title: 'Video Upscale / Restore (SeedVR2 3B int8) in passes of 4n+1 frames: memory stays flat (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-seedvr2-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], shortSide: [b('3', 'resize_type.shorter_size')], seed: [b('9', 'seed')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 16,
+    license: 'SeedVR2 (Apache-2.0); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'The native SeedVR2 nodes of upscale-video-seedvr2 (same files, same settings) run on framesPerBatch frames per pass (33 by default; SeedVR2 pads a pass to 4n+1 frames and crops the padding back) and the ' +
+      'passes are piped into one H.264 encode with the source\'s sound, so a long clip no longer needs the whole film in memory (the template is capped at 20 s). The frames are first scaled so the shorter edge is ' +
+      'shortSide px. Each pass is restored on its own: there is no temporal context across a pass boundary, so a seam every framesPerBatch frames is possible (not measured: no GPU here). Validated by /prompt only.',
+  },
+  {
+    id: 'video-export-pro-chunked',
+    title: 'Pro codec export in passes (ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264): memory stays flat (VHS meta-batch)',
+    capability: 'export-video',
+    handBuilt: 'hand-built/video-export-pro-chunked.json',
+    bindings: { video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], format: [b('4', 'format')], profile: [b('4', 'profile')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { format: 'video/ProRes', profile: 'hq' },
+    vramGb: 0,
+    license: 'n/a (no model; VideoHelperSuite GPL-3.0 code and the system ffmpeg\'s prores_ks / libx265 / ffv1 / libx264 encoders)',
+    notes:
+      'video-export-pro with VHS_LoadVideo decoding framesPerBatch frames per pass (64 by default) into one VHS_VideoCombine encode that stays open across passes, at the source frame rate, with the source\'s sound: ' +
+      'the export Fuobe\'s Export mode runs (video-export-pro decodes the whole clip). Same params.format mapping (prores_422_hq -> video/ProRes + hq, prores_4444 -> + 4444, h265_10bit -> video/h265-mp4 (yuv420p10le), ' +
+      'ffv1 -> video/ffv1-mkv, h264 -> video/h264-mp4; exr -> video-export-exr). VHS lists only <prefix>_00001-audio.<ext> when the clip has sound, <prefix>_00001.<ext> otherwise, on the last pass. ' +
+      'Caveat: VHS\'s ProRes "hq" profile leaves the pixel format to prores_ks, which picks yuv444p10le for the RGB frames, so "ProRes 422 HQ" is the HQ profile (apch) carrying 4:4:4 10-bit samples ' +
+      '(FFmpeg decodes it; a strict 4:2:2 file needs a VHS format with -pix_fmt yuv422p10le, which would be a change to the node pack). The same holds for video-export-pro. ' +
+      'Ran here (CPU, r4/video-finish, 3 s 320x180 25 fps clip with sound): ProRes apch / yuv444p10le / PCM and H.265 Main 10 yuv420p10le with AAC; on a silent 2 s 24 fps clip FFV1 gbrap16le .mkv, 48 of 48 frames; each ffprobe-checked.',
+  },
+  {
+    id: 'video-sdr-to-hdr-exr',
+    title: 'SDR to HDR as OpenEXR frames (scene-linear Rec.2020, half float) plus a 10-bit HLG preview (core, no model)',
+    capability: 'sdr-to-hdr',
+    handBuilt: 'hand-built/video-sdr-to-hdr-exr.json',
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    outputs: [{ node: '6', kind: 'video', role: 'preview' }, { node: '4', kind: 'image', role: 'frames' }],
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'params.format exr of the sdr-to-hdr operation (Higgsfield\'s "EXR 16-bit: uncompressed frame sequence for compositing"). The same ImageSDRToHDR expansion as video-sdr-to-hdr; SaveImageAdvanced writes each ' +
+      'frame as a half-float EXR with input_color_space HDR, i.e. the inverse HLG curve: scene-linear light in Rec.2020 primaries, highlights above 1.0 kept. Node 6 saves the 10-bit HLG MP4 with the clip\'s sound as ' +
+      'the result to watch (role preview); the provider zips the frames (role frames) onto it as meta.artifacts.exr. Decodes the whole clip: RAM grows with the length (the provider refuses what the server can\'t hold).',
   },
 ];

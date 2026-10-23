@@ -18421,6 +18421,61 @@
     "has_intermediate_output": false,
     "search_aliases": []
   },
+  "VHS_SelectEveryNthImage": {
+    "input": {
+      "required": {
+        "images": [
+          "IMAGE"
+        ],
+        "select_every_nth": [
+          "INT",
+          {
+            "default": 1,
+            "min": 1,
+            "max": 9007199254740991,
+            "step": 1
+          }
+        ],
+        "skip_first_images": [
+          "INT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 9007199254740991,
+            "step": 1
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "images",
+        "select_every_nth",
+        "skip_first_images"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE",
+      "INT"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "IMAGE",
+      "count"
+    ],
+    "name": "VHS_SelectEveryNthImage",
+    "display_name": "Select Every Nth Image 🎥🅥🅗🅢",
+    "description": "Select Every Nth Image 🎥🅥🅗🅢<div style=\"font-size: 0.8em\"><div id=VHS_shortdesc>Keep only 1 image for every interval</div></div><div style=\"font-size: 0.8em\"><div vhs_title=\"Inputs\" style=\"display: flex; font-size: 0.8em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">Inputs: <div vhs_title=\"images\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">images: The input image</div></div></div></div><div vhs_title=\"Outputs\" style=\"display: flex; font-size: 0.8em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">Outputs: <div vhs_title=\"IMAGE\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">IMAGE: The output images</div></div><div vhs_title=\"count\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">count: The number of images in the input</div></div></div></div><div vhs_title=\"Widgets\" style=\"display: flex; font-size: 0.8em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">Widgets: <div vhs_title=\"select_every_nth\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">select_every_nth: The interval from which one frame is kept. 1 means no frames are skipped.</div></div><div vhs_title=\"skip_first_images\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">skip_first_images: A number of frames which that is skipped from the start. This applies before select_every_nth. As a result, multiple copies of the node can each have a different skip_first_frames to divide the image into groups</div></div></div></div></div>",
+    "python_module": "custom_nodes.ComfyUI-VideoHelperSuite",
+    "category": "Video Helper Suite 🎥🅥🅗🅢/image",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
   "VHS_VideoCombine": {
     "input": {
       "required": {
