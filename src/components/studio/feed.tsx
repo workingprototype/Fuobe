@@ -217,7 +217,7 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
     p.aspectRatio,
     p.resolution,
     p.duration ? `${p.duration >= 1000 ? p.duration / 1000 : p.duration}s` : undefined,
-  ].filter(Boolean);
+  ].filter((x, i, all) => x && all.indexOf(x) === i);
 
   return (
     <section data-gen-id={g.id} className="group/gen animate-fade-up space-y-2.5 [contain-intrinsic-size:auto_330px] [content-visibility:auto]">
