@@ -55,6 +55,7 @@ import {
   nativeSize,
   needsDetectedSize,
   placeTextBlocks,
+  readableBackdrop,
   reframeDoc,
   RELIGHT_DIRECTIONS,
   RELIGHT_LIGHTS,
@@ -249,6 +250,14 @@ function useRun() {
       }
     },
   };
+}
+
+/** A blank canvas of a size. */
+function blankCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext("2d")!];
 }
 
 // ---------------------------------------------------------------------------
@@ -489,13 +498,33 @@ function EditTextTool() {
   useEffect(() => () => setHighlight(null), [setHighlight]);
 
   const changes = textChanges(rows);
+  const [preparing, setPreparing] = useState(false);
   const detecting = !!detect && isRunning(detect);
   const detectCost = costLabel(detector.model, isDemo(detector.model));
-  const startDetect = () => {
+  const startDetect = async () => {
     setLoadedFor(null);
     setRestored(false);
     setUnreadable(false);
-    void go({ tool: "text-detect", target, modelId: detector.modelId, label: "Detect text" });
+    setPreparing(true);
+    // A transparent layer (a decomposition's text) goes on a backdrop its text stands out from.
+    let image: string | undefined;
+    if (node) {
+      try {
+        const c = await renderNative(node, 2048);
+        const bg = readableBackdrop(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data);
+        if (bg) {
+          const [flat, f] = blankCanvas(c.width, c.height);
+          f.fillStyle = bg;
+          f.fillRect(0, 0, c.width, c.height);
+          f.drawImage(c, 0, 0);
+          image = await uploadRender(flat, `${node.name}-text`);
+        }
+      } catch {
+        // The layer goes as it is.
+      }
+    }
+    setPreparing(false);
+    void go({ tool: "text-detect", target, image, modelId: detector.modelId, label: "Detect text" });
   };
   const addLine = () => {
     setTyping(true);
@@ -514,7 +543,7 @@ function EditTextTool() {
         <div className="space-y-2">
           <ModelSelect tool="text-detect" value={detector.modelId} onChange={detector.setModelId} label="Detector" />
           {detector.model && TOOL_MODELS["text-detect"][engine].length > 1 && <p className="text-[11px] text-pretty text-subtle-foreground">{detector.model.tagline}</p>}
-          <Button variant="secondary" className="w-full rounded-full" onClick={startDetect} disabled={busy || detecting || !detector.model}>
+          <Button variant="secondary" className="w-full rounded-full" onClick={() => void startDetect()} disabled={busy || preparing || detecting || !detector.model}>
             {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
           </Button>
           <p className="text-center font-mono text-[11px] text-subtle-foreground">{detectCost}</p>
@@ -525,7 +554,7 @@ function EditTextTool() {
               {unreadable ? "Could not read the text on this image." : "No text was found on this image."}
             </p>
           )}
-          {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={startDetect} />}
+          {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={() => void startDetect()} />}
           {!typing && (
             <button type="button" className="mx-auto block text-[12px] font-medium text-brand-text hover:underline" onClick={addLine}>
               Type the lines instead
@@ -576,7 +605,7 @@ function EditTextTool() {
           <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label={found ? "Detect text again" : "Detect text"} onClick={startDetect} disabled={busy || detecting || !detector.model}>
+                <Button variant="ghost" size="icon" aria-label={found ? "Detect text again" : "Detect text"} onClick={() => void startDetect()} disabled={busy || preparing || detecting || !detector.model}>
                   {detecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                 </Button>
               </TooltipTrigger>
@@ -857,14 +886,6 @@ function RegionalTool() {
 
 // ---------------------------------------------------------------------------
 // Inpaint (brush an area, say what goes there)
-
-/** A blank canvas of a size. */
-function blankCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  return [c, c.getContext("2d")!];
-}
 
 function InpaintTool() {
   const { doc, isDemo, jobs, setMode, mode, paint, setPaint, paintVersion, brushSize, setBrushSize } = useEditor();

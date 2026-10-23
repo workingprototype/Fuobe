@@ -1011,6 +1011,27 @@ export function needsDetectedSize(meta: Record<string, unknown> | undefined): bo
   return !asSize(meta?.size) && detectedBlocks(meta).some((o) => !!rawBox(o)?.px);
 }
 
+/**
+ * The backdrop a transparent layer goes on before a detector reads it (detectors see no alpha, and
+ * transparent pixels read as black): white under dark text, black under light text. Null when the
+ * layer has no transparency to fill.
+ */
+export function readableBackdrop(rgba: ArrayLike<number>): "#ffffff" | "#000000" | null {
+  let sum = 0;
+  let n = 0;
+  let clear = false;
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const a = rgba[i + 3];
+    if (a < 250) clear = true;
+    if (a > 128) {
+      sum += 0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2];
+      n++;
+    }
+  }
+  if (!clear) return null;
+  return n && sum / n > 140 ? "#000000" : "#ffffff";
+}
+
 /** Lay detected blocks out in the document: their 0–1 boxes inside the frame the detector read (doc px). */
 export function placeTextBlocks(blocks: TextBlock[], frame: Box): (TextRow & { box: Box | null })[] {
   const [fx, fy, fw, fh] = frame;

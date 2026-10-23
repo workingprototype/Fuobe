@@ -50,6 +50,7 @@ import {
   inpaintPrompt,
   needsDetectedSize,
   placeTextBlocks,
+  readableBackdrop,
   coverage,
   defaultLayers,
   exportScale,
@@ -455,6 +456,17 @@ describe("edit text", () => {
     expect(textBlocksFrom({ ...px, size: [2000, 1000] })).toEqual([{ text: "Hi", box: [0.05, 0.05, 0.1, 0.1] }]);
     // Ideogram's object boxes in fractions need no size.
     expect(needsDetectedSize({ textBlocks: [{ text: "x", bbox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 } }] })).toBe(false);
+  });
+
+  it("puts a transparent layer on a backdrop its text stands out from before detection", () => {
+    const px = (...p: number[][]) => p.flat();
+    // Opaque: nothing to fill.
+    expect(readableBackdrop(px([10, 10, 10, 255], [250, 250, 250, 255]))).toBeNull();
+    // Dark text on transparency → white; light text → black.
+    expect(readableBackdrop(px([20, 20, 30, 255], [0, 0, 0, 0], [0, 0, 0, 0]))).toBe("#ffffff");
+    expect(readableBackdrop(px([255, 255, 240, 255], [250, 250, 250, 200], [0, 0, 0, 0]))).toBe("#000000");
+    // Nothing visible at all: white.
+    expect(readableBackdrop(px([0, 0, 0, 0]))).toBe("#ffffff");
   });
 
   it("lays detected lines out in the frame the detector read, like the cloud route's blocks", () => {
