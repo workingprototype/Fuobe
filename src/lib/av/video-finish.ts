@@ -4,7 +4,7 @@
  * for the workflows (interpolate-rife-fps, video-export-pro-chunked, video-sdr-to-hdr(-exr),
  * video-export-exr, upscale-video-*-chunked).
  */
-import type { VideoFormat } from "@/lib/catalog/types";
+import type { Operation, VideoFormat } from "@/lib/catalog/types";
 import { FORMAT_INFO, formatList } from "./formats";
 import { targetShortEdge } from "./upscale";
 
@@ -83,10 +83,39 @@ export function framesPerPass(clip: ClipFacts, o: { shortSide?: number; modelSca
 
 /**
  * Bytes a whole-clip graph holds (FPS Boost, HDR, EXR export decode the whole clip as float32 frames):
- * `copies` frame-sized copies of every source frame. Undefined when the clip's size or length is unknown.
+ * `copies` frame-sized copies of every source frame (SDR to HDR and EXR 2, FPS Boost 2 + m). Undefined
+ * when the clip's size or length is unknown.
  */
 export function wholeClipBytes(clip: ClipFacts, copies: number): number | undefined {
   const frames = clip.frames ?? (clip.duration && clip.fps ? Math.round(clip.duration * clip.fps) : undefined);
   if (!clip.width || !clip.height || !frames) return undefined;
   return clip.width * clip.height * FLOAT_RGB * frames * copies;
+}
+
+/**
+ * An open tool that decodes the whole clip (FPS Boost, SDR to HDR, EXR export): its name and the frame-sized
+ * copies of the clip it holds at its peak (`multiplier` = FPS Boost's m). Null for tools that work in passes.
+ */
+export function wholeClipTool(op: Operation | undefined, format: VideoFormat | undefined, multiplier = 1): { what: string; copies: number; op: Operation } | null {
+  if (op === "interpolate") return { what: "FPS Boost on the open engine", copies: multiplier >= 2 ? 2 + multiplier : 2, op };
+  if (op === "sdr-to-hdr") return { what: "SDR to HDR on the open engine", copies: 2, op };
+  if (op === "export-video" && format === "exr") return { what: "EXR export on the open engine", copies: 2, op };
+  return null;
+}
+
+const GB = 2 ** 30;
+
+/** What a whole-clip graph may hold: half the ComfyUI server's RAM (a 16 GB server assumed when unknown). */
+export const wholeClipBudget = (ramBytes: number | undefined) => (ramBytes && ramBytes > 0 ? ramBytes : 16 * GB) / 2;
+
+/** Why a whole-clip tool can't take this clip on a server with `ramBytes` of RAM; null when it fits or the clip's size is unknown. */
+export function wholeClipProblem(tool: NonNullable<ReturnType<typeof wholeClipTool>>, clip: ClipFacts, ramBytes: number | undefined): string | null {
+  const need = wholeClipBytes(clip, tool.copies);
+  const budget = wholeClipBudget(ramBytes);
+  if (!need || need <= budget) return null;
+  return (
+    `${tool.what} holds the whole clip in memory: this one needs about ${Math.ceil(need / GB)} GB of RAM and this ComfyUI can spare ${Math.floor(budget / GB)} GB. ` +
+    "Trim it first (Video tools → Trim)" +
+    (tool.op === "interpolate" ? ", or pick a lower frame rate" : "")
+  );
 }

@@ -666,7 +666,8 @@ export function useDeleteElement() {
 export type EngineMode = "both" | "open" | "cloud";
 
 export interface StatusInfo {
-  providers: Record<string, { label: string; configured: boolean }>;
+  /** `ramBytes`: the connected ComfyUI's RAM (comfyui only, when it says). */
+  providers: Record<string, { label: string; configured: boolean; ramBytes?: number }>;
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;

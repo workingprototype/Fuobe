@@ -33,7 +33,7 @@ import {
 } from "@/lib/comfy";
 import { fpsPlan } from "@/lib/av/fps";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
-import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipBytes } from "@/lib/av/video-finish";
+import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
@@ -311,19 +311,31 @@ async function bundleFrames(outputs: ComfyOutput[], generationId: string): Promi
 // (a worker thread does the fetch); after that the cached result is refreshed in the background every 10 s.
 
 declare global {
-  var __fuobeComfyReach: { ok: boolean; at: number; url: string } | undefined;
+  /** Reachability of the ComfyUI server, and its RAM (bytes) when /system_stats said. */
+  var __fuobeComfyReach: { ok: boolean; at: number; url: string; ram?: number } | undefined;
 }
 
 export async function probeComfy(force = false): Promise<boolean> {
   const cur = globalThis.__fuobeComfyReach;
   if (!force && cur && cur.url === baseUrl() && Date.now() - cur.at < 10_000) return cur.ok;
   let ok = false;
+  let ram: number | undefined;
   try {
     const r = await fetch(`${baseUrl()}/system_stats`, { headers: authHeaders(), signal: AbortSignal.timeout(2000) });
     ok = r.ok;
+    if (ok) {
+      const total = ((await r.json().catch(() => null)) as { system?: { ram_total?: unknown } } | null)?.system?.ram_total;
+      if (typeof total === "number" && total > 0) ram = total;
+    }
   } catch {}
-  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl() };
+  globalThis.__fuobeComfyReach = { ok, at: Date.now(), url: baseUrl(), ...(ram ? { ram } : {}) };
   return ok;
+}
+
+/** The connected ComfyUI's RAM in bytes, as the last reachability check read it (whole-clip tools' budget). */
+export function comfyRam(): number | undefined {
+  const cur = globalThis.__fuobeComfyReach;
+  return cur?.ok && cur.url === baseUrl() ? cur.ram : undefined;
 }
 
 const PROBE_WORKER = `const { workerData } = require("node:worker_threads");
@@ -447,9 +459,6 @@ const GB = 2 ** 30;
 
 const clipFacts = (clip: MediaInfo | undefined) => ({ width: clip?.width, height: clip?.height, fps: clip?.fps, frames: clip?.frames, duration: clip?.videoDuration ?? clip?.duration });
 
-/** Frame rate assumed for FPS Boost's m / n when the clip's header can't be read (the graph still plays at the right speed). */
-const ASSUMED_FPS = 30;
-
 /**
  * Values and graph edits for the Upscale hub's open tools, from the request and the clip's header:
  * VHS format / profile (export), CreateVideo's colour space (HDR10 PQ or HLG), FPS Boost's multiplier m,
@@ -461,7 +470,7 @@ function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: Me
   const d = manifest.defaults;
   const facts = clipFacts(clip);
   const values: Partial<Record<BindingKey, unknown>> = {};
-  const out = { values, holds: 0, what: manifest.title, bypassInterpolation: false, dropSound: false };
+  const out = { values, wholeClip: null as ReturnType<typeof wholeClipTool>, bypassInterpolation: false, dropSound: false };
   try {
     // Export: VideoHelperSuite's format and ProRes profile.
     if (manifest.capability === "export-video" && b.format) {
@@ -474,10 +483,9 @@ function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: Me
   } catch (e) {
     throw new ProviderError((e as Error).message);
   }
-  if (manifest.capability === "sdr-to-hdr" || manifest.id === "video-export-exr") {
-    out.holds = 3;
-    out.what = manifest.capability === "sdr-to-hdr" ? "SDR to HDR on the open engine" : "EXR export on the open engine";
-  }
+  // Graphs that decode the whole clip (src/lib/av/video-finish.ts wholeClipTool says how many copies they hold).
+  if (manifest.capability === "sdr-to-hdr") out.wholeClip = wholeClipTool("sdr-to-hdr", input.format);
+  if (manifest.id === "video-export-exr") out.wholeClip = wholeClipTool("export-video", "exr");
   // FPS Boost: interpolate by m, keep every n-th frame (the graph computes the output frame rate itself).
   if (b.every && b.multiplier) {
     const target = input.targetFps;
@@ -487,20 +495,26 @@ function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: Me
     // m, n and the slow-motion factor go together: a stray params.extra value can't break the ratio.
     for (const k of ["multiplier", "every", "slowdown"]) delete extra[k];
     if (target) {
-      const plan = fpsPlan(clip?.fps && clip.fps > 0 ? clip.fps : ASSUMED_FPS, target, slowdown, Number(manifest.limits?.maxMultiplier ?? 16));
+      // m and n come from the clip's own rate (the upload's header, else what the server read from it).
+      const sourceFps = clip?.fps && clip.fps > 0 ? clip.fps : input.sourceFps && input.sourceFps > 0 ? input.sourceFps : undefined;
+      if (!sourceFps) {
+        throw new ProviderError(
+          `FPS Boost on the open engine works out its frames from the clip's frame rate, and this file doesn't say what it is, so ${target} fps can't be hit. Re-save it as MP4 (H.264) or WebM and try again`,
+        );
+      }
+      const plan = fpsPlan(sourceFps, target, slowdown, Number(manifest.limits?.maxMultiplier ?? 16));
       m = plan.multiplier;
       n = plan.every;
     } else m = Math.max(2, Math.min(Number(manifest.limits?.maxMultiplier ?? 16), Math.round(m * slowdown)));
-    // m 1 (a lower target, or one the clip's rate divides into): FrameInterpolate is linked out below, and the
-    // graph's frame-rate expression still reads m, so it gets the real 1.
+    // m 1 (a target the clip's rate is a whole multiple of: 60 → 30 keeps every 2nd frame): FrameInterpolate is
+    // linked out below, and the graph's frame-rate expression still reads m, so it gets the real 1. Other lower
+    // targets still interpolate (30 → 24 is m 4, n 5).
     values.multiplier = m;
     values.every = n;
     values.slowdown = slowdown;
     out.bypassInterpolation = m < 2;
     out.dropSound = slowdown > 1;
-    // The source frames, their copy with the last frame held, the interpolated ones (m per frame) and the kept ones.
-    out.holds = 2 + m + m / n;
-    out.what = "FPS Boost on the open engine";
+    out.wholeClip = wholeClipTool("interpolate", undefined, m);
   }
   // Chunked upscaling: the shorter edge asked for, and passes that hold about 1.5 GB of frames.
   if (b.shortSide) {
@@ -544,8 +558,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Soundtrack without a background stem: the single-track graph.
   if (ctx.op === "mux" && !audio2 && !extra.audio2 && loadManifest().workflows.some((w) => w.id === `${endpoint}-replace`)) endpoint = `${endpoint}-replace`;
   // EXR frames have graphs of their own (export, SDR to HDR).
-  if (input.format === "exr" && (ctx.op === "export-video" || ctx.op === "sdr-to-hdr") && loadManifest().workflows.some((w) => w.id === exrWorkflow(ctx.op as "export-video"))) {
-    endpoint = exrWorkflow(ctx.op);
+  if (input.format === "exr" && (ctx.op === "export-video" || ctx.op === "sdr-to-hdr")) {
+    const exr = exrWorkflow(ctx.op);
+    if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
   }
 
   const { manifest, workflow } = getWorkflow(endpoint);
@@ -735,15 +750,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   }
 
   // Graphs that hold the whole clip in memory (FPS Boost, HDR, EXR): refuse what the server can't hold.
-  if (finish.holds) {
-    const need = wholeClipBytes(clipFacts(clip), finish.holds);
-    const budget = ((await ctx.serverRam?.()) ?? 16 * GB) / 2;
-    if (need && need > budget) {
-      throw new ProviderError(
-        `${finish.what} holds the whole clip in memory: this one needs about ${Math.ceil(need / GB)} GB of RAM and this ComfyUI can spare ${Math.floor(budget / GB)} GB. ` +
-          "Trim it first (Video tools → Trim)" + (ctx.op === "interpolate" ? ", or pick a lower frame rate" : ""),
-      );
-    }
+  if (finish.wholeClip) {
+    const problem = wholeClipProblem(finish.wholeClip, clipFacts(clip), await ctx.serverRam?.());
+    if (problem) throw new ProviderError(problem);
   }
 
   const bound = applyBindings(graph, b, Object.fromEntries(Object.entries(values).filter(([k]) => !left.includes(k))));

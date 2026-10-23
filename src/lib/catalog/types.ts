@@ -709,7 +709,10 @@ export interface GenInput extends GenParams {
   audios?: string[];
   model3d?: string;
   loras?: LoraRef[];
-  /** Server-filled from the input clip's header (generations.ts submit): its displayed size and frame rate. */
+  /**
+   * Server-filled from the input clip's header (generations.ts submit): its displayed size (upscale factors,
+   * the upscale tier) and frame rate (open FPS Boost's m / n when the provider's own upload cache has none).
+   */
   sourceSize?: { width: number; height: number };
   sourceFps?: number;
 }
