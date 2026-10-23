@@ -667,15 +667,18 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
   const picked = pickedTake(said);
   if (picked && (picked.animate || askedToPick(messages))) {
     const { stills, waiting } = latestStills(messages);
-    const chosen = picked.take === -1 ? stills.at(-1) : stills[picked.take - 1];
+    // 1-based; "the last one" is the last, and "animate it" the only one.
+    const index = picked.take === -1 ? stills.length : picked.take === 0 ? (stills.length === 1 && !waiting ? 1 : 0) : picked.take;
+    const chosen = index > 0 ? stills[index - 1] : undefined;
     if (chosen) {
-      const plan = animateTake(chosen, picked.take === -1 ? stills.length : picked.take, ctx.engine, said);
+      const plan = animateTake(chosen, index, ctx.engine, said);
       return reply(
         [text(plan.say), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
         "tool_use",
       );
     }
     if (waiting) return reply([text("They're still rendering — tell me which one to animate once they're in.")], "end_turn");
+    if (stills.length && picked.take === 0) return reply([text(`There are ${stills.length} stills — ${PICK_ASK}: reply "animate 2" (they're numbered in order).`)], "end_turn");
     if (stills.length) return reply([text(`Pick a number from 1 to ${stills.length}.`)], "end_turn");
     // No stills in this chat: read it as a new request.
   }
@@ -701,8 +704,12 @@ const FOLLOW_UP: Record<MediaKind, string> = {
   model3d: "Want another take, or a model from a different photo?",
 };
 
-/** The generation ids a tool result started, in order. */
-const startedIds = (body: string) => [...body.matchAll(/"(?:started|id)":\s*\[?\s*"([\w-]+)"/g)].map((m) => m[1]);
+/**
+ * The generation ids a tool result started, in order: every id of each `"started": [...]` list (on
+ * the open engine 4 takes are 4 generations of one job) and each `"id": "..."`.
+ */
+const startedIds = (body: string) =>
+  [...body.matchAll(/"started":\s*\[([^\]]*)\]|"(?:started|id)":\s*"([\w-]+)"/g)].flatMap((m) => (m[2] ? [m[2]] : [...m[1].matchAll(/"([\w-]+)"/g)].map((x) => x[1])));
 
 /** The kind of the last generation a tool result started (the end of a chain), image when unknown. */
 function startedKind(body: string): MediaKind {
@@ -720,6 +727,11 @@ const num = (s: string) => NUMBER_WORDS[s.toLowerCase()] ?? Number(s);
 /** Nouns a count can come before ("4 portraits", "three vertical videos", "a 6-frame heist"). */
 const COUNTED = "images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?";
 const COUNT = new RegExp(`\\b${NUM}(?:-|\\s+(?:([\\w-]+)\\s+)?)(${COUNTED})\\b`, "i");
+const COUNTS = new RegExp(COUNT.source, "gi");
+/** Nouns that only ever count takes ("4 versions", "two takes"), wherever they are in a request. */
+const TAKE_NOUN = /^(?:takes?|versions?|variations?|options?)$/i;
+/** Words that start a phrase about what's in the picture: a count after one ("a card with 3 icons", "a collage of 3 photos") is part of it. */
+const CONTENT_WORD = /\b(?:with|of|showing|featuring|containing|including|holding|having|and|plus|from|in|on)\b/i;
 /** What a still can be called, singular or plural, before "then animate it". */
 const STILL = /\b(stills?|photos?|pictures?|images?|portraits?|headshots?|posters?|frames?|shots?|renders?|key ?visuals?)\b/i;
 /** "… then pick the best and animate it": the person chooses which take moves. */
@@ -728,14 +740,32 @@ const PICK_WORDS = /\b(best|favou?rite|pick|choose|select|strongest|one of them)
 const singular = (noun: string) => noun.replace(/([^s])s$/i, "$1");
 
 /**
- * One take's prompt: "Make 4 moody portraits of a keeper" → "Moody portrait of a keeper". The count
- * goes to `outputs`; left in the prompt, each image could come back as a grid of four.
+ * The count that says how many takes to make: "4 portraits of …", "make three posters", "a fox,
+ * 2 versions". A count inside the description ("a birthday card with 3 icons", "a collage of 3
+ * photos") is what the picture shows: it stays in the prompt and makes no extra takes.
  */
-function oneTake(text: string): string {
-  const s = text
+function takeCount(text: string): RegExpExecArray | null {
+  for (const m of text.matchAll(COUNTS)) {
+    if (TAKE_NOUN.test(m[3]) || !CONTENT_WORD.test(text.slice(0, m.index))) return m as RegExpExecArray;
+  }
+  return null;
+}
+
+/**
+ * One take's prompt: "Make 4 moody portraits of a keeper" → "Moody portrait of a keeper". The take
+ * count (takeCount) goes to `outputs`; left in the prompt, each image could come back as a grid of
+ * four. Other numbers stay as written.
+ */
+function oneTake(text: string, take: RegExpExecArray | null): string {
+  // "4 moody portraits" → "moody portrait"; "3 versions of a logo" → "a logo".
+  const meta = !!take && TAKE_NOUN.test(take[3]);
+  const after = take ? text.slice(take.index + take[0].length) : "";
+  const counted = take ? `${text.slice(0, take.index)}${meta ? "" : `${take[2] ? `${take[2]} ` : ""}${singular(take[3])}`}${meta ? after.replace(/^\s+of\b/i, "") : after}` : text;
+  const s = counted
     .replace(/^\s*(?:please\s+)?(?:make|create|generate|give me|draw|shoot|render|design)(?:\s+me)?\s+/i, "")
-    .replace(COUNT, (_m, _n, adj: string | undefined, noun: string) => `${adj ? `${adj} ` : ""}${singular(noun)}`)
     .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
+    .replace(/\s+([,;.])/g, "$1")
+    .replace(/([,;])(?:\s*[,;])+/g, "$1")
     .replace(/\s{2,}/g, " ")
     .replace(/[\s,;:—–-]+$/, "")
     .trim();
@@ -793,8 +823,11 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
     return { tool: "remember", input: { text: sentence, category: guessCategory(what) }, say: "I'll remember that for every chat." };
   }
 
+  // Any count: a storyboard's frames ("a 6-frame heist"). The take count: how many pictures to make.
   const counted = COUNT.exec(t);
   const count = counted ? num(counted[1]) : hint?.outputs;
+  const take = takeCount(text);
+  const takes = take ? num(take[1]) : hint?.outputs;
   // "a 3-shot ad", "in 4 shots": one clip cut into shots, not several clips.
   const shots = (() => {
     const m = new RegExp(`\\b${NUM}[- ]shots?\\b`).exec(t) ?? new RegExp(`\\bin\\s+${NUM}\\s+shots\\b`).exec(t);
@@ -817,8 +850,8 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
   const [beforeThen, ...rest] = text.split(/[,;]?\s*\bthen\b/i);
   const afterThen = rest.join(" then ").toLowerCase();
   if (thenAnimate && STILL.test(beforeThen)) {
-    const subject = oneTake(beforeThen);
-    const stills = COUNT.exec(beforeThen);
+    const stills = takeCount(beforeThen);
+    const subject = oneTake(beforeThen, stills);
     const n = Math.max(1, Math.min(4, stills ? num(stills[1]) : 1));
     const stillModel = pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels);
     const clipModel = pick(VIDEO_STUDIO.defaultModels);
@@ -894,12 +927,12 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
     };
   }
   const studio = isVideo ? VIDEO_STUDIO : images.length ? EDIT_STUDIO : IMAGE_STUDIO;
-  const n = Math.max(1, Math.min(4, count ?? (isVideo ? 1 : 2)));
+  const n = Math.max(1, Math.min(4, takes ?? (isVideo ? 1 : 2)));
   const multi = isVideo && shots ? shots : undefined;
   const modelId = pick(studio.defaultModels);
   const job = {
     model_id: modelId,
-    prompt: styled(counted ? oneTake(text) : text),
+    prompt: styled(take ? oneTake(text, take) : text),
     ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }),
     ...(aspect && { aspect_ratio: aspect }),
     ...(n > 1 && { outputs: n }),
@@ -920,19 +953,28 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
 const ORDINALS: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, last: -1 };
 const ORDINAL = /(?:#|\b)(\d)(?:st|nd|rd|th)?\b|\b(first|second|third|fourth|fifth|sixth|seventh|eighth|last)\b/;
 
+/** "animate it", "now bring that one to life": motion for the still, without naming which. */
+const ANIMATE_IT = /^(?:(?:now|ok|okay|great|nice|please|cool)[,!]?\s+)*(?:animate (?:it|that|this)|bring (?:it|that|this)(?: one)? to life|make (?:it|that|this)(?: one)? move)\b/;
+
 /**
  * Which take a short reply names: "animate 2", "the second one", "#3", "go with the last one".
- * 1-based; -1 is the last. `animate` says the reply asked for motion itself; a bare "2" only
- * answers a pick-the-best plan's question. Null for anything else, a new request included.
+ * 1-based; -1 is the last; 0 is "animate it" (the only still, or a question when there are more).
+ * `animate` says the reply asked for motion itself; a bare "2" only answers a pick-the-best plan's
+ * question. Lengths, formats and times aren't take numbers ("for 5 seconds", "in 9:16", "at 24
+ * fps"). Null for anything else, a new request included.
  */
 export function pickedTake(message: string): { take: number; animate: boolean } | null {
   const t = message.trim().toLowerCase().replace(/[.!?]+$/, "");
   if (!t || t.length > 60 || COUNT.test(t)) return null;
-  const m = ORDINAL.exec(t);
-  if (!m) return null;
+  const animate = /\b(animate|bring (it|that one|this one) to life|make (it|that one|this one) move)\b/.test(t);
+  const numbers = t
+    .replace(/\b\d+\s*:\s*\d+\b/g, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*-?\s*(?:s|secs?|seconds?|mins?|minutes?|fps|k|p|x|%)(?![\w])/g, " ")
+    .replace(/\b(?:for|in|at|to|by|of|under|over)\s+\d+\b/g, " ");
+  const m = ORDINAL.exec(numbers);
+  if (!m) return animate && ANIMATE_IT.test(t) ? { take: 0, animate } : null;
   const take = m[1] ? Number(m[1]) : ORDINALS[m[2]];
   if (!take) return null;
-  const animate = /\b(animate|bring (it|that one|this one) to life|make (it|that one|this one) move)\b/.test(t);
   const bare = new RegExp(
     `^(?:(?:let'?s|i'?ll|i'?d)\\s+)?(?:(?:go with|use|pick|choose|take|like|want|prefer|animate)\\s+)?(?:the\\s+)?(?:number\\s+|no\\.?\\s*|take\\s+|image\\s+|still\\s+)?(?:${ORDINAL.source})(?:\\s+(?:one|image|still|take|pic(?:ture)?|photo))?(?:,?\\s+please)?$`,
   ).test(t);

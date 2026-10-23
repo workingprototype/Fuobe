@@ -85,6 +85,24 @@ describe("Assist's suggestion chips on the offline planner (R4-04)", () => {
     expect(jobsOf(agent.offlinePlan("4 portraits of a jazz singer in a smoky club", "cloud"))[0]).toMatchObject({ outputs: 4, prompt: "Portrait of a jazz singer in a smoky club" });
     // Without a count the words stay as written.
     expect(jobsOf(agent.offlinePlan("a cozy cafe", "cloud"))[0]).toMatchObject({ prompt: "a cozy cafe" });
+    // "versions" and "takes" count takes wherever they are, and leave the prompt.
+    expect(jobsOf(agent.offlinePlan("a red fox in the snow, 3 versions", "cloud"))[0]).toMatchObject({ outputs: 3, prompt: "A red fox in the snow" });
+    expect(jobsOf(agent.offlinePlan("Make 3 different versions of a bakery logo", "cloud"))[0]).toMatchObject({ outputs: 3, prompt: "A bakery logo" });
+  });
+
+  it("keeps a count that describes what's in the picture", () => {
+    // The card shows 3 icons: that's the picture, not 3 takes of it.
+    const card = jobsOf(agent.offlinePlan("a birthday card with 3 icons of balloons", "cloud"))[0];
+    expect(card.prompt).toBe("a birthday card with 3 icons of balloons");
+    expect(card.outputs).toBe(2);
+    const collage = jobsOf(agent.offlinePlan("a collage of 3 photos of my dog at the beach", "cloud"))[0];
+    expect(collage.prompt).toBe("a collage of 3 photos of my dog at the beach");
+    // A still with a counted detail, then animated: one still, the detail kept.
+    const poster = agent.offlinePlan("a poster with 2 icons of a rocket, then animate it", "cloud")!;
+    expect(jobsOf(poster).map((j) => [j.prompt, j.outputs, j.after])).toEqual([
+      ["A poster with 2 icons of a rocket", undefined, undefined],
+      [expect.stringMatching(/^A poster with 2 icons of a rocket\. The still comes to life/), undefined, 0],
+    ]);
   });
 });
 
@@ -102,6 +120,68 @@ describe("picking a take", () => {
     expect(agent.pickedTake("a lighthouse at dawn")).toBeNull();
     expect(agent.pickedTake("2 cats on a sofa")).toBeNull();
     expect(agent.pickedTake("make it 2 seconds longer and moodier")).toBeNull();
+    // Lengths, formats and times aren't take numbers.
+    expect(agent.pickedTake("animate it for 5 seconds")).toEqual({ take: 0, animate: true });
+    expect(agent.pickedTake("animate it in 9:16")).toEqual({ take: 0, animate: true });
+    expect(agent.pickedTake("animate 2 for 5 seconds")).toEqual({ take: 2, animate: true });
+    expect(agent.pickedTake("animate the third one in 16:9 at 24 fps")).toEqual({ take: 3, animate: true });
+    expect(agent.pickedTake("animate it")).toEqual({ take: 0, animate: true });
+    expect(agent.pickedTake("for 5 seconds")).toBeNull();
+  });
+
+  it("animate it: the only still moves; with several it asks which", async () => {
+    const outputs = (n: number) => Array.from({ length: n }, (_, i) => ({ url: `/api/files/outputs/it-${n}-${i + 1}.png`, kind: "image", contentType: "image/png" }));
+    // One still: "animate it for 5 seconds" animates it, 5 s long.
+    const one = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
+    agent.addMessage(one.id, "a cat in a hat, 1 version");
+    await agent.run(one.id, agent.offline);
+    let v = agent.getThread(one.id)!;
+    db().prepare("UPDATE generations SET status = 'succeeded', outputs_json = ? WHERE id = ?").run(JSON.stringify(outputs(1)), v.generations[0].id);
+    agent.addMessage(one.id, "animate it for 5 seconds");
+    await agent.run(one.id, agent.offline);
+    v = agent.getThread(one.id)!;
+    const clip = v.generations.find((g) => g.kind === "video")!;
+    expect(clip.request).toMatchObject({ modelId: "seedance-2-5", inputs: { images: ["/api/files/outputs/it-1-1.png"] }, params: expect.objectContaining({ duration: 5 }) });
+
+    // Two stills (a plain request makes 2 takes): it asks, and a bare number then answers.
+    const two = agent.createThread({ agent: "offline", engine: "cloud", autoApprove: true });
+    agent.addMessage(two.id, "a cat in a hat");
+    await agent.run(two.id, agent.offline);
+    v = agent.getThread(two.id)!;
+    db().prepare("UPDATE generations SET status = 'succeeded', outputs_json = ? WHERE id = ?").run(JSON.stringify(outputs(2)), v.generations[0].id);
+    agent.addMessage(two.id, "animate it for 5 seconds");
+    await agent.run(two.id, agent.offline);
+    v = agent.getThread(two.id)!;
+    expect((v.thread.items.at(-1) as { text: string }).text).toBe('There are 2 stills — tell me which one to animate: reply "animate 2" (they\'re numbered in order).');
+    agent.addMessage(two.id, "2");
+    await agent.run(two.id, agent.offline);
+    v = agent.getThread(two.id)!;
+    expect(v.generations.find((g) => g.kind === "video")?.request.inputs?.images).toEqual(["/api/files/outputs/it-2-2.png"]);
+  });
+
+  it("picks the best on the open engine too, where each take is its own generation", async () => {
+    const t = agent.createThread({ agent: "offline", engine: "open", autoApprove: true });
+    agent.addMessage(t.id, ASSIST_SUGGESTIONS[1]);
+    await agent.run(t.id, agent.offline);
+    let v = agent.getThread(t.id)!;
+    expect(v.generations).toHaveLength(4);
+    expect(v.generations.every((g) => g.request.modelId === "oss-z-image-turbo")).toBe(true);
+    // Done out of order: the numbers follow the order they were started in, like the chat shows them.
+    for (const g of [...v.generations].reverse()) {
+      db()
+        .prepare("UPDATE generations SET status = 'succeeded', outputs_json = ? WHERE id = ?")
+        .run(JSON.stringify([{ url: `/api/files/outputs/open-${g.id}.png`, kind: "image", contentType: "image/png" }]), g.id);
+    }
+    agent.addMessage(t.id, "animate 2");
+    await agent.run(t.id, agent.offline);
+    v = agent.getThread(t.id)!;
+    const stills = v.generations.filter((g) => g.kind === "image").sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    const clip = v.generations.find((g) => g.kind === "video")!;
+    expect(clip).toBeTruthy();
+    expect(clip.request.modelId).toBe("oss-wan22-14b-fast");
+    const started = (v.thread.items.find((i) => i.role === "generations") as { ids: string[] } | undefined)?.ids ?? stills.map((g) => g.id);
+    expect(clip.request.inputs?.images).toEqual([`/api/files/outputs/open-${started[1]}.png`]);
+    expect(v.thread.items.filter((i) => i.role === "assistant").map((i) => (i as { text: string }).text)).toContain("I'll animate take 2 with the default video model.");
   });
 
   it("asks which still to animate, then animates the one picked", async () => {
