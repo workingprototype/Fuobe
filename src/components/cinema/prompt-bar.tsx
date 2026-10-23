@@ -62,6 +62,7 @@ import {
 import { findMentions, type StudioElement } from "@/lib/catalog/elements";
 import type { Engine, MediaKind } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { modKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { MoveChips, MovePicker } from "./camera-moves";
 import { CameraChip, EmotionChip, FilmSetupChip, LightingChip, PaletteChip } from "./director-panel";
@@ -207,9 +208,6 @@ function RefThumb({ r, index, startFrame, onRemove }: { r: RefItem; index: numbe
     </div>
   );
 }
-
-/** "⌘" on Apple keyboards, "Ctrl" elsewhere (only rendered inside tooltips, i.e. in the browser). */
-const modKey = () => (typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl");
 
 const kindOf = (f: File): MediaKind => (f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : "image");
 

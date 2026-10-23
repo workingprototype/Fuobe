@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import type { MediaKind } from "@/lib/catalog/types";
+import { useModKey } from "@/lib/keys";
 import { ACCEPT, LibraryGrid, type SlotValue } from "./media-slot";
 import { ResponsivePanel } from "./responsive-panel";
 
@@ -35,7 +36,7 @@ async function clipboardFiles(): Promise<File[]> {
 export function AttachMenu({ kinds, onFiles, onPick }: { kinds: MediaKind[]; onFiles: (files: File[]) => void; onPick: (v: SlotValue) => void }) {
   const [open, setOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = useModKey();
   const paste = async () => {
     try {
       const files = await clipboardFiles();
@@ -43,7 +44,7 @@ export function AttachMenu({ kinds, onFiles, onPick }: { kinds: MediaKind[]; onF
       onFiles(files);
       setOpen(false);
     } catch {
-      toast(`Press ${mac ? "⌘V" : "Ctrl+V"} in the prompt to paste`);
+      toast(`Press ${mod === "⌘" ? "⌘V" : "Ctrl+V"} in the prompt to paste`);
     }
   };
   const words = kinds.map((k) => KIND_WORD[k]);
@@ -73,7 +74,7 @@ export function AttachMenu({ kinds, onFiles, onPick }: { kinds: MediaKind[]; onF
           <Button variant="secondary" className="h-10 justify-start gap-2" onClick={paste}>
             <ClipboardPaste /> Paste
             <span className="ml-auto hidden items-center gap-0.5 sm:flex">
-              <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
+              <Kbd>{mod}</Kbd>
               <Kbd>V</Kbd>
             </span>
           </Button>
