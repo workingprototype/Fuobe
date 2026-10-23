@@ -582,15 +582,16 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
     if (b.prompt) values.prompt = REMOVE_SCENE;
   }
-  // Depth colour maps: Video Depth Anything has gray and inferno; the other graphs are grayscale only.
+  // Depth maps: Video Depth Anything draws gray or inferno (the other graphs grayscale only), and can put the
+  // original clip next to the map.
   if (ctx.op === "depth-video" && input.colormap) {
     const want = input.colormap.toLowerCase() === "grayscale" ? "gray" : input.colormap.toLowerCase();
     if (b.colormap && (want === "gray" || want === "inferno")) values.colormap = want;
     else if (want !== "gray") throw new ProviderError(b.colormap ? "The open engine's depth maps come in grayscale or inferno — turbo, magma and viridis are on the cloud" : "This depth model makes grayscale maps only — pick Video Depth Anything for inferno");
   }
-  // Matte graphs save a cut-out and a black-and-white matte: params.extra.keepOutput ("cutout" | "matte") keeps one.
-  const keepRole = typeof extra.keepOutput === "string" ? extra.keepOutput : undefined;
-  delete extra.keepOutput;
+  if (b.sideBySide && input.sideBySide !== undefined) values.sideBySide = input.sideBySide;
+  // Matte graphs save a cut-out and a black-and-white matte: params.matteOutput keeps one.
+  const keepRole: string | undefined = ctx.op === "bg-remove-video" ? input.matteOutput : undefined;
 
   if (b.filenamePrefix) values.filenamePrefix = `fuobe/${ctx.generationId}`;
   const cues = manifest.expand === "captions" ? captionCues(input, extra) : [];

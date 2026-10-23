@@ -9736,7 +9736,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "birefnet",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Transparent WebM cut-outs of the subject",
+    "tagline": "Transparent WebM cut-outs of the subject, or their alpha mask",
     "routes": [
       {
         "op": "bg-remove-video",
@@ -9745,6 +9745,13 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "prompt": false,
           "video": "video_url",
+          "matteOutput": {
+            "key": "output_mask",
+            "values": {
+              "cutout": false,
+              "matte": true
+            }
+          },
           "fixed": {
             "video_output_type": "VP9 (.webm)",
             "model": "General Use (Heavy)"
@@ -9753,6 +9760,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "matteOutputs": [
+        "cutout",
+        "matte"
+      ],
       "promptless": true
     },
     "pricing": {
@@ -9784,7 +9795,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "promptless": true
+      "promptless": true,
+      "matteOutputs": [
+        "cutout"
+      ]
     },
     "pricing": {
       "unit": "second",
@@ -9808,6 +9822,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "video": "video_url",
           "colormap": "colormap",
+          "sideBySide": "side_by_side",
           "resolution": "resolution",
           "fixed": {
             "model": "VDA-Base"
@@ -9819,6 +9834,14 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "colormaps": [
+        "grayscale",
+        "turbo",
+        "inferno",
+        "magma",
+        "viridis"
+      ],
+      "sideBySide": true,
       "resolutions": [
         "auto",
         "360p",
@@ -12255,7 +12278,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "sam",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "A mask video of what you name or click, tracked through the clip",
+    "tagline": "The alpha mask of what you name (\u201cthe dog\u201d), tracked through the clip",
     "routes": [
       {
         "op": "bg-remove-video",
@@ -12273,13 +12296,17 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "keepsNamed": true,
+      "matteOutputs": [
+        "matte"
+      ]
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.015,
       "note": "$0.01 per 16 input frames (24 fps)"
-    },
-    "hidden": true
+    }
   },
   {
     "id": "p-video-replace",

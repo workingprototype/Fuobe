@@ -238,6 +238,7 @@ export function planGeneration(
   if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
   if (requires?.points && !params.points?.length) throw new Error(requires.msg);
+  if (op === "bg-remove-video" || op === "depth-video") checkVideoToolOptions(model, op, prompt, params);
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
@@ -252,6 +253,33 @@ export function planGeneration(
   const perJobOutputs = Math.min(requested, maxPerJob);
   const jobs = Math.ceil(requested / perJobOutputs);
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
+}
+
+/**
+ * Remove background and Depth map options (Higgsfield's Video tools): what to keep, the cut-out or its alpha mask,
+ * the colour map and side by side, each checked against what the model makes, so nothing is quietly swapped.
+ */
+function checkVideoToolOptions(model: ModelDef, op: "bg-remove-video" | "depth-video", prompt: string, params: GenParams) {
+  const o = model.options;
+  if (op === "bg-remove-video") {
+    // A segmenter keeps what is named (or clicked, where its route reads points): with neither it keeps nothing.
+    const clicked = !!params.points?.length && routesFor(model, op).some((r) => !!r.map?.points);
+    if (o.keepsNamed && !prompt && !clicked) throw new Error("Say what to keep, e.g. “the dog” or “the woman in red”");
+    const outputs = o.matteOutputs ?? ["cutout"];
+    if (params.matteOutput && !outputs.includes(params.matteOutput)) {
+      throw new Error(params.matteOutput === "matte" ? `${model.name} makes the cut-out only — pick BiRefNet or SAM for an alpha mask` : `${model.name} makes the alpha mask only — pick BiRefNet for a cut-out video`);
+    }
+    return;
+  }
+  const maps = o.colormaps ?? ["grayscale"];
+  if (params.colormap && !maps.includes(params.colormap.toLowerCase())) {
+    throw new Error(
+      model.engine === "open"
+        ? `${model.name} draws ${maps.length > 1 ? `${maps.slice(0, -1).join(", ")} or ${maps.at(-1)}` : "grayscale only"} — the open engine has no ${params.colormap}; it's on the cloud`
+        : `${model.name} has no ${params.colormap} colour map`,
+    );
+  }
+  if (params.sideBySide && !o.sideBySide) throw new Error(`${model.name} can't put the original next to the depth map`);
 }
 
 /** Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. */

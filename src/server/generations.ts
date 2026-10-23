@@ -8,6 +8,7 @@ import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { keepMatte } from "@/lib/catalog/payload";
 import {
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
@@ -870,7 +871,9 @@ async function pollOne(r: Row): Promise<void> {
   // Mark first so a slow download isn't polled twice.
   update(r.id, { status: "running", progress: 0.99, message: "Saving results" });
   const outputs: OutputFile[] = [];
-  for (const o of res.outputs as RichOutput[]) {
+  // Remove background: of a cut-out and its mask (BiRefNet's answer), the one asked for (params.matteOutput).
+  const matte = r.op === "bg-remove-video" ? (JSON.parse(r.request_json) as GenerationRequest).params?.matteOutput : undefined;
+  for (const o of keepMatte(res.outputs as RichOutput[], matte)) {
     try {
       outputs.push(await persistOutput(o, r.id));
     } catch (e) {

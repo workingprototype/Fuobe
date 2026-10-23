@@ -501,9 +501,10 @@ const open: ModelDef[] = [
     vendor: "ZhengPeng7",
     family: "birefnet",
     kind: "video",
-    tagline: "Cut the subject out of every frame — transparent WebM plus a matte",
+    tagline: "Cut the subject out of every frame — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-birefnet")],
-    options: {},
+    // The graph saves both; params.matteOutput keeps one (Video tools → Remove background: Cutout video / Alpha mask).
+    options: { promptless: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-matte-sam3",
@@ -511,9 +512,9 @@ const open: ModelDef[] = [
     vendor: "Meta",
     family: "sam",
     kind: "video",
-    tagline: "Keep just the object you name (“the dog”, “the red car”)",
+    tagline: "Keep just what you name (“the dog”, “the red car”) — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-sam3")],
-    options: {},
+    options: { keepsNamed: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-depth-da3",
@@ -521,9 +522,9 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Per-frame depth maps for compositing and 3D effects",
+    tagline: "Per-frame depth maps for compositing and 3D effects · grayscale",
     routes: [comfy("depth-video", "video-depth-da3")],
-    options: {},
+    options: { colormaps: ["grayscale"], sideBySide: true },
   }),
   o({
     id: "oss-video-depth-vda",
@@ -531,9 +532,10 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Temporally stable, flicker-free depth",
+    tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
-    options: {},
+    // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
   }),
   // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
   // (the provider sends it to SAM 3.1 as maskPrompt; the scene the gap is filled with is params.extra.prompt or a

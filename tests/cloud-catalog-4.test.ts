@@ -63,8 +63,8 @@ const ROUND4: Record<string, Operation> = {
   "genjutsu-lite-motion-transfer": "motion-transfer",
 };
 
-/** Chain helpers that never show in a picker. */
-const HIDDEN = ["bria-video-erase-points", "bria-video-erase-mask", "sam-3-1-video-mask", "ken-burns", "overlay-image", "extract-frames", "images-to-video", "join-audio"];
+/** Chain helpers that never show in a picker (SAM 3.1's mask is also Remove background's "keep what you name" on the cloud). */
+const HIDDEN = ["bria-video-erase-points", "bria-video-erase-mask", "ken-burns", "overlay-image", "extract-frames", "images-to-video", "join-audio"];
 
 const NEW_OPS: Operation[] = [
   "remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join",

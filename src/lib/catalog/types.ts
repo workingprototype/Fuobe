@@ -222,6 +222,12 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
  */
 export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr";
 
+/** What Remove background makes: the subject on a transparent background, or its black-and-white alpha mask. */
+export type MatteOutput = "cutout" | "matte";
+
+/** Depth map colour maps, in Higgsfield's order (grayscale first: every depth model draws it). */
+export const COLORMAPS = ["grayscale", "turbo", "inferno", "magma", "viridis"] as const;
+
 /** A point on a picture in its own pixels (the first frame of a video). Negative points mark what to keep. */
 export interface PixelPoint {
   x: number;
@@ -380,6 +386,13 @@ export interface FieldMap {
   frameInterval?: string;
   /** Depth map colours (params.colormap: grayscale, turbo, inferno, magma, viridis). */
   colormap?: string | EnumField;
+  /** Boolean field: the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: string;
+  /**
+   * Remove background's output (params.matteOutput) as the API's own value: BiRefNet's `output_mask` true adds
+   * the mask video, and the job keeps the asked-for file (outputs tagged meta.role "cutout" / "matte").
+   */
+  matteOutput?: { key: string; values: Partial<Record<MatteOutput, unknown>> };
   /** Images held as video frames: [{[url]: image, [frames]: 1}] in order (images to video at params.fps). */
   frames?: { key: string; url: string; frames: string };
   /**
@@ -477,6 +490,14 @@ export interface ModelOptions {
   requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
+  /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */
+  colormaps?: string[];
+  /** Depth maps: it can put the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: boolean;
+  /** Remove background: what it can make (params.matteOutput), its default first. Unset = the cut-out. */
+  matteOutputs?: MatteOutput[];
+  /** Remove background keeps only what you name (SAM): words, or points clicked on the first frame, are needed. */
+  keepsNamed?: boolean;
 }
 
 export interface Pricing {
@@ -575,6 +596,10 @@ export interface GenParams {
   slowdown?: number;
   /** Depth map colours: grayscale, turbo, inferno, magma or viridis. */
   colormap?: string;
+  /** Depth maps: the original clip next to the result. */
+  sideBySide?: boolean;
+  /** Remove background: the cut-out (transparent video) or its alpha mask (black and white). */
+  matteOutput?: MatteOutput;
   /** Overlay: where its centre goes (0–1 of the background) and its size (1 = its own size). */
   position?: FocusPoint;
   scale?: number;

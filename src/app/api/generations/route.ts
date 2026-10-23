@@ -70,6 +70,8 @@ const RequestSchema = z.object({
       targetFps: z.number().positive().max(240).optional(),
       slowdown: z.number().min(1).max(8).optional(),
       colormap: z.string().max(40).optional(),
+      sideBySide: z.boolean().optional(),
+      matteOutput: z.enum(["cutout", "matte"]).optional(),
       position: Focus.optional(),
       scale: z.number().positive().max(10).optional(),
       animation: z.union([z.string().max(200), z.number()]).optional(),

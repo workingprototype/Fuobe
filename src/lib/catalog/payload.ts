@@ -1,5 +1,5 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
-import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation, type PixelPoint } from "./types";
+import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
@@ -324,6 +324,11 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.colormap && input.colormap) {
     const [k, v] = enumValue(map.colormap, input.colormap);
     out[k] = v;
+  }
+  if (map.sideBySide && input.sideBySide !== undefined) out[map.sideBySide] = input.sideBySide;
+  if (map.matteOutput && input.matteOutput) {
+    const v = map.matteOutput.values[input.matteOutput];
+    if (v !== undefined) out[map.matteOutput.key] = v;
   }
   if (map.frames && images.length) out[map.frames.key] = images.map((url) => ({ [map.frames!.url]: url, [map.frames!.frames]: 1 }));
   if (map.loop && input.audio) {
@@ -756,6 +761,28 @@ function stemOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * Remove background: BiRefNet answers with the cut-out (`video`) and, when asked, its mask (`mask_video`); both are
+ * tagged (meta.role "cutout" / "matte") so the job keeps the one asked for ({@link keepMatte}).
+ */
+function matteOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const cut = isObj(r) ? fileOf(r.video) : undefined;
+  const mask = isObj(r) ? fileOf(r.mask_video) : undefined;
+  if (!cut || !mask) return extractMedia(response);
+  return [
+    { url: cut.url, kind: "video", contentType: cut.contentType, meta: { role: "cutout" } },
+    { url: mask.url, kind: "video", contentType: mask.contentType, meta: { role: "matte" } },
+  ];
+}
+
+/** The results of a Remove background job: only the asked-for file when the answer tagged both (else all of them). */
+export function keepMatte<T extends { meta?: Record<string, unknown> }>(outputs: T[], want: MatteOutput | undefined): T[] {
+  if (!want) return outputs;
+  const kept = outputs.filter((o) => o.meta?.role === want);
+  return kept.length ? kept : outputs;
+}
+
+/**
  * Every result of a provider response, with structure the operation defines: layers (name, z, bbox),
  * text blocks, transcripts (text + cues), 3D models and audio stems. A text operation's response with
  * no media but text comes back as one text output; for media operations a text-only answer (a refusal)
@@ -795,6 +822,9 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "separate-audio":
       out = stemOutputs(response);
+      break;
+    case "bg-remove-video":
+      out = matteOutputs(response);
       break;
     default:
       out = extractMedia(response);

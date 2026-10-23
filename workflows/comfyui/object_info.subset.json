@@ -5290,9 +5290,7 @@
           {
             "tooltip": "Select a frame interpolation model to load. Models must be placed in the 'frame_interpolation' folder.",
             "multiselect": false,
-            "options": [
-              "vftest_rife_random.safetensors"
-            ]
+            "options": []
           }
         ]
       }
@@ -17566,9 +17564,7 @@
           "COMBO",
           {
             "multiselect": false,
-            "options": [
-              "vftest_esrgan_x4_random.safetensors"
-            ]
+            "options": []
           }
         ]
       }

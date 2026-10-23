@@ -93,15 +93,16 @@ describe("matte graphs: Cutout video or Alpha mask", () => {
     const both = await prepare("video-bg-remove-sam3", { prompt: "the dog" }, "bg-remove-video");
     expect(Object.keys(both.workflow)).toEqual(expect.arrayContaining(["9", "12"]));
     expect(both.manifest.outputs.map((o) => o.role)).toEqual(["cutout", "matte"]);
-    const matte = await prepare("video-bg-remove-sam3", { prompt: "the dog", extra: { keepOutput: "matte" } }, "bg-remove-video");
+    const matte = await prepare("video-bg-remove-sam3", { prompt: "the dog", matteOutput: "matte" }, "bg-remove-video");
     expect(matte.workflow["9"]).toBeUndefined();
     expect(matte.workflow["12"].class_type).toBe("SaveVideo");
     expect(at(matte.workflow, "4", "text")).toBe("the dog");
-    const cut = await prepare("video-bg-remove-birefnet", { extra: { keepOutput: "cutout" } }, "bg-remove-video");
+    const cut = await prepare("video-bg-remove-birefnet", { matteOutput: "cutout" }, "bg-remove-video");
     expect(cut.workflow["10"]).toBeUndefined();
     expect(cut.workflow["7"].class_type).toBe("SaveWEBM");
-    // keepOutput is not a graph input.
-    expect(JSON.stringify(cut.workflow)).not.toContain("keepOutput");
+    // Only Remove background keeps one: a matte graph run for another op saves both.
+    const other = await prepare("video-bg-remove-birefnet", { matteOutput: "cutout" }, "bg-remove");
+    expect(Object.keys(other.workflow)).toEqual(expect.arrayContaining(["7", "10"]));
   });
 });
 
@@ -110,7 +111,7 @@ describe("depth graphs: colour map and side by side", () => {
     const gray = await prepare("video-depth-vda-small", { colormap: "grayscale" }, "depth-video");
     expect(at(gray.workflow, "5", "colormap")).toBe("gray");
     expect(at(gray.workflow, "9", "value")).toBe(false);
-    const inferno = await prepare("video-depth-vda-small", { colormap: "inferno", extra: { sideBySide: true } }, "depth-video");
+    const inferno = await prepare("video-depth-vda-small", { colormap: "inferno", sideBySide: true }, "depth-video");
     expect(at(inferno.workflow, "5", "colormap")).toBe("inferno");
     expect(at(inferno.workflow, "9", "value")).toBe(true);
     expect(inferno.workflow["10"].inputs).toEqual({ switch: ["9", 0], on_true: ["8", 0], on_false: ["5", 0] });
@@ -119,7 +120,7 @@ describe("depth graphs: colour map and side by side", () => {
 
   it("Depth Anything 3 is grayscale only (and can go side by side too)", async () => {
     await expect(prepare("video-depth-da3", { colormap: "inferno" }, "depth-video")).rejects.toThrow(/grayscale maps only/);
-    const sbs = await prepare("video-depth-da3", { colormap: "grayscale", extra: { sideBySide: true } }, "depth-video");
+    const sbs = await prepare("video-depth-da3", { colormap: "grayscale", sideBySide: true }, "depth-video");
     expect(at(sbs.workflow, "9", "value")).toBe(true);
   });
 });

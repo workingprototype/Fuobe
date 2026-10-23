@@ -294,6 +294,8 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
         // The painted eraser also hands the window's last tracked mask to the next window.
         ...(meta.lastMask ? [{ url: svgUri(demoMaskSvg(ar)), kind: "image" as const, contentType: "image/svg+xml", meta: { role: "mask", demo: true } }] : []),
       ];
+    case "bg-remove-video":
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, role: meta.matteOutput } }];
     case "video-swap":
     case "video-insert":
     case "keyframes":
@@ -349,6 +351,8 @@ export const mockProvider: ProviderAdapter = {
         duration: input.duration,
         format: input.format,
         clips: input.audios?.length,
+        // Remove background: which file the demo stands for (the cut-out or its alpha mask).
+        matteOutput: route.op === "bg-remove-video" ? (input.matteOutput ?? model.options.matteOutputs?.[0] ?? "cutout") : undefined,
         // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted).
         lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted",
         // Workflows whose second output is the cut's first frame (video-segment-resample).
