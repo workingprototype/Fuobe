@@ -5,7 +5,9 @@ import type { PlannedJob } from "@/lib/assist";
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
 import { FACELESS_STYLE_IDS, STYLES } from "@/lib/catalog/faceless";
+import { SHORTS_MODELS } from "@/lib/catalog/shorts";
 import type { ChainSlot, Engine, GenerationRequest, Operation } from "@/lib/catalog/types";
+import { TOOL_MODELS } from "@/lib/layers";
 import { createPipeline, type PipelineStep } from "../chains";
 import { db } from "../db";
 import { chooseRoute, createGenerations, outputKind, previewChained } from "../generations";
@@ -54,13 +56,23 @@ const LayersInput = z.object({
   image: ref.describe("The image to split."),
   layers: z.number().int().optional().describe("How many layers (2–8; the Layers studio starts at 8, Seedream decides how many it returns)."),
   focus: z.string().optional().describe("What to separate, e.g. 'the person, the product, the headline text, the background'."),
-  model_id: z.string().optional().describe("A layers model from search_models (task layers); default: the engine's best."),
+  model_id: z
+    .string()
+    .optional()
+    .describe(
+      `Layers' decomposition models: ${TOOL_MODELS.decompose.cloud.join(", ")} (cloud), ${TOOL_MODELS.decompose.open.join(", ")} (open source); default: the engine's first. Another model runs outside Layers, as a plain job in the Library.`,
+    ),
 });
 const RestyleInput = z.object({
   video: ref.describe("The footage to restyle."),
   style: z.string().describe("The new look, e.g. 'claymation, warm studio light' or 'anime, cel shading'."),
   references: z.array(ref).optional().describe("Up to 4 style reference images."),
-  model_id: z.string().optional().describe("A video-to-video model from search_models (task v2v)."),
+  model_id: z
+    .string()
+    .optional()
+    .describe(
+      `Shorts Studio's restyle models: ${SHORTS_MODELS.cloud.join(", ")} (cloud), ${SHORTS_MODELS.open.join(", ")} (open source); default: the engine's first. Another video-to-video model runs outside Shorts Studio, as a single job in the Library.`,
+    ),
 });
 const DubInput = z.object({
   video: ref.describe("The video to dub."),
@@ -101,7 +113,10 @@ const AdsInput = z.object({
   brief: z.string().describe("What the ads sell and to whom, with the offer or angle."),
   product_image: ref.optional().describe("The product photo (keeps the real product in every ad)."),
   count: z.number().int().optional().describe("How many different ads (1–8, default 4)."),
-  aspect_ratios: z.array(z.string()).optional().describe("Formats for each ad: 1:1, 4:5 (default), 9:16, 16:9."),
+  aspect_ratios: z
+    .array(z.string())
+    .optional()
+    .describe("Ads Studio's formats: 1:1, 4:5 (default), 9:16 — there every ad comes in all three. 16:9 runs outside Ads Studio, as plain images in the Library."),
   headline: z.string().optional().describe("A headline to use exactly; otherwise each ad gets its own."),
   cta: z.string().optional().describe("Call to action, e.g. 'Shop now'."),
   brand_id: z.string().optional().describe("A brand kit id from the Ads studio, when the user has one."),
@@ -548,7 +563,7 @@ const facelessEpisode = defineTool({
 const createAds = defineTool({
   name: "create_ads",
   description:
-    "Make a batch of different ad creatives (1–8) for a product: varied angles and layouts with a headline, body, call to action and the real product from its photo — a batch in Fuobe's Ads Studio, where every ad comes in 1:1, 4:5 and 9:16 with the brand's logo, colours and fonts, editable and downloadable. Without brand_id the ads go to a brand kit called “Assist”. Use it for 'ads for my product', 'a set of Meta ads', 'creatives to test'. Gated by the same approval card as generate.",
+    "Make a batch of different ad creatives (1–8) for a product: varied angles and layouts with a headline, body, call to action and the real product from its photo — a batch in Fuobe's Ads Studio, where every ad comes in 1:1, 4:5 and 9:16 with the brand's logo, colours and fonts, editable and downloadable. Without brand_id, a brand kit is made from the brief (as Ads Studio's “Describe your business” does, named after the business it describes) with a product named from the brief's first words; a later brief for a product of the same name goes back to that kit. The user's own kits are only used when you pass brand_id (and product_id), from the Ads studio. Use it for 'ads for my product', 'a set of Meta ads', 'creatives to test'. Gated by the same approval card as generate.",
   schema: AdsInput,
   gated: true,
   title: (i) => `${Math.max(1, Math.min(8, i.count ?? 4))} ads: ${i.brief.slice(0, 50)}`,

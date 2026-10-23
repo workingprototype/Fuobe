@@ -3,8 +3,9 @@ import fs from "node:fs";
 import type { PlannedJob } from "@/lib/assist";
 import { dubLanguageFor, facelessStyleFor, shortsPresetFor } from "@/lib/assist-studios";
 import { BURN_MODELS, burnPricePerMinute, burnRequest, CAPTIONS_FEATURE, lookFor, OPEN_FONT_SIZE, styleById, transcribeRequest, type BurnRoute, type CaptionLook } from "@/lib/av/captions";
-import { DUB_STEP_MODELS, translateKey, type OneShotModel } from "@/lib/av/dub";
+import { DUB_STEP_MODELS, prepareSteps, translateKey, type OneShotModel } from "@/lib/av/dub";
 import { getModel } from "@/lib/catalog";
+import { routesFor } from "@/lib/catalog/plan";
 import { defaultSettings, genreInfo, PART_LABELS, type EpisodeAspect, type EpisodeSettings, type NarratorVoice, type StepPart } from "@/lib/catalog/faceless";
 import { AD_RATIOS, emptyKit, type AdRatio, type BrandKit, type Product } from "@/lib/catalog/marketing";
 import { lookFromPreset, SHORTS, SHORTS_MODELS, type ShortsLook } from "@/lib/catalog/shorts";
@@ -14,9 +15,10 @@ import { imageSize } from "@/lib/image-size";
 import { clampLayers, decomposeCost, defaultLayers, TOOL_MODELS, TOOL_LABELS, type LayerJobInput } from "@/lib/layers";
 import { createBatch, estimateBatch, listCreatives, type BatchInput } from "../ads";
 import { createManualBrand, createProduct, DuplicateProductError, getBrand, getProduct, heuristicManualKit, listProducts, updateProduct } from "../brand";
-import { createPipeline, type PipelineStep } from "../chains";
+import { createPipeline, providerNames, type PipelineStep } from "../chains";
 import { createDubSession, previewDub, videoLength, type CreateDubInput } from "../dub";
 import { createChannel, createEpisode, estimateEpisode, listChannels } from "../faceless";
+import { chooseRoute } from "../generations";
 import { createProject, deleteProject, FileUrl, jobSteps, startJob } from "../layers";
 import { engineMode } from "../settings";
 import { createSession, estimateWith, sourceInfo, type ShortsBody, type SourceInfo } from "../shorts";
@@ -240,7 +242,30 @@ const shortsRoute: StudioRoute<RestyleToolInput> = {
 
 const ONE_SHOT_NAMES: Record<OneShotModel, string> = { "heygen-translate": "HeyGen Translate", "heygen-translate-fast": "HeyGen Translate Speed", "elevenlabs-dubbing": "ElevenLabs Dubbing" };
 
-function dubJob(i: DubToolInput, ctx: ToolContext): Checked<{ input: CreateDubInput; names: string[] }> {
+/**
+ * Why the review flow's first stage (voice, transcript, translations) can't start as one pipeline, or
+ * null: a step no provider can run, or a demo step among real ones, which createPipeline refuses (a
+ * fal key without Claude or Ollama: the translation would be a demo while the rest runs for real).
+ */
+function prepareProblem(input: Pick<CreateDubInput, "engine" | "video" | "source" | "targets">): string | null {
+  const modes: { label: string; needs: string; demo: boolean }[] = [];
+  for (const s of prepareSteps({ engine: input.engine, video: input.video, source: input.source, targets: input.targets })) {
+    const m = getModel(s.request.modelId);
+    if (!m || !s.request.op) continue;
+    const label = s.request.step?.label ?? s.key;
+    const needs = providerNames(m, s.request.op);
+    try {
+      modes.push({ label, needs, demo: chooseRoute(routesFor(m, s.request.op)).demo });
+    } catch {
+      return `${label} needs ${needs}`;
+    }
+  }
+  const demo = modes.find((x) => x.demo);
+  return demo && modes.some((x) => !x.demo) ? `${demo.label} would run as a demo (it needs ${demo.needs}) while the other steps run for real` : null;
+}
+
+/** `blocked`: the studio takes the call but can't start it (shown on the card, thrown on run); `notes` go on the card. */
+function dubJob(i: DubToolInput, ctx: ToolContext): Checked<{ input: CreateDubInput; names: string[]; notes: string[]; blocked?: string }> {
   const engine = engineOf(ctx);
   if (!i.video.startsWith("/api/files/")) return { problem: "Translate & dub works on videos saved in Fuobe (an upload or a result)" };
   const asked = [...new Set(i.languages.map((l) => l.trim()).filter(Boolean))].slice(0, 4);
@@ -248,24 +273,41 @@ function dubJob(i: DubToolInput, ctx: ToolContext): Checked<{ input: CreateDubIn
   const langs = asked.map((l) => ({ asked: l, lang: dubLanguageFor(l) }));
   const unknown = langs.find((l) => !l.lang);
   if (unknown) return { problem: `Translate & dub doesn't list ${unknown.asked}` };
-  const review = i.review !== false;
-  if (!review && engine === "open") return { problem: "Dubbing in one go is a cloud service; on the open engine Translate & dub reviews the lines first" };
-  const model: OneShotModel | undefined = review ? undefined : i.lipsync === false ? "elevenlabs-dubbing" : "heygen-translate";
-  const input: CreateDubInput = {
+  if (i.review === false && engine === "open") return { problem: "Dubbing in one go is a cloud service; on the open engine Translate & dub reviews the lines first" };
+  const oneShot: OneShotModel = i.lipsync === false ? "elevenlabs-dubbing" : "heygen-translate";
+  const base = {
     engine,
-    mode: review ? "steps" : "oneshot",
     video: i.video,
     title: fileTitle(i.video),
     source: (i.source_language && dubLanguageFor(i.source_language)?.code) || "auto",
     targets: [...new Set(langs.map((l) => l.lang!.code))],
-    ...(model && { model }),
   };
-  try {
-    previewDub(input);
-  } catch (e) {
-    return { problem: (e as Error).message };
+  const steps: CreateDubInput = { ...base, mode: "steps" };
+  const once: CreateDubInput = { ...base, mode: "oneshot", model: oneShot };
+  const names = langs.map((l) => l.lang!.name);
+  const priced = (input: CreateDubInput): string | null => {
+    try {
+      previewDub(input);
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+  if (i.review === false) {
+    const problem = priced(once);
+    return problem ? { problem } : { input: once, names, notes: [] };
   }
-  return { input, names: langs.map((l) => l.lang!.name) };
+  const problem = priced(steps);
+  if (problem) return { problem };
+  // The review flow needs its first stage to run all for real (or all as a demo). When it can't and the
+  // review wasn't asked for outright, the cloud dubs in one go instead, still as a dub in the studio.
+  const why = prepareProblem(steps);
+  if (!why) return { input: steps, names, notes: [] };
+  const stuck = `Reviewing the lines can't start: ${why}`;
+  if (engine === "cloud" && i.review === undefined && !priced(once)) {
+    return { input: once, names, notes: [`${stuck} — so it dubs in one go with ${ONE_SHOT_NAMES[oneShot]} (connect it in Settings to review every line first)`] };
+  }
+  return { input: steps, names, notes: [], blocked: `${stuck} — connect it in Settings${engine === "cloud" ? ", or dub in one go (review: false)" : ", or turn on demo mode to try it all as a demo"}` };
 }
 
 const dubRoute: StudioRoute<DubToolInput> = {
@@ -273,10 +315,13 @@ const dubRoute: StudioRoute<DubToolInput> = {
   page: modeHref("audio", "translate"),
   refuse: (i, ctx) => problemOf(dubJob(i, ctx)),
   plan: (i, ctx) => {
-    const { input, names } = ok(dubJob(i, ctx));
+    const { input, names, notes, blocked } = ok(dubJob(i, ctx));
     const price = previewDub(input);
     const oneshot = input.mode === "oneshot";
     const extra = price.unpriced.length ? ` · plus ${price.unpriced.join(" and ")} at the provider's own rate` : "";
+    const note = oneshot
+      ? `Dubbed in one go${input.model === "elevenlabs-dubbing" ? ", no lip re-sync" : ", lip-synced"}${extra}`
+      : `Transcribe and translate (${price.steps} steps)${extra} · then review every line and voice it in Translate & dub, priced there`;
     const job: PlannedJob = {
       tool: "dub_video",
       modelId: input.model ?? DUB_STEP_MODELS[input.engine].translate,
@@ -287,15 +332,15 @@ const dubRoute: StudioRoute<DubToolInput> = {
       count: input.targets.length,
       costUsd: price.costUsd,
       demo: price.demo,
-      note: oneshot
-        ? `Dubbed in one go${input.model === "elevenlabs-dubbing" ? ", no lip re-sync" : ", lip-synced"}${extra}`
-        : `Transcribe and translate (${price.steps} steps)${extra} · then review every line and voice it in Translate & dub, priced there`,
+      note: [note, ...notes].join(" · "),
       atomic: true,
+      ...(blocked && { error: blocked }),
     };
     return [job];
   },
   async run(i, ctx) {
-    const { input } = ok(dubJob(i, ctx));
+    const { input, notes, blocked } = ok(dubJob(i, ctx));
+    if (blocked) throw new Error(blocked);
     const s = createDubSession(input);
     const steps = s.mode === "steps";
     const ids = steps ? s.targets.map((c) => s.prepare?.[translateKey(c)]).filter((x): x is string => !!x) : Object.values(s.oneshot ?? {});
@@ -304,6 +349,8 @@ const dubRoute: StudioRoute<DubToolInput> = {
       href: modeHref("audio", "translate", { dub: s.id }),
       info: {
         dub: s.id,
+        // Why it dubs in one go when the review was the default (tell the user).
+        ...(notes.length && { changed: notes.join(" ") }),
         ...(steps && {
           next: `Once the translation is ready, the user reviews every line in Translate & dub and presses Voice${i.lipsync === false ? " (with Lip sync switched off)" : ""}; the dubbed video is made then.`,
         }),
@@ -447,8 +494,9 @@ function adsJob(i: AdsToolInput, ctx: ToolContext): Checked<{ input: BatchInput;
   const input: BatchInput = {
     brandId: kit?.id ?? "draft",
     engine,
-    // Several formats need Fuobe's compositor (every ad in 1:1, 4:5 and 9:16); Higgsfield renders one format per ad.
-    ...(ratios.length > 1 && { route: "fuobe" as const }),
+    // Several formats, or words to use as given, need Fuobe's compositor (every ad in 1:1, 4:5 and 9:16, its
+    // headline and call to action editable); Higgsfield renders one format per ad and writes its own copy into the picture.
+    ...((ratios.length > 1 || !!i.headline?.trim() || !!i.cta?.trim()) && { route: "fuobe" as const }),
     items: [{ productId: draftProduct.id, count: Math.max(1, Math.min(8, i.count ?? 4)) }],
     direction,
     ratio: ratios[0] as AdRatio,
@@ -461,15 +509,24 @@ function adsJob(i: AdsToolInput, ctx: ToolContext): Checked<{ input: BatchInput;
   return { input, brand: kit, product, draft: { brand: draftBrand, product: draftProduct }, name };
 }
 
-/** The product the ads are for: the one named, else one made from the brief (a product of the same name gets the new photo). */
-function adsProduct(brandId: string, name: string, i: AdsToolInput): Product {
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * The product the ads are for, made from the brief. A product of the same name already in the kit is
+ * used: in a kit Assist made, a new photo becomes its first; the user's own products are never changed
+ * (a new photo makes a second product of that name, as Ads Studio's "Create anyway" does).
+ */
+function adsProduct(brand: BrandKit, name: string, i: AdsToolInput): Product {
   const images = i.product_image ? [i.product_image] : [];
   try {
-    return createProduct({ name, brandId, description: i.brief, images });
+    return createProduct({ name, brandId: brand.id, description: i.brief, images });
   } catch (e) {
     if (!(e instanceof DuplicateProductError)) throw e;
-    const same = listProducts(brandId).find((p) => p.name.toLowerCase() === name.toLowerCase())!;
-    return images.length ? (updateProduct(same.id, { images: [...images, ...same.images.filter((u) => !images.includes(u))] }) ?? same) : same;
+    const same = listProducts(brand.id).filter((p) => sameName(p.name, name));
+    const fits = same.find((p) => !images.length || p.images[0] === images[0]);
+    if (fits) return fits;
+    if (brand.origin === "assist" && same[0]) return updateProduct(same[0].id, { images: [...images, ...same[0].images.filter((u) => !images.includes(u))] }) ?? same[0];
+    return createProduct({ name, brandId: brand.id, description: i.brief, images }, { force: true });
   }
 }
 
@@ -501,10 +558,16 @@ const adsRoute: StudioRoute<AdsToolInput> = {
   async run(i, ctx) {
     const job = ok(adsJob(i, ctx));
     // A brief without a brand kit gets one of its own, the way Ads Studio's "Describe your business" makes
-    // it; the same product asked for again goes back to the kit it's in.
-    const again = job.brand ? null : listProducts().find((p) => p.brandId && p.name.toLowerCase() === job.name.toLowerCase());
-    const brand = job.brand ?? (again ? getBrand(again.brandId!) : null) ?? (await createManualBrand({ description: i.brief }));
-    const product = job.product ?? adsProduct(brand.id, job.name, i);
+    // it (marked as Assist's); the same product asked for again goes back to that kit. The user's own
+    // kits are only used when named (brand_id).
+    const again = job.brand
+      ? null
+      : listProducts()
+          .filter((p) => p.brandId && sameName(p.name, job.name))
+          .map((p) => getBrand(p.brandId!))
+          .find((b): b is BrandKit => b?.origin === "assist" && b.status === "ready");
+    const brand = job.brand ?? again ?? (await createManualBrand({ description: i.brief, origin: "assist" }));
+    const product = job.product ?? adsProduct(brand, job.name, i);
     const { batchId, run } = createBatch({ ...job.input, brandId: brand.id, items: [{ productId: product.id, count: job.input.items[0].count }] }, { headline: i.headline, cta: i.cta });
     // The copy is written first (one LLM call), then each ad's picture starts: wait for that, not for the pictures.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -515,6 +578,8 @@ const adsRoute: StudioRoute<AdsToolInput> = {
       href: `/ads/${brand.id}`,
       info: {
         brand: brand.id,
+        // The kit's name, to tell the user where the ads are (a kit made from the brief is named by it).
+        brandName: brand.name,
         product: product.id,
         batch: batchId,
         ads: ads.map((c) => ({ headline: c.headline, cta: c.cta, status: c.status })),
@@ -592,8 +657,8 @@ const captionsRoute: StudioRoute<CaptionsToolInput> = {
   refuse: (i, ctx) => problemOf(captionsJob(i, ctx)),
   plan: (i, ctx) => {
     const { steps, route, seconds } = ok(captionsJob(i, ctx));
-    // The burn at the studio's own rate per minute (VEED's dynamic styles cost double).
-    const burn = seconds && route !== "open" ? Math.round(burnPricePerMinute(route, CAPTION_LOOK.style) * (seconds / 60) * 1000) / 1000 : null;
+    // The burn at the studio's own rate per minute (VEED's dynamic styles cost double), plus VEED's translation when it translates.
+    const burn = seconds && route !== "open" ? Math.round(burnPricePerMinute(route, CAPTION_LOOK.style, route === "veed" && !!i.translate_to) * (seconds / 60) * 1000) / 1000 : null;
     return planSteps("add_captions", steps).map((j) => (j.op === "captions" && burn !== null && !j.demo && !j.error ? { ...j, costUsd: burn } : j));
   },
   async run(i, ctx) {

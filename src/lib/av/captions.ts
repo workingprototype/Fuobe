@@ -127,11 +127,14 @@ export function lookFor(route: BurnRoute, look: CaptionLook): CaptionLook {
 /** VEED's dynamic presets bill twice the basic rate. */
 const VEED_DYNAMIC = new Set(["glass", "whisper", "glide2", "fusion", "glide", "terminal", "handwritten", "backdrop", "backdrop2"]);
 
-/** The burn's price per minute of video (USD), for the route's note; 0 on the open engine. */
-export function burnPricePerMinute(route: BurnRoute, style: string): number {
+/** VEED's translated subtitles add this per minute (its catalog note: "translation +$0.20/min"). */
+const VEED_TRANSLATION = 0.2;
+
+/** The burn's price per minute of video (USD), for the route's note; 0 on the open engine. `translated`: VEED also translates. */
+export function burnPricePerMinute(route: BurnRoute, style: string, translated = false): number {
   if (route === "open") return 0;
   if (route === "auto") return 0.03;
-  return VEED_DYNAMIC.has(styleById(style).veed) ? 0.2 : 0.1;
+  return (VEED_DYNAMIC.has(styleById(style).veed) ? 0.2 : 0.1) + (translated ? VEED_TRANSLATION : 0);
 }
 
 /** What the style controls mean on this burner, in one line. */

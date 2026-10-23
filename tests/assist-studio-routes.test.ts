@@ -53,6 +53,21 @@ async function priced<T>(fn: () => T | Promise<T>): Promise<T> {
   }
 }
 
+/** Claude connected as the LLM (nothing is called while pricing). */
+async function withLlm<T>(fn: () => T | Promise<T>): Promise<T> {
+  setSetting("anthropicKey", "test-key");
+  setSetting("enhanceProvider", "auto");
+  try {
+    return await fn();
+  } finally {
+    setSetting("anthropicKey", "");
+    setSetting("enhanceProvider", "none");
+  }
+}
+
+type Est = { result: { structuredContent: { studio?: string; href?: string; fallback?: string; jobs: { error?: string }[] }; isError: boolean } };
+const estimate = async (tool: string, args: unknown) => (await rpc("tools/call", { name: "estimate_job", arguments: { tool, arguments: args } })) as Est;
+
 const fixture = path.join(__dirname, "fixtures/shorts-12s.mp4");
 let png = "";
 let clip = "";
@@ -189,11 +204,11 @@ describe("Translate & dub", () => {
     (await (await dubRoute.POST(new Request("http://x/api/dub?preview=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }))).json()) as { costUsd: number; steps: number };
 
   it("prices the first stage like the studio's preview, and one-go dubs too", async () => {
-    const p = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish", "German"] }));
-    const route = await priced(() => preview({ engine: "cloud", mode: "steps", video: clip, targets: ["es", "de"] }));
+    const p = await withLlm(() => priced(() => plan("dub_video", { video: clip, languages: ["Spanish", "German"] })));
+    const route = await withLlm(() => priced(() => preview({ engine: "cloud", mode: "steps", video: clip, targets: ["es", "de"] })));
     expect(p).toMatchObject({ studio: "Translate & dub", href: "/audio/translate" });
-    // (The translation itself needs an LLM, which isn't connected here.)
-    expect(p.jobs).toEqual([expect.objectContaining({ op: "translate", costUsd: route.costUsd, prompt: "Into Spanish, German", count: 2 })]);
+    expect(p.jobs).toEqual([expect.objectContaining({ op: "translate", costUsd: route.costUsd, prompt: "Into Spanish, German", count: 2, demo: false })]);
+    expect(p.jobs[0].error).toBeUndefined();
     expect(route.costUsd).toBeGreaterThan(0);
     expect(p.jobs[0].note).toMatch(/review every line and voice it in Translate & dub/);
     const oneGo = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish"], review: false }));
@@ -220,6 +235,40 @@ describe("Translate & dub", () => {
     expect(s).toMatchObject({ mode: "oneshot", model: "elevenlabs-dubbing", targets: ["fr"] });
     expect(b.results).toEqual(Object.values(s.oneshot!));
     expect(gen(b.results[0])).toMatchObject({ modelId: "elevenlabs-dubbing", op: "dub" });
+  });
+
+  it("with a fal key but no Claude or Ollama, dubs in one go rather than plan a review that can't start", async () => {
+    // The review's translation would run as a demo among real steps, which createPipeline refuses.
+    const p = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish"] }));
+    expect(p).toMatchObject({ studio: "Translate & dub", href: "/audio/translate" });
+    expect(p.jobs).toEqual([expect.objectContaining({ modelId: "heygen-translate", op: "dub", demo: false })]);
+    expect(p.jobs[0].error).toBeUndefined();
+    expect(p.jobs[0].note).toMatch(/Reviewing the lines can't start: Translate · Spanish would run as a demo \(it needs Claude or Ollama\).*dubs in one go with HeyGen Translate/);
+    expect((await priced(() => estimate("dub_video", { video: clip, languages: ["Spanish"] }))).result.isError).toBe(false);
+    // A review asked for outright isn't swapped: the card says why it can't start, and nothing is made.
+    const asked = await priced(() => plan("dub_video", { video: clip, languages: ["Spanish"], review: true }));
+    expect(asked.jobs[0].error).toMatch(/^Reviewing the lines can't start: Translate · Spanish would run as a demo.*connect it in Settings, or dub in one go \(review: false\)/);
+    expect((await priced(() => estimate("dub_video", { video: clip, languages: ["Spanish"], review: true }))).result.isError).toBe(true);
+    const before = dub.listDubSessions(100).length;
+    const out = await priced(() => run("dub_video", { video: clip, languages: ["Spanish"], review: true }));
+    expect(out).toMatchObject({ isError: true, content: expect.stringMatching(/Reviewing the lines can't start/) });
+    expect(dub.listDubSessions(100)).toHaveLength(before);
+    // With Claude connected too, the review runs as planned.
+    expect((await withLlm(() => priced(() => plan("dub_video", { video: clip, languages: ["Spanish"], review: true })))).jobs[0]).toMatchObject({ op: "translate", demo: false });
+  });
+
+  it("reads a video's length once, however often a call is checked and priced", () => {
+    const fresh = saveFile({ data: fs.readFileSync(fixture), contentType: "video/mp4", source: "upload", name: "read once.mp4" }).url;
+    const spy = vi.spyOn(fs, "readFileSync");
+    try {
+      for (let k = 0; k < 3; k++) {
+        expect(plan("dub_video", { video: fresh, languages: ["German"] }, "open").studio).toBe("Translate & dub");
+        expect(plan("add_captions", { video: fresh }, "open").studio).toBe("Captions");
+      }
+      expect(spy.mock.calls.filter(([f]) => String(f).endsWith(path.basename(fresh)))).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("falls back for a language the studio doesn't list", () => {
@@ -286,7 +335,7 @@ describe("Ads Studio", () => {
     expect(out.isError).toBeFalsy();
     const b = body(out);
     expect(b.href).toBe(`/ads/${b.brand}`);
-    expect(brand.getBrand(b.brand)).toMatchObject({ source: "manual", status: "ready" });
+    expect(brand.getBrand(b.brand)).toMatchObject({ source: "manual", status: "ready", origin: "assist", name: b.brandName });
     expect(brand.getProduct(b.product)).toMatchObject({ name: "Cold brew coffee for night owls", brandId: b.brand, images: [png] });
     const creatives = ads.listCreatives({ brandId: b.brand, batchId: b.batch });
     expect(creatives).toHaveLength(2);
@@ -297,6 +346,39 @@ describe("Ads Studio", () => {
     // The same product again goes back to its kit.
     const again = body(await run("create_ads", { brief, count: 1 }));
     expect([again.brand, again.product]).toEqual([b.brand, b.product]);
+  });
+
+  it("never takes over the user's own kits or changes their products", async () => {
+    const acme = await brand.createManualBrand({ description: "Acme makes running gear", name: "Acme" });
+    const shoes = brand.createProduct({ name: "Running shoes", brandId: acme.id });
+    const photo = saveFile({ data: encodePng({ width: 32, height: 32, data: Buffer.alloc(32 * 32 * 4, 90) }), contentType: "image/png", source: "upload", name: "shoe.png" }).url;
+    // No brand_id: a kit of Assist's own, even though Acme has a product of that name.
+    const b = body(await run("create_ads", { brief: "Running shoes, light and fast", product_image: photo, count: 1 }));
+    expect(b.brand).not.toBe(acme.id);
+    expect(brand.getBrand(b.brand)?.origin).toBe("assist");
+    expect(brand.getProduct(shoes.id)?.images).toEqual([]);
+    // Acme named: the ads are Acme's, and the new photo makes a second "Running shoes" rather than replacing Acme's.
+    const named = body(await run("create_ads", { brief: "Running shoes, light and fast", product_image: photo, brand_id: acme.id, count: 1 }));
+    expect(named.brand).toBe(acme.id);
+    expect(named.product).not.toBe(shoes.id);
+    expect(brand.getProduct(shoes.id)?.images).toEqual([]);
+    expect(brand.getProduct(named.product)).toMatchObject({ name: "Running shoes", brandId: acme.id, images: [photo] });
+    // The same photo again goes to that product; no photo, to the first of that name.
+    expect(body(await run("create_ads", { brief: "Running shoes", product_image: photo, brand_id: acme.id, count: 1 })).product).toBe(named.product);
+    expect(brand.listProducts(acme.id).filter((p) => p.name === "Running shoes")).toHaveLength(2);
+  });
+
+  it("keeps a given headline on Fuobe's compositor, even with a Higgsfield key", async () => {
+    setSetting("higgsfieldKey", "id:secret");
+    try {
+      const own = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"] }));
+      expect(own.jobs[0].modelName).toBe("Higgsfield Ads Studio");
+      const fixed = await priced(() => plan("create_ads", { brief: "Sneakers for city runs", aspect_ratios: ["4:5"], headline: "Run the city" }));
+      expect(fixed.jobs[0].modelName).not.toBe("Higgsfield Ads Studio");
+      expect(fixed.jobs[0].note).toMatch(/each in 1:1, 4:5 and 9:16/);
+    } finally {
+      setSetting("higgsfieldKey", "");
+    }
   });
 
   it("falls back for formats it doesn't make", () => {
@@ -313,6 +395,11 @@ describe("Captions", () => {
     expect(p.jobs.map((j) => j.modelId)).toEqual(["scribe-v2", "auto-subtitle"]);
     expect(p.jobs[1].costUsd).toBe(Math.round(burnPricePerMinute("auto", "clean") * (12 / 60) * 1000) / 1000);
     expect(p.jobs[0].costUsd).toBeGreaterThan(0);
+    // VEED translating as it burns: its basic rate plus the translation's $0.20 a minute.
+    const translated = await priced(() => plan("add_captions", { video: clip, translate_to: "Spanish" }));
+    expect(translated.jobs).toEqual([expect.objectContaining({ modelId: "veed-subtitles", costUsd: Math.round(0.3 * (12 / 60) * 1000) / 1000 })]);
+    expect(burnPricePerMinute("veed", "clean", true)).toBeCloseTo(0.3);
+    expect(burnPricePerMinute("veed", "clean")).toBeCloseTo(0.1);
   });
 
   it("burns them in and opens the editor on the video with its lines", async () => {
@@ -349,7 +436,6 @@ describe("MCP", () => {
   });
 
   it("estimate_job says where the job opens, or why it runs in the Library", async () => {
-    type Est = { result: { structuredContent: { studio?: string; href?: string; fallback?: string; jobs: unknown[] }; isError: boolean } };
     const est = (await rpc("tools/call", { name: "estimate_job", arguments: { tool: "dub_video", arguments: { video: clip, languages: ["Spanish"] } } })) as Est;
     expect(est.result.isError).toBe(false);
     expect(est.result.structuredContent).toMatchObject({ studio: "Translate & dub", href: "/audio/translate" });
@@ -358,6 +444,14 @@ describe("MCP", () => {
     const off = (await rpc("tools/call", { name: "estimate_job", arguments: { tool: "create_ads", arguments: { brief: "x", aspect_ratios: ["16:9"] } } })) as Est;
     expect(off.result.structuredContent.studio).toBeUndefined();
     expect(off.result.structuredContent.fallback).toMatch(/Library/);
+  });
+
+  it("tool arguments name what each studio takes", async () => {
+    const list = (await rpc("tools/list")) as { result: { tools: { name: string; inputSchema: { properties: Record<string, { description?: string; items?: unknown }> } }[] } };
+    const arg = (tool: string, key: string) => list.result.tools.find((t) => t.name === tool)!.inputSchema.properties[key].description ?? "";
+    expect(arg("restyle_footage", "model_id")).toMatch(/gemini-omni-flash.*oss-wan22-vace-restyle.*outside Shorts Studio/);
+    expect(arg("split_layers", "model_id")).toMatch(/seedream-5-layers.*oss-qwen-layered.*outside Layers/);
+    expect(arg("create_ads", "aspect_ratios")).toMatch(/16:9 runs outside Ads Studio/);
   });
 
   it("tools/call returns the job's page", async () => {
@@ -391,9 +485,12 @@ describe("Assist chat", () => {
   it("a call the studio can't take says why on the card", async () => {
     const t = agent.createThread({ engine: "open", agent: "offline", autoApprove: false });
     agent.addMessage(t.id, "A square tea episode");
-    await agent.run(t.id, scripted(reply([use("u1", "faceless_episode", { scenes, style: "watercolour", aspect_ratio: "1:1" })], "tool_use")));
+    // Two square episodes in one turn: the reason is said once.
+    const square = { scenes, style: "watercolour", aspect_ratio: "1:1" };
+    await agent.run(t.id, scripted(reply([use("u1", "faceless_episode", square), use("u2", "faceless_episode", { ...square, title: "Again" })], "tool_use")));
     const card = agent.getThread(t.id)!.thread.items.find((i) => i.role === "approval");
     expect(card).toMatchObject({ notes: [expect.stringMatching(/16:9 and 9:16 episodes — so it runs as separate steps in your Library\./)] });
+    expect(card && "notes" in card ? card.notes : []).toHaveLength(1);
     expect(card && "opens" in card ? card.opens : undefined).toBeUndefined();
   });
 

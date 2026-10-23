@@ -939,7 +939,8 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     const total = plans.some((p) => p.total === null) ? null : plans.reduce((n, p) => n + (p.total ?? 0), 0);
     const summary = [...new Set(gated.map((g) => cardTitle(g.name, g.input)))].join(" · ");
     const opens = [...new Set(plans.flatMap((p) => (p.studio ? [p.studio] : [])))];
-    const notes = plans.flatMap((p) => (p.fallback ? [`${p.fallback}.`] : []));
+    // Two calls that fall back for the same reason say it once.
+    const notes = [...new Set(plans.flatMap((p) => (p.fallback ? [`${p.fallback}.`] : [])))];
     const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending", ...(opens.length && { opens }), ...(notes.length && { notes }) });
     offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };

@@ -132,8 +132,8 @@ export function ApprovalCard({ item, live, onAnswer }: { item: Extract<AssistIte
               <AppWindow className="mt-0.5 size-3.5 shrink-0" /> Opens in {item.opens.join(" and ")}, where you can keep working on it
             </p>
           ) : null}
-          {item.notes?.map((n) => (
-            <p key={n} className="flex items-start gap-1.5">
+          {item.notes?.map((n, k) => (
+            <p key={k} className="flex items-start gap-1.5">
               <Info className="mt-0.5 size-3.5 shrink-0" /> {n}
             </p>
           ))}
