@@ -14,7 +14,7 @@ import { MediaDrop } from "@/components/av/media-drop";
 import { StepList } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useGeneration } from "@/components/av/use-generation";
-import { useCreateGeneration, useEngine, useGenerations, useHydrated } from "@/lib/api";
+import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
 import {
   BURN_CAPS,
@@ -92,9 +92,14 @@ function download(name: string, text: string, type: string) {
 
 /** Captions (Video tools → Captions): transcribe, fix every line, style, burn in — or export .srt / .vtt. */
 export function CaptionsStudio({ tabs }: { tabs?: React.ReactNode }) {
-  // The last project comes back after a reload (this browser only), once hydrated; a hand-off link wins.
-  const hydrated = useHydrated();
-  const saved = useMemo(() => (hydrated ? (handoff() ?? load()) : undefined), [hydrated]);
+  // The last project comes back after a reload (this browser only); a hand-off link wins. Both are read
+  // once mounted: on a link from Assist the address only changes as the new page commits, so reading
+  // it while rendering would still see /assist.
+  const [saved, setSaved] = useState<Saved | null | undefined>(undefined);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the address and this browser's project once mounted
+    setSaved(handoff() ?? load());
+  }, []);
   const [picked, setVideo] = useState<SlotValue | null | undefined>(undefined);
   const video = picked === undefined ? (saved?.video ?? null) : picked;
   const results = useGenerations({ features: ["captions"], kinds: ["video"], limit: 24 });
