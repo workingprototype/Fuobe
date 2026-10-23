@@ -169,10 +169,18 @@ node validate-workflows.mjs <ids> wan21-vace-14b-ref2v --shared
   crossfade curve upload `fadeCurve` (the research used `audio2` / `audio3`, which the provider fills with user audio);
   the brief binds `frames` / `startFrame` (canonical keys) and `frameWidth` (a canonical `width` would be resized by the
   provider) plus `seed`; TripoSplat's `seed` drives both the sampler and the decoder; outputs use kind `model3d`.
+  The four VACE graphs and VOID take their window in **seconds** (`startTime`, `duration`): core `Video Slice` decodes
+  only the window (at most 81 / 197 frames + half a frame at the clip's fps, read from a 0.1 s probe slice), the graph
+  keeps the largest 4n+1 / 8n+5 frames it decoded and trims the sound to exactly those frames; `width` × `height` is a
+  work-size budget the graph renders in the clip's own shape (scaled, never cropped, so the VACE paste-back lines up).
+  The research graphs decoded the whole clip as float32 before cutting the window (`startFrame` / `frames`) and
+  centre-cropped to `width` × `height`. MoGe resizes on the longer edge (the research tested the width only).
 - **What the provider has to do** (feature packages): write the crossfade curve (a stereo WAV exactly `crossfade` seconds
   long, left = sin(π/2·t), right = cos(π/2·t), 8 kHz) and upload it as `fadeCurve`; parse the OCR JSON (strip fences,
-  `bbox`/`text` or `bbox_2d`/`text_content`, boxes relative 0–1000); run VACE / VOID windows of ≤ 81 / ≤ 197 source frames
-  (`startFrame`, `frames` counted at the clip's own fps) and join them; map Ken Burns and export params; for a silent ad
+  `bbox`/`text` or `bbox_2d`/`text_content`, boxes relative 0–1000); run VACE / VOID windows (`startTime` = k × 81 / fps,
+  `duration` = 81 / fps; VOID 197; fps from the clip's header, `duration` 0 = the longest window) and join them; map Ken
+  Burns and export params; set `meta.format` on the splat (and a content type for `.ksplat`, `.mkv` and `.exr`, which
+  `storage.ts` has no extension for: they would be saved as `.bin`); for a silent ad
   drop nodes 2, 12 and 13 of the end card and node 14's `complete_audio` (`LoadAudio` stops on a clip with no sound),
   and fall back to `still-to-clip` + `video-concat-sound1-2` for clips other encoders made.
 - **Build**: `OpticalFlowLoader` (folder `optical_flow`) and `LoadMoGeModel` (`geometry_estimation`) are known loaders;
@@ -186,9 +194,12 @@ node validate-workflows.mjs <ids> wan21-vace-14b-ref2v --shared
   (0 + steps 20 + cfg 6 = full quality). Re-validated; the pairing is inferred, not GPU-tested.
 - **Real runs** used the fixtures plus tiny generated tones / noise, on the shared CPU server (own prompt ids only; the
   test inputs and outputs were deleted afterwards), in two sessions; every output was checked with ffprobe (and
-  framemd5, silencedetect or numpy where it matters). Timings are in each entry's notes. The VACE graphs' window-and-sound
-  part (`ImageFromBatch` + `TrimAudioDuration` at the clip's fps → `CreateVideo`, nodes taken from the built graph) ran on
-  a clip with sound (the window's 0.84 s kept) and a silent one (no sound track, no error).
+  framemd5, silencedetect or numpy where it matters). Timings are in each entry's notes. The window, sound and work-size
+  nodes of the VACE and VOID graphs (taken from the built graphs, the model replaced by the work-size frames scaled back)
+  ran on a 9:16 30 fps clip with sound (81 frames and 2.700 s of sound from 1 s, rendered at 464×832 and back, lined up
+  with the source frames), a 1 s window (29 frames), a silent clip (no sound track, no error), a 25 fps clip through
+  VOID (197 frames, 7.880 s of picture and of sound, 672×376) and a window at 50 s of a 60 s clip (0.6 s instead of
+  2.6 s with the whole-clip decode). MoGe's guard ran on 1536×3000, 3000×1536 and 1024×768 stills.
 
 ## Adding a workflow
 
