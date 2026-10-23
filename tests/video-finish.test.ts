@@ -2,21 +2,22 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { FORMAT_INFO, formatList, formatsOf } from "@/lib/av/formats";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, fpsFrames, fpsPlan, fpsSummary } from "@/lib/av/fps";
-import { targetShortEdge, upscaledSize, upscaleFactorFor } from "@/lib/av/upscale";
-import { exportValues, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipBytes } from "@/lib/av/video-finish";
+import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "@/lib/av/upscale";
+import { exportValues, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipBytes, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
 import { estimateCost, planGeneration } from "@/lib/catalog/plan";
 import type { Generation, GenerationRequest, GenInput, ModelDef, Operation, OutputFile } from "@/lib/catalog/types";
-import type { ComfyWorkflow } from "@/lib/comfy";
-import { clipOutcome, formatOf, settingsShape, settingsSummary } from "@/lib/composer";
+import { explainComfyError, type ComfyWorkflow } from "@/lib/comfy";
+import { clipOutcome, formatOf, settingsShape, settingsSummary, showsPrompt } from "@/lib/composer";
 import { HUB_MODES } from "@/lib/hubs";
 import type { MediaInfo } from "@/lib/media-probe";
 import { editOnlyFormat, outputActions } from "@/lib/output-actions";
-import { FPS_BOOST_STUDIO, SDR_TO_HDR_STUDIO, VIDEO_EXPORT_STUDIO, VIDEO_UPSCALE_STUDIO } from "@/lib/studios";
+import { slimModel } from "@/lib/studio-catalog";
+import { FPS_BOOST_STUDIO, SDR_TO_HDR_STUDIO, UPSCALE_STUDIO, VIDEO_EXPORT_STUDIO, VIDEO_UPSCALE_STUDIO } from "@/lib/studios";
 
 // The Upscale hub's video tools (r4/video-finish): FPS Boost and slow motion, SDR to HDR, pro export formats,
 // the upscalers' options, and chunked open upscaling.
@@ -94,9 +95,26 @@ describe("upscale targets", () => {
     // FLUX.3 Upscale takes 1.5–3×.
     expect(upscaleFactorFor("1440p", { width: 1920, height: 1080 }, 1.5, 3)).toBe(1.5);
     expect(upscaleFactorFor("1080p", { width: 854, height: 480 }, 1.5, 3)).toBe(2.25);
+    expect(upscaleFactorFor("1440p", { width: 1920, height: 1080 })).toBe(1.333);
+    expect(upscaledSize({ width: 1920, height: 1080 }, "1440p", 1.333)).toEqual({ width: 2560, height: 1440 });
     expect(upscaleFactorFor("4K", undefined)).toBeUndefined();
     expect(upscaledSize({ width: 720, height: 1280 }, "1080p")).toEqual({ width: 1080, height: 1920 });
     expect(upscaledSize({ width: 1280, height: 720 }, "Original")).toEqual({ width: 1280, height: 720 });
+  });
+
+  it("never runs a tier that leaves the clip as it is or shrinks it: a default moves up, a picked one is refused", () => {
+    const topaz = model("topaz-video").options.resolutions;
+    const esrgan = model("oss-upscale-video-esrgan").options.resolutions;
+    const fhd = { width: 1920, height: 1080 };
+    expect(upscaleTier("4K", topaz, fhd, true)).toEqual({ resolution: "4K" });
+    expect(upscaleTier("1080p", topaz, fhd, false)).toEqual({ resolution: "1440p" });
+    expect(upscaleTier("1080p", topaz, fhd, true)).toEqual({ error: "This clip is already 1080p — pick a higher resolution, or Original to only clean it up" });
+    // Topaz at its top tier: only cleaning up is left.
+    expect(upscaleTier("1080p", topaz, { width: 3840, height: 2160 }, false)).toEqual({ resolution: "Original" });
+    // Chunked ESRGAN would scale a 4K source down to 1080p.
+    expect(upscaleTier("1080p", esrgan, { width: 3840, height: 2160 }, false)).toEqual({ error: "This clip is already 2160p: 1080p would make it smaller — this model upscales no further" });
+    expect(upscaleTier("1080p", esrgan, { width: 720, height: 1280 }, true)).toEqual({ resolution: "1080p" });
+    expect(upscaleTier("1080p", esrgan, undefined, false)).toEqual({ resolution: "1080p" });
   });
 });
 
@@ -150,6 +168,35 @@ describe("Upscale hub modes", () => {
     // Without the clip's length: the model's default seconds, as before.
     expect(estimateCost(fps, {}, 1, "interpolate")).toBe(0.15);
     for (const id of ["oss-rife", "oss-sdr-to-hdr", "oss-export-video", "oss-seedvr2", "oss-upscale-video-esrgan"]) expect(estimateCost(model(id), { sourceDuration: 30 }, 1, "upscale-video"), id).toBe(0);
+  });
+
+  it("prices the settings that change the price: 60 fps, ByteDance Pro, FLUX.3 Creative, Starlight Fast 2, Aion", () => {
+    const at = (id: string, params: GenerationRequest["params"]) => estimateCost(model(id), { sourceDuration: 10, ...params }, 1, "upscale-video");
+    expect(at("topaz-video", { resolution: "1080p", targetFps: 30 })).toBe(0.2);
+    expect(at("topaz-video", { resolution: "1080p", targetFps: 60 })).toBe(0.4);
+    expect(at("bytedance-video-upscale", { resolution: "1080p" })).toBe(0.072);
+    expect(at("bytedance-video-upscale", { resolution: "1080p", extra: { enhancement_tier: "pro" } })).toBe(0.72);
+    expect(at("bytedance-video-upscale", { resolution: "1080p", targetFps: 60, extra: { enhancement_tier: "pro" } })).toBe(1.44);
+    expect(at("flux-video-upscale", { resolution: "1440p", extra: { creativity: 1 } })).toBe(2.1);
+    expect(at("flux-video-upscale", { resolution: "1440p", extra: { creativity: 0 } })).toBe(1.5);
+    expect(at("topaz-starlight", { resolution: "4K", extra: { model: "Starlight Fast 2" } })).toBe(1.3);
+    expect(estimateCost(model("topaz-fps-boost"), { targetFps: 60, sourceDuration: 10, extra: { model: "Aion" } }, 1, "interpolate")).toBe(0.501);
+  });
+
+  it("shows the prompt box only for a model that reads one: FLUX.3 Upscale's details to keep", () => {
+    const flux = model("flux-video-upscale").options;
+    expect(showsPrompt(VIDEO_UPSCALE_STUDIO, flux)).toBe(true);
+    expect(VIDEO_UPSCALE_STUDIO.modelPrompt).toBe(UPSCALE_STUDIO.modelPrompt);
+    for (const id of ["topaz-video", "topaz-starlight", "bytedance-video-upscale", "seedvr-video", "oss-seedvr2", "oss-upscale-video-esrgan"]) expect(showsPrompt(VIDEO_UPSCALE_STUDIO, model(id).options), id).toBe(false);
+    // A studio that hides the box without wording one keeps it hidden; presets and promptless models never show it.
+    expect(showsPrompt(SDR_TO_HDR_STUDIO, flux)).toBe(false);
+    expect(showsPrompt({}, flux, "none")).toBe(false);
+    expect(showsPrompt({}, model("topaz-video").options)).toBe(false);
+    expect(showsPrompt({}, {})).toBe(true);
+    // FLUX.3 sends what was typed, and leaves the prompt out when nothing was.
+    const map = route("flux-video-upscale", "upscale-video").map!;
+    expect(buildPayload(map, { video: "v", prompt: "the lettering on the sign", resolution: "4K", sourceSize: { width: 1280, height: 720 } })).toMatchObject({ prompt: "the lettering on the sign", upscale_factor: 3 });
+    expect(buildPayload(map, { video: "v", prompt: "  ", resolution: "4K" })).not.toHaveProperty("prompt");
   });
 });
 
@@ -258,6 +305,27 @@ describe("composer: settings and what comes out", () => {
     expect(clipOutcome("export-video", facts, { format: "exr" }, model("oss-export-video"))).toBe("1280×720 · 10 s → EXR 16-bit (240 frames), .zip");
     expect(clipOutcome("export-video", {}, {}, model("oss-export-video"))).toBeNull();
   });
+
+  it("keeps an API's factor range and a frame-count route's cap in the line, also from the browser's slim catalog", () => {
+    for (const m of [model("flux-video-upscale"), slimModel(model("flux-video-upscale"))]) {
+      // 1440p of a 1080p clip is 1.33×; FLUX.3 takes 1.5× at least.
+      expect(clipOutcome("upscale-video", { width: 1920, height: 1080, fps: 24, duration: 10 }, { resolution: "1440p" }, m)).toBe("1920×1080 → 2880×1620 (FLUX.3 Upscale upscales at least 1.5×)");
+    }
+    // 4K of 480p is 4.5×; Topaz stops at 4×.
+    expect(clipOutcome("upscale-video", { width: 854, height: 480 }, { resolution: "4K" }, slimModel(model("topaz-video")))).toBe("854×480 → 3416×1920 (Topaz Video upscales at most 4×)");
+    expect(clipOutcome("upscale-video", { width: 1280, height: 720 }, { resolution: "4K" }, slimModel(model("topaz-video")))).toBe("1280×720 → 3840×2160");
+    // A default tier the clip already has moves up, as the server does.
+    expect(clipOutcome("upscale-video", { width: 1920, height: 1080 }, {}, model("topaz-video"))).toBe("1920×1080 → 2560×1440 · 1440p, as the clip is already 1080p");
+    // LTX 2.3 HDR renders 24 fps and at most 481 frames: a 30 s clip is cut to its first 20 s.
+    const ltx = slimModel(model("ltx-2-3-hdr"));
+    expect(ltx.routes[0]).not.toHaveProperty("map");
+    expect(ltx.routes[0].preview).toEqual({ numFrames: { key: "num_frames", fps: 24, min: 9, max: 481 } });
+    expect(clipOutcome("sdr-to-hdr", { width: 1280, height: 720, fps: 30, duration: 30 }, {}, ltx)).toBe(
+      "1280×720 · 30 s → EXR 16-bit (481 frames at 24 fps: only the first 20 s, the most LTX 2.3 HDR takes), .zip",
+    );
+    expect(clipOutcome("sdr-to-hdr", { width: 1280, height: 720, fps: 30, duration: 10 }, {}, ltx)).toBe("1280×720 · 10 s → EXR 16-bit (240 frames at 24 fps), .zip");
+    expect(slimModel(model("topaz-sdr-to-hdr")).routes[0]).not.toHaveProperty("preview");
+  });
 });
 
 describe("results", () => {
@@ -268,8 +336,12 @@ describe("results", () => {
     const o: OutputFile = { url: "/api/files/outputs/x/preview.mp4", kind: "video", meta: { artifacts: { exr: "/api/files/outputs/x/frames.zip" } } };
     const a = outputActions(gen(o, { format: "exr" }, "export-video"), 0).find((x) => x.id === "download-exr");
     expect(a).toMatchObject({ label: "Download EXR frames (.zip)", placement: "bar", href: expect.stringMatching(/^\/api\/files\/outputs\/x\/frames\.zip\?download=.+-exr\.zip$/) });
-    // A provider link that was never stored isn't offered.
-    expect(outputActions(gen({ ...o, meta: { artifacts: { exr: "https://cdn.example/frames.zip" } } }, {}, "sdr-to-hdr"), 0).some((x) => x.id === "download-exr")).toBe(false);
+    // A provider link that couldn't be stored is still offered (it expires), as it is.
+    expect(outputActions(gen({ ...o, meta: { artifacts: { exr: "https://cdn.example/frames.zip" } } }, {}, "sdr-to-hdr"), 0).find((x) => x.id === "download-exr")).toMatchObject({
+      label: "Download EXR frames (.zip, provider link)",
+      href: "https://cdn.example/frames.zip",
+    });
+    expect(outputActions(gen({ ...o, meta: { artifacts: { exr: "javascript:alert(1)" } } }, {}, "sdr-to-hdr"), 0).some((x) => x.id === "download-exr")).toBe(false);
   });
 
   it("shows ProRes and FFV1 files as files for an editor, not as a black player", () => {
@@ -289,7 +361,8 @@ describe("results", () => {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-video-finish-"));
 process.env.FUOBE_DATA_DIR = tmp;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
-const { prepareWorkflow } = await import("@/server/providers/comfyui");
+const { prepareWorkflow, comfyProvider, CANCEL_SWEEPS } = await import("@/server/providers/comfyui");
+const { db } = await import("@/server/db");
 const { zipToFile } = await import("@/server/zip");
 const { mediaFacts } = await import("@/server/media-facts");
 const { setSetting } = await import("@/server/settings");
@@ -343,6 +416,39 @@ describe("open FPS Boost (interpolate-rife-fps)", () => {
     );
     expect(wholeClipBytes({ width: 100, height: 100, frames: 10 }, 2)).toBe(100 * 100 * 12 * 10 * 2);
   });
+
+  it("counts the copies the graph really holds: the source, its padded copy and m interpolated frames per frame", async () => {
+    // 5 s of 1080p at 24 fps → 60 fps is m 5: 7 copies of 120 frames, about 20 GB (Select Every Nth is a view).
+    const fhd = clip({ width: 1920, height: 1080, fps: 24, duration: 5, videoDuration: 5, frames: 120 });
+    expect(wholeClipTool("interpolate", undefined, 5)).toMatchObject({ copies: 7 });
+    expect(wholeClipTool("interpolate", undefined, 1)).toMatchObject({ copies: 2 });
+    const message = "FPS Boost on the open engine holds the whole clip in memory: this one needs about 20 GB of RAM and this ComfyUI can spare 16 GB. Trim it first (Video tools → Trim), or pick a lower frame rate";
+    await expect(prep("interpolate-rife-fps", "interpolate", { targetFps: 60 }, fhd, 32 * 2 ** 30)).rejects.toThrow(message);
+    // The composer checks the same rule before Generate, from the clip's header and the server's RAM.
+    expect(wholeClipProblem(wholeClipTool("interpolate", undefined, 5)!, { width: 1920, height: 1080, fps: 24, duration: 5 }, 32 * 2 ** 30)).toBe(message);
+    expect(wholeClipProblem(wholeClipTool("interpolate", undefined, 5)!, { width: 1920, height: 1080, fps: 24, duration: 5 }, 64 * 2 ** 30)).toBeNull();
+    // 30 → 60 (m 2) on the same server fits: 4 copies, about 11 GB.
+    await expect(prep("interpolate-rife-fps", "interpolate", { targetFps: 60 }, clip({ ...fhd, fps: 30, frames: 150 }), 32 * 2 ** 30)).resolves.toBeTruthy();
+  });
+
+  it("needs the clip's frame rate: the upload's header, else the server's reading; never a guess", async () => {
+    const unknown = clip({ fps: undefined });
+    await expect(prep("interpolate-rife-fps", "interpolate", { targetFps: 60 }, unknown)).rejects.toThrow(
+      "FPS Boost on the open engine works out its frames from the clip's frame rate, and this file doesn't say what it is, so 60 fps can't be hit. Re-save it as MP4 (H.264) or WebM and try again",
+    );
+    const { workflow: wf } = await prep("interpolate-rife-fps", "interpolate", { targetFps: 60, sourceFps: 24 }, unknown);
+    expect([wf["6"].inputs.value, wf["8"].inputs.value]).toEqual([5, 2]);
+  });
+
+  it("lists FILM as an optional download, so a missing FILM file is named with its link", async () => {
+    const { manifest } = await prep("interpolate-rife-fps", "interpolate", { targetFps: 60 });
+    expect(manifest.models.find((m) => m.file === "film_net_fp16.safetensors")).toMatchObject({ folder: "frame_interpolation", optional: true, sizeGb: 0.07 });
+    expect(manifest.models.find((m) => m.file === "rife_v4.26.safetensors")?.optional).toBeUndefined();
+    const err = { "5": { class_type: "FrameInterpolationModelLoader", errors: [{ message: "Value not in list", extra_info: { input_name: "model_name", received_value: "film_net_fp16.safetensors" } }] } };
+    expect(explainComfyError(err, manifest)).toBe(
+      'Missing model "film_net_fp16.safetensors" — put it in ComfyUI/models/frame_interpolation (download: https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors)',
+    );
+  });
 });
 
 describe("open SDR to HDR and Export", () => {
@@ -357,6 +463,20 @@ describe("open SDR to HDR and Export", () => {
     expect(one(exr.workflow, "SaveImageAdvanced").inputs).toMatchObject({ format: "exr", "format.bit_depth": "16-bit float", filename_prefix: "fuobe/gen1" });
     await expect(prep("video-sdr-to-hdr", "sdr-to-hdr", { format: "prores_422_hq" })).rejects.toThrow(/H\.265 and ProRes HDR come from Topaz SDR to HDR on the cloud/);
     expect(hdrColorSpace(undefined)).toBe("HDR");
+  });
+
+  it("holds two copies of the clip (decoded, tone mapped): 10 s of 1080p fits a 32 GB server, a minute doesn't", async () => {
+    const fhd = (seconds: number) => clip({ width: 1920, height: 1080, fps: 24, duration: seconds, videoDuration: seconds, frames: seconds * 24 });
+    await expect(prep("video-sdr-to-hdr", "sdr-to-hdr", {}, fhd(10), 32 * 2 ** 30)).resolves.toBeTruthy();
+    await expect(prep("video-sdr-to-hdr", "sdr-to-hdr", { format: "exr" }, fhd(10), 32 * 2 ** 30)).resolves.toBeTruthy();
+    await expect(prep("video-export-pro-chunked", "export-video", { format: "exr" }, fhd(10), 32 * 2 ** 30)).resolves.toBeTruthy();
+    await expect(prep("video-sdr-to-hdr", "sdr-to-hdr", {}, fhd(60), 32 * 2 ** 30)).rejects.toThrow(
+      "SDR to HDR on the open engine holds the whole clip in memory: this one needs about 67 GB of RAM and this ComfyUI can spare 16 GB. Trim it first (Video tools → Trim)",
+    );
+    // Export in passes holds no whole clip.
+    expect(wholeClipTool("export-video", "prores_422_hq")).toBeNull();
+    expect(wholeClipTool("export-video", "exr")).toMatchObject({ copies: 2 });
+    await expect(prep("video-export-pro-chunked", "export-video", { format: "prores_422_hq" }, fhd(600), 8 * 2 ** 30)).resolves.toBeTruthy();
   });
 
   it("maps each export format onto VideoHelperSuite, in passes with a manager of the job's own", async () => {
@@ -396,6 +516,11 @@ describe("chunked open upscaling (R4-38)", () => {
     expect(one(wf, "VHS_LoadVideo").inputs.meta_batch).toEqual(["2", 0]);
   });
 
+  it("ESRGAN on a big source goes down to one frame a pass (about 0.85 GB a frame from 1440p to 2160p)", async () => {
+    const { workflow: wf } = await prep("upscale-video-esrgan-chunked", "upscale-video", { resolution: "2160p" }, clip({ width: 2560, height: 1440 }));
+    expect(one(wf, "VHS_BatchManager").inputs.frames_per_batch).toBe(1);
+  });
+
   it("SeedVR2: passes of 4n+1 frames", async () => {
     const { workflow: wf } = await prep("upscale-video-seedvr2-chunked", "upscale-video", { resolution: "1080p" });
     expect(one(wf, "VHS_BatchManager").inputs.frames_per_batch).toBe(33);
@@ -426,6 +551,36 @@ describe("files", () => {
     expect(out).toBe("None frame_00001.exr:1000|frame_00002.exr:2000|frame_00003.exr:3000");
   });
 
+  it("keeps a provider's big EXR zip (streamed to disk, past the 200 MB in-memory cap), or its link when it can't be fetched", async () => {
+    const http = await import("node:http");
+    const server = http.createServer((req, res) => {
+      if (req.url !== "/out/frames.zip") return void res.writeHead(404).end();
+      res.setHeader("content-type", "application/zip");
+      let i = 0;
+      const next = () => (i++ < 20 ? res.write(Buffer.alloc(256 * 1024, i), () => setImmediate(next)) : res.end());
+      next();
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+    process.env.FUOBE_ALLOW_PRIVATE_URLS = "1";
+    try {
+      const kept = await gens.persistArtifacts({ frames: 481, artifacts: { exr: `http://127.0.0.1:${port}/out/frames.zip` } }, "genexr");
+      const url = (kept?.artifacts as Record<string, string>).exr;
+      expect(url).toMatch(/^\/api\/files\/outputs\/.+\.zip$/);
+      expect(kept?.frames).toBe(481);
+      const file = path.join(tmp, "files", decodeURIComponent(url.slice("/api/files/".length)));
+      expect(fs.statSync(file).size).toBe(20 * 256 * 1024);
+      expect(fs.readdirSync(path.join(tmp, "tmp"))).toEqual([]);
+      // Gone at the provider: the link stays (the result still offers it).
+      const lost = await gens.persistArtifacts({ artifacts: { exr: `http://127.0.0.1:${port}/out/gone.zip` } }, "genexr");
+      expect((lost?.artifacts as Record<string, string>).exr).toBe(`http://127.0.0.1:${port}/out/gone.zip`);
+      expect(fs.readdirSync(path.join(tmp, "tmp"))).toEqual([]);
+    } finally {
+      delete process.env.FUOBE_ALLOW_PRIVATE_URLS;
+      server.close();
+    }
+  });
+
   it("reads a clip's header: size, frame rate and length", () => {
     const facts = mediaFacts(fs.readFileSync(path.join(process.cwd(), "public/samples/demo-square.mp4")));
     expect(facts).toMatchObject({ width: 576, height: 576, fps: 24 });
@@ -433,8 +588,100 @@ describe("files", () => {
   });
 });
 
+describe("cancelling a job", () => {
+  const ctx = (externalId: string, meta: Record<string, unknown>) => ({ externalId, meta, route: route("oss-export-video", "export-video"), model: model("oss-export-video"), createdAt: 0 });
+  const graph = (prefix: string) => ({ "4": { class_type: "VHS_VideoCombine", inputs: { filename_prefix: prefix } } });
+
+  /** A ComfyUI queue in memory; `onInterrupt` runs when a prompt is interrupted. */
+  function fakeComfy(running: unknown[][], pending: unknown[][], onInterrupt?: (q: { pending: unknown[][] }) => void) {
+    const state = { running, pending, posts: [] as { path: string; body: Record<string, unknown> }[] };
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        state.posts.push({ path: url.pathname, body });
+        if (url.pathname === "/queue") state.pending = state.pending.filter((q) => !(body.delete as string[]).includes(String(q[1])));
+        if (url.pathname === "/interrupt") {
+          state.running = state.running.filter((q) => q[1] !== body.prompt_id);
+          onInterrupt?.(state);
+        }
+        return Response.json({});
+      }
+      if (url.pathname === "/queue") return Response.json({ queue_running: state.running, queue_pending: state.pending });
+      return new Response("", { status: 404 });
+    }) as typeof fetch;
+    return { state, restore: () => void (globalThis.fetch = real) };
+  }
+
+  it("stops every pass of a meta-batch job (new ids, front of the queue), and one it queued while stopping", async () => {
+    const sweeps = { ...CANCEL_SWEEPS };
+    Object.assign(CANCEL_SWEEPS, { everyMs: 5 });
+    let requeued = false;
+    // Pass 3 runs, pass 4 waits at the front; pass 3 was already saving, so it queues pass 5 as it stops.
+    const comfy = fakeComfy([[-3, "pass-3", graph("fuobe/gen9")]], [[-4, "pass-4", graph("fuobe/gen9")], [12, "other", graph("fuobe/other")]], (q) => {
+      if (!requeued) q.pending = [[-5, "pass-5", graph("fuobe/gen9")], ...q.pending];
+      requeued = true;
+    });
+    try {
+      await comfyProvider.cancel!(ctx("pass-1", { metaBatch: true, prefix: "fuobe/gen9" }));
+      await vi.waitFor(() => expect(comfy.state.posts).toContainEqual({ path: "/queue", body: { delete: ["pass-5"] } }));
+      expect(comfy.state.posts.slice(0, 3)).toEqual([
+        { path: "/queue", body: { delete: ["pass-1"] } },
+        { path: "/queue", body: { delete: ["pass-4"] } },
+        { path: "/interrupt", body: { prompt_id: "pass-3" } },
+      ]);
+      expect(comfy.state.running).toEqual([]);
+      expect(comfy.state.pending.map((q) => q[1])).toEqual(["other"]);
+    } finally {
+      comfy.restore();
+      Object.assign(CANCEL_SWEEPS, sweeps);
+    }
+  });
+
+  it("a one-prompt job: deleted by its id, interrupted only when it's the one running", async () => {
+    const comfy = fakeComfy([[1, "other-running", graph("fuobe/other")]], [[2, "job", graph("fuobe/gen2")]]);
+    try {
+      await comfyProvider.cancel!(ctx("job", { prefix: "fuobe/gen2" }));
+      expect(comfy.state.posts).toEqual([{ path: "/queue", body: { delete: ["job"] } }]);
+      expect(comfy.state.running).toHaveLength(1);
+    } finally {
+      comfy.restore();
+    }
+  });
+});
+
 describe("demo mode", () => {
   beforeAll(() => setSetting("demoMode", "auto"));
+
+  async function settled(id: string) {
+    const end = Date.now() + 30_000;
+    let g = gens.getGeneration(id)!;
+    while (!["succeeded", "failed"].includes(g.status) && Date.now() < end) {
+      await new Promise((r) => setTimeout(r, 200));
+      g = gens.getGeneration(id)!;
+    }
+    return g;
+  }
+
+  it("an upscale that wouldn't enlarge the clip: a default tier moves up, a picked one fails with the reason", async () => {
+    const data = Buffer.from(fs.readFileSync(path.join(process.cwd(), "public/samples/demo-landscape.mp4")));
+    // The same clip, its header saying 1920×1080 (tkhd's display size, 16.16 fixed point).
+    const tkhd = data.indexOf("tkhd") + 4;
+    const matrix = tkhd + (data[tkhd] === 1 ? 52 : 40);
+    data.writeUInt32BE(1920 * 65536, matrix + 36);
+    data.writeUInt32BE(1080 * 65536, matrix + 40);
+    expect(mediaFacts(data)).toMatchObject({ width: 1920, height: 1080 });
+    const video = saveFile({ data, contentType: "video/mp4", source: "upload" }).url;
+    const [picked] = gens.createGenerations({ feature: "upscale", modelId: "topaz-video", op: "upscale-video", inputs: { video }, params: { resolution: "1080p" } });
+    const [auto] = gens.createGenerations({ feature: "upscale", modelId: "topaz-video", op: "upscale-video", inputs: { video } });
+    const [p, a] = [await settled(picked.id), await settled(auto.id)];
+    expect(p.status).toBe("failed");
+    expect(p.error).toBe("This clip is already 1080p — pick a higher resolution, or Original to only clean it up");
+    expect(a.status, a.error ?? undefined).toBe("succeeded");
+    const sent = db().prepare("SELECT provider_input_json FROM generations WHERE id = ?").get(auto.id) as { provider_input_json: string };
+    expect(JSON.parse(sent.provider_input_json)).toMatchObject({ resolution: "1440p", sourceSize: { width: 1920, height: 1080 } });
+  }, 40_000);
 
   it("an EXR export keeps its frames as a zip in the Library", async () => {
     const video = saveFile({ data: fs.readFileSync(path.join(process.cwd(), "public/samples/demo-square.mp4")), contentType: "video/mp4", source: "upload" }).url;
