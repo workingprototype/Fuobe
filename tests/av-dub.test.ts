@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { cueReducer, cueProblems, formatCueTime, normalizeCues, parseCueTime } from "@/lib/av/cue-edit";
-import { BLANK_FRAME, crowdedLines, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareMedia, prepareSteps, priceLine, reviewCues, spokenText, takeLines, voiceOnly, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { BLANK_FRAME, crowdedLines, linearGain, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareMedia, prepareSteps, priceLine, reviewCues, spokenText, takeLines, voiceOnly, voiceSteps, type DubSessionView } from "@/lib/av/dub";
 import { timelineFor, timelineTracks } from "@/lib/av/timeline";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { getModel } from "@/lib/catalog";
@@ -188,7 +188,7 @@ describe("dub pipeline DAGs", () => {
     expect(() => voiceSteps({ engine: "cloud", video, lang: "ja", cues: [{ start: 40, end: 41, text: "late" }], voiceRef: "/v", duration: 30 })).toThrow(/after the end of the video/);
   });
 
-  it("cloud voice with the background: lips on the clean voice, the voice mixed over the Demucs stems, that mix on the video", () => {
+  it("cloud voice with the background: lips on the clean voice, the voice mixed over the lowered Demucs stems, that mix on the video", () => {
     const beds = ["/drums.mp3", "/bass.mp3", "/other.mp3"];
     const steps = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", background: beds, duration: 30 });
     expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
@@ -198,18 +198,25 @@ describe("dub pipeline DAGs", () => {
       ["track", "compose-timeline", "timeline", ["line:0", "line:1", "line:2"]],
       ["soundtrack", "extract-soundtrack", "separate-audio", "track"],
       ["clone", "chatterbox-vc-cloud", "voice-change", "soundtrack"],
+      ["bed:0", "ffmpeg-loudnorm", "level", null],
+      ["bed:1", "ffmpeg-loudnorm", "level", null],
+      ["bed:2", "ffmpeg-loudnorm", "level", null],
       ["lips", "sync-lipsync-3", "lipsync", "clone"],
-      ["mix", "compose-timeline", "timeline", "clone"],
+      ["mix", "compose-timeline", "timeline", ["clone", "bed:0", "bed:1", "bed:2"]],
       ["film", "merge-audio-video", "mux", ["lips", "mix"]],
     ]);
-    expect(steps.map((s) => s.request.step?.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(steps.every((s) => s.request.step?.of === 9)).toBe(true);
-    const [lips, mix, film] = steps.slice(6);
+    expect(steps.map((s) => s.request.step?.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(steps.every((s) => s.request.step?.of === 12)).toBe(true);
+    // Each stem 3 dB down, like the open route's background (compose itself has no volume control).
+    expect(steps.slice(6, 9).map((s) => s.request.inputs)).toEqual(beds.map((audio) => ({ audio })));
+    expect(steps[6].request.params).toEqual({ extra: linearGain(-3) });
+    expect(steps[6].request.step?.label).toBe("Music and effects 1 of 3 · Japanese");
+    const [lips, mix, film] = steps.slice(9);
     expect(lips.request).toMatchObject({ inputs: { video }, params: { duration: 30 } });
     expect(lips.chain).toEqual([{ slot: "audio" }]);
-    // The new voice goes first, then every stem, each for the whole length (so compose mixes them).
-    expect(mix.chain).toEqual([{ slot: "audios", position: "first" }]);
-    expect(mix.request.inputs).toEqual({ images: [BLANK_FRAME], audios: beds });
+    // The new voice goes first, then every lowered stem, each for the whole length (so compose mixes them).
+    expect(mix.chain).toEqual(Array(4).fill({ slot: "audios", position: "first" }));
+    expect(mix.request.inputs).toEqual({ images: [BLANK_FRAME] });
     expect(mix.request.params).toEqual({ duration: 30, extra: { timeline: { length: 30, clips: Array(4).fill({ start: 0, duration: 30 }) } } });
     expect(film.chain).toEqual([{ slot: "video" }, { slot: "audio" }]);
     expect(film.request.inputs).toBeUndefined();
@@ -226,12 +233,36 @@ describe("dub pipeline DAGs", () => {
     const flat = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", background: beds, lipsync: false, duration: 30 });
     expect(flat.slice(5).map((s) => [s.key, s.after])).toEqual([
       ["clone", "soundtrack"],
-      ["mix", "clone"],
+      ["bed:0", undefined],
+      ["bed:1", undefined],
+      ["bed:2", undefined],
+      ["mix", ["clone", "bed:0", "bed:1", "bed:2"]],
       ["film", "mix"],
     ]);
     expect(flat.at(-1)!.request).toMatchObject({ modelId: "merge-audio-video", inputs: { video } });
     expect(flat.at(-1)!.chain).toEqual([{ slot: "audio" }]);
-    expect(flat.every((s) => s.request.step?.of === 8)).toBe(true);
+    expect(flat.every((s) => s.request.step?.of === 11)).toBe(true);
+    expect(flat.map((s) => s.request.step?.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("lowers a track by an exact gain with loudnorm's linear mode (target − measured), never raising it", () => {
+    const p = linearGain(-3);
+    // ffmpeg's loudnorm takes linear mode when measured TP + gain ≤ target TP (−0.1 on fal) and measured LRA ≤ target LRA.
+    expect(p).toMatchObject({ linear: true });
+    expect(Number(p.integrated_loudness) - Number(p.measured_i)).toBe(-3);
+    expect(Number(p.measured_tp) - 3).toBeLessThanOrEqual(-0.1);
+    expect(Number(p.measured_lra)).toBeGreaterThan(0);
+    expect(Number(p.measured_lra)).toBeLessThanOrEqual(Number(p.loudness_range));
+    expect(p.measured_thresh).not.toBe(-70);
+    // Inside fal's ranges.
+    expect(Number(p.integrated_loudness)).toBeGreaterThanOrEqual(-70);
+    expect(Number(p.measured_i)).toBeLessThanOrEqual(0);
+    expect(Number(p.measured_thresh)).toBeGreaterThanOrEqual(-99);
+    // A raise would clip with no limiter: it's held at 0 dB.
+    expect(Number(linearGain(6).integrated_loudness) - Number(linearGain(6).measured_i)).toBe(0);
+    // The payload fal gets: the stem as audio_url with the parameters as they are.
+    const body = buildPayload(getModel("ffmpeg-loudnorm")!.routes[0].map!, { audio: "https://a/drums.mp3", extra: p });
+    expect(body).toEqual({ audio_url: "https://a/drums.mp3", ...p });
   });
 
   it("timeline tracks: lines that follow each other share the voice track, overlapping clips get tracks of their own", () => {
@@ -348,7 +379,7 @@ describe("dub sessions (demo mode)", () => {
     expect(reviewCues(saved, "es")![0].text).toBe("Hola, esto es una prueba");
     const voiced = dub.voiceDub(view.id, "es");
     const run = voiced.voices!.es[0];
-    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["line:0", "track", "lips", "film"] : ["line:0", "track", "soundtrack", "clone", "lips", "mix", "film"]);
+    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["line:0", "track", "lips", "film"] : ["line:0", "bed:0", "track", "soundtrack", "clone", "lips", "mix", "film"]);
     expect(voiced.generations[run.ids["line:0"]].request.prompt).toContain("Hola, esto es una prueba");
     // The voice track is exactly as long as the source (read from its MP4 header when the session was made).
     expect(view.duration).toBeGreaterThan(1);
@@ -363,7 +394,11 @@ describe("dub sessions (demo mode)", () => {
       const split = view.generations[view.prepare!.background];
       const bed = split.outputs.filter((o) => o.meta?.stem !== "voice").map((o) => o.url);
       expect(bed.length).toBeGreaterThan(0);
-      expect(voiced.generations[run.ids.mix].request.inputs?.audios).toEqual(bed);
+      // Each lowered first: the mix takes the new voice, then the lowered stems.
+      const levelled = bed.map((_, i) => voiced.generations[run.ids[`bed:${i}`]]);
+      expect(levelled.map((g) => [g.modelId, g.request.inputs?.audio])).toEqual(bed.map((url) => ["ffmpeg-loudnorm", url]));
+      expect(voiced.generations[run.ids.mix].request.inputs?.images).toEqual([BLANK_FRAME]);
+      expect((await settle(run.ids.mix)).request.inputs?.audios).toEqual([(await settle(run.ids.clone)).outputs[0].url, ...(await Promise.all(levelled.map(async (g) => (await settle(g.id)).outputs[0].url)))]);
       expect(voiceOnly(view)).toBe(false);
     }
     expect(languageStage(voiced, "es")).toBe("voicing");
@@ -421,6 +456,13 @@ describe("dub sessions (demo mode)", () => {
     expect(languageStage(failed, "es")).toBe("review");
     expect(prepareMedia(failed).background).toBeUndefined();
     expect(voiceOnly(failed)).toBe(true);
+    // A split that found nothing but the voice leaves nothing to mix under it: voice only too.
+    const split = view.generations[view.prepare!.background];
+    const vocals = { ...view, generations: { ...view.generations, [split.id]: { ...split, outputs: split.outputs.filter((o) => o.meta?.stem === "voice") } } };
+    expect(languageStage(vocals, "es")).toBe("review");
+    expect(prepareMedia(vocals).background).toBeUndefined();
+    expect(voiceOnly(vocals)).toBe(true);
+    expect(voiceOnly(view)).toBe(false);
     // A cloud dub made before the split existed has no background step at all.
     const older = { ...view, prepare: Object.fromEntries(Object.entries(view.prepare!).filter(([k]) => k !== "sound" && k !== "background")) };
     expect(voiceOnly(older)).toBe(true);
@@ -448,8 +490,8 @@ describe("dub sessions (demo mode)", () => {
       const voice = (background?: string[]) => voiceSteps({ engine: "cloud", video: "/api/files/uploads/clip.mp4", lang: "es", cues: lines, voiceRef: "/api/files/uploads/voice.mp3", background, duration: 30 });
       const alone = dub.priceSteps("cloud", voice(), 30);
       const mixed = dub.priceSteps("cloud", voice(["/api/files/a.mp3", "/api/files/b.mp3", "/api/files/c.mp3"]), 30);
-      expect(mixed.steps).toBe(alone.steps + 2);
-      // Lips at $8 a minute either way; the mix and putting it on the video add $0.0002/s each.
+      expect(mixed.steps).toBe(alone.steps + 5);
+      // Lips at $8 a minute either way; levelling the stems is free, the mix and putting it on the video add $0.0002/s each.
       expect(mixed.costUsd).toBeCloseTo(alone.costUsd + 2 * 30 * 0.0002, 3);
       expect(mixed.unpriced).toEqual([]);
     } finally {

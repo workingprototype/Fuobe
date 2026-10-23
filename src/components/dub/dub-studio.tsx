@@ -17,7 +17,7 @@ import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useEngine } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
-import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
+import { BACKGROUND_DB, crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
 import type { Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
@@ -295,10 +295,13 @@ function voiceRows(s: DubSessionView, lang: string): StepRow[] {
   };
   const entries = Object.entries(run.ids);
   const lines = entries.filter(([k]) => k.startsWith("line:")).map(([, id]) => s.generations[id]);
+  const beds = entries.filter(([k]) => k.startsWith("bed:")).map(([, id]) => s.generations[id]);
   const rows: StepRow[] = [];
   // One row for the takes: a dub of 30 lines would otherwise list 30 near-identical steps.
   if (lines.length) rows.push({ key: "lines", label: `${lines.length} line${lines.length === 1 ? "" : "s"} ${open ? "in their voice" : "spoken"}`, group: lines });
-  for (const [k, id] of entries) if (!k.startsWith("line:")) rows.push({ key: k, label: label[k] ?? k, g: s.generations[id] });
+  // And one for the background stems, each lowered a little before the mix.
+  if (beds.length) rows.push({ key: "beds", label: `Music and effects ${Math.abs(BACKGROUND_DB)} dB lower`, group: beds });
+  for (const [k, id] of entries) if (!k.startsWith("line:") && !k.startsWith("bed:")) rows.push({ key: k, label: label[k] ?? k, g: s.generations[id] });
   return rows;
 }
 
@@ -425,7 +428,7 @@ function ResultCard({ s, lang }: { s: DubSessionView; lang: string }) {
     >
       <video src={out.url} controls playsInline preload="metadata" className="max-h-[42vh] w-full rounded-xl bg-media object-contain" />
       {g.provider === "mock" && <p className="mt-2 text-[12px] text-muted-foreground">Demo result — connect a provider (or start ComfyUI) to dub for real.</p>}
-      {voiceOnly(s) && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: this dub&apos;s music and effects weren&apos;t separated, so the new voice plays alone.</p>}
+      {voiceOnly(s) && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: no music or effects were separated from this clip, so the new voice plays alone.</p>}
     </Panel>
   );
 }
@@ -525,7 +528,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
             </Button>
           </div>
         </div>
-        {voiceOnly(s) && <p className="mt-3 text-[12px] text-muted-foreground">The music and effects weren&apos;t separated for this dub, so the new voice will play alone.</p>}
+        {voiceOnly(s) && <p className="mt-3 text-[12px] text-muted-foreground">No music or effects were separated from this clip, so the new voice will play alone.</p>}
         {runs.length > 0 && <StepList steps={voiceRows(s, lang)} className="mt-4" />}
       </Panel>
     </>

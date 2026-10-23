@@ -26,9 +26,10 @@ import { timelineFor } from "./timeline";
  * music and effects). ElevenLabs v4 speaks each phrase, fal's compose lays them out over a blank still
  * (its soundtrack is read back as audio), Chatterbox voice conversion turns the track into the speaker's
  * voice and Sync Lipsync 3 re-syncs the lips; compose then mixes the new voice over the Demucs stems and
- * that mix replaces the video's sound. fal's compose has no volume control, so the stems keep their own
- * level (the open mux lowers its background stem by 3 dB). Dubs started before the background split, or
- * whose split failed, carry the dubbed voice only.
+ * that mix replaces the video's sound. Like the open mux, the background sits BACKGROUND_DB under its
+ * original level: fal's compose has no volume control, so each stem is lowered first by fal's loudnorm
+ * in linear mode (see linearGain). Dubs started before the background split, or whose split failed (or
+ * found nothing but the voice), carry the dubbed voice only.
  */
 
 export const DUB_FEATURE = "dub";
@@ -48,12 +49,30 @@ export const DUB_STEP_MODELS = {
     timeline: "compose-timeline",
     soundtrack: "extract-soundtrack",
     clone: "chatterbox-vc-cloud",
+    // Each background stem a little lower before the mix (compose has no volume control).
+    level: "ffmpeg-loudnorm",
     lips: "sync-lipsync-3",
     mux: "merge-audio-video",
   },
   // The stems step also times the voice (Qwen3-ASR 1.7B + forced aligner inside the same workflow).
   open: { stems: "oss-voice-separate", translate: "oss-text-llm", speech: "oss-chatterbox", timeline: "oss-audio-timeline", lips: "oss-infinitetalk-v2v", mux: "oss-mux" },
 } as const;
+
+/** How far the background (music and effects) sits under its original level once the new voice is on, both engines. */
+export const BACKGROUND_DB = -3;
+
+/**
+ * fal loudnorm parameters (ffmpeg's loudnorm filter) that change a track's level by `db` and nothing else.
+ * In linear mode loudnorm doesn't measure: it trusts the measurements it's given and scales the whole
+ * track by (target − measured_I) dB, as long as the "measured" true peak plus that gain stays under the
+ * target peak and the "measured" range under the target range — true here. So the gain is exact whatever
+ * the track's real loudness, with no dynamics and no limiter, which is why it only lowers (a raise could clip).
+ */
+export function linearGain(db: number): Record<string, number | boolean> {
+  const gain = Math.min(0, db);
+  const target = -24;
+  return { linear: true, integrated_loudness: target, measured_i: target - gain, measured_tp: -12, measured_lra: 1, measured_thresh: target - 10, loudness_range: 7 };
+}
 
 /** The ElevenLabs voice the cloud route speaks with before it's converted into the speaker's own voice. */
 export const CLOUD_BASE_VOICE = "JBFqnCBsd6RMkjVDRZzb"; // George
@@ -149,8 +168,8 @@ export interface VoiceInput {
   /** The clean voice to clone (the voice stem / isolated voice). */
   voiceRef: string;
   /**
-   * What the new voice is mixed over: the open engine's background stem (lowered by 3 dB), or on the cloud
-   * the Demucs stems that aren't the voice (drums, bass, other), mixed at their own level.
+   * What the new voice is mixed over: the open engine's background stem, or on the cloud the Demucs stems
+   * that aren't the voice (drums, bass, other). Either way it's lowered by BACKGROUND_DB.
    */
   background?: string | string[];
   /** Re-sync the lips (default on). Off: the new voice is laid over the original picture. */
@@ -210,8 +229,8 @@ export function trackLength(phrases: DubPhrase[], duration?: number): number {
  * Step 2: speak the reviewed translation in the cloned voice, one take per phrase, and lay the takes on
  * the video's timeline; then re-sync the lips and put the new voice on the video. Step keys: "line:0…"
  * (the takes), "track" (the voice track, as long as the video), cloud "soundtrack" + "clone", "lips"
- * (open; cloud when it mixes a background), cloud "mix" (the voice over the background stems) and
- * "film" (the dubbed video).
+ * (open; cloud when it mixes a background), cloud "bed:0…" (each background stem lowered) and "mix"
+ * (the voice over them), and "film" (the dubbed video).
  */
 export function voiceSteps(o: VoiceInput): DubStep[] {
   const lang = languageByCode(o.lang);
@@ -258,7 +277,7 @@ export function voiceSteps(o: VoiceInput): DubStep[] {
         op: "mux",
         inputs: { ...(lips ? {} : { video: o.video }), ...(beds[0] && { audio2: beds[0] }) },
         // The background stem sits a little under the new voice.
-        ...(beds[0] && { params: { extra: { backgroundVolumeDb: -3 } } }),
+        ...(beds[0] && { params: { extra: { backgroundVolumeDb: BACKGROUND_DB } } }),
         step: step(tag("Dubbed video"), n - 1, n),
       },
     });
@@ -266,7 +285,7 @@ export function voiceSteps(o: VoiceInput): DubStep[] {
   }
   const m = DUB_STEP_MODELS.cloud;
   const mixed = beds.length > 0;
-  const n = k + 3 + (mixed ? (lips ? 3 : 2) : 1);
+  const n = k + 3 + (mixed ? beds.length + (lips ? 3 : 2) : 1);
   // Seconds of media the per-second and per-minute steps bill for (their price estimate).
   const timed = { params: { duration: length } };
   const steps: DubStep[] = phrases.map((p, i) => ({
@@ -283,19 +302,27 @@ export function voiceSteps(o: VoiceInput): DubStep[] {
     steps.push({ key: "film", after: "clone", chain: [{ slot: "audio" }], request: { ...base, ...film, inputs: { video: o.video }, ...timed, step: step(tag("Dubbed video"), k + 3, n) } });
     return steps;
   }
-  // The lips follow the clean voice; the mix is a compose over the blank still with the voice and every
-  // background stem as tracks of their own for the whole length, and its sound replaces the video's.
-  if (lips) steps.push({ key: "lips", after: "clone", chain: [{ slot: "audio" }], request: { ...base, modelId: m.lips, op: "lipsync", inputs: { video: o.video }, ...timed, step: step(tag("Lips"), k + 3, n) } });
+  // Each background stem lowered by BACKGROUND_DB (these start at once, next to the takes); the lips follow
+  // the clean voice; the mix is a compose over the blank still with the voice and every lowered stem as
+  // tracks of their own for the whole length, and its sound replaces the video's.
+  const bedKeys = beds.map((_, i) => `bed:${i}`);
+  beds.forEach((url, i) =>
+    steps.push({
+      key: bedKeys[i],
+      request: { ...base, modelId: m.level, op: "level", inputs: { audio: url }, params: { extra: linearGain(BACKGROUND_DB) }, step: step(tag(`Music and effects ${i + 1} of ${beds.length}`), k + 3 + i, n) },
+    }),
+  );
+  if (lips) steps.push({ key: "lips", after: "clone", chain: [{ slot: "audio" }], request: { ...base, modelId: m.lips, op: "lipsync", inputs: { video: o.video }, ...timed, step: step(tag("Lips"), k + 3 + beds.length, n) } });
   const whole = { start: 0, duration: length };
   steps.push({
     key: "mix",
-    after: "clone",
-    chain: [{ slot: "audios", position: "first" }],
+    after: ["clone", ...bedKeys],
+    chain: ["clone", ...bedKeys].map(() => ({ slot: "audios" as const, position: "first" as const })),
     request: {
       ...base,
       modelId: m.timeline,
       op: "timeline",
-      inputs: { images: [BLANK_FRAME], audios: beds },
+      inputs: { images: [BLANK_FRAME] },
       params: { duration: length, extra: { timeline: { length, clips: [whole, ...beds.map(() => whole)] } } },
       step: step(tag("Over the music and effects"), n - 2, n),
     },
@@ -466,11 +493,15 @@ export function prepareMedia(s: DubSessionView): { voice?: string; background?: 
   return { voice: audioOf("voice")[0]?.url, ...(beds.length && { background: beds }) };
 }
 
-/** Whether a cloud step-by-step dub lost its music and effects: started before the split, or the split failed. */
+/**
+ * Whether a cloud step-by-step dub lost its music and effects: started before the split, the split
+ * failed, or it found nothing but the voice. (While the split runs, the language is still preparing.)
+ */
 export function voiceOnly(s: DubSessionView): boolean {
   if (s.engine !== "cloud" || s.mode !== "steps") return false;
   const split = s.generations[s.prepare?.background ?? ""];
-  return !split || broken(split);
+  if (!split || broken(split)) return true;
+  return done(split) && !prepareMedia(s).background;
 }
 
 /** The finished dub of a language, if any. */
