@@ -2,6 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -20,20 +21,28 @@ export function IntentLink({
   ...props
 }: React.ComponentProps<typeof Link> & { eager?: boolean }) {
   const [intent, setIntent] = useState(false);
+  const router = useRouter();
+  const start = () => {
+    if (eager || intent) return;
+    setIntent(true);
+    // Start the fetch from the event itself: the Link only picks it up after it renders again and
+    // sees itself on screen, a frame or more later (several on a slow phone), which a quick click beats.
+    if (typeof props.href === "string") router.prefetch(props.href);
+  };
   return (
     <Link
       {...props}
       prefetch={eager || intent ? null : false}
       onMouseEnter={(e) => {
-        setIntent(true);
+        start();
         onMouseEnter?.(e);
       }}
       onTouchStart={(e) => {
-        setIntent(true);
+        start();
         onTouchStart?.(e);
       }}
       onFocus={(e) => {
-        setIntent(true);
+        start();
         onFocus?.(e);
       }}
     />
