@@ -1,5 +1,5 @@
 /**
- * The slim catalog behind the ⌘K palette (GET /api/palette): names, categories and where each item
+ * The slim catalog behind the ⌘K palette (GET /api/search-index): names, categories and where each item
  * opens. Built on the server from the catalog, so the palette never ships prompt templates or routes.
  */
 import { APPS, EFFECTS, MODELS, MOTIONS } from "@/lib/catalog";

@@ -144,7 +144,7 @@ export function rankPalette(entries: PaletteEntry[], query: string, limits: Reco
     .map(({ kind, label, entries }) => ({ kind, label, entries }));
 }
 
-/** The slim catalog the palette loads on first open (GET /api/palette). */
+/** The slim catalog the palette loads on first open (GET /api/search-index). */
 export interface PaletteIndex {
   apps: PalettePreset[];
   motions: PalettePreset[];

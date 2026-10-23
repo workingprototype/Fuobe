@@ -125,7 +125,7 @@ function PaletteBody({ onPick, onOpenRecent }: { onPick: (e: PaletteEntry) => vo
   // The apps, motions, effects and models load on first open (and stay for the session).
   const index = useQuery({
     queryKey: ["palette-index"],
-    queryFn: async () => (await fetch("/api/palette")).json() as Promise<PaletteIndex>,
+    queryFn: async () => (await fetch("/api/search-index")).json() as Promise<PaletteIndex>,
     staleTime: Infinity,
   });
   const recent = useGenerations({ q: dq || undefined, limit: 5, statuses: ["succeeded"] }, { keepPrevious: true });
