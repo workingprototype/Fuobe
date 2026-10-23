@@ -628,7 +628,7 @@ function EngineBadge({ model }: { model?: ModelDef }) {
   return (
     <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-1.5 text-[10px] font-semibold", open ? "bg-success/15 text-success" : "bg-brand-faint text-brand-text")}>
       {open ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
-      {open ? "Open" : "Cloud"}
+      {open ? "Open source" : "Cloud"}
     </span>
   );
 }

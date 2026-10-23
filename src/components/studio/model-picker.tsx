@@ -101,7 +101,7 @@ function ModelRow({
           {showEngine && (
             <span className="inline-flex shrink-0 items-center gap-0.5 rounded-[4px] bg-muted px-1 text-[10px] leading-4 font-medium text-muted-foreground">
               {m.engine === "open" ? <Cpu className="size-2.5!" /> : <Cloud className="size-2.5!" />}
-              {m.engine === "open" ? "Open" : "Cloud"}
+              {m.engine === "open" ? "Open source" : "Cloud"}
             </span>
           )}
         </span>
@@ -218,7 +218,7 @@ function PickerList({ models, value, onChange, engine, onEngineChange, defaultMo
             <span aria-hidden>·</span>
             <span className="min-w-0">
               Demo — no key connected, outputs are placeholders.{" "}
-              <Link href="/settings" className="text-brand-text hover:underline">
+              <Link href="/settings" className="text-brand-text underline underline-offset-2">
                 Connect
               </Link>
             </span>
