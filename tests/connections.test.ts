@@ -166,6 +166,56 @@ describe("POST /api/providers/test with unsaved values", () => {
     expect(down.result.body).toMatchObject({ ok: false, detail: expect.stringMatching(/^Can't reach ComfyUI at http:\/\/10\.9\.9\.9:8188/) });
   });
 
+  it("keeps the saved ComfyUI token with the server it was saved for", async () => {
+    const stats = { system: { comfyui_version: "0.41.0" }, devices: [{ name: "cpu", vram_total: 0 }] };
+    setSetting("comfyToken", "saved-secret-token");
+    const answers = { "http://10.1.2.3:8188/system_stats": [200, stats], "http://127.0.0.1:9/system_stats": [200, stats], "http://10.1.2.4:8189/system_stats": [200, stats] } as Record<string, [number, unknown]>;
+    // A new address gets no token unless one is typed with it.
+    const other = await withFetch(answers, () => post({ provider: "comfyui", value: "http://10.1.2.3:8188" }));
+    expect(other.result.body.ok).toBe(true);
+    expect(other.seen.map((r) => r.auth)).toEqual([undefined]);
+    const typed = await withFetch(answers, () => post({ provider: "comfyui", values: { comfyUrl: "http://10.1.2.3:8188", comfyToken: "typed-token" } }));
+    expect(typed.seen.map((r) => r.auth)).toEqual(["Bearer typed-token"]);
+    // The saved server, typed again or not, still gets it.
+    const same = await withFetch(answers, () => post({ provider: "comfyui", value: "http://127.0.0.1:9/" }));
+    expect(same.seen.map((r) => r.auth)).toEqual(["Bearer saved-secret-token"]);
+    const saved = await withFetch(answers, () => post({ provider: "comfyui" }));
+    expect(saved.seen.map((r) => r.auth)).toEqual(["Bearer saved-secret-token"]);
+    // The isolated worker's address is tested on its own, and a new one gets no token either.
+    const iso = await withFetch(answers, () => post({ provider: "comfyui", values: { comfyIsolatedUrl: "http://10.1.2.4:8189" } }));
+    expect(iso.result.body).toEqual({ ok: true, detail: "isolated worker: ComfyUI 0.41.0 · cpu" });
+    expect(iso.seen).toEqual([{ url: "http://10.1.2.4:8189/system_stats", auth: undefined }]);
+    const isoDown = await withFetch(answers, () => post({ provider: "comfyui", values: { comfyIsolatedUrl: "http://10.1.2.5:8189" } }));
+    expect(isoDown.result.body).toMatchObject({ ok: false, detail: expect.stringMatching(/isolated ComfyUI worker at http:\/\/10\.1\.2\.5:8189 doesn't answer/) });
+    setSetting("comfyToken", "");
+  });
+
+  it("checks a typed Anthropic key with Anthropic, also when text steps run on Ollama", async () => {
+    const tags = { models: [{ name: "qwen3:8b" }] };
+    const rejectedKey = { "https://api.anthropic.com/v1/models": [401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }], "http://127.0.0.1:9/api/tags": [200, tags] } as Record<string, [number, unknown]>;
+    const goodKey = { "https://api.anthropic.com/v1/models": [200, { data: [], has_more: false }], "http://127.0.0.1:9/api/tags": [200, tags] } as Record<string, [number, unknown]>;
+    for (const [mode, enhancer, note] of [
+      ["open", "auto", "Open source only mode keeps text steps on Ollama"],
+      ["both", "ollama", "text steps use Ollama (Enhancer)"],
+    ] as const) {
+      setSetting("engineMode", mode);
+      setSetting("enhanceProvider", enhancer);
+      const bogus = await withFetch(rejectedKey, () => post({ provider: "llm", values: { anthropicKey: "sk-ant-bogus-key-123" } }));
+      expect(bogus.result.body, mode).toEqual({ ok: false, detail: "Anthropic rejected the key (401)" });
+      const good = await withFetch(goodKey, () => post({ provider: "llm", values: { anthropicKey: "sk-ant-good" }, field: "anthropicKey" }));
+      expect(good.result.body, mode).toEqual({ ok: true, detail: `Claude key accepted · ${note}` });
+    }
+    // The saved key, checked from its own field (nothing typed).
+    setSetting("anthropicKey", "sk-ant-saved");
+    const saved = await withFetch(rejectedKey, () => post({ provider: "llm", field: "anthropicKey" }));
+    expect(saved.result.body).toEqual({ ok: false, detail: "Anthropic rejected the key (401)" });
+    expect(saved.seen.some((r) => r.auth === "sk-ant-saved")).toBe(true);
+    // A field another provider owns is ignored: the whole text-step check runs.
+    const ollamaField = await withFetch(rejectedKey, () => post({ provider: "llm", field: "falKey" }));
+    expect(ollamaField.result.body.detail).toMatch(/Ollama/);
+    for (const n of ["engineMode", "enhanceProvider", "anthropicKey"] as const) setSetting(n, "");
+  });
+
   it("tests Ollama's address and model, and an Anthropic key, for text steps", async () => {
     const tags = { models: [{ name: "qwen3:8b" }] };
     const ready = await withFetch({ "http://10.0.0.5:11434/api/tags": [200, tags] }, () => post({ provider: "llm", values: { ollamaUrl: "http://10.0.0.5:11434" } }));
@@ -203,9 +253,29 @@ describe("POST /api/providers/test with unsaved values", () => {
 });
 
 describe("GET /api/status", () => {
+  const onboarded = async () => ((await (await statusRoute()).json()) as { onboarded: boolean }).onboarded;
+
   it("says whether the first-run guide was put away", async () => {
-    expect(((await (await statusRoute()).json()) as { onboarded: boolean }).onboarded).toBe(false);
+    expect(await onboarded()).toBe(false);
     setSetting("onboarded", "1");
-    expect(((await (await statusRoute()).json()) as { onboarded: boolean }).onboarded).toBe(true);
+    expect(await onboarded()).toBe(true);
+    setSetting("onboarded", "");
+  });
+
+  it("remembers the first connection the engine mode generates with, so an offline day doesn't bring the guide back", async () => {
+    // Claude makes nothing by itself, and a fal.ai key doesn't serve an open-source-only install.
+    setSetting("anthropicKey", "sk-ant-x");
+    expect(await onboarded()).toBe(false);
+    setSetting("engineMode", "open");
+    setSetting("falKey", "id:secret");
+    expect(await onboarded()).toBe(false);
+    expect(getSetting("onboarded")).toBe("0");
+    setSetting("engineMode", "");
+    expect(await onboarded()).toBe(true);
+    expect(getSetting("onboarded")).toBe("1");
+    // The key goes (or ComfyUI is offline one morning): the guide stays put away.
+    setSetting("falKey", "");
+    expect(await onboarded()).toBe(true);
+    for (const n of ["anthropicKey", "onboarded"] as const) setSetting(n, "");
   });
 });

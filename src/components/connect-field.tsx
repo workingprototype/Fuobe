@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { saveSettings, testConnection, useStatus, type ConnectionTest } from "@/lib/api";
+import { saveSettings, testConnection, type ConnectionTest } from "@/lib/api";
 import { settingProblem, type TestProvider } from "@/lib/connections";
 import { cn } from "@/lib/utils";
 
@@ -19,11 +19,12 @@ export interface PublicSetting {
   isSet: boolean;
 }
 
-/** Every setting as the browser may see it (secrets masked). */
-export function useSettings() {
+/** Every setting as the browser may see it (secrets masked). `enabled: false` waits (Home's guide, until the status says it's wanted). */
+export function useSettings(enabled = true) {
   return useQuery({
     queryKey: ["settings"],
     queryFn: async () => ((await (await fetch("/api/settings")).json()) as { settings: PublicSetting[] }).settings,
+    enabled,
   });
 }
 
@@ -65,7 +66,6 @@ export function ConnectField({
   className?: string;
 }) {
   const qc = useQueryClient();
-  const status = useStatus().data;
   const inputId = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,11 +87,11 @@ export function ConnectField({
     setBusy(true);
     try {
       const values = typed !== null ? { [name]: typed } : undefined;
-      const res = await testConnection(provider, values);
+      const res = await testConnection(provider, values, name);
       if (res.ok) {
-        // Connected: keep it, and the first-run guide has done its job.
-        const patch = { ...values, ...(status?.onboarded ? {} : { onboarded: "1" }) };
-        if (Object.keys(patch).length) await saveSettings(patch);
+        // Connected: keep it. The first-run guide goes once the status sees a connection the engine
+        // mode generates with (the server remembers that), not for Ollama or an unused provider.
+        if (values) await saveSettings(values);
         setDraft(null);
         refresh();
         onConnected?.(res);

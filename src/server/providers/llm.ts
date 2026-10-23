@@ -456,8 +456,25 @@ export const llmProvider: ProviderAdapter = {
     jobs().delete(externalId);
   },
 
-  /** Checks each LLM text steps would use: Claude's key (a free model list call) and that Ollama has its model. */
-  async test() {
+  /**
+   * Checks each LLM text steps would use: Claude's key (a free model list call) and that Ollama has
+   * its model. Checking the Anthropic key itself (focus) always asks Anthropic, also when text steps
+   * run on Ollama (Open source only, or the Enhancer set to Ollama): Assist can still use the key.
+   * Checking Ollama's address or model asks Ollama.
+   */
+  async test(opts) {
+    if (opts?.focus === "anthropicKey") {
+      if (!getSetting("anthropicKey")) return { ok: false, detail: "No Anthropic key set" };
+      const claude = await testClaude();
+      // A good key that text steps don't use: say where they run, so green doesn't read as "Claude rewrites prompts".
+      const choice = getSetting("enhanceProvider");
+      let elsewhere: string | null = null;
+      if (choice === "none") elsewhere = "text steps are off (Enhancer: Offline rewriter)";
+      else if (choice === "ollama") elsewhere = "text steps use Ollama (Enhancer)";
+      else if (choice === "auto" && engineMode() === "open") elsewhere = "Open source only mode keeps text steps on Ollama";
+      return claude.ok && elsewhere ? { ok: true, detail: `${claude.detail} · ${elsewhere}` } : claude;
+    }
+    if (opts?.focus === "ollamaUrl" || opts?.focus === "ollamaModel") return testOllama();
     if (getSetting("enhanceProvider") === "none") return { ok: false, detail: "Text steps are off (Enhancer: Offline rewriter)" };
     await probeOllama(true);
     const b = llmBackends({ endpoint: "auto" });

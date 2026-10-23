@@ -1,14 +1,16 @@
-import { candidateValues, isTestProvider, settingProblem } from "@/lib/connections";
+import { candidateValues, isTestProvider, PROVIDER_SETTINGS, settingProblem } from "@/lib/connections";
 import { PROVIDERS } from "@/server/providers";
 import { validateSetting, withCandidates, type SettingName } from "@/server/settings";
 
 /**
  * Test a provider's connection. With `value` (the provider's main setting) or `values` (by setting
  * name), the test runs with those unsaved values instead of the saved ones, so Settings can check a
- * key or an address before saving it. Nothing is stored here.
+ * key or an address before saving it. `field` names the setting being checked (else the first
+ * unsaved one), so a provider that reaches several servers tests that one: the Anthropic key is
+ * checked with Anthropic even when text steps run on Ollama. Nothing is stored here.
  */
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as { provider?: unknown; value?: unknown; values?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { provider?: unknown; value?: unknown; values?: unknown; field?: unknown };
   const provider = body.provider;
   const adapter = isTestProvider(provider) ? PROVIDERS[provider] : undefined;
   if (!isTestProvider(provider) || !adapter?.test) return Response.json({ ok: false, detail: "Unknown provider" }, { status: 400 });
@@ -18,7 +20,10 @@ export async function POST(request: Request) {
   } catch (e) {
     return Response.json({ ok: false, detail: (e as Error).message }, { status: 400 });
   }
-  const test = adapter.test.bind(adapter);
+  const settings: readonly string[] = PROVIDER_SETTINGS[provider];
+  const focus = typeof body.field === "string" && settings.includes(body.field) ? body.field : Object.keys(values)[0];
+  const check = adapter.test.bind(adapter);
+  const test = () => check({ focus });
   try {
     const res = await withCandidates(values, test);
     // A rejected key that doesn't look like one: say what it should look like.

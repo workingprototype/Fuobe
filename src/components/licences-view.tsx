@@ -123,9 +123,9 @@ export function LicencesView({ list }: { list: LicenceList }) {
 
       {catalog.length > 0 && (
         <section aria-labelledby="lic-models">
-          <h2 id="lic-models" className="text-[15px] font-semibold">
+          <h3 id="lic-models" className="text-[15px] font-semibold">
             Open models in Fuobe&apos;s studios <span className="font-normal text-muted-foreground tabular-nums">· {catalog.length}</span>
-          </h2>
+          </h3>
           <ul className="divide-y">
             {catalog.map((r) => (
               <Row key={r.id} row={r} />
@@ -135,9 +135,9 @@ export function LicencesView({ list }: { list: LicenceList }) {
       )}
       {library.length > 0 && (
         <section aria-labelledby="lic-library" className="pt-4">
-          <h2 id="lic-library" className="text-[15px] font-semibold">
+          <h3 id="lic-library" className="text-[15px] font-semibold">
             Also in the workflow library <span className="font-normal text-muted-foreground tabular-nums">· {library.length}</span>
-          </h2>
+          </h3>
           <p className="mt-1 text-[12px] text-muted-foreground">Workflows ready on your ComfyUI that no studio runs yet, or alternatives to the ones above.</p>
           <ul className="divide-y">
             {library.map((r) => (

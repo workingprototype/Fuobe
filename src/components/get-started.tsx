@@ -12,10 +12,14 @@ import { copyWithToast } from "@/lib/clipboard";
 import { COMFY_INSTALL_COMMAND, COMFY_INSTALL_DOCS, FAL_KEYS_URL, nothingConnected } from "@/lib/connections";
 import { cn } from "@/lib/utils";
 
-/** "What do you want to do?" — Liner's first-run question, as one tap to the right place. */
+/**
+ * "What do you want to do?" — Liner's first-run question, as one tap to the right place. Image and
+ * Edit switch Home's composer (Edit's Start then asks for the photo); "Animate a photo" opens Video
+ * itself, where the Start frame is, since Home's Video mode would run text-to-video without one.
+ */
 const INTENTS = [
   { label: "Make an image", href: "/image", icon: ImageIcon, mode: "image" },
-  { label: "Animate a photo", href: "/video", icon: Video, mode: "video" },
+  { label: "Animate a photo", href: "/video", icon: Video },
   { label: "Edit a photo", href: "/edit", icon: Wand2, mode: "edit" },
   { label: "Advertise a product", href: "/marketing", icon: Megaphone },
   { label: "A talking avatar", href: "/lipsync", icon: Mic2 },
@@ -73,7 +77,9 @@ export function GetStarted({
   className?: string;
 }) {
   const qc = useQueryClient();
-  const settings = useSettings().data;
+  // Not in Home's static shell (no status yet): a returning visitor's guide is gone once the status
+  // arrives, so it shouldn't cost a settings read on every Home visit.
+  const settings = useSettings(!!status).data;
   const get = (n: string) => settings?.find((s) => s.name === n);
   const [hiding, setHiding] = useState(false);
   const titleId = useId();
