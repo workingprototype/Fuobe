@@ -384,6 +384,11 @@ export interface ShortsPlanInput {
   aspectRatio: ShortsRatio;
   /** Cloud: the restyle model can be asked for the ratio itself; otherwise each cut is cropped to it first (it keeps its input's shape). */
   reframes?: boolean;
+  /**
+   * Keep the clip's own shape instead of `aspectRatio` (Genjutsu Restyle: framing stays as filmed): no crop, no ratio
+   * asked of the cloud model, and the open cuts and join follow the clip ("auto").
+   */
+  keepShape?: boolean;
   language: string;
   /** The restyle model (cloud: SHORTS_MODELS.cloud; open: oss-wan22-vace-restyle). */
   modelId: string;
@@ -407,6 +412,10 @@ export interface TakeKeys {
   frame?: string;
   look: string;
 }
+
+/** The ratio a step is asked for: the session's, or (keepShape) the clip's own on the open engine and none on the cloud. */
+const ratioParams = (input: Pick<ShortsPlanInput, "engine" | "aspectRatio" | "keepShape">): { aspectRatio?: string } =>
+  !input.keepShape ? { aspectRatio: input.aspectRatio } : input.engine === "open" ? { aspectRatio: "auto" } : {};
 
 const segLabel = (s: ShortsSegment, n: number, what: string) => ({ label: `Segment ${s.index + 1} of ${n} · ${what}`, index: s.index, of: n });
 
@@ -437,7 +446,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
             modelId: t.cut,
             op: "trim",
             inputs: { video: input.source.url },
-            params: { startTime: seg.start, endTime: seg.end, fps: SHORTS.openFps, aspectRatio: input.aspectRatio, resolution: "480p" },
+            params: { startTime: seg.start, endTime: seg.end, fps: SHORTS.openFps, ...ratioParams(input), resolution: "480p" },
             step: segLabel(seg, total, "cut"),
           },
         },
@@ -462,7 +471,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
             modelId: input.modelId,
             op: "v2v",
             prompt: segmentPrompt(input.look),
-            params: { aspectRatio: input.aspectRatio, resolution: "480p", duration: (seg.frames ?? Math.round((seg.end - seg.start) * SHORTS.openFps)) / SHORTS.openFps, ...seed },
+            params: { ...ratioParams(input), resolution: "480p", duration: (seg.frames ?? Math.round((seg.end - seg.start) * SHORTS.openFps)) / SHORTS.openFps, ...seed },
             step: segLabel(seg, total, "restyle"),
           },
           after: [keys.cut, keys.frame!],
@@ -471,7 +480,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
       ],
     };
   }
-  const fit = !input.reframes && needsFit(input.source, input.aspectRatio);
+  const fit = !input.keepShape && !input.reframes && needsFit(input.source, input.aspectRatio);
   const keys: TakeKeys = { cut: k("cut"), ...(fit ? { fit: k("fit") } : {}), look: k("look") };
   const seconds = seg.end - seg.start;
   return {
@@ -508,7 +517,7 @@ export function planTake(input: ShortsPlanInput, seg: ShortsSegment, total: numb
           inputs: refs.length ? { images: refs } : undefined,
           // The segment's exact length: what per-second prices count. No restyle route is sent a length
           // (each keeps its clip's), so the restyled segments add up to the selection and stay on the sound.
-          params: { aspectRatio: input.aspectRatio, duration: r3(seconds), ...(input.resolution ? { resolution: input.resolution } : {}), ...seed },
+          params: { ...ratioParams(input), duration: r3(seconds), ...(input.resolution ? { resolution: input.resolution } : {}), ...seed },
           step: segLabel(seg, total, "restyle"),
         },
         after: [keys.fit ?? keys.cut],
@@ -543,7 +552,7 @@ export function planStitch(input: ShortsPlanInput, clips: ClipRef[], suffix = ""
   const base = { feature: SHORTS_FEATURE, batchTitle: input.title };
   const helper = { feature: SHORTS_STEP_FEATURE, batchTitle: input.title };
   const steps: PlanStep[] = [];
-  const params = input.engine === "open" ? { aspectRatio: input.aspectRatio, resolution: "480p" } : { aspectRatio: input.aspectRatio };
+  const params = input.engine === "open" ? { ...ratioParams(input), resolution: "480p" } : ratioParams(input);
   // Each join step takes its clips either chained (key) or as files (url).
   let level: ClipRef[] = clips;
   let depth = 0;

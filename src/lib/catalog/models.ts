@@ -574,6 +574,32 @@ const open: ModelDef[] = [
     routes: [comfy("remove-object", "video-erase-void", "SAM 3.1 text track + VOID (CogVideoX-5B fine-tune), two passes; up to 197 frames per window")],
     options: { seed: true, negativePrompt: true },
   }),
+  // Genjutsu's Object swap and Insert on the open engine (docs/research/comfyui-oss-4.md §c). Swap: params.extra.maskPrompt
+  // names what goes (else the "replace … with" part of the prompt, see swapTarget), the first reference image is what comes
+  // in, the prompt describes the result. Insert: a painted region held for the whole window. One window per job, as the
+  // eraser: src/lib/catalog/genjutsu.ts tiles longer clips and joins them.
+  o({
+    id: "oss-vace-swap",
+    name: "Wan 2.1 VACE Swap",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to swap: SAM 3.1 follows it, VACE paints your reference in its place, every other pixel stays the original · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the first reference image; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true, maxImages: 1 },
+  }),
+  o({
+    id: "oss-vace-insert",
+    name: "Wan 2.1 VACE Insert",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint where it goes on the first frame: VACE adds your reference there, held for the whole shot (a still or slow camera) · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-insert", "video-insert-wan-vace", "painted region (white = where it goes) held for every frame + Wan 2.1 VACE 14B with the first reference image")],
+    options: { seed: true, negativePrompt: true, maxImages: 1, requires: { mask: true, msg: "Paint where it goes on the first frame" } },
+  }),
   o({
     id: "oss-qwen-relight",
     name: "Qwen-Image-Edit Relight",
