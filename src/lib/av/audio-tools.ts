@@ -80,7 +80,8 @@ export interface JoinInput {
 
 /** "2:05", "0:07.5" */
 export function clock(seconds: number): string {
-  const s = Math.max(0, seconds);
+  // Rounded to tenths first, so 7.96 s reads 0:08, not 0:07.10.
+  const s = Math.round(Math.max(0, seconds) * 10) / 10;
   const whole = Math.floor(s + 1e-6);
   const tenth = Math.round((s - whole) * 10);
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}${tenth && s < 60 ? `.${tenth}` : ""}`;

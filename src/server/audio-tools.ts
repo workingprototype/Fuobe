@@ -1,4 +1,5 @@
 import "server-only";
+import fs from "node:fs/promises";
 import { z } from "zod";
 import { planJoin, planLoop, CROSSFADE_MAX, JOIN_MAX_CLIPS, LOOP_MAX_SECONDS, type AudioToolPreview, type ToolPlan } from "@/lib/av/audio-tools";
 import type { Engine, Generation } from "@/lib/catalog/types";
@@ -6,7 +7,7 @@ import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
 import { engineMode } from "./settings";
-import { readRef } from "./storage";
+import { absolutePath } from "./storage";
 
 /**
  * The Audio hub's Loop / extend and Join tools on the server: each clip's length is read from its own header
@@ -44,15 +45,40 @@ export type AudioToolRequest = z.infer<typeof AudioToolBody>;
 
 export class AudioToolError extends Error {}
 
-/** A clip's length from its header (WAV, FLAC, MP3, M4A), else the browser's. */
+declare global {
+  var __fuobeAudioLengths: Map<string, number | null> | undefined;
+}
+/**
+ * Lengths already read, by file and version (path, size, modified time): the page asks for a price after
+ * every settled change, and a Join of big WAVs would read every file again each time.
+ */
+const lengths = (globalThis.__fuobeAudioLengths ??= new Map<string, number | null>());
+const LENGTHS_KEPT = 500;
+
+/** A clip's length from its header (WAV, FLAC, MP3, M4A), else the browser's. Read without blocking the server. */
 async function lengthOf(url: string, given?: number): Promise<number | undefined> {
+  let file: string;
+  let key: string;
   try {
-    const info = probeMedia((await readRef(url)).data);
-    if (info?.duration && info.duration > 0) return Math.round(info.duration * 1000) / 1000;
+    file = absolutePath(decodeURIComponent(url.slice("/api/files/".length)));
+    const st = await fs.stat(file);
+    if (!st.isFile()) throw new Error("not a file");
+    key = `${file}:${st.size}:${st.mtimeMs}`;
   } catch {
     throw new AudioToolError("That audio file is gone — add it again");
   }
-  return given;
+  if (!lengths.has(key)) {
+    let data: Buffer;
+    try {
+      data = await fs.readFile(file);
+    } catch {
+      throw new AudioToolError("That audio file is gone — add it again");
+    }
+    const info = probeMedia(data);
+    if (lengths.size >= LENGTHS_KEPT) lengths.delete(lengths.keys().next().value!);
+    lengths.set(key, info?.duration && info.duration > 0 ? Math.round(info.duration * 1000) / 1000 : null);
+  }
+  return lengths.get(key) ?? given;
 }
 
 async function plan(body: AudioToolRequest): Promise<ToolPlan & { engine: Engine }> {

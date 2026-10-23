@@ -123,6 +123,11 @@ describe("Loop / extend and Join plans", () => {
     expect(outputActions(g, 0).find((a) => a.id === "loop-audio")).toMatchObject({ label: "Loop / extend", placement: "menu", href: "/audio/loop?audio=%2Fapi%2Ffiles%2Fo%2Fbed.flac" });
     expect(clock(61.5)).toBe("1:01");
     expect(clock(7.5)).toBe("0:07.5");
+    // Tenths round with the seconds: 7.968 s is 0:08, not 0:07.10.
+    expect(clock(7.968)).toBe("0:08");
+    expect(clock(3.99)).toBe("0:04");
+    expect(clock(59.96)).toBe("1:00");
+    expect(clock(7.44)).toBe("0:07.4");
   });
 });
 
@@ -134,6 +139,13 @@ describe("POST /api/audio-tools (demo mode)", () => {
     expect(preview).toEqual({ summary: "Loops it to 0:20 with 3 crossfaded seams (1 s each), then fades out over the last 1 s.", notes: [], length: 20, steps: 1, costUsd: 0, demo: true });
     const cloud = await (await post({ tool: "loop", engine: "cloud", audio, duration: 20 }, true)).json();
     expect(cloud).toMatchObject({ length: 24, steps: 1, demo: true });
+    // A length read once is kept for that file as it is; a file written again is read again.
+    const { absolutePath } = await import("@/server/storage");
+    const fileOf = (url: string) => absolutePath(decodeURIComponent(url.slice("/api/files/".length)));
+    const other = upload(6, "other.wav");
+    expect((await (await post({ tool: "loop", engine: "open", audio: other, duration: 20 }, true)).json()).length).toBe(20);
+    fs.writeFileSync(fileOf(other), fs.readFileSync(fileOf(upload(25))));
+    expect((await (await post({ tool: "loop", engine: "open", audio: other, duration: 20 }, true)).json()).error).toBe("The clip is already 0:25 long — pick a longer length");
     const res = await post({ tool: "loop", engine: "open", audio, duration: 20, crossfade: 1 });
     expect(res.status).toBe(201);
     const run = await res.json();
