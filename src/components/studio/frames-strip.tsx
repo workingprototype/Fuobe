@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Minus, Plus, X } from "lucide-react";
+import { Loader2, Minus, Plus, TriangleAlert, X } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -105,16 +105,20 @@ export function FramesStrip({
       {frames.length > 0 && <Ruler frames={frames} times={times} duration={duration} onMove={onMove} />}
 
       {notice && (
-        <p className={cn("px-1 text-[12px] leading-snug", notice.tone === "warn" ? "text-warning" : "text-muted-foreground")} role={notice.tone === "warn" ? "status" : undefined}>
-          {notice.text}
-          {notice.action && (
-            <>
-              {" "}
-              <button type="button" onClick={notice.action.onClick} className="font-medium text-brand-text underline-offset-2 hover:underline">
-                {notice.action.label}
-              </button>
-            </>
-          )}
+        // A warning (Generate waits for it) reads in the body colour beside an amber icon: amber text on white is under 4.5:1.
+        <p className={cn("flex items-start gap-1.5 px-1 text-[12px] leading-snug", notice.tone === "warn" ? "text-foreground" : "text-muted-foreground")} role={notice.tone === "warn" ? "status" : undefined}>
+          {notice.tone === "warn" && <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0 text-warning" />}
+          <span>
+            {notice.text}
+            {notice.action && (
+              <>
+                {" "}
+                <button type="button" onClick={notice.action.onClick} className="font-medium text-brand-text underline-offset-2 hover:underline">
+                  {notice.action.label}
+                </button>
+              </>
+            )}
+          </span>
         </p>
       )}
     </div>

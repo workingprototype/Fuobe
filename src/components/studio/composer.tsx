@@ -12,7 +12,21 @@ import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset } from "
 import { enhance, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { chainGapProblem, chainTiming, frameSupport, framesBlocker, framesDuration, framesDurations, framesNote, FRAMES_MODELS, frameTimes, keyframeChain, moveFrameAt, type FrameSupport } from "@/lib/catalog/keyframes";
+import {
+  chainGapProblem,
+  chainTiming,
+  frameSupport,
+  framesBlocker,
+  framesDuration,
+  framesDurations,
+  framesNote,
+  FRAMES_MODELS,
+  frameTimes,
+  keyframeChain,
+  moveFrameAt,
+  OPEN_MIN_GAP,
+  type FrameSupport,
+} from "@/lib/catalog/keyframes";
 import {
   blockerFor,
   costLabel,
@@ -21,6 +35,8 @@ import {
   firstMissingSlot,
   framesRequest,
   framesShape,
+  framesSlots,
+  framesUploading,
   leaveFrames,
   namedImageSlots,
   needsMask,
@@ -96,18 +112,20 @@ function buildRequest(
   const videos = refKind === "video" ? refs : [];
   let endImage = s.endImage?.ref || undefined;
   let params = draft.params;
+  let pinned = op;
   // Frames mode: the stills in order at their times (or the first and last as start and end frame), at the strip's length.
   if (draft.frames && frames) {
     const sent = framesRequest(draft.frames, frames);
     images = sent.images;
     endImage = sent.endImage;
     params = { ...params, ...sent.params };
+    pinned = op ?? sent.op;
   }
   return {
     feature,
     presetId: draft.presetId,
     modelId: draft.modelId,
-    op,
+    op: pinned,
     prompt: promptSuffix && draft.prompt.trim() ? `${draft.prompt.trim().replace(/[.\s]+$/, "")}. ${promptSuffix}` : draft.prompt,
     negativePrompt: draft.negativePrompt || undefined,
     inputs: {
@@ -230,6 +248,9 @@ export function Composer({ docked }: { docked: boolean }) {
   const framesOn = !!config.frames && !!draft.frames;
   const framesCtx: FramesContext | undefined =
     framesOn && model ? { support: frameSupport(model), duration: framesDuration(model, draft.params.duration), chained: !!keyframeChain(model) } : undefined;
+  const framesAt = framesCtx && draft.frames ? frameTimes(draft.frames.map((f) => f.at), framesCtx.duration) : [];
+  // The open chain's gaps (and one frame's clip) must be clips its model makes; the planner checks two or more frames too.
+  const framesGap = framesCtx?.chained && model && framesAt.length ? chainGapProblem(framesAt, framesCtx.duration, chainTiming(model)) : null;
 
   // The page's drop zone hands its files to this composer.
   useEffect(() => {
@@ -258,8 +279,10 @@ export function Composer({ docked }: { docked: boolean }) {
   // operation are known up front and the blocker can name the slot in the studio's own words.
   // Studios that need one of several inputs (Lipsync: a portrait or a video) name the group.
   const anyOf = preset?.inputs ? undefined : config.anyOf;
-  const missing = firstMissingSlot(slots, draft.slots, anyOf);
-  const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading);
+  // Frames mode has its own strip: the start frame is frame 1 (a camera motion's start frame tile isn't asked for).
+  const askedSlots = framesOn ? framesSlots(slots) : slots;
+  const missing = firstMissingSlot(askedSlots, draft.slots, anyOf);
+  const uploading = Object.values(draft.slots).some((v) => v?.uploading) || draft.refs.some((r) => r.uploading) || (framesOn && framesUploading(draft.frames));
   const engineError = lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null;
   let op: Operation | undefined;
   let cost: number | null = null;
@@ -268,7 +291,7 @@ export function Composer({ docked }: { docked: boolean }) {
     try {
       const stand = (v: SlotValue | null | undefined, kind: MediaKind): SlotValue | null | undefined => (v?.uploading ? { ...v, ref: PLACEHOLDER[kind] } : v);
       const planSlots: Draft["slots"] = Object.fromEntries(Object.entries(draft.slots).map(([k, v]) => [k, stand(v, v?.kind ?? "image")]));
-      for (const s of slots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
+      for (const s of askedSlots) if (s.required && !planSlots[s.key]?.ref) planSlots[s.key] = { ref: PLACEHOLDER[s.accept], preview: "", kind: s.accept };
       for (const g of anyOf ?? []) {
         const first = slots.find((s) => s.key === g[0]);
         if (first && !g.some((k) => planSlots[k]?.ref)) planSlots[first.key] = { ref: PLACEHOLDER[first.accept], preview: "", kind: first.accept };
@@ -294,7 +317,7 @@ export function Composer({ docked }: { docked: boolean }) {
     loading: !catalog.ready ? "Loading models…" : presetLoading ? "Loading presets…" : null,
     model: !!model,
     engineError,
-    frames: framesOn && model ? framesBlocker(model, draft.frames!.length) : null,
+    frames: framesOn && model ? (framesBlocker(model, draft.frames!.length) ?? (framesGap ? { message: framesGap } : null)) : null,
     missing,
     uploading,
     maskMissing: needsMask(model, config.sketch, draft.slots),
@@ -437,11 +460,11 @@ export function Composer({ docked }: { docked: boolean }) {
     const alt = catalog.getModel(FRAMES_MODELS[model.engine].id);
     const action = alt && alt.id !== model.id ? { label: `Use ${alt.name}`, onClick: () => pickModel(alt) } : undefined;
     const count = draft.frames.length;
-    const times = frameTimes(draft.frames.map((f) => f.at), framesCtx.duration);
-    const gap = framesCtx.chained && count > 1 ? chainGapProblem(times, framesCtx.duration, chainTiming(model)) : null;
-    const note = framesNote(model, count, draft.frames.at(-1)?.at);
+    // On the open chain, a last frame far enough from the end gets a clip of its own after it.
+    const tail = framesCtx.chained && count > 0 && framesCtx.duration - framesAt[count - 1] >= OPEN_MIN_GAP - 1e-6;
+    const note = framesNote(model, count, draft.frames.at(-1)?.at, { suggested: alt, tail });
     if (framesCtx.support === "start" || framesCtx.support === "none") framesNotice = { text: `${framesBlocker(model, count)!.message}.`, tone: "warn", action };
-    else if (gap) framesNotice = { text: `${gap}.`, tone: "warn" };
+    else if (framesGap) framesNotice = { text: `${framesGap}.`, tone: "warn" };
     else if (note) framesNotice = { text: note, tone: "info", action };
   }
   const framesChip = config.frames ? (

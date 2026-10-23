@@ -2,7 +2,22 @@ import { describe, expect, it } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
 import { frameSupport, framesBlocker, framesDuration, keyframeChain } from "@/lib/catalog/keyframes";
 import { planGeneration } from "@/lib/catalog/plan";
-import { addFrame, blockerFor, enterFrames, framesRequest, framesShape, leaveFrames, removeFrame, replaceAttachment, settingsShape, type Attachment, type FrameAttachment } from "@/lib/composer";
+import {
+  addFrame,
+  blockerFor,
+  enterFrames,
+  firstMissingSlot,
+  framesRequest,
+  framesShape,
+  framesSlots,
+  framesUploading,
+  leaveFrames,
+  removeFrame,
+  replaceAttachment,
+  settingsShape,
+  type Attachment,
+  type FrameAttachment,
+} from "@/lib/composer";
 import { VIDEO_STUDIO } from "@/lib/studios";
 import { studioCatalog } from "@/lib/studio-catalog";
 
@@ -58,6 +73,7 @@ describe("Frames mode in the Video studio composer", () => {
     expect(sent.endImage).toBeUndefined();
     expect(sent.params).toMatchObject({ duration: 8, keyframeTimes: [0, 2.7, 5.3, 8] });
     expect(sent.params.numOutputs).toBeUndefined();
+    expect(sent.op).toBe("keyframes");
     const plan = planGeneration({ feature: "video", modelId: "flux-3-max", prompt: "a paper boat", inputs: { images: sent.images }, params: sent.params }, getModel, getPreset);
     expect(plan.op).toBe("keyframes");
   });
@@ -66,16 +82,51 @@ describe("Frames mode in the Video studio composer", () => {
     const fs = framesOf("a", "b", "c");
     const sent = framesRequest(fs, ctxFor("kling-o3", 5));
     expect(sent).toMatchObject({ images: [fs[0].value.ref], endImage: fs[2].value.ref, params: { duration: 5, keyframeTimes: undefined } });
+    // The planner picks the operation for the ends (start + end frame, or a start frame alone).
+    expect(sent.op).toBeUndefined();
     const plan = planGeneration({ feature: "video", modelId: "kling-o3", prompt: "x", inputs: { images: sent.images, endImage: sent.endImage }, params: sent.params }, getModel, getPreset);
     expect(plan.op).toBe("flf2v");
     expect(framesRequest(framesOf("a"), ctxFor("flux-3-max"))).toMatchObject({ images: ["/api/files/a.png"], params: { keyframeTimes: undefined } });
   });
 
-  it("makes one film on the open chain, and leaves frames still uploading out", () => {
-    const fs = addFrame(framesOf("a", "b"), still("c", { ref: "", uploading: true }));
-    const sent = framesRequest(fs, ctxFor("oss-wan22-14b-fast", 8));
-    expect(sent.images).toEqual(["/api/files/a.png", "/api/files/b.png"]);
-    expect(sent.params).toMatchObject({ duration: 8, keyframeTimes: [0, 4], numOutputs: 1 });
+  it("makes one film on the open chain", () => {
+    const sent = framesRequest(framesOf("a", "b", "c"), ctxFor("oss-wan22-14b-fast", 8));
+    expect(sent).toMatchObject({ op: "keyframes", images: ["/api/files/a.png", "/api/files/b.png", "/api/files/c.png"], params: { duration: 8, keyframeTimes: [0, 4, 8], numOutputs: 1 } });
+  });
+
+  it("holds Generate while a frame is still uploading, so no frame is left out of the run", () => {
+    const fs = addFrame(framesOf("a", "b", "c"), still("d", { ref: "", uploading: true }));
+    // The frame with no ref yet can't be sent...
+    expect(framesRequest(fs, ctxFor("flux-3-max", 5)).images).toHaveLength(3);
+    // ...so the composer waits for it, as it waits for any other upload.
+    expect(framesUploading(fs)).toBe(true);
+    expect(framesUploading(framesOf("a", "b"))).toBe(false);
+    expect(framesUploading(undefined)).toBe(false);
+    const base = { model: true, frames: framesBlocker(getModel("flux-3-max")!, fs.length), promptMissing: false };
+    expect(blockerFor({ ...base, uploading: framesUploading(fs) })).toEqual({ message: "Uploading…" });
+    // The start frame uploading too: nothing goes until it's in.
+    const first = [{ value: still("s", { ref: "", uploading: true }), at: 0 }, ...framesOf("b", "c").slice(1)];
+    expect(blockerFor({ ...base, uploading: framesUploading(first) })?.message).toBe("Uploading…");
+  });
+
+  it("doesn't ask for a camera motion's start frame tile: frame 1 is the start frame", () => {
+    const preset = getPreset("motion-zoom-in")!;
+    expect(firstMissingSlot(preset.inputs!, {})?.key).toBe("image");
+    expect(firstMissingSlot(framesSlots(preset.inputs!), {})).toBeUndefined();
+    // A transition (start and end frame) too.
+    const transition = [{ key: "image" as const, label: "Start frame", accept: "image" as const, required: true }, { key: "endImage" as const, label: "End frame", accept: "image" as const, required: true }];
+    expect(firstMissingSlot(framesSlots(transition), {})).toBeUndefined();
+    // The motion's words (and, on its own model, its LoRA) go with a keyframes run, not the preset's image-to-video.
+    const run = (id: string, presetId: string) => {
+      const sent = framesRequest(framesOf("a", "b", "c"), ctxFor(id, 5));
+      return planGeneration({ feature: "video", modelId: id, presetId, op: sent.op, prompt: "a fox", inputs: { images: sent.images }, params: sent.params }, getModel, getPreset);
+    };
+    expect(run("flux-3-max", preset.id)).toMatchObject({ op: "keyframes", prompt: expect.stringMatching(/zooms in/) });
+    // Dolly In runs on Wan 2.2 14B with a LoRA: its own operation is image-to-video, which would drop frames 2 and 3.
+    expect(getPreset("motion-dolly-in")?.open).toMatchObject({ modelId: "oss-wan22-14b", op: "i2v" });
+    const dolly = run("oss-wan22-14b", "motion-dolly-in");
+    expect(dolly.op).toBe("keyframes");
+    expect(dolly.loras.length).toBeGreaterThan(0);
   });
 
   it("asks for the start frame first and says which models can't follow frames", () => {

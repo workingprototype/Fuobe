@@ -367,18 +367,31 @@ export function enterFrames<T extends Attachment>(slots: Partial<Record<InputSlo
 
 /**
  * What Frames mode sends: the stills in order at their times (or the first and last as start and end
- * frame, as the model takes them), at the strip's length. Frames still uploading (no ref yet) wait.
+ * frame, as the model takes them), at the strip's length. Every frame at its time is a keyframes run
+ * (`op`, so a camera motion preset's own operation doesn't replace it). A frame still uploading has no
+ * ref yet and is left out here, so the composer holds Generate ("Uploading…") until every frame is in.
  */
 export function framesRequest(
   frames: FrameAttachment[],
   ctx: { support: FrameSupport; duration: number; chained: boolean },
-): { images: string[]; endImage?: string; params: Pick<GenParams, "duration" | "keyframeTimes" | "shots" | "multiShot" | "numOutputs"> } {
+): { op?: "keyframes"; images: string[]; endImage?: string; params: Pick<GenParams, "duration" | "keyframeTimes" | "shots" | "multiShot" | "numOutputs"> } {
   const times = frameTimes(frames.map((f) => f.at), ctx.duration);
   const kept = frames.map((f, i) => ({ ref: f.value.ref, time: times[i] })).filter((f) => !!f.ref);
   const sent = framesInputs(kept.map((f) => f.ref), kept.map((f) => f.time), ctx.support);
   // Frames and shots don't mix; the open chain makes one film (its clips are the jobs).
-  return { images: sent.images ?? [], endImage: sent.endImage, params: { duration: ctx.duration, keyframeTimes: sent.keyframeTimes, shots: undefined, multiShot: undefined, ...(ctx.chained && { numOutputs: 1 }) } };
+  return {
+    ...(sent.keyframeTimes && { op: "keyframes" as const }),
+    images: sent.images ?? [],
+    endImage: sent.endImage,
+    params: { duration: ctx.duration, keyframeTimes: sent.keyframeTimes, shots: undefined, multiShot: undefined, ...(ctx.chained && { numOutputs: 1 }) },
+  };
 }
+
+/** Frames mode has its own strip: the studio's start and end frame tiles (a camera motion's too) aren't asked for. */
+export const framesSlots = <S extends Pick<InputSlot, "key">>(slots: S[]): S[] => slots.filter((s) => s.key !== "image" && s.key !== "endImage");
+
+/** Frames still uploading: Generate waits for them, as it does for any other attachment. */
+export const framesUploading = (frames: FrameAttachment[] | undefined): boolean => !!frames?.some((f) => f.value.uploading);
 
 /**
  * Frames mode off: the first frame is the start frame again and the last (with two or more) the end
