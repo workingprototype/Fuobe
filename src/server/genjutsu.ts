@@ -6,11 +6,14 @@ import {
   GENJUTSU,
   genjutsuProblem,
   genjutsuTitle,
+  getMaker,
+  makersFor,
   MODE_TARGETS,
   planGenjutsu,
   planMakerPieces,
   qualityFor,
   makerStepUsd,
+  resolutionWords,
   type GenjutsuLook,
   type GenjutsuMode,
   type GenjutsuPlanInput,
@@ -18,9 +21,9 @@ import {
   type GenjutsuTier,
   type Maker,
 } from "@/lib/catalog/genjutsu";
-import { scalePoints, wholeClip, type RemoveRange, type RemoveSource } from "@/lib/catalog/remove-object";
+import { MASK_TRACKER, REMOVE_TOOLS, scalePoints, wholeClip, type RemoveRange, type RemoveSource } from "@/lib/catalog/remove-object";
 import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
-import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
+import type { Engine, Generation, PixelPoint, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
 import { provider } from "./providers";
@@ -203,9 +206,8 @@ function notesFor(body: GenjutsuBody, m: Maker, source: RemoveSource, range: Rem
   if (fuobeLook && body.look?.kind === "custom" && m.readsLookImages && body.look.images.length > m.readsLookImages) notes.push(`${name} reads ${m.readsLookImages} of your look's images`);
   if (body.mode === "restyle" && m.looks === "higgsfield" && refs > m.refs.max) notes.push(`Genjutsu Restyle takes ${m.refs.max} character references — your first ${m.refs.max} go`);
   const quality = body.quality ?? GENJUTSU.defaultQuality;
-  const res = qualityFor(m, quality);
-  if (m.engine === "cloud" && !m.qualities) notes.push(`${name} keeps your clip's size (it has no resolution setting)`);
-  else if (res && res !== quality) notes.push(`${name} renders ${res} at most here — that's what you get`);
+  const res = resolutionWords(m, quality);
+  if (res) notes.push(`${name} ${res}${m.qualities ? "" : " (it has no resolution setting)"}`);
   if (m.id === "wan-22-vace-inpaint") {
     notes.push(body.mode === "insert" ? "The spot stays where you painted it for the whole shot — best with a still or slow camera" : "Only the area you marked changes; SAM 3.1 follows it through the selection when it runs as pieces or you clicked");
   }
@@ -222,24 +224,110 @@ function notesFor(body: GenjutsuBody, m: Maker, source: RemoveSource, range: Rem
 
 const withChain = (s: PlanStep) => ({ ...s.request, ...(s.chain ? { chain: s.chain } : {}) });
 
+/** The helper steps in words, for a run that can't have them (they run on fal; the open ones on ComfyUI). */
+const HELPER_WORDS: Record<string, string> = {
+  [REMOVE_TOOLS.cloud.cut]: "cutting the clip",
+  [REMOVE_TOOLS.cloud.join]: "joining the pieces",
+  [REMOVE_TOOLS.cloud.mux]: "putting the sound back",
+  [MASK_TRACKER]: "following what you marked",
+  "extract-frame": "following what you marked",
+  "scale-video": "fitting the clip",
+};
+
+/** The providers a step's model runs its operation on (any one of them will do). */
+const providersOf = (s: PlanStep): ProviderId[] => [...new Set((getModel(s.request.modelId)?.routes ?? []).filter((r) => !s.request.op || r.op === s.request.op).map((r) => r.provider))];
+
+const listWords = (xs: string[]) => (xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+const cap = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+
+interface StepMode {
+  step: PlanStep;
+  /** It would run as a demo (no provider for it), or can't run at all (demo mode off). */
+  demo: boolean;
+}
+
+/**
+ * A run is all real or all a demo (chainMode in src/server/generations.ts): a real step after a demo one runs as a demo
+ * too, a demo step after a real one fails, both after the paid steps were made. So when only some of the steps have a
+ * provider — a Higgsfield key without fal for the cuts and joins, or fal without Higgsfield for Genjutsu — say which key
+ * is missing (and the way around it) before anything is paid for.
+ */
+function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput): string | null {
+  const missing = modes.filter((x) => x.demo);
+  if (!missing.length || (!cannot && missing.length === modes.length)) return null;
+  const m = input.maker;
+  const makerName = getModel(m.id)?.name ?? m.label;
+  const own = missing.filter((x) => x.step.request.modelId === m.id);
+  const helpers = missing.filter((x) => x.step.request.modelId !== m.id);
+  const ids = (xs: StepMode[]) => [...new Set(xs.flatMap((x) => providersOf(x.step)))];
+  const label = (xs: ProviderId[]) => xs.map((id) => provider(id).label).join(" or ");
+  const [ownIds, helperIds] = [ids(own), ids(helpers)];
+  const parts: string[] = [];
+  if (own.length) parts.push(`${makerName} runs on ${label(ownIds)}`);
+  if (helpers.length) {
+    const jobs = [...new Set(helpers.map((x) => HELPER_WORDS[x.step.request.modelId] ?? getModel(x.step.request.modelId)?.name ?? x.step.request.modelId))];
+    parts.push(`${own.length ? listWords(jobs) : cap(listWords(jobs))} ${jobs.length > 1 || own.length ? "run" : "runs"} on ${label(helperIds)}`);
+  }
+  // The fewest keys that cover it: one provider both need, else one for each.
+  const both = ownIds.filter((id) => helperIds.includes(id));
+  const key = !own.length ? `a ${label(helperIds)} key` : !helpers.length ? `a ${label(ownIds)} key` : both.length ? `a ${label(both.slice(0, 1))} key` : `a ${label(helperIds)} key and a ${label(ownIds)} key`;
+  const around = own.length ? otherModel(input) : oneCall(input);
+  return `${parts.join(", and ")} — add ${key} in Settings → API keys${around ? `, or ${around}` : ""}`;
+}
+
+/** Another model for the same job that doesn't need Higgsfield (the way around a missing Higgsfield key). */
+function otherModel(input: GenjutsuPlanInput): string | undefined {
+  const other = makersFor(input.engine, input.mode, input.target, input.look).find((x) => x.id !== input.maker.id && !x.higgsfield);
+  return other ? `pick ${other.label}` : undefined;
+}
+
+/** How a Higgsfield model runs without fal's cuts and joins: the whole clip, in one call. */
+function oneCall(input: GenjutsuPlanInput): string | undefined {
+  const m = input.maker;
+  if (!m.higgsfield || !m.maxSeconds) return undefined;
+  const high = m.tier === "standard" && m.pair ? getMaker(m.pair) : undefined;
+  const d = input.source.duration;
+  const len = input.range.end - input.range.start;
+  const fits = (t: number | undefined, s: number | undefined) => t !== undefined && s !== undefined && t <= s + 0.05;
+  if (!wholeClip(input.range, d)) {
+    if (fits(d, m.maxSeconds)) return "use the whole clip";
+    if (high && fits(d, high.maxSeconds)) return `use the whole clip with Quality: High (up to ${high.maxSeconds} s in one call)`;
+    return `add a clip of ${high?.maxSeconds ?? m.maxSeconds} s or less and use all of it`;
+  }
+  if (high && fits(len, high.maxSeconds)) return `pick Quality: High (up to ${high.maxSeconds} s in one call)`;
+  return undefined;
+}
+
+/** Whether a step's model has no route it could run on now (demo mode off: it would refuse). */
+const unrunnable = (s: PlanStep) => !providersOf(s).some((id) => provider(id).isConfigured());
+
 /** What the steps cost together (null when a price is unknown) and whether they would run as a demo. */
-function price(steps: PlanStep[]): { costUsd: number | null; demo: boolean } {
+function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number | null; demo: boolean } {
   let cost: number | null = 0;
-  let demo = false;
+  const modes: StepMode[] = [];
+  let cannot = false;
   for (const s of steps) {
     let p: ReturnType<typeof previewChained>;
     try {
       p = previewChained(withChain(s), s.after?.length ?? 0);
     } catch (e) {
+      // Demo mode off and no key for it: said with the other missing keys below.
+      if (unrunnable(s)) {
+        cannot = true;
+        modes.push({ step: s, demo: true });
+        continue;
+      }
       throw new ShortsError((e as Error).message, 422);
     }
-    demo ||= p.demo;
+    modes.push({ step: s, demo: p.demo });
     // Genjutsu's tiers and Kling O3's edit price aren't in the catalog per resolution: the planner's table.
     const own = p.demo ? null : makerStepUsd(s.request.modelId, s.request.params);
     const usd = own ?? p.costUsd;
     cost = cost === null || usd === null ? null : cost + usd;
   }
-  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo };
+  const problem = mixProblem(modes, cannot, input);
+  if (problem) throw new ShortsError(problem, 422);
+  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo: modes.some((x) => x.demo) };
 }
 
 export interface GenjutsuEstimate {
@@ -268,7 +356,7 @@ export async function estimateGenjutsu(body: GenjutsuBody): Promise<GenjutsuEsti
     throw new ShortsError((e as Error).message, 422);
   }
   return {
-    ...price(plan.steps),
+    ...price(plan.steps, input),
     modelId: maker.id,
     modelName: getModel(maker.id)?.name ?? maker.label,
     ...(maker.tier ? { tier: maker.tier } : {}),
@@ -286,6 +374,8 @@ export async function createGenjutsu(body: GenjutsuBody): Promise<{ final: Gener
   const { input } = await planInput(body, { probe: true });
   try {
     const plan = planGenjutsu(input);
+    // The same check as the estimate: nothing starts when only some of the steps have a provider.
+    price(plan.steps, input);
     const p = createPipeline(plan.steps);
     return { final: p.byKey[plan.final], items: p.items };
   } catch (e) {
