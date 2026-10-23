@@ -11,6 +11,7 @@ import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/type
 import { useEngine, useGenerations } from "@/lib/api";
 import { handoffKey, mergeHandoff, promptShown } from "@/lib/composer";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
+import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
@@ -71,7 +72,7 @@ function initialDraft(
 }
 
 /** Rebuild a composer draft from a past generation ("Reuse"). */
-function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft> {
+function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id: string) => ModelDef | undefined): Partial<Draft> {
   // A run styled by the Color signature / Moodboard chips comes back as it was before they routed it,
   // with the picks on the chips (studios without the chips get the styled prompt instead).
   const signed = config.signature ? reuseSignature(g.request) : null;
@@ -84,11 +85,15 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
   if (r.inputs?.endImage) slots.endImage = slot(r.inputs.endImage);
   if (r.inputs?.video) slots.video = slot(r.inputs.video);
   if (r.inputs?.audio) slots.audio = slot(r.inputs.audio);
+  const params = { ...r.params };
+  // A spoken language stored as a name (Assist's "Spanish") or a locale comes back as the model's own code.
+  const languages = getModel(r.modelId)?.options.sourceLanguages;
+  if (languages?.length && params.sourceLanguage) params.sourceLanguage = matchSpokenLanguage(params.sourceLanguage, languages) ?? params.sourceLanguage;
   return {
     prompt: r.prompt ?? "",
     negativePrompt: r.negativePrompt ?? "",
     modelId: r.modelId,
-    params: { ...r.params },
+    params,
     slots,
     refs,
     presetId: r.presetId,
@@ -233,14 +238,15 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
   // While the feed loads (and in the prerendered shell) the page shows the hero and the composer, never a blank area.
   const hasItems = items.length > 0;
   const offscreen = useOffscreenResults(feed.data);
+  const catalog = useCatalog();
 
   const reuse = useCallback(
     (g: Generation) => {
-      setDraft(draftFromGeneration(g, config));
+      setDraft(draftFromGeneration(g, config, catalog.getModel));
       if (g.engine !== engine) setEngine(g.engine);
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
     },
-    [config, engine, setDraft, setEngine],
+    [catalog, config, engine, setDraft, setEngine],
   );
 
   return (

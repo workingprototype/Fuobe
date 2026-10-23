@@ -91,7 +91,7 @@ import {
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
-import { spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
+import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { cn } from "@/lib/utils";
 import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
@@ -578,12 +578,15 @@ function ModelOptions({ id, model, data }: { id: string; model: ModelDef; data: 
   }
   // Transcribers: the language of the speech, detected unless you pick one.
   if (o.sourceLanguages?.length) {
-    const codes = ["auto", ...spokenLanguageOptions(o.sourceLanguages).map((l) => l.code)];
+    const listed = spokenLanguageOptions(o.sourceLanguages).map((l) => l.code);
+    // A stored language the model doesn't list (or lists by another code) shows as what is sent.
+    const value = p.sourceLanguage ? (matchSpokenLanguage(p.sourceLanguage, listed) ?? p.sourceLanguage) : "auto";
+    const codes = ["auto", ...(listed.includes(value) || value === "auto" ? [] : [value]), ...listed];
     items.push(
       <OptionSelect
         key="spoken"
         label="Spoken language"
-        value={p.sourceLanguage ?? "auto"}
+        value={value}
         options={codes}
         onChange={(v) => set({ sourceLanguage: v === "auto" ? undefined : v })}
         format={(v) => (v === "auto" ? "Detect language" : spokenLanguageName(v))}

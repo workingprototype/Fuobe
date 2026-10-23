@@ -25,7 +25,7 @@ import { appStudio, EDIT_STUDIO, IMAGE_STUDIO, JOIN_CLIPS_STUDIO, LIPSYNC_STUDIO
 import { studioCatalog } from "@/lib/studio-catalog";
 import { buildPayload } from "@/lib/catalog/payload";
 import { asrLanguage, whisperLanguage } from "@/lib/comfy";
-import { spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
+import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 
 const model = (id: string) => {
   const m = getModel(id);
@@ -93,6 +93,22 @@ describe("settings summary", () => {
     const options = spokenLanguageOptions(["fr", "en", "de", "en"]);
     expect(options.map((o) => o.name)).toEqual(["English", "French", "German"]);
     expect(spokenLanguageOptions(model("whisper").options.sourceLanguages!).length).toBeGreaterThan(90);
+  });
+
+  it("finds a model's code for a language stored as a name, a locale or an alias", () => {
+    const scribe = model("scribe-v2").options.sourceLanguages!;
+    // Assist stores the language as free text ("Spanish"): reused in Audio → Transcribe, the picker
+    // selects Spanish and the request sends the code, as the chip says.
+    expect(matchSpokenLanguage("Spanish", scribe)).toBe("es");
+    expect(matchSpokenLanguage("spanish", scribe)).toBe("es");
+    expect(matchSpokenLanguage("es", scribe)).toBe("es");
+    expect(matchSpokenLanguage("ES-mx", scribe)).toBe("es");
+    expect(matchSpokenLanguage("pt_BR", scribe)).toBe("pt");
+    expect(matchSpokenLanguage("German (de)", scribe)).toBe("de");
+    // The picker lists one code per name: another code for the same language finds it.
+    expect(matchSpokenLanguage("tl", ["en", "fil"])).toBe("fil");
+    expect(matchSpokenLanguage("Klingon", scribe)).toBeUndefined();
+    expect(matchSpokenLanguage("  ", scribe)).toBeUndefined();
   });
 
   it("counts the changes the chip doesn't spell out", () => {

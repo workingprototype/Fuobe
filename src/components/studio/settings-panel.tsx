@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { OPERATION_LABELS, type GenParams, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { durationLabel, hiddenChanges, settingsSummary, type SettingsShape } from "@/lib/composer";
 import { ratioValue } from "@/lib/format";
-import { spokenLanguageOptions } from "@/lib/speech-languages";
+import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { cn } from "@/lib/utils";
 import { SliderControls } from "./audio-controls";
 import { Chip } from "./chip";
@@ -88,16 +88,23 @@ function SeedInput({ value, onChange }: { value: number; onChange: (v: number) =
   );
 }
 
-/** The language of the speech a transcriber hears: detected unless you pick one (sent as params.sourceLanguage). */
+/**
+ * The language of the speech a transcriber hears: detected unless you pick one (sent as
+ * params.sourceLanguage). A stored value the model doesn't list stays on show as it is, so the
+ * picker says what the chip says and the request sends.
+ */
 function SpokenLanguage({ codes, value, onChange }: { codes: string[]; value?: string; onChange: (v: string | undefined) => void }) {
   const options = useMemo(() => spokenLanguageOptions(codes), [codes]);
+  const listed = value ? matchSpokenLanguage(value, options.map((l) => l.code)) : undefined;
+  const selected = !value ? "auto" : (listed ?? value);
   return (
-    <Select value={value && codes.includes(value) ? value : "auto"} onValueChange={(v) => onChange(v === "auto" ? undefined : v)}>
+    <Select value={selected} onValueChange={(v) => onChange(v === "auto" ? undefined : v)}>
       <SelectTrigger className="w-full" aria-label="Spoken language">
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="max-h-72">
         <SelectItem value="auto">Detect automatically</SelectItem>
+        {value && !listed && <SelectItem value={value}>{spokenLanguageName(value)}</SelectItem>}
         {options.map((l) => (
           <SelectItem key={l.code} value={l.code}>
             {l.name}

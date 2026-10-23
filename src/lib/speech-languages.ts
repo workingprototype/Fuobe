@@ -71,3 +71,21 @@ export function spokenLanguageOptions(codes: readonly string[]): { code: string;
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, "en"));
 }
+
+/**
+ * The code in a model's list that means `value`: the code itself (any case), its base language
+ * ("es-MX", "pt_BR", "German (de)"), or its English name ("Spanish", as Assist stores it), also when
+ * the list names that language by another code. Undefined when the model doesn't list it.
+ */
+export function matchSpokenLanguage(value: string, codes: readonly string[]): string | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+  const find = (code: string) => codes.find((c) => c.toLowerCase() === code.toLowerCase());
+  const exact = find(v);
+  if (exact) return exact;
+  const base = /\(([a-z]{2,3})\)\s*$/i.exec(v)?.[1] ?? /^([a-z]{2,3})(?:[-_][a-z0-9]+)+$/i.exec(v)?.[1];
+  const byBase = base && find(base);
+  if (byBase) return byBase;
+  const name = (base || /^[a-z]{2,3}$/i.test(v) ? spokenLanguageName((base ?? v).toLowerCase()) : v).toLowerCase();
+  return codes.find((c) => spokenLanguageName(c).toLowerCase() === name);
+}
