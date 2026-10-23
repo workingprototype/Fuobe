@@ -1889,7 +1889,7 @@ export function pickerData(lookup: ModelLookup): PickerData {
 
 /** What the music switch does on each engine (settings, the Explainer's popover). */
 export const MUSIC_HINT: Record<Engine, string> = {
-  cloud: "An instrumental bed under the voice, as long as the film (Sonilo, up to 10 minutes)",
+  cloud: "An instrumental bed under the voice, as long as the film (Sonilo makes up to 10 minutes; past that it plays again)",
   open: "An instrumental bed under the voice (ACE-Step); past 4 minutes it loops with a soft crossfade",
 };
 

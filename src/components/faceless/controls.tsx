@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
@@ -77,12 +77,14 @@ export const usd = (n: number) => (n >= 10 ? `$${n.toFixed(0)}` : `$${n.toFixed(
 
 /** "≈ $7.02" / "Demo · free" / "Free · your GPU", with what it's made of in a popover. */
 export function EstimateLine({ data, loading, engine, className }: { data: EstimateResult | undefined; loading?: boolean; engine: Engine; className?: string }) {
+  const [open, setOpen] = useState(false);
   if (!data) return <span className={cn("inline-flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground", className)}>{loading && <Loader2 className="size-3 animate-spin" />}Estimating…</span>;
   const price = data.demo ? "Demo · free" : engine === "open" ? "Free · your GPU" : `≈ ${usd(data.estimate.total)}${data.estimate.unknown ? "+" : ""}`;
   const parts = Object.entries(data.estimate.parts).filter(([, v]) => (v ?? 0) > 0) as [StepPart, number][];
+  const notes = !data.error ? (data.notes ?? []) : [];
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", className)}>
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button type="button" className={cn("inline-flex items-center gap-1 rounded-full font-mono text-[12px] text-foreground tabular-nums transition-opacity hover:underline", loading && "opacity-60")}>
             {price}
@@ -103,10 +105,10 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
             </dl>
           )}
           {data.demo && <p className="mt-2 text-[12px] text-muted-foreground">Nothing is connected for some steps, so this runs as a free demo with placeholder results.</p>}
-          {/* The notes again: on a phone they live here only, so the bar stays one or two lines tall. */}
-          {!data.error && !!data.notes?.length && (
+          {/* The notes again: on a phone they live here (the bar shows how many), so it stays one or two lines tall. */}
+          {notes.length > 0 && (
             <ul className="mt-2.5 space-y-1 border-t pt-2.5 text-[12px] text-muted-foreground">
-              {data.notes.map((n) => (
+              {notes.map((n) => (
                 <li key={n}>{n}</li>
               ))}
             </ul>
@@ -122,13 +124,24 @@ export function EstimateLine({ data, loading, engine, className }: { data: Estim
           <span className="min-w-0">{data.error}</span>
         </span>
       )}
-      {!data.error &&
-        data.notes?.map((n) => (
-          <span key={n} className="hidden min-w-0 items-start gap-1 text-[12px] text-muted-foreground sm:inline-flex">
-            <Info className="mt-0.5 size-3 shrink-0" />
-            <span className="min-w-0">{n}</span>
-          </span>
-        ))}
+      {notes.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-haspopup="dialog"
+          aria-label={`${notes.length} note${notes.length === 1 ? "" : "s"} on this render — show them with the price`}
+          className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2 text-[12px] text-foreground sm:hidden"
+        >
+          <Info className="size-3 text-muted-foreground" />
+          {notes.length} note{notes.length === 1 ? "" : "s"}
+        </button>
+      )}
+      {notes.map((n) => (
+        <span key={n} className="hidden min-w-0 items-start gap-1 text-[12px] text-muted-foreground sm:inline-flex">
+          <Info className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0">{n}</span>
+        </span>
+      ))}
     </div>
   );
 }
