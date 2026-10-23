@@ -1,13 +1,13 @@
 "use client";
 
-import { Brush, Eraser, Hand, Maximize, Minus, MousePointer2, Plus } from "lucide-react";
+import { Brush, Eraser, Hand, Maximize, Minus, MousePointer2, Paintbrush, Plus } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
-import { resizeBox, rotationTo, toLocal, type Box, type Handle, type LayerDoc, type LayerNode } from "@/lib/layers";
+import { INPAINT_TINT, resizeBox, rotationTo, toLocal, type Box, type Handle, type LayerDoc, type LayerNode } from "@/lib/layers";
 import { cn } from "@/lib/utils";
-import { keysBelongElsewhere, type MaskEdit, type StageMode } from "./editor-context";
+import { keysBelongElsewhere, type MaskEdit, type PaintEdit, type StageMode } from "./editor-context";
 import { drawNode, opaqueAt, type Sources } from "./render";
 
 interface View {
@@ -29,6 +29,27 @@ const HANDLES: Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const HANDLE_POS: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
 const HANDLE_CURSOR: Record<Handle, string> = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
 
+type Geometry = Pick<LayerNode, "x" | "y" | "w" | "h" | "rotation">;
+
+/** The painted area in the tint it's shown (and sent) in, redrawn once per stroke. */
+const tinted = new WeakMap<HTMLCanvasElement, { version: number; canvas: HTMLCanvasElement }>();
+function tintOf(src: HTMLCanvasElement, version: number): HTMLCanvasElement {
+  const hit = tinted.get(src);
+  if (hit?.version === version) return hit.canvas;
+  const c = hit?.canvas ?? document.createElement("canvas");
+  c.width = src.width;
+  c.height = src.height;
+  const ctx = c.getContext("2d")!;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.drawImage(src, 0, 0);
+  ctx.globalCompositeOperation = "source-in";
+  ctx.fillStyle = INPAINT_TINT;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.globalCompositeOperation = "source-over";
+  tinted.set(src, { version, canvas: c });
+  return c;
+}
 
 export interface StageProps {
   doc: LayerDoc;
@@ -43,6 +64,11 @@ export interface StageProps {
   setFrame: (r: Box | null) => void;
   mask: MaskEdit | null;
   onMaskChange: () => void;
+  /** Inpaint's painted area, painted while the mode is "inpaint" and shown tinted over its layer. */
+  paint?: PaintEdit | null;
+  paintVersion?: number;
+  onPaintChange?: () => void;
+  setPaintErase?: (erase: boolean) => void;
   brushSize: number;
   setBrushSize: (n: number) => void;
   highlight: Box | null;
@@ -106,6 +132,13 @@ export function Stage(p: StageProps) {
     return p.overlay?.length ? [...list, ...p.overlay] : list;
   }, [doc.nodes, live, p.overlay]);
 
+  /** Where Inpaint's painted area sits: on its layer (as it is moved), else over the whole image. */
+  const paintBox = useMemo<Geometry | null>(() => {
+    if (!p.paint) return null;
+    if (!p.paint.nodeId) return { x: 0, y: 0, w: doc.width, h: doc.height, rotation: 0 };
+    return nodes.find((n) => n.id === p.paint!.nodeId) ?? null;
+  }, [p.paint, nodes, doc.width, doc.height]);
+
   // Paint.
   useEffect(() => {
     const c = canvas.current;
@@ -127,8 +160,14 @@ export function Stage(p: StageProps) {
     ctx.clip();
     ctx.imageSmoothingQuality = "high";
     for (const n of nodes) if (!n.hidden) drawNode(ctx, n, dpr * view.zoom, p.sources, redraw);
+    const pb = paintBox;
+    if (p.paint && pb) {
+      ctx.translate(pb.x + pb.w / 2, pb.y + pb.h / 2);
+      ctx.rotate((pb.rotation * Math.PI) / 180);
+      ctx.drawImage(tintOf(p.paint.canvas, p.paintVersion ?? 0), -pb.w / 2, -pb.h / 2, pb.w, pb.h);
+    }
     ctx.restore();
-  }, [nodes, view, size, doc.width, doc.height, p.sources, redraw, tick]);
+  }, [nodes, view, size, doc.width, doc.height, p.sources, redraw, tick, p.paint, p.paintVersion, paintBox]);
 
   // Wheel: pinch / ⌘-scroll zooms around the pointer, scrolling pans.
   useEffect(() => {
@@ -207,27 +246,34 @@ export function Stage(p: StageProps) {
     return undefined;
   };
 
-  const paint = (px: number, py: number) => {
+  /** What a stroke paints into: Inpaint's area, or the selected layer's visibility mask. */
+  const strokeTarget = (): { canvas: HTMLCanvasElement; n: Geometry; erase: boolean; done: () => void } | null => {
+    if (mode === "inpaint") return p.paint && paintBox ? { canvas: p.paint.canvas, n: paintBox, erase: p.paint.erase, done: () => p.onPaintChange?.() } : null;
     const m = p.mask;
+    const n = m && doc.nodes.find((x) => x.id === m.nodeId);
+    return m && n ? { canvas: m.canvas, n, erase: mode === "eraser", done: p.onMaskChange } : null;
+  };
+
+  const paint = (px: number, py: number) => {
+    const t = strokeTarget();
     const d = drag.current;
-    if (!m || d?.kind !== "paint") return;
-    const n = doc.nodes.find((x) => x.id === m.nodeId);
-    if (!n) return;
+    if (!t || d?.kind !== "paint") return;
+    const { n, canvas: target } = t;
     // Local coordinates may run past the edges; strokes there are simply clipped.
     const cx = n.x + n.w / 2;
     const cy = n.y + n.h / 2;
     const r = (-n.rotation * Math.PI) / 180;
     const lx = (px - cx) * Math.cos(r) - (py - cy) * Math.sin(r);
     const ly = (px - cx) * Math.sin(r) + (py - cy) * Math.cos(r);
-    const x = (lx / n.w + 0.5) * m.canvas.width;
-    const y = (ly / n.h + 0.5) * m.canvas.height;
-    const ctx = m.canvas.getContext("2d")!;
-    ctx.globalCompositeOperation = mode === "eraser" ? "destination-out" : "source-over";
+    const x = (lx / n.w + 0.5) * target.width;
+    const y = (ly / n.h + 0.5) * target.height;
+    const ctx = target.getContext("2d")!;
+    ctx.globalCompositeOperation = t.erase ? "destination-out" : "source-over";
     ctx.strokeStyle = "#fff";
     ctx.fillStyle = "#fff";
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.lineWidth = (p.brushSize * m.canvas.width) / n.w;
+    ctx.lineWidth = (p.brushSize * target.width) / n.w;
     ctx.beginPath();
     if (d.last) {
       ctx.moveTo(d.last[0], d.last[1]);
@@ -239,7 +285,7 @@ export function Stage(p: StageProps) {
     }
     ctx.globalCompositeOperation = "source-over";
     d.last = [x, y];
-    p.onMaskChange();
+    t.done();
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -256,7 +302,7 @@ export function Stage(p: StageProps) {
       begin({ kind: "pan", sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y });
       return;
     }
-    if ((mode === "brush" || mode === "eraser") && p.mask) {
+    if (((mode === "brush" || mode === "eraser") && p.mask) || (mode === "inpaint" && p.paint)) {
       begin({ kind: "paint", last: null });
       paint(px, py);
       return;
@@ -365,8 +411,9 @@ export function Stage(p: StageProps) {
     const [x, y, w, h] = Array.isArray(b) ? b : [b.x, b.y, b.w, b.h];
     return { left: view.x + x * view.zoom, top: view.y + y * view.zoom, width: w * view.zoom, height: h * view.zoom };
   };
-  const cursor = space || mode === "hand" ? (dragKind === "pan" ? "grabbing" : "grab") : mode === "region" ? "crosshair" : mode === "brush" || mode === "eraser" ? "none" : undefined;
-  const maskNode = p.mask ? doc.nodes.find((n) => n.id === p.mask!.nodeId) : undefined;
+  const painting = ((mode === "brush" || mode === "eraser") && !!p.mask) || (mode === "inpaint" && !!p.paint);
+  const cursor = space || mode === "hand" ? (dragKind === "pan" ? "grabbing" : "grab") : mode === "region" ? "crosshair" : painting ? "none" : undefined;
+  const maskNode = p.mask ? doc.nodes.find((n) => n.id === p.mask!.nodeId) : mode === "inpaint" && p.paint?.nodeId ? (paintBox ?? undefined) : undefined;
 
   return (
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/40" style={{ cursor }}>
@@ -452,10 +499,10 @@ export function Stage(p: StageProps) {
           </div>
         )}
 
-        {maskNode && (mode === "brush" || mode === "eraser") && (
+        {maskNode && (mode === "brush" || mode === "eraser" || mode === "inpaint") && (
           <div className="pointer-events-none absolute border border-dashed border-primary" style={{ ...at(maskNode), transform: `rotate(${maskNode.rotation}deg)` }} />
         )}
-        {pointer && (mode === "brush" || mode === "eraser") && p.mask && (
+        {pointer && painting && (
           <div
             className="pointer-events-none absolute rounded-full border-2 border-white mix-blend-difference"
             style={{ left: view.x + pointer[0] * view.zoom - (p.brushSize * view.zoom) / 2, top: view.y + pointer[1] * view.zoom - (p.brushSize * view.zoom) / 2, width: p.brushSize * view.zoom, height: p.brushSize * view.zoom }}
@@ -469,9 +516,27 @@ export function Stage(p: StageProps) {
           <>
             <ModeButton icon={MousePointer2} label="Select and move" k="V" active={mode === "select"} onClick={() => p.setMode("select")} />
             <ModeButton icon={Hand} label="Pan" k="H" active={mode === "hand"} onClick={() => p.setMode("hand")} />
-            <ModeButton icon={Brush} label={selectedId ? "Brush: paint the mask back" : "Brush (pick a layer first)"} k="B" active={mode === "brush"} disabled={!selectedId} onClick={() => p.setMode("brush")} />
-            <ModeButton icon={Eraser} label={selectedId ? "Eraser: hide parts of the layer" : "Eraser (pick a layer first)"} k="E" active={mode === "eraser"} disabled={!selectedId} onClick={() => p.setMode("eraser")} />
-            {(mode === "brush" || mode === "eraser") && (
+            {p.paint ? (
+              // Inpaint is open: the brush paints the area to change.
+              <>
+                <ModeButton icon={Paintbrush} label="Paint the area to change" k="B" active={mode === "inpaint" && !p.paint.erase} onClick={() => {
+                    p.setPaintErase?.(false);
+                    p.setMode("inpaint");
+                  }}
+                />
+                <ModeButton icon={Eraser} label="Erase paint" k="E" active={mode === "inpaint" && p.paint.erase} onClick={() => {
+                    p.setPaintErase?.(true);
+                    p.setMode("inpaint");
+                  }}
+                />
+              </>
+            ) : (
+              <>
+                <ModeButton icon={Brush} label={selectedId ? "Brush: paint the mask back" : "Brush (pick a layer first)"} k="B" active={mode === "brush"} disabled={!selectedId} onClick={() => p.setMode("brush")} />
+                <ModeButton icon={Eraser} label={selectedId ? "Eraser: hide parts of the layer" : "Eraser (pick a layer first)"} k="E" active={mode === "eraser"} disabled={!selectedId} onClick={() => p.setMode("eraser")} />
+              </>
+            )}
+            {(mode === "brush" || mode === "eraser" || mode === "inpaint") && (
               <div className="flex w-32 shrink-0 items-center gap-2 px-2">
                 <Slider aria-label="Brush size" min={4} max={Math.max(64, Math.round(Math.max(doc.width, doc.height) / 6))} step={1} value={[p.brushSize]} onValueChange={([v]) => p.setBrushSize(v)} />
               </div>

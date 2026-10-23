@@ -3,6 +3,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  BookmarkPlus,
   Brush,
   ChevronLeft,
   ChevronRight,
@@ -64,6 +65,7 @@ import { cn } from "@/lib/utils";
 import { Field } from "./bits";
 import { costLabel, modelsFor, TOOL_FOR_JOB, useEditor } from "./editor-context";
 import { downloadLayer, loadImage, sizeOf } from "./render";
+import { SaveElementDialog } from "./save-element";
 
 /**
  * A layer's thumbnail showing just the part of its image it uses (its crop), on a mid-grey
@@ -330,6 +332,7 @@ function LayerRow({
   const { doc, commit, select, busyJob, failedJob, openTool, setSplitTarget, setMode, mode } = useEditor();
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(node.name);
+  const [savingElement, setSavingElement] = useState(false);
   const job = busyJob(node.id);
   // A failed run stays on its row until it's dismissed (its layer card or tool form says why).
   const failed = busy ? undefined : failedJob(node.id);
@@ -439,6 +442,9 @@ function LayerRow({
             <DropdownMenuItem onSelect={() => void downloadLayer(doc, node).catch(() => toast.error("Could not download the layer."))}>
               <Download /> Download
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setTimeout(() => setSavingElement(true))}>
+              <BookmarkPlus /> Save as element
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() => {
@@ -477,6 +483,7 @@ function LayerRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {savingElement && <SaveElementDialog node={node} open onOpenChange={setSavingElement} />}
     </li>
   );
 }

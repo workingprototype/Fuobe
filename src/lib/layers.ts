@@ -248,26 +248,29 @@ export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }>
 export type EnhanceLook = "skin" | "glow" | "sharpen" | "detail";
 
 /** The looks: what each does, and the instruction an edit model gets (Detail has none: an upscaler restores it). */
-export const ENHANCE_LOOKS: { id: EnhanceLook; label: string; hint: string; prompt?: string }[] = [
+export const ENHANCE_LOOKS: { id: EnhanceLook; label: string; verb: string; hint: string; prompt?: string }[] = [
   {
     id: "skin",
     label: "Skin",
+    verb: "Retouch skin",
     hint: "A natural retouch: blemishes and redness even out, pores and freckles stay",
     prompt: "Give the portrait a subtle natural retouch: even out redness and blemishes while keeping every pore, freckle and fine line.",
   },
   {
     id: "glow",
     label: "Soft glow",
+    verb: "Add a soft glow",
     hint: "A soft beauty retouch with a healthy, dewy glow",
     prompt: "Give the portrait a soft beauty retouch with a healthy dewy glow, still keeping real pore texture.",
   },
   {
     id: "sharpen",
     label: "Sharpen",
+    verb: "Sharpen",
     hint: "Removes blur and noise, restores crisp edges",
     prompt: "Sharpen the image: remove blur, noise and compression artefacts and restore crisp detail in edges, eyes, hair, fabric and text.",
   },
-  { id: "detail", label: "Detail", hint: "An upscaler rebuilds fine detail: twice the pixels, same place on the canvas" },
+  { id: "detail", label: "Detail", verb: "Restore detail", hint: "An upscaler rebuilds fine detail: twice the pixels, same place on the canvas" },
 ];
 
 /** The upscalers behind the Detail look (the Upscale tool's, Topaz with its face pass first). */
@@ -1019,6 +1022,9 @@ export function placeTextBlocks(blocks: TextBlock[], frame: Box): (TextRow & { b
 
 /** The painted area on the picture handed to edit models without a mask input (the Inpaint studio's red). */
 export const INPAINT_TINT = "rgba(255, 59, 48, 0.55)";
+
+/** Inpaint models with no mask input: they're shown the painted area tinted red instead. */
+export const INPAINT_SEES_TINT = new Set(["nano-banana-pro"]);
 
 /** The instruction an Inpaint run sends: what goes in the painted area, and that nothing else changes. */
 export function inpaintPrompt(prompt: string, keepAlpha = false): string {
