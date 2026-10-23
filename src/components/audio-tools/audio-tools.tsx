@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, AudioLines, Library, Loader2, Merge, Plus, Repeat, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, AudioLines, Cpu, Library, Loader2, Merge, Plus, Repeat, Upload, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -176,10 +176,8 @@ function LengthField({ value, onCommit, max }: { value: number; onCommit: (s: nu
   );
 }
 
-/** Crossfade length and fade shape (open engine), or why there is none (cloud). */
-function CrossfadeControls({ engine, value, onChange, curve, onCurve, max }: { engine: Engine; value: number; onChange: (v: number) => void; curve: Curve; onCurve: (c: Curve) => void; max: number }) {
-  if (engine === "cloud")
-    return <p className="text-[13px] text-muted-foreground">The cloud joins the audio end to end, with no crossfade. Switch to the open engine (top right) for smooth crossfaded seams.</p>;
+/** Crossfade length and fade shape (open engine; the cloud has no crossfade, the run bar says so). */
+function CrossfadeControls({ value, onChange, curve, onCurve, max }: { value: number; onChange: (v: number) => void; curve: Curve; onCurve: (c: Curve) => void; max: number }) {
   const top = Math.max(0.5, Math.min(CROSSFADE_MAX, Math.floor(max * 2) / 2));
   return (
     <div className="space-y-3">
@@ -204,8 +202,27 @@ function CrossfadeControls({ engine, value, onChange, curve, onCurve, max }: { e
   );
 }
 
-/** The run bar: what will happen, what it costs, and the button. */
-function RunBar({ label, icon: Icon, blocker, preview, engine, onRun, pending }: { label: string; icon: typeof Repeat; blocker: string | null; preview: ReturnType<typeof useAudioToolPreview>; engine: Engine; onRun: () => void; pending: boolean }) {
+/** The run bar: what will happen, what it costs, and the button (on the cloud, a way to the open engine's crossfades). */
+function RunBar({
+  label,
+  icon: Icon,
+  blocker,
+  preview,
+  engine,
+  onRun,
+  pending,
+  onOpenEngine,
+}: {
+  label: string;
+  icon: typeof Repeat;
+  blocker: string | null;
+  preview: ReturnType<typeof useAudioToolPreview>;
+  engine: Engine;
+  onRun: () => void;
+  pending: boolean;
+  /** Set when the install offers both engines. */
+  onOpenEngine?: () => void;
+}) {
   const error = preview.error ? (preview.error as Error).message : null;
   const p = preview.data;
   const shown = blocker ?? error;
@@ -219,6 +236,11 @@ function RunBar({ label, icon: Icon, blocker, preview, engine, onRun, pending }:
               {n}
             </p>
           ))}
+          {engine === "cloud" && onOpenEngine && (
+            <Button variant="outline" size="sm" className="mt-1 rounded-full" onClick={onOpenEngine}>
+              <Cpu className="size-3.5" /> Use open source for crossfades
+            </Button>
+          )}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-3">
@@ -282,7 +304,7 @@ function Results({ feature, title }: { feature: string; title: string }) {
 
 /** Audio → Loop / extend. */
 export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
-  const [engine] = useEngine();
+  const [engine, setEngine, mode] = useEngine();
   const run = useAudioToolRun();
   const [clip, setClip] = useState<Clip | null>(null);
   const [target, setTarget] = useState(120);
@@ -341,12 +363,12 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
             {clip.duration ? <LoopBar clip={clip.duration} target={target} crossfade={crossfade} engine={engine} /> : null}
           </Panel>
         )}
-        {clip && (
+        {clip && engine === "open" && (
           <Panel title="Seams">
-            <CrossfadeControls engine={engine} value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={clip.duration ? clip.duration / 2 - 0.1 : CROSSFADE_MAX} />
+            <CrossfadeControls value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={clip.duration ? clip.duration / 2 - 0.1 : CROSSFADE_MAX} />
           </Panel>
         )}
-        {clip && <RunBar label="Loop it" icon={Repeat} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} />}
+        {clip && <RunBar label="Loop it" icon={Repeat} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} onOpenEngine={mode === "both" ? () => setEngine("open") : undefined} />}
       </div>
       <Results feature={LOOP_FEATURE} title="Your loops" />
     </ToolShell>
@@ -355,7 +377,7 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
 
 /** Audio → Join. */
 export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
-  const [engine] = useEngine();
+  const [engine, setEngine, mode] = useEngine();
   const run = useAudioToolRun();
   const [clips, setClips] = useState<Clip[]>([]);
   const [crossfade, setCrossfade] = useState(DEFAULT_JOIN_CROSSFADE);
@@ -429,12 +451,12 @@ export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
             {clips.length === 1 && <p className="mt-2 text-[13px] text-muted-foreground">Add one more clip to join.</p>}
           </Panel>
         )}
-        {clips.length > 0 && (
+        {clips.length > 0 && engine === "open" && (
           <Panel title="Seams">
-            <CrossfadeControls engine={engine} value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={Number.isFinite(shortest) ? shortest - 0.1 : CROSSFADE_MAX} />
+            <CrossfadeControls value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={Number.isFinite(shortest) ? shortest - 0.1 : CROSSFADE_MAX} />
           </Panel>
         )}
-        {clips.length > 0 && <RunBar label="Join them" icon={Merge} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} />}
+        {clips.length > 0 && <RunBar label="Join them" icon={Merge} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} onOpenEngine={mode === "both" ? () => setEngine("open") : undefined} />}
       </div>
       <Results feature={JOIN_FEATURE} title="Your joins" />
     </ToolShell>

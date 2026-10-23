@@ -62,6 +62,7 @@ describe("Loop / extend and Join plans", () => {
     expect(one.steps.map((s) => [s.key, s.request.modelId, s.request.params?.duration, s.request.params?.sourceDuration])).toEqual([["loop-1", "join-audio", 120, 30]]);
     expect(one.length).toBe(120);
     expect(one.notes[0]).toBe("The cloud repeats the whole clip, so this comes out 2:00, not 1:40.");
+    expect(planLoop({ engine: "cloud", audio: "a", name: "Bed", sourceDuration: 30, duration: 100 }).steps[0].request.title).toBe("Loop · Bed to 2:00");
     const chain = planLoop({ engine: "cloud", audio: "/api/files/a.wav", sourceDuration: 10, duration: 600 });
     expect(chain.steps.map((s) => s.request.params?.duration)).toEqual([50, 200, 600]);
     expect(chain.steps.map((s) => s.request.params?.sourceDuration)).toEqual([10, 50, 200]);

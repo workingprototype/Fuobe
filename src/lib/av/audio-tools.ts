@@ -96,10 +96,11 @@ export function planLoop(i: LoopInput): ToolPlan {
   if (!(i.duration > L)) throw new Error(`The clip is already ${clock(L)} long — pick a longer length`);
   if (i.duration > LOOP_MAX_SECONDS) throw new Error(`Loops run up to ${LOOP_MAX_SECONDS / 60} minutes`);
   const duration = Math.round(i.duration * 10) / 10;
-  const title = `Loop · ${i.name ? `${i.name} ` : ""}to ${clock(duration)}`;
-  const base = { feature: LOOP_FEATURE, batchTitle: title } satisfies Partial<GenerationRequest>;
+  const titleFor = (made: number) => `Loop · ${i.name ? `${i.name} ` : ""}to ${clock(made)}`;
   const models = AUDIO_TOOL_MODELS[i.engine];
   if (i.engine === "open") {
+    const title = titleFor(duration);
+    const base = { feature: LOOP_FEATURE, batchTitle: title } satisfies Partial<GenerationRequest>;
     const x = fade(i.crossfade, DEFAULT_LOOP_CROSSFADE);
     const problem = crossfadeProblem([L], x, "loop");
     if (problem) throw new Error(problem);
@@ -127,6 +128,9 @@ export function planLoop(i: LoopInput): ToolPlan {
   const passes = cloudLoopPasses(L, duration, CLOUD_PER_CALL);
   const length = cloudLoopLength(L, passes);
   const plays = passes.reduce((a, b) => a * b, 1);
+  // Titled by what it makes (whole plays), not by what was asked.
+  const title = titleFor(length);
+  const base = { feature: LOOP_FEATURE, batchTitle: title } satisfies Partial<GenerationRequest>;
   // Each call's clip and length are rounded together (ms), so the route counts exactly `p` plays.
   let clip = Math.round(L * 1000) / 1000;
   const steps: ToolStep[] = passes.map((p, k) => {
