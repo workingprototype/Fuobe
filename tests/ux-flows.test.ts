@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { directorPicks } from "@/components/cinema/draft";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
-import { leftLabel, timeLeft, untitledName } from "@/lib/format";
+import { leftLabel, notePace, timeLeft, untitledName, type Pace } from "@/lib/format";
 import { toggleAll } from "@/lib/library";
 import { nextSteps, videoPoster } from "@/lib/output-actions";
 
@@ -84,6 +84,39 @@ describe("time left on a running tile", () => {
     expect(timeLeft({ at: 1000, progress: 0.01 }, { at: 1500, progress: 0.03 }, 2000)).toBeNull();
     expect(timeLeft({ at: 1000, progress: 0.5 }, { at: 3000, progress: 0.4 }, 3000)).toBeNull();
     expect(timeLeft({ at: 1000, progress: 0.2 }, { at: 3000, progress: 1 }, 3000)).toBeNull();
+  });
+
+  it("counts down while a step runs: a poll that rewrites updatedAt with the same progress isn't a report", () => {
+    // A ComfyUI-like job: 5 % per 30 s sampler step, polled every 1.5 s, each poll bumping updatedAt.
+    let pace: Pace = notePace(null, 0, null);
+    const seen: number[] = [];
+    for (let t = 1500; t <= 120_000; t += 1500) {
+      const progress = Math.floor(t / 30_000) * 0.05 || null;
+      const next = notePace(pace, t, progress);
+      if (progress === pace.seen) expect(next).toBe(pace);
+      pace = next;
+      if (pace.first && pace.last) seen.push(timeLeft(pace.first, pace.last, t)!);
+    }
+    // From 60 s on (two changes seen): 0.9 to go at 0.05 / 30 s is 540 s, and it only goes down from there.
+    expect(seen[0]).toBe(540);
+    for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeLessThanOrEqual(seen[i - 1]);
+    // At 2 min, 20 % done: 0.8 to go at the same pace is 480 s.
+    expect(seen.at(-1)).toBe(480);
+  });
+
+  it("starts at the first change when the tile opens part-way, and over when progress goes back", () => {
+    // Opened at 40 %: when 40 % was reached is unknown, so no anchor until it moves.
+    let pace = notePace(null, 10_000, 0.4);
+    expect(pace.first).toBeNull();
+    pace = notePace(pace, 12_000, 0.45);
+    expect(pace).toMatchObject({ first: { at: 12_000, progress: 0.45 }, last: null });
+    pace = notePace(pace, 42_000, 0.5);
+    expect(timeLeft(pace.first!, pace.last!, 42_000)).toBe(300);
+    // A new stage restarts at 10 %: the old pace no longer applies.
+    pace = notePace(pace, 50_000, 0.1);
+    expect(pace).toMatchObject({ first: { at: 50_000, progress: 0.1 }, last: null });
+    // Queued or unknown progress changes nothing.
+    expect(notePace(pace, 60_000, null)).toBe(pace);
   });
 
   it("reads as minutes and seconds", () => {

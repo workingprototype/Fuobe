@@ -14,7 +14,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { useCreateGeneration, useGenerationActions } from "@/lib/api";
-import { elapsed, formatCost, leftLabel, ratioValue, timeAgo, timeLeft } from "@/lib/format";
+import { elapsed, formatCost, leftLabel, notePace, ratioValue, timeAgo, timeLeft } from "@/lib/format";
 import { downloadHref, downloadName, userTitle } from "@/lib/library";
 import { isLayered, nextSteps, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
@@ -41,10 +41,13 @@ export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const now = useNow(1000);
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
-  // The first progress this tile saw: with the latest one it gives the pace, so the time left.
-  const [first, setFirst] = useState<{ at: number; progress: number } | null>(null);
-  if (!first && g.progress != null && g.status === "running") setFirst({ at: g.updatedAt, progress: g.progress });
-  const left = first && g.progress != null ? timeLeft(first, { at: g.updatedAt, progress: g.progress }, now) : null;
+  // When progress moved (not every poll: each one rewrites updatedAt) gives the pace, so the time left.
+  // Keyed by id: a chain's tile moves on to its next step's generation.
+  const report = g.status === "running" ? g.progress : null;
+  const [track, setTrack] = useState(() => ({ id: g.id, pace: notePace(null, g.updatedAt, report) }));
+  const pace = track.id === g.id ? notePace(track.pace, g.updatedAt, report) : notePace(null, g.updatedAt, report);
+  if (track.id !== g.id || pace !== track.pace) setTrack({ id: g.id, pace });
+  const left = pace.first && pace.last ? timeLeft(pace.first, pace.last, now) : null;
   return (
     <div className="relative h-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
       <div className="skeleton-sweep absolute inset-0 animate-skeleton" />
