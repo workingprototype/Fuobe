@@ -174,19 +174,25 @@ describe("point cloud from a photo and a depth map", () => {
     expect(-cloud.positions[3 * 3 + 2]).toBeCloseTo(5, 4);
   });
 
-  it("samples big photos under the point budget and drops the smear behind an edge", () => {
+  it("samples big photos under the point budget and snaps a soft edge's smear to its sides", () => {
     const big = pixels(1000, 500, () => [10, 20, 30]);
     const flat = pixels(100, 50, () => [128, 0, 0]);
     const cloud = buildPointCloud(big, flat, { hFov: 60, maxPoints: 10_000 });
     expect(cloud.stride).toBe(8);
     expect(cloud.count).toBeLessThanOrEqual(10_000);
-    // A near square in the middle of a far wall: the wall right next to it goes, the square stays whole.
+    // A near square on a far wall with a hard edge: every sample stays where it is.
     const box = pixels(40, 20, (x, y) => (x >= 10 && x < 30 && y >= 5 && y < 15 ? [255, 0, 0] : [0, 0, 0]));
-    const cut = buildPointCloud(photo, box, { hFov: 60, near: 1, far: 5, nearIsBright: true });
-    const all = buildPointCloud(photo, box, { hFov: 60, near: 1, far: 5, nearIsBright: true, edge: 0 });
-    expect(cut.count).toBeLessThan(all.count);
-    const nearPts = (c: typeof cut) => Array.from({ length: c.count }, (_, k) => -c.positions[k * 3 + 2]).filter((d) => d < 1.5).length;
-    expect(nearPts(cut)).toBe(nearPts(all));
+    const hard = buildPointCloud(photo, box, { hFov: 60, near: 1, far: 5, nearIsBright: true });
+    const hardAll = buildPointCloud(photo, box, { hFov: 60, near: 1, far: 5, nearIsBright: true, edge: 0 });
+    expect(Array.from(hard.positions)).toEqual(Array.from(hardAll.positions));
+    // A soft edge (a 4-sample ramp from the subject down to the wall): nothing is dropped and nothing floats between.
+    const ramp = pixels(40, 20, (x) => [x < 10 ? 255 : x >= 14 ? 0 : Math.round(255 * (1 - (x - 9) / 5)), 0, 0]);
+    const soft = buildPointCloud(photo, ramp, { hFov: 60, near: 1, far: 5, nearIsBright: true });
+    expect(soft.count).toBe(800);
+    const depths = Array.from({ length: soft.count }, (_, k) => -soft.positions[k * 3 + 2]);
+    expect(depths.every((d) => Math.abs(d - 1) < 1e-4 || Math.abs(d - 5) < 1e-4)).toBe(true);
+    // Each ramp sample went to the side it is nearer to in 1/z: the first two to the subject, the last two to the wall.
+    expect([10, 11, 12, 13].map((x) => Math.round(depths[5 * 40 + x]))).toEqual([1, 1, 5, 5]);
   });
 });
 

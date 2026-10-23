@@ -243,7 +243,7 @@ export interface PointCloudOptions {
   /** Distance of the nearest and the farthest points (scene units ≈ metres). */
   near?: number;
   far?: number;
-  /** Points whose depth jumps more than this fraction from a neighbour's are dropped (the smeared edges). */
+  /** Samples between their neighbours whose depth jumps more than this fraction snap to a side of the edge (0 = off). */
   edge?: number;
 }
 
@@ -327,50 +327,61 @@ export function buildPointCloud(photo: Pixels, depthMap: Pixels, opts: PointClou
 
   const fx = W / 2 / Math.tan(clamp(opts.hFov, 1, 179) * DEG * 0.5);
   const edge = opts.edge ?? 0.06;
-  const keep: number[] = [];
-  for (let r = 0; r < rows; r++)
-    for (let c = 0; c < cols; c++) {
-      const i = r * cols + c;
-      if (edge > 0) {
+  // Soft depth edges leave samples floating between a subject and what is behind it (a "curtain" once the camera
+  // moves). Each one snaps to the nearer side of the edge, compared in 1/z: no point is dropped, so the still's own
+  // view stays whole, and nothing hangs in the air between the two.
+  if (edge > 0) {
+    const snapped = z.slice();
+    const k = 4;
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
         let jump = 0;
         if (c + 1 < cols) jump = Math.max(jump, Math.abs(z[i + 1] - z[i]));
         if (c > 0) jump = Math.max(jump, Math.abs(z[i - 1] - z[i]));
         if (r + 1 < rows) jump = Math.max(jump, Math.abs(z[i + cols] - z[i]));
         if (r > 0) jump = Math.max(jump, Math.abs(z[i - cols] - z[i]));
-        // A jump counts against the nearer side, so the front edge of a subject stays and the smear behind goes.
-        if (jump / z[i] > edge && jump > 0 && !isFrontOf(z, i, cols, rows)) continue;
+        if (jump / z[i] <= edge || isExtreme(z, i, cols, rows)) continue;
+        let lo = Infinity;
+        let hi = 0;
+        for (let y = Math.max(0, r - k); y <= Math.min(rows - 1, r + k); y++)
+          for (let x = Math.max(0, c - k); x <= Math.min(cols - 1, c + k); x++) {
+            lo = Math.min(lo, z[y * cols + x]);
+            hi = Math.max(hi, z[y * cols + x]);
+          }
+        snapped[i] = Math.abs(1 / z[i] - 1 / lo) <= Math.abs(1 / z[i] - 1 / hi) ? lo : hi;
       }
-      keep.push(i);
-    }
+    z.set(snapped);
+  }
 
-  const count = keep.length;
+  const count = cols * rows;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const sizes = new Float32Array(count);
-  keep.forEach((i, k) => {
+  for (let i = 0; i < count; i++) {
     const c = i % cols;
     const r = (i - c) / cols;
     const px = Math.min(W - 1, c * stride);
     const py = Math.min(H - 1, r * stride);
     const d = z[i];
-    positions[k * 3] = ((px + 0.5 - W / 2) / fx) * d;
-    positions[k * 3 + 1] = (-(py + 0.5 - H / 2) / fx) * d;
-    positions[k * 3 + 2] = -d;
+    positions[i * 3] = ((px + 0.5 - W / 2) / fx) * d;
+    positions[i * 3 + 1] = (-(py + 0.5 - H / 2) / fx) * d;
+    positions[i * 3 + 2] = -d;
     const o = (py * W + px) * 4;
-    colors[k * 3] = photo.data[o] / 255;
-    colors[k * 3 + 1] = photo.data[o + 1] / 255;
-    colors[k * 3 + 2] = photo.data[o + 2] / 255;
-    sizes[k] = ((stride * d) / fx) * 1.5;
-  });
+    colors[i * 3] = photo.data[o] / 255;
+    colors[i * 3 + 1] = photo.data[o + 1] / 255;
+    colors[i * 3 + 2] = photo.data[o + 2] / 255;
+    sizes[i] = ((stride * d) / fx) * 1.5;
+  }
   return { positions, colors, sizes, count, stride, depth: medianDepth(positions) };
 }
 
-/** Whether sample i is the nearest of itself and its four neighbours (the front of an edge). */
-function isFrontOf(z: Float32Array, i: number, cols: number, rows: number): boolean {
+/** Whether sample i is the nearest or the farthest of itself and its four neighbours (a side of an edge). */
+function isExtreme(z: Float32Array, i: number, cols: number, rows: number): boolean {
   const c = i % cols;
   const r = (i - c) / cols;
-  const n = [c + 1 < cols ? z[i + 1] : Infinity, c > 0 ? z[i - 1] : Infinity, r + 1 < rows ? z[i + cols] : Infinity, r > 0 ? z[i - cols] : Infinity];
-  return n.every((v) => z[i] <= v);
+  const n = [c + 1 < cols && z[i + 1], c > 0 && z[i - 1], r + 1 < rows && z[i + cols], r > 0 && z[i - cols]].filter((v): v is number => typeof v === "number");
+  return n.every((v) => z[i] <= v) || n.every((v) => z[i] >= v);
 }
 
 // ---------------------------------------------------------------------------
