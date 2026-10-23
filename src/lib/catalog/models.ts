@@ -225,6 +225,17 @@ const open: ModelDef[] = [
     },
   }),
   o({
+    // Layers' Edit text on the open engine (Florence-2 / Ideogram on the cloud): the lines and their boxes.
+    id: "oss-ocr-lines",
+    name: "OvisOCR3",
+    vendor: "ATH-MaaS",
+    family: "qwen-llm",
+    kind: "text",
+    tagline: "Every line of text in an image, with its box · 3 GB GPU · Apache-2.0",
+    routes: [comfy("ocr", "ocr-lines-qwen35", "OvisOCR3 0.8B (a Qwen3.5 OCR fine-tune) on core TextGenerate; boxes come back 0–1000")],
+    options: { promptless: true, maxImages: 1 },
+  }),
+  o({
     id: "oss-seedvr2-image",
     name: "SeedVR2 (image)",
     vendor: "ByteDance Seed",

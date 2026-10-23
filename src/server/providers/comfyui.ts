@@ -33,6 +33,7 @@ import { guessKind } from "@/lib/catalog/payload";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
+import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
 import { readRef } from "../storage";
@@ -259,17 +260,27 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
     .filter((o) => o.role === "language")
     .map((o) => textsOf(outputs[o.node])[0]?.trim())
     .find(Boolean);
+  // OCR: the size the model saw (a PreviewAny "frame") goes with the lines it read.
+  const frame = declared
+    .filter((o) => o.role === "frame")
+    .map((o) => parseOcrFrame(textsOf(outputs[o.node]).join("\n")))
+    .find(Boolean);
   const files: ComfyOutput[] = [];
   const pick = (type: string) => {
     for (const nodeId of order) {
       const spec: ManifestOutput | undefined = declared.find((o) => o.node === nodeId);
-      if (spec?.role === "language") continue;
+      if (spec?.role === "language" || spec?.role === "frame") continue;
       const ui = outputs[nodeId] ?? {};
       const texts = textsOf(ui);
       const found: { key: string; f: HistoryFile }[] = [];
       for (const [key, val] of Object.entries(ui)) {
         if (!Array.isArray(val)) continue;
         for (const f of val) if (isFile(f) && f.type === type) found.push({ key, f });
+      }
+      // OCR lines (SaveText .json): the model's answer, read into lines with boxes.
+      if (spec?.role === "lines" && texts.length) {
+        if (type === "output") files.push(ocrOutput(texts.join("\n"), frame));
+        continue;
       }
       // A text output with no file (PreviewAny): keep the words.
       if (!found.length && type === "output" && spec?.kind === "text" && texts.length) {
@@ -310,6 +321,18 @@ function textOutput(o: ComfyOutput, text: string | undefined, spec: ManifestOutp
   }
   if (language) meta.language = language;
   return { ...o, kind: "text", ...(text !== undefined ? { text } : {}), ...(Object.keys(meta).length ? { meta } : {}) };
+}
+
+/**
+ * An OCR answer as Fuobe's OCR output (the shape Florence-2's cloud route gives): the lines as plain
+ * text, `meta.lines` [{text, bbox: [x, y, w, h] 0–1}] and `meta.size`, the picture the model read. An
+ * answer with no list in it keeps its words, with no lines and `meta.unreadable`.
+ */
+function ocrOutput(answer: string, frame: OcrFrame | undefined): ComfyOutput {
+  const { lines, ok } = parseOcrLines(answer, frame);
+  const text = ok ? ocrText(lines) : answer.trim();
+  const size = frame?.width && frame.height ? [frame.width, frame.height] : undefined;
+  return { url: dataUrl(Buffer.from(text), "text/plain"), kind: "text", contentType: "text/plain", text, meta: { lines, ...(size ? { size } : {}), ...(ok ? {} : { unreadable: true }) } };
 }
 
 /** Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. */
