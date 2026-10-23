@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { APPS } from "@/lib/catalog/apps";
+import { recordForPath, unknownHubMode } from "@/lib/record-pages";
 import { authEnabled, crossSite, hostAllowed, SESSION_COOKIE, validSession, validToken } from "@/server/auth";
+import { recordExists } from "@/server/records";
 
 /** Paths that work signed out: the login page and its API. */
 const OPEN = new Set(["/login", "/api/auth/login"]);
@@ -8,15 +10,22 @@ const OPEN = new Set(["/login", "/api/auth/login"]);
 const APP_IDS = new Set(APPS.map((a) => a.id));
 
 /**
- * Let the request through — except /apps/<id> for an app that doesn't exist, which gets a real 404.
- * The page can't send one itself: the studio's loading.tsx streams the shell (with a 200) before
- * the page knows the id is unknown.
+ * Let the request through — except a page for something that doesn't exist (an unknown app or hub
+ * mode, a project / canvas / channel… id that isn't stored), which gets a real 404. The page can't
+ * send one itself: the studio's loading.tsx streams the shell (with a 200) before the page knows
+ * the id is unknown. (The proxy can't tell a client-side navigation from a page load, so a link to
+ * a deleted id reloads into the same 404 page.)
  */
 function pass(request: NextRequest): NextResponse {
-  const app = /^\/apps\/([^/]+)\/?$/.exec(request.nextUrl.pathname)?.[1];
-  if (app && !APP_IDS.has(safeDecode(app))) return NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
+  const { pathname } = request.nextUrl;
+  const app = /^\/apps\/([^/]+)\/?$/.exec(pathname)?.[1];
+  if ((app && !APP_IDS.has(safeDecode(app))) || unknownHubMode(pathname)) return notFound(request);
+  const record = recordForPath(pathname);
+  if (record && !recordExists(record)) return notFound(request);
   return NextResponse.next();
 }
+
+const notFound = (request: NextRequest) => NextResponse.rewrite(new URL("/_fuobe-not-found", request.url), { status: 404 });
 
 function safeDecode(s: string): string {
   try {

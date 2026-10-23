@@ -34,7 +34,10 @@ export type OutputActionId =
   | "compare"
   | "reuse"
   | "copy-prompt"
+  | "pin"
+  | "review"
   | "delete"
+  | "delete-upload"
   | "restore"
   | "delete-forever";
 
@@ -78,6 +81,11 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   const link = (id: OutputActionId, label: string, href: string, placement: OutputAction["placement"] = "menu") => out.push({ id, label, href, placement });
   switch (o.kind) {
     case "image":
+      if (isVector(g, o)) {
+        // The hand-offs all send the picture to models that read pixels, and nothing rasterises an .svg on the way.
+        out.push({ ...file, label: "Download .svg" }, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
+        break;
+      }
       link("animate", "Animate", `/video?image=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("edit", "Edit", `/edit?image=${q(o.url)}`);
@@ -114,15 +122,28 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       out.push({ ...file, label: `Download .${ext}` }, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       break;
   }
-  // Uploads (the Library's Uploads tab) are files, not generations: hand-offs and download only.
-  if (g.feature === "upload") return out.filter((a) => a.id !== "favorite");
+  // Uploads (the Library's Uploads tab) are files, not generations: hand-offs, download, and a
+  // delete that first checks nothing uses the file.
+  if (g.feature === "upload") return [...out.filter((a) => a.id !== "favorite"), { id: "delete-upload", label: "Delete", placement: "menu", destructive: true }];
   if (g.outputs.length > 1) out.push({ id: "download-all", label: `Download all ${g.outputs.length} (.zip)`, placement: "menu", href: `/api/generations/zip?ids=${g.id}`, download: "" });
   if (o.draftId) out.push({ id: "finalize", label: "Render this draft in 1080p", placement: "menu" });
   if (ctx.compare) out.push({ id: "compare", label: "Compare with original", placement: "menu" });
   if (ctx.reuse) out.push({ id: "reuse", label: "Reuse settings", placement: "menu" });
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
+  // Library: pinned results stay at the top of their view; the review status is a sub-menu of its own.
+  out.push({ id: "pin", label: g.pinnedAt ? "Unpin" : "Pin to top", placement: "menu" }, { id: "review", label: "Review status", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });
   return out;
+}
+
+/**
+ * A vector result (an SVG: Vectorize, Recraft's vector styles, an uploaded .svg). Demo pictures are
+ * SVG placeholders standing in for raster results, so they keep the raster hand-offs (except Vectorize's).
+ */
+export function isVector(g: Pick<Generation, "provider" | "op">, o: Pick<OutputFile, "url" | "kind" | "contentType">): boolean {
+  if (o.kind !== "image") return false;
+  const svg = /^image\/svg\+xml\b/i.test(o.contentType ?? "") || o.url.startsWith("data:image/svg+xml") || extensionOf(o) === "svg";
+  return svg && (g.provider !== "mock" || g.op === "vectorize");
 }
 
 /**

@@ -1,7 +1,8 @@
 import zlib from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { crc32, uniqueNames, zipFiles } from "@/components/ads/zip";
-import { clampClip, initialClip, MULTIPLIER } from "@/lib/catalog/marketing";
+import { initialClip, MULTIPLIER } from "@/lib/catalog/marketing";
+import { clampRange, setEdge } from "@/lib/trim-range";
 
 /** Read a stored zip back: every entry's name and bytes, from the central directory. */
 function readZip(zip: Uint8Array): { name: string; data: Uint8Array; crc: number }[] {
@@ -63,16 +64,17 @@ describe("Ad Multiplier in/out points", () => {
     expect(initialClip(95)).toEqual({ start: 0, end: MULTIPLIER.maxSeconds });
   });
 
-  it("keeps the range 4–30 s inside the clip, moving the other point", () => {
-    // Out point dragged far: the in point follows to keep 30 s.
-    expect(clampClip({ start: 0, end: 50 }, 60, "end")).toEqual({ start: 20, end: 50 });
-    // In point dragged past the out point: the out point moves to keep 4 s.
-    expect(clampClip({ start: 20, end: 21 }, 60, "start")).toEqual({ start: 20, end: 24 });
-    // Near the end of the clip the in point gives way instead.
-    expect(clampClip({ start: 58, end: 60 }, 60, "start")).toEqual({ start: 56, end: 60 });
+  it("keeps the selection 4–30 s inside the clip (the shared trimmer with the multiplier's limits)", () => {
+    const L = { duration: 60, min: MULTIPLIER.minSeconds, max: MULTIPLIER.maxSeconds };
+    const r = (startTime: number, endTime: number) => ({ startTime, endTime });
+    // The out point dragged far: it stops 30 s after the in point.
+    expect(clampRange(r(0, 50), L, "end")).toEqual(r(0, 30));
+    // A typed out time past the limit keeps the in point too; the window slides to pick another part.
+    expect(setEdge(r(12, 16), "end", 20, L)).toEqual(r(12, 20));
+    expect(clampRange(r(20, 21), L, "start")).toEqual(r(17, 21));
     // Out of bounds values are pulled back in.
-    expect(clampClip({ start: -3, end: 70 }, 60, "start")).toEqual({ start: 0, end: 30 });
-    // A clip under 4 s can't be fixed by trimming; it stays whole (the form says why).
-    expect(clampClip({ start: 0, end: 3 }, 3, "end")).toEqual({ start: 0, end: 3 });
+    expect(clampRange(r(-3, 70), L, "move")).toEqual(r(0, 30));
+    // A clip under 4 s can't be fixed by trimming: it stays whole (the form says why).
+    expect(clampRange(r(0, 3), { ...L, duration: 3 }, "end")).toEqual(r(0, 3));
   });
 });

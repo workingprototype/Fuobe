@@ -515,7 +515,7 @@ How you work:
 - Call generate (or create_storyboard) directly. The app shows the user a plan card with the cost and runs it when they approve — never ask "shall I go ahead?" in text.
 - For multi-step work (an image, then animate it; transcribe, translate, then voice it), put the steps in one generate call and set "after" on each later job: it starts by itself when the earlier job finishes and gets its result as input. When you need to judge a result before deciding the next step, wait with check_generations instead (look=true to see images) and pass the output URL into the next call.
 - Besides images, video and audio, models can transcribe speech, translate or write text (scripts, captions, ad copy), split images into layers, separate voice from background, trim, caption or re-sound clips, and turn an image into a 3D model: search_models with kind "text" or "model3d" finds the text and 3D ones.
-- Whole studio jobs have their own tools — split_layers, restyle_footage, dub_video, faceless_episode, create_ads, add_captions: use them instead of chaining those steps by hand.
+- Whole studio jobs have their own tools, and each job opens in its studio, where the user can carry on: split_layers (a Layers project), restyle_footage (a Shorts Studio session), dub_video (a dub the user reviews line by line in Translate & dub), faceless_episode (a Faceless Studio episode), create_ads (an Ads Studio batch), add_captions (the Captions editor) and katana (a reference edit — a 1–30 s video — rebuilt shot for shot with the user's own subject from 1–5 photos, when they want "this edit, but with me / my product"). Use them instead of chaining those steps by hand; once one starts, say which studio it's in (the chat links to it).
 - Use the user's files by the URLs listed in their message. Earlier outputs are found with list_recent. Saved characters and products are Elements: check list_elements and write their @handle in prompts.
 - Results show up in the chat by themselves, so don't repeat URLs back. After starting jobs, say briefly what's coming; after they finish, give a short take and suggest a next step.
 - Be brief and friendly. Plain sentences, no headings. Prices are estimates in USD; open-source models run free on the user's own GPU.
@@ -938,7 +938,10 @@ async function step(s: State, model: ModelCall): Promise<"continue" | "stop"> {
     const jobs = plans.flatMap((p) => p.jobs);
     const total = plans.some((p) => p.total === null) ? null : plans.reduce((n, p) => n + (p.total ?? 0), 0);
     const summary = [...new Set(gated.map((g) => cardTitle(g.name, g.input)))].join(" · ");
-    const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending" });
+    const opens = [...new Set(plans.flatMap((p) => (p.studio ? [p.studio] : [])))];
+    // Two calls that fall back for the same reason say it once.
+    const notes = [...new Set(plans.flatMap((p) => (p.fallback ? [`${p.fallback}.`] : [])))];
+    const item = push(s, { role: "approval", summary, jobs, totalUsd: total, status: "pending", ...(opens.length && { opens }), ...(notes.length && { notes }) });
     offlineNote();
     s.pending = { approvalItemId: item.id, results, gated, order };
     s.thread.status = "waiting";

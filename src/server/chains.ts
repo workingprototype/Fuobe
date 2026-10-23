@@ -23,7 +23,8 @@ interface ModeStep {
   op: Operation;
 }
 
-const providerNames = (m: ModelDef, op: Operation) => [...new Set(routesFor(m, op).map((r) => (r.provider === "llm" ? "Claude or Ollama" : provider(r.provider).label)))].join(" or ");
+/** Who can run a model's operation, as Settings names them ("fal.ai", "Claude or Ollama"). */
+export const providerNames = (m: ModelDef, op: Operation) => [...new Set(routesFor(m, op).map((r) => (r.provider === "llm" ? "Claude or Ollama" : provider(r.provider).label)))].join(" or ");
 
 /**
  * A chain must not mix paid and demo steps: a demo join of paid clips (or a paid step fed a demo
@@ -292,7 +293,8 @@ function topoOrder(steps: PipelineStep[]): PipelineStep[] {
  * ]);
  * // byKey.film is the finished video; every step shares batchId and shows "Step n of 6".
  * // Paid route: demucs ("vocals" counts as "voice"), scribe-v2, text-llm, chatterbox-cloud, sync-lipsync-3;
- * // its soundtrack model (merge-audio-video) takes one track, so it ends at "lips" or muxes the voice alone.
+ * // merge-audio-video takes one track, so the voice and the other stems are mixed first by compose-timeline
+ * // (overlapping clips go on tracks of their own) and that mix is the soundtrack (src/lib/av/dub.ts).
  * ```
  */
 export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}): Pipeline {

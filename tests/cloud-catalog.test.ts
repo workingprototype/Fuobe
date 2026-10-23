@@ -6,7 +6,7 @@ import { planGeneration } from "@/lib/catalog/plan";
 import { OPERATION_OUTPUT, type FieldMap, type ModelRoute, type Operation } from "@/lib/catalog/types";
 
 type Endpoint = { provider: string; endpoint: string; inputs?: Record<string, unknown>; verified?: boolean };
-const research = ["paid-model-apis.json", "paid-model-apis-2.json", "paid-model-apis-3.json"].flatMap(
+const research = ["paid-model-apis.json", "paid-model-apis-2.json", "paid-model-apis-3.json", "paid-model-apis-4.json"].flatMap(
   (f) => (JSON.parse(fs.readFileSync(`docs/research/${f}`, "utf8")) as { endpoints: Endpoint[] }).endpoints,
 );
 const byId = new Map<string, Endpoint>();
@@ -20,7 +20,9 @@ function fieldsOf(map: FieldMap): string[] {
     if (typeof v === "string") out.push(v);
     else if (v && typeof v === "object") {
       const o = v as Record<string, unknown>;
-      for (const f of ["key", "background", "shotType", "flag"]) if (typeof o[f] === "string") out.push(o[f] as string);
+      // Round 4: a Ken Burns zoom's factor and focal point, an overlay's position, and their nested enum keys.
+      for (const f of ["key", "background", "shotType", "flag", "factor", "x", "y"]) if (typeof o[f] === "string") out.push(o[f] as string);
+      for (const f of ["direction", "easing"]) if (o[f] && typeof (o[f] as { key?: unknown }).key === "string") out.push((o[f] as { key: string }).key);
     }
   }
   return [...out, ...Object.keys(map.fixed ?? {}), ...Object.keys(map.defaults ?? {})].map((f) => f.split(".")[0].replace("[]", ""));

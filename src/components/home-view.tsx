@@ -87,7 +87,7 @@ function RecentStrip({ items }: { items: Generation[] }) {
                 <Link
                   href="/library"
                   title={title}
-                  aria-label={`${failed ? "Failed" : "In progress"}: “${title}” — open the Library`}
+                  aria-label={`${failed ? "Failed" : "Rendering"}: “${title}” — open the Library`}
                   className="grid aspect-square w-full place-items-center rounded-xl border border-dashed bg-muted/40 text-muted-foreground"
                 >
                   {failed ? <CircleAlert className="size-5" /> : <Loader2 className="size-5 animate-spin" />}

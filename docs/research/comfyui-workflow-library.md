@@ -10,6 +10,7 @@ _Generated 2026-10-16 by the `scripts/comfy` pipeline. Machine-readable source o
 * Everything except 5 workflows runs on **core ComfyUI nodes only** — in 2026 core ComfyUI natively covers InfiniteTalk, SeedVR2, BiRefNet, RIFE/FILM, Wan Animate 2, LTX-2.x, so custom packs are only needed for: ReActor face swap, RMBG, MMAudio, the WanVideoWrapper InfiniteTalk variant, and the RIFE-VFI variant (plus VHS/KJNodes helpers).
 * 86 distinct model files, **740 GB** if you download everything. A sensible starter set (Z-Image Turbo, Qwen-Image-Edit 2509, Wan 2.2 5B, Wan 2.2 14B I2V lightx2v, BiRefNet, RealESRGAN, RIFE, ACE-Step) is ≈ 112 GB.
 * **2026-10-16 update: +20 workflows** from [`comfyui-oss-2.md`](comfyui-oss-2.md) (TTS / dialogue / voice change, video extend / reframe / relight, draw-to-video, multi-shot concat, storyboard, video alpha + depth, palette lock): **all 20 validated** on the same ComfyUI commit with three more packs. The manifest now has 73 entries (incl. the 2 self-test graphs), **73/73 validated**. Details, new binding keys and new capability values: [section 10](#10-comfyui-oss-2-additions-2026-10-16).
+* **2026-10-22 update (round 4): +17 workflows** from [`comfyui-oss-4.md`](comfyui-oss-4.md) (OCR lines for Layers, object removal / swap / insert on Wan 2.1 VACE and VOID, Ken Burns, audio loop and join, pro codecs, SDR to HDR, EXR, still to clip, logo end card, whole-scene mesh, subject splat, reference-video brief), all hand-built and **17/17 validated**; the eight model-free ones also ran for real on CPU. With round 3's 42 the manifest has **132 entries, 132/132 validated**. `wan21-vace-14b-ref2v` no longer uses the non-commercial CausVid LoRA. Details: [section 11](#11-comfyui-oss-4-additions-2026-10-22).
 * Validation used zero-byte placeholder model files and tiny uploaded fixtures; **no model was executed** (CPU-only box, no weights). Validation proves graph structure, node/input names, types, ranges, combo values and file references — not output quality.
 
 ## 2. The library
@@ -202,7 +203,7 @@ The manifest `outputs[]` lists the node ids to read (other nodes produce nothing
 | [`wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors`](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors) | loras | 1.23 | wan22-i2v-14b-lightx2v |
 | [`wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors`](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors) | loras | 1.23 | wan22-t2v-14b-lightx2v, wan22-s2v-14b |
 | [`wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors`](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors) | loras | 1.23 | wan22-t2v-14b-lightx2v |
-| [`Wan21_CausVid_14B_T2V_lora_rank32.safetensors`](https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan21_CausVid_14B_T2V_lora_rank32.safetensors) | loras | 0.32 | wan21-vace-14b-ref2v |
+| [`lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors`](https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors) | loras | 0.63 | wan21-vace-14b-ref2v (since R4-15, [§11.6](#116-r4-15-causvid-licence-fix); it shipped the CC-BY-NC-4.0 CausVid LoRA before), video-relight-bernini-r, the round-4 VACE graphs |
 | [`apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors`](https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/apple_DFN5B-CLIP-ViT-H-14-384_fp16.safetensors) | mmaudio | 1.97 | v2a-mmaudio |
 | [`mmaudio_large_44k_v2_fp16.safetensors`](https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/mmaudio_large_44k_v2_fp16.safetensors) | mmaudio | 2.06 | v2a-mmaudio |
 | [`mmaudio_synchformer_fp16.safetensors`](https://huggingface.co/Kijai/MMAudio_safetensors/resolve/main/mmaudio_synchformer_fp16.safetensors) | mmaudio | 0.47 | v2a-mmaudio |
@@ -396,3 +397,121 @@ New optional manifest field: **`license`** (string) on these 20 entries.
 | LTX-2.x extend / outpaint IC-LoRA | Revenue-gated licence and extra packs (LTXVideo, VHS, ComfyMath). |
 | Core `TrainLoraNode` character LoRA | Does not fit the manifest model: `SaveLoRA` reports no UI output (nothing to fetch from `/history`), the result is a `.safetensors` (not image/video/audio), the dataset must be a folder in ComfyUI's `input/` (not an upload), and a run holds the GPU for 20-90 min. Use the ai-toolkit worker from comfyui-oss-2 §8 instead. |
 | HoloCine multi-shot | CC-BY-NC-SA, no ComfyUI node. |
+
+## 11. comfyui-oss-4 additions (2026-10-22)
+
+Seventeen workflows from [`comfyui-oss-4.md`](comfyui-oss-4.md) / [`comfyui-oss-4.json`](comfyui-oss-4.json): the 14 researched graphs and the critic's 3 (§i). Round 3 (42 hand-built workflows, 73 → 115) is documented in `scripts/comfy/README.md` and [`comfyui-oss-3.md`](comfyui-oss-3.md); this section takes the manifest from 115 to **132 entries**. All 17 are **hand-built** (`scripts/comfy/hand-built/<id>.json`, the researcher's validated API graphs with the changes listed below), declared in the "comfyui-oss-4" section of `library.spec.mjs`, built and validated by the normal pipeline.
+
+**Validation:** the same ComfyUI `fc04da91` (v0.41.0-7, CPU, 14 packs), shared with other agents, so always with `--shared`. **17/17 accepted** (HTTP 200, `prompt_id`, no `node_errors`) with zero-byte placeholder weights and the fixtures; the switches `skipPass2` and `cutout` were fed their non-default value. A sample of 10 older workflows (FLUX.1 [dev], Wan 2.2 I2V lightx2v, RIFE, a sound-keeping join, Qwen3.5 / Gemma 4 `TextGenerate`, Fun VACE restyle, TRELLIS.2, FLUX.2 [klein] style reference, caption burn-in) re-validated unchanged: **132/132 validated**. No new node pack and no isolated worker: core nodes, KJNodes' `GrowMaskWithBlur` and VHS's `VHS_LoadAudioUpload` / `VHS_VideoCombine` / `VHS_LoadVideo`.
+
+**Real CPU runs (no weights needed):** the eight model-free graphs ran on tiny inputs, in two sessions, every output checked with ffprobe (plus framemd5, silencedetect or numpy where it matters). Timings are in each entry's `notes`. The model graphs (OCR, VACE, VOID, MoGe, TripoSplat, Gemma 4 brief) are `/prompt`-validated only here; the research ran OCR and MoGe on CPU with real weights. Their model-free parts did run: the VACE and VOID window, sound and work-size nodes (the model replaced by the work-size frames scaled back; frame counts, sound lengths and the alignment with the source frames checked with ffprobe and numpy) and MoGe's resize guard.
+
+**Changes from the research graphs** (each also in the entry's notes): the painted / insert masks are read from the red channel; Ken Burns gained `easeInOut`; the audio graphs' curve upload is `fadeCurve`; the VACE / VOID graphs take the window in seconds and decode only it (`Video Slice`), count its frames in the graph and render a work-size budget in the clip's own shape (the research decoded the whole clip as float32 before cutting `startFrame` / `frames` from it and centre-cropped to `width` × `height`, which misplaced the paste-back for any other shape); MoGe resizes on the longer edge (the research tested the width only).
+
+### 11.1 Workflows
+
+| id | capability (round-4 op) | what it does | bindings | outputs | models GB (new) | VRAM | ran here |
+|---|---|---|---|---|---|---|---|
+| `ocr-lines-qwen35` | ocr | text lines + boxes for Layers (OvisOCR3 0.8B through core `TextGenerate`) | image, maxSize, checkpoint, instruction, maxTokens | 5: text `lines` (.json), 8: text `frame` | 1.71 (1.71) | 3 | research only (161–194 s per poster) |
+| `video-inpaint-wan-vace` | remove-object | SAM 3.1 tracks `maskPrompt`, Wan 2.1 VACE 14B + lightx2v regenerates it, pasted into the original frames | video, startTime, duration, width, height, maskPrompt, maskGrow, prompt, negativePrompt, checkpoint, loraStrength, shift, seed, steps, cfg | 38: video | 44.05 (0) | 24 | window, sound and work-size part only |
+| `video-inpaint-wan-vace-painted` | remove-object | same, the object painted on the window's first frame | as above with `mask` instead of `maskPrompt` | 38: video | 44.05 (0) | 24 | no |
+| `video-erase-void` | remove-object | Netflix VOID: removes the object and what it causes (shadows, reflections), 2 passes | video, startTime, duration, width, height, maskPrompt, maskGrow, prompt, negativePrompt, cfg, steps, seed, skipPass2 | 52: video | 34.27 (22.73) | 40 (unverified) | window, sound and work-size part only |
+| `video-swap-wan-vace` | video-swap | the tracked object replaced by a reference `image` | the inpaint keys + image | 38: video | 44.05 (0) | 24 | no |
+| `video-insert-wan-vace` | video-insert | a reference `image` placed in a painted region held for the window | the painted keys + image | 38: video | 42.30 (0) | 24 | no |
+| `kenburns-still` | still-motion | pan + zoom over a still, core loops, chunk-encoded | image, supersample, width, height, duration, fps, zoomStart, zoomEnd, panStartX, panStartY, panEndX, panEndY, easeInOut, chunkFrames | 32: video | 0 | 0 (CPU) | yes |
+| `audio-loop-crossfade` | audio-loop | a bed of any length: loop with equal-power seams, fade-out | audio, fadeCurve, crossfade, duration, headroomDb | 29: audio (FLAC) | 0 | 0 (CPU) | yes |
+| `audio-join-crossfade` | audio-join | two clips overlapped by `crossfade` seconds | audio, audio2, fadeCurve, crossfade | 17: audio (FLAC) | 0 | 0 (CPU) | yes |
+| `video-export-pro` | export-video | ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264 (VHS) | video, format, profile | 3: video | 0 | 0 (CPU) | yes, all five formats |
+| `video-sdr-to-hdr` | sdr-to-hdr | core `ImageSDRToHDR` → BT.2020 HLG 10-bit H.264 | video, peakNits | 5: video | 0 | 0 (CPU) | yes |
+| `video-export-exr` | export-video | half-float scene-linear EXR per frame | video | 3: image `frames` | 0 | 0 (CPU) | yes |
+| `still-to-clip` | still-motion | a still held N s with a silent stereo track | image, width, height, duration, fps | 9: video | 0 | 0 (CPU) | yes |
+| `video-append-endcard` | concat | ad + end card; the ad's picture stream-copied and its sound kept | video, image, width, height, fps, duration | 15: video | 0 | 0 (CPU) | yes |
+| `scene-mesh-moge` | scene-3d | textured GLB of the whole scene + a depth PNG (MoGe 2) | image, checkpoint, resolutionLevel, fovX, decimation | 9: model3d `scene`, 11: image `depth` | 0.66 (0.66) | 4 | research only (42 s); the resize guard here |
+| `image-to-splat-triposplat` | splat | Gaussian splat of the subject (`.spz`) + a 3 s orbit | image, cutout, numGaussians, steps, cfg, seed, splatFormat, orbitFrames | 51: model3d `splat`, 42: video `turntable` | 3.78 (3.00) | 8 (unverified) | no |
+| `reference-brief-gemma4` | write | a reference clip's frames and sound → JSON style brief (Gemma 4 E4B) | video, frames, startFrame, frameWidth, checkpoint, instruction, seed, maxTokens | 4: text `brief` | 9.06 (0) | 12 | no |
+
+Every entry also binds `filenamePrefix`. Booleans are in the manifest defaults too (`skipPass2` false, `cutout` true; `ManifestWorkflow.defaults` now allows booleans). "new" = files no older workflow uses: **28.1 GB** in all (VOID 22.73, TripoSplat 3.00, OvisOCR3 1.71, MoGe 2 0.66). The VACE graphs reuse the library's Wan 2.1 VACE 14B, SAM 3.1, umT5, Wan VAE and lightx2v files; VOID's `t5xxl_fp16` and TripoSplat's `flux2-vae` are byte-identical to the FLUX files already listed (same sha256), so their download URLs differ but one file serves both.
+
+**Licences.** Apache-2.0 for OvisOCR3 / Qwen3.5, Wan 2.1 VACE and the lightx2v LoRA, Gemma 4; MIT for MoGe and TripoSplat. Three need a notice in the app:
+* **VOID** weights are Apache-2.0 but fine-tuned from CogVideoX-Fun-V1.5-5b-InP, whose transformer is under the **CogVideoX License**: commercial use only after registering for its basic commercial licence, and at most 1 million service visits a month without a further licence.
+* **TripoSplat** uses the DINOv3 ViT-H encoder under the **DINOv3 License** (royalty-free, commercial use allowed, trade-control limits): show "Built with DINOv3".
+* **KJNodes** (`GrowMaskWithBlur` in the four VACE graphs) and VideoHelperSuite are GPL-3.0 code; SAM 3.1 is under Meta's SAM License.
+
+### 11.2 Capability values
+
+The 17 use the round-4 operations of the shared contract (`src/lib/catalog/types.ts`, owned by the catalog-4 package): `ocr`, `remove-object`, `video-swap`, `video-insert`, `still-motion`, `audio-loop`, `audio-join`, `export-video`, `sdr-to-hdr`, `scene-3d`, `splat`. Two reuse older ones: `video-append-endcard` is a `concat`, and `reference-brief-gemma4` a `write`. `export-video` has two graphs: `video-export-pro` for every codec and `video-export-exr` for `params.format` `exr`. `still-motion` has two: `kenburns-still` for a camera move and `still-to-clip` for a held still. FPS boost stays on the existing `interpolate-rife` (`interpolate`); the research's target-fps table (multiplier m, keep every n-th frame) is not built.
+
+### 11.3 New binding keys
+
+Keys marked * are filled by the provider from the canonical request (`params.*`); the rest are sliders or controls (`params.extra[key]`). All are in `BINDING_KEYS` (`build-library.mjs`).
+
+| key | type | meaning | default |
+|---|---|---|---|
+| `maskPrompt`* | string | SAM 3.1 text prompt: what to remove / replace | — |
+| `maskGrow` | int px | the tracked mask grows by this much (edges, contact shadows) | 16 (VOID 8) |
+| `skipPass2` | bool | VOID pass 1 only (half the time) | false |
+| `zoomStart`*, `zoomEnd`* | float | Ken Burns zoom (`params.zoomFrom` / `zoomTo`), 1 = the widest crop in the output's shape | 1, 1.25 |
+| `panStartX`*, `panStartY`*, `panEndX`*, `panEndY`* | float 0–1 | the crop centre (`params.panFrom` / `panTo` {x, y}), clamped inside the still | 0.5, 0.5, 0.6, 0.45 |
+| `easeInOut`* | 0 / 1 | `params.easing`: 1 = ease-in-out, 0 = linear | 1 |
+| `supersample`, `chunkFrames` | float, int | the still upscaled once before cropping; frames per encoded chunk | 2, 30 |
+| `crossfade`* | float s | seconds at each seam (`params.crossfade`) | 1 |
+| `fadeCurve`* | upload | the crossfade curve WAV the provider writes (11.5) | — |
+| `headroomDb` | int dB | taken off before the loop's seams are summed | −3 |
+| `format`*, `profile`* | string | VHS format and ProRes profile, from `params.format` | `video/ProRes`, `hq` |
+| `peakNits` | float | SDR to HDR target peak white (0 = the calibrated curve) | 650 |
+| `resolutionLevel`, `fovX`, `decimation` | int, float, int | MoGe detail 0–9; horizontal field of view in degrees (0 = estimate); mesh decimation | 9, 0, 1 |
+| `cutout`, `numGaussians`, `splatFormat`, `orbitFrames` | bool, int, string, int | TripoSplat: BiRefNet cut-out (false = the image's alpha); Gaussians (≤ 1,048,576); `spz` / `ply` / `ksplat`; orbit length | true, 262144, `spz`, 75 |
+| `frameWidth` | int px | the brief's frame width (a canonical `width` would be resized by the provider) | 384 |
+
+Reused keys with a workflow-specific meaning: in the VACE / VOID graphs `startTime` and `duration` are the window in **seconds** (the graph counts the frames itself, at the clip's own fps), `width` × `height` is the work-size budget the graph renders in the clip's own shape and `prompt` describes the scene without the object (remove) or the result (swap / insert); `image` is the reference (swap / insert), the end card, the still or the subject; `mask` is a first-frame PNG read from its **red** channel, white = erase / the region; in the brief `frames` / `startFrame` count frames at the fixed 24 fps; `checkpoint` picks OvisOCR3 or a Qwen3.5 fallback, VACE 14B or 1.3B, MoGe 2 or 3; `instruction` defaults to the graph's own prompt (`defaults.instruction`).
+
+The research named some keys differently; the library uses canonical keys instead: the brief's `frameCap` / `skipFrames` / `width` are `frames` / `startFrame` / `frameWidth`, and the audio graphs' curve upload is `fadeCurve` rather than `audio2` / `audio3` (which the provider fills with user audio). New manifest output roles: `lines`, `frame`, `frames`, `scene`, `depth`, `splat`, `brief` (typed in `src/lib/comfy.ts`; `turntable` already existed).
+
+### 11.4 Models
+
+| file | folder | GB | new? | used by |
+|---|---|---|---|---|
+| [`ovisocr3_0.8b_bf16.safetensors`](https://huggingface.co/ATH-MaaS/OvisOCR3/resolve/main/model.safetensors) (upstream `model.safetensors`, save it under this name) | text_encoders | 1.71 | new | ocr-lines-qwen35 |
+| `qwen3.5_0.8b_bf16` / `qwen3.5_2b_bf16` / `qwen3.5_4b_bf16` (optional `checkpoint`) | text_encoders | 1.75 / 4.55 / 9.32 | optional (4B shared) | ocr-lines-qwen35 |
+| `wan2.1_vace_14B_fp16`, `umt5_xxl_fp8_e4m3fn_scaled`, `wan_2.1_vae`, `lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16`, `sam3.1_multiplex_fp16` | … | 34.68 / 6.74 / 0.25 / 0.63 / 1.75 | shared | the four VACE graphs (SAM not in insert) |
+| `wan2.1_vace_1.3B_fp16` (optional `checkpoint`, 8 GB cards) | diffusion_models | 4.31 | optional | VACE graphs |
+| [`void_pass1` / `void_pass2`](https://huggingface.co/Comfy-Org/void-model) | diffusion_models | 2 × 11.14 | new | video-erase-void |
+| `cogvideox_vae`, `raft_large_C_T_SKHT_V2-ff5fadd5` | vae / optical_flow | 0.43 / 0.02 | new | video-erase-void |
+| `t5xxl_fp16` | text_encoders | 9.79 | shared (FLUX) | video-erase-void |
+| [`moge_2_vitl_normal_fp16`](https://huggingface.co/Comfy-Org/MoGe) (`moge_3_vitl_fp16` 0.74, `moge_3_vitg_fp16` 2.50 optional) | geometry_estimation | 0.66 | new | scene-mesh-moge |
+| [`triposplat_fp16`, `triposplat_vae_decoder_fp16`, `dino_v3_vit_h`](https://huggingface.co/VAST-AI/TripoSplat) | diffusion_models / vae / clip_vision | 0.74 / 0.58 / 1.68 | new | image-to-splat-triposplat |
+| `flux2-vae`, `birefnet` | vae / background_removal | 0.34 / 0.44 | shared | image-to-splat-triposplat |
+| `gemma4_e4b_it_fp8_scaled` | text_encoders | 9.06 | shared | reference-brief-gemma4 |
+
+`build-library.mjs` knows two more loaders: `OpticalFlowLoader` (`optical_flow`) and `LoadMoGeModel` (`geometry_estimation`).
+
+### 11.5 Quirks the app must handle
+
+* **OCR output.** Role `lines` is a JSON array in reading order, `[{"bbox":[x0,y0,x1,y1],"text":…}]`, corners as integers **relative 0–1000** (checked against rendered ground truth in the research). Strip Markdown code fences, accept `bbox`/`text` and `bbox_2d`/`text_content` (the Qwen3.5 fallbacks answer that way), divide by 1000 and fill `OutputFile.meta.lines [{text, bbox:[x, y, w, h]}]` (normalised) and `OutputFile.text` (the lines joined by newlines). Role `frame` is `{"width","height","coords":"relative-1000"}`, the size the model saw. Greedy decoding: no seed.
+* **VACE / VOID windows.** One window per job, in seconds: `startTime` and `duration` (`params.startTime`, `params.endTime` − `startTime`, which the provider already fills; `duration` 0 = the longest window). Core `Video Slice` decodes only the window, at most 81 (VOID 197) frames + half a frame at the clip's fps, which a 0.1 s probe slice reads, so RAM no longer grows with the clip. The graph keeps the largest 4n+1 (VOID 8n+5) frames it decoded, at most 81 (197), and trims the sound to exactly those frames, so picture and sound stay the same length. Longer clips: `startTime` = k × 81 / fps and `duration` = 81 / fps (VOID 197; fps from the clip's header), one job per window, joined with `video-concat-N` (seams untested). `width` × `height` is a work-size budget: the graph renders about that many pixels in the clip's own shape (VACE multiples of 16, ≤ 1280 a side; VOID multiples of 8, ≤ 1024), scaled and never cropped. The VACE result is pasted into the **original** frames through a 6 px soft mask, so nothing outside the mask changes; VOID re-renders the whole frame at its work size (672×376 for a 16:9 clip with the default 672×384 budget). RAM: the VACE window is held at the source size as float32 in several copies (~25 MB per 1080p frame, roughly 10 GB for 81 frames at 1080p, inferred); downscale 4K first. Checked on CPU with the built graphs' own window, sound and work-size nodes (counts, sound lengths, alignment with the source frames, a silent clip, a window at 50 s of a 60 s clip).
+* **Painted masks** (`-painted`, insert): a PNG of the window's first frame in the clip's shape, read from the red channel (white = erase / the region), scaled (not cropped) to the work size like the frames. For a later window, paint on (or track to) that window's first frame. Insert holds the region for every frame, so it suits a static or slow camera.
+* **Crossfade curve.** Core has no gain-ramp node, so the provider writes `fadeCurve`: a stereo 16-bit WAV exactly `crossfade` seconds long at 8 kHz, left = sin(π/2·t) (fade-in), right = cos(π/2·t) (fade-out), t = 0…1. 8 kHz makes `AudioMerge` upsample the curve, never resample the music. Equal power bumps a pure tone by ~3 dB at the seam (+2.1 dB RMS over the seam measured here); a linear curve avoids it for near-identical material. The loop needs a clip longer than 2 × `crossfade`; each loop pass stays cached (memory O(repeats² × clip)), so prefer clips ≥ 60 s. More than two clips: fold `audio-join-crossfade`.
+* **Ken Burns.** ≤ 10 s per job (RAM grows by about one output frame per frame until ComfyUI's RAM-pressure cache evicts chunks); split longer scenes. Crops are whole pixels: keep `supersample` 2 and stills larger than the output.
+* **Exports.** `params.format` → `video-export-pro` `format` + `profile`: `prores_422_hq` = `video/ProRes` + `hq`, `prores_4444` = + `4444`, `h265_10bit` = `video/h265-mp4`, `ffv1` = `video/ffv1-mkv`, `h264` = `video/h264-mp4`; `exr` → `video-export-exr`. VHS lists only `<prefix>_00001-audio.<ext>` (under `gifs`) when the clip has sound, and leaves a silent copy and a first-frame PNG next to it. The EXR output is one image per frame (role `frames`): zip it. All three decode the whole clip. `storage.ts` has no extension for `video/x-matroska` (FFV1) or `image/aces` (EXR), so those files are saved as `<id>.bin` until a feature package adds them.
+* **End card.** Only for clips the open engine made: a clip from another encoder fails in v0.41 with "Video chunk 1 could not be encoded compatibly: extradata … color space" (reproduced here). For those, use `still-to-clip` + `video-concat-sound1-2`. For a silent ad, drop nodes 2, 12 and 13 and node 14's `complete_audio` (`LoadAudio` stops with "No audio stream found in the file"). `width`, `height` and `fps` must be the clip's own.
+* **Splat output.** `SaveGLB` writes the splat under its format's extension (`.spz` by default); set `meta.format` from it (`collectOutputs` sets only `meta.role`). `/view` serves `.spz` / `.ply` / `.ksplat` as `application/octet-stream`, so `persistOutput` takes the type from the extension: `storage.ts` maps `spz` and `ply` (catalog-4), not `ksplat`, which would land as an image `.bin`. `seed` drives the sampler and the decoder; `cutout` is true by default.
+* **Brief.** `VHS_LoadVideo` forces 24 fps because Gemma 4 keeps every 24th frame (1 fps, ≤ 70 soft tokens each); 720 frames = the first 30 s. Strip fences before parsing. Whether E4B takes 30 s of audio in one call is unverified.
+
+### 11.6 R4-15: CausVid licence fix
+
+`wan21-vace-14b-ref2v` shipped the official template's `Wan21_CausVid_14B_T2V_lora_rank32` at 0.3, which is **CC-BY-NC-4.0** (tianweiy/CausVid). Its spec entry now swaps it (transforms on nodes 115, 108, 110) for the Apache-2.0 `lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16` at 1.0 (clip strength 0) with the round-4 VACE settings: 4 steps, cfg 1, `euler` (was `uni_pc`), shift 5 (was 8). It binds `loraStrength` (0 + steps 20 + cfg 6 = the slow full-quality path) and carries a `license`. Rebuilt and re-validated; the lightx2v + VACE 14B pairing is inferred, not GPU-tested.
+
+### 11.7 Considered but not added
+
+| option | why not |
+|---|---|
+| Florence-2 `OCR_WITH_REGION` | needs a pack (kijai/ComfyUI-Florence2), weaker on stylised text (inferred) |
+| PaddleOCR-VL, DeepSeek-OCR, GOT-OCR 2.0 | custom packs only; document-oriented, 4× larger, or no line detection |
+| MiniMax-Remover | CC-BY-NC-4.0 |
+| DiffuEraser | relies on ProPainter priors (S-Lab licence, non-commercial, unverified) and SD 1.5 |
+| MiniMax H3 Person-Remover / Character-Swap LoRAs | a 40–66 GB base + a 51.5 GB encoder; persons only; need a core change after v0.42 |
+| SCAIL-2 Character Replacement | template exported by the research, not built (94 nodes); the recommended next step for whole-person swaps |
+| A painted-mask or point-prompted swap | not researched; `video-swap-wan-vace` tracks a text prompt only |
+| GIMM-VFI | slower than RIFE, licence unconfirmed ("other") |
+| FPS boost to exact targets (`VHS_SelectEveryNthImage` after `FrameInterpolate`) | researched as a table, not built or timed |
+| LTX-2.5 SDR-To-HDR / Alpha-Gen IC-LoRAs | revenue-gated LTX licence; a later round |

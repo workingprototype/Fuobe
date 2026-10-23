@@ -11,15 +11,15 @@ import { Switch } from "@/components/ui/switch";
 import { areaCls } from "@/components/brand/fields";
 import { uploadImages } from "@/components/brand/image-list";
 import { fileToSlot, LibraryGrid, type SlotValue } from "@/components/studio/media-slot";
+import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { initialClip, mentionedImages, MULTIPLIER, MULTIPLIER_MODELS, multiplierResolution, type ClipRange as Range, type MarketingRun, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
-import { probeMedia } from "@/lib/media-probe";
+import { probeBlob, probeUrl } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
 import { RunsList } from "@/components/marketing/runs";
 import { EmptyIcon, MarketingHeader, useMarketingEngine } from "@/components/marketing/shell";
-import { ClipRange } from "./clip-range";
 import { uploadFrame } from "./frames";
 
 type Quality = (typeof MULTIPLIER.qualities)[number];
@@ -199,9 +199,11 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const length = cut ? cut.end - cut.start : 0;
   const ready = !!video && !video.uploading && !!video.ref && duration != null && !!cut;
 
-  // Which reference is current (a late answer about an older clip is ignored), and whether its length is known.
+  // Which reference is current (a late answer about an older clip is ignored), whether its length is
+  // known, and whether its header has been read already (once per clip).
   const clip = useRef(0);
   const known = useRef(false);
+  const probed = useRef(0);
   /** A new reference (a library pick, or an upload that reports its preview first, then its server URL). */
   const startVideo = () => {
     clip.current += 1;
@@ -210,21 +212,22 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
     setRange(null);
     return clip.current;
   };
-  /** The length from the file's own header, for clips this browser can't play (e.g. H.264 without the codec). */
+  /**
+   * The length from the file's own header, for clips this browser can't play (e.g. H.264 without the
+   * codec): the dropped file itself, else the server's copy with Range requests (only its header and
+   * moov box are read, never the whole clip). Unknown containers: the player is the only other source.
+   */
   const probe = async (source: Blob | string, token: number) => {
-    try {
-      const blob = typeof source === "string" ? await (await fetch(source)).blob() : source;
-      const d = probeMedia(new Uint8Array(await blob.arrayBuffer()))?.duration;
-      if (d && token === clip.current && !known.current) onDuration(d);
-    } catch {
-      // Unknown container: the player is the only other source of the length.
-    }
+    if (probed.current === token) return;
+    probed.current = token;
+    const d = (typeof source === "string" ? await probeUrl(source) : await probeBlob(source))?.duration;
+    if (d && token === clip.current && !known.current) onDuration(d);
   };
   const onFile = (f: File) => {
     if (!f.type.startsWith("video/") && !/\.(mp4|mov|webm|m4v)$/i.test(f.name)) return void toast("Video only — drop a clip here");
     const token = startVideo();
     void fileToSlot(f, setVideo, "video");
-    if (f.size <= 400 * 1024 * 1024) void probe(f, token);
+    void probe(f, token);
   };
   const onDuration = (d: number) => {
     const first = !known.current;
@@ -232,7 +235,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
     setDuration(d);
     setRange((r) => r ?? initialClip(d));
     if (!first) return;
-    if (d > MULTIPLIER.maxSeconds + 0.05) toast(`Using the first ${MULTIPLIER.maxSeconds} s — move the in and out points to pick another part`, { id: "mult-trim" });
+    if (d > MULTIPLIER.maxSeconds + 0.05) toast(`Using the first ${MULTIPLIER.maxSeconds} s — slide the selection to pick another part`, { id: "mult-trim" });
     if (d < MULTIPLIER.minSeconds - 0.05) toast.error(`That clip is ${d.toFixed(1)} s — the reference needs ${MULTIPLIER.minSeconds}–${MULTIPLIER.maxSeconds} s`, { id: "mult-trim" });
   };
 
@@ -299,7 +302,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
       <MarketingHeader title="Ad Multiplier" active="multiplier" engine={engine} onEngine={setEngine} />
-      <main className="mx-auto w-full min-w-0 max-w-[1180px] flex-1 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
+      <div className="mx-auto w-full min-w-0 max-w-[1180px] flex-1 px-3 pt-6 pb-20 sm:px-6 sm:pt-10">
         <div className="pb-6 text-center">
           <h2 className="font-heading text-display text-balance">Turn one winning ad into many</h2>
           <p className="mx-auto mt-2 max-w-xl text-[15px] text-muted-foreground">Upload an ad that works. Recreate it with new people, products or places — or keep it and try a new hook or call to action.</p>
@@ -319,8 +322,18 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
               <ReferenceDrop onFile={onFile} onPick={(v) => (startVideo(), setVideo(v))} />
             ) : (
               <div className="relative">
-                <ClipRange src={video.preview} duration={duration} value={range} onChange={setRange} onDuration={onDuration} onUnplayable={() => {
-                    if (!video.uploading && video.ref && !known.current) void probe(video.ref, clip.current);
+                {/* A new reference mounts a new trimmer (Replace goes back to the drop zone); a finished upload only moves its preview to the server. */}
+                <VideoTrimmer
+                  src={video.preview}
+                  value={range && { startTime: range.start, endTime: range.end }}
+                  onChange={(r) => setRange({ start: r.startTime, end: r.endTime })}
+                  min={MULTIPLIER.minSeconds}
+                  max={MULTIPLIER.maxSeconds}
+                  duration={duration ?? undefined}
+                  label="Part of the reference ad"
+                  onMeta={(m) => m.duration > 0 && onDuration(m.duration)}
+                  onUnreadable={() => {
+                    if (!known.current) void probe(video.ref || video.preview, clip.current);
                   }}
                 />
                 {video.uploading && (
@@ -481,7 +494,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
         <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-subtle-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
         </p>
-      </main>
+      </div>
     </div>
   );
 }

@@ -269,12 +269,17 @@ export const katanaTool = {
       return [{ ...job, error: e instanceof z.ZodError ? "Give the reference video and 1–5 photos as /api/files/… URLs" : (e as Error).message }];
     }
   },
+  /** Where the job opens (the approval card, MCP's estimate_job). */
+  place: () => ({ studio: "Katana", href: "/katana" }),
   async run(s: z.infer<typeof KatanaToolInput>, ctx: { engine: Engine }) {
     const job = createKatana(toBody(s, ctx.engine));
     const final = job.steps[job.final];
     return {
-      content: JSON.stringify({ katana: job.id, segments: job.segments, final, note: `Open /katana to follow it. ${Object.keys(job.steps).length} steps; the finished video is generation ${final}.` }),
-      items: [{ id: "", role: "generations" as const, ids: [final] }],
+      content: JSON.stringify({ studio: "Katana", href: "/katana", katana: job.id, segments: job.segments, final, note: `${Object.keys(job.steps).length} steps; the finished video is generation ${final}. Katana lists the run with its steps, Retry and Run again.` }),
+      items: [
+        { id: "", role: "tool" as const, text: "Started a Katana edit", href: "/katana", studio: "Katana" },
+        { id: "", role: "generations" as const, ids: [final] },
+      ],
     };
   },
 };

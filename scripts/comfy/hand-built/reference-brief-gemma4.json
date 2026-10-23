@@ -1,0 +1,76 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "video": "reference.mp4",
+      "force_rate": 24,
+      "custom_width": 384,
+      "custom_height": 0,
+      "frame_load_cap": 720,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "_meta": {
+      "title": "Reference clip at 24 fps (video; frames = frame cap, startFrame, frameWidth px wide)"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "gemma4_e4b_it_fp8_scaled.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Gemma 4 E4B (checkpoint)"
+    }
+  },
+  "3": {
+    "class_type": "TextGenerate",
+    "inputs": {
+      "prompt": "You are given a short-form reference video (frames at 1 fps plus its soundtrack). Write a reusable style brief for a new faceless video in the same style. Return strict JSON with keys: format (e.g. 'what if' explainer), hook (first 3 s), pacing (average shot length in seconds), shots (list of {seconds, visual, camera, on_screen_text}), visual_style (medium, palette, lighting, texture), animation_style (one of 'Fully animated', 'Frame by frame', 'Scene by scene video', 'Seamless motion video'), narration (voice, tone, words per minute, language), music (genre, energy), captions (style, position), and topic_ideas (5). Describe style only; never copy the reference's people, logos or exact words.",
+      "max_length": 2048,
+      "sampling_mode": "on",
+      "sampling_mode.temperature": 0.3,
+      "sampling_mode.top_k": 64,
+      "sampling_mode.top_p": 0.95,
+      "sampling_mode.min_p": 0.05,
+      "sampling_mode.repetition_penalty": 1.05,
+      "sampling_mode.seed": 0,
+      "sampling_mode.presence_penalty": 0,
+      "thinking": false,
+      "use_default_template": true,
+      "mtp": "auto",
+      "clip": [
+        "2",
+        0
+      ],
+      "audio": [
+        "1",
+        2
+      ],
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Style brief as JSON (instruction, maxTokens)"
+    }
+  },
+  "4": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/reference-brief",
+      "format": "txt"
+    },
+    "_meta": {
+      "title": "Save the brief"
+    }
+  }
+}

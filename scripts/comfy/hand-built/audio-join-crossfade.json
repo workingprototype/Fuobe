@@ -1,0 +1,251 @@
+{
+  "1": {
+    "class_type": "VHS_LoadAudioUpload",
+    "inputs": {
+      "audio": "a.wav",
+      "start_time": 0,
+      "duration": 0
+    },
+    "_meta": {
+      "title": "First clip (audio)"
+    }
+  },
+  "2": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "b.wav"
+    },
+    "_meta": {
+      "title": "Second clip (audio2)"
+    }
+  },
+  "3": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "fade.wav"
+    },
+    "_meta": {
+      "title": "Crossfade curve the provider writes: stereo, left = fade-in, right = fade-out (fadeCurve)"
+    }
+  },
+  "4": {
+    "class_type": "SplitAudioChannels",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Fade-in / fade-out curves"
+    }
+  },
+  "5": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 1
+    },
+    "_meta": {
+      "title": "Crossfade seconds (crossfade)"
+    }
+  },
+  "6": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "0 - a",
+      "values.a": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "-crossfade"
+    }
+  },
+  "7": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a - b",
+      "values.a": [
+        "1",
+        1
+      ],
+      "values.b": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "First clip without its tail"
+    }
+  },
+  "8": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "First clip, all but the overlap"
+    }
+  },
+  "9": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "start_index": [
+        "6",
+        0
+      ],
+      "duration": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "First clip's tail"
+    }
+  },
+  "10": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Second clip's head"
+    }
+  },
+  "11": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": [
+        "5",
+        0
+      ],
+      "duration": 100000
+    },
+    "_meta": {
+      "title": "Second clip after the overlap (a long duration = to its end)"
+    }
+  },
+  "12": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "9",
+        0
+      ],
+      "audio2": [
+        "4",
+        1
+      ],
+      "merge_method": "multiply"
+    },
+    "_meta": {
+      "title": "Tail fading out"
+    }
+  },
+  "13": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "10",
+        0
+      ],
+      "audio2": [
+        "4",
+        0
+      ],
+      "merge_method": "multiply"
+    },
+    "_meta": {
+      "title": "Head fading in"
+    }
+  },
+  "14": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "12",
+        0
+      ],
+      "audio2": [
+        "13",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Overlap"
+    }
+  },
+  "15": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "8",
+        0
+      ],
+      "audio2": [
+        "14",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "First clip + overlap"
+    }
+  },
+  "16": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "15",
+        0
+      ],
+      "audio2": [
+        "11",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "+ the rest of the second clip"
+    }
+  },
+  "17": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": [
+        "16",
+        0
+      ],
+      "filename_prefix": "fuobe/audio-join"
+    },
+    "_meta": {
+      "title": "Save (FLAC)"
+    }
+  }
+}

@@ -4,7 +4,6 @@ import { Clapperboard, Copy, ExternalLink, MoreHorizontal, Pin, PinOff, Plus, Se
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { toast } from "sonner";
 import { PageShell } from "@/components/page-shell";
 import { PageHeader } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -14,6 +13,7 @@ import type { CinemaProject } from "@/lib/catalog/cinema";
 import { formatUsd } from "./money";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { useCinemaProjects, useUpdateProject } from "./hooks";
 import { ProjectDialog } from "./project-settings";
 
@@ -86,10 +86,7 @@ function ProjectCard({ project, onSettings }: { project: CinemaProject; onSettin
             <ExternalLink /> Open in new tab
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => {
-              void navigator.clipboard.writeText(new URL(href, window.location.origin).toString());
-              toast("Link copied");
-            }}
+            onClick={() => void copyWithToast(new URL(href, window.location.origin).toString(), "Link copied")}
           >
             <Copy /> Copy link
           </DropdownMenuItem>

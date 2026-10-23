@@ -75,6 +75,8 @@ const ROUND3_MODELS: Record<string, { op: Operation; kind: MediaKind; workflow: 
   "oss-tryon-klein": { op: "edit", kind: "image", workflow: "tryon-flux2-klein-4b" },
   "oss-zimage-grid": { op: "t2i", kind: "image", workflow: "grid-zimage-contact-sheet" },
   "oss-zimage-soul-cast": { op: "t2i", kind: "image", workflow: "soul-cast-sheet-zimage" },
+  // round 4
+  "oss-vtracer": { op: "vectorize", kind: "image", workflow: "image-vectorize-vtracer" },
 };
 const manifest = JSON.parse(fs.readFileSync(path.join(process.cwd(), "workflows/comfyui/manifest.json"), "utf8")) as Manifest;
 const workflowById = new Map(manifest.workflows.map((w) => [w.id, w]));
@@ -108,8 +110,11 @@ describe("round-3 open models", () => {
     expect(getModel("oss-captions-whisper")!.tagline).toMatch(/non-commercial/);
     expect(getModel("oss-hunyuan-foley")!.tagline).toMatch(/EU, UK and South Korea/);
     expect(getModel("oss-stable-audio-3")!.tagline).toMatch(/US\$1M/);
-    expect(getModel("oss-thinksound")!.hidden).toBe(true); // isolated worker only
-    expect(getModel("oss-latentsync")!.hidden).toBe(true);
+    // Offered in their studios, and marked as running on the isolated worker.
+    for (const id of ["oss-thinksound", "oss-latentsync"]) {
+      expect(getModel(id)!.worker, id).toBe("isolated");
+      expect(getModel(id)!.hidden, id).toBeFalsy();
+    }
   });
 
   it("every open model's sliders and controls are bindings of its workflows", () => {

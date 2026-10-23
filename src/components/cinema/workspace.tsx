@@ -20,6 +20,7 @@ import { rigError, type CinemaFolder, type DirectorSettings, type DirectorShot }
 import type { StudioElement } from "@/lib/catalog/elements";
 import type { OutputFile } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { CinemaFeed, type FeedHandlers } from "./cinema-feed";
 import { initialDraft, type CinemaDraft } from "./draft";
 import { ElementsPanel } from "./elements-panel";
@@ -395,10 +396,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
               {project.pinned ? <PinOff /> : <Pin />} {project.pinned ? "Unpin project" : "Pin project"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => {
-                void navigator.clipboard.writeText(window.location.href);
-                toast("Link copied");
-              }}
+              onClick={() => void copyWithToast(window.location.href, "Link copied")}
             >
               <Copy /> Copy link
             </DropdownMenuItem>
@@ -414,7 +412,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-60 shrink-0 border-r bg-sidebar/40 lg:block">{sidebar}</aside>
-        <main
+        <div
           className="relative flex min-w-0 flex-1 flex-col"
           onDragOver={(e) => {
             if (!e.dataTransfer.types.includes("Files")) return;
@@ -484,7 +482,7 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
               </p>
             </div>
           )}
-        </main>
+        </div>
         {xl && panel && <aside className="w-[380px] shrink-0 border-l bg-sidebar/40">{sidePanel}</aside>}
       </div>
 

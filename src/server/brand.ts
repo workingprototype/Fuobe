@@ -814,6 +814,7 @@ interface BrandRow {
 
 interface StoredKit extends BrandKitFields {
   source?: "website" | "manual";
+  origin?: "assist";
   note?: string | null;
   error?: string | null;
 }
@@ -1118,8 +1119,8 @@ export function sellingPointsFrom(description: string | undefined): string[] {
     .slice(0, 3);
 }
 
-/** A manual kit from a description ("Describe your business") and optional product photos. */
-export async function createManualBrand(input: { description: string; name?: string; images?: string[]; colors?: string[] }): Promise<BrandKit> {
+/** A manual kit from a description ("Describe your business") and optional product photos. `origin`: who made it (Assist). */
+export async function createManualBrand(input: { description: string; name?: string; images?: string[]; colors?: string[]; origin?: "assist" }): Promise<BrandKit> {
   const description = input.description.trim();
   if (!description && !input.images?.length) throw new Error("Add a description or upload images");
   const llm = description ? softFieldsFrom(parseJsonObject(await llmText(MANUAL_SYSTEM, `Business: ${description}`))) : {};
@@ -1130,6 +1131,7 @@ export async function createManualBrand(input: { description: string; name?: str
     colors: colors.length ? colors : llm.colors?.length ? llm.colors : (heur.colors ?? []),
     fonts: { heading: llm.fonts?.heading ?? heur.fonts?.heading, body: llm.fonts?.body ?? heur.fonts?.body },
     source: "manual",
+    ...(input.origin && { origin: input.origin }),
   };
   const id = nanoid(10);
   const now = Date.now();

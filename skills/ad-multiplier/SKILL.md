@@ -1,14 +1,15 @@
 ---
 name: ad-multiplier
-title: Ad Multiplier
 description: Turn one winning video ad into many variants — new hooks, new CTAs, new settings, new subjects or products — keeping what works in the original (timing, structure, audio), for testing on paid social.
-when_to_use: The user has an existing video ad (4–30 s) and wants variations, A/B versions, "new hooks for this ad", "the same ad with our other product" or "localised versions". Needs the reference video.
-icon: copy
-studio: /video-edit
-tags: [ads, variants, video, testing]
-offline:
-  kind: video
-  aspect: "9:16"
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Ad Multiplier
+  when_to_use: The user has an existing video ad (4–30 s) and wants variations, A/B versions, "new hooks for this ad", "the same ad with our other product" or "localised versions". Needs the reference video.
+  icon: copy
+  studio: /ads/multiplier
+  tags: ads, variants, video, testing
+  offline_kind: video
+  offline_aspect: "9:16"
 ---
 
 # Ad Multiplier
@@ -38,3 +39,11 @@ default (480p for quick tests). 3–5 variants per batch, each one `generate` jo
 ## Hand-off
 Name each variant by what changed ("Hook B — the spill") so the user can track them in their ad
 manager. Offer captions (`add_captions`) and 1:1 / 4:5 crops (video-repurposer).
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with one job per variant (op `v2v`), or the hook /
+CTA chain with `after`, then `check_generations` for the results; `add_captions` for captions. Price
+a run with `estimate_cost` (or `estimate_job` for a studio tool) and confirm it with the user first.
+Files go in as URLs: `fuobe upload <file>` prints one. Without MCP, the `fuobe` CLI runs the same
+jobs (`fuobe generate`, `fuobe tool <name>`).

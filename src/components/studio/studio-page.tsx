@@ -9,8 +9,9 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { handoffKey, mergeHandoff } from "@/lib/composer";
+import { handoffKey, mergeHandoff, promptShown } from "@/lib/composer";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
+import { matchSpokenLanguage } from "@/lib/speech-languages";
 import { SoulPresetCards } from "@/components/moodboards/soul-preset-cards";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import { cn } from "@/lib/utils";
@@ -71,7 +72,7 @@ function initialDraft(
 }
 
 /** Rebuild a composer draft from a past generation ("Reuse"). */
-function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft> {
+function draftFromGeneration(g: Generation, config: StudioConfig, getModel: (id: string) => ModelDef | undefined): Partial<Draft> {
   // A run styled by the Color signature / Moodboard chips comes back as it was before they routed it,
   // with the picks on the chips (studios without the chips get the styled prompt instead).
   const signed = config.signature ? reuseSignature(g.request) : null;
@@ -84,11 +85,15 @@ function draftFromGeneration(g: Generation, config: StudioConfig): Partial<Draft
   if (r.inputs?.endImage) slots.endImage = slot(r.inputs.endImage);
   if (r.inputs?.video) slots.video = slot(r.inputs.video);
   if (r.inputs?.audio) slots.audio = slot(r.inputs.audio);
+  const params = { ...r.params };
+  // A spoken language stored as a name (Assist's "Spanish") or a locale comes back as the model's own code.
+  const languages = getModel(r.modelId)?.options.sourceLanguages;
+  if (languages?.length && params.sourceLanguage) params.sourceLanguage = matchSpokenLanguage(params.sourceLanguage, languages) ?? params.sourceLanguage;
   return {
     prompt: r.prompt ?? "",
     negativePrompt: r.negativePrompt ?? "",
     modelId: r.modelId,
-    params: { ...r.params },
+    params,
     slots,
     refs,
     presetId: r.presetId,
@@ -178,6 +183,31 @@ function ActivePresetHeader() {
   );
 }
 
+/**
+ * Example prompts under the hero. Its own component: it follows the picked model (a model that
+ * takes no prompt, like FASHN try-on, gets none), so it re-renders with the draft, not the page.
+ */
+function PromptSuggestions({ suggestions }: { suggestions: string[] }) {
+  const { config, draft, setDraft } = useStudio();
+  const catalog = useCatalog();
+  const preset = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
+  const model = catalog.getModel(draft.modelId);
+  if (!promptShown(config.hidePrompt, preset?.userPrompt, model?.options.promptless)) return null;
+  return (
+    <div className="mx-auto mt-4 flex max-w-[760px] flex-wrap justify-center gap-2 px-3 pb-10">
+      {suggestions.map((s) => (
+        <button
+          key={s}
+          onClick={() => setDraft({ prompt: s })}
+          className="h-8 max-w-full truncate rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          {s.length > 48 ? `${s.slice(0, 46)}…` : s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Sticky page header (title + engine), with an optional row of mode tabs under it. */
 function StudioHeader({ title, header, tabs }: { title: string; header?: React.ReactNode; tabs?: React.ReactNode }) {
   const [engine, setEngine] = useEngine();
@@ -208,14 +238,15 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
   // While the feed loads (and in the prerendered shell) the page shows the hero and the composer, never a blank area.
   const hasItems = items.length > 0;
   const offscreen = useOffscreenResults(feed.data);
+  const catalog = useCatalog();
 
   const reuse = useCallback(
     (g: Generation) => {
-      setDraft(draftFromGeneration(g, config));
+      setDraft(draftFromGeneration(g, config, catalog.getModel));
       if (g.engine !== engine) setEngine(g.engine);
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-composer] textarea")?.focus());
     },
-    [config, engine, setDraft, setEngine],
+    [catalog, config, engine, setDraft, setEngine],
   );
 
   return (
@@ -243,7 +274,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
     >
       <StudioHeader title={config.title} header={header} tabs={tabs} />
 
-      <main className={cn("mx-auto w-full max-w-[1240px] min-w-0 px-3 sm:px-6", hasItems && "flex-1 pb-8")}>
+      <div className={cn("mx-auto w-full max-w-[1240px] min-w-0 px-3 sm:px-6", hasItems && "flex-1 pb-8")}>
         {hasItems ? (
           <div className="pt-4">
             <Feed items={items} onReuse={reuse} />
@@ -254,7 +285,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
             {config.subtitle && <p className="mt-2 max-w-xl text-[13px] text-muted-foreground">{config.subtitle}</p>}
           </div>
         )}
-      </main>
+      </div>
 
       {/* One composer for both layouts (centred under the hero, docked under the feed), so it keeps focus and state when the first result arrives. */}
       <div
@@ -282,19 +313,7 @@ function StudioBody({ header, tabs }: { header?: React.ReactNode; tabs?: React.R
         </div>
       </div>
 
-      {!hasItems && config.suggestions && (
-        <div className="mx-auto mt-4 flex max-w-[760px] flex-wrap justify-center gap-2 px-3 pb-10">
-          {config.suggestions.map((s) => (
-            <button
-              key={s}
-              onClick={() => setDraft({ prompt: s })}
-              className="h-8 max-w-full truncate rounded-full border bg-background px-3 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              {s.length > 48 ? `${s.slice(0, 46)}…` : s}
-            </button>
-          ))}
-        </div>
-      )}
+      {!hasItems && config.suggestions && <PromptSuggestions suggestions={config.suggestions} />}
       {!hasItems && config.signature && <SoulPresetCards />}
 
       {dragging && (

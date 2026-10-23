@@ -16,7 +16,9 @@ import { readRef } from "../storage";
 import { katanaTool } from "../katana";
 import { createStoryboard } from "../storyboard";
 import { CONTEXT_TOOLS } from "./context-tools";
-import { defineTool, type ResultContent, type ToolContext, type ToolDef, type ToolOutcome } from "./define";
+import { defineTool, type JobPlace, type ResultContent, type ToolContext, type ToolDef, type ToolOutcome } from "./define";
+// Fills STUDIO_ROUTES with the studio modules (Layers, Shorts, dub, Faceless, Ads, Captions).
+import "./studio-routes";
 import { STUDIO_TOOLS } from "./studio-tools";
 
 export type { ToolContext, ToolOutcome };
@@ -306,8 +308,11 @@ function toRequest(j: JobInput): GenerationRequest {
 function slotFor(kind: MediaKind, op: Operation | undefined): ChainSlot {
   if (kind === "text") return { slot: "prompt" };
   if (kind === "video") return { slot: op === "concat" ? "videos" : "video" };
-  // tts clones the earlier audio's voice; voice-change re-voices the earlier audio (its target voice is voice_audio).
-  if (kind === "audio") return { slot: op === "tts" ? "voiceAudio" : "audio" };
+  // tts clones the earlier audio's voice; voice-change re-voices the earlier audio (its target voice is voice_audio);
+  // a join takes it as one of its clips.
+  if (kind === "audio") return { slot: op === "tts" ? "voiceAudio" : op === "audio-join" ? "audios" : "audio" };
+  // A mesh goes on to be rigged.
+  if (kind === "model3d") return { slot: "model3d" };
   return { slot: "images", position: "first" };
 }
 
@@ -535,14 +540,17 @@ export function validateInput(name: string, input: unknown): string | null {
   return parsed.success ? null : describeIssues(parsed.error.issues);
 }
 
-/** Price a gated call. Arguments are validated first: plan() only ever sees input its schema accepts. */
-export function planFor(name: string, input: unknown, ctx: ToolContext): { jobs: PlannedJob[]; total: number | null; error?: string } {
+/**
+ * Price a gated call. Arguments are validated first: plan() only ever sees input its schema accepts.
+ * Studio tools also say where the job opens (studio and its page) or why it runs in the Library.
+ */
+export function planFor(name: string, input: unknown, ctx: ToolContext): { jobs: PlannedJob[]; total: number | null; error?: string } & JobPlace {
   const t = getTool(name);
   if (!t?.plan) return { jobs: [], total: 0 };
   const parsed = t.schema.safeParse(input);
   if (!parsed.success) return { jobs: [], total: 0, error: describeIssues(parsed.error.issues) };
   const jobs = t.plan(parsed.data, ctx);
-  return { jobs, total: totalCost(jobs) };
+  return { jobs, total: totalCost(jobs), ...t.place?.(parsed.data, ctx) };
 }
 
 /** Validate and run a tool. Never throws: failures come back as an error result. */

@@ -189,6 +189,17 @@ describe("apps on the new models", () => {
     expect(open.loras[0]?.file).toMatch(/multiple-angles/);
   });
 
+  it("Video Background Remover mattes the whole clip with BiRefNet on both engines (no more single frame)", () => {
+    const preset = getPreset("app-video-background-remover")!;
+    expect(preset.inputs).toEqual([expect.objectContaining({ key: "video", accept: "video", required: true })]);
+    for (const [engine, model] of [["cloud", "birefnet-video"], ["open", "oss-video-matte-birefnet"]] as const) {
+      const route = engine === "cloud" ? preset.cloud! : preset.open!;
+      const p = planGeneration({ feature: `app:${preset.id}`, presetId: preset.id, modelId: route.modelId, inputs: { video: "/api/files/in.mp4" } }, getModel, getPreset);
+      expect([p.model.id, p.op]).toEqual([model, "bg-remove-video"]);
+    }
+    expect(preset.parity).not.toMatch(/no video matting|single frame/);
+  });
+
   it("Product Shot sends a scene description only (Bria takes a description or a reference photo, never both)", () => {
     expect(plan("app-product-shot", "cloud", { scene: "beach" }).prompt).toMatch(/^The product on warm sand at the beach/);
     expect(getPreset("app-product-shot")!.inputs!.some((s) => s.key === "image2")).toBe(false);

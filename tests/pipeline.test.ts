@@ -257,3 +257,62 @@ describe("one mode per chain at launch (S9)", () => {
     }
   });
 });
+
+describe("round-4 inputs and params", () => {
+  const providerInput = (id: string) => JSON.parse((db().prepare("SELECT provider_input_json FROM generations WHERE id = ?").get(id) as { provider_input_json: string }).provider_input_json) as Record<string, unknown>;
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f0005000201a2e2b6a40000000049454e44ae426082", "hex");
+
+  it("chains a mesh into the rigging step through the model3d slot", async () => {
+    const photo = saveFile({ data: png, contentType: "image/png", source: "upload" }).url;
+    const p = createPipeline([
+      { key: "mesh", request: { feature: "3d", modelId: "test-3d", op: "image-to-3d", inputs: { images: [photo] } } },
+      { key: "rig", request: { feature: "3d", modelId: "meshy-rigging", op: "rig-3d", params: { animation: 12 } }, after: "mesh", chain: [{ slot: "model3d" }] },
+    ]);
+    const mesh = await settle(p.byKey.mesh.id);
+    const rig = await settle(p.byKey.rig.id);
+    expect(rig.status, rig.error ?? "").toBe("succeeded");
+    const glb = mesh.outputs.find((o) => o.kind === "model3d")!.url;
+    expect(rig.request.inputs?.model3d).toBe(glb);
+    expect(rig.kind).toBe("model3d");
+    expect(providerInput(rig.id)).toMatchObject({ model3d: expect.stringMatching(/^data:model\/gltf-binary/), animation: 12 });
+  });
+
+  it("keeps the round-4 params and the 3D input on POST /api/generations", async () => {
+    const { POST } = await import("@/app/api/generations/route");
+    const post = async (body: unknown) => {
+      const res = await POST(new Request("http://localhost/api/generations", { method: "POST", body: JSON.stringify(body) }));
+      expect(res.status, await res.clone().text()).toBe(201);
+      const { items } = (await res.json()) as { items: Generation[] };
+      for (const g of items) await gens.cancelGeneration(g.id);
+      return items[0];
+    };
+    const kf = await post({ feature: "video", modelId: "flux-3-max", prompt: "she puts on the hat", inputs: { images: ["/api/files/a.png", "/api/files/b.png"] }, params: { keyframeTimes: [0, 4], duration: 5 } });
+    expect(kf.op).toBe("keyframes");
+    expect(kf.request.params?.keyframeTimes).toEqual([0, 4]);
+    const params = {
+      points: [{ x: 10, y: 20, label: "negative" }],
+      format: "prores_422_hq",
+      zoomFrom: 1,
+      zoomTo: 1.2,
+      panFrom: { x: 0.5, y: 0.5 },
+      panTo: { x: 0.3, y: 0.4 },
+      easing: "ease-in-out",
+      crossfade: 0.5,
+      sourceDuration: 8,
+      frameInterval: 2,
+      targetFps: 60,
+      slowdown: 2,
+      colormap: "turbo",
+      position: { x: 0.5, y: 0.8 },
+      scale: 0.5,
+      animation: 12,
+    };
+    const erase = await post({ feature: "video-tools", modelId: "bria-video-erase-points", inputs: { video: "/api/files/v.mp4" }, params });
+    expect(erase.request.params).toMatchObject(params);
+    const rig = await post({ feature: "3d", modelId: "meshy-rigging", inputs: { model3d: "/api/files/m.glb" } });
+    expect(rig.request.inputs?.model3d).toBe("/api/files/m.glb");
+    // Values outside the contract are refused, not passed on.
+    const bad = await POST(new Request("http://localhost/api/generations", { method: "POST", body: JSON.stringify({ feature: "x", modelId: "topaz-sdr-to-hdr", inputs: { video: "/v.mp4" }, params: { format: "mpeg2" } }) }));
+    expect(bad.status).toBe(400);
+  });
+});

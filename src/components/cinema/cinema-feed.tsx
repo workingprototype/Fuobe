@@ -53,6 +53,7 @@ import type { CinemaFolder } from "@/lib/catalog/cinema";
 import type { Generation, OutputFile } from "@/lib/catalog/types";
 import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { MoveToItems } from "./folder-sidebar";
 import { foreign, useItemActions, type CinemaGeneration } from "./hooks";
 
@@ -224,10 +225,7 @@ function TileMenu({ u, folders, projectId, handlers, onDelete }: { u: Unit; fold
           <Heart /> {u.g.favorite ? "Unlike" : "Like"}
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(u.g.prompt ?? "");
-            toast("Prompt copied");
-          }}
+          onClick={() => void copyWithToast(u.g.prompt ?? "", "Prompt copied")}
         >
           <Copy /> Copy prompt
         </DropdownMenuItem>

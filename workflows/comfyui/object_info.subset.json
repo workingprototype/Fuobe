@@ -2759,6 +2759,290 @@
       "clear conditioning"
     ]
   },
+  "CreateCameraInfo": {
+    "input": {
+      "required": {
+        "mode": [
+          "COMFY_DYNAMICCOMBO_V3",
+          {
+            "tooltip": "How to define the camera: orbit angles, an explicit position, or a position + quaternion.",
+            "options": [
+              {
+                "key": "orbit",
+                "inputs": {
+                  "required": {
+                    "yaw": [
+                      "FLOAT",
+                      {
+                        "default": 35,
+                        "min": -360,
+                        "max": 360,
+                        "step": 1
+                      }
+                    ],
+                    "pitch": [
+                      "FLOAT",
+                      {
+                        "default": 30,
+                        "min": -89,
+                        "max": 89,
+                        "step": 1
+                      }
+                    ],
+                    "distance": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Camera distance from the target.",
+                        "default": 4,
+                        "min": 0.01,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "key": "look_at",
+                "inputs": {
+                  "required": {
+                    "position_x": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Camera position in world space (right-handed, Y-up).",
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ],
+                    "position_y": [
+                      "FLOAT",
+                      {
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ],
+                    "position_z": [
+                      "FLOAT",
+                      {
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "key": "quaternion",
+                "inputs": {
+                  "required": {
+                    "position_x": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Camera position in world space (right-handed, Y-up).",
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ],
+                    "position_y": [
+                      "FLOAT",
+                      {
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ],
+                    "position_z": [
+                      "FLOAT",
+                      {
+                        "default": 4,
+                        "min": -1000,
+                        "max": 1000,
+                        "step": 0.01
+                      }
+                    ],
+                    "quat_x": [
+                      "FLOAT",
+                      {
+                        "default": 0,
+                        "min": -1,
+                        "max": 1,
+                        "step": 0.001
+                      }
+                    ],
+                    "quat_y": [
+                      "FLOAT",
+                      {
+                        "default": 0,
+                        "min": -1,
+                        "max": 1,
+                        "step": 0.001
+                      }
+                    ],
+                    "quat_z": [
+                      "FLOAT",
+                      {
+                        "default": 0,
+                        "min": -1,
+                        "max": 1,
+                        "step": 0.001
+                      }
+                    ],
+                    "quat_w": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Camera world-rotation quaternion (three.js: looks down local -Z). Normalized for you.",
+                        "default": 1,
+                        "min": -1,
+                        "max": 1,
+                        "step": 0.001
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "target_x": [
+          "FLOAT",
+          {
+            "tooltip": "Look-at point (orbit pivot / aim). In orbit mode, move it to pan/translate the whole camera. Ignored in quaternion mode. Defaults to the origin.",
+            "advanced": true,
+            "default": 0,
+            "min": -1000,
+            "max": 1000,
+            "step": 0.01
+          }
+        ],
+        "target_y": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 0,
+            "min": -1000,
+            "max": 1000,
+            "step": 0.01
+          }
+        ],
+        "target_z": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 0,
+            "min": -1000,
+            "max": 1000,
+            "step": 0.01
+          }
+        ],
+        "roll": [
+          "FLOAT",
+          {
+            "tooltip": "Camera roll about the view axis, degrees.",
+            "default": 0,
+            "min": -180,
+            "max": 180,
+            "step": 1
+          }
+        ],
+        "fov": [
+          "FLOAT",
+          {
+            "tooltip": "Vertical field of view in degrees.",
+            "default": 35,
+            "min": 1,
+            "max": 120,
+            "step": 1
+          }
+        ],
+        "zoom": [
+          "FLOAT",
+          {
+            "tooltip": "Digital zoom (focal-length multiplier). >1 zooms in without moving the camera.",
+            "default": 1,
+            "min": 0.01,
+            "max": 100,
+            "step": 0.01
+          }
+        ],
+        "camera_type": [
+          "COMBO",
+          {
+            "tooltip": "Projection used by Render Splat: perspective (foreshortening) or orthographic (parallel).",
+            "multiselect": false,
+            "options": [
+              "perspective",
+              "orthographic"
+            ]
+          }
+        ]
+      },
+      "optional": {
+        "camera_info_state": [
+          "CAMERA_INFO_STATE",
+          {
+            "socketless": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "mode",
+        "target_x",
+        "target_y",
+        "target_z",
+        "roll",
+        "fov",
+        "zoom",
+        "camera_type"
+      ],
+      "optional": [
+        "camera_info_state"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "LOAD3D_CAMERA"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "camera_info"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "CreateCameraInfo",
+    "display_name": "Create Camera Info",
+    "description": "Build a camera_info. Mode 'orbit' aims with yaw/pitch/distance around the target; 'look_at' places the camera at world position. Coordinates are the viewer's world space (right-handed,Y-up).",
+    "python_module": "comfy_extras.nodes_camera",
+    "category": "3d",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "camera position",
+      "make camera info",
+      "orbit camera",
+      "look at camera"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "CreateList": {
     "input": {
       "required": {
@@ -5383,6 +5667,180 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "GrowMask": {
+    "input": {
+      "required": {
+        "mask": [
+          "MASK",
+          {}
+        ],
+        "expand": [
+          "INT",
+          {
+            "default": 0,
+            "min": -16384,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "tapered_corners": [
+          "BOOLEAN",
+          {
+            "advanced": true,
+            "default": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "mask",
+        "expand",
+        "tapered_corners"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MASK"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MASK"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "GrowMask",
+    "display_name": "Grow Mask",
+    "description": "",
+    "python_module": "comfy_extras.nodes_mask",
+    "category": "image/mask",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "expand mask",
+      "shrink mask"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "GrowMaskWithBlur": {
+    "input": {
+      "required": {
+        "mask": [
+          "MASK"
+        ],
+        "expand": [
+          "INT",
+          {
+            "default": 0,
+            "min": -16384,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "incremental_expandrate": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 100,
+            "step": 0.1
+          }
+        ],
+        "tapered_corners": [
+          "BOOLEAN",
+          {
+            "default": true
+          }
+        ],
+        "flip_input": [
+          "BOOLEAN",
+          {
+            "default": false
+          }
+        ],
+        "blur_radius": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 100,
+            "step": 0.1
+          }
+        ],
+        "lerp_alpha": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          }
+        ],
+        "decay_factor": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          }
+        ]
+      },
+      "optional": {
+        "fill_holes": [
+          "BOOLEAN",
+          {
+            "default": false
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "mask",
+        "expand",
+        "incremental_expandrate",
+        "tapered_corners",
+        "flip_input",
+        "blur_radius",
+        "lerp_alpha",
+        "decay_factor"
+      ],
+      "optional": [
+        "fill_holes"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MASK",
+      "MASK"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "mask",
+      "mask_inverted"
+    ],
+    "name": "GrowMaskWithBlur",
+    "display_name": "Grow Mask With Blur",
+    "description": "\n# GrowMaskWithBlur\n- mask: Input mask or mask batch\n- expand: Expand or contract mask or mask batch by a given amount\n- incremental_expandrate: increase expand rate by a given amount per frame\n- tapered_corners: use tapered corners\n- flip_input: flip input mask\n- blur_radius: value higher than 0 will blur the mask\n- lerp_alpha: alpha value for interpolation between frames\n- decay_factor: decay value for interpolation between frames\n- fill_holes: fill holes in the mask (slow)",
+    "python_module": "custom_nodes.ComfyUI-KJNodes",
+    "category": "KJNodes/masking",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
   "Hunyuan3Dv2Conditioning": {
     "input": {
       "required": {
@@ -6063,6 +6521,91 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "ImageCrop": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE",
+          {}
+        ],
+        "width": [
+          "INT",
+          {
+            "default": 512,
+            "min": 1,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "height": [
+          "INT",
+          {
+            "default": 512,
+            "min": 1,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "x": [
+          "INT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "y": [
+          "INT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 16384,
+            "step": 1
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "width",
+        "height",
+        "x",
+        "y"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "ImageCrop",
+    "display_name": "Crop Image (DEPRECATED)",
+    "description": "",
+    "python_module": "comfy_extras.nodes_images",
+    "category": "image/transform",
+    "output_node": false,
+    "deprecated": true,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "trim"
+    ],
+    "essentials_category": "Image Tools",
+    "has_intermediate_output": false
+  },
   "ImageCropToMask": {
     "input": {
       "required": {
@@ -6590,6 +7133,77 @@
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []
+  },
+  "ImageSDRToHDR": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE",
+          {
+            "tooltip": "SDR image(s) in sRGB."
+          }
+        ],
+        "algorithm": [
+          "COMFY_DYNAMICCOMBO_V3",
+          {
+            "tooltip": "Lottes-style rational expansion blended with a calibrated monotonic log-gain curve.",
+            "options": [
+              {
+                "key": "lottes",
+                "inputs": {
+                  "required": {
+                    "target_luminance": [
+                      "FLOAT",
+                      {
+                        "tooltip": "Peak-white target in nits. 0 keeps the calibrated rendering. Dark images are not normalized to this peak.",
+                        "default": 650,
+                        "min": 0,
+                        "max": 10000,
+                        "step": 1
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "algorithm"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "ImageSDRToHDR",
+    "display_name": "Convert SDR to HDR",
+    "description": "Expand sRGB brightness into Rec.2020 HLG HDR. Save the result with the HDR color space selected. Alpha is preserved.",
+    "python_module": "comfy_extras.nodes_images",
+    "category": "image/color",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
   },
   "ImageScale": {
     "input": {
@@ -8984,12 +9598,6 @@
           {
             "multiselect": false,
             "options": [
-              "fuobe_BdMb-3O7.wav",
-              "fuobe_Ntv5KhVl.wav",
-              "fuobe_ZLDbJNmf.wav",
-              "fuobe_av_frame.mp4",
-              "fuobe_real.mp4",
-              "fuobe_real.wav",
               "fuobe_validate.mp4",
               "fuobe_validate.wav"
             ],
@@ -9148,7 +9756,6 @@
       "required": {
         "image": [
           [
-            "example.png",
             "fuobe_validate.png",
             "fuobe_validate_mask.png"
           ],
@@ -9199,7 +9806,6 @@
       "required": {
         "image": [
           [
-            "example.png",
             "fuobe_validate.png",
             "fuobe_validate_mask.png"
           ],
@@ -9247,6 +9853,52 @@
     ],
     "essentials_category": "Image Tools"
   },
+  "LoadMoGeModel": {
+    "input": {
+      "required": {
+        "model_name": [
+          "COMBO",
+          {
+            "multiselect": false,
+            "options": []
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model_name"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MOGE_MODEL"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MOGE_MODEL"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "LoadMoGeModel",
+    "display_name": "Load MoGe Model",
+    "description": "",
+    "python_module": "comfy_extras.nodes_moge",
+    "category": "model/loaders",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "LoadVideo": {
     "input": {
       "required": {
@@ -9255,8 +9907,6 @@
           {
             "multiselect": false,
             "options": [
-              "fuobe_av_frame.mp4",
-              "fuobe_real.mp4",
               "fuobe_validate.mp4"
             ],
             "video_upload": true
@@ -9994,6 +10644,272 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "MoGeInference": {
+    "input": {
+      "required": {
+        "moge_model": [
+          "MOGE_MODEL",
+          {}
+        ],
+        "image": [
+          "IMAGE",
+          {}
+        ],
+        "resolution_level": [
+          "INT",
+          {
+            "tooltip": "0 = fastest, 9 = most detail.",
+            "default": 9,
+            "min": 0,
+            "max": 9
+          }
+        ],
+        "fov_x_degrees": [
+          "FLOAT",
+          {
+            "tooltip": "Horizontal field of view of the source camera. Sets the focal length used to unproject the depth map into 3D. 0 = auto-recover from the predicted points.",
+            "advanced": true,
+            "default": 0,
+            "min": 0,
+            "max": 170,
+            "step": 0.1
+          }
+        ],
+        "batch_size": [
+          "INT",
+          {
+            "tooltip": "Images per inference call. Lower if you OOM on a long video / image set.",
+            "default": 4,
+            "min": 1,
+            "max": 64
+          }
+        ],
+        "force_projection": [
+          "BOOLEAN",
+          {
+            "advanced": true,
+            "default": true
+          }
+        ],
+        "apply_mask": [
+          "BOOLEAN",
+          {
+            "tooltip": "Set masked-out (sky / invalid) pixels to inf in points and depth so meshing culls them. Disable to keep the raw predicted geometry everywhere; the mask is still returned separately.",
+            "advanced": true,
+            "default": true
+          }
+        ],
+        "refine_steps": [
+          "INT",
+          {
+            "tooltip": "MoGe-3 only: sparse volumetric refinement passes over the predicted depth. More passes sharpen fine detail and edges at a roughly linear cost. 0 disables refinement. Ignored by MoGe-1 / MoGe-2.",
+            "advanced": true,
+            "default": 3,
+            "min": 0,
+            "max": 8
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "moge_model",
+        "image",
+        "resolution_level",
+        "fov_x_degrees",
+        "batch_size",
+        "force_projection",
+        "apply_mask",
+        "refine_steps"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MOGE_GEOMETRY"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "moge_geometry"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "MoGeInference",
+    "display_name": "Run MoGe Inference",
+    "description": "Run MoGe on a single image to estimate depth and geometry.",
+    "python_module": "comfy_extras.nodes_moge",
+    "category": "image/geometry estimation",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "moge",
+      "depth",
+      "geometry",
+      "depth estimation",
+      "geometry estimation"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "MoGePointMapToMesh": {
+    "input": {
+      "required": {
+        "moge_geometry": [
+          "MOGE_GEOMETRY",
+          {}
+        ],
+        "batch_index": [
+          "INT",
+          {
+            "tooltip": "Which image of a batched MoGe geometry to mesh. Per-image vertex counts differ, so batches can't be stacked into a single MESH.",
+            "default": 0,
+            "min": 0,
+            "max": 4096
+          }
+        ],
+        "decimation": [
+          "INT",
+          {
+            "tooltip": "Vertex stride; 1 = full resolution.",
+            "default": 1,
+            "min": 1,
+            "max": 8
+          }
+        ],
+        "discontinuity_threshold": [
+          "FLOAT",
+          {
+            "tooltip": "Drop pixels whose 3x3 depth span exceeds this fraction. 0 = off.",
+            "default": 0.04,
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          }
+        ],
+        "texture": [
+          "BOOLEAN",
+          {
+            "tooltip": "Carry the source image through as the baseColor texture.",
+            "default": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "moge_geometry",
+        "batch_index",
+        "decimation",
+        "discontinuity_threshold",
+        "texture"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MESH"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MESH"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "MoGePointMapToMesh",
+    "display_name": "Convert MoGe Point Map to Mesh",
+    "description": "Convert a MoGe point map into a 3D mesh.",
+    "python_module": "comfy_extras.nodes_moge",
+    "category": "image/geometry estimation",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "moge",
+      "mesh",
+      "geometry",
+      "point map"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "MoGeRender": {
+    "input": {
+      "required": {
+        "moge_geometry": [
+          "MOGE_GEOMETRY",
+          {}
+        ],
+        "output": [
+          "COMBO",
+          {
+            "tooltip": "DirectX vs OpenGL controls the normal-map green-channel convention. DirectX: green = -Y down (Unreal). OpenGL: green = +Y up (Blender, Substance, Unity, glTF).",
+            "default": "depth",
+            "multiselect": false,
+            "options": [
+              "depth",
+              "depth_colored",
+              "normal_opengl",
+              "normal_directx",
+              "mask"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "moge_geometry",
+        "output"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "IMAGE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "MoGeRender",
+    "display_name": "Render MoGe Geometry",
+    "description": "Render a depth map or normal map from geometry data",
+    "python_module": "comfy_extras.nodes_moge",
+    "category": "image/geometry estimation",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "moge",
+      "render",
+      "geometry",
+      "depth",
+      "normal"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "ModelPatchLoader": {
     "input": {
       "required": {
@@ -10377,6 +11293,53 @@
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []
+  },
+  "OpticalFlowLoader": {
+    "input": {
+      "required": {
+        "model_name": [
+          "COMBO",
+          {
+            "tooltip": "Optical flow model to load.  Files must be placed in the 'optical_flow' folder.  Today only torchvision's raft_large.pth is supported.",
+            "multiselect": false,
+            "options": []
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "model_name"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "OPTICAL_FLOW"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "OPTICAL_FLOW"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "OpticalFlowLoader",
+    "display_name": "Load Optical Flow Model",
+    "description": "",
+    "python_module": "comfy_extras.nodes_void",
+    "category": "model/loaders",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
   },
   "PreviewAny": {
     "input": {
@@ -11693,6 +12656,174 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "RenderSplat": {
+    "input": {
+      "required": {
+        "splat": [
+          "SPLAT",
+          {}
+        ],
+        "width": [
+          "INT",
+          {
+            "default": 1024,
+            "min": 64,
+            "max": 2048,
+            "step": 8
+          }
+        ],
+        "height": [
+          "INT",
+          {
+            "default": 1024,
+            "min": 64,
+            "max": 2048,
+            "step": 8
+          }
+        ],
+        "frames": [
+          "INT",
+          {
+            "tooltip": "-1, 0, 1 = single still image; >1 = turntable, the camera orbits over a full 360 turn (works with any camera_info). Negative value orbits the other way.",
+            "default": 1,
+            "min": -240,
+            "max": 240
+          }
+        ],
+        "splat_scale": [
+          "FLOAT",
+          {
+            "tooltip": "Multiplier on each splat's projected footprint (lower = crisper points, higher = softer/fuller surface).",
+            "advanced": true,
+            "default": 1,
+            "min": 0.1,
+            "max": 5,
+            "step": 0.05
+          }
+        ],
+        "sharpen": [
+          "FLOAT",
+          {
+            "tooltip": "Sharpen overlapping splats: 1.0 = physically-correct blend; higher biases each pixel toward its dominant (nearest) splat for crisper texture, without shrinking splats or opening gaps. Non-physical above 1.",
+            "default": 2,
+            "min": 1,
+            "max": 8,
+            "step": 0.5
+          }
+        ],
+        "headlight_shading": [
+          "FLOAT",
+          {
+            "tooltip": "Diffuse shading from a light at the camera (headlight), using the splat surfel normals: darkens surfaces that turn away from view to reveal form/curvature. 0 = flat albedo, 1 = strongest shading.",
+            "advanced": true,
+            "default": 0,
+            "min": 0,
+            "max": 3,
+            "step": 0.05
+          }
+        ],
+        "opacity_threshold": [
+          "FLOAT",
+          {
+            "tooltip": "Cull gaussians with opacity below this (removes faint floaters).",
+            "advanced": true,
+            "default": 0,
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          }
+        ],
+        "render_style": [
+          "COMBO",
+          {
+            "tooltip": "What the image output shows: color, clay (neutral-albedo shaded), depth (near=bright), normal (OpenGL normal map).",
+            "multiselect": false,
+            "options": [
+              "color",
+              "clay",
+              "depth",
+              "normal"
+            ]
+          }
+        ],
+        "background": [
+          "COLOR",
+          {
+            "default": "#000000",
+            "socketless": true
+          }
+        ]
+      },
+      "optional": {
+        "bg_image": [
+          "IMAGE",
+          {
+            "tooltip": "Optional background plate composited behind the splat (overrides the solid background colour). Resized to the render size; a batch is used per frame, a single image for all. color/clay only."
+          }
+        ],
+        "camera_info": [
+          "LOAD3D_CAMERA",
+          {
+            "tooltip": "Camera to render from - a Load3D / Preview3D camera or a Create Camera Info node. If empty, the splat is auto-framed from a default 3/4 view."
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "splat",
+        "width",
+        "height",
+        "frames",
+        "splat_scale",
+        "sharpen",
+        "headlight_shading",
+        "opacity_threshold",
+        "render_style",
+        "background"
+      ],
+      "optional": [
+        "bg_image",
+        "camera_info"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE",
+      "MASK"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "image",
+      "mask"
+    ],
+    "output_tooltips": [
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "RenderSplat",
+    "display_name": "Render Splat",
+    "description": "Render a gaussian splat as an image with an anisotropic EWA rasterizer (oriented elliptical splats, antialiased, depth-sorted front-to-back). The camera comes from a camera_info input (Load / Preview 3D, or a Create Camera Info node); leave it empty to auto-frame the splat. Set frames greater than 1 for a turntable batch of images to feed a Video node.",
+    "python_module": "comfy_extras.nodes_gaussian_splat",
+    "category": "3d/splat",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "splat to image",
+      "render splat",
+      "gaussian turntable"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "RepeatImageBatch": {
     "input": {
       "required": {
@@ -12057,6 +13188,61 @@
       "shrink",
       "enlarge"
     ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "ResizeImagesByLongerEdge": {
+    "input": {
+      "required": {
+        "images": [
+          "IMAGE",
+          {
+            "tooltip": "Image to process."
+          }
+        ],
+        "longer_edge": [
+          "INT",
+          {
+            "tooltip": "Target dimension for the longer edge.",
+            "default": 1024,
+            "min": 1,
+            "max": 8192
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "images",
+        "longer_edge"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "images"
+    ],
+    "output_tooltips": [
+      "Processed images"
+    ],
+    "output_matchtypes": null,
+    "name": "ResizeImagesByLongerEdge",
+    "display_name": "Resize Images by Longer Edge (DEPRECATED)",
+    "description": "Resize images so that the longer edge matches the specified dimension while preserving aspect ratio.",
+    "python_module": "comfy_extras.nodes_dataset",
+    "category": "image/transform",
+    "output_node": false,
+    "deprecated": true,
+    "experimental": true,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
     "essentials_category": null,
     "has_intermediate_output": false
   },
@@ -14253,6 +15439,115 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "SplatToFile3D": {
+    "input": {
+      "required": {
+        "splat": [
+          "SPLAT",
+          {}
+        ],
+        "format": [
+          "COMBO",
+          {
+            "tooltip": "ply: standard 3D Gaussian Splat with full spherical harmonics. ksplat: mkkellogg SplatBuffer (level 0, uncompressed), base color only spz: Niantic gzip-compressed (~10x smaller), base color only ",
+            "multiselect": false,
+            "options": [
+              "ply",
+              "ksplat",
+              "spz"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "splat",
+        "format"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "FILE_3D_SPLAT_ANY"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "model_3d"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "SplatToFile3D",
+    "display_name": "Create 3D File (from Splat)",
+    "description": "Serialize a gaussian splat to a File3D object for Save / Preview 3D nodes. Supports one item per batch only.",
+    "python_module": "comfy_extras.nodes_gaussian_splat",
+    "category": "3d/splat",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "gaussian to ply",
+      "splat to file",
+      "export gaussian"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "SplitAudioChannels": {
+    "input": {
+      "required": {
+        "audio": [
+          "AUDIO",
+          {}
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "audio"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "AUDIO",
+      "AUDIO"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "left",
+      "right"
+    ],
+    "output_tooltips": [
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "SplitAudioChannels",
+    "display_name": "Split Audio Channels",
+    "description": "Separates the audio into left and right channels.",
+    "python_module": "comfy_extras.nodes_audio",
+    "category": "audio",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "stereo to mono"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "SplitSigmas": {
     "input": {
       "required": {
@@ -14553,6 +15848,100 @@
       "string concat",
       "append text",
       "combine text"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "StringFormat": {
+    "input": {
+      "required": {
+        "values": [
+          "COMFY_AUTOGROW_V3",
+          {
+            "template": {
+              "input": {
+                "required": {
+                  "value": [
+                    "*",
+                    {}
+                  ]
+                }
+              },
+              "names": [
+                "a",
+                "b",
+                "c",
+                "d",
+                "e",
+                "f",
+                "g",
+                "h",
+                "i",
+                "j",
+                "k",
+                "l",
+                "m",
+                "n",
+                "o",
+                "p",
+                "q",
+                "r",
+                "s",
+                "t",
+                "u",
+                "v",
+                "w",
+                "x",
+                "y",
+                "z"
+              ],
+              "min": 0
+            }
+          }
+        ],
+        "f_string": [
+          "STRING",
+          {
+            "default": "{a}",
+            "multiline": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "values",
+        "f_string"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "STRING"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "STRING"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "StringFormat",
+    "display_name": "Format Text",
+    "description": "Same as Python's string format method. Supports all of Python's format options and features.",
+    "python_module": "comfy_extras.nodes_string",
+    "category": "text",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "string",
+      "format"
     ],
     "essentials_category": null,
     "has_intermediate_output": false
@@ -15853,6 +17242,140 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "TripoSplatConditioning": {
+    "input": {
+      "required": {
+        "clip_vision": [
+          "CLIP_VISION",
+          {
+            "tooltip": "DINOv3 ViT-H/16+ image encoder"
+          }
+        ],
+        "vae": [
+          "VAE",
+          {
+            "tooltip": "Flux2 VAE"
+          }
+        ],
+        "image": [
+          "IMAGE",
+          {}
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "clip_vision",
+        "vae",
+        "image"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "CONDITIONING",
+      "CONDITIONING",
+      "LATENT"
+    ],
+    "output_is_list": [
+      false,
+      false,
+      false
+    ],
+    "output_name": [
+      "positive",
+      "negative",
+      "latent"
+    ],
+    "output_tooltips": [
+      null,
+      null,
+      "The fixed size noise target (latent +camera)."
+    ],
+    "output_matchtypes": null,
+    "name": "TripoSplatConditioning",
+    "display_name": "TripoSplat Conditioning",
+    "description": "Encode the image with DINOv3 and the Flux2 VAE into TripoSplat positive/negative conditioning, and create the fixed size noise target (latent + camera) for the KSampler",
+    "python_module": "comfy_extras.nodes_triposplat",
+    "category": "model/conditioning/triposplat",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "TripoSplatPreprocessImage": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE",
+          {}
+        ],
+        "mask": [
+          "MASK",
+          {}
+        ],
+        "erode_radius": [
+          "INT",
+          {
+            "tooltip": "Erode the alpha matte by this pixel radius before cropping (avoids border bleed).",
+            "default": 1,
+            "min": 0,
+            "max": 16
+          }
+        ],
+        "size": [
+          "INT",
+          {
+            "tooltip": "Square image size. The model is trained at 1024; other sizes run but are off-distribution.",
+            "default": 1024,
+            "min": 256,
+            "max": 4096,
+            "step": 16
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "mask",
+        "erode_radius",
+        "size"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "IMAGE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "image"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "TripoSplatPreprocessImage",
+    "display_name": "TripoSplat Preprocess Image",
+    "description": "Crop center each image to a square canvas on a black background and add padding.",
+    "python_module": "comfy_extras.nodes_triposplat",
+    "category": "model/conditioning/triposplat",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "UNETLoader": {
     "input": {
       "required": {
@@ -16330,6 +17853,77 @@
     "has_intermediate_output": false,
     "search_aliases": []
   },
+  "VAEDecodeTripoSplat": {
+    "input": {
+      "required": {
+        "samples": [
+          "LATENT",
+          {}
+        ],
+        "vae": [
+          "VAE",
+          {
+            "tooltip": "TripoSplat VAE decoder"
+          }
+        ],
+        "num_gaussians": [
+          "INT",
+          {
+            "tooltip": "Number of gaussians to produce (rounded to a multiple of 32). 262144 matches the octree's point density; higher oversamples the same points (denser, but no new detail) and costs proportionally more VRAM/time.",
+            "default": 262144,
+            "min": 32768,
+            "max": 1048576,
+            "step": 32
+          }
+        ],
+        "seed": [
+          "INT",
+          {
+            "tooltip": "Seeds the octree point sampler (global RNG) for deterministic decodes.",
+            "default": 0,
+            "min": 0,
+            "max": 18446744073709552000
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "samples",
+        "vae",
+        "num_gaussians",
+        "seed"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "SPLAT"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "splat"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "VAEDecodeTripoSplat",
+    "display_name": "TripoSplat Decode",
+    "description": "Decode the sampled TripoSplat latent into a 3D gaussian splat. Modify the number of gaussians to vary the density.",
+    "python_module": "comfy_extras.nodes_triposplat",
+    "category": "model/latent/triposplat",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "VAEEncode": {
     "input": {
       "required": {
@@ -16532,13 +18126,75 @@
     "has_intermediate_output": false,
     "search_aliases": []
   },
+  "VHS_LoadAudioUpload": {
+    "input": {
+      "required": {
+        "audio": [
+          [
+            "fuobe_validate.mp4",
+            "fuobe_validate.wav"
+          ]
+        ]
+      },
+      "optional": {
+        "start_time": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 10000000,
+            "step": 0.01,
+            "widgetType": "VHSTIMESTAMP"
+          }
+        ],
+        "duration": [
+          "FLOAT",
+          {
+            "default": 0,
+            "min": 0,
+            "max": 10000000,
+            "step": 0.01,
+            "widgetType": "VHSTIMESTAMP"
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "audio"
+      ],
+      "optional": [
+        "start_time",
+        "duration"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "AUDIO",
+      "FLOAT"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "audio",
+      "duration"
+    ],
+    "name": "VHS_LoadAudioUpload",
+    "display_name": "Load Audio (Upload)🎥🅥🅗🅢",
+    "description": "Load Audio (Upload) 🎥🅥🅗🅢<div style=\"font-size: 0.8em\"><div id=VHS_shortdesc>Loads an audio file from the input directory</div></div><div style=\"font-size: 0.8em\">Very similar in functionality to the built-in LoadAudio. It was originally added before VHS swapped to use Comfy's internal AUDIO format, but provides the additional options for start time and duration</div><div style=\"font-size: 0.8em\"><div vhs_title=\"Outputs\" style=\"display: flex; font-size: 0.8em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">Outputs: <div vhs_title=\"audio\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">audio: The loaded audio</div></div></div></div><div vhs_title=\"Widgets\" style=\"display: flex; font-size: 0.8em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">Widgets: <div vhs_title=\"audio\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">audio: The audio file to be loaded.</div></div><div vhs_title=\"start_time\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">start_time: An offset from the start of the sound file that the audio should start from</div></div><div vhs_title=\"duration\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">duration: A maximum limit for the audio. Disabled if 0</div></div><div vhs_title=\"choose audio to upload\" style=\"display: flex; font-size: 1em\" class=\"VHS_collapse\"><div style=\"color: #AAA; height: 1.5em;\">[<span style=\"font-family: monospace\">-</span>]</div><div style=\"width: 100%\">choose audio to upload: An upload button is provided to upload an audio file to the input folder</div></div></div></div></div>",
+    "python_module": "custom_nodes.ComfyUI-VideoHelperSuite",
+    "category": "Video Helper Suite 🎥🅥🅗🅢/audio",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
   "VHS_LoadVideo": {
     "input": {
       "required": {
         "video": [
           [
-            "fuobe_av_frame.mp4",
-            "fuobe_real.mp4",
             "fuobe_validate.mp4"
           ]
         ],
@@ -17372,6 +19028,294 @@
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []
+  },
+  "VOIDInpaintConditioning": {
+    "input": {
+      "required": {
+        "positive": [
+          "CONDITIONING",
+          {}
+        ],
+        "negative": [
+          "CONDITIONING",
+          {}
+        ],
+        "vae": [
+          "VAE",
+          {}
+        ],
+        "video": [
+          "IMAGE",
+          {
+            "tooltip": "Source video frames [T, H, W, 3]"
+          }
+        ],
+        "quadmask": [
+          "MASK",
+          {
+            "tooltip": "Preprocessed quadmask from VOIDQuadmaskPreprocess [T, H, W]"
+          }
+        ],
+        "width": [
+          "INT",
+          {
+            "default": 672,
+            "min": 16,
+            "max": 16384,
+            "step": 8
+          }
+        ],
+        "height": [
+          "INT",
+          {
+            "default": 384,
+            "min": 16,
+            "max": 16384,
+            "step": 8
+          }
+        ],
+        "length": [
+          "INT",
+          {
+            "tooltip": "Number of pixel frames to process. For CogVideoX-Fun-V1.5 (patch_size_t=2), latent_t must be even — lengths that produce odd latent_t are rounded down (e.g. 49 → 45).",
+            "default": 45,
+            "min": 1,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "batch_size": [
+          "INT",
+          {
+            "default": 1,
+            "min": 1,
+            "max": 64
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "positive",
+        "negative",
+        "vae",
+        "video",
+        "quadmask",
+        "width",
+        "height",
+        "length",
+        "batch_size"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "CONDITIONING",
+      "CONDITIONING",
+      "LATENT"
+    ],
+    "output_is_list": [
+      false,
+      false,
+      false
+    ],
+    "output_name": [
+      "positive",
+      "negative",
+      "latent"
+    ],
+    "output_tooltips": [
+      null,
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "VOIDInpaintConditioning",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_void",
+    "category": "model/conditioning/void",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "VOIDSampler": {
+    "input": {
+      "required": {}
+    },
+    "input_order": {
+      "required": []
+    },
+    "is_input_list": false,
+    "output": [
+      "SAMPLER"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "SAMPLER"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "VOIDSampler",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_void",
+    "category": "model/sampling/samplers",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "VOIDWarpedNoise": {
+    "input": {
+      "required": {
+        "optical_flow": [
+          "OPTICAL_FLOW",
+          {
+            "tooltip": "Optical flow model from OpticalFlowLoader (RAFT-large)."
+          }
+        ],
+        "video": [
+          "IMAGE",
+          {
+            "tooltip": "Pass 1 output video frames [T, H, W, 3]"
+          }
+        ],
+        "width": [
+          "INT",
+          {
+            "default": 672,
+            "min": 16,
+            "max": 16384,
+            "step": 8
+          }
+        ],
+        "height": [
+          "INT",
+          {
+            "default": 384,
+            "min": 16,
+            "max": 16384,
+            "step": 8
+          }
+        ],
+        "length": [
+          "INT",
+          {
+            "tooltip": "Number of pixel frames. Rounded down to make latent_t even (patch_size_t=2 requirement), e.g. 49 → 45.",
+            "default": 45,
+            "min": 1,
+            "max": 16384,
+            "step": 1
+          }
+        ],
+        "batch_size": [
+          "INT",
+          {
+            "default": 1,
+            "min": 1,
+            "max": 64
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "optical_flow",
+        "video",
+        "width",
+        "height",
+        "length",
+        "batch_size"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "LATENT"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "warped_noise"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "VOIDWarpedNoise",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_void",
+    "category": "model/latent/void",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "VOIDWarpedNoiseSource": {
+    "input": {
+      "required": {
+        "warped_noise": [
+          "LATENT",
+          {
+            "tooltip": "Warped noise latent from VOIDWarpedNoise"
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "warped_noise"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "NOISE"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "NOISE"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "VOIDWarpedNoiseSource",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_void",
+    "category": "model/latent/void",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
   },
   "VaeDecodeShapeTrellis": {
     "input": {
@@ -20916,6 +22860,241 @@
     "description": "Loads Wan VAE model from 'ComfyUI/models/vae'",
     "python_module": "custom_nodes.ComfyUI-WanVideoWrapper",
     "category": "WanVideoWrapper",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
+  "SaveSVGNode": {
+    "input": {
+      "required": {
+        "svg": [
+          "SVG",
+          {}
+        ],
+        "filename_prefix": [
+          "STRING",
+          {
+            "tooltip": "The prefix for the file to save. This may include formatting information such as %date:yyyy-MM-dd% or %Empty Latent Image.width% to include values from nodes.",
+            "default": "svg/ComfyUI",
+            "multiline": false
+          }
+        ]
+      },
+      "hidden": {
+        "prompt": [
+          "PROMPT"
+        ],
+        "extra_pnginfo": [
+          "EXTRA_PNGINFO"
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "svg",
+        "filename_prefix"
+      ],
+      "hidden": [
+        "prompt",
+        "extra_pnginfo"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "SVG"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "svg"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "SaveSVGNode",
+    "display_name": "Save SVG",
+    "description": "Save SVG files on disk.",
+    "python_module": "comfy_extras.nodes_images",
+    "category": "image",
+    "output_node": true,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "export vector",
+      "save vector graphics"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "TS_ImageToSVGStringColor_Vtracer": {
+    "input": {
+      "required": {
+        "image": [
+          "IMAGE"
+        ],
+        "hierarchical": [
+          [
+            "stacked",
+            "cutout"
+          ],
+          {
+            "default": "stacked"
+          }
+        ],
+        "mode": [
+          [
+            "spline",
+            "polygon",
+            "none"
+          ],
+          {
+            "default": "spline"
+          }
+        ],
+        "filter_speckle": [
+          "INT",
+          {
+            "default": 4,
+            "min": 0,
+            "max": 100,
+            "step": 1
+          }
+        ],
+        "color_precision": [
+          "INT",
+          {
+            "default": 6,
+            "min": 0,
+            "max": 10,
+            "step": 1
+          }
+        ],
+        "layer_difference": [
+          "INT",
+          {
+            "default": 16,
+            "min": 0,
+            "max": 256,
+            "step": 1
+          }
+        ],
+        "corner_threshold": [
+          "INT",
+          {
+            "default": 60,
+            "min": 0,
+            "max": 180,
+            "step": 1
+          }
+        ],
+        "length_threshold": [
+          "FLOAT",
+          {
+            "default": 4,
+            "min": 0,
+            "max": 10,
+            "step": 0.1
+          }
+        ],
+        "max_iterations": [
+          "INT",
+          {
+            "default": 10,
+            "min": 1,
+            "max": 70,
+            "step": 1
+          }
+        ],
+        "splice_threshold": [
+          "INT",
+          {
+            "default": 45,
+            "min": 0,
+            "max": 180,
+            "step": 1
+          }
+        ],
+        "path_precision": [
+          "INT",
+          {
+            "default": 3,
+            "min": 0,
+            "max": 10,
+            "step": 1
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "image",
+        "hierarchical",
+        "mode",
+        "filter_speckle",
+        "color_precision",
+        "layer_difference",
+        "corner_threshold",
+        "length_threshold",
+        "max_iterations",
+        "splice_threshold",
+        "path_precision"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "STRING"
+    ],
+    "output_is_list": [
+      true
+    ],
+    "output_name": [
+      "STRING"
+    ],
+    "name": "TS_ImageToSVGStringColor_Vtracer",
+    "display_name": "Image to SVG String Color_Vtracer",
+    "description": "",
+    "python_module": "custom_nodes.ComfyUI-ToSVG",
+    "category": "💎TOSVG/Convert",
+    "output_node": false,
+    "has_intermediate_output": false,
+    "search_aliases": []
+  },
+  "TS_SVGStringToSVGBytesIO": {
+    "input": {
+      "required": {
+        "SVG_String": [
+          "STRING",
+          {
+            "forceInput": true
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "SVG_String"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "SVG"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "SVG"
+    ],
+    "name": "TS_SVGStringToSVGBytesIO",
+    "display_name": "SVG String to SVG BytesIO",
+    "description": "",
+    "python_module": "custom_nodes.ComfyUI-ToSVG",
+    "category": "💎TOSVG/Tools",
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []

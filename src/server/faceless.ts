@@ -73,6 +73,8 @@ import {
 } from "@/lib/catalog/faceless";
 import { routesFor } from "@/lib/catalog/plan";
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import { DocxError, docxText } from "./assist/docx";
+import { PdfError, pdfText } from "./assist/pdf";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
@@ -315,7 +317,7 @@ const NAME_SYSTEM = "You name YouTube channels. Reply with the name only: 2–4 
  * A new channel is there straight away with a name taken from the idea; the LLM's name replaces it when
  * it answers (within 15 s, and only while the channel still has the first name), then the avatar is drawn.
  */
-export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string }): Promise<FacelessChannel> {
+export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean }): Promise<FacelessChannel> {
   const idea = input.idea.trim();
   if (!idea) throw new FacelessError("Describe the channel first");
   const reference = input.reference?.trim() ? await readReference(input.reference) : null;
@@ -343,7 +345,8 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
       if (name) db().prepare("UPDATE faceless_channels SET name = ? WHERE id = ? AND name = ?").run(name, row.id, row.name);
     }
     try {
-      if (channelRow(row.id)) makeAvatar(row.id);
+      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button.
+      if (input.avatar !== false && channelRow(row.id)) makeAvatar(row.id);
     } catch {
       // No picture model can run right now: the channel shows its initials, and "Draw an avatar" is there.
     }
@@ -444,6 +447,8 @@ export interface EpisodeInput {
   autoRender?: boolean;
   /** Save this episode's look and sound as the channel's (default: only for a channel's first episode). */
   saveLook?: boolean;
+  /** A script that's written already, with its pictures (Assist): no writer runs; it's ready to review, or renders at once with autoRender. */
+  blocks?: Partial<ScriptBlock>[];
 }
 
 function cleanSettings(s: EpisodeSettings): EpisodeSettings {
@@ -462,25 +467,27 @@ function cleanSettings(s: EpisodeSettings): EpisodeSettings {
 export function createEpisode(input: EpisodeInput): FacelessEpisode {
   const topic = input.topic.trim();
   const pasted = input.script?.trim() ?? "";
-  if (!topic && !pasted && !input.sources?.length) throw new FacelessError(input.kind === "explainer" ? "Add a prompt, or attach a file or link" : "Add a topic, or bring your own script");
-  if (pasted.length > MAX_SCRIPT) throw new FacelessError("That script is too long to narrate. Shorten it and try again.");
+  const written = input.blocks ? normalizeBlocks(input.blocks) : null;
+  if (!topic && !pasted && !input.sources?.length && !written?.length) throw new FacelessError(input.kind === "explainer" ? "Add a prompt, or attach a file or link" : "Add a topic, or bring your own script");
+  if (pasted.length > MAX_SCRIPT || (written && narrationText(written).length > MAX_SCRIPT)) throw new FacelessError("That script is too long to narrate. Shorten it and try again.");
+  if (written && !written.length) throw new FacelessError("The script has no scenes yet");
   const channel = input.channelId ? getChannel(input.channelId) : null;
   if (input.channelId && !channel) throw new FacelessError("Channel not found", 404);
   const settings = cleanSettings(input.settings);
   const sources = (input.sources ?? []).slice(0, MAX_SOURCES);
   settings.sourceImages = sources.filter((s): s is Extract<ExplainerSource, { kind: "image" }> => s.kind === "image").map((s) => s.url);
   const now = Date.now();
-  const title = (topic || pasted).replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
+  const title = (topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
   const row: EpisodeRow = {
     id: nanoid(10),
     channel_id: channel?.id ?? null,
     kind: input.kind,
     title,
     topic: topic.slice(0, 5000),
-    status: "writing",
+    status: written ? "review" : "writing",
     error: null,
     settings_json: JSON.stringify(settings),
-    script_json: JSON.stringify({ blocks: [], source: pasted ? "pasted" : "ai" } satisfies EpisodeScript),
+    script_json: JSON.stringify((written ? { blocks: written, source: "ai" } : { blocks: [], source: pasted ? "pasted" : "ai" }) satisfies EpisodeScript),
     plan_json: null,
     sources_json: JSON.stringify(sources),
     favorite: 0,
@@ -495,6 +502,16 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     void updateChannel(channel.id, {
       settings: { engine: settings.engine, styleId: settings.styleId, styleRefs: settings.styleRefs, voice: settings.voice, aspect: settings.aspect, subtitles: settings.subtitles, music: settings.music, animation: settings.animation, length: settings.length },
     });
+  }
+  if (written) {
+    if (!input.autoRender) return toEpisode(row);
+    try {
+      return renderEpisode(row.id);
+    } catch (e) {
+      // The script is there: show it with what's in the way, as a written script that can't render does.
+      updateEpisodeRow(row.id, { status: "review", error: (e as Error).message });
+      return mustEpisode(row.id);
+    }
   }
   startWriting(row.id, pasted, !!input.autoRender);
   return toEpisode(row);
@@ -539,7 +556,7 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
   const elements = listElements()
     .filter((e) => e.kind !== "voice" && handles.has(e.handle.toLowerCase()))
     .map((e) => ({ handle: e.handle, kind: e.kind, description: e.description }));
-  const textSources = ep.sources.flatMap((x) => (x.kind === "text" ? [`${x.name}: ${x.text.slice(0, 6000)}`] : x.kind === "link" ? [`${x.title ?? x.url} (${x.url}): ${x.text.slice(0, 6000)}`] : []));
+  const textSources = ep.sources.flatMap((x) => (x.kind === "text" ? [`${x.name}: ${x.text.slice(0, SOURCE_CHARS)}`] : x.kind === "link" ? [`${x.title ?? x.url} (${x.url}): ${x.text.slice(0, SOURCE_CHARS)}`] : []));
   let failure = "";
   const ask = { onError: (m: string) => (failure = m), signal };
   let script: EpisodeScript;
@@ -1326,6 +1343,59 @@ export async function summarizeLink(url: string, engine: Engine): Promise<Extrac
     { timeoutMs: 2 * 60_000 },
   );
   return { kind: "link", url: res.url, title: title?.slice(0, 160), text: (summary ?? text).slice(0, 6000) };
+}
+
+/** The largest PDF or Word file the Explainer reads. */
+export const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+/** The script writer reads this much of each source; longer documents are summarised for it first. */
+const SOURCE_CHARS = 6000;
+/** What a document summary is written from (about a 40-page report; a local model's context holds it). */
+const SUMMARY_INPUT_CHARS = 40_000;
+
+export type DocumentKind = "pdf" | "docx";
+
+/** What a file is, from its first bytes, name and type: a PDF, a Word file, or neither. */
+export function documentKind(file: { name: string; data: Buffer; type?: string }): DocumentKind | null {
+  const head = file.data.subarray(0, 5).toString("latin1");
+  if (head === "%PDF-") return "pdf";
+  if (head.startsWith("PK\x03\x04") && (/\.docx$/i.test(file.name) || /wordprocessingml/.test(file.type ?? ""))) return "docx";
+  if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") return "pdf"; // a damaged one: the reader says so
+  if (/\.(docx?|dot[xm]?)$/i.test(file.name) || /msword|wordprocessingml/.test(file.type ?? "")) return "docx";
+  return null;
+}
+
+/**
+ * A PDF or Word source for the Explainer: its text is read on the server (PDF.js through unpdf, or
+ * word/document.xml through the bounded unzip), and a document longer than the writer reads is
+ * summarised by the engine's text model, like a link. With no text model the beginning is kept.
+ */
+export async function readDocument(
+  file: { name: string; data: Buffer; type?: string },
+  engine: Engine,
+): Promise<{ source: Extract<ExplainerSource, { kind: "text" }>; pages?: number; readPages?: number; summarized: boolean }> {
+  if (file.data.length > MAX_DOCUMENT_BYTES) throw new FacelessError(`${file.name} is over ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB — add the part that matters, or paste its text into the prompt`, 413);
+  const kind = documentKind(file);
+  if (!kind) throw new FacelessError(`${file.name} isn't a PDF or a Word file (.docx)`, 415);
+  let read: { text: string; title?: string; pages?: number; pagesRead?: number };
+  try {
+    read = kind === "pdf" ? await pdfText(file.data, { maxChars: SUMMARY_INPUT_CHARS, maxPages: 200 }) : docxText(file.data, { maxChars: SUMMARY_INPUT_CHARS });
+  } catch (e) {
+    if (e instanceof PdfError || e instanceof DocxError) throw new FacelessError(e.message, 422);
+    throw new FacelessError(kind === "pdf" ? "Couldn't read that PDF — save it again, or paste its text into the prompt" : "Couldn't read that Word file — save it as PDF, or paste its text into the prompt", 422);
+  }
+  const name = file.name.slice(0, 200);
+  const long = read.text.length > SOURCE_CHARS;
+  const summary = long
+    ? await askLlm(
+        engine,
+        "You summarise documents for a video script writer. Reply with the key facts, numbers, names, steps and explanations as short plain sentences (at most 300 words). No preamble.",
+        `Document: ${read.title ?? name}\n\n${read.text}`,
+        { timeoutMs: 2 * 60_000 },
+      )
+    : null;
+  // A PDF read only in part (its first SUMMARY_INPUT_CHARS) says how many of its pages were read.
+  const partial = read.pages && read.pagesRead !== undefined && read.pagesRead < read.pages ? { readPages: read.pagesRead } : {};
+  return { source: { kind: "text", name, text: (summary ?? read.text).slice(0, 20_000) }, ...(read.pages && { pages: read.pages }), ...partial, summarized: !!summary };
 }
 
 // ---------------------------------------------------------------------------

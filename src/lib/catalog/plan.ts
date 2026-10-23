@@ -8,10 +8,11 @@ import type {
   Operation,
   Preset,
   PresetRoute,
+  Pricing,
 } from "./types";
 
 /** Infer the operation from what the user attached. */
-export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs">): Operation {
+export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
   if (req.op) return req.op;
   const ops = new Set(model.routes.map((r) => r.op));
   const imgs = req.inputs?.images?.length ?? 0;
@@ -24,7 +25,12 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (req.inputs?.video && imgs && has("motion-transfer")) return "motion-transfer";
     if (req.inputs?.video && has("v2v")) return "v2v";
     if (req.inputs?.video && has("extend")) return "extend";
+    // Video erasers and swappers (a general video editor above takes these as plain edits unless asked).
+    if (req.inputs?.video && imgs && has("video-swap")) return "video-swap";
+    if (req.inputs?.video && has("remove-object")) return "remove-object";
     if (imgs && req.inputs?.endImage && has("flf2v")) return "flf2v";
+    // Several stills are keyframes when they have times, or when the model takes no references.
+    if (imgs > 1 && has("keyframes") && (req.params?.keyframeTimes?.length || !has("ref2v"))) return "keyframes";
     if ((imgs > 1 || clipRefs > 0) && has("ref2v")) return "ref2v";
     if (imgs && has("i2v")) return "i2v";
     if (has("t2v")) return "t2v";
@@ -33,6 +39,15 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (imgs && req.inputs?.mask && has("inpaint")) return "inpaint";
     if (imgs && has("edit")) return "edit";
     if (has("t2i")) return "t2i";
+  }
+  if (model.kind === "audio") {
+    if ((req.inputs?.audios?.length ?? 0) > 1 && has("audio-join")) return "audio-join";
+    if (req.inputs?.audio && has("audio-loop")) return "audio-loop";
+  }
+  if (model.kind === "model3d") {
+    if (req.inputs?.model3d && has("rig-3d")) return "rig-3d";
+    if (imgs && has("image-to-3d")) return "image-to-3d";
+    if (!imgs && has("text-to-3d")) return "text-to-3d";
   }
   return model.routes[0].op;
 }
@@ -99,6 +114,8 @@ const PROMPTLESS = new Set<Operation>([
   "trim", "transcribe", "mux", "separate-audio", "layers", "image-to-3d", "captions", "text-layers", "vectorize", "level",
   // av-tools: the dub voice track (clips placed on the video's timeline)
   "timeline",
+  // round 4: tools that work from their inputs (removing an object needs a prompt only on models that read one)
+  "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop", "audio-join", "scene-3d", "splat", "rig-3d", "extract-frames", "images-to-video", "overlay",
 ]);
 
 /**
@@ -107,9 +124,21 @@ const PROMPTLESS = new Set<Operation>([
  * routes for this operation sends one.
  */
 export function promptOptional(model: ModelDef, op: Operation): boolean {
-  if (PROMPTLESS.has(op) || model.options.promptless) return true;
+  if (PROMPTLESS.has(op) || model.options.promptless || model.options.promptOptional) return true;
   const routes = routesFor(model, op);
   return routes.length > 0 && routes.every((r) => r.map?.prompt === false);
+}
+
+/**
+ * Removing an object: what to erase is named (the prompt), painted (inputs.mask) or clicked (params.points).
+ * A mask or points stand in for the words when a route reads them (unknown on the client, whose catalog
+ * has no field maps, and on ComfyUI routes, whose workflows bind them).
+ */
+function markedTarget(model: ModelDef, op: Operation, req: GenerationRequest, params: GenParams): boolean {
+  if (op !== "remove-object") return false;
+  const routes = routesFor(model, op);
+  const reads = (k: "mask" | "points") => routes.some((r) => !r.map || !!r.map[k]);
+  return (!!req.inputs?.mask && reads("mask")) || (!!params.points?.length && reads("points"));
 }
 
 export function planGeneration(
@@ -200,11 +229,17 @@ export function planGeneration(
     throw new Error(op === "tts" ? "Pick or record the voice to speak with" : "Pick or record the voice to change into");
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
+  if (op === "keyframes") checkKeyframes(model, req.inputs?.images?.length ?? 0, params);
+  // A join takes as many clips as the API's list does (fal merge-audios: 5); longer joins run in steps.
+  const maxAudios = model.options.maxAudios;
+  if (op === "audio-join" && maxAudios && (req.inputs?.audios?.length ?? 0) > maxAudios) throw new Error(`${model.name} joins up to ${maxAudios} clips at a time — join the rest in a second step`);
   const requires = model.options.requires;
   if (requires?.images && (req.inputs?.images?.length ?? 0) < requires.images) throw new Error(requires.msg);
   if (requires?.prompt && !prompt) throw new Error(requires.msg);
-  if (!prompt && !promptOptional(model, op)) {
-    throw new Error("Write a prompt first");
+  if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
+  if (requires?.points && !params.points?.length) throw new Error(requires.msg);
+  if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
+    throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
 
   const missing = missingInputs(op, req) ?? unreadInputs(model, op, req) ?? missingImages(model, req);
@@ -219,10 +254,26 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
+/** Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. */
+function checkKeyframes(model: ModelDef, n: number, params: GenParams) {
+  const max = model.options.maxImages;
+  if (max && n > max) throw new Error(`${model.name} takes up to ${max} keyframes`);
+  const times = params.keyframeTimes;
+  if (!times?.length) return;
+  if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
+  if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
+  const duration = params.duration ?? model.defaults?.duration;
+  const last = times[times.length - 1];
+  if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
+}
+
 type InputKey = keyof NonNullable<GenerationRequest["inputs"]>;
 
 const NEEDS: Partial<
-  Record<Operation, { images?: number; video?: boolean; videos?: number; audio?: boolean; endImage?: boolean; mask?: boolean; oneOf?: InputKey[]; msg: string }>
+  Record<
+    Operation,
+    { images?: number; video?: boolean; videos?: number; audio?: boolean; audios?: number; endImage?: boolean; mask?: boolean; model3d?: boolean; oneOf?: InputKey[]; msg: string }
+  >
 > = {
   edit: { images: 1, msg: "Add an image to edit" },
   inpaint: { images: 1, mask: true, msg: "Add an image and paint the area to change" },
@@ -261,6 +312,23 @@ const NEEDS: Partial<
   transcribe: { oneOf: ["audio", "video"], msg: "Add the audio or video to transcribe" },
   "separate-audio": { oneOf: ["audio", "video"], msg: "Add the audio or video to split" },
   level: { audio: true, msg: "Add the audio to level" },
+  // round 4
+  "remove-object": { video: true, msg: "Add the video to remove something from" },
+  "video-swap": { video: true, images: 1, msg: "Add the video and a picture of what goes in" },
+  "video-insert": { video: true, images: 1, msg: "Add the video and a picture of what to add" },
+  keyframes: { images: 1, msg: "Add the keyframes, in order" },
+  "sdr-to-hdr": { video: true, msg: "Add the video to convert" },
+  "export-video": { video: true, msg: "Add the video to export" },
+  ocr: { images: 1, msg: "Add the image to read" },
+  "still-motion": { images: 1, msg: "Add the still to move over" },
+  "audio-loop": { audio: true, msg: "Add the audio to loop" },
+  "audio-join": { audios: 2, msg: "Add at least two audio clips to join" },
+  "scene-3d": { images: 1, msg: "Add the image to build the scene from" },
+  splat: { images: 1, msg: "Add a photo of the subject" },
+  "rig-3d": { model3d: true, msg: "Add the 3D model to rig" },
+  "extract-frames": { video: true, msg: "Add the video to take frames from" },
+  "images-to-video": { images: 1, msg: "Add the images, in order" },
+  overlay: { images: 2, msg: "Add the picture and the overlay to put on it" },
 };
 
 const given = (v: unknown) => (Array.isArray(v) ? v.length > 0 : !!v);
@@ -274,8 +342,10 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   if (n.video && !i.video) return n.msg;
   if (n.videos && (i.videos?.length ?? 0) < n.videos) return n.msg;
   if (n.audio && !i.audio) return n.msg;
+  if (n.audios && (i.audios?.length ?? 0) < n.audios) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
   if (n.mask && !i.mask) return n.msg;
+  if (n.model3d && !i.model3d) return n.msg;
   if (n.oneOf && !n.oneOf.some((k) => given(i[k]))) return n.msg;
   return null;
 }
@@ -318,6 +388,14 @@ function missingImages(model: ModelDef, req: Pick<GenerationRequest, "inputs">):
   if ((req.inputs?.images?.length ?? 0) >= min) return null;
   const labels = model.options.imageLabels?.slice(0, min);
   return labels?.length === min ? `Add the ${labels.join(" and the ")}` : `${model.name} needs ${min} images`;
+}
+
+/** The price that holds at `now`: a launch promo to the end of its last day (UTC), then the list price. */
+export function pricingAt(p: Pricing, now = Date.now()): Pricing {
+  if (!p.promo) return p;
+  const { promo, ...list } = p;
+  if (!(now <= Date.parse(`${promo.until}T23:59:59.999Z`))) return list;
+  return { ...list, usd: promo.usd, ...(promo.byResolution ? { byResolution: promo.byResolution } : {}) };
 }
 
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */

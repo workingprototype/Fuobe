@@ -9,7 +9,7 @@ process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9"; // nothing listens here → open models fall back to demo
 
 const { setSetting, getSetting, validateSetting } = await import("@/server/settings");
-const { chooseRoute, createGenerations } = await import("@/server/generations");
+const { chooseRoute, createGenerations, previewGeneration } = await import("@/server/generations");
 const { getModel } = await import("@/lib/catalog");
 
 beforeAll(() => setSetting("demoMode", "auto"));
@@ -49,5 +49,30 @@ describe("preferred cloud provider", () => {
     expect(chooseRoute(routes).route.provider).toBe("replicate");
     setSetting("replicateToken", "");
     expect(chooseRoute(routes)).toMatchObject({ demo: true });
+  });
+});
+
+describe("routes that take fewer images or can't batch", () => {
+  const edit = () => getModel("grok-imagine-image-2")!.routes.filter((r) => r.op === "edit");
+
+  it("sends more images than fal's Grok edit takes to Higgsfield, or says why it can't", () => {
+    setSetting("falKey", "fal_test_key_123456");
+    expect(chooseRoute(edit(), 3).route.provider).toBe("fal");
+    expect(() => chooseRoute(edit(), 8)).toThrow("This model takes up to 5 images on fal.ai — remove some, or connect Higgsfield for more");
+    setSetting("higgsfieldKey", "key_id:key_secret");
+    expect(chooseRoute(edit(), 8).route.provider).toBe("higgsfield");
+    expect(chooseRoute(edit(), 3).route.provider).toBe("fal");
+    setSetting("falKey", "");
+    setSetting("higgsfieldKey", "");
+  });
+
+  it("runs one job per take on a route without a batch count", () => {
+    setSetting("higgsfieldKey", "key_id:key_secret");
+    const req = { feature: "image", modelId: "grok-imagine-image-2", prompt: "a fox", params: { numOutputs: 4 } };
+    expect(previewGeneration(req)).toMatchObject({ providerId: "higgsfield", jobs: 4, outputs: 4 });
+    setSetting("falKey", "fal_test_key_123456");
+    expect(previewGeneration(req)).toMatchObject({ providerId: "fal", jobs: 1, outputs: 4 });
+    setSetting("falKey", "");
+    setSetting("higgsfieldKey", "");
   });
 });

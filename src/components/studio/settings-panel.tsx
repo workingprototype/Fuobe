@@ -1,13 +1,15 @@
 "use client";
 
 import { ChevronDown, Loader2, Shuffle, SlidersHorizontal, Sparkles, Wand2 } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { OPERATION_LABELS, type GenParams, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { durationLabel, hiddenChanges, settingsSummary, type SettingsShape } from "@/lib/composer";
 import { ratioValue } from "@/lib/format";
+import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { cn } from "@/lib/utils";
 import { SliderControls } from "./audio-controls";
 import { Chip } from "./chip";
@@ -83,6 +85,33 @@ function SeedInput({ value, onChange }: { value: number; onChange: (v: number) =
       aria-label="Seed"
       className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm tabular-nums outline-none focus:border-primary"
     />
+  );
+}
+
+/**
+ * The language of the speech a transcriber hears: detected unless you pick one (sent as
+ * params.sourceLanguage). A stored value the model doesn't list stays on show as it is, so the
+ * picker says what the chip says and the request sends.
+ */
+function SpokenLanguage({ codes, value, onChange }: { codes: string[]; value?: string; onChange: (v: string | undefined) => void }) {
+  const options = useMemo(() => spokenLanguageOptions(codes), [codes]);
+  const listed = value ? matchSpokenLanguage(value, options.map((l) => l.code)) : undefined;
+  const selected = !value ? "auto" : (listed ?? value);
+  return (
+    <Select value={selected} onValueChange={(v) => onChange(v === "auto" ? undefined : v)}>
+      <SelectTrigger className="w-full" aria-label="Spoken language">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="max-h-72">
+        <SelectItem value="auto">Detect automatically</SelectItem>
+        {value && !listed && <SelectItem value={value}>{spokenLanguageName(value)}</SelectItem>}
+        {options.map((l) => (
+          <SelectItem key={l.code} value={l.code}>
+            {l.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -208,6 +237,11 @@ function SettingsBody({ model, op, shape, params: p, setP, setExtra, negativePro
       {shape.count && (
         <Section label={kind === "video" ? "Videos" : "Images"}>
           <Segmented label={kind === "video" ? "Videos" : "Images"} options={[1, 2, 3, 4]} value={p.numOutputs ?? 1} onChange={(v) => setP({ numOutputs: v })} format={(v) => `×${v}`} />
+        </Section>
+      )}
+      {shape.sourceLanguages && (
+        <Section label="Spoken language">
+          <SpokenLanguage codes={shape.sourceLanguages} value={p.sourceLanguage} onChange={(sourceLanguage) => setP({ sourceLanguage })} />
         </Section>
       )}
       {shape.multiShot && model && (

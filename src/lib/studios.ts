@@ -187,6 +187,25 @@ export const TRANSLATE_STUDIO: StudioConfig = {
   hidePrompt: true,
 };
 
+export const TRANSCRIBE_STUDIO: StudioConfig = {
+  feature: "transcribe",
+  title: "Audio",
+  hero: "Turn speech into text",
+  subtitle: "Timed lines from a recording or a video. Copy them, or download .srt and .vtt captions.",
+  placeholder: "",
+  kind: "text",
+  ops: ["transcribe"],
+  feed: { kind: "text", features: ["transcribe"] },
+  slots: [
+    { key: "audio", label: "Recording", accept: "audio" },
+    { key: "video", label: "Video", accept: "video" },
+  ],
+  anyOf: [["audio", "video"]],
+  defaultModels: { cloud: "scribe-v2", open: "oss-qwen3-asr" },
+  promptOptional: true,
+  hidePrompt: true,
+};
+
 export const SFX_STUDIO: StudioConfig = {
   feature: "audio",
   title: "Audio",

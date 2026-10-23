@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { NotificationSettings } from "@/components/notification-settings";
 import { SecuritySettings } from "@/components/security-settings";
 
 interface PublicSetting {
@@ -323,6 +324,13 @@ export function SettingsForm() {
       >
         <Field setting={get("comfyUrl")} label="ComfyUI server URL" placeholder="http://127.0.0.1:8188" onSave={set("comfyUrl")} />
         <Field setting={get("comfyToken")} label="Auth token (optional)" hint="Sent as a Bearer token, for ComfyUI behind a proxy." onSave={set("comfyToken")} />
+        <Field
+          setting={get("comfyIsolatedUrl")}
+          label="Isolated worker URL (optional)"
+          placeholder="http://127.0.0.1:8189"
+          hint="A second ComfyUI for LatentSync 1.6 and ThinkSound, whose node packs can't share the main install. scripts/comfy/README.md shows how to start one."
+          onSave={set("comfyIsolatedUrl")}
+        />
         <TestButton provider="comfyui" />
       </Section>
 
@@ -351,6 +359,14 @@ export function SettingsForm() {
           <Field setting={get("ollamaUrl")} label="Ollama URL" onSave={set("ollamaUrl")} />
           <Field setting={get("ollamaModel")} label="Ollama model" onSave={set("ollamaModel")} />
         </div>
+      </Section>
+
+      <Section
+        id="notifications"
+        title="Notifications"
+        description="Get a heads-up from your browser when something you started finishes while you're in another tab or app. Saved in this browser; nothing is sent anywhere."
+      >
+        <NotificationSettings />
       </Section>
 
       <Section

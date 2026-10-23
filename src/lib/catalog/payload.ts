@@ -1,9 +1,70 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
-import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation } from "./types";
+import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
   return [field.key, field.values && value in field.values ? field.values[value] : value];
+}
+
+/** "16:9" → 16/9; undefined for "auto" and other names. */
+function ratioOf(v: string): number | undefined {
+  const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(v.trim());
+  return m && Number(m[2]) > 0 ? Number(m[1]) / Number(m[2]) : undefined;
+}
+
+/** "720p" → 720, "2k" / "4K" → 2000 / 4000: a size to order resolution tiers by. */
+function tierOf(v: string): number | undefined {
+  const m = /^(\d+(?:\.\d+)?)\s*([pk])$/i.exec(v.trim());
+  return m ? Number(m[1]) * (m[2].toLowerCase() === "k" ? 1000 : 1) : undefined;
+}
+
+/**
+ * The value a route takes for `value` (EnumField.accepts): the value itself (in any case), else the
+ * closest one it takes: the nearest shape for an aspect ratio, the largest tier not above it for a
+ * resolution (the smallest when all are above). Undefined (leave the field out) for "auto" and other
+ * names it doesn't take.
+ */
+export function fitValue(accepts: readonly string[], value: string, kind: "ratio" | "tier"): string | undefined {
+  const same = accepts.find((a) => a.toLowerCase() === value.trim().toLowerCase());
+  if (same !== undefined) return same;
+  const size = kind === "ratio" ? ratioOf : tierOf;
+  const want = size(value);
+  if (want === undefined) return undefined;
+  const sized = accepts.flatMap((a) => {
+    const n = size(a);
+    return n === undefined ? [] : [{ a, n }];
+  });
+  if (!sized.length) return undefined;
+  if (kind === "ratio") return sized.reduce((best, c) => (Math.abs(Math.log(c.n / want)) < Math.abs(Math.log(best.n / want)) ? c : best)).a;
+  const below = sized.filter((c) => c.n <= want);
+  if (below.length) return below.reduce((best, c) => (c.n > best.n ? c : best)).a;
+  return sized.reduce((best, c) => (c.n < best.n ? c : best)).a;
+}
+
+/** Write an enum setting (aspect ratio, resolution) fitted to what the route takes; nothing when it takes nothing close. */
+function putEnum(out: Record<string, unknown>, field: string | EnumField, value: string, kind: "ratio" | "tier") {
+  const v = typeof field !== "string" && field.accepts ? fitValue(field.accepts, value, kind) : value;
+  if (v === undefined) return;
+  const [k, sent] = enumValue(field, v);
+  out[k] = sent;
+}
+
+type Range = NonNullable<FieldMap["ranges"]>[string];
+
+/** A number inside an API's limits: rounded for whole-number fields, then clamped. */
+function inRange(n: number, r: Range): number {
+  let v = r.integer ? Math.round(n) : n;
+  if (r.min !== undefined) v = Math.max(r.min, v);
+  if (r.max !== undefined) v = Math.min(r.max, v);
+  return v;
+}
+
+/** How many frames a frame-count route renders for the clip (FieldMap.numFrames), or undefined when its length is unknown. */
+export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps">): number | undefined {
+  const seconds = input.sourceDuration ?? input.duration;
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
+  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fps;
+  return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
 }
 
 /** Path segments that would reach Object.prototype (or a constructor) instead of the payload. */
@@ -91,12 +152,75 @@ export function languageValue(values: string[], lang: string): string | undefine
   return values.find((x) => x.toLowerCase().startsWith(`${code}-`));
 }
 
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * Clicked points in the API's own shape: Bria's eraser takes strings ("{'x':100, 'y':100, 'type':'positive'}"),
+ * SAM 3 takes {x, y, label} with 1 = this thing, 0 = not this. Pixels, rounded.
+ */
+export function pointsValue(format: NonNullable<FieldMap["points"]>["format"], points: PixelPoint[]): unknown[] {
+  return points.map((p) => {
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    const positive = p.label !== "negative";
+    return format === "bria" ? `{'x':${x}, 'y':${y}, 'type':'${positive ? "positive" : "negative"}'}` : { x, y, label: positive ? 1 : 0 };
+  });
+}
+
+/**
+ * Keyframes pinned to frame indexes at the API's frame rate: each image at its time, or spread evenly over
+ * the clip when no times are given. Indexes stay inside the clip and strictly increase (APIs want them unique).
+ */
+export function keyframesValue(k: NonNullable<FieldMap["keyframes"]>, images: string[], times: number[] | undefined, duration: number | undefined) {
+  const last = duration !== undefined ? Math.round(duration * k.fps) : undefined;
+  const span = last ?? (images.length - 1) * k.fps;
+  const frames: number[] = [];
+  images.forEach((_, i) => {
+    const t = times?.[i];
+    let f = t !== undefined && Number.isFinite(t) ? Math.round(t * k.fps) : images.length > 1 ? Math.round((i * span) / (images.length - 1)) : 0;
+    f = Math.max(0, last !== undefined ? Math.min(f, last) : f);
+    frames.push(i > 0 ? Math.max(f, frames[i - 1] + 1) : f);
+  });
+  // Keyframes nudged apart at the very end (4.99 s and 5 s in a 5 s clip) step back so the last stays on the
+  // clip's final frame: each one frame before the next.
+  if (last !== undefined) for (let i = frames.length - 1; i >= 0; i--) frames[i] = Math.max(0, Math.min(frames[i], i === frames.length - 1 ? last : frames[i + 1] - 1));
+  return images.map((url, i) => ({ [k.image]: url, [k.frame]: frames[i] }));
+}
+
+/**
+ * A Ken Burns move as one zoom (fal's zoompan zooms from the whole picture toward a focal point, or back
+ * out to it): the factor is the zoomed-in end (the larger of zoomFrom / zoomTo), so that framing is
+ * exact and the other end is the whole picture; the focal point is the pan point at the zoomed-in end.
+ * Nothing is sent when the request says nothing about the move (the API's defaults apply).
+ */
+function zoomValue(z: NonNullable<FieldMap["zoom"]>, input: GenInput): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const said = input.zoomFrom !== undefined || input.zoomTo !== undefined || input.panFrom || input.panTo;
+  if (said) {
+    const from = input.zoomFrom ?? 1;
+    const to = input.zoomTo ?? from;
+    const zoomIn = to >= from;
+    const factor = Math.max(1, from, to);
+    out[z.factor] = round3(z.max ? Math.min(z.max, factor) : factor);
+    if (z.direction) out[z.direction.key] = zoomIn ? z.direction.in : z.direction.out;
+    const focus = zoomIn ? (input.panTo ?? input.panFrom) : (input.panFrom ?? input.panTo);
+    const k = z.percent ? 100 : 1;
+    if (focus && z.x) out[z.x] = round3(focus.x * k);
+    if (focus && z.y) out[z.y] = round3(focus.y * k);
+  }
+  if (z.easing && input.easing) {
+    const [k, v] = enumValue(z.easing, input.easing);
+    out[k] = v;
+  }
+  return out;
+}
+
 /** Build a provider payload from canonical input using a route's {@link FieldMap}. Pure + unit-tested. */
 export function buildPayload(map: FieldMap, input: GenInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   // Fallbacks first: every canonical field and params.extra below overrides them.
   for (const [k, v] of Object.entries(map.defaults ?? {})) setPath(out, k, v);
-  if (map.prompt !== false && input.prompt !== undefined) setPath(out, map.prompt ?? "prompt", input.prompt);
+  if (map.prompt !== false && input.prompt !== undefined && !(map.omitEmptyPrompt && !input.prompt.trim())) setPath(out, map.prompt ?? "prompt", input.prompt);
   if (map.negativePrompt && input.negativePrompt) out[map.negativePrompt] = input.negativePrompt;
 
   const images = input.images ?? [];
@@ -124,14 +248,8 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     out[map.timeline] = timelineTracks(spec, visual, input.audios ?? []);
   }
 
-  if (map.aspectRatio && input.aspectRatio) {
-    const [k, v] = enumValue(map.aspectRatio, input.aspectRatio);
-    out[k] = v;
-  }
-  if (map.resolution && input.resolution) {
-    const [k, v] = enumValue(map.resolution, input.resolution);
-    out[k] = v;
-  }
+  if (map.aspectRatio && input.aspectRatio) putEnum(out, map.aspectRatio, input.aspectRatio, "ratio");
+  if (map.resolution && input.resolution) putEnum(out, map.resolution, input.resolution, "tier");
   if (map.duration && input.duration !== undefined) out[map.duration.key] = timeValue(map.duration, input.duration);
   if (map.numOutputs && input.numOutputs !== undefined) out[map.numOutputs] = input.numOutputs;
   if (map.seed && input.seed !== undefined && input.seed >= 0) {
@@ -185,7 +303,52 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
 
-  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline")) setPath(out, k, v);
+  // Round 4: clicked points, keyframes, formats, Ken Burns, overlays, retiming, frames and 3D (research part 4).
+  if (map.points && input.points?.length) out[map.points.key] = pointsValue(map.points.format, input.points);
+  if (map.keyframes && images.length) out[map.keyframes.key] = keyframesValue(map.keyframes, images, input.keyframeTimes, input.duration);
+  if (map.format && input.format) {
+    const v = map.format.values[input.format];
+    if (v !== undefined) out[map.format.key] = v;
+  }
+  if (map.crossfade && input.crossfade !== undefined) out[map.crossfade] = input.crossfade;
+  if (map.zoom) Object.assign(out, zoomValue(map.zoom, input));
+  if (map.position && input.position) {
+    const k = map.position.percent ? 100 : 1;
+    out[map.position.x] = round3(input.position.x * k);
+    out[map.position.y] = round3(input.position.y * k);
+  }
+  if (map.scale && input.scale !== undefined) out[map.scale.key] = round3(input.scale * (map.scale.multiplier ?? 1));
+  if (map.targetFps && input.targetFps !== undefined) out[map.targetFps] = input.targetFps;
+  if (map.slowdown && input.slowdown !== undefined) out[map.slowdown] = input.slowdown;
+  if (map.frameInterval && input.frameInterval !== undefined) out[map.frameInterval] = input.frameInterval;
+  if (map.colormap && input.colormap) {
+    const [k, v] = enumValue(map.colormap, input.colormap);
+    out[k] = v;
+  }
+  if (map.frames && images.length) out[map.frames.key] = images.map((url) => ({ [map.frames!.url]: url, [map.frames!.frames]: 1 }));
+  if (map.loop && input.audio) {
+    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration) : map.loop.max;
+    out[map.loop.key] = Array.from({ length: Math.max(2, Math.min(map.loop.max, want)) }, () => input.audio);
+  }
+  if (map.model3d && input.model3d) out[map.model3d] = input.model3d;
+  if (map.animation && input.animation !== undefined && input.animation !== "") {
+    const n = typeof input.animation === "number" ? input.animation : Number(input.animation);
+    const numeric = Number.isFinite(n) && String(input.animation).trim() !== "";
+    const r = map.ranges?.[map.animation.key];
+    // Meshy's presets are numbered: a name can't be sent.
+    if (r?.integer && !numeric) throw new Error(`Pick the animation by its preset number${r.min !== undefined && r.max !== undefined ? ` (${r.min}–${r.max})` : ""}`);
+    out[map.animation.key] = numeric ? n : input.animation;
+    if (map.animation.flag) out[map.animation.flag] = true;
+  }
+  if (map.numFrames) {
+    const n = numFramesValue(map.numFrames, input);
+    if (n !== undefined) out[map.numFrames.key] = n;
+  }
+  // The API's limits on what Fuobe filled in (params.extra below is sent as given).
+  for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);
+
+  const ignore = new Set(map.ignore ?? []);
+  for (const [k, v] of Object.entries({ ...map.fixed, ...input.extra })) if (!(map.timeline && k === "timeline") && !ignore.has(k)) setPath(out, k, v);
   // A background colour given as hex goes out in the palette's shape (Recraft wants {r,g,b}).
   const bg = map.palette?.background;
   if (bg && typeof out[bg] === "string") {
@@ -483,7 +646,8 @@ function model3dOutputs(response: unknown): ExtractedOutput[] {
     const urls = isObj(r.model_urls) ? r.model_urls : {};
     const glb = fileOf(r.model_glb) ?? fileOf(urls.glb) ?? fileOf(r.model_mesh) ?? fileOf(r.mesh) ?? fileOf(r.model_file);
     if (glb) {
-      const formats = compact(Object.fromEntries(Object.entries(urls).map(([k, v]) => [k, fileOf(v)?.url])));
+      // SAM 3D Objects also returns the scene as a Gaussian splat.
+      const formats = compact({ ...Object.fromEntries(Object.entries(urls).map(([k, v]) => [k, fileOf(v)?.url])), splat: fileOf(r.gaussian_splat)?.url });
       const preview = fileOf(r.thumbnail)?.url ?? fileOf(r.rendered_image)?.url ?? fileOf(r.preview)?.url;
       // A GLB was asked for; generic or missing types are labelled as one so it is stored as .glb.
       const contentType = !glb.contentType || glb.contentType === "application/octet-stream" || MODEL3D_EXT.test(glb.url) ? "model/gltf-binary" : glb.contentType;
@@ -493,6 +657,88 @@ function model3dOutputs(response: unknown): ExtractedOutput[] {
   const media = extractMedia(response);
   const mesh = media.find((m) => m.kind === "model3d") ?? media.find((m) => /\.(obj|fbx|ply|usdz)(\?|$)/i.test(m.url)) ?? media[0];
   return mesh ? [{ url: mesh.url, kind: "model3d", contentType: MODEL3D_EXT.test(mesh.url) ? "model/gltf-binary" : mesh.contentType }] : [];
+}
+
+/**
+ * Gaussian splats (TripoSplat's model_mesh, a .ply unless it says .spz) with meta.format; the cut-out the
+ * model actually saw is the preview.
+ */
+function splatOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const f = isObj(r) ? (fileOf(r.model_mesh) ?? fileOf(r.splat) ?? fileOf(r.gaussian_splat)) : undefined;
+  if (!f) return model3dOutputs(response);
+  const format = /\.spz(\?|$)/i.test(f.url) || f.contentType?.includes("spz") ? "spz" : "ply";
+  const preview = isObj(r) ? fileOf(r.preprocessed_image)?.url : undefined;
+  return [{ url: f.url, kind: "model3d", contentType: format === "spz" ? "model/x-spz" : "model/ply", meta: compact({ format, preview }) }];
+}
+
+/**
+ * Rigging (Meshy): the animated GLB when an animation preset was asked for, else the rigged character;
+ * the FBX files and the walking / running clips ride along in meta.formats.
+ */
+function rigOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const animated = isObj(r) ? fileOf(r.animation_glb) : undefined;
+  const main = animated ?? (isObj(r) ? fileOf(r.rigged_character_glb) : undefined);
+  if (!isObj(r) || !main) return model3dOutputs(response);
+  const basic = isObj(r.basic_animations) ? r.basic_animations : {};
+  const formats = compact({
+    fbx: fileOf(animated ? r.animation_fbx : r.rigged_character_fbx)?.url,
+    rigged: animated ? fileOf(r.rigged_character_glb)?.url : undefined,
+    walking: fileOf(basic.walking_glb)?.url,
+    running: fileOf(basic.running_glb)?.url,
+  });
+  return [{ url: main.url, kind: "model3d", contentType: "model/gltf-binary", meta: compact({ rigged: true, animated: !!animated || undefined, formats: Object.keys(formats).length ? formats : undefined }) }];
+}
+
+/**
+ * OCR: Florence-2's results.quad_boxes [{x, y, w, h, label}] (x, y = top left, in the pixels of the image
+ * it read) become one text output: the lines joined by newlines, and meta.lines [{text, bbox}] with
+ * bbox = [x, y, w, h] as fractions of the image (pixels in bboxPx when the response gives no size).
+ * A list that is already normalized ({lines: [{text, bbox}]}) passes through; an image without text
+ * gives an empty text with no lines.
+ */
+function ocrOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const res = isObj(r) && isObj(r.results) ? r.results : r;
+  const boxes = isObj(res) && Array.isArray(res.quad_boxes) ? res.quad_boxes : isObj(r) && Array.isArray(r.lines) ? r.lines : undefined;
+  if (!isObj(r) || !boxes) return transcriptOutputs(response);
+  const img = isObj(r.image) ? r.image : undefined;
+  const w = num(img?.width);
+  const h = num(img?.height);
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
+  const lines = boxes.flatMap((b) => {
+    if (!isObj(b)) return [];
+    const text = (str(b.label) ?? str(b.text))?.trim();
+    if (!text) return [];
+    if (Array.isArray(b.bbox) && b.bbox.length === 4 && b.bbox.every((n) => typeof n === "number")) return [{ text, bbox: b.bbox as number[] }];
+    const box = [num(b.x), num(b.y), num(b.w), num(b.h)];
+    if (box.some((n) => n === undefined)) return [{ text }];
+    const [x, y, bw, bh] = box as number[];
+    return [w && h ? { text, bbox: [r4(x / w), r4(y / h), r4(bw / w), r4(bh / h)] } : { text, bboxPx: [x, y, bw, bh] }];
+  });
+  const text = lines.map((l) => l.text).join("\n");
+  return [{ url: textDataUri(text), kind: "text", contentType: "text/plain", text, meta: compact({ lines, size: w && h ? [w, h] : undefined }) }];
+}
+
+/** Extracted frames in order, each with meta.index (its place in the sequence: source frame = index × frameInterval). */
+function frameOutputs(response: unknown): ExtractedOutput[] {
+  return extractMedia(response)
+    .filter((o) => o.kind === "image")
+    .map((o, index) => ({ ...o, meta: { index } }));
+}
+
+/**
+ * SDR to HDR: a playable HDR file (Topaz) is the result. LTX-2.3 HDR answers with a ZIP of 16-bit EXR
+ * frames and an SDR preview: the preview is the result and the EXR archive rides along as a link
+ * (meta.artifacts.exr), as Higgsfield's extra files do.
+ */
+function hdrOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const exr = isObj(r) ? fileOf(r.exr_frames_url) : undefined;
+  if (!isObj(r) || !exr) return extractMedia(response);
+  const preview = fileOf(r.preview_video);
+  return preview ? [{ url: preview.url, kind: "video", contentType: preview.contentType, meta: { preview: "sdr", artifacts: { exr: exr.url } } }] : [];
 }
 
 const STEM_ORDER = ["vocals", "voice", "speech", "target", "drums", "bass", "guitar", "piano", "other", "residual", "accompaniment", "instrumental"];
@@ -528,7 +774,24 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       out = transcriptOutputs(response);
       break;
     case "image-to-3d":
+    case "text-to-3d":
+    case "scene-3d":
       out = model3dOutputs(response);
+      break;
+    case "splat":
+      out = splatOutputs(response);
+      break;
+    case "rig-3d":
+      out = rigOutputs(response);
+      break;
+    case "ocr":
+      out = ocrOutputs(response);
+      break;
+    case "extract-frames":
+      out = frameOutputs(response);
+      break;
+    case "sdr-to-hdr":
+      out = hdrOutputs(response);
       break;
     case "separate-audio":
       out = stemOutputs(response);

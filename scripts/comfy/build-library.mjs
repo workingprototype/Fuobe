@@ -64,6 +64,9 @@ export const LOADER_FOLDERS = {
   HunyuanDependenciesLoader: { vae_name: 'foley', synchformer_name: 'foley' },
   ThinkSoundModelLoader: { thinksound_model: 'thinksound' },
   ThinkSoundFeatureUtilsLoader: { vae_model: 'thinksound', synchformer_model: 'thinksound' },
+  // comfyui-oss-4 additions
+  OpticalFlowLoader: { model_name: 'optical_flow' },
+  LoadMoGeModel: { model_name: 'geometry_estimation' },
 };
 // Nodes that fetch their own weights at runtime (no manual download needed; listed in the entry's autoDownloads).
 const SELF_DOWNLOADING = new Set(['RIFE VFI', 'DownloadAndLoadWav2VecModel', 'RMBG', 'AILab_Qwen3ASRSubtitle', 'Apply Whisper', 'ClothesSegment', 'LatentSyncNode']);
@@ -80,6 +83,11 @@ const NUMERIC_DEFAULT_KEYS = [
   'octreeResolution', 'columns', 'rows',
   // av-tools (Wave B)
   'frameIndex',
+  // comfyui-oss-4 additions
+  'maskGrow', 'supersample', 'zoomStart', 'zoomEnd', 'panStartX', 'panStartY', 'panEndX', 'panEndY', 'easeInOut', 'chunkFrames',
+  'crossfade', 'headroomDb', 'peakNits', 'resolutionLevel', 'fovX', 'decimation', 'numGaussians', 'orbitFrames', 'frameWidth',
+  // round 4 (engine seams)
+  'filterSpeckle', 'colorPrecision',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -98,6 +106,12 @@ export const BINDING_KEYS = new Set([
   'gridPrompt', 'sheetPrompt',
   // av-tools (Wave B, see library.spec.mjs header)
   'frameIndex',
+  // comfyui-oss-4 additions (see library.spec.mjs header)
+  'maskPrompt', 'maskGrow', 'skipPass2', 'supersample', 'zoomStart', 'zoomEnd', 'panStartX', 'panStartY', 'panEndX', 'panEndY',
+  'easeInOut', 'chunkFrames', 'crossfade', 'headroomDb', 'fadeCurve', 'format', 'profile', 'peakNits', 'resolutionLevel', 'fovX',
+  'decimation', 'cutout', 'numGaussians', 'splatFormat', 'orbitFrames', 'frameWidth',
+  // round 4 (engine seams, see library.spec.mjs header)
+  'curveMode', 'filterSpeckle', 'colorPrecision',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

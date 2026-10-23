@@ -1,13 +1,14 @@
 ---
 name: narration
-title: Narration
 description: Speech narration in two modes, picked by the input — text plus a chosen voice becomes finished narration takes with one consistent voice; a video plus a photo becomes the same video with that person as its on-screen narrator.
-when_to_use: The user wants a voice-over, a narrated read of a script, audiobook-style reading, or a presenter added to a video. The deliverable is speech — not music, sound effects or singing (use audio-generation for those).
-icon: mic
-studio: /audio
-tags: [voice, tts, narration]
-offline:
-  kind: audio
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: Narration
+  when_to_use: The user wants a voice-over, a narrated read of a script, audiobook-style reading, or a presenter added to a video. The deliverable is speech — not music, sound effects or singing (use audio-generation for those).
+  icon: mic
+  studio: /audio
+  tags: voice, tts, narration
+  offline_kind: audio
 ---
 
 # Narration
@@ -37,3 +38,10 @@ offline:
 ## Checks
 Listen-for list in the follow-up: pronunciation of names, pacing at commas, the last word not
 cut off. Offer a slower or more energetic take.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…), connect Fuobe's MCP server (`fuobe mcp` prints
+the command) and call the same tools: `generate` with op `tts` (one job per block) or op `avatar`
+for an on-screen presenter. Price a run with `estimate_cost` (or `estimate_job` for a studio tool)
+and confirm it with the user first. Files go in as URLs: `fuobe upload <file>` prints one. Without
+MCP, the `fuobe` CLI runs the same jobs (`fuobe generate`, `fuobe tool <name>`).

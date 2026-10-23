@@ -4,37 +4,48 @@ import { z } from "zod";
 import type { PlannedJob } from "@/lib/assist";
 import { getModel } from "@/lib/catalog";
 import { routesFor } from "@/lib/catalog/plan";
+import { FACELESS_STYLE_IDS, STYLES } from "@/lib/catalog/faceless";
+import { SHORTS_MODELS } from "@/lib/catalog/shorts";
 import type { ChainSlot, Engine, GenerationRequest, Operation } from "@/lib/catalog/types";
+import { TOOL_MODELS } from "@/lib/layers";
 import { createPipeline, type PipelineStep } from "../chains";
 import { db } from "../db";
 import { chooseRoute, createGenerations, outputKind, previewChained } from "../generations";
 import { engineMode } from "../settings";
 import { fileUrl, saveFile } from "../storage";
-import { defineTool, type ToolContext, type ToolOutcome } from "./define";
+import { defineTool, type JobPlace, type ToolContext, type ToolOutcome } from "./define";
 
 /**
  * Agent access to whole studios: split an image into layers, restyle footage, dub a video, make a
- * faceless episode, a batch of ads, captions. Each tool runs the studio's own module when one is
- * wired into STUDIO_ROUTES (so the job shows up in that studio), and otherwise builds the same job
- * from catalog models with createPipeline — the studios that aren't in this build still work
- * from Assist and MCP, just without their own page.
+ * faceless episode, a batch of ads, captions. Each tool runs the studio's own module through its
+ * STUDIO_ROUTES entry (filled by ./studio-routes.ts), so the job opens in that studio: a Layers
+ * project, a Shorts session, a dub to review, a Faceless episode, an Ads Studio batch, the Captions
+ * editor. When the studio can't take a call (an input or engine it doesn't offer: its `refuse` says
+ * why), or no entry is wired in, the tool builds the same job from catalog models with createPipeline
+ * and the results land in the Library.
  */
 
 // ---------------------------------------------------------------------------
-// Wiring for the studio modules (set at merge; see the report for each adapter)
+// Wiring for the studio modules (src/server/assist/studio-routes.ts fills STUDIO_ROUTES)
 
 /** What a studio module returns when it takes a job: the generations to show and its page. */
 export interface StudioRun {
   /** Generation ids to show in the chat (the finished results first). */
   ids: string[];
   /** The studio page for this job, e.g. /layers/<id>. */
-  href?: string;
-  /** Extra facts for the agent (session id, segments, steps). */
+  href: string;
+  /** Extra facts for the agent (session id, segments, steps, what to do next). */
   info?: Record<string, unknown>;
 }
 
 export interface StudioRoute<I> {
-  /** Price the job; the built-in plan is used when absent. */
+  /** The studio as the chat names it: "Open in Layers". */
+  studio: string;
+  /** Its page before the job exists ("/layers"), for estimates. */
+  page: string;
+  /** Why the studio can't take this call (the tool then runs its own pipeline, in the Library), or null. */
+  refuse?: (input: I, ctx: ToolContext) => string | null;
+  /** Price the job the way the studio prices it; the built-in plan is used when absent. */
   plan?: (input: I, ctx: ToolContext) => PlannedJob[];
   run: (input: I, ctx: ToolContext) => Promise<StudioRun>;
 }
@@ -43,21 +54,37 @@ const ref = z.string().describe("A file URL from the chat: an attachment, a proj
 
 const LayersInput = z.object({
   image: ref.describe("The image to split."),
-  layers: z.number().int().optional().describe("How many layers (2–8, default 4)."),
+  layers: z.number().int().optional().describe("How many layers (2–8; the Layers studio starts at 8, Seedream decides how many it returns)."),
   focus: z.string().optional().describe("What to separate, e.g. 'the person, the product, the headline text, the background'."),
-  model_id: z.string().optional().describe("A layers model from search_models (task layers); default: the engine's best."),
+  model_id: z
+    .string()
+    .optional()
+    .describe(
+      `Layers' decomposition models: ${TOOL_MODELS.decompose.cloud.join(", ")} (cloud), ${TOOL_MODELS.decompose.open.join(", ")} (open source); default: the engine's first. Another model runs outside Layers, as a plain job in the Library.`,
+    ),
 });
 const RestyleInput = z.object({
   video: ref.describe("The footage to restyle."),
   style: z.string().describe("The new look, e.g. 'claymation, warm studio light' or 'anime, cel shading'."),
   references: z.array(ref).optional().describe("Up to 4 style reference images."),
-  model_id: z.string().optional().describe("A video-to-video model from search_models (task v2v)."),
+  model_id: z
+    .string()
+    .optional()
+    .describe(
+      `Shorts Studio's restyle models: ${SHORTS_MODELS.cloud.join(", ")} (cloud), ${SHORTS_MODELS.open.join(", ")} (open source); default: the engine's first. Another video-to-video model runs outside Shorts Studio, as a single job in the Library.`,
+    ),
 });
 const DubInput = z.object({
   video: ref.describe("The video to dub."),
   languages: z.array(z.string()).describe("1–4 languages to dub into, e.g. ['Spanish', 'German']."),
   lipsync: z.boolean().optional().describe("Re-sync the lips to the new speech (default true)."),
   source_language: z.string().optional().describe("The language spoken in the video, if known."),
+  review: z
+    .boolean()
+    .optional()
+    .describe(
+      "Default true: transcribe and translate, then the user reviews every line in Translate & dub and voices it there. false: dub in one go (cloud: HeyGen Translate, or ElevenLabs Dubbing without lip sync; open source: every step as one pipeline in the Library).",
+    ),
 });
 const FacelessInput = z.object({
   title: z.string().optional().describe("The episode title."),
@@ -70,7 +97,13 @@ const FacelessInput = z.object({
     )
     .describe("2–8 scenes in order."),
   style: z.string().describe("The visual style for every scene, e.g. 'flat 2D illustration, muted palette'."),
-  aspect_ratio: z.string().optional().describe("9:16 (default), 16:9 or 1:1."),
+  style_id: z
+    .enum(STYLES.map((x) => x.id) as [string, ...string[]])
+    .optional()
+    .describe(
+      `Faceless Studio's style for the episode (the faceless-video skill describes them): ${FACELESS_STYLE_IDS.join(", ")}; the Explainer's ${STYLES.filter((x) => !FACELESS_STYLE_IDS.includes(x.id)).map((x) => x.id).join(", ")} work too. Without it the style is matched from your words.`,
+    ),
+  aspect_ratio: z.string().optional().describe("9:16 (default) or 16:9; 1:1 runs outside Faceless Studio."),
   voice: z.string().optional().describe("A premade narrator voice id for the cloud engine (search_models kind audio lists them)."),
   voice_sample: ref
     .optional()
@@ -80,7 +113,10 @@ const AdsInput = z.object({
   brief: z.string().describe("What the ads sell and to whom, with the offer or angle."),
   product_image: ref.optional().describe("The product photo (keeps the real product in every ad)."),
   count: z.number().int().optional().describe("How many different ads (1–8, default 4)."),
-  aspect_ratios: z.array(z.string()).optional().describe("Formats for each ad: 1:1, 4:5 (default), 9:16, 16:9."),
+  aspect_ratios: z
+    .array(z.string())
+    .optional()
+    .describe("Ads Studio's formats: 1:1, 4:5 (default), 9:16 — there every ad comes in all three. 16:9 runs outside Ads Studio, as plain images in the Library."),
   headline: z.string().optional().describe("A headline to use exactly; otherwise each ad gets its own."),
   cta: z.string().optional().describe("Call to action, e.g. 'Shop now'."),
   brand_id: z.string().optional().describe("A brand kit id from the Ads studio, when the user has one."),
@@ -373,6 +409,55 @@ function adRequests(i: AdsToolInput, ctx: ToolContext): GenerationRequest[] {
 // ---------------------------------------------------------------------------
 // The tools
 
+/** The studio route that takes a call, or why the call runs as the tool's own pipeline (neither: no route is wired in). */
+function routeFor<I>(route: StudioRoute<I> | undefined, input: I, ctx: ToolContext): { route?: StudioRoute<I>; why?: string } {
+  if (!route) return {};
+  let why: string | null;
+  try {
+    why = route.refuse?.(input, ctx) ?? null;
+  } catch (e) {
+    why = (e as Error).message;
+  }
+  return why ? { why } : { route };
+}
+
+/** Where a call's job will open, for the approval card and estimate_job. */
+function placeFor<I>(route: StudioRoute<I> | undefined, input: I, ctx: ToolContext): JobPlace {
+  const r = routeFor(route, input, ctx);
+  if (r.route) return { studio: r.route.studio, href: r.route.page };
+  return r.why ? { fallback: inLibrary(r.why) } : {};
+}
+
+const inLibrary = (why: string) => `${why.replace(/[.\s]+$/, "")} — so it runs as separate steps in your Library`;
+
+/** The studio's price when it takes the call, else the tool's own plan. Never throws: a failure is the card's error. */
+function planVia<I>(tool: string, route: StudioRoute<I> | undefined, input: I, ctx: ToolContext, own: () => PlannedJob[]): PlannedJob[] {
+  const r = routeFor(route, input, ctx).route;
+  if (!r?.plan) return own();
+  try {
+    return r.plan(input, ctx);
+  } catch (e) {
+    return [{ tool, modelId: tool, modelName: r.studio, kind: "video", op: "v2v", prompt: r.studio, note: r.studio, count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
+  }
+}
+
+/** Run through the studio when it takes the call; otherwise the tool's own job, with the reason. */
+async function runVia<I>(route: StudioRoute<I> | undefined, input: I, ctx: ToolContext, label: string, own: () => ToolOutcome | Promise<ToolOutcome>): Promise<ToolOutcome> {
+  const r = routeFor(route, input, ctx);
+  if (r.route) return viaStudio(r.route, input, ctx, label);
+  const out = await own();
+  if (!r.why || out.isError) return out;
+  // Say why it isn't in the studio: to the agent in the result, to the user under the cards.
+  const why = inLibrary(r.why);
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = typeof out.content === "string" ? (JSON.parse(out.content) as Record<string, unknown>) : null;
+  } catch {
+    body = null;
+  }
+  return { ...out, ...(body && { content: JSON.stringify({ ...body, ranIn: "Library", why }) }), items: [...(out.items ?? []), { id: "", role: "notice", tone: "info", text: `${why}.` }] };
+}
+
 function startPipeline(tool: string, steps: PipelineStep[], title: string, show: "last" | "all" = "last"): ToolOutcome {
   const p = createPipeline(steps.map((s) => ({ ...s, request: { ...s.request, batchTitle: title.slice(0, 200) } })));
   const final = p.items.at(-1)!;
@@ -392,129 +477,135 @@ function startPipeline(tool: string, steps: PipelineStep[], title: string, show:
   };
 }
 
-async function viaStudio<I>(route: StudioRoute<I> | undefined, input: I, ctx: ToolContext, label: string): Promise<ToolOutcome | null> {
-  if (!route) return null;
+async function viaStudio<I>(route: StudioRoute<I>, input: I, ctx: ToolContext, label: string): Promise<ToolOutcome> {
   const r = await route.run(input, ctx);
   return {
-    content: JSON.stringify({ results: r.ids, ...(r.href && { open: r.href }), ...r.info }),
-    items: [{ id: "", role: "tool", text: label, ...(r.href && { href: r.href }) }, ...(r.ids.length ? [{ id: "", role: "generations" as const, ids: r.ids }] : [])],
+    // href is a path on this Fuobe server: the job's page in its studio.
+    content: JSON.stringify({ studio: route.studio, href: r.href, results: r.ids, ...r.info }),
+    items: [{ id: "", role: "tool", text: label, href: r.href, studio: route.studio }, ...(r.ids.length ? [{ id: "", role: "generations" as const, ids: r.ids }] : [])],
   };
 }
 
 const splitLayers = defineTool({
   name: "split_layers",
   description:
-    "Split an image into separate transparent layers (person, product, text, background…) for editing — Fuobe's Layers studio. Use it for 'separate the layers', 'make this editable', 'cut everything out into layers'. Gated by the same approval card as generate.",
+    "Split an image into separate transparent layers (person, product, text, background…) for editing — opens a project in Fuobe's Layers studio, where the user moves, edits and exports them. Use it for 'separate the layers', 'make this editable', 'cut everything out into layers'. Gated by the same approval card as generate.",
   schema: LayersInput,
   gated: true,
   title: () => "Split into layers",
-  plan: (i, ctx) => STUDIO_ROUTES.split_layers?.plan?.(i, ctx) ?? planSteps("split_layers", layerSteps(i, ctx)),
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.split_layers, i, ctx),
+  plan: (i, ctx) => planVia("split_layers", STUDIO_ROUTES.split_layers, i, ctx, () => planSteps("split_layers", layerSteps(i, ctx))),
   async run(i, ctx) {
-    return (await viaStudio(STUDIO_ROUTES.split_layers, i, ctx, "Opened a Layers project")) ?? startPipeline("Layers", layerSteps(i, ctx), "Layers", "all");
+    return runVia(STUDIO_ROUTES.split_layers, i, ctx, "Opened a Layers project", () => startPipeline("Layers", layerSteps(i, ctx), "Layers", "all"));
   },
 });
 
 const restyleFootage = defineTool({
   name: "restyle_footage",
   description:
-    "Restyle the user's own footage into a new look (anime, claymation, oil paint, a reference image's style) while keeping its motion — Fuobe's Shorts / Mixed Media studio. Use it for 'turn my clip into…', 'restyle this video'. Gated by the same approval card as generate.",
+    "Restyle the user's own footage into a new look (anime, claymation, oil paint, a reference image's style) while keeping its motion — a session in Fuobe's Shorts Studio: the clip is cut into segments, each restyled, then stitched under the original sound; the user can regenerate a segment there. Use it for 'turn my clip into…', 'restyle this video'. Gated by the same approval card as generate.",
   schema: RestyleInput,
   gated: true,
   title: (i) => `Restyle: ${i.style.slice(0, 60)}`,
-  plan: (i, ctx) => STUDIO_ROUTES.restyle_footage?.plan?.(i, ctx) ?? planSteps("restyle_footage", restyleSteps(i, ctx)),
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.restyle_footage, i, ctx),
+  plan: (i, ctx) => planVia("restyle_footage", STUDIO_ROUTES.restyle_footage, i, ctx, () => planSteps("restyle_footage", restyleSteps(i, ctx))),
   async run(i, ctx) {
-    return (await viaStudio(STUDIO_ROUTES.restyle_footage, i, ctx, "Started a Shorts restyle")) ?? startPipeline("Restyle", restyleSteps(i, ctx), `Restyle: ${i.style}`);
+    return runVia(STUDIO_ROUTES.restyle_footage, i, ctx, "Started a Shorts restyle", () => startPipeline("Restyle", restyleSteps(i, ctx), `Restyle: ${i.style}`));
   },
 });
 
 const dubVideo = defineTool({
   name: "dub_video",
   description:
-    "Dub a video into 1–4 other languages in the speaker's own voice, optionally lip-synced, keeping the background sound — Fuobe's Translate & dub studio. One approval runs every step (voice separation, transcript, translation, voice, lip sync, mix). Gated by the same approval card as generate.",
+    "Dub a video into 1–4 other languages in the speaker's own voice, optionally lip-synced, keeping the background sound — a dub in Fuobe's Translate & dub studio (Audio → Translate). By default the speech is transcribed and translated, then the user reviews every line there and voices it (that step is priced there); review=false dubs in one go. Gated by the same approval card as generate.",
   schema: DubInput,
   gated: true,
   title: (i) => `Dub into ${i.languages.join(", ")}`,
-  plan: (i, ctx) => {
-    if (STUDIO_ROUTES.dub_video?.plan) return STUDIO_ROUTES.dub_video.plan(i, ctx);
-    try {
-      return planSteps("dub_video", dubSteps(i, ctx));
-    } catch (e) {
-      return [{ tool: "dub_video", modelId: "dub", modelName: "Translate & dub", kind: "video", op: "dub", prompt: i.languages.join(", "), count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
-    }
-  },
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.dub_video, i, ctx),
+  plan: (i, ctx) =>
+    planVia("dub_video", STUDIO_ROUTES.dub_video, i, ctx, () => {
+      try {
+        return planSteps("dub_video", dubSteps(i, ctx));
+      } catch (e) {
+        return [{ tool: "dub_video", modelId: "dub", modelName: "Translate & dub", kind: "video", op: "dub", prompt: i.languages.join(", "), count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
+      }
+    }),
   async run(i, ctx) {
-    return (await viaStudio(STUDIO_ROUTES.dub_video, i, ctx, "Started a dub")) ?? startPipeline("Dub", dubSteps(i, ctx), `Dub into ${i.languages.join(", ")}`);
+    return runVia(STUDIO_ROUTES.dub_video, i, ctx, "Started a dub", () => startPipeline("Dub", dubSteps(i, ctx), `Dub into ${i.languages.join(", ")}`));
   },
 });
 
 const facelessEpisode = defineTool({
   name: "faceless_episode",
   description:
-    "Make a narrated faceless video from scenes you wrote: a still and an animated clip per scene in one style, the narration, joined into one episode — Fuobe's Faceless studio. Write the narration and visuals first (load the faceless-video skill), then call this once. On the open-source engine the narration clones voice_sample, so ask the user for a recording (or a saved voice) when there is none. Gated by the same approval card as generate.",
+    "Make a narrated faceless video from scenes you wrote — an episode in Fuobe's Faceless Studio: a picture and an animated clip per scene in one style, the narration, a music bed and subtitles, cut to where each line is spoken; the user can change any scene there. Write the narration and visuals first (load the faceless-video skill), pick style_id, then call this once. On the open-source engine the narration clones voice_sample, so ask the user for a recording (or a saved voice) when there is none. Gated by the same approval card as generate.",
   schema: FacelessInput,
   gated: true,
   title: (i) => i.title?.trim() || "Faceless episode",
-  plan: (i, ctx) => {
-    if (STUDIO_ROUTES.faceless_episode?.plan) return STUDIO_ROUTES.faceless_episode.plan(i, ctx);
-    try {
-      return planSteps("faceless_episode", facelessSteps(i, ctx), { voice: narratorVoice(i, ctx).missing });
-    } catch (e) {
-      return [{ tool: "faceless_episode", modelId: "faceless", modelName: "Faceless episode", kind: "video", op: "concat", prompt: i.title ?? "Episode", count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
-    }
-  },
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.faceless_episode, i, ctx),
+  plan: (i, ctx) =>
+    planVia("faceless_episode", STUDIO_ROUTES.faceless_episode, i, ctx, () => {
+      try {
+        return planSteps("faceless_episode", facelessSteps(i, ctx), { voice: narratorVoice(i, ctx).missing });
+      } catch (e) {
+        return [{ tool: "faceless_episode", modelId: "faceless", modelName: "Faceless episode", kind: "video", op: "concat", prompt: i.title ?? "Episode", count: 0, costUsd: 0, demo: false, atomic: true, error: (e as Error).message }];
+      }
+    }),
   async run(i, ctx) {
-    const studio = await viaStudio(STUDIO_ROUTES.faceless_episode, i, ctx, "Started a faceless episode");
-    if (studio) return studio;
-    const missing = narratorVoice(i, ctx).missing;
-    if (missing) return { content: JSON.stringify({ error: missing }), isError: true };
-    return startPipeline("Faceless episode", facelessSteps(i, ctx, "run"), i.title?.trim() || "Faceless episode");
+    return runVia(STUDIO_ROUTES.faceless_episode, i, ctx, "Started a faceless episode", () => {
+      const missing = narratorVoice(i, ctx).missing;
+      if (missing) return { content: JSON.stringify({ error: missing }), isError: true };
+      return startPipeline("Faceless episode", facelessSteps(i, ctx, "run"), i.title?.trim() || "Faceless episode");
+    });
   },
 });
 
 const createAds = defineTool({
   name: "create_ads",
   description:
-    "Make a batch of different ad creatives (1–8 concepts × up to 4 formats) for a product: varied layouts and angles, headline, call to action, the real product from its photo — Fuobe's Ads studio. Use it for 'ads for my product', 'a set of Meta ads', 'creatives to test'. Gated by the same approval card as generate.",
+    "Make a batch of different ad creatives (1–8) for a product: varied angles and layouts with a headline, body, call to action and the real product from its photo — a batch in Fuobe's Ads Studio, where every ad comes in 1:1, 4:5 and 9:16 with the brand's logo, colours and fonts, editable and downloadable. Without brand_id, a brand kit is made from the brief (as Ads Studio's “Describe your business” does, named after the business it describes) with a product named from the brief's first words; a later brief for a product of the same name goes back to that kit. The user's own kits are only used when you pass brand_id (and product_id), from the Ads studio. Use it for 'ads for my product', 'a set of Meta ads', 'creatives to test'. Gated by the same approval card as generate.",
   schema: AdsInput,
   gated: true,
   title: (i) => `${Math.max(1, Math.min(8, i.count ?? 4))} ads: ${i.brief.slice(0, 50)}`,
-  plan: (i, ctx) => {
-    if (STUDIO_ROUTES.create_ads?.plan) return STUDIO_ROUTES.create_ads.plan(i, ctx);
-    return planSteps(
-      "create_ads",
-      adRequests(i, ctx).map((r, k) => ({ key: `ad${k}`, request: { ...r, step: { label: `Ad ${k + 1} · ${r.params?.aspectRatio}`, index: k, of: 0 } } })),
-      {},
-      true,
-    );
-  },
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.create_ads, i, ctx),
+  plan: (i, ctx) =>
+    planVia("create_ads", STUDIO_ROUTES.create_ads, i, ctx, () =>
+      planSteps(
+        "create_ads",
+        adRequests(i, ctx).map((r, k) => ({ key: `ad${k}`, request: { ...r, step: { label: `Ad ${k + 1} · ${r.params?.aspectRatio}`, index: k, of: 0 } } })),
+        {},
+        true,
+      ),
+    ),
   async run(i, ctx) {
-    const studio = await viaStudio(STUDIO_ROUTES.create_ads, i, ctx, "Started an ads batch");
-    if (studio) return studio;
-    const batchId = nanoid(10);
-    const ids: string[] = [];
-    const errors: string[] = [];
-    for (const r of adRequests(i, ctx)) {
-      try {
-        ids.push(...createGenerations({ ...r, batchTitle: `Ads: ${i.brief.slice(0, 120)}` }, { batchId }).map((g) => g.id));
-      } catch (e) {
-        errors.push((e as Error).message);
+    return runVia(STUDIO_ROUTES.create_ads, i, ctx, "Started an ads batch", () => {
+      const batchId = nanoid(10);
+      const ids: string[] = [];
+      const errors: string[] = [];
+      for (const r of adRequests(i, ctx)) {
+        try {
+          ids.push(...createGenerations({ ...r, batchTitle: `Ads: ${i.brief.slice(0, 120)}` }, { batchId }).map((g) => g.id));
+        } catch (e) {
+          errors.push((e as Error).message);
+        }
       }
-    }
-    if (!ids.length) return { content: JSON.stringify({ error: errors[0] ?? "Nothing could start" }), isError: true };
-    return { content: JSON.stringify({ started: ids, ...(errors.length && { errors }) }), items: [{ id: "", role: "generations", ids }] };
+      if (!ids.length) return { content: JSON.stringify({ error: errors[0] ?? "Nothing could start" }), isError: true };
+      return { content: JSON.stringify({ started: ids, ...(errors.length && { errors }) }), items: [{ id: "", role: "generations", ids }] };
+    });
   },
 });
 
 const addCaptions = defineTool({
   name: "add_captions",
   description:
-    "Burn captions into a video from its speech, optionally translated into another language — Fuobe's Captions tool. Gated by the same approval card as generate.",
+    "Burn captions into a video from its speech, optionally translated into another language — Fuobe's Captions tool (Video tools → Captions), where the captioned video lands and the user can fix any line and burn it again. Gated by the same approval card as generate.",
   schema: CaptionsInput,
   gated: true,
   title: (i) => (i.translate_to ? `Captions in ${i.translate_to}` : "Captions"),
-  plan: (i, ctx) => STUDIO_ROUTES.add_captions?.plan?.(i, ctx) ?? planSteps("add_captions", captionSteps(i, ctx)),
+  place: (i, ctx) => placeFor(STUDIO_ROUTES.add_captions, i, ctx),
+  plan: (i, ctx) => planVia("add_captions", STUDIO_ROUTES.add_captions, i, ctx, () => planSteps("add_captions", captionSteps(i, ctx))),
   async run(i, ctx) {
-    return (await viaStudio(STUDIO_ROUTES.add_captions, i, ctx, "Started captions")) ?? startPipeline("Captions", captionSteps(i, ctx), i.translate_to ? `Captions in ${i.translate_to}` : "Captions");
+    return runVia(STUDIO_ROUTES.add_captions, i, ctx, "Started captions", () => startPipeline("Captions", captionSteps(i, ctx), i.translate_to ? `Captions in ${i.translate_to}` : "Captions"));
   },
 });
 

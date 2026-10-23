@@ -1,0 +1,747 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Source clip (video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "85",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The window's frames, sound and fps"
+    }
+  },
+  "5": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "batch_index": 0,
+      "length": [
+        "86",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "The window (4n+1 frames)"
+    }
+  },
+  "6": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "5",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Work size (scaled, not cropped)"
+    }
+  },
+  "7": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "SAM 3.1"
+    }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "the car",
+      "clip": [
+        "7",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "What to select (maskPrompt)"
+    }
+  },
+  "9": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ],
+      "model": [
+        "7",
+        0
+      ],
+      "conditioning": [
+        "8",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+    },
+    "_meta": {
+      "title": "Track it through the window"
+    }
+  },
+  "10": {
+    "class_type": "SAM3_TrackToMask",
+    "inputs": {
+      "track_data": [
+        "9",
+        0
+      ],
+      "object_indices": ""
+    },
+    "_meta": {
+      "title": "Per-frame masks (object_indices: which tracked objects)"
+    }
+  },
+  "11": {
+    "class_type": "GrowMask",
+    "inputs": {
+      "mask": [
+        "10",
+        0
+      ],
+      "expand": 16,
+      "tapered_corners": true
+    },
+    "_meta": {
+      "title": "Grow the mask to cover edges and shadows (maskGrow, px)"
+    }
+  },
+  "12": {
+    "class_type": "InvertMask",
+    "inputs": {
+      "mask": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Inverted mask"
+    }
+  },
+  "13": {
+    "class_type": "MaskToImage",
+    "inputs": {
+      "mask": [
+        "12",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Black where the mask is"
+    }
+  },
+  "14": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "6",
+        0
+      ],
+      "source": [
+        "13",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Control video: the clip with the masked area blanked (as the official VACE inpainting template)"
+    }
+  },
+  "15": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "umT5"
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "The red sports car from the reference drives down the street.",
+      "clip": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The scene after the change (prompt)"
+    }
+  },
+  "17": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+      "clip": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+    }
+  },
+  "18": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "_meta": {
+      "title": "Wan VAE"
+    }
+  },
+  "19": {
+    "class_type": "WanVaceToVideo",
+    "inputs": {
+      "positive": [
+        "16",
+        0
+      ],
+      "negative": [
+        "17",
+        0
+      ],
+      "vae": [
+        "18",
+        0
+      ],
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "length": [
+        "86",
+        1
+      ],
+      "batch_size": 1,
+      "strength": 1,
+      "control_video": [
+        "14",
+        0
+      ],
+      "control_masks": [
+        "11",
+        0
+      ],
+      "reference_image": [
+        "40",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VACE: mask 1 = regenerate, 0 = keep"
+    }
+  },
+  "20": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "wan2.1_vace_14B_fp16.safetensors",
+      "weight_dtype": "fp8_e4m3fn_fast"
+    },
+    "_meta": {
+      "title": "Wan 2.1 VACE 14B (cast to fp8 on load)"
+    }
+  },
+  "21": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "lora_name": "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "strength_model": 1
+    },
+    "_meta": {
+      "title": "lightx2v 4-step LoRA, Apache-2.0 (loraStrength 0 + steps 20 + cfg 6 = full quality)"
+    }
+  },
+  "22": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "21",
+        0
+      ],
+      "shift": 5
+    },
+    "_meta": {
+      "title": "Shift (shift)"
+    }
+  },
+  "23": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "22",
+        0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "positive": [
+        "19",
+        0
+      ],
+      "negative": [
+        "19",
+        1
+      ],
+      "latent_image": [
+        "19",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Sample (seed, steps, cfg)"
+    }
+  },
+  "24": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {
+      "samples": [
+        "23",
+        0
+      ],
+      "trim_amount": [
+        "19",
+        3
+      ]
+    },
+    "_meta": {
+      "title": "Drop the reference latent"
+    }
+  },
+  "25": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "24",
+        0
+      ],
+      "vae": [
+        "18",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode"
+    }
+  },
+  "30": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Source size and frames decoded"
+    }
+  },
+  "31": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "25",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "30",
+        0
+      ],
+      "height": [
+        "30",
+        1
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Result at the source size"
+    }
+  },
+  "32": {
+    "class_type": "GrowMaskWithBlur",
+    "inputs": {
+      "mask": [
+        "11",
+        0
+      ],
+      "expand": 4,
+      "incremental_expandrate": 0,
+      "tapered_corners": true,
+      "flip_input": false,
+      "blur_radius": 6,
+      "lerp_alpha": 1,
+      "decay_factor": 1,
+      "fill_holes": false
+    },
+    "_meta": {
+      "title": "Soft paste edge"
+    }
+  },
+  "33": {
+    "class_type": "MaskToImage",
+    "inputs": {
+      "mask": [
+        "32",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Paste mask as image"
+    }
+  },
+  "34": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "33",
+        0
+      ],
+      "upscale_method": "bilinear",
+      "width": [
+        "30",
+        0
+      ],
+      "height": [
+        "30",
+        1
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Paste mask at the source size"
+    }
+  },
+  "35": {
+    "class_type": "ImageToMask",
+    "inputs": {
+      "image": [
+        "34",
+        0
+      ],
+      "channel": "red"
+    },
+    "_meta": {
+      "title": "Paste mask"
+    }
+  },
+  "36": {
+    "class_type": "ImageCompositeMasked",
+    "inputs": {
+      "destination": [
+        "5",
+        0
+      ],
+      "source": [
+        "31",
+        0
+      ],
+      "x": 0,
+      "y": 0,
+      "resize_source": false,
+      "mask": [
+        "35",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Only the masked area changes"
+    }
+  },
+  "37": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "36",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "62",
+        0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {
+      "title": "Clip with the window's sound"
+    }
+  },
+  "38": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "37",
+        0
+      ],
+      "filename_prefix": "fuobe/video-swap-wan-vace",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  },
+  "40": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "reference.png"
+    },
+    "_meta": {
+      "title": "What to put in (image: object, product or character on a plain background)"
+    }
+  },
+  "61": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a / b",
+      "values.a": [
+        "86",
+        1
+      ],
+      "values.b": [
+        "2",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Window length in seconds"
+    }
+  },
+  "62": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        1
+      ],
+      "start_index": 0,
+      "duration": [
+        "61",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The window's sound, as long as its frames (none for silent clips)"
+    }
+  },
+  "80": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": 0.1,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "First 0.1 s only: the clip's fps"
+    }
+  },
+  "81": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "80",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The clip's fps"
+    }
+  },
+  "82": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Window length in seconds (duration; 0 = the longest window, 81 frames)"
+    }
+  },
+  "83": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 81
+    },
+    "_meta": {
+      "title": "Frame cap per window (81 = Wan 2.1 VACE)"
+    }
+  },
+  "84": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "min(a + 1e9 * (a <= 0), (c + 0.5) / b)",
+      "values.a": [
+        "82",
+        0
+      ],
+      "values.b": [
+        "81",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seconds to decode: duration (0 = no limit), at most the frame cap + half a frame"
+    }
+  },
+  "85": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": [
+        "84",
+        0
+      ],
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "Decode only the window (startTime, in seconds)"
+    }
+  },
+  "86": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(1, floor((min(a, c) - 1) / 4) * 4 + 1)",
+      "values.a": [
+        "30",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames in the window: the largest 4n+1 decoded, at most the cap"
+    }
+  },
+  "87": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 832
+    },
+    "_meta": {
+      "title": "Work-size budget: width (width)"
+    }
+  },
+  "88": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 480
+    },
+    "_meta": {
+      "title": "Work-size budget: height (height)"
+    }
+  },
+  "89": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(16, floor(min(sqrt(a * b * c / d), 1280, 1280 * c / d) / 16) * 16)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work width: about width x height pixels in the clip's shape (multiple of 16, <= 1280)"
+    }
+  },
+  "90": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(16, floor(min(sqrt(a * b * d / c), 1280, 1280 * d / c) / 16) * 16)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work height (multiple of 16, <= 1280)"
+    }
+  }
+}

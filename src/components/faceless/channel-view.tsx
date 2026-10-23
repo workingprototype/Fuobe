@@ -143,7 +143,7 @@ export function ChannelView({ id, picker }: { id: string; picker: PickerData }) 
           <ArrowLeft className="size-4 shrink-0" /> <span className="truncate">Faceless Studio</span>
         </Link>
       </header>
-      <main className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 space-y-8 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 space-y-8 px-3 pb-16 sm:px-6">
         {isLoading || !channel ? (
           <div className="space-y-4 pt-6">
             <div className="flex items-center gap-4">
@@ -319,7 +319,7 @@ export function ChannelView({ id, picker }: { id: string; picker: PickerData }) 
             </AlertDialog>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

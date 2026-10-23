@@ -8,9 +8,11 @@ import {
   defaultModelForNode,
   describeNode,
   effectiveOp,
+  elementUpdates,
   graphEngine,
   inputPorts,
   isGenerator,
+  modelChoices,
   nodeSignature,
   outputType,
   paletteItems,
@@ -18,13 +20,14 @@ import {
   promptPlaceholder,
   singleInput,
   topoOrder,
+  withCurrentElements,
   withPlaceholders,
   type CanvasEdge,
   type CanvasGraph,
   type CanvasNode,
   type CanvasRuns,
 } from "@/lib/catalog/canvas";
-import type { GenerationStatus } from "@/lib/catalog/types";
+import type { GenerationStatus, Operation } from "@/lib/catalog/types";
 
 const node = (id: string, type: CanvasNode["type"], x: number, y: number, data: CanvasNode["data"] = {}): CanvasNode => ({ id, type, position: { x, y }, data });
 const edge = (source: string, target: string, targetHandle = "in"): CanvasEdge => ({ id: `${source}>${target}:${targetHandle}`, source, sourceHandle: "out", target, targetHandle });
@@ -192,6 +195,27 @@ describe("canvas graph → plan", () => {
     g.nodes[1].data.prompt = "A portrait of @Maya";
     g.nodes[0].data.handle = "maya";
     expect(describeNode(g, g.nodes[1]).request?.prompt).toBe("A portrait of @Maya");
+  });
+
+  it("follows a renamed element: the node shows its new name and mentions its new @handle", () => {
+    const g: CanvasGraph = {
+      nodes: [
+        node("el", "element", 0, 0, { elementId: "e1", handle: "Maya", name: "Maya", preview: "/api/files/maya.png" }),
+        node("gone", "element", 0, 200, { elementId: "deleted", handle: "Old", name: "Old" }),
+        node("img", "model", 300, 0, { modelId: "nano-banana-pro", prompt: "A portrait" }),
+      ],
+      edges: [edge("el", "img", "elements")],
+    };
+    const now = [{ id: "e1", handle: "Maya_Lee", name: "Maya Lee", references: ["/api/files/maya.png"] }];
+    expect([...elementUpdates(g, now)]).toEqual([["el", { handle: "Maya_Lee", name: "Maya Lee" }]]);
+    const fresh = withCurrentElements(g, now);
+    expect(fresh.nodes[0].data).toMatchObject({ elementId: "e1", handle: "Maya_Lee", name: "Maya Lee" });
+    // An element that's gone keeps what the node had; the rest of the board is the same object.
+    expect(fresh.nodes[1]).toBe(g.nodes[1]);
+    expect(describeNode(fresh, fresh.nodes[2]).request?.prompt).toBe("A portrait\n\nWith @Maya_Lee.");
+    // A new first photo follows too; nothing changed → the same graph.
+    expect(elementUpdates(fresh, [{ ...now[0], references: ["/api/files/new.png"] }]).get("el")).toEqual({ preview: "/api/files/new.png" });
+    expect(withCurrentElements(fresh, now)).toBe(fresh);
   });
 
   it("reports validation errors on the node and blocks what depends on it", () => {
@@ -397,5 +421,45 @@ describe("canvas templates", () => {
     // Utilities pick a working model on each engine (or say there's none).
     const frame = node("f", "frame", 0, 0, {});
     expect(describeNode({ nodes: [frame], edges: [] }, frame).error).toBe("Pick a model");
+  });
+});
+
+describe("round-4 models on the canvas", () => {
+  const modelNode = (modelId: string, op?: Operation): CanvasNode => node("m", "model", 300, 0, { modelId, mediaKind: getModel(modelId)!.kind, ...(op && { op }) });
+  const ports = (id: string, op?: Operation) => inputPorts(modelNode(id, op)).map((p) => p.id);
+
+  it("gives the new operations their inputs", () => {
+    expect(ports("kling-o3", "remove-object")).toEqual(["prompt", "video"]);
+    expect(ports("kling-o3", "video-swap")).toEqual(["prompt", "elements", "images", "video"]);
+    expect(ports("bria-video-erase")).toEqual(["prompt", "video"]);
+    expect(ports("p-video-replace")).toEqual(["prompt", "elements", "images", "video"]);
+    expect(ports("genjutsu-lite-object-swap")).toEqual(["prompt", "elements", "images", "video"]);
+    expect(ports("florence-2-ocr")).toEqual(["images"]);
+    expect(ports("topaz-sdr-to-hdr")).toEqual(["video"]);
+    expect(ports("triposplat")).toEqual(["images"]);
+    expect(ports("tripo-h3-1-text")).toEqual(["prompt"]);
+    expect(ports("recraft-vectorize")).toEqual(["images"]);
+    const keyframes = inputPorts(modelNode("flux-3-max", "keyframes"));
+    expect(keyframes.map((p) => p.id)).toEqual(["prompt", "images"]);
+    expect(keyframes.find((p) => p.id === "images")!.multiple).toBe(true);
+  });
+
+  it("runs an eraser fed from the board", () => {
+    const g: CanvasGraph = {
+      nodes: [node("clip", "video-input", 0, 0, { url: "/api/files/clip.mp4" }), node("m", "model", 300, 0, { modelId: "bria-video-erase", prompt: "the coffee cup" })],
+      edges: [edge("clip", "m", "video")],
+    };
+    const d = describeNode(g, g.nodes[1]);
+    expect(d.error).toBeUndefined();
+    expect(d.plan?.op).toBe("remove-object");
+  });
+
+  it("leaves out models and operations the canvas can't feed", () => {
+    const video = modelChoices({ type: "model", data: { mediaKind: "video" } }).map((m) => m.id);
+    expect(video).toContain("bria-video-erase");
+    // VACE runs only on a painted first-frame mask.
+    expect(video).not.toContain("wan-22-vace-inpaint");
+    // Rigging needs a 3D model input, which the canvas has no port for.
+    expect(modelChoices({ type: "model", data: { mediaKind: "model3d" } }).map((m) => m.id)).not.toContain("meshy-rigging");
   });
 });

@@ -10,14 +10,16 @@ import {
   fitAttachments,
   handoffKey,
   mergeHandoff,
+  needsMask,
   noRoomMessage,
   onImageChange,
+  promptShown,
   type Attachment,
   type DraftShape,
 } from "@/lib/composer";
 import { HUB_MODES, modeHref } from "@/lib/hubs";
 import { outputActions } from "@/lib/output-actions";
-import { AUDIO_STUDIO, IMAGE_STUDIO, LIPSYNC_STUDIO, VIDEO_STUDIO, VOICE_CHANGE_STUDIO } from "@/lib/studios";
+import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, INPAINT_STUDIO, LIPSYNC_STUDIO, VIDEO_STUDIO, VOICE_CHANGE_STUDIO } from "@/lib/studios";
 
 const att = (id: string, kind: Attachment["kind"] = "image", extra: Partial<Attachment> = {}): Attachment => ({ id, ref: `/api/files/${id}`, preview: `/api/files/${id}`, kind, ...extra });
 
@@ -180,5 +182,47 @@ describe("studio hubs", () => {
     expect(href(video, "upscale")).toMatch(/^\/upscale\/video\?video=/);
     expect(href(video, "add-sound")).toMatch(/^\/audio\/video\?video=/);
     expect(href(audio, "voice-change")).toMatch(/^\/audio\/voice-change\?audio=/);
+  });
+});
+
+describe("Inpaint asks for the painted area once the image is in", () => {
+  const fill = getModel("oss-flux-fill")!;
+  const sketch = INPAINT_STUDIO.sketch;
+
+  it("knows a mask-only model (FLUX Fill) is waiting for the painting", () => {
+    expect(needsMask(fill, sketch, { image: att("a") })).toBe(true);
+    // Still uploading: the same (Uploading… comes first in the blocker).
+    expect(needsMask(fill, sketch, { image: att("a", "image", { ref: "", uploading: true }) })).toBe(true);
+    // Painted, or no image yet (the image's own blocker says what to add).
+    expect(needsMask(fill, sketch, { image: att("a"), mask: att("m") })).toBe(false);
+    expect(needsMask(fill, sketch, {})).toBe(false);
+    // A model with an instruction edit runs without a mask; a studio without the brush never asks.
+    expect(needsMask(getModel(INPAINT_STUDIO.defaultModels.cloud), sketch, { image: att("a") })).toBe(false);
+    expect(needsMask(fill, undefined, { image: att("a") })).toBe(false);
+  });
+
+  it("says “Paint the area to change” and points at the brush, not “Add an image…”", () => {
+    // A new image dropped the old painting (onImageChange): the planner's message names both inputs.
+    const after = onImageChange({ slots: { image: att("a"), mask: att("m"), sketch: att("s") }, params: {} }, { image: att("b"), mask: att("m"), sketch: att("s") });
+    const maskMissing = needsMask(fill, sketch, after.slots);
+    expect(maskMissing).toBe(true);
+    const planError = "Add an image and paint the area to change";
+    expect(blockerFor({ model: true, uploading: false, maskMissing, planError, promptMissing: false })).toEqual({ message: "Paint the area to change", slot: "mask" });
+    // Inpaint asks for the painting before the prompt; an image still missing or uploading comes first.
+    expect(blockerFor({ model: true, uploading: false, maskMissing, planError: "Write a prompt first", promptMissing: true })?.message).toBe("Paint the area to change");
+    expect(blockerFor({ model: true, uploading: true, maskMissing, promptMissing: false })?.message).toBe("Uploading…");
+    const image = firstMissingSlot(INPAINT_STUDIO.slots, {});
+    expect(blockerFor({ model: true, missing: image, uploading: false, maskMissing: false, promptMissing: true })).toEqual({ message: "Add an image", slot: "image" });
+  });
+});
+
+describe("prompt suggestions follow the prompt box", () => {
+  it("hides them for models that take no prompt (FASHN try-on in Edit) and for prompt-less studios", () => {
+    expect(EDIT_STUDIO.suggestions?.length).toBeGreaterThan(0);
+    expect(promptShown(EDIT_STUDIO.hidePrompt, undefined, getModel(EDIT_STUDIO.defaultModels.cloud)?.options.promptless)).toBe(true);
+    expect(promptShown(EDIT_STUDIO.hidePrompt, undefined, getModel("fashn-tryon")?.options.promptless)).toBe(false);
+    expect(promptShown(true, undefined, false)).toBe(false);
+    expect(promptShown(false, "none", false)).toBe(false);
+    expect(promptShown(false, "optional", false)).toBe(true);
   });
 });

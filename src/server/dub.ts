@@ -96,16 +96,36 @@ export interface CreateDubInput {
   duration?: number;
 }
 
+/**
+ * Lengths read from stored files, by path, size and time: a dub (or an Assist call) is checked, priced
+ * and started, each asking for the length, and reading a 200 MB upload each time would block the server.
+ */
+const lengths = new Map<string, number | null>();
+
 /** The source's length: its MP4/MOV header, else what the browser measured. The dubbed voice track is this long. */
 export function videoLength(ref: string, measured?: number): number | undefined {
   try {
     if (ref.startsWith("/api/files/")) {
-      const info = probeMedia(fs.readFileSync(absolutePath(decodeURIComponent(ref.slice("/api/files/".length)))));
-      const d = info?.videoDuration ?? info?.duration;
-      if (d && d > 0) return d;
+      const abs = absolutePath(decodeURIComponent(ref.slice("/api/files/".length)));
+      const st = fs.statSync(abs);
+      const key = `${abs}|${st.size}|${st.mtimeMs}`;
+      if (!lengths.has(key)) {
+        let d: number | null = null;
+        try {
+          const info = probeMedia(fs.readFileSync(abs));
+          const v = info?.videoDuration ?? info?.duration;
+          d = v && v > 0 ? v : null;
+        } catch {
+          // An unreadable header (WebM): what the browser measured.
+        }
+        lengths.set(key, d);
+        if (lengths.size > 64) lengths.delete(lengths.keys().next().value!);
+      }
+      const d = lengths.get(key);
+      if (d) return d;
     }
   } catch {
-    // An unreadable header (WebM): what the browser measured.
+    // Gone: what the browser measured.
   }
   return measured && measured > 0 ? measured : undefined;
 }

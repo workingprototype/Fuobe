@@ -14,7 +14,7 @@ import { MediaDrop } from "@/components/av/media-drop";
 import { StepList } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useGeneration } from "@/components/av/use-generation";
-import { useCreateGeneration, useEngine, useGenerations, useHydrated } from "@/lib/api";
+import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
 import {
   BURN_CAPS,
@@ -57,6 +57,30 @@ function load(): Saved | null {
 
 const DEFAULT_LOOK: CaptionLook = { style: "clean", size: "M", position: "bottom" };
 
+/**
+ * A hand-off: /video-tools/captions?video=<file>&transcript=<generation id> opens the editor on that
+ * video and fills the lines from the transcript when it's done (Assist and MCP link the captions they
+ * burn). Lines already edited in this browser for the same video and transcript are kept.
+ */
+function handoff(): Saved | null {
+  const p = new URLSearchParams(window.location.search);
+  const video = p.get("video");
+  if (!video?.startsWith("/api/files/")) return null;
+  const transcriptId = p.get("transcript") || undefined;
+  const local = load();
+  if (local?.video.ref === video && (!transcriptId || local.transcriptId === transcriptId)) return local;
+  return { video: { ref: video, preview: video, kind: "video", name: video.split("/").pop() }, cues: [], look: DEFAULT_LOOK, ...(transcriptId && { transcriptId }) };
+}
+
+/** Leaving the handed-off video: a reload then shows this browser's own project. */
+function dropHandoff() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("video") && !url.searchParams.has("transcript")) return;
+  url.searchParams.delete("video");
+  url.searchParams.delete("transcript");
+  window.history.replaceState(null, "", url);
+}
+
 function download(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
@@ -68,9 +92,14 @@ function download(name: string, text: string, type: string) {
 
 /** Captions (Video tools → Captions): transcribe, fix every line, style, burn in — or export .srt / .vtt. */
 export function CaptionsStudio({ tabs }: { tabs?: React.ReactNode }) {
-  // The last project comes back after a reload (this browser only), once hydrated.
-  const hydrated = useHydrated();
-  const saved = useMemo(() => (hydrated ? load() : undefined), [hydrated]);
+  // The last project comes back after a reload (this browser only); a hand-off link wins. Both are read
+  // once mounted: on a link from Assist the address only changes as the new page commits, so reading
+  // it while rendering would still see /assist.
+  const [saved, setSaved] = useState<Saved | null | undefined>(undefined);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the address and this browser's project once mounted
+    setSaved(handoff() ?? load());
+  }, []);
   const [picked, setVideo] = useState<SlotValue | null | undefined>(undefined);
   const video = picked === undefined ? (saved?.video ?? null) : picked;
   const results = useGenerations({ features: ["captions"], kinds: ["video"], limit: 24 });
@@ -83,6 +112,7 @@ export function CaptionsStudio({ tabs }: { tabs?: React.ReactNode }) {
           restored={saved?.video.ref === video.ref ? saved : null}
           onReplace={(v) => {
             setVideo(v);
+            dropHandoff();
             try {
               localStorage.removeItem(STORE);
             } catch {}

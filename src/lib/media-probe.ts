@@ -33,6 +33,77 @@ export function probeMedia(data: Uint8Array): MediaInfo | null {
 }
 
 // ---------------------------------------------------------------------------
+// Probing a file without reading all of it
+
+/** Reads the bytes [start, end) of a file. */
+export type ReadRange = (start: number, end: number) => Promise<Uint8Array>;
+
+const HEAD_BYTES = 256 * 1024;
+const MAX_MOOV_BYTES = 64 * 1024 * 1024;
+const ISO_TOP = ["ftyp", "moov", "mdat", "free", "wide", "skip"];
+
+/**
+ * {@link probeMedia} without reading the whole file: an MP4 / MOV is walked box header by box header
+ * to its moov box (at the start, or after the media data like a camera file) and only that is read,
+ * so a 200 MB clip costs a few small reads. Other containers are probed when the whole file fits in
+ * the first read, else unknown (null).
+ */
+export async function probeMediaRanges(read: ReadRange, size: number): Promise<MediaInfo | null> {
+  try {
+    const head = await read(0, Math.min(size, HEAD_BYTES));
+    if (head.length < 12) return null;
+    if (!ISO_TOP.includes(fourcc(head, 4))) return size <= head.length ? probeMedia(head) : null;
+    for (let o = 0; o + 8 <= size; ) {
+      const h = o + 16 <= head.length ? head.subarray(o, o + 16) : await read(o, Math.min(size, o + 16));
+      if (h.length < 8) return null;
+      const d = new DataView(h.buffer, h.byteOffset, h.byteLength);
+      let len = d.getUint32(0);
+      if (len === 1) {
+        if (h.length < 16) return null;
+        len = Number(d.getBigUint64(8));
+      } else if (len === 0) len = size - o;
+      if (len < 8) return null;
+      if (fourcc(h, 4) === "moov") {
+        if (len > MAX_MOOV_BYTES) return null;
+        const end = Math.min(size, o + len);
+        return probeMedia(end <= head.length ? head.subarray(o, end) : await read(o, end));
+      }
+      o += len;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Probe a dropped file (a File or Blob) by reading only the parts that say what it is. */
+export function probeBlob(blob: Blob): Promise<MediaInfo | null> {
+  return probeMediaRanges(async (start, end) => new Uint8Array(await blob.slice(start, end).arrayBuffer()), blob.size);
+}
+
+/**
+ * Probe a file by URL with Range requests (/api/files answers them), so only its header and moov
+ * box are downloaded. A server that ignores Range sends the whole file, which is probed as it is.
+ */
+export async function probeUrl(url: string): Promise<MediaInfo | null> {
+  try {
+    const first = await fetch(url, { headers: { Range: `bytes=0-${HEAD_BYTES - 1}` } });
+    if (!first.ok) return null;
+    const head = new Uint8Array(await first.arrayBuffer());
+    const total = first.status === 206 ? Number(/\/(\d+)\s*$/.exec(first.headers.get("content-range") ?? "")?.[1]) : head.length;
+    if (first.status !== 206 || !Number.isFinite(total) || total <= head.length) return probeMedia(head);
+    return probeMediaRanges(async (start, end) => {
+      if (end <= head.length) return head.subarray(start, end);
+      const res = await fetch(url, { headers: { Range: `bytes=${start}-${end - 1}` } });
+      if (res.status !== 206) throw new Error("no ranges");
+      return new Uint8Array(await res.arrayBuffer());
+    }, total);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ISO-BMFF (mp4, mov, m4a)
 
 interface Box {

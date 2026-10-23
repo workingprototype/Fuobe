@@ -1,12 +1,13 @@
 ---
 name: youtube-script
-title: YouTube Script
 description: A complete YouTube script with a full spoken body in one of six genres — business and finance, tech review, commentary or video essay, storytelling or documentary, true crime, or explainer and education — plus hook options, timestamps, production cues and a retention map.
-when_to_use: The user asks for a YouTube script, a video script, an outline with hooks, or "write the script for my video". The deliverable is text; offer to produce the video afterwards with faceless-video or narration.
-icon: file-text
-tags: [youtube, script, writing]
-offline:
-  kind: text
+compatibility: Needs a Fuobe server. Fuobe Assist runs these steps itself; other agents call the same tools on Fuobe's MCP endpoint (/api/mcp) or use the fuobe CLI.
+metadata:
+  title: YouTube Script
+  when_to_use: The user asks for a YouTube script, a video script, an outline with hooks, or "write the script for my video". The deliverable is text; offer to produce the video afterwards with faceless-video or narration.
+  icon: file-text
+  tags: youtube, script, writing
+  offline_kind: text
 ---
 
 # YouTube Script
@@ -35,3 +36,9 @@ Write it yourself in the chat for normal lengths. For very long scripts or when 
 file, use `generate` with op `write` (`text-llm` / `oss-text-llm`) and put the genre, length and
 structure in `system`. Ask one question at most (the genre or the audience) when the topic leaves
 it open. Offer next steps: narrate it (narration), produce it (faceless-video), or a thumbnail.
+
+## Using Fuobe from an agent
+Outside Fuobe Assist (Claude Code, Codex, Cursor…) the script is yours to write: answer in your own
+reply. Fuobe is only needed for a long script delivered as a file (its `generate` tool with op
+`write` over MCP; `fuobe mcp` prints the command) or for the next steps (narration,
+faceless-video), which say which Fuobe tools to call.

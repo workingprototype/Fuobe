@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate src/lib/catalog/cloud-models.generated.ts from docs/research/paid-model-apis.json
-(merged with parts 2 and 3: paid-model-apis-2.json, paid-model-apis-3.json).
+(merged with parts 2, 3 and 4: paid-model-apis-2.json, paid-model-apis-3.json, paid-model-apis-4.json).
 
 The research file holds verified fal/Replicate input schemas (field names, enums, defaults,
 prices). This script turns a curated list of models (MODELS below, mirroring Higgsfield's
@@ -31,6 +31,12 @@ RESEARCH_3 = json.loads((ROOT / "docs/research/paid-model-apis-3.json").read_tex
 for e in RESEARCH_3["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
+# Part 4 (video erase / swap, FPS / HDR / codecs, FFmpeg compose, OCR, 3D scenes, new models): same merge.
+# Its Higgsfield records (Genjutsu Light) are copied into higgsfield-api.json for gen-higgsfield-models.py.
+RESEARCH_4 = json.loads((ROOT / "docs/research/paid-model-apis-4.json").read_text())
+for e in RESEARCH_4["endpoints"]:
+    prev = EPS.get((e["provider"], e["endpoint"]))
+    EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
@@ -39,6 +45,8 @@ IMAGE_SIZE_MAP = {
     "5:4": "landscape_4_3", "4:5": "portrait_4_3",
 }
 RATIO = re.compile(r"^\d+(\.\d+)?:\d+(\.\d+)?$")
+# Duration picks for APIs that take any whole number of seconds in a range (the Higgsfield generator's list).
+NICE_DURATIONS = [3, 4, 5, 6, 8, 10, 12, 15, 20, 30]
 
 # ---------------------------------------------------------------------------
 # Curated catalog. routes: list of (op, endpoint) or (op, endpoint, provider).
@@ -48,13 +56,19 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None, api_defaults=None):
+          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
-    fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults)."""
+    fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
+    formats: {canonical VideoFormat: the API's value} for its output-format field (params.format), checked against the enum.
+    ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it.
+    fit_values: the model offers the union of its routes' aspect ratios and resolutions, so each route lists the
+    ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine on fal and Higgsfield).
+    A route's options dict may also set max_images (FieldMap.maxImages) and note."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
-                  sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}))
+                  sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
+                  ranged_durations=ranged_durations, fit_values=fit_values))
 
 
 # ----- Image
@@ -249,7 +263,11 @@ model("kling-3-4k", "Kling 3.0 4K", "Kuaishou", "kling", "video", "Native 4K Kli
 model("kling-o3", "Kling O3 Omni", "Kuaishou", "kling", "video",
       "One model for text, image, reference and video edits",
       [("t2v", "fal-ai/kling-video/o3/pro/text-to-video"), ("i2v", "fal-ai/kling-video/o3/pro/image-to-video", "fal", "+flf2v"),
-       ("ref2v", "fal-ai/kling-video/o3/pro/reference-to-video"), ("v2v", "fal-ai/kling-video/o3/pro/video-to-video/edit")],
+       ("ref2v", "fal-ai/kling-video/o3/pro/reference-to-video"), ("v2v", "fal-ai/kling-video/o3/pro/video-to-video/edit"),
+       # Higgsfield's Remove Object page runs exactly this edit with a removal prompt (research part 4 §3); swaps and
+       # inserts name @Image1 in the prompt. Same endpoint, so the studios can list Kling O3 under those tools.
+       ("remove-object", "fal-ai/kling-video/o3/pro/video-to-video/edit"), ("video-swap", "fal-ai/kling-video/o3/pro/video-to-video/edit"),
+       ("video-insert", "fal-ai/kling-video/o3/pro/video-to-video/edit")],
       badges=["new"], defaults={"aspectRatio": "16:9", "duration": 5})
 model("kling-o1", "Kling O1 Omni", "Kuaishou", "kling", "video",
       "Reference-driven video and natural-language video editing",
@@ -360,7 +378,10 @@ model("runway-aleph-2", "Runway Aleph 2", "Runway", "runway", "video",
       [("v2v", "runwayml/aleph-2", "replicate")], badges=["pro"])
 model("kling-o3-4k-edit", "Kling O3 4K Edit", "Kuaishou", "kling", "video",
       "Kling O3 video edits rendered in native 4K, keeps the original audio",
-      [("v2v", "fal-ai/kling-video/o3/4k/video-to-video/edit")], badges=["4k"], pricing=("second", 0.42))
+      [("v2v", "fal-ai/kling-video/o3/4k/video-to-video/edit"),
+       # "Need more detail? Run Kling 3.0 Omni Edit in 4K mode" (Higgsfield's Remove Object page).
+       ("remove-object", "fal-ai/kling-video/o3/4k/video-to-video/edit"), ("video-swap", "fal-ai/kling-video/o3/4k/video-to-video/edit"),
+       ("video-insert", "fal-ai/kling-video/o3/4k/video-to-video/edit")], badges=["4k"], pricing=("second", 0.42))
 model("grok-imagine-video-edit", "Grok Imagine Video Edit", "xAI", "grok", "video",
       "Edit clips up to 8 s with a sentence",
       [("v2v", "xai/grok-imagine-video/edit-video")], badges=["fast"],
@@ -474,7 +495,9 @@ model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video",
       [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
       fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
 model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
-      [("depth-video", "fal-ai/depth-anything-video")], pricing=("second", 0.04), fixed={"model": "VDA-Base", "colormap": "grayscale"})
+      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked.
+      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap"}})], pricing=("second", 0.04),
+      fixed={"model": "VDA-Base"}, api_defaults={"colormap": "grayscale"})
 model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
       [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
       fixed={"relit_cond_type": "ic", "relight_parameters.bg_source": "Left"},
@@ -556,6 +579,229 @@ model("tripo-h3-1", "Tripo H3.1", "Tripo", "tripo", "model3d", "Clean topology a
 model("meshy-7-1", "Meshy 7.1", "Meshy", "meshy", "model3d", "Textured models with optional auto-rigging; describe the texture in the prompt",
       [("image-to-3d", "meshy/v7.1/image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
       controls=[("model_type", "Mesh"), ("topology", "Topology")])
+
+
+# ---------------------------------------------------------------------------
+# Round 4 (research part 4): video erase / swap / insert, FPS boost, SDR to HDR, FFmpeg-style tools, OCR, 3D
+# and the models released between 2026-09-15 and 2026-10-22.
+#
+# TODO(kling-4): Kling 4.0 (kling/v4/text-to-video, image-to-video, reference-to-video, video-to-video/edit) has
+# schemas in paid-model-apis-4.json but status "playground-only": fal's pages say "Kling 4.0 is available in the
+# playground and fal Agent. API access is coming soon." (re-checked 2026-10-22). Add a "kling-4" model here
+# (t2v / i2v + keyframes / ref2v / v2v + remove-object / video-swap / video-insert) once the API opens.
+
+# What VOID and VACE regenerate in the masked area when Fuobe's prompt names the thing to remove.
+SCENE_AFTER_REMOVAL = "The same shot with nothing there: the background continues naturally, matching the light, texture and motion around it"
+
+# ----- Remove an object from a video (Bria under 5 s; VOID also removes shadows and reflections; LTX clean plate removes people)
+model("bria-video-erase", "Bria Video Eraser", "Bria", "bria", "video",
+      "Name what to remove from a clip under 5 s — sound kept",
+      [("remove-object", "bria/video/erase/prompt")], badges=["new"], pricing=("second", 0.14, "clips under 5 s; longer ones are cut to their first 5 s"))
+model("bria-video-erase-points", "Bria Video Eraser · points", "Bria", "bria", "video",
+      "Remove what you click on the first frame (under 5 s)",
+      [("remove-object", "bria/video/erase/keypoints")], pricing=("second", 0.14, "clips under 5 s"), hidden=True,
+      options={"requires": {"points": True, "msg": "Click what to remove on the first frame"}})
+# A mask *video* (white = erase), e.g. from SAM 3.1 video: Fuobe's painted first-frame mask is not one.
+model("bria-video-erase-mask", "Bria Video Eraser · mask video", "Bria", "bria", "video",
+      "Remove what a mask video marks (white), under 5 s",
+      [("remove-object", "bria/video/erase/mask"), ("remove-object", "bria/video-erase-object", "replicate", {"fixed": {"auto_trim": True}})],
+      pricing=("second", 0.14, "fal; $0.05/s on Replicate"), hidden=True,
+      options={"requires": {"mask": True, "msg": "Add the mask video (white = what to remove)"}})
+# Netflix's VOID (Apache-2.0 weights on a CogVideoX base, comfyui-oss-4.md), hosted by fal.
+model("void-video-inpainting", "VOID Video Eraser", "Netflix", "void", "video",
+      "Removes an object and what it causes — shadows, reflections, ripples — from clips up to ~8 s",
+      [("remove-object", "fal-ai/void-video-inpainting", "fal",
+        {"drop": ["mask"], "note": "Up to 197 frames (about 8 s at 24 fps): split longer clips"})], badges=["new"],
+      pricing=("request", 0.1, "$0.05 per clip + $0.05 for the mask made from your words; Pass 2 refinement doubles the first part; up to 197 frames"),
+      api_defaults={"prompt": SCENE_AFTER_REMOVAL})
+model("ltx-2-3-clean-plate", "LTX 2.3 Clean Plate", "Lightricks", "ltx", "video",
+      "Removes every person from a shot for a clean background plate",
+      # "720p allows up to ~6s, 480p up to ~15s. A request above the budget is rejected" (num_frames from the clip's length).
+      [("remove-object", "fal-ai/ltx-2.3-quality/clean-plate", "fal", {"drop": ["prompt"], "note": "720p up to about 6 s, 480p up to about 15 s"})],
+      pricing=("video", 0.27, "121 frames at 720p; billed per megapixel of video"), defaults={"resolution": "720p"})
+# Hosted Wan 2.2 VACE Fun: the painted first-frame mask is tracked through the clip (mask_image_url). Erase with a
+# description of the background (SCENE_AFTER_REMOVAL unless params.extra.prompt says otherwise); swap and insert
+# regenerate the masked area as the reference image(s), following the prompt.
+_VACE = "fal-ai/wan-22-vace-fun-a14b/inpainting"
+_VACE_KEYS = {"keys": {"mask": "mask_image_url"}, "drop": ["image", "endImage"]}
+model("wan-22-vace-inpaint", "Wan 2.2 VACE Fun Inpaint (hosted)", "Alibaba Wan", "wan", "video",
+      "Paint an area on the first frame: erase it, or swap or add something from a reference image",
+      [("remove-object", _VACE, "fal", {**_VACE_KEYS, "drop": ["image", "endImage", "images", "prompt"], "defaults": {"prompt": SCENE_AFTER_REMOVAL}}),
+       ("video-swap", _VACE, "fal", _VACE_KEYS), ("video-insert", _VACE, "fal", _VACE_KEYS)],
+      # "Video seconds calculated at 16 frames per second": the clip keeps its own frame rate, so a 30 fps clip bills ~1.9x its length.
+      pricing=("second", 0.1, "720p, billed as frames ÷ 16 (a 30 fps clip costs about 1.9× its length); 580p $0.075, 480p $0.05",
+               {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
+      api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True},
+      options={"requires": {"mask": True, "msg": "Paint the area to change on the first frame"}})
+# The mask maker for the erase and swap chains: what you name or click becomes a black-and-white mask video
+# (apply_mask off; whether the matte is clean black and white is unverified without a run).
+model("sam-3-1-video-mask", "SAM 3.1 video mask", "Meta", "sam", "video",
+      "A mask video of what you name or click, tracked through the clip",
+      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False}, hidden=True,
+      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"))
+
+# ----- Swap who or what is on camera
+model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
+      "Put the people from 1–3 photos into a clip — same motion, timing, camera and sound",
+      [("video-swap", "prunaai/p-video-replace", "replicate", {"drop": ["fps"]})], badges=["new"],
+      pricing=("second", 0.03, "720p; 1080p $0.06", {"byResolution": {"720p": 0.03, "1080p": 0.06}}), defaults={"resolution": "720p"},
+      # "Identity reference image(s) (1-3)".
+      options={"maxImages": 3})
+
+# ----- FPS boost, slow motion and SDR to HDR (Higgsfield's Upscale tools)
+model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
+      "Smooth frame interpolation to 16–120 fps, or up to 8× slow motion",
+      [("interpolate", "topaz/interpolate/video")], badges=["new"],
+      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"),
+      # H.265 unless asked: H.264 plays in every browser.
+      api_defaults={"H264_output": True}, controls=[("model", "Model")])
+# Doubles the frame rate (one new frame per pair) at the clip's own speed; its fps field only applies with
+# use_calculated_fps off, so a target frame rate is not sent.
+model("rife-video-cloud", "RIFE (hosted)", "Open source", "rife", "video",
+      "Cheap frame interpolation: twice the frames, same speed",
+      [("interpolate", "fal-ai/rife/video", "fal", {"drop": ["fps"]})], badges=["fast"], pricing=("request", 0.001, "billed per compute second ($0.0013/s)"))
+model("topaz-sdr-to-hdr", "Topaz SDR to HDR", "Topaz Labs", "topaz", "video",
+      "Hyperion 2.5: SDR footage to 10-bit HDR10 (H.265) or ProRes 422 HQ",
+      [("sdr-to-hdr", "topaz/sdr-to-hdr/video")], badges=["new"], formats={"h265_10bit": "mp4", "prores_422_hq": "prores"},
+      pricing=("second", 0.24, "up to 1080p at 30 fps; 4K $0.51"))
+# EXR frames only (a ZIP, kept as a link on the SDR preview); prompt = how to see the shot, defaulted.
+model("ltx-2-3-hdr", "LTX 2.3 HDR (EXR frames)", "Lightricks", "ltx", "video",
+      "SDR to 16-bit EXR frames for compositing, with an SDR preview",
+      [("sdr-to-hdr", "fal-ai/ltx-2.3-quality/hdr", "fal", {"drop": ["prompt", "resolution"]})], options={"formats": ["exr"]},
+      api_defaults={"prompt": "The same shot in high dynamic range: deeper shadows and brighter highlights, every detail and movement unchanged"},
+      pricing=("video", 0.3, "121 frames at 720p; billed per megapixel of HDR video"))
+
+# ----- FFmpeg-style tools for chains (Ken Burns, end cards, per-frame Mixed Media, audio): hidden utilities
+model("ken-burns", "Ken Burns", "fal", "utility", "video", "A slow zoom into (or out of) a still, toward a focal point",
+      [("still-motion", "fal-ai/workflow-utilities/image-to-video")], pricing=("request", 0.001, "billed per compute second"), hidden=True)
+model("overlay-image", "Overlay image", "fal", "utility", "image", "Places a logo or picture on another, at a position and size",
+      [("overlay", "fal-ai/workflow-utilities/overlay-image")], pricing=("request", 0.001, "billed per compute second"), hidden=True)
+model("extract-frames", "Extract frames", "fal", "utility", "image", "Every Nth frame of a video as images (up to 500 a call)",
+      # max_frames defaults to 100 at the API: ask for its most (500), so a clip is not cut short silently.
+      [("extract-frames", "fal-ai/workflow-utilities/extract-nth-frame")], pricing=("request", 0.001, "billed per compute second"), hidden=True,
+      api_defaults={"max_frames": 500})
+model("images-to-video", "Images to video", "fal", "utility", "video", "Images in order as the frames of a video",
+      [("images-to-video", "fal-ai/ffmpeg-api/images-to-video")], pricing=("request", 0.001, "billed per compute second"), hidden=True)
+# Concatenates 2–5 files (no crossfade on the cloud: hard joins); a loop repeats the clip, up to 5 plays a call.
+model("join-audio", "Join audio", "fal", "utility", "audio", "Audio clips one after another, or one clip played several times",
+      [("audio-join", "fal-ai/ffmpeg-api/merge-audios"), ("audio-loop", "fal-ai/ffmpeg-api/merge-audios")],
+      pricing=("request", 0.001, "billed per compute second"), hidden=True)
+
+# ----- Read text with its boxes (Layers)
+model("florence-2-ocr", "Florence-2 OCR", "Microsoft", "florence", "text", "Every line of text in an image, with its box",
+      [("ocr", "fal-ai/florence-2-large/ocr-with-region")], pricing=("request", 0.001, "billed per compute second"))
+
+# ----- 3D: splats, objects in place, text to 3D, multi-view and rigging
+model("triposplat", "TripoSplat", "Tripo", "tripo", "model3d", "A Gaussian splat of the subject in one photo (background removed)",
+      [("splat", "tripo3d/triposplat")], badges=["new"], fixed={"output_format": "ply"}, sliders=[("num_gaussians", "Gaussians")])
+# Its prompt defaults to "car" at the API, so Fuobe always asks for one.
+model("sam-3d-objects", "SAM 3D Objects", "Meta", "sam", "model3d", "The objects you name, rebuilt in 3D where they stand in the photo",
+      [("image-to-3d", "fal-ai/sam-3/3d-objects")], badges=["new"], pricing=("request", 0.02, "per unit; fal does not say what a unit is"),
+      options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
+model("tripo-h3-1-text", "Tripo H3.1 Text to 3D", "Tripo", "tripo", "model3d", "A textured 3D model from a description",
+      [("text-to-3d", "tripo3d/h3.1/text-to-3d")], pricing=("request", 0.2, "standard textures; untextured $0.10, HD $0.30"),
+      controls=[("texture_quality", "Texture"), ("geometry_quality", "Geometry")])
+model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "One object from up to 4 photos of different sides",
+      [("image-to-3d", "meshy/v7.1/multi-image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
+      controls=[("topology", "Topology")])
+model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
+      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+
+# ----- New video models
+model("flux-3-max", "FLUX 3 Max", "Black Forest Labs", "flux", "video",
+      "BFL's top video model: 5–20 s with sound, start and end frames, or up to 10 keyframes",
+      [("t2v", "blackforestlabs/flux-3-max/text-to-video"), ("i2v", "blackforestlabs/flux-3-max/image-to-video", "fal", "+flf2v"),
+       ("keyframes", "blackforestlabs/flux-3-max/keyframes-to-video")],
+      badges=["new", "audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      # The research's explicit promo-then-list prices ("75% off ... from October 15 to November 7"): parse_price would
+      # read only the promo rate. The catalog switches to the list price after the promo's last day (Pricing.promo).
+      pricing=("second", 0.17, "720p; 1080p $0.29 — launch price $0.0425 (1080p $0.0725) until 2026-11-07",
+               {"byResolution": {"720p": 0.17, "1080p": 0.29},
+                "promo": {"until": "2026-11-07", "usd": 0.0425, "byResolution": {"720p": 0.0425, "1080p": 0.0725}}}),
+      controls=[("reasoning_level", "Reasoning")])
+model("heygen-video", "HeyGen Video", "HeyGen", "heygen", "video",
+      "HeyGen's model on MiniMax H3 — cheap 768p clips, references with sound",
+      [("t2v", "heygen/heygen-video/text-to-video"), ("i2v", "heygen/heygen-video/image-to-video"), ("ref2v", "heygen/heygen-video/reference-to-video")],
+      badges=["new", "fast"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "768p"}, ranged_durations=True,
+      pricing=("second", 0.02, "480p and 768p; 1080p and 2K $0.06", {"byResolution": {"480p": 0.02, "768p": 0.02, "1080p": 0.06, "2k": 0.06}}),
+      controls=[("prompt_enhancement", "Prompt boost")])
+# Higgsfield offers Grok Imagine Video 1.5 too (its Higgsfield route is added by gen-higgsfield-models.py).
+# Its routes take different values (fal's reference-to-video stops at 720p), so each lists its own (fit_values).
+model("grok-imagine-video-1-5", "Grok Imagine Video 1.5", "xAI", "grok", "video", "xAI's video model with references and audio",
+      [("t2v", "xai/grok-imagine-video/v1.5/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/image-to-video"),
+       ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video")],
+      defaults={"aspectRatio": "16:9", "duration": 6, "resolution": "720p"}, ranged_durations=True, fit_values=True,
+      pricing=("second", 0.14, "720p; 480p $0.08, 1080p $0.25; +$0.01 per input image", {"byResolution": {"480p": 0.08, "720p": 0.14, "1080p": 0.25}}))
+model("grok-imagine-video-1-5-lite", "Grok Imagine Video 1.5 Lite", "xAI", "grok", "video", "One of the cheapest 720p video models, 1–15 s",
+      [("t2v", "xai/grok-imagine-video/v1.5/lite/text-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/lite/image-to-video")],
+      badges=["new", "fast"], defaults={"aspectRatio": "16:9", "duration": 6, "resolution": "720p"}, ranged_durations=True,
+      pricing=("second", 0.03, "720p; 480p $0.02, 1080p $0.14; +$0.01 per input image", {"byResolution": {"480p": 0.02, "720p": 0.03, "1080p": 0.14}}))
+model("pixverse-v6-max", "PixVerse V6 Max", "PixVerse", "pixverse", "video", "PixVerse's top model — up to 15 s 1080p with sound and dialogue",
+      [("t2v", "pixverse/pixverse-v6-max", "replicate"), ("i2v", "pixverse/pixverse-v6-max", "replicate")],
+      badges=["new", "audio"], defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"},
+      # Sound is on by default in Fuobe (off at the API), so the estimate uses the with-sound rates.
+      pricing=("second", 0.15, "720p with sound; without $0.11; 1080p $0.28 / $0.22",
+               {"byResolution": {"360p": 0.09, "540p": 0.11, "720p": 0.15, "1080p": 0.28}}))
+model("p-video-2-pro-reference", "P-Video 2 Pro Reference", "Pruna AI", "p-video", "video",
+      "MiniMax H3 reference-to-video: images, clips and sound to follow, optional first and last frame",
+      [("ref2v", "prunaai/p-video-2-pro-reference", "replicate")], badges=["new"],
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "768p"}, ranged_durations=True,
+      pricing=("second", 0.035, "768p speed mode; cost mode $0.025; + reference clips and images", {"byResolution": {"480p": 0.02, "768p": 0.035}}),
+      controls=[("mode", "Mode")])
+model("creatify-boreal", "Creatify Boreal", "Creatify", "creatify", "video",
+      "UGC, product and presenter clips with sound for a cent a second",
+      [("t2v", "creatify/boreal"), ("i2v", "creatify/boreal")], badges=["new", "audio", "fast"],
+      defaults={"aspectRatio": "16:9", "duration": 10, "resolution": "720p"}, ranged_durations=True,
+      pricing=("second", 0.01, "720p; 1080p $0.03, 2K $0.12", {"byResolution": {"720p": 0.01, "1080p": 0.03, "2k": 0.12}}))
+model("pixelcut-looping-video", "Pixelcut Looping Video", "Pixelcut", "pixelcut", "video",
+      "A product photo as a seamless 5–15 s loop, camera locked",
+      [("i2v", "pixelcut/looping-video")], badges=["new"], defaults={"duration": 5, "resolution": "768p", "generateAudio": False}, ranged_durations=True,
+      pricing=("second", 0.16, "768p; 480p $0.08, 1080p $0.32", {"byResolution": {"480p": 0.08, "768p": 0.16, "1080p": 0.32}}),
+      # "Optional creative direction for the motion. Camera stays locked regardless."
+      controls=[("motion", "Motion")], options={"promptOptional": True})
+model("minimax-h3-max-reframe", "MiniMax H3 Max Reframe", "MiniMax", "hailuo", "video",
+      "Outpaints a clip to a new shape — 9:16, 1:1, 21:9 and more — sound and timing kept",
+      [("reframe", "minimax/h3-max/reframe-video")], badges=["new"], defaults={"aspectRatio": "9:16", "resolution": "768p"},
+      pricing=("second", 0.08, "768p; 480p $0.05; long clips run in overlapping windows, and the overlap is billed", {"byResolution": {"480p": 0.05, "768p": 0.08}}))
+# A script-spoken avatar needs no audio file, but Fuobe's avatar flow brings the voice: the TTS fields stay out.
+model("p-video-2-pro-avatar", "P-Video 2 Pro Avatar", "Pruna AI", "p-video", "video",
+      "A portrait and a voice track → a talking video up to 3 minutes",
+      [("avatar", "prunaai/p-video-2-pro-avatar", "replicate", {"drop": ["voice", "script", "language"]})], badges=["new"],
+      defaults={"resolution": "768p"}, pricing=("second", 0.04, "768p; 480p $0.02", {"byResolution": {"480p": 0.02, "768p": 0.04}}))
+
+# ----- New image models
+model("krea-3", "Krea 3", "Krea", "krea", "image", "Krea's new image model — generate or edit with up to 8 references",
+      [("t2i", "krea/v3/text-to-image"), ("edit", "krea/v3/edit"), ("t2i", "krea/krea-3", "replicate"), ("edit", "krea/krea-3", "replicate")],
+      badges=["new"], defaults={"aspectRatio": "1:1"}, pricing=("megapixel", 0.025, "output + each reference; Replicate $0.03–0.08 per image"),
+      # Both APIs take up to 8 images.
+      options={"maxImages": 8})
+# Higgsfield offers Grok Imagine Image 2.0 too (its Higgsfield route is added by gen-higgsfield-models.py).
+# fal's text-to-image has no "auto" and Higgsfield no 20:9 / 19.5:9 / 9:19.5 / 9:20: each route lists what it takes (fit_values).
+model("grok-imagine-image-2", "Grok Imagine Image 2.0", "xAI", "grok", "image", "xAI's image model — bold, fast, few refusals",
+      # fal's edit takes "a maximum of 5 images"; Higgsfield's route takes 10, so a run with more than 5 goes there.
+      [("t2i", "xai/grok-imagine-image/v2.0/text-to-image"), ("edit", "xai/grok-imagine-image/v2.0/edit", "fal", {"max_images": 5})],
+      defaults={"aspectRatio": "1:1", "resolution": "1k"}, fit_values=True,
+      pricing=("image", 0.06, "1K medium on fal; low $0.04; 2K $0.06–0.08; +$0.01 per input image; Higgsfield $0.04 (1K) / $0.08 (2K)",
+               {"byResolution": {"1k": 0.06, "2k": 0.08}}),
+      controls=[("quality", "Quality")], options={"maxImages": 10})
+model("bria-fibo-2", "Bria FIBO 2", "Bria", "bria", "image", "Structured prompts; Bria says it is trained on licensed data only",
+      [("t2i", "bria/fibo-2/generate"), ("edit", "bria/fibo-2/edit")], badges=["new"], defaults={"aspectRatio": "1:1"})
+model("ideogram-vector", "Ideogram Vector", "Ideogram", "ideogram", "image", "Editable SVGs from a prompt, or any image traced to SVG",
+      [("t2i", "ideogram/vector/text-to-vector"), ("vectorize", "ideogram/vector/image-to-vector")], badges=["new"],
+      defaults={"aspectRatio": "1:1"}, pricing=("image", 0.16, "per SVG at medium quality (low $0.13, high $0.20); image to SVG $0.10"),
+      controls=[("quality", "Quality")])
+# Its negative_prompt is refused, not ignored: never sent.
+model("bria-expand", "Bria Expand", "Bria", "bria", "image", "Extend a picture to a new aspect ratio, edges filled to match",
+      # Words for the new area are optional ("Omit it and the model is asked only to extend the image").
+      # It needs a target shape (aspect_ratio or canvas_size): a run without one widens to 16:9.
+      [("outpaint", "bria/fibo-edit-1.5/expand", "fal", {"drop": ["negativePrompt"]})], badges=["new"], options={"promptOptional": True},
+      defaults={"aspectRatio": "16:9"})
+
+# ----- New speech models
+model("heygen-voice-turbo", "HeyGen Voice Turbo", "HeyGen", "heygen", "audio", "24 voices or an instant clone of yours, in 39 languages, for almost nothing",
+      [("tts", "heygen/heygen-voice/turbo")], badges=["new", "fast"], pricing=("request", 0.004, "per 1k chars"))
+model("gemini-3-8-flash-tts", "Gemini 3.8 Flash TTS", "Google", "gemini-tts", "audio", "30 Gemini voices with inline <laugh> and <sigh>",
+      [("tts", "google/gemini-3.8-flash-tts")], badges=["new"], pricing=("request", 0.045, "per 1k chars"))
 
 
 # ---------------------------------------------------------------------------
@@ -678,18 +924,145 @@ def map_fields(fmap):
     for k, v in fmap.items():
         if k in ("fixed", "defaults"):
             out += list(v)
-        elif k in ("seedRange", "maskFormat"):
+        elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
             out.append(v)
         elif isinstance(v, dict):
-            out += [v[f] for f in ("key", "background", "shotType", "flag") if isinstance(v.get(f), str)]
+            out += [v[f] for f in ("key", "background", "shotType", "flag", "factor", "x", "y") if isinstance(v.get(f), str)]
+            # Ken Burns: the zoom direction and easing are fields of their own.
+            out += [v[f]["key"] for f in ("direction", "easing") if isinstance(v.get(f), dict) and isinstance(v[f].get("key"), str)]
     return [f.split(".")[0] for f in out]
 
 
 def mask_format(ep):
     """Ideogram paints black = change; OpenAI's GPT Image uses transparent = change; others white."""
     return "black" if "ideogram" in ep else "alpha" if ("gpt-image" in ep or ep.startswith("openai/")) else None
+
+
+def enum_of(inputs, key):
+    return [v for v in ((inputs.get(key) or {}).get("values") or [])]
+
+
+# Operations research part 4 added (their numeric fields get FieldMap.ranges).
+ROUND4_OPS = ("remove-object", "video-swap", "video-insert", "keyframes", "sdr-to-hdr", "export-video", "ocr", "still-motion", "audio-loop",
+              "audio-join", "scene-3d", "splat", "text-to-3d", "rig-3d", "extract-frames", "images-to-video", "overlay")
+
+
+def part4_slots(op, kf, inputs, m, opts, fmap):
+    """Research part 4 slots, each read only for the operations it belongs to (parts 2-3 use some of the same
+    names: Qwen angles' "zoom", Luma's and Runway's "keyframes")."""
+    if "points" in kf and op in ("remove-object", "video-swap", "video-insert", "bg-remove-video", "image-to-3d"):
+        spec = inputs.get(kf["points"]) or {}
+        item = spec.get("itemSchema") or {}
+        fmt = "bria" if spec.get("items") == "string" else "sam" if "label" in item else None
+        if fmt:
+            fmap["points"] = {"key": kf["points"], "format": fmt}
+        else:
+            warn(f"{m['id']}: {kf['points']} has an unknown point shape")
+    if "keyframes" in kf and op == "keyframes":
+        spec = inputs.get(kf["keyframes"]) or {}
+        item = spec.get("itemSchema") or {}
+        image = next((k for k in item if k.endswith("url")), None)
+        frame = next((k for k in item if "frame" in k), None)
+        # "Frame position of this keyframe in the generated 24 fps video."
+        fps = num((re.search(r"(\d+)\s*fps", (item.get(frame) or {}).get("desc") or "") or [None, None])[1]) if frame else None
+        if image and frame and fps:
+            fmap["keyframes"] = {"key": kf["keyframes"], "image": image, "frame": frame, "fps": fps}
+            opts["maxImages"] = max(opts.get("maxImages", 1), num(spec.get("maxItems")) or 1)
+        else:
+            warn(f"{m['id']}: can't read the keyframe shape of {kf['keyframes']}")
+    if m.get("formats") and op in ("sdr-to-hdr", "export-video"):
+        key = kf.get("outputFormat") or kf.get("codec")
+        enum = enum_of(inputs, key) if key else []
+        bad = [v for v in m["formats"].values() if v not in enum]
+        if key and not bad:
+            fmap["format"] = {"key": key, "values": dict(m["formats"])}
+            opts["formats"] = union(opts.get("formats", []), list(m["formats"]))
+        else:
+            warn(f"{m['id']}: format values {bad or list(m['formats'].values())} not in its output-format enum")
+    if "crossfade" in kf and op in ("audio-loop", "audio-join"):
+        fmap["crossfade"] = kf["crossfade"]
+    if "zoom" in kf and op == "still-motion":
+        z = {"factor": kf["zoom"]}
+        # The furthest it zooms (fal: 2x); a steeper move is sent at that.
+        if num((inputs.get(kf["zoom"]) or {}).get("maximum")):
+            z["max"] = num(inputs[kf["zoom"]]["maximum"])
+        d = kf.get("zoomDirection")
+        vals = enum_of(inputs, d) if d else []
+        zin, zout = (next((v for v in vals if str(v).lower() == w), None) for w in ("in", "out"))
+        if zin and zout:
+            z["direction"] = {"key": d, "in": zin, "out": zout}
+        if "zoomX" in kf and "zoomY" in kf:
+            z["x"], z["y"] = kf["zoomX"], kf["zoomY"]
+            if num((inputs.get(kf["zoomX"]) or {}).get("maximum")) == 100:
+                z["percent"] = True
+        # Fuobe's easing names ("ease-in-out") against the API's ("ease_in_out").
+        ease = {c: v for v in enum_of(inputs, kf.get("easing")) for c in ("linear", "ease-in-out") if str(v).replace("_", "-") == c}
+        if ease:
+            z["easing"] = {"key": kf["easing"], "values": ease}
+        fmap["zoom"] = z
+    if op == "overlay":
+        if "x" in kf and "y" in kf:
+            pct = num((inputs.get(kf["x"]) or {}).get("maximum")) == 100
+            fmap["position"] = {"x": kf["x"], "y": kf["y"], **({"percent": True} if pct else {})}
+        if "scale" in kf:
+            # "Scale of overlay image as percentage (25-200)": Fuobe's scale 1 = 100%.
+            pct = (num((inputs.get(kf["scale"]) or {}).get("maximum")) or 0) > 10
+            fmap["scale"] = {"key": kf["scale"], **({"multiplier": 100} if pct else {})}
+    if op == "interpolate":
+        if "slowdown" in kf:
+            fmap["slowdown"] = kf["slowdown"]
+        if "targetFps" in kf:
+            fmap["targetFps"] = kf["targetFps"]
+    if "frameInterval" in kf and op == "extract-frames":
+        fmap["frameInterval"] = kf["frameInterval"]
+    if "colormap" in kf and op == "depth-video":
+        fmap["colormap"] = kf["colormap"]
+    if "frames" in kf and op == "images-to-video":
+        item = (inputs.get(kf["frames"]) or {}).get("itemSchema") or {}
+        url, frames = next((k for k in item if "url" in k), None), next((k for k in item if "frame" in k), None)
+        if url and frames:
+            fmap["frames"] = {"key": kf["frames"], "url": url, "frames": frames}
+            opts["maxImages"] = max(opts.get("maxImages", 1), num((inputs.get(kf["frames"]) or {}).get("maxItems")) or 1)
+    if op == "rig-3d":
+        if "model3d" in kf:
+            fmap["model3d"] = kf["model3d"]
+        if "animation" in kf:
+            flag = next((k for k, v in inputs.items() if k.startswith("enable_") and "animation" in k and (v or {}).get("type") == "boolean"), None)
+            fmap["animation"] = {"key": kf["animation"], **({"flag": flag} if flag else {})}
+    # Routes that render only as many frames as asked (LTX 2.3 clean plate / HDR: "Output duration is num_frames /
+    # frames_per_second"; VOID's window): the frame count follows the clip's length. VACE matches the input itself.
+    if "numFrames" in kf and op in ("remove-object", "sdr-to-hdr", "video-swap", "video-insert") and "match_input_num_frames" not in inputs:
+        spec = inputs.get(kf["numFrames"]) or {}
+        fps_spec = inputs.get(kf.get("fps", "")) or {}
+        # VOID has no frame-rate field: its frame budget is read at 24 fps ("about 8 s at 24 fps", research part 4).
+        fps = num(fps_spec.get("default")) or 24
+        fmap["numFrames"] = {"key": kf["numFrames"], "fps": fps,
+                             **{k: num(spec[f]) for k, f in (("min", "minimum"), ("max", "maximum")) if num(spec.get(f)) is not None}}
+
+
+def part4_ranges(op, inputs, fmap):
+    """The API's limits on the numbers Fuobe fills for the round-4 tools (FieldMap.ranges): rounded and kept inside them."""
+    fields = [fmap.get(k) for k in ("targetFps", "slowdown", "frameInterval", "crossfade")]
+    fields += [(fmap.get(k) or {}).get(f) for k, f in (("scale", "key"), ("position", "x"), ("position", "y"), ("zoom", "x"), ("zoom", "y"), ("animation", "key"))]
+    if op in ROUND4_OPS:
+        fields += [fmap.get("fps"), (fmap.get("duration") or {}).get("key")]
+    ranges = {}
+    for f in fields:
+        spec = inputs.get(f) if isinstance(f, str) else None
+        if not spec or spec.get("type") not in ("integer", "number"):
+            continue
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        # Meshy states its preset range in words: "it must be in [0, 696]".
+        stated = re.search(r"\[(\d+),\s*(\d+)\]", spec.get("desc") or "")
+        if lo is None and hi is None and stated:
+            lo, hi = num(stated[1]), num(stated[2])
+        r = {**({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}), **({"integer": True} if spec["type"] == "integer" else {})}
+        if r:
+            ranges[f] = r
+    if ranges:
+        fmap["ranges"] = ranges
 
 
 def build_route(op, ep, provider, m, opts, ropts=None):
@@ -702,7 +1075,13 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         warn(f"{m['id']}: {ep} is not verified")
     inputs = e.get("inputs") or {}
     kf = dict(e.get("keyFields") or {})
-    # A route can ignore key fields whose meaning doesn't fit Fuobe's slot (e.g. Ideogram edit's style refs).
+    # A route can point a slot at another field of the same schema (VACE's first-frame mask is mask_image_url)…
+    for k, f in (ropts.get("keys") or {}).items():
+        if f.split(".")[0] not in inputs:
+            warn(f"{m['id']}: {ep} has no field {f} for {k}")
+            continue
+        kf[k] = f
+    # …or ignore key fields whose meaning doesn't fit Fuobe's slot (e.g. Ideogram edit's style refs).
     for k in ropts.get("drop") or []:
         kf.pop(k, None)
     # Part 3 slot names that are the same canonical input: the person in a try-on is the main image,
@@ -717,6 +1096,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         if k in kf and "image2" not in kf and (inputs.get(kf[k]) or {}).get("type") != "array":
             kf["image2"] = kf[k]
             labels[1] = label
+    # An overlay goes on a picture (a logo on an end card).
+    if op == "overlay":
+        labels = ["picture", "logo or overlay"]
     # Two-image APIs whose second image is required (try-on garments) can't run on one picture.
     if "image2" in kf and (inputs.get(kf["image2"]) or {}).get("required") and (inputs.get(kf.get("image", "")) or {}).get("required"):
         opts["minImages"] = 2
@@ -734,6 +1116,19 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Relight endpoints take the lighting description as the prompt.
     if "lightingPrompt" in kf:
         fmap["prompt"] = kf["lightingPrompt"]
+    # Erasers that build their own mask from words (VOID's mask_prompt) take Fuobe's prompt, which names
+    # what to remove or replace; their own prompt (the scene afterwards) comes from api_defaults or params.extra.
+    if "maskPrompt" in kf and op in ("remove-object", "video-swap", "video-insert"):
+        fmap["prompt"] = kf["maskPrompt"]
+    # Swaps whose references say what goes in may also take words (P-Video Replace's instruction): optional.
+    elif op in ("video-swap", "video-insert") and "prompt" in kf and not (inputs.get(kf["prompt"]) or {}).get("required"):
+        opts["promptOptional"] = True
+    # A model that runs without words leaves an empty prompt out where the API's prompt is optional
+    # (Bria Expand: "Omit it and the model is asked only to extend the image").
+    pkey = fmap.get("prompt", "prompt" if "prompt" in kf else None)
+    if pkey and (m["options"].get("promptOptional") or (op in ("video-swap", "video-insert") and opts.get("promptOptional"))) \
+            and not (inputs.get(pkey.split(".")[0]) or {}).get("required"):
+        fmap["omitEmptyPrompt"] = True
     # Zero-shot TTS takes its reference voice in the "audio" field; voice conversion names it separately.
     if op == "tts" and "audio" in kf:
         kf["referenceVoice"] = kf.pop("audio")
@@ -784,6 +1179,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
                     opts[key] = max(opts.get(key, 0), cap)
                 continue
             fmap[k] = kf[k]
+    # A loop by repetition (fal merge-audios): the one clip, listed as many times as the length needs.
+    if op == "audio-loop" and "audios" in fmap:
+        fmap["loop"] = {"key": fmap.pop("audios"), "max": num((inputs.get(kf["audio"]) or {}).get("maxItems")) or 2}
     # Multi-shot, draft mode and draft completion (research part 2 key fields).
     if "multiShot" in kf and op in ("t2v", "i2v", "ref2v") and (inputs.get(kf["multiShot"]) or {}).get("type") in ("array", "string"):
         item = (inputs.get(kf["multiShot"]) or {}).get("itemSchema") or {}
@@ -800,6 +1198,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         opts["draft"] = True
     if "draftId" in kf:
         fmap["draftId"] = kf["draftId"]
+    # Frame interpolation's "fps" is the frame rate to reach (params.targetFps), not a sampling rate.
+    if op == "interpolate" and "fps" in kf:
+        kf["targetFps"] = kf.pop("fps")
     # Research part 3 slots.
     if "image2" in kf:
         fmap["image2"] = kf["image2"]
@@ -812,6 +1213,7 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["styleId"] = kf["styleId"]
     if "numLayers" in kf:
         fmap["numLayers"] = kf["numLayers"]
+    part4_slots(op, kf, inputs, m, opts, fmap)
     # fal compose: the timeline's tracks are built from the clips and their start times (FieldMap.timeline).
     if "tracks" in kf and op == "timeline":
         fmap["timeline"] = kf["tracks"]
@@ -860,6 +1262,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]
             if not ratios and spec.get("type") == "string":
                 ratios = ["16:9", "9:16", "1:1"] if m["kind"] == "video" else IMG_AR
+            elif m.get("fit_values") and ratios:
+                fmap["aspectRatio"] = {"key": key, "accepts": ratios}
             opts["aspectRatios"] = union(opts.get("aspectRatios", []), ratios)
     # Resolution
     if "resolution" in kf:
@@ -869,6 +1273,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         if enum and (inputs.get(key) or {}).get("valueType") in ("integer", "number"):
             # Numeric tiers (TRELLIS 512/1024/1536) are picked as strings and sent as numbers.
             fmap["resolution"] = {"key": key, "values": {str(v): v for v in enum}}
+        elif enum and m.get("fit_values"):
+            fmap["resolution"] = {"key": key, "accepts": [str(v) for v in enum]}
         opts["resolutions"] = union(opts.get("resolutions", []), [str(v) for v in enum])
     # Duration
     if "duration" in kf:
@@ -892,8 +1298,12 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             fmap["duration"] = {"key": key, "type": dtype}
             if str(spec.get("default", "")).endswith("s") and dtype == "string":
                 fmap["duration"]["suffix"] = "s"
+            lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+            if m.get("ranged_durations") and lo is not None and hi is not None:
+                opts["durations"] = union(opts.get("durations", []), [v for v in NICE_DURATIONS if lo <= v <= hi] or [lo])
         if key.endswith("_ms"):
             fmap["duration"]["multiplier"] = 1000
+    part4_ranges(op, inputs, fmap)
     # Text-to-speech etc. carry the prompt in "text".
     if ropts.get("fixed"):
         m = {**m, "fixed": {**m["fixed"], **ropts["fixed"]}}
@@ -904,6 +1314,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             warn(f"{m['id']}: fixed fields {missing} not in {ep} inputs")
         if not fmap["fixed"]:
             del fmap["fixed"]
+    # A route's own fallbacks (VACE's background prompt applies to its erase route only).
+    if ropts.get("defaults"):
+        m = {**m, "api_defaults": {**m["api_defaults"], **ropts["defaults"]}}
     if m.get("api_defaults"):
         fmap["defaults"] = {k: v for k, v in m["api_defaults"].items() if k.split(".")[0] in inputs}
         missing = [k for k in m["api_defaults"] if k.split(".")[0] not in inputs]
@@ -927,6 +1340,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     if "images" in fmap:
         mx = num((inputs.get(fmap["images"]) or {}).get("maxItems")) or None
         opts["maxImages"] = max(opts.get("maxImages", 1), mx or (10 if op == "edit" else 4))
+        # A route that takes fewer than the model's other routes (stated in its docs, not its schema).
+        if ropts.get("max_images"):
+            fmap["maxImages"] = ropts["max_images"]
     elif "image" in fmap:
         opts["maxImages"] = max(opts.get("maxImages", 0), 2 if "image2" in fmap else 1)
     # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
@@ -988,6 +1404,14 @@ for m in M:
     if all(r["map"].get("prompt") is False for r in routes):
         opts["promptless"] = True
     opts.update(m["options"])
+    # A model-wide control or slider goes only to the routes whose schema has its field (Ideogram Vector's
+    # quality is a text-to-vector setting; image-to-vector has none).
+    offered = [c["param"] for c in opts.get("controls", [])] + [x["param"] for x in opts.get("sliders", [])]
+    for route in routes:
+        inputs = (EPS.get((route["provider"], route["endpoint"])) or {}).get("inputs") or {}
+        missing = [x for x in offered if x.split(".")[0] not in inputs]
+        if missing:
+            route["map"] = {**route["map"], "ignore": missing}
     pricing = None
     if m["pricing"]:
         u, usd, *rest = m["pricing"]
@@ -1022,7 +1446,7 @@ for m in M:
     out.append(d)
 
 ts = (
-    "// Generated by scripts/gen-cloud-models.py from docs/research/paid-model-apis(-2,-3).json — do not edit by hand.\n"
+    "// Generated by scripts/gen-cloud-models.py from docs/research/paid-model-apis(-2,-3,-4).json — do not edit by hand.\n"
     'import type { ModelDef } from "./types";\n\n'
     f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n"
 )

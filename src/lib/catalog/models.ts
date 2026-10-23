@@ -1,5 +1,7 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
+import { pricingAt } from "./plan";
+import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -202,6 +204,25 @@ const open: ModelDef[] = [
     tagline: "Fast 4x image upscale",
     routes: [comfy("upscale-image", "upscale-image-esrgan")],
     options: {},
+  }),
+  o({
+    // The Vectorize app's open route (Recraft Vectorize on the cloud): tracing, no model weights.
+    id: "oss-vtracer",
+    name: "VTracer",
+    vendor: "visioncortex",
+    family: "vtracer",
+    kind: "image",
+    tagline: "Traces logos, icons and flat art into a clean, editable SVG · CPU, no model · MIT",
+    routes: [comfy("vectorize", "image-vectorize-vtracer", "colour tracing, stacked shapes")],
+    options: {
+      promptless: true,
+      maxImages: 1,
+      controls: [{ param: "curveMode", label: "Curves", values: ["spline", "polygon"], default: "spline" }],
+      sliders: [
+        { param: "colorPrecision", label: "Colour detail", min: 1, max: 8, step: 1, default: 6 },
+        { param: "filterSpeckle", label: "Ignore specks (px)", min: 0, max: 32, step: 1, default: 4 },
+      ],
+    },
   }),
   o({
     id: "oss-seedvr2-image",
@@ -887,11 +908,11 @@ const open: ModelDef[] = [
     vendor: "FunAudioLLM",
     family: "thinksound",
     kind: "audio",
-    tagline: "Apache-2.0 sound effects with a step-by-step sound description · 12 GB GPU · needs a separate ComfyUI worker",
+    tagline: "Apache-2.0 sound effects from a description, up to 30 s · 12 GB GPU",
     routes: [comfy("sfx", "sfx-thinksound", "isolated worker (scripts/comfy/README.md)")],
     options: { durations: [3, 5, 8, 10, 20, 30], seed: true },
     defaults: { duration: 8 },
-    hidden: true,
+    worker: "isolated",
   }),
   // Voice, transcription, captions, translation, lip re-sync, soundtrack
   o({
@@ -914,7 +935,8 @@ const open: ModelDef[] = [
     tagline: "Timed captions from speech in 30 languages (auto-detect) · 4 GB GPU · Apache-2.0",
     badges: ["new", "top"],
     routes: [comfy("transcribe", "captions-qwen3-asr", "Qwen3-ASR 0.6B + ForcedAligner; one cue per line")],
-    options: { sliders: [{ param: "maxChars", label: "Characters per caption", min: 12, max: 60, step: 2, default: 32 }] },
+    // "tl" is the node's second code for Filipino.
+    options: { sliders: [{ param: "maxChars", label: "Characters per caption", min: 12, max: 60, step: 2, default: 32 }], sourceLanguages: Object.keys(ASR_LANGUAGES).filter((c) => c !== "tl") },
   }),
   o({
     id: "oss-captions-burnin",
@@ -944,7 +966,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack, installed only with NC_PACKS=1",
     routes: [comfy("captions", "captions-whisper-burnin", "Whisper large-v3-turbo + ComfyUI-Whisper (CC-BY-NC-SA code)")],
-    options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }] },
+    options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }], sourceLanguages: Object.keys(WHISPER_LANGUAGES) },
   }),
   o({
     id: "oss-qwen35-translate",
@@ -986,10 +1008,16 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "latentsync",
     kind: "video",
-    tagline: "Mouth-only lip re-sync, identity untouched · 20 GB GPU · OpenRAIL++ · needs a separate ComfyUI worker",
+    tagline: "Re-syncs only the mouth of real footage to a new voice; face, camera and background untouched · 20 GB GPU · OpenRAIL++",
     routes: [comfy("lipsync", "lipsync-latentsync16", "isolated worker (scripts/comfy/README.md)")],
-    options: { seed: true },
-    hidden: true,
+    options: {
+      seed: true,
+      sliders: [
+        { param: "lipsExpression", label: "Lip movement", min: 1, max: 3, step: 0.1, default: 1.5 },
+        { param: "steps", label: "Steps", min: 10, max: 50, step: 1, default: 20 },
+      ],
+    },
+    worker: "isolated",
   }),
   o({
     id: "oss-mux",
@@ -1207,9 +1235,14 @@ const AI_INFLUENCER: ModelDef = {
   pricing: { unit: "image", usd: 0.05 },
 };
 
+/** A launch price while it lasts, the list price after (FLUX 3 Max); read once, when the catalog loads. */
+const withCurrentPrice = (m: ModelDef): ModelDef => (m.pricing?.promo ? { ...m, pricing: pricingAt(m.pricing) } : m);
+
 /** Cloud models with their Higgsfield routes attached, plus the models only Higgsfield hosts. */
 const cloud: ModelDef[] = [
-  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m)).map(withLastFrameExtend),
+  ...CLOUD_MODELS.map((m) => (HIGGSFIELD_ROUTES[m.id] ? { ...m, routes: [...m.routes, ...HIGGSFIELD_ROUTES[m.id]] } : m))
+    .map(withLastFrameExtend)
+    .map(withCurrentPrice),
   ...HIGGSFIELD_MODELS,
   AI_INFLUENCER,
   ...cloudTools,

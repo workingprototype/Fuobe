@@ -3,11 +3,11 @@
 Generate src/lib/catalog/higgsfield-models.generated.ts from docs/research/higgsfield-api.json.
 
 Two outputs:
-  HIGGSFIELD_MODELS — models only Higgsfield hosts (Soul, Soul Cinema, Genjutsu, Cinema Studio,
-                      Marketing/Ads Studio, Grok Imagine, Happy Horse)
+  HIGGSFIELD_MODELS — models only Higgsfield hosts (Soul, Soul Cinema, Genjutsu and Genjutsu Lite, Cinema
+                      Studio, Marketing/Ads Studio, Happy Horse)
   HIGGSFIELD_ROUTES — extra `higgsfield` routes for models Fuobe already offers through fal /
-                      Replicate (Seedance, Kling, Wan, MiniMax, LTX, PixVerse…), so a Higgsfield
-                      key alone can run them.
+                      Replicate (Seedance, Kling, Wan, MiniMax, LTX, PixVerse, Grok Imagine…), so a
+                      Higgsfield key alone can run them.
 
 Field names, enums, defaults and prices come from the verified research file; nothing is typed
 by hand except the curated list below.
@@ -38,10 +38,20 @@ CONTROL_LABELS = {
 }
 
 
+# Operations that edit the one video they are given (the clip goes in video_urls, not the reference clips).
+EDIT_OPS = ("v2v", "extend", "remove-object", "video-swap", "video-insert")
+
+
 def field_map(op, ep, inputs, opts):
+    # Read-only fields (Genjutsu Light's duration, computed from the source) are never sent.
+    inputs = {k: v for k, v in inputs.items() if not v.get("readOnly")}
     fm = {}
     if "prompt" not in inputs:
         fm["prompt"] = False
+    elif op in ("video-swap", "video-insert") and not inputs["prompt"].get("required"):
+        # The references say what goes in; words are optional (Genjutsu object swap), and an empty prompt is left out.
+        opts["promptOptional"] = True
+        fm["omitEmptyPrompt"] = True
     pick = lambda *names: next((n for n in names if n in inputs), None)  # noqa: E731
     img = pick("image_url", "first_frame_url")
     imgs = "image_urls" if "image_urls" in inputs else None
@@ -61,7 +71,7 @@ def field_map(op, ep, inputs, opts):
         # Seedance 2.5 edit / extend take reference clips beside the video they work on.
         if "video_urls" in inputs and clips:
             fm["videos"] = "video_urls"
-    elif "video_urls" in inputs and op in ("v2v", "extend"):
+    elif "video_urls" in inputs and op in EDIT_OPS:
         fm["videoArray"] = "video_urls"
     elif "video_urls" in inputs and clips:
         # Reference videos (Cinema Studio 4.0, Seedance, Wan, MiniMax reference-to-video): inputs.videos.
@@ -156,17 +166,32 @@ def price(ep, default_res=None):
     return {"unit": p["unit"], "usd": usd, "note": "Higgsfield list price"} if usd else None
 
 
-def routes_for(spec, opts):
+def routes_for(spec, opts, fit=False):
+    """spec: (op, endpoint) or (op, endpoint, {drop: [canonical keys], accepts: {aspectRatio | resolution: [values]}}).
+    fit: the model's aspect ratios and resolutions come from its fal routes, so each route lists the ones it
+    takes (EnumField.accepts) and gets the closest of them."""
     out = []
     for r in spec:
         op, ep = r[0], r[1]
+        ro = r[2] if len(r) > 2 else {}
         if ep not in EPS:
             warn(f"{ep} not in research")
             continue
         e = EPS[ep]
         if not e.get("verified"):
             warn(f"{ep} not verified")
-        fm = field_map(op, ep, e.get("inputs") or {}, opts)
+        inputs = e.get("inputs") or {}
+        fm = field_map(op, ep, inputs, opts)
+        for k in ro.get("drop") or []:
+            fm.pop(k, None)
+        if fit:
+            for canon, field in (("aspectRatio", "aspect_ratio"), ("resolution", "resolution")):
+                if fm.get(canon) != field:
+                    continue
+                vals = (ro.get("accepts") or {}).get(canon) or [
+                    str(v) for v in inputs[field].get("enum", []) if canon == "resolution" or RATIO.match(str(v)) or v == "auto"]
+                if vals:
+                    fm[canon] = {"key": field, "accepts": vals}
         out.append({"op": op, "provider": "higgsfield", "endpoint": ep, "map": fm})
         if op == "i2v" and "endImage" in fm:
             out.append({"op": "flf2v", "provider": "higgsfield", "endpoint": ep, "map": fm})
@@ -197,9 +222,6 @@ EXCLUSIVE = [
     dict(id="ads-studio", name="Ads Studio", vendor="Higgsfield", family="ads-studio", kind="image",
          tagline="A brief and a product photo in, a batch of static ad concepts out",
          routes=[("t2i", "higgsfield/ads-studio/v1.0"), ("edit", "higgsfield/ads-studio/v1.0")], defaults={"aspectRatio": "1:1"}),
-    dict(id="grok-imagine-image-2", name="Grok Imagine Image 2.0", vendor="xAI", family="grok", kind="image",
-         tagline="xAI's image model — bold, fast, few refusals",
-         routes=[("t2i", "xai/grok-imagine-image-2.0"), ("edit", "xai/grok-imagine-image-2.0")], defaults={"aspectRatio": "1:1"}),
     dict(id="cinema-studio-4", name="Cinema Studio 4.0", vendor="Higgsfield", family="cinema-studio", kind="video",
          tagline="Higgsfield's director model on Seedance 2.5 — genre, lens, light, grade and camera move controls",
          badges=["top", "audio", "new"], routes=[("t2v", "higgsfield/cinema-studio/4.0"), ("ref2v", "higgsfield/cinema-studio/4.0")],
@@ -209,15 +231,20 @@ EXCLUSIVE = [
          badges=["new"], routes=[("motion-transfer", "higgsfield/genjutsu/motion-transfer/v1.0")], defaults={"resolution": "720p"}),
     dict(id="genjutsu-object-swap", name="Genjutsu Object Swap", vendor="Higgsfield", family="genjutsu", kind="video",
          tagline="Replace one thing in a video and keep everything else",
-         routes=[("v2v", "higgsfield/genjutsu/object-swap/v1.0")], defaults={"resolution": "720p"}),
+         # Also listed as round 4's video-swap, beside Genjutsu Lite, for the swap tools that pick models by operation.
+         routes=[("v2v", "higgsfield/genjutsu/object-swap/v1.0"), ("video-swap", "higgsfield/genjutsu/object-swap/v1.0")],
+         defaults={"resolution": "720p"}),
     dict(id="genjutsu-restyle", name="Genjutsu Restyle", vendor="Higgsfield", family="genjutsu", kind="video",
          tagline="Restyle footage with 30+ looks while keeping motion and audio",
          routes=[("v2v", "higgsfield/genjutsu/restyle/v1.0")],
          presets={"source": "genjutsu-restyle", "param": "preset_id", "label": "Style", "required": True}, defaults={"resolution": "720p"}),
-    dict(id="grok-imagine-video-1-5", name="Grok Imagine Video 1.5", vendor="xAI", family="grok", kind="video",
-         tagline="xAI's video model with references and audio",
-         routes=[("t2v", "xai/grok-imagine-video/v1.5/reference-to-video"), ("i2v", "xai/grok-imagine-video/v1.5/reference-to-video"),
-                 ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video")], defaults={"aspectRatio": "16:9", "duration": 6}),
+    # Genjutsu Lite (API name Genjutsu Light, 2026-10-20): the first 15 s of the source at a fraction of the price.
+    dict(id="genjutsu-lite-object-swap", name="Genjutsu Lite Object Swap", vendor="Higgsfield", family="genjutsu", kind="video",
+         tagline="Swap objects, characters or clothes from 1–8 references in clips up to 15 s",
+         badges=["new"], routes=[("video-swap", "higgsfield/genjutsu-light/object-swap/v1.0")], defaults={"resolution": "720p"}),
+    dict(id="genjutsu-lite-motion-transfer", name="Genjutsu Lite Motion Transfer", vendor="Higgsfield", family="genjutsu", kind="video",
+         tagline="A clip's motion on your characters, for clips up to 15 s",
+         badges=["new"], routes=[("motion-transfer", "higgsfield/genjutsu-light/motion-transfer/v1.0")], defaults={"resolution": "720p"}),
     dict(id="happy-horse-1-1", name="Happy Horse 1.1", vendor="Alibaba", family="happy-horse", kind="video",
          tagline="Alibaba's expressive character-animation video model",
          routes=[("t2v", "alibaba/happy-horse/v1.1/text-to-video"), ("i2v", "alibaba/happy-horse/v1.1/image-to-video"),
@@ -234,7 +261,9 @@ EXTRA = {
     "kling-3": [("t2v", "kling-video/v3.0/pro/text-to-video"), ("i2v", "kling-video/v3.0/pro/image-to-video")],
     "kling-3-4k": [("t2v", "kling-video/v3.0/4k/text-to-video"), ("i2v", "kling-video/v3.0/4k/image-to-video")],
     "kling-3-turbo": [("t2v", "kling-video/v3.0-turbo/text-to-video"), ("i2v", "kling-video/v3.0-turbo/image-to-video")],
-    "kling-o3": [("flf2v", "kling-video/o3/first-last-frame"), ("ref2v", "kling-video/o3/image-reference"), ("v2v", "kling-video/o3/video-edit")],
+    # Higgsfield's Remove Object page is this edit with a removal prompt (research part 4); swaps and inserts too.
+    "kling-o3": [("flf2v", "kling-video/o3/first-last-frame"), ("ref2v", "kling-video/o3/image-reference"), ("v2v", "kling-video/o3/video-edit"),
+                 ("remove-object", "kling-video/o3/video-edit"), ("video-swap", "kling-video/o3/video-edit"), ("video-insert", "kling-video/o3/video-edit")],
     "kling-o1": [("flf2v", "kling-video/omni/first-last-frame"), ("ref2v", "kling-video/omni/image-reference"), ("v2v", "kling-video/omni/video-edit")],
     "kling-motion-control": [("motion-transfer", "kling-video/v3/motion-control/pro")],
     "kling-2-6-pro": [("t2v", "kling-video/v2.6/pro/text-to-video"), ("i2v", "kling-video/v2.6/pro/image-to-video")],
@@ -252,7 +281,18 @@ EXTRA = {
     "z-image-turbo-cloud": [("t2i", "z-image/turbo")],
     "recraft-4-1": [("t2i", "recraft/v4.1/text-to-image")],
     "recraft-4-1-pro": [("t2i", "recraft/v4.1/pro/text-to-image")],
+    # Grok Imagine on fal since round 4 (gen-cloud-models.py); Higgsfield is the second route. "Choose either image_url
+    # or reference media (image_urls/audio_url); do not combine these modes", and "when image_urls or audio_url is
+    # provided, resolution must be 480p or 720p" (the shared schema lists 1080p).
+    "grok-imagine-video-1-5": [("t2v", "xai/grok-imagine-video/v1.5/reference-to-video"),
+                               ("i2v", "xai/grok-imagine-video/v1.5/reference-to-video", {"drop": ["images"]}),
+                               ("ref2v", "xai/grok-imagine-video/v1.5/reference-to-video",
+                                {"drop": ["image"], "accepts": {"resolution": ["480p", "720p"]}})],
+    "grok-imagine-image-2": [("t2i", "xai/grok-imagine-image-2.0"), ("edit", "xai/grok-imagine-image-2.0")],
 }
+
+# Models whose fal and Higgsfield routes take different aspect ratios or resolutions (see routes_for's fit).
+FIT = {"grok-imagine-video-1-5", "grok-imagine-image-2"}
 
 models = []
 for m in EXCLUSIVE:
@@ -277,7 +317,7 @@ extra = {}
 for mid, spec in EXTRA.items():
     opts = {}
     # The model keeps its own enums and controls: Higgsfield-only fields would break its fal routes.
-    extra[mid] = routes_for(spec, opts)
+    extra[mid] = routes_for(spec, opts, fit=mid in FIT)
 
 out = ROOT / "src/lib/catalog/higgsfield-models.generated.ts"
 out.write_text(

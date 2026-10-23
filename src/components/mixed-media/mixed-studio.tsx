@@ -91,7 +91,7 @@ export function MixedStudio({ models }: { models: Record<Engine, RestyleModelInf
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 px-3 pb-28 sm:px-6 lg:pb-16">
+      <div className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 px-3 pb-28 sm:px-6 lg:pb-16">
         {tab === "history" ? (
           <MixedHistory onStart={() => pick("presets")} />
         ) : tab === "how" ? (
@@ -108,7 +108,7 @@ export function MixedStudio({ models }: { models: Record<Engine, RestyleModelInf
             <Workspace engine={engine} models={models[engine]} />
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

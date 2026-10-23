@@ -695,7 +695,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
         />
         <div className="flex min-h-0 flex-1">
           <ToolRail />
-          <main className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative flex min-w-0 flex-1 flex-col">
             {compare ? (
               <div className="checkerboard grid min-h-0 flex-1 place-items-center overflow-hidden p-6">
                 {pair ? <CompareSlider before={pair.before} after={pair.after} alt="Your layers" /> : <Loader2 className="size-5 animate-spin text-muted-foreground" />}
@@ -735,7 +735,7 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
                 </Button>
               </div>
             )}
-          </main>
+          </div>
           <LayersPanel />
         </div>
       </div>

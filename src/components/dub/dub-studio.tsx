@@ -17,7 +17,7 @@ import { StepList, type StepRow } from "@/components/av/step-list";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
 import { useEngine } from "@/lib/api";
 import { cueProblems } from "@/lib/av/cue-edit";
-import { crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
+import { BACKGROUND_DB, crowdedLines, dubResult, languageStage, ONE_SHOT_MODELS, priceLine, reviewCues, takeLines, translateKey, voiceOnly, type DubPrice, type DubSessionView, type DubStage, type OneShotModel } from "@/lib/av/dub";
 import { languageByCode, supportsTarget, type DubRoute } from "@/lib/av/languages";
 import type { Cue } from "@/lib/cues";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ const ONE_SHOT: Record<OneShotModel, { name: string; note: string }> = {
 
 const ROUTE_LINE = {
   open: "Open source: MelBand RoFormer splits the voice from the music and Qwen3-ASR times it → your local LLM translates → you review → Chatterbox speaks each line in the cloned voice, at its time → InfiniteTalk re-syncs the lips → mixed back over the music.",
-  cloud: "Cloud: ElevenLabs isolates the voice → Scribe v2 times it → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3. The cloud route keeps the voice only (no music stem on this route).",
+  cloud: "Cloud: ElevenLabs isolates the voice and Demucs lifts out the music and effects → Scribe v2 times the voice → Claude (or Ollama) translates → you review → ElevenLabs speaks each line at its time and Chatterbox turns it into the speaker's voice → Sync Lipsync 3 → mixed back over the music and effects.",
 };
 
 const STAGE: Record<DubStage, { label: string; tone: string }> = {
@@ -52,16 +52,35 @@ function StageBadge({ stage }: { stage: DubStage }) {
 export function DubStudio({ tabs }: { tabs?: React.ReactNode }) {
   const sessions = useDubSessions();
   const [openId, setOpenId] = useState<string | null>(null);
+  // Hand-off: /audio/translate?dub=<id> opens that dub (Assist and MCP link the dubs they start).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("dub");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read once after hydration (no Suspense boundary needed)
+    if (id) setOpenId(id);
+  }, []);
+  // The open dub is in the address, so a reload or a shared link comes back to it.
+  const show = (id: string | null) => {
+    setOpenId(id);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set("dub", id);
+    else url.searchParams.delete("dub");
+    window.history.replaceState(null, "", url);
+  };
   // A dub removed elsewhere (another tab) just closes.
   const open = sessions.data?.find((s) => s.id === openId);
   return (
     <ToolShell title="Audio" tabs={tabs}>
       {open ? (
-        <SessionView key={open.id} s={open} onBack={() => setOpenId(null)} />
+        <SessionView key={open.id} s={open} onBack={() => show(null)} />
+      ) : openId && sessions.isLoading ? (
+        <div className="mx-auto max-w-[760px] space-y-3 pt-4" aria-label="Opening the dub">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="aspect-video w-full rounded-2xl" />
+        </div>
       ) : (
         <>
-          <NewDub onStarted={(id) => setOpenId(id)} />
-          <RecentDubs sessions={sessions.data} loading={sessions.isLoading} onOpen={setOpenId} />
+          <NewDub onStarted={show} />
+          <RecentDubs sessions={sessions.data} loading={sessions.isLoading} onOpen={show} />
         </>
       )}
     </ToolShell>
@@ -270,7 +289,7 @@ function RecentDubs({ sessions, loading, onOpen }: { sessions?: DubSessionView[]
   );
 }
 
-const PREPARE_LABEL: Record<string, string> = { stems: "Voice, background and transcript", voice: "Clean voice", words: "Transcript" };
+const PREPARE_LABEL: Record<string, string> = { stems: "Voice, background and transcript", voice: "Clean voice", words: "Transcript", sound: "Original sound", background: "Music and effects" };
 
 function prepareRows(s: DubSessionView, lang: string): StepRow[] {
   // Older open dubs transcribed in a step of their own.
@@ -289,14 +308,19 @@ function voiceRows(s: DubSessionView, lang: string): StepRow[] {
     soundtrack: "Voice track",
     clone: "Their voice",
     lips: "Lips re-synced",
-    film: run.lipsync && !open ? "Lips re-synced" : "Dubbed video",
+    mix: "Over the music and effects",
+    // Older cloud dubs (and cloud dubs with no background) re-synced the lips as their last step.
+    film: run.lipsync && !run.ids.lips ? "Lips re-synced" : "Dubbed video",
   };
   const entries = Object.entries(run.ids);
   const lines = entries.filter(([k]) => k.startsWith("line:")).map(([, id]) => s.generations[id]);
+  const beds = entries.filter(([k]) => k.startsWith("bed:")).map(([, id]) => s.generations[id]);
   const rows: StepRow[] = [];
   // One row for the takes: a dub of 30 lines would otherwise list 30 near-identical steps.
   if (lines.length) rows.push({ key: "lines", label: `${lines.length} line${lines.length === 1 ? "" : "s"} ${open ? "in their voice" : "spoken"}`, group: lines });
-  for (const [k, id] of entries) if (!k.startsWith("line:")) rows.push({ key: k, label: label[k] ?? k, g: s.generations[id] });
+  // And one for the background stems, each lowered a little before the mix.
+  if (beds.length) rows.push({ key: "beds", label: `Music and effects ${Math.abs(BACKGROUND_DB)} dB lower`, group: beds });
+  for (const [k, id] of entries) if (!k.startsWith("line:") && !k.startsWith("bed:")) rows.push({ key: k, label: label[k] ?? k, g: s.generations[id] });
   return rows;
 }
 
@@ -423,7 +447,7 @@ function ResultCard({ s, lang }: { s: DubSessionView; lang: string }) {
     >
       <video src={out.url} controls playsInline preload="metadata" className="max-h-[42vh] w-full rounded-xl bg-media object-contain" />
       {g.provider === "mock" && <p className="mt-2 text-[12px] text-muted-foreground">Demo result — connect a provider (or start ComfyUI) to dub for real.</p>}
-      {s.engine === "cloud" && s.mode === "steps" && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: the cloud route has no music stem to mix back in (the open route and the one-shot models keep it).</p>}
+      {voiceOnly(s) && <p className="mt-2 text-[12px] text-muted-foreground">Voice only: no music or effects were separated from this clip, so the new voice plays alone.</p>}
     </Panel>
   );
 }
@@ -523,6 +547,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
             </Button>
           </div>
         </div>
+        {voiceOnly(s) && <p className="mt-3 text-[12px] text-muted-foreground">No music or effects were separated from this clip, so the new voice will play alone.</p>}
         {runs.length > 0 && <StepList steps={voiceRows(s, lang)} className="mt-4" />}
       </Panel>
     </>

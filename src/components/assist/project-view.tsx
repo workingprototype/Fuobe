@@ -117,7 +117,7 @@ function Project({ p }: { p: AssistProject }) {
           </DropdownMenu>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[860px] min-w-0 flex-1 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full max-w-[860px] min-w-0 flex-1 px-3 pb-16 sm:px-6">
         <div className="mx-auto max-w-[760px] pt-[6vh] sm:pt-[9vh]">
           <h2 className="text-center font-heading text-display text-balance">What are we creating in {p.name}?</h2>
           <button onClick={() => setSettings(true)} className="mx-auto mt-2 block max-w-xl text-center text-[14px] text-pretty text-muted-foreground hover:text-foreground">
@@ -183,7 +183,7 @@ function Project({ p }: { p: AssistProject }) {
             <MemoryView projectId={p.id} />
           </TabsContent>
         </Tabs>
-      </main>
+      </div>
       <ProjectDialog open={settings} onOpenChange={setSettings} project={p} />
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
@@ -240,8 +240,8 @@ function Assets({ p, active }: { p: AssistProject; active: boolean }) {
         {tiles.map(({ a, at, o, i }) => (
           <li key={`${a.generation.id}-${i}`}>
             <button onClick={() => setOpen({ at, i })} className="group relative block aspect-square w-full overflow-hidden rounded-xl bg-muted" aria-label={`Open ${a.generation.request.prompt?.slice(0, 60) || "result"} (from ${a.chatTitle})`}>
-              <MediaThumb output={o} g={a.generation} className="transition duration-300 group-hover:scale-[1.03]" />
-              {a.generation.provider === "mock" && <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-medium">Demo</span>}
+              <MediaThumb output={o} g={a.generation} className="transition duration-300 group-hover:scale-[1.03]" tag={a.generation.provider === "mock" && o.kind === "text" ? "Demo" : undefined} />
+              {a.generation.provider === "mock" && o.kind !== "text" && <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] font-medium">Demo</span>}
             </button>
           </li>
         ))}

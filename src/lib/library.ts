@@ -1,8 +1,9 @@
 /**
- * Library (Assets) logic shared by the browser and the server: feed filters, folders, the Trash,
- * download names, date sections and batch stacks. Pure: no React, no database.
+ * Library (Assets) logic shared by the browser and the server: feed filters, helper steps, nested
+ * folders, pins, review statuses, the Trash, where a file is used, download names, date sections
+ * and batch stacks. Pure: no React, no database.
  */
-import { OPERATION_LABELS, type Generation, type GenerationStatus, type MediaKind, type OutputFile } from "./catalog/types";
+import { OPERATION_LABELS, type Generation, type GenerationStatus, type MediaKind, type OutputFile, type ReviewStatus } from "./catalog/types";
 
 // ---------------------------------------------------------------------------
 // Filters (GET /api/generations query ⇄ client-side matching for live cache updates)
@@ -20,13 +21,32 @@ export interface FeedFilter {
   since?: number;
   until?: number;
   folderId?: string;
+  /** Any of these folders (a folder and its subfolders: "Show subfolders content"). */
+  folderIds?: string[];
   /** The Trash instead of the library. */
   trashed?: boolean;
+  /** Pinned ones only (most recently pinned first), or (false) the ones that aren't pinned. */
+  pinned?: boolean;
+  /** Review statuses; "none" is a result without one. */
+  reviews?: ReviewFilter[];
+  /**
+   * Also helper steps (see isHelperFeature). A list that names no features (and no batch) leaves them
+   * out unless this is set, so a list that must see every job (a count of running jobs) sets it.
+   */
+  steps?: boolean;
 }
 
-/** The paging cursor for the page after `last`: its timestamp (deletedAt in the Trash) and id, so equal timestamps aren't skipped. */
-export function cursorAfter(last: Generation, trashed?: boolean): string | undefined {
-  const ts = trashed ? last.deletedAt : last.createdAt;
+/** Which timestamp a list is ordered (and paged) by: deletedAt in the Trash, pinnedAt in a pinned list, else createdAt. */
+function sortTime(g: Generation, f: Pick<FeedFilter, "trashed" | "pinned">): number | null | undefined {
+  return f.trashed ? g.deletedAt : f.pinned ? g.pinnedAt : g.createdAt;
+}
+
+/**
+ * The paging cursor for the page after `last`: its sort timestamp and id, so equal timestamps aren't
+ * skipped. `f` is the list's filter (or, as before, whether it's the Trash).
+ */
+export function cursorAfter(last: Generation, f?: boolean | Pick<FeedFilter, "trashed" | "pinned">): string | undefined {
+  const ts = sortTime(last, typeof f === "boolean" ? { trashed: f } : (f ?? {}));
   return ts ? `${ts}:${last.id}` : undefined;
 }
 
@@ -42,7 +62,11 @@ export function filterToSearch(f: FeedFilter, before?: string | number): URLSear
   if (f.since) qs.set("since", String(f.since));
   if (f.until) qs.set("until", String(f.until));
   if (f.folderId) qs.set("folder", f.folderId);
+  if (f.folderIds?.length) qs.set("folders", f.folderIds.join(","));
   if (f.trashed) qs.set("trash", "1");
+  if (f.pinned !== undefined) qs.set("pinned", f.pinned ? "1" : "0");
+  if (f.reviews?.length) qs.set("reviews", f.reviews.join(","));
+  if (f.steps) qs.set("steps", "1");
   if (before) qs.set("before", String(before));
   qs.set("limit", String(f.limit ?? 80));
   return qs;
@@ -62,6 +86,10 @@ export function matchesFilter(g: Generation, f: FeedFilter): boolean {
   if (f.since && g.createdAt < f.since) return false;
   if (f.until && g.createdAt >= f.until) return false;
   if (f.folderId && g.folderId !== f.folderId) return false;
+  if (f.folderIds?.length && !f.folderIds.includes(g.folderId ?? "")) return false;
+  if (f.pinned !== undefined && !!g.pinnedAt !== f.pinned) return false;
+  if (f.reviews?.length && !f.reviews.includes(g.review ?? "none")) return false;
+  if (!f.steps && !f.features?.length && isHelperFeature(g.feature)) return false;
   const q = f.q?.trim().toLowerCase();
   if (q && !`${g.prompt ?? ""}\n${g.request.prompt ?? ""}`.toLowerCase().includes(q)) return false;
   return true;
@@ -79,6 +107,51 @@ export function byDeleted(a: Generation, b: Generation): number {
   return (b.deletedAt ?? 0) - (a.deletedAt ?? 0) || byIdDesc(a, b);
 }
 
+/** A pinned list's order: most recently pinned first (ties: id descending, like the server). */
+export function byPinned(a: Generation, b: Generation): number {
+  return (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0) || byIdDesc(a, b);
+}
+
+/** The order of a list with this filter, as the server sends it. */
+export function listOrder(f: Pick<FeedFilter, "trashed" | "pinned">): (a: Generation, b: Generation) => number {
+  return f.trashed ? byDeleted : f.pinned ? byPinned : byNewest;
+}
+
+// ---------------------------------------------------------------------------
+// Helper steps
+
+/**
+ * Jobs nobody asked to see on their own: the steps a chain runs before its result (a Shorts cut, a
+ * Click to Ad voiceover, an Ad Multiplier hook: every "<studio>-step" feature), and helper jobs a
+ * studio starts by itself (a Mixed Media preview frame, a Faceless channel avatar or narrator sample,
+ * a moodboard's cover). The Library and the home feed leave them out unless "Show steps" is on; a
+ * list that names its features (a studio reading its own steps) gets what it asks for.
+ */
+export const HELPER_SUFFIX = "-step";
+export const HELPER_FEATURES = ["mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard"] as const;
+
+export function isHelperFeature(feature: string): boolean {
+  return feature.endsWith(HELPER_SUFFIX) || (HELPER_FEATURES as readonly string[]).includes(feature);
+}
+
+// ---------------------------------------------------------------------------
+// Review status (Higgsfield's Assets: In progress, Needs review, Approved, Rejected)
+
+export const REVIEW_STATUSES: { id: ReviewStatus; label: string; color: string }[] = [
+  { id: "in-progress", label: "In progress", color: "#029dfe" },
+  { id: "needs-review", label: "Needs review", color: "#fe7802" },
+  { id: "approved", label: "Approved", color: "#d1fe17" },
+  { id: "rejected", label: "Rejected", color: "#ef4444" },
+];
+
+export type ReviewFilter = ReviewStatus | "none";
+
+export const isReviewStatus = (v: unknown): v is ReviewStatus => REVIEW_STATUSES.some((r) => r.id === v);
+
+export function reviewInfo(status: ReviewStatus | null | undefined): (typeof REVIEW_STATUSES)[number] | null {
+  return REVIEW_STATUSES.find((r) => r.id === status) ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Folders
 
@@ -86,11 +159,105 @@ export interface Folder {
   id: string;
   name: string;
   color: string;
+  /** Results directly in it, as its page shows them by default (not in its subfolders or the Trash, not helper steps). */
   count: number;
-  /** The newest output in the folder, for its cover. */
+  /** Subfolders directly in it. */
+  folders: number;
+  /** The newest output in the folder (not a helper step's), for its cover. */
   cover: OutputFile | null;
+  /** The folder it's in (null: the library root). */
+  parentId: string | null;
+  /** Pinned to the top of its parent at (null: not pinned). */
+  pinnedAt: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** How deep folders nest (the breadcrumbs, the zip paths and the Move menu stay readable). */
+export const MAX_FOLDER_DEPTH = 8;
+
+type FolderLink = Pick<Folder, "id" | "parentId">;
+
+/** A folder's subfolders (the root's with null): pinned first, in the order they were pinned, then oldest first. */
+export function childFolders<F extends FolderLink & Pick<Folder, "pinnedAt" | "createdAt">>(all: F[], parentId: string | null): F[] {
+  return all
+    .filter((f) => (f.parentId ?? null) === parentId)
+    .sort((a, b) => (a.pinnedAt ? 0 : 1) - (b.pinnedAt ? 0 : 1) || (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0) || a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+}
+
+/** The folders from the root down to `id`, for breadcrumbs ([] when it's gone; a loop in bad data stops the walk). */
+export function folderPath<F extends FolderLink>(all: F[], id: string | null | undefined): F[] {
+  const byId = new Map(all.map((f) => [f.id, f]));
+  const out: F[] = [];
+  const seen = new Set<string>();
+  for (let f = id ? byId.get(id) : undefined; f && !seen.has(f.id); f = f.parentId ? byId.get(f.parentId) : undefined) {
+    seen.add(f.id);
+    out.unshift(f);
+  }
+  return out;
+}
+
+/** `id` and every folder inside it, at any depth. */
+export function folderAndDescendants(all: FolderLink[], id: string): string[] {
+  const out = [id];
+  for (let i = 0; i < out.length; i++) for (const f of all) if (f.parentId === out[i] && !out.includes(f.id)) out.push(f.id);
+  return out;
+}
+
+/** How many levels a folder's subtree spans (1: no subfolders). */
+function subtreeHeight(all: FolderLink[], id: string, seen = new Set<string>()): number {
+  seen.add(id);
+  const kids = all.filter((f) => f.parentId === id && !seen.has(f.id));
+  return 1 + Math.max(0, ...kids.map((k) => subtreeHeight(all, k.id, seen)));
+}
+
+/** Why folder `id` can't go into `parentId` (null: the library root), in Higgsfield's words; null when it can. */
+export function folderMoveError(all: FolderLink[], id: string, parentId: string | null): string | null {
+  const f = all.find((x) => x.id === id);
+  if (!f || (parentId && !all.some((x) => x.id === parentId))) return "That folder doesn't exist anymore";
+  if (parentId === id) return "Cannot move into itself";
+  if ((f.parentId ?? null) === parentId) return "Already in this folder";
+  if (parentId && folderAndDescendants(all, id).includes(parentId)) return "Cannot move into a subfolder";
+  if (folderPath(all, parentId).length + subtreeHeight(all, id) > MAX_FOLDER_DEPTH) return `Folders go ${MAX_FOLDER_DEPTH} levels deep at most`;
+  return null;
+}
+
+/** Every folder in tree order with its depth (0 at the root), for Move menus. */
+export function folderTree<F extends FolderLink & Pick<Folder, "pinnedAt" | "createdAt">>(all: F[]): { folder: F; depth: number }[] {
+  const out: { folder: F; depth: number }[] = [];
+  const seen = new Set<string>();
+  const walk = (parentId: string | null, depth: number) => {
+    for (const f of childFolders(all, parentId)) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      out.push({ folder: f, depth });
+      walk(f.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return out;
+}
+
+/** A name no sibling has yet: "Drafts" → "Drafts 2" (case-insensitive, like the folder names). */
+export function freeName(name: string, taken: string[]): string {
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  if (!used.has(name.toLowerCase())) return name;
+  for (let k = 2; ; k++) {
+    const next = `${name.slice(0, 56)} ${k}`;
+    if (!used.has(next.toLowerCase())) return next;
+  }
+}
+
+/** A folder name as one path segment in a zip ("Spring / Summer" → "Spring - Summer"). */
+export function zipSegment(name: string): string {
+  const clean = [...name]
+    .filter((c) => c.charCodeAt(0) >= 32 && !'<>:"|?*'.includes(c))
+    .join("")
+    .replace(/[\\/]+/g, " - ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+|\.+$/g, "");
+  return clean.slice(0, 80) || "Folder";
 }
 
 /** Higgsfield's seven folder swatches, as oklch hues (lime is the default). */
@@ -119,6 +286,38 @@ const DAY = 86_400_000;
 
 export function trashDaysLeft(deletedAt: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((deletedAt + TRASH_DAYS * DAY - now) / DAY));
+}
+
+// ---------------------------------------------------------------------------
+// Where a stored file is used (an upload can only be deleted when nothing refers to it)
+
+/** One row that refers to a file: what it is ("result", "element"), which one (rows of two tables can be one thing) and its name. */
+export interface AssetUse {
+  what: string;
+  key: string;
+  name: string | null;
+  /** A result in the Trash (it can still be restored, so it still counts). */
+  trashed?: boolean;
+}
+
+const plural = (what: string) => (/(s|x|ch|sh)$/.test(what) ? `${what}es` : `${what}s`);
+
+/** "2 results (1 in the Trash), the element “Maya” and 3 canvases": where a file is used, in one line. */
+export function describeUses(uses: AssetUse[]): string {
+  const groups = new Map<string, Map<string, AssetUse>>();
+  for (const u of uses) {
+    const g = groups.get(u.what) ?? new Map<string, AssetUse>();
+    groups.set(u.what, g);
+    if (!g.has(u.key)) g.set(u.key, u);
+  }
+  const parts = [...groups].map(([what, rows]) => {
+    const list = [...rows.values()];
+    const trashed = list.filter((u) => u.trashed).length;
+    const inTrash = trashed ? ` (${trashed === list.length && list.length === 1 ? "in the Trash" : `${trashed} in the Trash`})` : "";
+    if (list.length === 1 && list[0].name?.trim()) return `the ${what} “${list[0].name.trim().slice(0, 60)}”${inTrash}`;
+    return `${list.length} ${list.length === 1 ? what : plural(what)}${inTrash}`;
+  });
+  return parts.length <= 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +439,12 @@ export function stackLabel(items: Generation[]): string {
   return `${items.length} results`;
 }
 
-/** Group a newest-first list into cards: generations sharing a batch become one stack, placed where its newest member is. */
-export function buildEntries(items: Generation[], opts: { stacks?: boolean } = {}): LibraryEntry[] {
+/**
+ * Group a newest-first list into cards: generations sharing a batch become one stack, placed where its
+ * newest member is. `prefix` goes in front of stack keys, for a second list on the same page (the
+ * Pinned section): a batch with members in both gets a stack in each, and their keys must differ.
+ */
+export function buildEntries(items: Generation[], opts: { stacks?: boolean; prefix?: string } = {}): LibraryEntry[] {
   if (opts.stacks === false) return items.map((g) => ({ type: "single", key: g.id, g }));
   const groups = new Map<string, Generation[]>();
   for (const g of items) {
@@ -260,7 +463,7 @@ export function buildEntries(items: Generation[], opts: { stacks?: boolean } = {
     if (placed.has(k)) continue;
     placed.add(k);
     const sorted = [...group].sort((a, b) => order(a) - order(b) || a.createdAt - b.createdAt);
-    out.push({ type: "stack", key: `stack:${k}`, title: stackTitle(group), label: stackLabel(group), items: sorted });
+    out.push({ type: "stack", key: `${opts.prefix ?? ""}stack:${k}`, title: stackTitle(group), label: stackLabel(group), items: sorted });
   }
   return out;
 }

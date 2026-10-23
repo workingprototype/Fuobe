@@ -76,13 +76,18 @@ export interface SourceInfo {
  */
 export async function probeSource(url: string): Promise<SourceInfo> {
   if (!url.startsWith("/api/files/")) throw new ShortsError("Upload the clip first");
-  let info: MediaInfo | null = null;
   let data: Buffer;
   try {
     data = (await readRef(url)).data;
   } catch {
     throw new ShortsError("That clip is gone — upload it again", 404);
   }
+  return sourceInfo(data);
+}
+
+/** What a clip's bytes say (the header readers behind probeSource). */
+export function sourceInfo(data: Buffer): SourceInfo {
+  let info: MediaInfo | null = null;
   try {
     info = probeMedia(data);
   } catch {
@@ -219,6 +224,8 @@ export interface ShortsBody {
   aspectRatio: ShortsRatio;
   language: string;
   modelId?: string;
+  /** A look of its own instead of a preset (Assist's words), kept on the session like a preset's. Server-side only. */
+  look?: ShortsLook;
 }
 
 function lookFor(presetId: string): ShortsLook {
@@ -245,10 +252,14 @@ const fileTitle = (name?: string) =>
 
 /** The plan input for a request: model, look, clip facts (from its header when it has one). */
 async function planInput(body: ShortsBody, opts: { probe: boolean }): Promise<{ input: ShortsPlanInput; info: SourceInfo }> {
+  return planWith(body, opts.probe ? await probeSource(body.source.url) : {});
+}
+
+/** planInput with the clip's header already read (`{}`: the browser's numbers only). */
+function planWith(body: ShortsBody, info: SourceInfo): { input: ShortsPlanInput; info: SourceInfo } {
   checkEngine(body.engine);
   const modelId = body.modelId && SHORTS_MODELS[body.engine].includes(body.modelId) ? body.modelId : SHORTS_MODELS[body.engine][0];
-  const look = lookFor(body.presetId);
-  const info = opts.probe ? await probeSource(body.source.url) : {};
+  const look = body.look ?? lookFor(body.presetId);
   const duration = info.duration ?? body.source.duration;
   const problem = rangeProblem(body.range, duration) ?? clipShapeProblem(info.width ?? body.source.width, info.height ?? body.source.height);
   if (problem) throw new ShortsError(problem);
@@ -329,7 +340,12 @@ function notesFor(input: ShortsPlanInput): string[] {
 
 /** What a session would cost and how it would run, without creating anything. */
 export async function estimateShorts(body: ShortsBody): Promise<ShortsEstimate> {
-  const { input } = await planInput(body, { probe: false });
+  return estimateWith(body, {});
+}
+
+/** estimateShorts for a clip whose header was read already (Assist prices with its sound and length). */
+export function estimateWith(body: ShortsBody, info: SourceInfo): ShortsEstimate {
+  const { input } = planWith(body, info);
   const plan = planShorts(input);
   const all = priceSteps(plan.steps);
   const one = priceSteps(planTake(input, plan.segments[0], plan.segments.length).steps);
@@ -346,8 +362,9 @@ export async function estimateShorts(body: ShortsBody): Promise<ShortsEstimate> 
 // ---------------------------------------------------------------------------
 // Sessions
 
-export async function createSession(body: ShortsBody): Promise<ShortsSession> {
-  const { input, info } = await planInput(body, { probe: true });
+/** Start a session; `known` is the clip's header when the caller read it already (else it's read here). */
+export async function createSession(body: ShortsBody, known?: SourceInfo): Promise<ShortsSession> {
+  const { input, info } = known ? planWith(body, known) : await planInput(body, { probe: true });
   const plan = planShorts(input);
   const pipeline = (() => {
     try {

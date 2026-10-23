@@ -4,7 +4,8 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { cueReducer, cueProblems, formatCueTime, normalizeCues, parseCueTime } from "@/lib/av/cue-edit";
-import { BLANK_FRAME, crowdedLines, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareSteps, priceLine, reviewCues, spokenText, takeLines, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { BLANK_FRAME, crowdedLines, linearGain, dubPhrases, languageStage, oneShotRequests, PHRASE_MAX, prepareMedia, prepareSteps, priceLine, reviewCues, spokenText, takeLines, voiceOnly, voiceSteps, type DubSessionView } from "@/lib/av/dub";
+import { timelineFor, timelineTracks } from "@/lib/av/timeline";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { getModel } from "@/lib/catalog";
 import { buildPayload } from "@/lib/catalog/payload";
@@ -70,15 +71,28 @@ describe("dub pipeline DAGs", () => {
     expect(() => prepareSteps({ engine: "open", video, targets: ["th"] })).toThrow(/Thai isn't available on the open engine/);
   });
 
-  it("cloud: isolated voice → Scribe → translations", () => {
+  it("cloud: isolated voice → Scribe → translations, and the soundtrack → Demucs stems for the background", () => {
     const steps = prepareSteps({ engine: "cloud", video, targets: ["fr"] });
-    expect(steps.map((s) => [s.key, s.request.modelId, s.after ?? null])).toEqual([
-      ["voice", "elevenlabs-voice-isolation", null],
-      ["words", "scribe-v2", "voice"],
-      ["translate:fr", "text-llm", "words"],
+    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
+      ["voice", "elevenlabs-voice-isolation", "separate-audio", null],
+      ["words", "scribe-v2", "transcribe", "voice"],
+      ["translate:fr", "text-llm", "translate", "words"],
+      ["sound", "extract-soundtrack", "separate-audio", null],
+      ["background", "demucs", "separate-audio", "sound"],
     ]);
     expect(steps[0].request.inputs).toEqual({ video });
     expect(steps[1].request.params).toBeUndefined(); // "auto" = detect
+    // Demucs reads audio only: the video's soundtrack goes in through the chain.
+    expect(steps[3].request.inputs).toEqual({ video });
+    expect(steps[4].chain).toEqual([{ slot: "audio" }]);
+    expect(steps[4].request.inputs).toBeUndefined();
+    expect(steps.map((s) => s.request.step)).toEqual([
+      { label: "Clean voice", index: 0, of: 5 },
+      { label: "Transcript", index: 1, of: 5 },
+      { label: "Translate · French", index: 2, of: 5 },
+      { label: "Original sound", index: 3, of: 5 },
+      { label: "Music and effects", index: 4, of: 5 },
+    ]);
   });
 
   // Speech starts at 2 s, pauses at 7–12 s and ends at 26 s of a 30 s clip.
@@ -172,6 +186,96 @@ describe("dub pipeline DAGs", () => {
     expect(flat.at(-1)!.request.modelId).toBe("merge-audio-video");
     expect(() => voiceSteps({ engine: "cloud", video, lang: "ja", cues: [{ start: 0, end: 1, text: " " }], voiceRef: "/v" })).toThrow(/no lines to speak/);
     expect(() => voiceSteps({ engine: "cloud", video, lang: "ja", cues: [{ start: 40, end: 41, text: "late" }], voiceRef: "/v", duration: 30 })).toThrow(/after the end of the video/);
+  });
+
+  it("cloud voice with the background: lips on the clean voice, the voice mixed over the lowered Demucs stems, that mix on the video", () => {
+    const beds = ["/drums.mp3", "/bass.mp3", "/other.mp3"];
+    const steps = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", background: beds, duration: 30 });
+    expect(steps.map((s) => [s.key, s.request.modelId, s.request.op, s.after ?? null])).toEqual([
+      ["line:0", "elevenlabs-v4", "tts", null],
+      ["line:1", "elevenlabs-v4", "tts", null],
+      ["line:2", "elevenlabs-v4", "tts", null],
+      ["track", "compose-timeline", "timeline", ["line:0", "line:1", "line:2"]],
+      ["soundtrack", "extract-soundtrack", "separate-audio", "track"],
+      ["clone", "chatterbox-vc-cloud", "voice-change", "soundtrack"],
+      ["bed:0", "ffmpeg-loudnorm", "level", null],
+      ["bed:1", "ffmpeg-loudnorm", "level", null],
+      ["bed:2", "ffmpeg-loudnorm", "level", null],
+      ["lips", "sync-lipsync-3", "lipsync", "clone"],
+      ["mix", "compose-timeline", "timeline", ["clone", "bed:0", "bed:1", "bed:2"]],
+      ["film", "merge-audio-video", "mux", ["lips", "mix"]],
+    ]);
+    expect(steps.map((s) => s.request.step?.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(steps.every((s) => s.request.step?.of === 12)).toBe(true);
+    // Each stem 3 dB down, like the open route's background (compose itself has no volume control).
+    expect(steps.slice(6, 9).map((s) => s.request.inputs)).toEqual(beds.map((audio) => ({ audio })));
+    expect(steps[6].request.params).toEqual({ extra: linearGain(-3) });
+    expect(steps[6].request.step?.label).toBe("Music and effects 1 of 3 · Japanese");
+    const [lips, mix, film] = steps.slice(9);
+    expect(lips.request).toMatchObject({ inputs: { video }, params: { duration: 30 } });
+    expect(lips.chain).toEqual([{ slot: "audio" }]);
+    // The new voice goes first, then every lowered stem, each for the whole length (so compose mixes them).
+    expect(mix.chain).toEqual(Array(4).fill({ slot: "audios", position: "first" }));
+    expect(mix.request.inputs).toEqual({ images: [BLANK_FRAME] });
+    expect(mix.request.params).toEqual({ duration: 30, extra: { timeline: { length: 30, clips: Array(4).fill({ start: 0, duration: 30 }) } } });
+    expect(film.chain).toEqual([{ slot: "video" }, { slot: "audio" }]);
+    expect(film.request.inputs).toBeUndefined();
+    expect(film.request.params).toEqual({ duration: 30 });
+    const payload = buildPayload(getModel("compose-timeline")!.routes[0].map!, { images: ["https://fal.media/still.png"], audios: ["https://a/voice.mp3", ...beds.map((b) => `https://a${b}`)], extra: mix.request.params?.extra });
+    expect(payload.tracks).toEqual([
+      { id: "picture", type: "image", keyframes: [{ url: "https://fal.media/still.png", timestamp: 0, duration: 30000 }] },
+      { id: "voice", type: "audio", keyframes: [{ url: "https://a/voice.mp3", timestamp: 0, duration: 30000 }] },
+      { id: "audio-2", type: "audio", keyframes: [{ url: "https://a/drums.mp3", timestamp: 0, duration: 30000 }] },
+      { id: "audio-3", type: "audio", keyframes: [{ url: "https://a/bass.mp3", timestamp: 0, duration: 30000 }] },
+      { id: "audio-4", type: "audio", keyframes: [{ url: "https://a/other.mp3", timestamp: 0, duration: 30000 }] },
+    ]);
+    // Without lip re-sync the mix goes over the original picture.
+    const flat = voiceSteps({ engine: "cloud", video, lang: "ja", cues, voiceRef: "/v.mp3", background: beds, lipsync: false, duration: 30 });
+    expect(flat.slice(5).map((s) => [s.key, s.after])).toEqual([
+      ["clone", "soundtrack"],
+      ["bed:0", undefined],
+      ["bed:1", undefined],
+      ["bed:2", undefined],
+      ["mix", ["clone", "bed:0", "bed:1", "bed:2"]],
+      ["film", "mix"],
+    ]);
+    expect(flat.at(-1)!.request).toMatchObject({ modelId: "merge-audio-video", inputs: { video } });
+    expect(flat.at(-1)!.chain).toEqual([{ slot: "audio" }]);
+    expect(flat.every((s) => s.request.step?.of === 11)).toBe(true);
+    expect(flat.map((s) => s.request.step?.index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("lowers a track by an exact gain with loudnorm's linear mode (target − measured), never raising it", () => {
+    const p = linearGain(-3);
+    // ffmpeg's loudnorm takes linear mode when measured TP + gain ≤ target TP (−0.1 on fal) and measured LRA ≤ target LRA.
+    expect(p).toMatchObject({ linear: true });
+    expect(Number(p.integrated_loudness) - Number(p.measured_i)).toBe(-3);
+    expect(Number(p.measured_tp) - 3).toBeLessThanOrEqual(-0.1);
+    expect(Number(p.measured_lra)).toBeGreaterThan(0);
+    expect(Number(p.measured_lra)).toBeLessThanOrEqual(Number(p.loudness_range));
+    expect(p.measured_thresh).not.toBe(-70);
+    // Inside fal's ranges.
+    expect(Number(p.integrated_loudness)).toBeGreaterThanOrEqual(-70);
+    expect(Number(p.measured_i)).toBeLessThanOrEqual(0);
+    expect(Number(p.measured_thresh)).toBeGreaterThanOrEqual(-99);
+    // A raise would clip with no limiter: it's held at 0 dB.
+    expect(Number(linearGain(6).integrated_loudness) - Number(linearGain(6).measured_i)).toBe(0);
+    // The payload fal gets: the stem as audio_url with the parameters as they are.
+    const body = buildPayload(getModel("ffmpeg-loudnorm")!.routes[0].map!, { audio: "https://a/drums.mp3", extra: p });
+    expect(body).toEqual({ audio_url: "https://a/drums.mp3", ...p });
+  });
+
+  it("timeline tracks: lines that follow each other share the voice track, overlapping clips get tracks of their own", () => {
+    const pic = { url: "p.png", type: "image" as const };
+    // A millisecond of rounding between two lines isn't an overlap.
+    const lines = timelineTracks({ length: 10, clips: [{ start: 0, duration: 2.0004 }, { start: 2, duration: 3 }, { start: 5, duration: 5 }] }, pic, ["a", "b", "c"]);
+    expect(lines.map((t) => t.id)).toEqual(["picture", "voice"]);
+    const mixed = timelineTracks({ length: 10, clips: [{ start: 0, duration: 4 }, { start: 2, duration: 2 }, { start: 4, duration: 6 }, { start: 5, duration: 1 }] }, pic, ["a", "b", "c", "d"]);
+    expect(mixed.slice(1).map((t) => [t.id, (t.keyframes as { url: string }[]).map((k) => k.url)])).toEqual([
+      ["voice", ["a", "c"]],
+      ["audio-2", ["b", "d"]],
+    ]);
+    expect(timelineTracks(timelineFor([0, 3.3333, 7.0006], 12), pic, ["a", "b", "c"]).length).toBe(2);
   });
 
   it("the cloud track is a fal compose timeline over the blank still", () => {
@@ -275,7 +379,7 @@ describe("dub sessions (demo mode)", () => {
     expect(reviewCues(saved, "es")![0].text).toBe("Hola, esto es una prueba");
     const voiced = dub.voiceDub(view.id, "es");
     const run = voiced.voices!.es[0];
-    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["line:0", "track", "lips", "film"] : ["line:0", "track", "soundtrack", "clone", "film"]);
+    expect(Object.keys(run.ids)).toEqual(engine === "open" ? ["line:0", "track", "lips", "film"] : ["line:0", "bed:0", "track", "soundtrack", "clone", "lips", "mix", "film"]);
     expect(voiced.generations[run.ids["line:0"]].request.prompt).toContain("Hola, esto es una prueba");
     // The voice track is exactly as long as the source (read from its MP4 header when the session was made).
     expect(view.duration).toBeGreaterThan(1);
@@ -285,6 +389,17 @@ describe("dub sessions (demo mode)", () => {
       // The background stem rides along to the mix.
       expect(voiced.generations[run.ids.film].request.inputs?.audio2).toMatch(/^\/api\/files\//);
       expect(voiced.generations[run.ids["line:0"]].request.inputs?.voiceAudio).toMatch(/^\/api\/files\//);
+    } else {
+      // The background split's stems that aren't the voice are mixed under the new one.
+      const split = view.generations[view.prepare!.background];
+      const bed = split.outputs.filter((o) => o.meta?.stem !== "voice").map((o) => o.url);
+      expect(bed.length).toBeGreaterThan(0);
+      // Each lowered first: the mix takes the new voice, then the lowered stems.
+      const levelled = bed.map((_, i) => voiced.generations[run.ids[`bed:${i}`]]);
+      expect(levelled.map((g) => [g.modelId, g.request.inputs?.audio])).toEqual(bed.map((url) => ["ffmpeg-loudnorm", url]));
+      expect(voiced.generations[run.ids.mix].request.inputs?.images).toEqual([BLANK_FRAME]);
+      expect((await settle(run.ids.mix)).request.inputs?.audios).toEqual([(await settle(run.ids.clone)).outputs[0].url, ...(await Promise.all(levelled.map(async (g) => (await settle(g.id)).outputs[0].url)))]);
+      expect(voiceOnly(view)).toBe(false);
     }
     expect(languageStage(voiced, "es")).toBe("voicing");
     expect((await settle(run.ids.film)).status).toBe("succeeded");
@@ -332,6 +447,56 @@ describe("dub sessions (demo mode)", () => {
     }
     expect(priceLine({ engine: "open", costUsd: 0, unpriced: [], demo: false, steps: 4 })).toBe("Free on your GPU");
     expect(priceLine({ engine: "cloud", costUsd: 0, unpriced: [], demo: true, steps: 4 })).toBe("Demo · free");
+  });
+
+  it("cloud: a failed background split still reaches review and voices over silence (voice only)", async () => {
+    const view = await prepared("cloud");
+    // As if Demucs had failed: the stage stays "review", the media has no background and the dub says so.
+    const failed = { ...view, generations: { ...view.generations, [view.prepare!.background]: { ...view.generations[view.prepare!.background], status: "failed" as const } } };
+    expect(languageStage(failed, "es")).toBe("review");
+    expect(prepareMedia(failed).background).toBeUndefined();
+    expect(voiceOnly(failed)).toBe(true);
+    // A split that found nothing but the voice leaves nothing to mix under it: voice only too.
+    const split = view.generations[view.prepare!.background];
+    const vocals = { ...view, generations: { ...view.generations, [split.id]: { ...split, outputs: split.outputs.filter((o) => o.meta?.stem === "voice") } } };
+    expect(languageStage(vocals, "es")).toBe("review");
+    expect(prepareMedia(vocals).background).toBeUndefined();
+    expect(voiceOnly(vocals)).toBe(true);
+    expect(voiceOnly(view)).toBe(false);
+    // A cloud dub made before the split existed has no background step at all.
+    const older = { ...view, prepare: Object.fromEntries(Object.entries(view.prepare!).filter(([k]) => k !== "sound" && k !== "background")) };
+    expect(voiceOnly(older)).toBe(true);
+    expect(languageStage(older, "es")).toBe("review");
+    // While the split is still running the language waits (the voice is mixed over it).
+    const running = { ...view, generations: { ...view.generations, [view.prepare!.background]: { ...view.generations[view.prepare!.background], status: "running" as const } } };
+    expect(languageStage(running, "es")).toBe("preparing");
+    // A failed transcript still fails the dub.
+    const broken = { ...view, generations: { ...view.generations, [view.prepare!.words]: { ...view.generations[view.prepare!.words], status: "failed" as const } } };
+    expect(languageStage(broken, "es")).toBe("failed");
+  });
+
+  it("prices the background split and the mix before they run", () => {
+    setSetting("falKey", "test-key");
+    try {
+      const lines = [
+        { start: 2, end: 4, text: "Hola a todos" },
+        { start: 12, end: 15, text: "Esto es una prueba" },
+      ];
+      const prep = prepareSteps({ engine: "cloud", video: "/api/files/uploads/clip.mp4", targets: ["es"] });
+      const split = dub.priceSteps("cloud", prep.filter((s) => s.key === "sound" || s.key === "background"), 30);
+      // The soundtrack ($0.0002/s) and Demucs ($0.0007/s) for 30 s.
+      expect(split.costUsd).toBeCloseTo(30 * 0.0002 + 30 * 0.0007, 3);
+      expect(dub.priceSteps("cloud", prep, 30).costUsd).toBeCloseTo(dub.priceSteps("cloud", prep.filter((s) => s.key !== "sound" && s.key !== "background"), 30).costUsd + split.costUsd, 3);
+      const voice = (background?: string[]) => voiceSteps({ engine: "cloud", video: "/api/files/uploads/clip.mp4", lang: "es", cues: lines, voiceRef: "/api/files/uploads/voice.mp3", background, duration: 30 });
+      const alone = dub.priceSteps("cloud", voice(), 30);
+      const mixed = dub.priceSteps("cloud", voice(["/api/files/a.mp3", "/api/files/b.mp3", "/api/files/c.mp3"]), 30);
+      expect(mixed.steps).toBe(alone.steps + 5);
+      // Lips at $8 a minute either way; levelling the stems is free, the mix and putting it on the video add $0.0002/s each.
+      expect(mixed.costUsd).toBeCloseTo(alone.costUsd + 2 * 30 * 0.0002, 3);
+      expect(mixed.unpriced).toEqual([]);
+    } finally {
+      setSetting("falKey", "");
+    }
   });
 
   it("removing a dub stops the steps that haven't finished (nothing more is spent)", async () => {

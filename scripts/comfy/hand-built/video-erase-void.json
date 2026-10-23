@@ -1,0 +1,757 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Source clip (video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "85",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The window's frames, sound and fps"
+    }
+  },
+  "5": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ],
+      "batch_index": 0,
+      "length": [
+        "86",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "The window (8n+5 frames)"
+    }
+  },
+  "6": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "5",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Work size (scaled, not cropped)"
+    }
+  },
+  "7": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "_meta": {
+      "title": "SAM 3.1"
+    }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "the person",
+      "clip": [
+        "7",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "What to select (maskPrompt)"
+    }
+  },
+  "9": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "6",
+        0
+      ],
+      "model": [
+        "7",
+        0
+      ],
+      "conditioning": [
+        "8",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 4,
+      "detect_interval": 1
+    },
+    "_meta": {
+      "title": "Track it through the window"
+    }
+  },
+  "10": {
+    "class_type": "SAM3_TrackToMask",
+    "inputs": {
+      "track_data": [
+        "9",
+        0
+      ],
+      "object_indices": ""
+    },
+    "_meta": {
+      "title": "Per-frame masks (object_indices: which tracked objects)"
+    }
+  },
+  "11": {
+    "class_type": "GrowMask",
+    "inputs": {
+      "mask": [
+        "10",
+        0
+      ],
+      "expand": 8,
+      "tapered_corners": true
+    },
+    "_meta": {
+      "title": "Grow the mask (maskGrow, px)"
+    }
+  },
+  "15": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "t5xxl_fp16.safetensors",
+      "type": "cogvideox",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "T5-XXL"
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "An empty snowy mountain slope under a clear sky.",
+      "clip": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The scene after removal (prompt)"
+    }
+  },
+  "17": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "",
+      "clip": [
+        "15",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Negative prompt (negativePrompt)"
+    }
+  },
+  "18": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "cogvideox_vae.safetensors"
+    },
+    "_meta": {
+      "title": "CogVideoX VAE"
+    }
+  },
+  "19": {
+    "class_type": "VOIDInpaintConditioning",
+    "inputs": {
+      "positive": [
+        "16",
+        0
+      ],
+      "negative": [
+        "17",
+        0
+      ],
+      "vae": [
+        "18",
+        0
+      ],
+      "video": [
+        "6",
+        0
+      ],
+      "quadmask": [
+        "11",
+        0
+      ],
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "length": [
+        "86",
+        1
+      ],
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "VOID conditioning (mask 1 = remove)"
+    }
+  },
+  "20": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "void_pass1.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "VOID pass 1"
+    }
+  },
+  "21": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "positive": [
+        "19",
+        0
+      ],
+      "negative": [
+        "19",
+        1
+      ],
+      "cfg": 6
+    },
+    "_meta": {
+      "title": "Guidance (cfg)"
+    }
+  },
+  "22": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "20",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 30,
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "Steps (steps)"
+    }
+  },
+  "23": {
+    "class_type": "VOIDSampler",
+    "inputs": {},
+    "_meta": {
+      "title": "VOID DDIM"
+    }
+  },
+  "24": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 0
+    },
+    "_meta": {
+      "title": "Seed (seed)"
+    }
+  },
+  "25": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "24",
+        0
+      ],
+      "guider": [
+        "21",
+        0
+      ],
+      "sampler": [
+        "23",
+        0
+      ],
+      "sigmas": [
+        "22",
+        0
+      ],
+      "latent_image": [
+        "19",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Pass 1"
+    }
+  },
+  "26": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "25",
+        0
+      ],
+      "vae": [
+        "18",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Pass 1 frames"
+    }
+  },
+  "30": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Source size and frames decoded"
+    }
+  },
+  "40": {
+    "class_type": "OpticalFlowLoader",
+    "inputs": {
+      "model_name": "raft_large_C_T_SKHT_V2-ff5fadd5.safetensors"
+    },
+    "_meta": {
+      "title": "RAFT optical flow"
+    }
+  },
+  "41": {
+    "class_type": "VOIDWarpedNoise",
+    "inputs": {
+      "optical_flow": [
+        "40",
+        0
+      ],
+      "video": [
+        "26",
+        0
+      ],
+      "width": [
+        "89",
+        1
+      ],
+      "height": [
+        "90",
+        1
+      ],
+      "length": [
+        "86",
+        1
+      ],
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Noise warped along pass 1's motion"
+    }
+  },
+  "42": {
+    "class_type": "VOIDWarpedNoiseSource",
+    "inputs": {
+      "warped_noise": [
+        "41",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Warped noise"
+    }
+  },
+  "43": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "void_pass2.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "VOID pass 2"
+    }
+  },
+  "44": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "43",
+        0
+      ],
+      "positive": [
+        "19",
+        0
+      ],
+      "negative": [
+        "19",
+        1
+      ],
+      "cfg": 6
+    },
+    "_meta": {
+      "title": "Pass 2 guidance"
+    }
+  },
+  "45": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "43",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 30,
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "Pass 2 steps"
+    }
+  },
+  "46": {
+    "class_type": "VOIDSampler",
+    "inputs": {},
+    "_meta": {
+      "title": "VOID DDIM"
+    }
+  },
+  "47": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "42",
+        0
+      ],
+      "guider": [
+        "44",
+        0
+      ],
+      "sampler": [
+        "46",
+        0
+      ],
+      "sigmas": [
+        "45",
+        0
+      ],
+      "latent_image": [
+        "19",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Pass 2 (temporal refinement)"
+    }
+  },
+  "48": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "47",
+        0
+      ],
+      "vae": [
+        "18",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Pass 2 frames"
+    }
+  },
+  "49": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": false
+    },
+    "_meta": {
+      "title": "Skip pass 2 (skipPass2: halves the time; pass 1 suffices for most clips)"
+    }
+  },
+  "50": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "49",
+        0
+      ],
+      "on_true": [
+        "26",
+        0
+      ],
+      "on_false": [
+        "48",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Pass 1 or pass 2"
+    }
+  },
+  "51": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "50",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "62",
+        0
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {
+      "title": "Clip with the window's sound"
+    }
+  },
+  "52": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "51",
+        0
+      ],
+      "filename_prefix": "fuobe/video-erase-void",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save video"
+    }
+  },
+  "61": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a / b",
+      "values.a": [
+        "86",
+        1
+      ],
+      "values.b": [
+        "2",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Window length in seconds"
+    }
+  },
+  "62": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        1
+      ],
+      "start_index": 0,
+      "duration": [
+        "61",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The window's sound, as long as its frames (none for silent clips)"
+    }
+  },
+  "80": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": 0.1,
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "First 0.1 s only: the clip's fps"
+    }
+  },
+  "81": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "80",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The clip's fps"
+    }
+  },
+  "82": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 0
+    },
+    "_meta": {
+      "title": "Window length in seconds (duration; 0 = the longest window, 197 frames)"
+    }
+  },
+  "83": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 197
+    },
+    "_meta": {
+      "title": "Frame cap per window (197 = VOID)"
+    }
+  },
+  "84": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "min(a + 1e9 * (a <= 0), (c + 0.5) / b)",
+      "values.a": [
+        "82",
+        0
+      ],
+      "values.b": [
+        "81",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Seconds to decode: duration (0 = no limit), at most the frame cap + half a frame"
+    }
+  },
+  "85": {
+    "class_type": "Video Slice",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "start_time": 0,
+      "duration": [
+        "84",
+        0
+      ],
+      "strict_duration": false
+    },
+    "_meta": {
+      "title": "Decode only the window (startTime, in seconds)"
+    }
+  },
+  "86": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(5, floor((min(a, c) - 5) / 8) * 8 + 5)",
+      "values.a": [
+        "30",
+        2
+      ],
+      "values.c": [
+        "83",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames in the window: the largest 8n+5 decoded, at most the cap"
+    }
+  },
+  "87": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 672
+    },
+    "_meta": {
+      "title": "Work-size budget: width (width)"
+    }
+  },
+  "88": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 384
+    },
+    "_meta": {
+      "title": "Work-size budget: height (height)"
+    }
+  },
+  "89": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(8, floor(min(sqrt(a * b * c / d), 1024, 1024 * c / d) / 8) * 8)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work width: about width x height pixels in the clip's shape (multiple of 8, <= 1024)"
+    }
+  },
+  "90": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(8, floor(min(sqrt(a * b * d / c), 1024, 1024 * d / c) / 8) * 8)",
+      "values.a": [
+        "87",
+        0
+      ],
+      "values.b": [
+        "88",
+        0
+      ],
+      "values.c": [
+        "30",
+        0
+      ],
+      "values.d": [
+        "30",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Work height (multiple of 8, <= 1024)"
+    }
+  }
+}
