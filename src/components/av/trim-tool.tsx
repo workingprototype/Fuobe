@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Scissors } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Feed } from "@/components/studio/feed";
@@ -9,7 +9,7 @@ import type { SlotValue } from "@/components/studio/media-slot";
 import { VideoTrimmer, type TrimRange } from "@/components/studio/video-trimmer";
 import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
 import { formatCueTime, parseCueTime } from "@/lib/av/cue-edit";
-import { probeMedia } from "@/lib/media-probe";
+import { probeBlob, probeUrl } from "@/lib/media-probe";
 import { cn } from "@/lib/utils";
 import { MediaDrop } from "./media-drop";
 import { useDraft } from "./use-draft";
@@ -17,15 +17,6 @@ import { Panel, ToolHero, ToolShell } from "./tool-shell";
 
 export const TRIM_FEATURE = "trim";
 const MIN_LENGTH = 0.5;
-
-/** The clip's length from its own header (MP4 / MOV), for clips this browser can't play. */
-async function headerLength(url: string): Promise<number | null> {
-  try {
-    return probeMedia(new Uint8Array(await (await fetch(url)).arrayBuffer()))?.duration ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Trim (Video tools → Trim): keep the part between two times, with its sound. fal's trim utility on
@@ -45,19 +36,35 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
   /** The browser can't decode the clip: its length from the header (null: unknown, so the times are typed). */
   const [unreadable, setUnreadable] = useState<{ clip: number; length: number | null } | null>(null);
   const unread = unreadable?.clip === clip ? unreadable : null;
+  // The file dropped for the current clip (none for a library pick), and which clip's header was read.
+  const dropped = useRef<File | null>(null);
+  const probed = useRef(-1);
+  // The slot as last picked: an upload reports back to the `pick` of the render it started in, whose `video` is stale.
+  const current = useRef<SlotValue | null>(null);
   const pick = (v: SlotValue | null) => {
-    const finished = !!v && !!video?.uploading && !v.uploading && v.name === video.name;
+    const prev = current.current;
+    current.current = v;
+    const finished = !!v && !!prev?.uploading && !v.uploading && v.name === prev.name;
     if (!finished) {
       setClip((c) => c + 1);
       setRange(null);
       setLength(0);
+      if (!v?.uploading) dropped.current = null;
     }
     setVideo(v);
   };
+  /**
+   * The clip's length from its own header (MP4 / MOV), for clips this browser can't play: read once
+   * per clip (the trimmer says so again when a finished upload moves its preview to the server),
+   * from the dropped file itself, else from the server with Range requests (only the header and
+   * moov box, never the whole clip).
+   */
   const onUnreadable = () => {
-    if (!video) return;
+    if (!video || probed.current === clip) return;
     const at = clip;
-    void headerLength(video.preview).then((d) => setUnreadable({ clip: at, length: d }));
+    probed.current = at;
+    const file = dropped.current;
+    void (file ? probeBlob(file) : probeUrl(video.ref || video.preview)).then((info) => setUnreadable({ clip: at, length: info?.duration ?? null }));
   };
   const trim = () => {
     if (!video) return void toast("Add the video first");
@@ -82,7 +89,7 @@ export function TrimTool({ tabs }: { tabs?: React.ReactNode }) {
     <ToolShell title="Video tools" tabs={tabs}>
       {!video && <ToolHero title="Keep just the part you need" subtitle="Pick where it starts and ends — the sound comes along. Free on your ComfyUI (CPU), fractions of a cent on the cloud." />}
       <div className={cn("mx-auto max-w-[820px] space-y-3", video ? "pt-4" : "mt-8")}>
-        <MediaDrop kind="video" value={video} onChange={pick} preview={false} title="Add a video to trim" hint="MP4, MOV or WebM up to 200 MB" compact />
+        <MediaDrop kind="video" value={video} onChange={pick} onFile={(f) => (dropped.current = f)} preview={false} title="Add a video to trim" hint="MP4, MOV or WebM up to 200 MB" compact />
         {video && (
           <Panel title="Keep">
             {typed ? (

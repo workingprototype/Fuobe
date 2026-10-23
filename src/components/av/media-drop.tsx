@@ -21,6 +21,7 @@ export function MediaDrop({
   hint,
   onDuration,
   onUnreadable,
+  onFile,
   className,
   compact,
   player,
@@ -36,6 +37,8 @@ export function MediaDrop({
   onDuration?: (seconds: number) => void;
   /** The browser can't decode the clip (e.g. H.265): tools fall back to typing times. */
   onUnreadable?: () => void;
+  /** The file picked or dropped, before its upload starts (Trim reads its header from it, not from the server). */
+  onFile?: (f: File) => void;
   className?: string;
   /** A shorter strip once something is attached (editors keep more room for their work). */
   compact?: boolean;
@@ -48,6 +51,7 @@ export function MediaDrop({
   const take = (f: File | undefined) => {
     if (!f) return;
     if (kindOfFile(f) !== kind) return void toast(wrongKindMessage(kind));
+    onFile?.(f);
     void fileToSlot(f, onChange, kind);
   };
   const Icon = kind === "video" ? FileVideo : ImagePlus;

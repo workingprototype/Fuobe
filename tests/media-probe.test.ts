@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { probeMedia } from "@/lib/media-probe";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { probeBlob, probeMedia, probeMediaRanges, probeUrl } from "@/lib/media-probe";
 
 const u32 = (...v: number[]) =>
   Buffer.concat(
@@ -93,5 +93,79 @@ describe("media probe", () => {
     expect(probeMedia(Buffer.from("\x1aE\xdf\xa3 webm header....."))).toBeNull();
     expect(probeMedia(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]))).toBeNull();
     expect(probeMedia(Buffer.alloc(4))).toBeNull();
+  });
+});
+
+describe("probing without reading the whole file (Trim, the Ad Multiplier)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** A camera-style file: 4 MB of media data with the moov box after it (or before: faststart), optionally a 64-bit mdat size. */
+  function big({ faststart = false, large = false } = {}): Buffer {
+    const whole = mp4();
+    const ftyp = whole.subarray(0, 16);
+    const moov = whole.subarray(16 + 72);
+    const media = Buffer.alloc(4 * 1024 * 1024);
+    const mdat = large ? Buffer.concat([u32(1), Buffer.from("mdat"), u32(0, 16 + media.length), media]) : box("mdat", media);
+    return Buffer.concat(faststart ? [ftyp, moov, mdat] : [ftyp, mdat, moov]);
+  }
+  const reader = (buf: Buffer) => {
+    const reads: [number, number][] = [];
+    const read = async (start: number, end: number) => (reads.push([start, end]), new Uint8Array(buf.subarray(start, end)));
+    return { read, reads, bytes: () => reads.reduce((n, [a, b]) => n + (b - a), 0) };
+  };
+  const expected = probeMedia(mp4());
+
+  it("finds the moov box by its box headers and reads only that, wherever it sits", async () => {
+    for (const opts of [{}, { faststart: true }, { large: true }]) {
+      const buf = big(opts);
+      const r = reader(buf);
+      expect(await probeMediaRanges(r.read, buf.length), JSON.stringify(opts)).toEqual(expected);
+      expect(r.bytes()).toBeLessThan(300 * 1024);
+    }
+  });
+
+  it("reads a dropped File in slices", async () => {
+    const buf = big();
+    const blob = new Blob([new Uint8Array(buf)]);
+    const slice = vi.spyOn(blob, "slice");
+    expect(await probeBlob(blob)).toEqual(expected);
+    expect(slice.mock.calls.every(([a, b]) => (b ?? 0) - (a ?? 0) <= 256 * 1024)).toBe(true);
+  });
+
+  it("asks the server for byte ranges, and copes with one that sends the whole file", async () => {
+    const buf = big();
+    let sent = 0;
+    const serve = (ranges: boolean) =>
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const m = /bytes=(\d+)-(\d+)/.exec(new Headers(init?.headers).get("range") ?? "");
+        if (!ranges || !m) return (sent += buf.length), new Response(new Uint8Array(buf), { status: 200 });
+        const end = Math.min(Number(m[2]), buf.length - 1);
+        const part = buf.subarray(Number(m[1]), end + 1);
+        sent += part.length;
+        return new Response(new Uint8Array(part), { status: 206, headers: { "Content-Range": `bytes ${m[1]}-${end}/${buf.length}` } });
+      });
+    vi.stubGlobal("fetch", serve(true));
+    expect(await probeUrl("/api/files/clip.mp4")).toEqual(expected);
+    expect(sent).toBeLessThan(300 * 1024);
+    vi.stubGlobal("fetch", serve(false));
+    expect(await probeUrl("/api/files/clip.mp4")).toEqual(expected);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
+    expect(await probeUrl("/api/files/gone.mp4")).toBeNull();
+  });
+
+  it("probes other containers only when the whole file fits in the first read", async () => {
+    const wav = Buffer.alloc(44);
+    wav.write("RIFF", 0);
+    wav.write("WAVEfmt ", 8);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt32LE(4, 28);
+    wav.write("data", 36);
+    wav.writeUInt32LE(0, 40);
+    const small = reader(Buffer.concat([wav, Buffer.alloc(400)]));
+    expect((await probeMediaRanges(small.read, 444))?.container).toBe("wav");
+    const webm = Buffer.concat([Buffer.from("\x1aE\xdf\xa3 webm header....."), Buffer.alloc(1024 * 1024)]);
+    const r = reader(webm);
+    expect(await probeMediaRanges(r.read, webm.length)).toBeNull();
+    expect(r.reads).toHaveLength(1);
   });
 });
