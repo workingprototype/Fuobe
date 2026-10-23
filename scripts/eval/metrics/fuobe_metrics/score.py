@@ -1,0 +1,348 @@
+"""Score a run: python -m fuobe_metrics.score <runDir> [options]. Reads run.json and jobs.jsonl,
+writes metrics.json next to them: per-job scores, per-group scores (continuity across a film's
+shots), which models made them (revision and licence) and why any metric was skipped. A job whose
+outputs and settings haven't changed keeps its earlier scores (--force recomputes)."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+import pathlib
+import sys
+import time
+
+import numpy as np
+
+from . import maths
+from .media import audio_track, have_ffmpeg, images_of, kind_of, video_frames
+from .models import MODELS, Aesthetic, Clip, Faces, Missing, device_of
+from .registry import FAMILIES
+
+VERSION = 1
+
+
+def read_jobs(run_dir: pathlib.Path) -> list[dict]:
+    rows: dict[str, dict] = {}
+    path = run_dir / "jobs.jsonl"
+    if not path.exists():
+        return []
+    for line in path.read_text(encoding="utf8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows[row["id"]] = row
+    return [r for r in rows.values() if r.get("status") == "succeeded" and r.get("outputs")]
+
+
+def media_outputs(run_dir: pathlib.Path, job: dict) -> list[pathlib.Path]:
+    """The job's picture or clip outputs (masks, first frames and other helpers left out)."""
+    out = []
+    for o in job.get("outputs", []):
+        if o.get("role") in {"mask", "first-frame", "depth"}:
+            continue
+        p = run_dir / o["file"]
+        if p.exists() and kind_of(p) in {"image", "video"}:
+            out.append(p)
+    return out
+
+
+def fingerprint(run_dir: pathlib.Path, job: dict, config: dict) -> str:
+    h = hashlib.sha256(json.dumps(config, sort_keys=True).encode())
+    for p in media_outputs(run_dir, job) + [pathlib.Path(r) for r in job.get("references", [])]:
+        try:
+            st = p.stat()
+            h.update(f"{p}|{st.st_size}|{int(st.st_mtime)}".encode())
+        except OSError:
+            h.update(f"{p}|missing".encode())
+    h.update(json.dumps(sorted(job.get("metrics", []))).encode())
+    return h.hexdigest()[:16]
+
+
+class Scorer:
+    def __init__(self, args):
+        self.args = args
+        self.device = device_of(args.device)
+        self._clip = None
+        self._clip_l14 = None
+        self._aesthetic = None
+        self._faces = None
+        self.used: dict[str, dict] = {}
+        self.skipped: dict[str, str] = {}
+
+    # Models, loaded on first use; a missing one skips its metric for the whole run with the reason.
+    def clip(self):
+        if self._clip is None:
+            self._clip = Clip(self.args.clip_model, self.device)
+            self.used["clip"] = {**MODELS[self.args.clip_model], "key": self.args.clip_model}
+        return self._clip
+
+    def aesthetic(self):
+        if self._aesthetic is None:
+            if self._clip_l14 is None:
+                self._clip_l14 = self._clip if self.args.clip_model == "clip-l14" and self._clip else Clip("clip-l14", self.device)
+            self._aesthetic = Aesthetic(self._clip_l14)
+            self.used["aesthetic"] = {"head": MODELS["aesthetic-v2"], "clip": MODELS["clip-l14"]}
+        return self._aesthetic
+
+    def faces(self):
+        if self._faces is None:
+            name = self.args.identity_model
+            if name == "buffalo_l" and not self.args.accept_noncommercial:
+                raise Missing("buffalo_l is licensed for non-commercial research only: add --accept-noncommercial to use it, or keep the default AuraFace (Apache-2.0)")
+            self._faces = Faces(name, self.device)
+            self.used["identity"] = {**MODELS[name], "key": name}
+        return self._faces
+
+    # Metric families: each returns a dict of keys from registry.FAMILIES plus notes.
+    def family(self, name: str, job: dict, outs: list[pathlib.Path]) -> dict:
+        return getattr(self, f"m_{name}")(job, outs)
+
+    def m_clip(self, job, outs):
+        text = (job.get("prompt") or "").replace("{character}", "a person").strip()
+        if not text:
+            return {"_note": "no prompt to compare with"}
+        pics = [p for o in outs for p in images_of(o, frames=4)]
+        if not pics:
+            return {"_note": "no picture to score"}
+        t = self.clip().texts([text])[0]
+        return {"clip": round(maths.mean_clip_score(self.clip().images(pics), t), 3)}
+
+    def m_aesthetic(self, job, outs):
+        pics = [p for o in outs for p in images_of(o, frames=4)]
+        if not pics:
+            return {"_note": "no picture to score"}
+        return {"aesthetic": round(float(np.mean(self.aesthetic().scores(pics))), 3)}
+
+    def reference_pictures(self, job) -> list:
+        pics = []
+        for r in job.get("references", []):
+            if kind_of(r) in {"image", "video"} and pathlib.Path(r).exists():
+                pics += images_of(r, frames=4)
+        return pics
+
+    def m_style(self, job, outs):
+        refs = self.reference_pictures(job)
+        if not refs:
+            return {"_note": "no style references (add your own images to the case's local/references folder)"}
+        pics = [p for o in outs for p in images_of(o, frames=4)]
+        if not pics:
+            return {"_note": "no picture to score"}
+        ref_emb = self.clip().images(refs)
+        out_emb = maths.l2norm(self.clip().images(pics).mean(axis=0))
+        s = maths.reference_similarity(out_emb, ref_emb)
+        return {"style": round(s["centroid"], 4), "styleNearest": round(s["nearest"], 4), "_refs": s["n"]}
+
+    def m_identity(self, job, outs):
+        refs = self.reference_pictures(job)
+        if not refs:
+            return {"_note": "no reference photos of the person"}
+        faces = self.faces()
+        ref = [f["embedding"] for f in (faces.largest(p) for p in refs) if f]
+        if not ref:
+            return {"_note": "no face found in the reference photos"}
+        pics = [p for o in outs for p in images_of(o, frames=8)]
+        found = [f for f in (faces.largest(p) for p in pics) if f]
+        if not found:
+            return {"identity": None, "faceRate": 0.0, "_note": "no face found in the output"}
+        centroid = maths.l2norm(np.mean(ref, axis=0))
+        sims = [float(maths.l2norm(f["embedding"]) @ centroid) for f in found]
+        return {"identity": round(float(np.mean(sims)), 4), "faceRate": round(len(found) / len(pics), 3), "_refs": len(ref)}
+
+    def m_temporal(self, job, outs):
+        clips = [o for o in outs if kind_of(o) == "video"]
+        if not clips:
+            return {"_note": "not a clip"}
+        res = {}
+        frames, _ = video_frames(clips[0], fps=self.args.fps, max_frames=self.args.frames, width=256)
+        if len(frames) < 2:
+            return {"_note": "the clip has fewer than two frames"}
+        from PIL import Image  # noqa: PLC0415
+
+        d = maths.drift(self.clip().images([Image.fromarray(f) for f in frames]))
+        res["drift"] = round(d["mean"], 5)
+        res["driftMax"] = round(d["max"], 5)
+        try:
+            import cv2  # noqa: PLC0415
+        except ImportError:
+            res["_note"] = "warp error needs OpenCV (pnpm eval:setup)"
+            return res
+        errs = []
+        gray = [cv2.cvtColor(f, cv2.COLOR_RGB2GRAY) for f in frames]
+        for a, b, ga, gb in zip(frames[:-1], frames[1:], gray[:-1], gray[1:]):
+            fw = cv2.calcOpticalFlowFarneback(ga, gb, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            bw = cv2.calcOpticalFlowFarneback(gb, ga, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            e = maths.warp_error(a, b, fw, maths.valid_flow_mask(fw, bw))
+            if not math.isnan(e):
+                errs.append(e)
+        if errs:
+            res["warp"] = round(float(np.mean(errs)), 5)
+        return res
+
+    def m_lipsync(self, job, outs):
+        clips = [o for o in outs if kind_of(o) == "video"]
+        if not clips:
+            return {"_note": "not a clip"}
+        fps = 25.0
+        frames, rate = video_frames(clips[0], fps=fps, max_frames=750, width=256)
+        audio = audio_track(clips[0])
+        source = "the clip's sound"
+        if audio is None and job.get("inputs", {}).get("audio") and pathlib.Path(job["inputs"]["audio"]).exists():
+            audio, source = audio_track(job["inputs"]["audio"]), "the voice track sent"
+        if audio is None or len(frames) < 8:
+            return {"_note": "no sound to compare the mouth with"}
+        box = None
+        try:
+            from PIL import Image  # noqa: PLC0415
+
+            f = self.faces().largest(Image.fromarray(frames[len(frames) // 2]))
+            box = f and f["box"]
+        except Missing:
+            pass
+        h, w = frames.shape[1:3]
+        if box:
+            x0, y0, x1, y1 = box
+            mouth = (int(y0 + 0.62 * (y1 - y0)), int(min(h, y1 + 0.05 * (y1 - y0))), int(x0 + 0.25 * (x1 - x0)), int(x0 + 0.75 * (x1 - x0)))
+        else:  # no detector: the lower middle of the frame, where a talking head's mouth usually is
+            mouth = (int(0.55 * h), int(0.85 * h), int(0.3 * w), int(0.7 * w))
+        region = frames[:, mouth[0] : max(mouth[0] + 2, mouth[1]), mouth[2] : max(mouth[2] + 2, mouth[3])].mean(axis=-1)
+        motion = maths.motion_energy(region)
+        env = maths.frame_envelope(audio, 16000, rate, len(frames))
+        best = maths.best_lag_correlation(motion, env, max_lag=int(round(rate * 0.5)))
+        res = {"lipsync": round(max(0.0, best["corr"]), 4), "lipsyncOffset": best["lag"], "_note": f"proxy: mouth-region motion vs {source}{' (face box)' if box else ' (fixed region, no face detector)'}"}
+        cmd = os.environ.get("FUOBE_EVAL_SYNCNET_CMD")
+        if cmd:
+            import shlex  # noqa: PLC0415
+            import subprocess  # noqa: PLC0415
+
+            r = subprocess.run([*shlex.split(cmd), str(clips[0])], capture_output=True, text=True, timeout=1800)
+            try:
+                s = json.loads(r.stdout.strip().splitlines()[-1])
+                res["syncnet"] = float(s["confidence"])
+                res["syncnetOffset"] = s.get("offset")
+            except (ValueError, KeyError, IndexError):
+                res["_note"] += f"; SyncNet command gave no JSON ({(r.stderr or '').strip()[:120]})"
+        return res
+
+
+def group_continuity(scorer: Scorer, run_dir: pathlib.Path, jobs: list[dict]) -> dict:
+    """Shot lists: the middle frame of each shot, CLIP-embedded, against the next shot's."""
+    groups: dict[str, list[dict]] = {}
+    for j in jobs:
+        if j.get("shot") and "continuity" in j.get("metrics", []):
+            groups.setdefault(f"{j['caseId']}|{j['variant']}|s{j['seed']}", []).append(j)
+    out = {}
+    for key, members in groups.items():
+        members.sort(key=lambda j: j["shot"]["index"])
+        pics = []
+        for j in members:
+            outs = media_outputs(run_dir, j)
+            if outs:
+                p = images_of(outs[0], frames=3)
+                if p:
+                    pics.append(p[len(p) // 2])
+        if len(pics) >= 2:
+            out[key] = {"continuity": round(maths.consecutive_similarity(scorer.clip().images(pics)), 4), "shots": len(pics), "jobs": [j["id"] for j in members]}
+    return out
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="fuobe_metrics.score", description="Score an evaluation run's outputs.")
+    ap.add_argument("run_dir")
+    ap.add_argument("--metrics", help="families to compute (default: each job's own list)")
+    ap.add_argument("--device", default="cpu", help="cpu (default), cuda, mps or auto")
+    ap.add_argument("--clip-model", default="clip-b32", choices=["clip-b32", "clip-l14"])
+    ap.add_argument("--identity-model", default="auraface", choices=["auraface", "buffalo_l"])
+    ap.add_argument("--accept-noncommercial", action="store_true", help="allow buffalo_l (non-commercial research licence)")
+    ap.add_argument("--frames", type=int, default=24, help="frames sampled per clip for temporal metrics")
+    ap.add_argument("--fps", type=float, default=8.0, help="sampling rate for temporal metrics")
+    ap.add_argument("--force", action="store_true", help="recompute every job")
+    args = ap.parse_args(argv)
+
+    run_dir = pathlib.Path(args.run_dir).resolve()
+    if not (run_dir / "run.json").exists():
+        print(f"{run_dir} isn't a run folder (no run.json)", file=sys.stderr)
+        return 2
+    if not have_ffmpeg():
+        print("The metrics need ffmpeg and ffprobe on PATH.", file=sys.stderr)
+        return 2
+    wanted = set(args.metrics.split(",")) if args.metrics else None
+    if wanted and wanted - set(FAMILIES):
+        print(f"Unknown metric {', '.join(sorted(wanted - set(FAMILIES)))} (have {', '.join(FAMILIES)})", file=sys.stderr)
+        return 2
+
+    out_file = run_dir / "metrics.json"
+    previous = json.loads(out_file.read_text(encoding="utf8")) if out_file.exists() and not args.force else {}
+    config = {"v": VERSION, "clip": args.clip_model, "identity": args.identity_model, "frames": args.frames, "fps": args.fps}
+    scorer = Scorer(args)
+    jobs = read_jobs(run_dir)
+    results: dict[str, dict] = {}
+    started = time.time()
+    for i, job in enumerate(jobs, 1):
+        fams = [f for f in job.get("metrics", []) if f in FAMILIES and f != "continuity" and (not wanted or f in wanted)]
+        fp = fingerprint(run_dir, job, {**config, "fams": fams})
+        old = previous.get("jobs", {}).get(job["id"])
+        if old and old.get("_fp") == fp:
+            results[job["id"]] = old
+            continue
+        outs = media_outputs(run_dir, job)
+        row: dict = {"_fp": fp}
+        notes = []
+        for fam in fams:
+            if fam in scorer.skipped:
+                continue
+            try:
+                got = scorer.family(fam, job, outs)
+            except Missing as e:
+                scorer.skipped[fam] = str(e)
+                continue
+            except Exception as e:  # one bad file shouldn't stop the run's other scores
+                notes.append(f"{fam}: {e}")
+                continue
+            note = got.pop("_note", None)
+            refs = got.pop("_refs", None)
+            if note:
+                notes.append(f"{fam}: {note}")
+            if refs is not None:
+                row[f"_{fam}Refs"] = refs
+            row.update(got)
+        if notes:
+            row["_notes"] = notes
+        results[job["id"]] = row
+        print(f"[{i}/{len(jobs)}] {job['id']}: " + ", ".join(f"{k} {v}" for k, v in row.items() if not k.startswith("_")), file=sys.stderr)
+
+    groups = {}
+    if not wanted or "continuity" in wanted:
+        try:
+            groups = group_continuity(scorer, run_dir, jobs)
+        except Missing as e:
+            scorer.skipped["continuity"] = str(e)
+    doc = {
+        "version": VERSION,
+        "computedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "device": scorer.device,
+        "config": config,
+        "models": {**previous.get("models", {}), **scorer.used},
+        "skipped": scorer.skipped,
+        "jobs": results,
+        "groups": groups,
+        "seconds": round(time.time() - started, 1),
+    }
+    tmp = out_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf8")
+    tmp.replace(out_file)
+    for fam, why in scorer.skipped.items():
+        print(f"Skipped {fam}: {why}", file=sys.stderr)
+    print(f"Wrote {out_file} ({len(results)} jobs, {len(groups)} groups)", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
