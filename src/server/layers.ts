@@ -9,7 +9,10 @@ import {
   clampLayers,
   CUTOUT_MODELS,
   defaultLayers,
+  enhanceModels,
+  enhancePrompt,
   initialDoc,
+  inpaintPrompt,
   layersModelFor,
   MAX_NODES,
   RELIGHT_DIRECTIONS,
@@ -136,7 +139,7 @@ export function parseDoc(v: unknown): LayerDoc | null {
   return doc;
 }
 
-const TOOLS = ["decompose", "split", "regenerate", "generate-layer", "text-detect", "text-edit", "bg-remove", "regional", "upscale", "relight", "angles", "expand"] as const satisfies readonly LayerTool[];
+const TOOLS = ["decompose", "split", "regenerate", "generate-layer", "text-detect", "text-edit", "bg-remove", "regional", "upscale", "relight", "angles", "expand", "inpaint", "enhance"] as const satisfies readonly LayerTool[];
 
 export const JobInputSchema = z.object({
   tool: z.enum(TOOLS),
@@ -144,6 +147,8 @@ export const JobInputSchema = z.object({
   modelId: z.string().max(80).optional(),
   image: FileUrl.optional(),
   refs: z.array(FileUrl).max(3).optional(),
+  mask: FileUrl.optional(),
+  sketch: FileUrl.optional(),
   prompt: clamped(2000).optional(),
   nodeId: z.string().max(40).optional(),
   frame: BoxSchema,
@@ -164,6 +169,7 @@ export const JobInputSchema = z.object({
       pads: z.object({ left: z.number().int().min(0).max(4096), top: z.number().int().min(0).max(4096), right: z.number().int().min(0).max(4096), bottom: z.number().int().min(0).max(4096) }).optional(),
       feather: num.min(0).max(500).optional(),
       aspect: z.string().regex(/^\d+(\.\d+)?:\d+(\.\d+)?$/).max(20).optional(),
+      look: z.enum(["skin", "glow", "sharpen", "detail"]).optional(),
     })
     .optional(),
 });
@@ -172,13 +178,8 @@ export const JobInputSchema = z.object({
 // Jobs → generation requests (pure: no database)
 
 /** The tool's model on this engine: the one asked for (when the tool offers it) or its default. */
-export function toolModel(tool: LayerTool, engine: Engine, modelId?: string): ModelDef {
-  const list = TOOL_MODELS[tool][engine];
-  if (!list.length) {
-    throw new LayersError(
-      tool === "text-detect" ? "Text detection runs on the cloud engine (Ideogram). On open source, type the lines you want to change." : `${TOOL_LABELS[tool]} has no ${engine === "open" ? "open-source" : "cloud"} model yet`,
-    );
-  }
+export function toolModel(tool: LayerTool, engine: Engine, modelId?: string, list: string[] = TOOL_MODELS[tool][engine]): ModelDef {
+  if (!list.length) throw new LayersError(`${TOOL_LABELS[tool]} has no ${engine === "open" ? "open-source" : "cloud"} model yet`);
   if (modelId && !list.includes(modelId)) throw new LayersError("That model can't run this tool", 400);
   const m = getModel(modelId ?? list[0]);
   if (!m) throw new LayersError("That model isn't in the catalog", 400);
@@ -274,8 +275,10 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
       break;
     }
     case "text-detect": {
+      // OCR models (OvisOCR3, Florence-2) read the lines; Ideogram's text layers also lift them off the picture.
       const model = toolModel(tool, engine, input.modelId);
-      add("detect", base(model, { op: "text-layers", inputs: { images: [needImage()] }, params: aspectFor(model) }));
+      const ocr = model.routes.some((r) => r.op === "ocr");
+      add("detect", base(model, { op: ocr ? "ocr" : "text-layers", inputs: { images: [needImage()] }, ...(ocr ? {} : { params: aspectFor(model) }) }));
       break;
     }
     case "text-edit": {
@@ -328,6 +331,28 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
           : base(model, { op: "edit", prompt: `Show the exact same subject from ${pick(ANGLES, s.angle)}, as if the camera physically moved. ${keep}${prompt ? ` ${prompt}` : ""}`, inputs: { images: [needImage()] }, params: aspectFor(model) });
       add("angle", request);
       if (s.keepAlpha) cutout("angle");
+      break;
+    }
+    case "inpaint": {
+      if (!input.mask) throw new LayersError("Paint over the area to change first", 400);
+      if (!prompt) throw new LayersError("Say what should fill the painted area", 400);
+      const model = toolModel(tool, engine, input.modelId);
+      // Mask models take the mask; edit models are shown the painted area tinted red (applySketch picks).
+      add("inpaint", base(model, { op: "inpaint", prompt: inpaintPrompt(prompt, s.keepAlpha), inputs: { images: [needImage()], mask: input.mask, ...(input.sketch ? { sketch: input.sketch } : {}) }, params: aspectFor(model) }));
+      if (s.keepAlpha) cutout("inpaint");
+      break;
+    }
+    case "enhance": {
+      const look = s.look ?? "skin";
+      const ask = enhancePrompt(look, prompt);
+      const model = toolModel(tool, engine, input.modelId, enhanceModels(look, engine));
+      if (!ask) {
+        // Detail: an upscaler rebuilds it (the layer keeps its place with more pixels, as Upscale does).
+        add("enhance", base(model, { op: "upscale-image", inputs: { images: [needImage()] }, params: aspectFor(model) }));
+        break;
+      }
+      add("enhance", base(model, { op: "edit", prompt: s.keepAlpha ? `${ask} Keep the subject on a plain, even background.` : ask, inputs: { images: [needImage()] }, params: aspectFor(model) }));
+      if (s.keepAlpha) cutout("enhance");
       break;
     }
     case "expand": {

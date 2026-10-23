@@ -42,6 +42,14 @@ import {
   toLocal,
   TOOL_MODELS,
   zipPlan,
+  ENHANCE_DETAIL_MODELS,
+  ENHANCE_LOOKS,
+  elementDraft,
+  enhanceModels,
+  enhancePrompt,
+  inpaintPrompt,
+  needsDetectedSize,
+  placeTextBlocks,
   coverage,
   defaultLayers,
   exportScale,
@@ -430,6 +438,59 @@ describe("edit text", () => {
     ]);
     expect(textBlocksFrom(undefined)).toEqual([]);
   });
+
+  it("reads OCR lines too: 0–1 boxes as they are, Florence-2's pixel boxes against the size", () => {
+    // OvisOCR3 / Florence-2 with a size: fractions already.
+    const lines = { lines: [{ text: "SUMMER SALE", bbox: [0.062, 0.096, 0.532, 0.109] }, { text: "no box" }], size: [1280, 960] };
+    expect(textBlocksFrom(lines)).toEqual([
+      { text: "SUMMER SALE", box: [0.062, 0.096, 0.532, 0.109] },
+      { text: "no box", box: null },
+    ]);
+    expect(needsDetectedSize(lines)).toBe(false);
+    // Florence-2 without the image's size: pixels in bboxPx, read against the picture the editor sent.
+    const px = { lines: [{ text: "Hi", bboxPx: [100, 50, 200, 100] }] };
+    expect(needsDetectedSize(px)).toBe(true);
+    expect(textBlocksFrom(px, [1000, 500])).toEqual([{ text: "Hi", box: [0.1, 0.1, 0.2, 0.2] }]);
+    expect(textBlocksFrom(px)).toEqual([{ text: "Hi", box: null }]);
+    expect(textBlocksFrom({ ...px, size: [2000, 1000] })).toEqual([{ text: "Hi", box: [0.05, 0.05, 0.1, 0.1] }]);
+    // Ideogram's object boxes in fractions need no size.
+    expect(needsDetectedSize({ textBlocks: [{ text: "x", bbox: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 } }] })).toBe(false);
+  });
+
+  it("lays detected lines out in the frame the detector read, like the cloud route's blocks", () => {
+    const rows = placeTextBlocks(
+      [
+        { text: "SUMMER SALE", box: [0.1, 0.2, 0.5, 0.1] },
+        { text: "fine print", box: null },
+      ],
+      [100, 50, 800, 400],
+    );
+    expect(rows).toEqual([
+      { from: "SUMMER SALE", to: "SUMMER SALE", box: [180, 130, 400, 40] },
+      { from: "fine print", to: "fine print", box: null },
+    ]);
+    // Nothing changed yet: Generate has nothing to send.
+    expect(textEditPrompt(rows)).toBe("Preserve the original design and change only the requested text.");
+  });
+});
+
+describe("inpaint and Save as element", () => {
+  it("asks for the painted area only", () => {
+    expect(inpaintPrompt("  a red scarf.  ")).toBe("a red scarf. Blend it into the surroundings with matching light, perspective and grain.");
+    expect(inpaintPrompt("a hat", true)).toMatch(/grain\. Keep the subject on a plain, even background\.$/);
+  });
+
+  it("names a layer's element and guesses its kind", () => {
+    expect(elementDraft({ name: "Woman in red coat", z: 2 })).toEqual({ name: "Woman in red coat", kind: "character" });
+    expect(elementDraft({ name: "Guitar · part 2", z: 3 })).toEqual({ name: "Guitar", kind: "prop" });
+    expect(elementDraft({ name: "Sky gradient copy", z: 1 })).toEqual({ name: "Sky gradient", kind: "style" });
+    // Generic names: the bottom layer reads as a backdrop, anything else as a prop; prompts say more.
+    expect(elementDraft({ name: "Background", z: 0 })).toEqual({ name: "Element", kind: "style" });
+    expect(elementDraft({ name: "Layer 4", z: 4 })).toEqual({ name: "Element", kind: "prop" });
+    expect(elementDraft({ name: "Generated layer", z: 5, prompt: "a golden retriever puppy" })).toEqual({ name: "Element", kind: "prop", description: "a golden retriever puppy" });
+    expect(elementDraft({ name: "Generated layer", z: 5, prompt: "a smiling dog" })).toMatchObject({ kind: "character" });
+    expect(elementDraft({ name: "x".repeat(90), z: 1 }).name).toHaveLength(60);
+  });
 });
 
 describe("Open in Layers", () => {
@@ -450,7 +511,7 @@ describe("tools and prices", () => {
     split: ["layers"],
     regenerate: ["edit"],
     "generate-layer": ["t2i", "edit"],
-    "text-detect": ["text-layers"],
+    "text-detect": ["text-layers", "ocr"],
     "text-edit": ["edit"],
     "bg-remove": ["bg-remove"],
     regional: ["edit"],
@@ -458,6 +519,8 @@ describe("tools and prices", () => {
     relight: ["edit"],
     angles: ["edit"],
     expand: ["edit", "outpaint"],
+    inpaint: ["inpaint", "edit"],
+    enhance: ["edit"],
   };
 
   it("offers catalog models of the right engine and operation for every tool", () => {
@@ -471,6 +534,24 @@ describe("tools and prices", () => {
         }
       }
     }
+  });
+
+  it("runs the Enhancer's Detail look on catalog upscalers", () => {
+    for (const engine of ["cloud", "open"] as const) {
+      for (const id of ENHANCE_DETAIL_MODELS[engine]) {
+        const m = getModel(id);
+        expect(m?.engine, id).toBe(engine);
+        expect(supportsOp(m!, "upscale-image"), id).toBe(true);
+      }
+      expect(enhanceModels("detail", engine)).toBe(ENHANCE_DETAIL_MODELS[engine]);
+      expect(enhanceModels("skin", engine)).toBe(TOOL_MODELS.enhance[engine]);
+    }
+    expect(enhancePrompt("detail")).toBeNull();
+    expect(enhancePrompt("glow", "  ")).toBe(
+      "Give the portrait a soft beauty retouch with a healthy dewy glow, still keeping real pore texture. Make the skin look like a high-end editorial photograph shot on a sharp lens — real texture, no plastic smoothing, no makeup changes. Keep the face shape, identity, expression, hair, lighting and background exactly the same.",
+    );
+    // Every look but Detail has an instruction.
+    expect(ENHANCE_LOOKS.filter((l) => !l.prompt).map((l) => l.id)).toEqual(["detail"]);
   });
 
   it("prices a decomposition per layer", () => {

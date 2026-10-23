@@ -12,7 +12,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-layers-comfy-"));
 process.env.FUOBE_DATA_DIR = dir;
 process.env.COMFYUI_URL = "http://127.0.0.1:9";
 
-const { prepareWorkflow } = await import("@/server/providers/comfyui");
+const { collectOutputs, getWorkflow, prepareWorkflow } = await import("@/server/providers/comfyui");
 const { jobSteps } = await import("@/server/layers");
 const { getModel } = await import("@/lib/catalog");
 
@@ -23,7 +23,7 @@ async function bind(req: GenerationRequest) {
   expect(route.provider).toBe("comfyui");
   const res = await prepareWorkflow(
     route.endpoint,
-    { prompt: req.prompt, images: req.inputs?.images, ...req.params },
+    { prompt: req.prompt, images: req.inputs?.images, ...(req.inputs?.mask ? { mask: req.inputs.mask } : {}), ...req.params },
     { generationId: "gen1", op: req.op!, upload: async (_d, _t, name) => `up_${name}`, media: () => undefined, serverRam: async () => undefined },
   );
   const wf = res.workflow as Record<string, { inputs: Record<string, unknown> }>;
@@ -76,5 +76,69 @@ describe("Layers on the open engine", () => {
     expect(String(relight("prompt")[0])).toContain("warm flickering candlelight, coming from the left");
     const text = await bind(step({ tool: "text-edit", settings: { rows: [{ from: "SALE", to: "OPEN" }] } }));
     expect(text("prompt")).toEqual(["Preserve the original design and change only the requested text. Change “SALE” to “OPEN”."]);
+  });
+});
+
+describe("Inpaint and Enhancer on the open engine", () => {
+  it("inpaint: the picture, its painted mask and the prompt reach FLUX Fill", async () => {
+    const req = step({ tool: "inpaint", prompt: "a vase of tulips", mask: "/api/files/m.png", sketch: "/api/files/s.png" });
+    const at = await bind(req);
+    expect(at("image")).toEqual(["/api/files/a.png"]);
+    expect(at("mask")).toEqual(["/api/files/m.png"]);
+    expect(String(at("prompt")[0])).toMatch(/^a vase of tulips\. Blend it into the surroundings/);
+  });
+
+  it("enhancer: a retouch reaches Qwen-Image-Edit, Detail the SeedVR2 upscaler", async () => {
+    const skin = await bind(step({ tool: "enhance", settings: { look: "skin" } }));
+    expect(String(skin("prompt")[0])).toMatch(/^Give the portrait a subtle natural retouch/);
+    const detail = await bind(step({ tool: "enhance", settings: { look: "detail" } }));
+    expect(detail("image")).toEqual(["/api/files/a.png"]);
+  });
+});
+
+describe("Text detection on the open engine (ocr-lines-qwen35)", () => {
+  const file = (filename: string) => ({ filename, subfolder: "fuobe", type: "output" });
+  const done = (outputs: Record<string, Record<string, unknown>>) => ({ status: { status_str: "success", completed: true }, outputs });
+
+  it("binds the picture to OvisOCR3 with the workflow's own instruction, checkpoint and size", async () => {
+    const req = step({ tool: "text-detect" });
+    expect(req).toMatchObject({ modelId: "oss-ocr-lines", op: "ocr", inputs: { images: ["/api/files/a.png"] } });
+    const at = await bind(req);
+    expect(at("image")).toEqual(["/api/files/a.png"]);
+    expect(at("checkpoint")).toEqual(["ovisocr3_0.8b_bf16.safetensors"]);
+    expect(at("maxSize")).toEqual([1280]);
+    expect(at("maxTokens")).toEqual([2048]);
+    expect(String(at("instruction")[0])).toMatch(/scaled to \[0, 1000\)/);
+  });
+
+  it("reads the answer into lines with 0–1 boxes, and folds the frame in as the size", () => {
+    const outs = collectOutputs(
+      done({
+        "8": { text: ['{"width": 1280, "height": 960, "coords": "relative-1000"}'] },
+        "5": { text: ['```json\n[{"bbox_2d": [62, 96, 594, 205], "text_content": "SUMMER SALE"}, {"bbox_2d": [700, 820, 940, 880], "text_content": "SAVE 30%"}]\n```'], files: [file("ocr_00001_.json")] },
+      }),
+      getWorkflow("ocr-lines-qwen35").manifest,
+      "http://comfy.test:8188",
+    );
+    expect(outs).toHaveLength(1);
+    expect(outs[0]).toMatchObject({
+      kind: "text",
+      contentType: "text/plain",
+      text: "SUMMER SALE\nSAVE 30%",
+      meta: {
+        size: [1280, 960],
+        lines: [
+          { text: "SUMMER SALE", bbox: [0.062, 0.096, 0.532, 0.109] },
+          { text: "SAVE 30%", bbox: [0.7, 0.82, 0.24, 0.06] },
+        ],
+      },
+    });
+    // The text travels as plain lines (like Florence-2's), not as the model's JSON file.
+    expect(outs[0].url.startsWith("data:text/plain;base64,")).toBe(true);
+  });
+
+  it("keeps an answer that isn't a list as its words, with no lines", () => {
+    const outs = collectOutputs(done({ "5": { text: ["Sorry, I can't read this."], files: [file("ocr_00002_.json")] } }), getWorkflow("ocr-lines-qwen35").manifest);
+    expect(outs[0]).toMatchObject({ text: "Sorry, I can't read this.", meta: { lines: [], unreadable: true } });
   });
 });

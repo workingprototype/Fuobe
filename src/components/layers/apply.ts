@@ -34,6 +34,8 @@ const NEW_LAYER_NAMES: Partial<Record<LayerJob["tool"], string>> = {
   upscale: "Upscaled",
   relight: "Relit",
   angles: "New angle",
+  inpaint: "Inpainted",
+  enhance: "Enhanced",
 };
 
 /** One image of a result, measured: its pixel size and the box of its opaque pixels. */

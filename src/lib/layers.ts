@@ -97,7 +97,9 @@ export type LayerTool =
   | "upscale"
   | "relight"
   | "angles"
-  | "expand";
+  | "expand"
+  | "inpaint"
+  | "enhance";
 
 export interface LayerProject {
   id: string;
@@ -174,6 +176,9 @@ export interface LayerJobInput {
   image?: string;
   /** Reference images (per-layer generate). */
   refs?: string[];
+  /** Inpaint: the painted area as a PNG the size of `image` (white = change), and `image` with that area tinted red. */
+  mask?: string;
+  sketch?: string;
   prompt?: string;
   nodeId?: string;
   frame: Box;
@@ -193,6 +198,8 @@ export interface LayerJobInput {
     pads?: { left: number; top: number; right: number; bottom: number };
     feather?: number;
     aspect?: string;
+    /** Enhancer: one of {@link ENHANCE_LOOKS}. */
+    look?: EnhanceLook;
   };
 }
 
@@ -210,6 +217,8 @@ export const TOOL_LABELS: Record<LayerTool, string> = {
   relight: "Relight",
   angles: "Angles",
   expand: "Expand",
+  inpaint: "Inpaint",
+  enhance: "Enhance",
 };
 
 /** Models each tool offers, per engine (the first is the default). Checked against the catalog in tests. */
@@ -218,7 +227,8 @@ export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }>
   split: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered", "oss-qwen-layered-control"] },
   regenerate: { cloud: ["nano-banana-pro", "seedream-5-pro", "nano-banana-2"], open: ["oss-qwen-edit", "oss-flux-kontext"] },
   "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-z-image-turbo", "oss-qwen-image"] },
-  "text-detect": { cloud: ["ideogram-3-text-layers"], open: [] },
+  // Ideogram also lifts the text off the picture; Florence-2 only reads it, for a tenth of a cent.
+  "text-detect": { cloud: ["ideogram-3-text-layers", "florence-2-ocr"], open: ["oss-ocr-lines"] },
   "text-edit": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-edit"] },
   "bg-remove": { cloud: ["birefnet-cloud", "ideogram-remove-bg"], open: ["oss-rmbg"] },
   regional: { cloud: ["seedream-5-pro", "nano-banana-pro"], open: ["oss-qwen-edit", "oss-flux-kontext"] },
@@ -226,7 +236,58 @@ export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }>
   relight: { cloud: ["nano-banana-pro"], open: ["oss-qwen-relight"] },
   angles: { cloud: ["qwen-multiple-angles", "nano-banana-pro"], open: ["oss-qwen-edit"] },
   expand: { cloud: ["nano-banana-pro"], open: ["oss-flux-fill"] },
+  // Nano Banana Pro sees the painted area tinted red (Higgsfield's nano_banana_pro_inpaint); the others take the mask itself.
+  inpaint: { cloud: ["nano-banana-pro", "flux-fill-pro", "z-image-inpaint"], open: ["oss-flux-fill"] },
+  // The retouch looks; Detail runs on {@link ENHANCE_DETAIL_MODELS}.
+  enhance: { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-edit"] },
 };
+
+// ---------------------------------------------------------------------------
+// Enhancer (Higgsfield's skin-enhancer, plus the upscalers' detail pass)
+
+export type EnhanceLook = "skin" | "glow" | "sharpen" | "detail";
+
+/** The looks: what each does, and the instruction an edit model gets (Detail has none: an upscaler restores it). */
+export const ENHANCE_LOOKS: { id: EnhanceLook; label: string; hint: string; prompt?: string }[] = [
+  {
+    id: "skin",
+    label: "Skin",
+    hint: "A natural retouch: blemishes and redness even out, pores and freckles stay",
+    prompt: "Give the portrait a subtle natural retouch: even out redness and blemishes while keeping every pore, freckle and fine line.",
+  },
+  {
+    id: "glow",
+    label: "Soft glow",
+    hint: "A soft beauty retouch with a healthy, dewy glow",
+    prompt: "Give the portrait a soft beauty retouch with a healthy dewy glow, still keeping real pore texture.",
+  },
+  {
+    id: "sharpen",
+    label: "Sharpen",
+    hint: "Removes blur and noise, restores crisp edges",
+    prompt: "Sharpen the image: remove blur, noise and compression artefacts and restore crisp detail in edges, eyes, hair, fabric and text.",
+  },
+  { id: "detail", label: "Detail", hint: "An upscaler rebuilds fine detail: twice the pixels, same place on the canvas" },
+];
+
+/** The upscalers behind the Detail look (the Upscale tool's, Topaz with its face pass first). */
+export const ENHANCE_DETAIL_MODELS: { cloud: string[]; open: string[] } = { cloud: ["topaz-image", "seedvr-image"], open: ["oss-seedvr2-image", "oss-upscale-image"] };
+
+/** The models a look offers on an engine (the first is the default). */
+export function enhanceModels(look: EnhanceLook | undefined, engine: "cloud" | "open"): string[] {
+  return look === "detail" ? ENHANCE_DETAIL_MODELS[engine] : TOOL_MODELS.enhance[engine];
+}
+
+/** The edit instruction of a retouch look, with anything the user added; null for Detail. */
+export function enhancePrompt(look: EnhanceLook | undefined, extra?: string): string | null {
+  const l = ENHANCE_LOOKS.find((x) => x.id === look) ?? ENHANCE_LOOKS[0];
+  if (!l.prompt) return null;
+  const keep =
+    l.id === "sharpen"
+      ? "Keep the content, composition, colours and lighting exactly the same."
+      : "Make the skin look like a high-end editorial photograph shot on a sharp lens — real texture, no plastic smoothing, no makeup changes. Keep the face shape, identity, expression, hair, lighting and background exactly the same.";
+  return [l.prompt, keep, extra?.trim()].filter(Boolean).join(" ");
+}
 
 /** Relight looks (the Relight app's), as [label, prompt]. */
 export const RELIGHT_LIGHTS: [string, string][] = [
@@ -901,24 +962,100 @@ export interface TextBlock {
   box: Box | null;
 }
 
-/** Text blocks from a text-layers result (OutputFile.meta.textBlocks), boxes normalised against the image size. */
+/**
+ * Text blocks from a detection: Ideogram's text layers (OutputFile.meta.textBlocks) or an OCR result's
+ * lines (meta.lines, from OvisOCR3 or Florence-2). Boxes in pixels are normalised against the size the
+ * result gives (meta.size), else `image` (the picture the detector read); without either they're dropped.
+ */
 export function textBlocksFrom(meta: Record<string, unknown> | undefined, image?: [number, number]): TextBlock[] {
-  const raw = Array.isArray(meta?.textBlocks) ? meta.textBlocks : [];
-  return raw
-    .map((b): TextBlock | null => {
-      if (!b || typeof b !== "object") return null;
-      const o = b as Record<string, unknown>;
+  const size = asSize(meta?.size) ?? image;
+  return detectedBlocks(meta)
+    .map((o): TextBlock | null => {
       const text = typeof o.text === "string" ? o.text.replace(/\s+/g, " ").trim() : "";
       if (!text) return null;
-      let box = asBox(o.bbox);
-      if (!box && o.bbox && typeof o.bbox === "object") {
-        const q = o.bbox as Record<string, unknown>;
-        box = asBox([q.x, q.y, q.w ?? q.width, q.h ?? q.height]);
-      }
-      if (box && Math.max(...box) > 1.0001) box = image ? [box[0] / image[0], box[1] / image[1], box[2] / image[0], box[3] / image[1]] : null;
+      const raw = rawBox(o);
+      let box = raw?.box ?? null;
+      if (box && raw!.px) box = size ? [box[0] / size[0], box[1] / size[1], box[2] / size[0], box[3] / size[1]] : null;
+      if (box && (box[2] <= 0 || box[3] <= 0)) box = null;
       return { text, box };
     })
     .filter((b): b is TextBlock => !!b);
+}
+
+/** The items of a detection: Ideogram's text blocks or an OCR result's lines. */
+function detectedBlocks(meta: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  const raw = Array.isArray(meta?.textBlocks) ? meta.textBlocks : Array.isArray(meta?.lines) ? meta.lines : [];
+  return raw.filter((b): b is Record<string, unknown> => !!b && typeof b === "object");
+}
+
+/** A block's [x, y, w, h], and whether it's in pixels (`bboxPx`, or numbers past 1) rather than 0–1. */
+function rawBox(o: Record<string, unknown>): { box: Box; px: boolean } | null {
+  let box = asBox(o.bbox);
+  if (!box && o.bbox && typeof o.bbox === "object") {
+    const q = o.bbox as Record<string, unknown>;
+    box = asBox([q.x, q.y, q.w ?? q.width, q.h ?? q.height]);
+  }
+  if (box) return { box, px: Math.max(...box) > 1.0001 };
+  const px = asBox(o.bboxPx);
+  return px ? { box: px, px: true } : null;
+}
+
+const asSize = (v: unknown): [number, number] | undefined =>
+  Array.isArray(v) && v.length === 2 && v.every((n) => finite(n) && n > 0) ? (v as [number, number]) : undefined;
+
+/** A detection gives its boxes in pixels but not the size they're of: the editor measures the picture it sent. */
+export function needsDetectedSize(meta: Record<string, unknown> | undefined): boolean {
+  return !asSize(meta?.size) && detectedBlocks(meta).some((o) => !!rawBox(o)?.px);
+}
+
+/** Lay detected blocks out in the document: their 0–1 boxes inside the frame the detector read (doc px). */
+export function placeTextBlocks(blocks: TextBlock[], frame: Box): (TextRow & { box: Box | null })[] {
+  const [fx, fy, fw, fh] = frame;
+  return blocks.map((b) => ({ from: b.text, to: b.text, box: b.box ? [fx + b.box[0] * fw, fy + b.box[1] * fh, b.box[2] * fw, b.box[3] * fh] : null }));
+}
+
+// ---------------------------------------------------------------------------
+// Inpaint
+
+/** The painted area on the picture handed to edit models without a mask input (the Inpaint studio's red). */
+export const INPAINT_TINT = "rgba(255, 59, 48, 0.55)";
+
+/** The instruction an Inpaint run sends: what goes in the painted area, and that nothing else changes. */
+export function inpaintPrompt(prompt: string, keepAlpha = false): string {
+  const p = prompt.trim().replace(/[.\s]+$/, "");
+  return `${p}. Blend it into the surroundings with matching light, perspective and grain.${keepAlpha ? " Keep the subject on a plain, even background." : ""}`;
+}
+
+// ---------------------------------------------------------------------------
+// Save as Element (a layer becomes a reusable @character, prop or style)
+
+export type LayerElementKind = "character" | "prop" | "style";
+
+export const LAYER_ELEMENT_KINDS: { kind: LayerElementKind; label: string; hint: string }[] = [
+  { kind: "character", label: "Character", hint: "A person or creature to keep the same in every picture" },
+  { kind: "prop", label: "Prop", hint: "An object or product to place in new scenes" },
+  { kind: "style", label: "Style", hint: "A look, texture or background to reuse" },
+];
+
+const GENERIC_NAME = /^(background|original image|layer \d+|cut-out|edited layer|text edit|upscaled|relit|new angle|inpainted|enhanced|edited region|expanded fill|color graded|generated layer|original|new)$/i;
+const PERSON = /\b(person|people|man|men|woman|women|girl|boy|child|kid|baby|face|portrait|model|character|subject|figure|hero|lady|guy|dancer|singer|athlete|cat|dog|animal|creature|robot|avatar|mascot)\b/i;
+const STYLE = /\b(background|backdrop|texture|pattern|sky|wall|floor|style|look|gradient|scene|landscape|scenery)\b/i;
+
+/**
+ * What “Save as element” starts with for a layer: a name from the layer (generic names like
+ * “Layer 3” become “Element”), the kind its name suggests (people → character, backdrops → style,
+ * anything else → prop) and, when the layer was generated or edited with a prompt, that prompt.
+ */
+export function elementDraft(node: Pick<LayerNode, "name" | "z" | "prompt">): { name: string; kind: LayerElementKind; description?: string } {
+  const base = node.name
+    .replace(/\s*·\s*part \d+$/i, "")
+    .replace(/\s+copy$/i, "")
+    .trim();
+  const name = (base && !GENERIC_NAME.test(base) ? base : "Element").slice(0, 60);
+  const words = `${base} ${node.prompt ?? ""}`;
+  const kind: LayerElementKind = PERSON.test(words) ? "character" : STYLE.test(words) || (node.z === 0 && GENERIC_NAME.test(base)) ? "style" : "prop";
+  const description = node.prompt?.trim().slice(0, 500);
+  return { name, kind, ...(description ? { description } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -950,7 +1087,7 @@ export function jobStatusText(r: LayerJobResult | null | undefined): string {
 }
 
 /** Tools whose result changes the document when it lands (text detection only fills the Edit text list). */
-export const APPLIES_TO_DOC = new Set<LayerTool>(["decompose", "split", "regenerate", "generate-layer", "text-edit", "bg-remove", "regional", "upscale", "relight", "angles", "expand"]);
+export const APPLIES_TO_DOC = new Set<LayerTool>(["decompose", "split", "regenerate", "generate-layer", "text-edit", "bg-remove", "regional", "upscale", "relight", "angles", "expand", "inpaint", "enhance"]);
 
 // ---------------------------------------------------------------------------
 // Zip (stored): built in the browser from rendered PNGs
