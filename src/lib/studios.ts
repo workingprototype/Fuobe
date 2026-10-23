@@ -119,6 +119,7 @@ export const UPSCALE_STUDIO: StudioConfig = {
   defaultModels: { cloud: "topaz-image", open: "oss-upscale-image" },
   promptOptional: true,
   hidePrompt: true,
+  modelPrompt: "Optional: details to keep or bring out, e.g. “the lettering on the shop sign”",
   controlsTitle: "Options",
 };
 

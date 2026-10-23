@@ -14,7 +14,7 @@ import { formatsOf } from "@/lib/av/formats";
 import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
-import { blockerFor, clipOutcome, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape } from "@/lib/composer";
+import { blockerFor, clipBlocker, clipOutcome, costLabel, filterModels, firstMissingSlot, namedImageSlots, PLACEHOLDER, pushRecent, settingsShape, showsPrompt } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AttachMenu } from "./attach-menu";
@@ -249,6 +249,10 @@ export function Composer({ docked }: { docked: boolean }) {
       planError = (e as Error).message;
     }
   }
+  // What the clip's header rules out before Generate (as the server does): an upscale that wouldn't enlarge it,
+  // an open tool that holds the whole clip in more RAM than the ComfyUI can spare.
+  const clipProblem = config.clipFacts ? clipBlocker(studioOp ?? op, facts, draft.params, model, status?.providers.comfyui?.ramBytes) : null;
+  if (clipProblem && !planError) planError = clipProblem;
   if (signed.blocker) planError = signed.blocker;
   // Models that take no prompt (try-on, 3D, transcription, upscalers), or can run without one, never ask for one.
   const promptMissing =
@@ -319,7 +323,8 @@ export function Composer({ docked }: { docked: boolean }) {
   // Studios with the Moodboard chip pick Soul's styles there (its Curated tab), not in a second Style chip.
   const soulStyles = !!config.signature && (opts.presets?.source === "soul-v1" || opts.presets?.source === "soul-v2");
   const opNote = op && model ? routesFor(model, op)[0]?.note : undefined;
-  const showPrompt = !config.hidePrompt && preset?.userPrompt !== "none" && !opts.promptless;
+  // Booleans in, not the model's options object: the React Compiler keeps the memos above.
+  const showPrompt = showsPrompt({ hidePrompt: config.hidePrompt, modelPrompt: config.modelPrompt }, { promptless: !!opts.promptless, promptOptional: !!opts.promptOptional }, preset?.userPrompt);
   const effectiveOp = studioOp ?? op;
   // SDR to HDR, Export: every format the studio's models on this engine write; picking one this model doesn't
   // write moves the request to the model that does (EXR frames → LTX 2.3 HDR on the cloud).
@@ -336,7 +341,8 @@ export function Composer({ docked }: { docked: boolean }) {
     // "via LTX 2.3 HDR": the name without what it makes in brackets (the format already says it).
     return m && m.id !== model?.id ? `via ${m.name.replace(/\s*\([^)]*\)$/, "")}` : undefined;
   };
-  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt, p, config.ops, studioFormats);
+  // Enhance writes a scene; a tool's optional words (FLUX.3 Upscale's details) stay as typed.
+  const shape = settingsShape(model, effectiveOp, config.kind, showPrompt && !config.hidePrompt, p, config.ops, studioFormats);
   const outcome = config.clipFacts && draft.slots.video?.ref ? clipOutcome(effectiveOp, facts, p, model) : null;
   const video = draft.slots.video?.ref;
   const alternative = config.comfyOnly?.alternative;
@@ -504,7 +510,7 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.prompt}
           onChange={(v) => setDraft({ prompt: v })}
           onSubmit={submit}
-          placeholder={preset?.promptPlaceholder ?? config.placeholder}
+          placeholder={preset?.promptPlaceholder ?? (config.hidePrompt && config.modelPrompt ? config.modelPrompt : config.placeholder)}
           elements={elements}
           collapsed={collapsed}
         />

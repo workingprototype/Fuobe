@@ -7,6 +7,7 @@ import { applyMentions } from "@/lib/catalog/elements";
 import { withSignatureWords } from "@/lib/catalog/palettes";
 import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
+import { upscaleTier } from "@/lib/av/upscale";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import {
   LAST_FRAME_CHAIN,
@@ -671,6 +672,16 @@ async function submit(
     };
     // What the caller said about the clip's length wins; the header fills the rest.
     Object.assign(input, { ...source, ...(plan.params.sourceDuration !== undefined && { sourceDuration: plan.params.sourceDuration }) });
+    // An upscale that wouldn't enlarge the clip (a 1080p clip at a default 1080p; a 4K clip would even shrink):
+    // a tier the model only defaulted to moves up to the next one it offers, one the caller picked is refused.
+    if (plan.op === "upscale-video" && input.sourceSize) {
+      const tier = upscaleTier(input.resolution, plan.model.options.resolutions, input.sourceSize, req.params?.resolution !== undefined);
+      if ("error" in tier) throw new Error(tier.error);
+      if (tier.resolution !== input.resolution) {
+        input.resolution = tier.resolution;
+        if (providerId !== "mock" && plan.model.engine !== "open") update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, resolution: tier.resolution }, 1, plan.op) });
+      }
+    }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();
     const status = statusOf(id);

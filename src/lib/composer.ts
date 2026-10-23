@@ -5,7 +5,8 @@
  */
 import { FORMAT_INFO } from "./av/formats";
 import { fpsPlan, fpsSummary } from "./av/fps";
-import { targetShortEdge, upscaledSize } from "./av/upscale";
+import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "./av/upscale";
+import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
 import type { Engine, GenParams, InputSlot, MediaKind, ModelDef, Operation, VideoFormat } from "./catalog/types";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,19 @@ export function settingsSummary(shape: SettingsShape, params: GenParams, model?:
   return parts;
 }
 
+/**
+ * Whether the composer shows the prompt box: not for a preset or model that takes no prompt; in a studio
+ * that hides it, only for a model that reads an optional prompt when the studio words one (`modelPrompt`).
+ */
+export function showsPrompt(
+  studio: { hidePrompt?: boolean; modelPrompt?: string },
+  options: Pick<ModelDef["options"], "promptless" | "promptOptional"> | undefined,
+  presetPrompt?: "none" | "optional" | "required",
+): boolean {
+  if (presetPrompt === "none" || options?.promptless) return false;
+  return !studio.hidePrompt || (!!studio.modelPrompt && !!options?.promptOptional);
+}
+
 /** The output format a request writes: the one picked, else the model's default or first, else the studio's first. */
 export function formatOf(params: GenParams, model: Pick<ModelDef, "options" | "defaults"> | undefined, studio: VideoFormat[] = []): VideoFormat | undefined {
   return params.format ?? model?.defaults?.format ?? model?.options.formats?.[0] ?? studio[0];
@@ -123,22 +137,39 @@ export function clipOutcome(
   op: Operation | undefined,
   facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
   params: GenParams,
-  model: Pick<ModelDef, "engine" | "options" | "defaults"> | undefined,
+  model: (Pick<ModelDef, "engine" | "options" | "defaults"> & Partial<Pick<ModelDef, "name" | "routes">>) | undefined,
 ): string | null {
   if (!facts || !model) return null;
   const { width, height, fps, duration } = facts;
   const size = width && height ? `${width}×${height}` : "";
   const length = duration ? clipSeconds(duration) : "";
+  // "LTX 2.3 HDR", not "LTX 2.3 HDR (EXR frames)".
+  const name = model.name?.replace(/\s*\([^)]*\)$/, "");
+  // The route's field-map rules (the browser's catalog keeps them as `preview`).
+  const rules = (o: Operation) => {
+    const r = model.routes?.find((x) => x.op === o);
+    return r?.map ?? r?.preview;
+  };
   if (op === "upscale-video") {
     if (!size) return null;
     const res = params.resolution ?? model.defaults?.resolution;
-    const target = targetShortEdge(res);
-    const short = Math.min(width!, height!);
     const rate = params.targetFps ? ` · ${params.targetFps} fps` : "";
     if (res?.toLowerCase() === "original") return `${size}, cleaned up at its own size${rate}`;
-    if (target && target <= short) return `This clip is already ${short}p — pick a higher resolution${model.options.resolutions?.some((r) => r.toLowerCase() === "original") ? ", or Original to only clean it up" : ""}`;
-    const out = upscaledSize({ width: width!, height: height! }, res);
-    return out ? `${size} → ${out.width}×${out.height}${rate}` : null;
+    const short = Math.min(width!, height!);
+    // A tier that wouldn't enlarge the clip: a default moves up (as the server does), a picked one is refused.
+    const tier = upscaleTier(res, model.options.resolutions, { width: width!, height: height! }, params.resolution !== undefined);
+    if ("error" in tier) return tier.error;
+    const moved = tier.resolution !== res ? ` · ${tier.resolution}, as the clip is already ${short}p` : "";
+    if (tier.resolution?.toLowerCase() === "original") return `${size}, cleaned up at its own size${moved}${rate}`;
+    // An API that takes a factor keeps it within its range: say what that makes, not the tier.
+    const range = rules("upscale-video")?.upscaleFactor;
+    const target = targetShortEdge(tier.resolution);
+    const factor = range ? upscaleFactorFor(tier.resolution, { width: width!, height: height! }, range.min, range.max) : undefined;
+    const out = upscaledSize({ width: width!, height: height! }, tier.resolution, factor);
+    if (!out) return null;
+    const clamped = factor !== undefined && target ? Math.abs(factor - target / short) > 0.01 : false;
+    const why = clamped ? ` (${name ?? "this model"} upscales ${factor! > target! / short ? "at least" : "at most"} ${factor}×)` : "";
+    return `${size} → ${out.width}×${out.height}${why}${moved}${rate}`;
   }
   if (op === "interpolate") {
     const slowdown = Math.max(1, params.slowdown ?? 1);
@@ -157,12 +188,45 @@ export function clipOutcome(
   if (op === "sdr-to-hdr" || op === "export-video") {
     const f = formatOf(params, model);
     const info = f ? FORMAT_INFO[f] : undefined;
-    const frames = f === "exr" && duration && fps ? ` (${Math.round(duration * fps)} frames)` : "";
     const head = [size, length].filter(Boolean).join(" · ");
     if (!head) return null;
+    // EXR frames: every frame of the clip, or what a frame-count route renders (LTX 2.3 HDR: 24 fps, 481 at most).
+    let frames = "";
+    const count = rules(op)?.numFrames;
+    if (f === "exr" && duration && count) {
+      const rate = params.fps && params.fps > 0 ? params.fps : count.fps;
+      const want = duration * rate;
+      const n = Math.round(Math.max(count.min ?? 1, Math.min(count.max ?? Infinity, want)));
+      frames = ` (${n} frames at ${rate} fps${n < want - 0.5 ? `: only the first ${clipSeconds(n / rate)}, the most ${name ?? "it"} takes` : ""})`;
+    } else if (f === "exr" && duration && fps) frames = ` (${Math.round(duration * fps)} frames)`;
     return info ? `${head} → ${info.short}${frames}, .${info.ext}` : head;
   }
   return null;
+}
+
+
+/**
+ * What the attached clip's header rules out before Generate, in the server's words (Upscale hub): a tier that
+ * wouldn't enlarge the clip (one picked; a default moves up), or an open tool that holds the whole clip (FPS
+ * Boost, SDR to HDR, EXR export) in more memory than half the ComfyUI's RAM (`ramBytes`, when it said).
+ */
+export function clipBlocker(
+  op: Operation | undefined,
+  facts: { width?: number; height?: number; fps?: number; duration?: number } | undefined,
+  params: GenParams,
+  model: Pick<ModelDef, "engine" | "options" | "defaults"> | undefined,
+  ramBytes: number | undefined,
+): string | null {
+  if (!facts?.width || !facts.height || !model) return null;
+  if (op === "upscale-video") {
+    const tier = upscaleTier(params.resolution ?? model.defaults?.resolution, model.options.resolutions, { width: facts.width, height: facts.height }, params.resolution !== undefined);
+    return "error" in tier ? tier.error : null;
+  }
+  if (model.engine !== "open" || !ramBytes || !facts.duration || !facts.fps) return null;
+  const target = params.targetFps ?? model.defaults?.targetFps;
+  const m = op === "interpolate" && target ? fpsPlan(facts.fps, target, Math.max(1, params.slowdown ?? 1)).multiplier : 1;
+  const tool = wholeClipTool(op, formatOf(params, model), m);
+  return tool ? wholeClipProblem(tool, facts, ramBytes) : null;
 }
 
 /** How many settings differ from their defaults beyond what the summary shows (seed, negative prompt, sliders). */

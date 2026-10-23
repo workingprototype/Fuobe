@@ -18,7 +18,8 @@ export function targetShortEdge(resolution: string | undefined): number | undefi
 
 /**
  * The factor an upscaler that takes one needs to reach `resolution` from a clip of `source` size: target ÷
- * shorter edge, kept within the API's min–max and rounded to 2 decimals. "Original" is 1 (enhance only).
+ * shorter edge, kept within the API's min–max and rounded to 3 decimals (1080p → 1440p is 1.333, which lands on
+ * 2560×1440; 1.33 would make 2554×1436). "Original" is 1 (enhance only).
  * Undefined when the size or the tier is unknown.
  */
 export function upscaleFactorFor(resolution: string | undefined, source: { width: number; height: number } | undefined, min = 1, max = 4): number | undefined {
@@ -27,7 +28,7 @@ export function upscaleFactorFor(resolution: string | undefined, source: { width
   const target = targetShortEdge(resolution);
   const short = source ? Math.min(source.width, source.height) : 0;
   if (!target || !(short > 0)) return undefined;
-  return Math.round(Math.max(lo, Math.min(max, target / short)) * 100) / 100;
+  return Math.round(Math.max(lo, Math.min(max, target / short)) * 1000) / 1000;
 }
 
 /** The size a clip comes out at for `resolution` (its shape kept, even numbers), or undefined when unknown. */
@@ -37,4 +38,41 @@ export function upscaledSize(source: { width: number; height: number } | undefin
   if (!(k > 0)) return undefined;
   const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
   return { width: even(source.width * k), height: even(source.height * k) };
+}
+
+/**
+ * Why an upscale to `resolution` would not enlarge a clip whose shorter edge is `short` px (null when it does,
+ * or when the tier is "Original" / unknown): the same words the composer shows and the server refuses with.
+ */
+export function upscaleProblem(resolution: string | undefined, offered: string[] | undefined, short: number): string | null {
+  const target = targetShortEdge(resolution);
+  if (!target || !(short > 0) || target > short) return null;
+  const higher = (offered ?? []).some((r) => (targetShortEdge(r) ?? 0) > short);
+  const original = (offered ?? []).some((r) => r.toLowerCase() === "original");
+  const shrink = target < short ? `: ${resolution} would make it smaller` : "";
+  const next = higher ? " — pick a higher resolution" : " — this model upscales no further";
+  return `This clip is already ${short}p${shrink}${next}${original ? ", or Original to only clean it up" : ""}`;
+}
+
+/**
+ * The tier an upscale runs at for a clip of `source` size: the one asked for when it enlarges the clip. A
+ * tier the model only defaulted to (`picked` false) moves up to the smallest offered tier that does, else to
+ * "Original" (clean-up only) when the model offers it; a tier the caller picked that doesn't is refused.
+ */
+export function upscaleTier(
+  resolution: string | undefined,
+  offered: string[] | undefined,
+  source: { width: number; height: number } | undefined,
+  picked: boolean,
+): { resolution: string | undefined } | { error: string } {
+  const short = source ? Math.min(source.width, source.height) : 0;
+  const problem = upscaleProblem(resolution, offered, short);
+  if (!problem) return { resolution };
+  if (picked) return { error: problem };
+  const up = (offered ?? [])
+    .map((r) => ({ r, edge: targetShortEdge(r) ?? 0 }))
+    .filter((t) => t.edge > short)
+    .sort((a, b) => a.edge - b.edge)[0]?.r;
+  const original = (offered ?? []).find((r) => r.toLowerCase() === "original");
+  return up || original ? { resolution: up ?? original } : { error: problem };
 }

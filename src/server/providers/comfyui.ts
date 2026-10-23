@@ -522,7 +522,8 @@ function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: Me
     values.shortSide = shortSide;
     if (b.framesPerBatch && extra.framesPerBatch === undefined) {
       const seedvr = /seedvr/i.test(manifest.id);
-      values.framesPerBatch = framesPerPass(facts, { shortSide, modelScale: seedvr ? 0 : 4, fourNPlusOne: seedvr, max: seedvr ? 33 : 64, fallback: Number(d.framesPerBatch ?? 16) });
+      // ESRGAN on a big source (1440p → 2160p: about 0.85 GB a frame): down to one frame a pass, to stay near the budget.
+      values.framesPerBatch = framesPerPass(facts, { shortSide, modelScale: seedvr ? 0 : 4, fourNPlusOne: seedvr, min: seedvr ? 5 : 1, max: seedvr ? 33 : 64, fallback: Number(d.framesPerBatch ?? 16) });
     }
   } else if (b.framesPerBatch && manifest.capability === "export-video" && extra.framesPerBatch === undefined) {
     values.framesPerBatch = framesPerPass(facts, { min: 8, max: 256, fallback: Number(d.framesPerBatch ?? 64) });

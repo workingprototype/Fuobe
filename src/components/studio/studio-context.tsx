@@ -33,6 +33,11 @@ export interface StudioConfig {
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
   hidePrompt?: boolean;
+  /**
+   * The prompt box's placeholder for a model that reads an optional prompt in a studio that hides it
+   * (Upscale: FLUX.3 Upscale's details to preserve or enhance); without it such a model gets no box either.
+   */
+  modelPrompt?: string;
   /** Paint tools offered on the first image: an inpaint mask and/or freehand drawing. */
   sketch?: ("mask" | "draw")[];
   /** Open the editor as soon as an image is attached (Inpaint). */
