@@ -174,6 +174,39 @@ describe("Word documents (.docx)", () => {
     expect(documentXmlText(xml)).toBe(["Tides & the Moon", "Twice a day\tthe sea rises.", "Then it falls.", "Kept text", "High\t06:12", "Low\t12:30", "In a box", "“Quoted” <tag> café", "", "The end."].join("\n"));
   });
 
+  it("leaves out a paragraph's tab stops (they're <w:tab>s in its properties, not tabs in the text)", () => {
+    const stops = '<w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/><w:tab w:val="right" w:leader="dot" w:pos="9000"/></w:tabs></w:pPr>';
+    const xml = `<w:document ${W}><w:body><w:p>${stops}<w:r>${t("Contents")}</w:r></w:p><w:p>${stops}<w:r>${t("Second paragraph")}<w:tab/>${t("12")}</w:r></w:p></w:body></w:document>`;
+    expect(documentXmlText(xml)).toBe("Contents\nSecond paragraph\t12");
+    // A line break inside a table cell keeps the row on one line.
+    expect(documentXmlText(`<w:tbl><w:tr><w:tc>${para(t("Two"), "<w:br/>", t("lines"))}</w:tc><w:tc>${para(t("x"))}</w:tc></w:tr></w:tbl>`)).toBe("Two lines\tx");
+  });
+
+  it("reads a crafted document in time that grows with its size, not its square", () => {
+    // Tags that never close and runs of blanks used to make the regexes rescan the rest of the file for each one.
+    const crafted = [
+      "<w:tc>".repeat(200_000),
+      "<mc:Fallback>".repeat(100_000),
+      "<w:delText x>".repeat(100_000),
+      `<w:p><w:r><w:t>${" ".repeat(1_000_000)}x${"\u00a0 ".repeat(200_000)}y</w:t></w:r></w:p>`,
+    ];
+    const started = performance.now();
+    for (const xml of crafted) documentXmlText(xml);
+    expect(documentXmlText(`<w:p><w:r><w:t>${" ".repeat(1_000_000)}x${"  ".repeat(100_000)}\ty</w:t></w:r></w:p>`)).toBe("x\ty");
+    expect(performance.now() - started).toBeLessThan(2_000);
+    // Through the .docx reader: a few KB that inflate to 12 MB of unclosed cells, refused quickly.
+    const bomb = makeDocx("<w:tc>".repeat(2_000_000));
+    expect(bomb.length).toBeLessThan(100_000);
+    const t0 = performance.now();
+    expect(() => docxText(bomb, { maxChars: 40_000 })).toThrow(/no text to read/);
+    expect(performance.now() - t0).toBeLessThan(2_000);
+    // A long document stops being read once there's enough text.
+    const long = makeDocx(para(t("The tide comes in. ")).repeat(200_000));
+    const t1 = performance.now();
+    expect(docxText(long, { maxChars: 1000 }).text).toHaveLength(1000);
+    expect(performance.now() - t1).toBeLessThan(2_000);
+  });
+
   it("reads a .docx's text and title, inflating only the document (a large picture inside costs nothing)", () => {
     const picture = Buffer.alloc(60 * 1024 * 1024); // 60 MB of zeros: deflates to a few KB, would blow every cap if inflated
     const docx = makeDocx([para(t("Why the sea has tides.")), para(t("The Moon pulls the water."))].join(""), { title: "Tides &amp; you", extra: [{ name: "word/media/image1.png", data: picture }] });
