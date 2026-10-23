@@ -149,7 +149,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <p className="mt-2 text-[12px] text-muted-foreground">
                     {tooFew ? `Needs at least ${t.minImages} photos.` : t.blocker}{" "}
                     {t.blocker && !tooFew && (
-                      <Link href="/settings" className="text-brand-text hover:underline">
+                      <Link href="/settings" className="text-brand-text underline underline-offset-2">
                         Open Settings
                       </Link>
                     )}

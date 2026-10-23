@@ -75,7 +75,7 @@ export function ElementsPicker({ value, onChange }: { value: string[]; onChange:
   if (!els.length)
     return (
       <p className="text-[12px] text-muted-foreground">
-        Save characters and places in <Link href="/elements?new=1" className="text-brand-text hover:underline">Elements</Link> to keep them the same in every scene.
+        Save characters and places in <Link href="/elements?new=1" className="text-brand-text underline underline-offset-2">Elements</Link> to keep them the same in every scene.
       </p>
     );
   return (

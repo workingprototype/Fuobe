@@ -165,7 +165,7 @@ export function MoodboardPanel({ value, onPick, presetSource }: { value?: Moodbo
       )}
       <p className="text-[11.5px] text-muted-foreground">
         Soul and Soul 2.0 take their own presets natively; other models get the look in words, or your board&apos;s images as style references.{" "}
-        <Link href="/moodboards" className="text-brand-text hover:underline">
+        <Link href="/moodboards" className="text-brand-text underline underline-offset-2">
           Manage moodboards
         </Link>
       </p>

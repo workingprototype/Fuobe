@@ -260,7 +260,7 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
                   {s.studio && (
                     <>
                       {" · "}
-                      <Link href={s.studio} className="text-brand-text hover:underline">
+                      <Link href={s.studio} className="text-brand-text underline underline-offset-2">
                         Open the studio
                       </Link>
                     </>
