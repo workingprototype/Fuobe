@@ -50,6 +50,7 @@ describe("Loop / extend and Join plans", () => {
   it("loops on the open engine in one job, crossfaded, to the exact length", () => {
     const p = planLoop({ engine: "open", audio: "/api/files/a.wav", name: "Bed", sourceDuration: 45, duration: 300, crossfade: 2 });
     expect(p.steps).toHaveLength(1);
+    expect(p.steps[0].request.step?.label).toMatch(/^\d+ seams · 2 s crossfades$/);
     expect(p.steps[0].request).toMatchObject({ feature: "audio-loop", modelId: "oss-audio-loop", op: "audio-loop", inputs: { audio: "/api/files/a.wav" }, params: { duration: 300, crossfade: 2, sourceDuration: 45 }, title: "Loop · Bed to 5:00" });
     expect(p.length).toBe(300);
     expect(p.summary).toBe("Loops it to 5:00 with 6 crossfaded seams (2 s each), then fades out over the last 2 s.");
@@ -71,6 +72,8 @@ describe("Loop / extend and Join plans", () => {
     expect(chain.steps[2].request.inputs).toBeUndefined();
     expect(chain.steps.map((s) => !!s.request.title)).toEqual([false, false, true]);
     expect(chain.summary).toBe("Plays it 60 times back to back (3 calls of up to 5): 10:00.");
+    // Each tile says what its call does (not the pipeline's "Step 1 of 3").
+    expect(chain.steps.map((s) => s.request.step?.label)).toEqual(["5 plays · call 1 of 3", "4 plays · call 2 of 3", "3 plays · call 3 of 3"]);
     expect(chain.notes).toEqual(["No crossfade on the cloud: switch to the open engine for smooth seams and an exact length."]);
   });
 
@@ -98,11 +101,13 @@ describe("Loop / extend and Join plans", () => {
     expect(open.steps).toHaveLength(1);
     expect(open.steps[0].request).toMatchObject({ feature: "audio-join", modelId: "oss-audio-join", op: "audio-join", inputs: { audios: clips.map((c) => c.url) }, params: { crossfade: 1.5 }, title: "Join · 7 clips" });
     expect(open.length).toBe(61);
+    expect(open.steps[0].request.step?.label).toBe("6 seams · 1.5 s crossfades");
     expect(open.summary).toBe("Joins 7 clips in this order with a 1.5 s crossfade at 6 seams.");
     const cloud = planJoin({ engine: "cloud", clips });
     expect(cloud.steps.map((s) => s.request.inputs?.audios?.length)).toEqual([5, 2]);
     expect(cloud.steps[1]).toMatchObject({ after: ["join-1"], chain: [{ slot: "audios", position: "first" }] });
     expect(cloud.length).toBe(70);
+    expect(cloud.steps.map((s) => s.request.step?.label)).toEqual(["Hard cuts · call 1 of 2", "Hard cuts · call 2 of 2"]);
     expect(cloud.notes[0]).toMatch(/hard cut/);
     expect(() => planJoin({ engine: "open", clips: clips.slice(0, 1) })).toThrow("Add at least two clips to join");
     expect(() => planJoin({ engine: "open", clips: Array.from({ length: 11 }, () => clips[0]) })).toThrow("Join up to 10 clips at a time");

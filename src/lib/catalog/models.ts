@@ -1039,7 +1039,7 @@ const open: ModelDef[] = [
   }),
   o({
     id: "oss-audio-loop",
-    name: "Loop audio",
+    name: "Crossfade loop",
     vendor: "ComfyUI",
     family: "utility",
     kind: "audio",
@@ -1050,7 +1050,7 @@ const open: ModelDef[] = [
   }),
   o({
     id: "oss-audio-join",
-    name: "Join audio",
+    name: "Crossfade join",
     vendor: "ComfyUI",
     family: "utility",
     kind: "audio",

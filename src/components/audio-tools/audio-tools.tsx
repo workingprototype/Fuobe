@@ -176,9 +176,12 @@ function LengthField({ value, onCommit, max }: { value: number; onCommit: (s: nu
   );
 }
 
+/** The longest crossfade offered when the clips allow up to `max` seconds (half-second steps). */
+const crossfadeTop = (max: number) => Math.max(0.5, Math.min(CROSSFADE_MAX, Math.floor(max * 2) / 2));
+
 /** Crossfade length and fade shape (open engine; the cloud has no crossfade, the run bar says so). */
 function CrossfadeControls({ value, onChange, curve, onCurve, max }: { value: number; onChange: (v: number) => void; curve: Curve; onCurve: (c: Curve) => void; max: number }) {
-  const top = Math.max(0.5, Math.min(CROSSFADE_MAX, Math.floor(max * 2) / 2));
+  const top = crossfadeTop(max);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
@@ -312,9 +315,12 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
   const [curve, setCurve] = useState<Curve>("equal-power");
   useHandoff(setClip);
   const ready = clip && !clip.uploading && clip.ref ? clip : null;
+  // The crossfade the slider shows: what the clip allows (a shorter clip lowers it).
+  const fadeMax = clip?.duration ? clip.duration / 2 - 0.1 : CROSSFADE_MAX;
+  const fade = Math.min(crossfade, crossfadeTop(fadeMax));
   const body: AudioToolBody | null = useMemo(
-    () => (ready ? { tool: "loop", engine, audio: ready.ref, name: nameOf(ready), duration: target, ...(ready.duration && { sourceDuration: ready.duration }), ...(engine === "open" && { crossfade, curve }) } : null),
-    [ready, engine, target, crossfade, curve],
+    () => (ready ? { tool: "loop", engine, audio: ready.ref, name: nameOf(ready), duration: target, ...(ready.duration && { sourceDuration: ready.duration }), ...(engine === "open" && { crossfade: fade, curve }) } : null),
+    [ready, engine, target, fade, curve],
   );
   const preview = useAudioToolPreview(useSettled(body));
   const blocker = !clip ? "Add a clip to loop" : clip.uploading ? "Uploading…" : clip.duration && target <= clip.duration ? `The clip is already ${clock(clip.duration)} — pick a longer length` : null;
@@ -360,12 +366,12 @@ export function AudioLoopTool({ tabs }: { tabs?: React.ReactNode }) {
               />
               <LengthField value={target} onCommit={setTarget} max={LOOP_MAX_SECONDS} />
             </div>
-            {clip.duration ? <LoopBar clip={clip.duration} target={target} crossfade={crossfade} engine={engine} /> : null}
+            {clip.duration ? <LoopBar clip={clip.duration} target={target} crossfade={fade} engine={engine} /> : null}
           </Panel>
         )}
         {clip && engine === "open" && (
           <Panel title="Seams">
-            <CrossfadeControls value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={clip.duration ? clip.duration / 2 - 0.1 : CROSSFADE_MAX} />
+            <CrossfadeControls value={fade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={fadeMax} />
           </Panel>
         )}
         {clip && <RunBar label="Loop it" icon={Repeat} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} onOpenEngine={mode === "both" ? () => setEngine("open") : undefined} />}
@@ -398,13 +404,16 @@ export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
       return next;
     });
   const ready = clips.length >= 2 && clips.every((c) => !c.uploading && c.ref);
+  // End clips allow a crossfade up to their length, middle ones up to half of it (they have two seams).
+  const shortest = clips.reduce((m, c, i) => Math.min(m, (c.duration ?? Infinity) / (i === 0 || i === clips.length - 1 ? 1 : 2)), Infinity);
+  const fadeMax = Number.isFinite(shortest) ? shortest - 0.1 : CROSSFADE_MAX;
+  const fade = Math.min(crossfade, crossfadeTop(fadeMax));
   const body: AudioToolBody | null = useMemo(
-    () => (ready ? { tool: "join", engine, clips: clips.map((c) => ({ url: c.ref, name: nameOf(c), ...(c.duration && { duration: c.duration }) })), ...(engine === "open" && { crossfade, curve }) } : null),
-    [ready, clips, engine, crossfade, curve],
+    () => (ready ? { tool: "join", engine, clips: clips.map((c) => ({ url: c.ref, name: nameOf(c), ...(c.duration && { duration: c.duration }) })), ...(engine === "open" && { crossfade: fade, curve }) } : null),
+    [ready, clips, engine, fade, curve],
   );
   const preview = useAudioToolPreview(useSettled(body));
   const blocker = clips.length < 2 ? "Add at least two clips" : clips.some((c) => c.uploading) ? "Uploading…" : null;
-  const shortest = clips.reduce((m, c, i) => Math.min(m, (c.duration ?? Infinity) / (i === 0 || i === clips.length - 1 ? 1 : 2)), Infinity);
   const go = () => {
     if (blocker) return void toast(blocker);
     if (preview.error) return void toast.error((preview.error as Error).message);
@@ -453,7 +462,7 @@ export function AudioJoinTool({ tabs }: { tabs?: React.ReactNode }) {
         )}
         {clips.length > 0 && engine === "open" && (
           <Panel title="Seams">
-            <CrossfadeControls value={crossfade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={Number.isFinite(shortest) ? shortest - 0.1 : CROSSFADE_MAX} />
+            <CrossfadeControls value={fade} onChange={setCrossfade} curve={curve} onCurve={setCurve} max={fadeMax} />
           </Panel>
         )}
         {clips.length > 0 && <RunBar label="Join them" icon={Merge} blocker={blocker} preview={preview} engine={engine} onRun={go} pending={run.isPending} onOpenEngine={mode === "both" ? () => setEngine("open") : undefined} />}

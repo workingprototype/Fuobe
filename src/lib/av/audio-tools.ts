@@ -116,6 +116,7 @@ export function planLoop(i: LoopInput): ToolPlan {
             inputs: { audio: i.audio },
             params: { duration, crossfade: x, sourceDuration: L, ...(i.curve === "linear" && { extra: { curve: "linear" } }) },
             title,
+            step: { label: `${plural(seams, "seam")} · ${x} s crossfades`, index: 0, of: 1 },
           },
         },
       ],
@@ -144,6 +145,7 @@ export function planLoop(i: LoopInput): ToolPlan {
         ...(k === 0 && { inputs: { audio: i.audio } }),
         params: { duration: made, sourceDuration: clip },
         ...(k === passes.length - 1 && { title }),
+        step: { label: `${p} plays${passes.length > 1 ? ` · call ${k + 1} of ${passes.length}` : ""}`, index: k, of: passes.length },
       },
       ...(k > 0 && { after: [`loop-${k}`], chain: [{ slot: "audio" as const }] }),
     };
@@ -186,6 +188,7 @@ export function planJoin(i: JoinInput): ToolPlan {
             inputs: { audios: clips.map((c) => c.url) },
             params: { crossfade: x, ...(i.curve === "linear" && { extra: { curve: "linear" } }) },
             title,
+            step: { label: `${plural(clips.length - 1, "seam")} · ${x} s crossfades`, index: 0, of: 1 },
           },
         },
       ],
@@ -208,6 +211,7 @@ export function planJoin(i: JoinInput): ToolPlan {
       ...(k > 1 && { after: [`join-${k - 1}`], chain: [{ slot: "audios" as const, position: "first" as const }] }),
     });
   }
+  steps.forEach((s, k) => (s.request.step = { label: `Hard cuts${steps.length > 1 ? ` · call ${k + 1} of ${steps.length}` : ""}`, index: k, of: steps.length }));
   return {
     steps,
     length: known ? joinedLength(lengths as number[], 0) : null,
