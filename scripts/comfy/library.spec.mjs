@@ -2567,6 +2567,7 @@ export const SPEC = [
       'paste-back into the original frames, the window\'s sound kept. ' +
       'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame: the second output (node 77, role "mask", added by the remove-object package) ' +
       'is the tracked mask of the window\'s LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. ' +
+      'The provider keeps node 77 only when params.extra.handOffMask is true (a window another one waits on); otherwise it is dropped, so a single or last window saves just the video. ' +
       'Validated by /prompt only (no GPU here).',
   },
   {

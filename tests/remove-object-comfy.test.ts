@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { GenInput, Operation, OutputFile } from "@/lib/catalog/types";
 import type { MediaInfo } from "@/lib/media-probe";
-import { CLICK_OPEN_PROBLEM, REMOVE_SCENE } from "@/lib/catalog/remove-object";
+import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE } from "@/lib/catalog/remove-object";
 
 // The comfyui provider driving the remove-object graphs (SAM 3.1 + VACE / VOID), the matte graphs' two outputs and
 // the depth graphs' colour map and side-by-side switch, bound for real on the library graphs.
@@ -32,6 +32,13 @@ describe("remove-object graphs through the provider", () => {
     expect([at(wf, "87", "value"), at(wf, "88", "value")]).toEqual([832, 480]);
   });
 
+  it("a whole sentence (a Canvas node runs the model directly) becomes the objects alone, each its own SAM prompt", async () => {
+    const { workflow: wf } = await prepare("video-inpaint-wan-vace", { prompt: "Remove the logo and the watermark from the video, keep everything else the same" });
+    expect(at(wf, "8", "text")).toBe("the logo, the watermark");
+    const v = await prepare("video-erase-void", { prompt: "the red car and its shadow" });
+    expect(at(v.workflow, "8", "text")).toBe("the red car, its shadow");
+  });
+
   it("a described scene (params.extra.prompt) fills the gap instead", async () => {
     const { workflow: wf } = await prepare("video-inpaint-wan-vace", { prompt: "the man", extra: { prompt: "An empty beach at sunset" } });
     expect(at(wf, "8", "text")).toBe("the man");
@@ -44,7 +51,7 @@ describe("remove-object graphs through the provider", () => {
   });
 
   it("painted VACE: the first-frame mask is uploaded into its loader, the scene prompt is the default", async () => {
-    const { workflow: wf, manifest } = await prepare("video-inpaint-wan-vace-painted", { mask: "mask.png", startTime: 0, endTime: 2.7 });
+    const { workflow: wf, manifest } = await prepare("video-inpaint-wan-vace-painted", { mask: "mask.png", startTime: 0, endTime: 2.7, extra: { [HAND_OFF]: true } });
     expect(at(wf, "70", "image")).toBe("mask.png");
     expect(at(wf, "16", "text")).toBe(REMOVE_SCENE);
     // Its second output is the last frame's tracked mask, which starts the next window.
@@ -55,6 +62,14 @@ describe("remove-object graphs through the provider", () => {
     expect(at(wf, "77", "filename_prefix")).toBe("fuobe/g1");
     expect(wf["76"].inputs).toMatchObject({ image: ["74", 0], batch_index: ["75", 1], length: 1 });
     expect(wf["74"].inputs).toEqual({ mask: ["10", 0] });
+    // The flag isn't bound to anything.
+    expect(JSON.stringify(wf)).not.toContain(HAND_OFF);
+  });
+
+  it("painted VACE: a window nothing waits on (one window, or the last) saves only the video", async () => {
+    const { workflow: wf } = await prepare("video-inpaint-wan-vace-painted", { mask: "mask.png", startTime: 0, endTime: 2.7 });
+    expect(wf["77"]).toBeUndefined();
+    expect(wf["38"].class_type).toBe("SaveVideo");
   });
 
   it("VOID: maskPrompt, the scene, and pass 2 can be skipped", async () => {

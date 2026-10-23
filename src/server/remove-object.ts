@@ -8,6 +8,7 @@ import {
   planPieces,
   planMaskPreview,
   planRemoval,
+  previewIsEraserMask,
   rangeProblem,
   REMOVE,
   removalProblem,
@@ -21,7 +22,7 @@ import {
   type RemoveSource,
 } from "@/lib/catalog/remove-object";
 import type { PlanStep } from "@/lib/catalog/shorts";
-import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
+import type { Engine, GenParams, Generation, PixelPoint } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
 import { decodePng } from "./png";
@@ -68,6 +69,7 @@ export const RemovalBodySchema = z.object({
   mode: z.enum(["type", "click", "paint"]),
   modelId: z.string().max(80).optional(),
   effects: z.boolean().optional(),
+  // The page stops at REMOVE.maxPromptChars; longer is refused in words by planInput.
   prompt: z.string().max(2500).optional(),
   points: z.array(point).max(REMOVE.maxPoints).optional(),
   frame: z.object({ width: z.number().int().positive().max(20000), height: z.number().int().positive().max(20000) }).optional(),
@@ -98,6 +100,20 @@ export const RemovalEstimateSchema = RemovalBodySchema.extend({
  * price of its own (its text- and image-to-video routes cost less): the removal estimate uses the edit price.
  */
 const EDIT_USD_PER_SECOND: Record<string, number> = { "kling-o3": 0.168 };
+
+/**
+ * LTX 2.3 Clean Plate is billed per megapixel of the video it makes ($0.0024075 × width × height × frames, rounded up;
+ * paid-model-apis-4.md §3), not the catalog's flat $0.27 (121 frames at 1280×720): at 720p the source's shape with a
+ * 720 px short side, for the piece's own frames.
+ */
+const MEGAPIXEL_USD: Record<string, number> = { "ltx-2-3-clean-plate": 0.0024075 };
+
+function megapixels(params: GenParams | undefined, source: Pick<RemoveSource, "width" | "height">): number {
+  const frames = Math.round((params?.sourceDuration ?? params?.duration ?? 0) * (params?.fps ?? 24));
+  const { width: w, height: h } = source;
+  const [ow, oh] = w && h ? (w >= h ? [Math.round((720 * w) / h), 720] : [720, Math.round((720 * h) / w)]) : [1280, 720];
+  return Math.ceil((ow * oh * frames) / 1e6);
+}
 
 const mustMatchMode = (engine: Engine) => {
   const mode = engineMode();
@@ -151,6 +167,8 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
 
   let points: PixelPoint[] | undefined;
   if (body.mode === "type" && !eraser.everyone && !body.prompt?.trim()) throw new ShortsError("Say what to remove, e.g. “the coffee cup in her hand”");
+  // Kling O3 edit takes 2500 characters, its template included: refused here, not after the cuts have run.
+  if ((body.prompt?.trim().length ?? 0) > REMOVE.maxPromptChars) throw new ShortsError(`Say what to remove in up to ${REMOVE.maxPromptChars} characters`, 422);
   if (body.mode === "click") {
     const given = (body.points ?? []).slice(0, REMOVE.maxPoints);
     if (!given.some((p) => p.label !== "negative")) throw new ShortsError("Click what to remove on the first frame");
@@ -165,19 +183,28 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
   const notes: string[] = [];
   const len = range.end - range.start;
   const model = getModel(eraser.id);
-  if (eraser.window) {
-    const fps = source.fps ?? 30;
-    const per = eraser.window.cap / fps;
-    const windows = source.fps ? planPieces(eraser, source, range).length : Math.ceil((len * fps) / eraser.window.cap);
-    if (windows > 1) {
-      notes.push(`${model?.name ?? eraser.label} works on ${eraser.window.cap} frames at a time (${per.toFixed(1)} s of this clip): the clip runs as ${windows} windows, joined with its own sound. Seams between windows aren't tested on a GPU yet`);
+  const eraserName = model?.name ?? eraser.label;
+  const fps = source.fps ?? 30;
+  // The pieces (cloud) or windows (open) the selection is erased in.
+  const pieces = eraser.window && !source.fps ? [] : planPieces(eraser, source, range);
+  const count = eraser.window && !source.fps ? Math.ceil((len * fps) / eraser.window.cap) : pieces.length;
+  // Frame-count erasers work in steps of frames: what's left at the end of the selection isn't erased (or kept).
+  const dropped = eraser.window && pieces.length ? Math.round((len - (pieces[pieces.length - 1].end - range.start)) * fps) : 0;
+  if (dropped > 0) {
+    notes.push(`${eraserName} works in steps of ${eraser.window!.step} frames: the selection's last ${dropped === 1 ? "frame" : `${dropped} frames`} (${(dropped / fps).toFixed(2)} s) ${dropped === 1 ? "is" : "are"} left out`);
+  }
+  if (eraser.engine === "open") {
+    const per = (eraser.window?.cap ?? 81) / fps;
+    if (count > 1) {
+      notes.push(`${eraserName} works on ${eraser.window?.cap} frames at a time (${per.toFixed(1)} s of this clip): the clip runs as ${count} windows, joined with its own sound. Seams between windows aren't tested on a GPU yet`);
       if (eraser.modes.includes("paint")) notes.push("SAM 3.1 hands what you painted on from window to window (each starts on the last frame of the one before), so the windows run one after another");
     }
     notes.push(eraser.effects ? "VOID needs a 24–40 GB GPU (unverified). Its CogVideoX base is licensed for commercial use only after registering, up to 1 million visits a month" : "Wan 2.1 VACE 14B needs a 24 GB GPU · Apache-2.0 (SAM 3.1: Meta's SAM License)");
   } else {
     const max = pieceSeconds(eraser, source.fps);
-    if (len > max + 0.01) notes.push(`${model?.name ?? eraser.label} takes ${max < 5 ? "clips under 5 s" : `up to ${Math.floor(max)} s`}: the clip is cut into ${Math.ceil(len / max - 1e-9)} pieces, erased one by one and joined, with its own sound put back. Seams between pieces aren't tested yet`);
-    if (body.mode !== "type" && (body.mode === "paint" || len > max + 0.01)) notes.push("SAM 3.1 first follows what you " + (body.mode === "paint" ? "painted" : "clicked") + " through the whole selection; Bria then erases that mask");
+    const limit = eraser.window ? `up to ${eraser.window.cap} frames (${max.toFixed(1)} s of this clip)` : max < 5 ? "clips under 5 s" : `up to ${Math.floor(max)} s`;
+    if (count > 1) notes.push(`${eraserName} takes ${limit}: the clip is cut into ${count} pieces, erased one by one and joined, with its own sound put back. Seams between pieces aren't tested yet`);
+    if (body.mode !== "type" && (body.mode === "paint" || count > 1)) notes.push("SAM 3.1 first follows what you " + (body.mode === "paint" ? "painted" : "clicked") + " through the whole selection; Bria then erases that mask");
     if (eraser.everyone) notes.push("LTX Clean Plate removes every person in the shot — it doesn't take a target");
   }
   if (!wholeClip(range, source.duration)) notes.push("Only the selected part comes out (the rest of the clip isn't kept)");
@@ -205,7 +232,7 @@ async function planInput(body: RemovalBody, opts: { probe: boolean; preview?: bo
 const withChain = (s: PlanStep) => ({ ...s.request, ...(s.chain ? { chain: s.chain } : {}) });
 
 /** What the steps cost together (null when a price is unknown) and whether they would run as a demo. */
-function price(steps: PlanStep[]): { costUsd: number | null; demo: boolean } {
+function price(steps: PlanStep[], source: RemoveSource): { costUsd: number | null; demo: boolean } {
   let cost: number | null = 0;
   let demo = false;
   for (const s of steps) {
@@ -217,7 +244,9 @@ function price(steps: PlanStep[]): { costUsd: number | null; demo: boolean } {
     }
     demo ||= p.demo;
     const edit = EDIT_USD_PER_SECOND[s.request.modelId];
-    const usd = p.costUsd ?? (edit !== undefined ? edit * (s.request.params?.duration ?? 0) : null);
+    const perMp = MEGAPIXEL_USD[s.request.modelId];
+    const usd =
+      !p.demo && perMp !== undefined ? perMp * megapixels(s.request.params, source) : (p.costUsd ?? (edit !== undefined ? edit * (s.request.params?.duration ?? 0) : null));
     cost = cost === null || usd === null ? null : cost + usd;
   }
   return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo };
@@ -236,6 +265,11 @@ export interface RemovalEstimate {
   notes: string[];
   /** The mask preview's price, or null when this engine and mode have none. */
   previewUsd: number | null;
+  /**
+   * Whether the preview is the mask the eraser works from; false: only how SAM 3.1 reads the words or clicks
+   * (Kling O3 edit and Bria find the object themselves).
+   */
+  previewExact: boolean;
 }
 
 export async function estimateRemoval(body: RemovalBody): Promise<RemovalEstimate> {
@@ -243,14 +277,15 @@ export async function estimateRemoval(body: RemovalBody): Promise<RemovalEstimat
   const plan = planRemoval(input);
   const preview = planMaskPreview({ ...input, prompt: input.prompt, points: input.points });
   return {
-    ...price(plan.steps),
+    ...price(plan.steps, input.source),
     modelId: eraser.id,
     modelName: getModel(eraser.id)?.name ?? eraser.label,
     pieces: plan.pieces.length,
     seconds: Math.round((input.range.end - input.range.start) * 100) / 100,
     steps: plan.steps.length,
     notes,
-    previewUsd: preview ? price(preview).costUsd : null,
+    previewUsd: preview ? price(preview, input.source).costUsd : null,
+    previewExact: !!preview && previewIsEraserMask(eraser, plan.tracked),
   };
 }
 

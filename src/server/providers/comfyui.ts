@@ -30,7 +30,7 @@ import {
 } from "@/lib/comfy";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { guessKind } from "@/lib/catalog/payload";
-import { CLICK_OPEN_PROBLEM, REMOVE_SCENE } from "@/lib/catalog/remove-object";
+import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { getSetting } from "../settings";
@@ -572,13 +572,17 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values[key] = def.replaceAll("{columns}", String(columns)).replaceAll("{rows}", String(rows)).replaceAll("{count}", String(columns * rows)).replaceAll("{language}", languageName(input.targetLanguage));
   }
 
-  // Remove object: the words name what SAM 3.1 follows (maskPrompt) and the gap is filled with the scene without it
-  // (params.extra.prompt, else a neutral default). No graph takes clicked points.
+  // Remove object: the words name what SAM 3.1 follows (maskPrompt: the objects alone, comma-separated, each its own
+  // SAM 3 prompt, so "Remove the red car from the shot" run straight from a Canvas works too) and the gap is filled
+  // with the scene without it (params.extra.prompt, else a neutral default). No graph takes clicked points.
+  // The painted eraser's last tracked mask (role "mask") is saved only for a window another one waits on.
+  const handOff = ctx.op === "remove-object" && extra[HAND_OFF] === true;
+  delete extra[HAND_OFF];
   if (ctx.op === "remove-object") {
     const words = input.prompt?.trim();
     if (b.maskPrompt) {
       if (!words && typeof extra.maskPrompt !== "string") throw new ProviderError(input.points?.length ? CLICK_OPEN_PROBLEM : "Say what to remove, e.g. “the coffee cup in her hand”");
-      values.maskPrompt = words;
+      if (words) values.maskPrompt = targetPhrase(words);
     }
     if (b.prompt) values.prompt = REMOVE_SCENE;
   }
@@ -659,6 +663,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (input.loras?.length) wf = injectLoras(wf, input.loras);
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
   if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
+  if (ctx.op === "remove-object" && !handOff) for (const o of manifest.outputs) if (o.role === "mask") delete wf[o.node];
   const metaBatch = Object.values(wf).some((n) => n.class_type === "VHS_BatchManager");
   return {
     manifest,

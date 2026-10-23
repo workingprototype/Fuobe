@@ -27,6 +27,8 @@ export const REMOVE = {
   /** Seconds the mask preview looks at. */
   previewSeconds: 2,
   maxPoints: 12,
+  /** What you type: Kling O3 edit takes prompts of up to 2500 characters, and klingPrompt() adds up to 52. */
+  maxPromptChars: 2400,
   accept: "video/mp4,video/quicktime,video/webm,.mp4,.mov,.m4v,.webm",
 } as const;
 
@@ -62,12 +64,16 @@ export interface Eraser {
   note: string;
   /** Cloud: the longest piece one call takes, in seconds (longer clips are cut, erased and joined). */
   maxSeconds?: number;
-  /** Cloud: the longest piece in frames at the clip's own rate (VOID: 197). */
-  maxFrames?: number;
   /** The shortest clip it takes, in seconds. */
   minSeconds?: number;
-  /** Open: one job per window of frames: at most `cap`, `step`·n + `base` frames (VACE 4n+1 ≤ 81, VOID 8n+5 ≤ 197). */
+  /**
+   * Routes that count frames: one job per window of whole frames, at most `cap`, `step`·n + `base` frames. Open: the
+   * graph reads its own window (VACE 4n+1 ≤ 81, VOID 8n+5 ≤ 197); cloud: the clip is cut on those frames and the route
+   * is told exactly that many (fal's VOID snaps num_frames to 69, 77 … 197; LTX renders 8n+1).
+   */
   window?: FrameWindow;
+  /** The highest frame rate it renders at (LTX Clean Plate: 60). */
+  maxFps?: number;
   /** The result carries the piece's own sound (otherwise the clip's sound is put back). */
   keepsSound: boolean;
   /** Also removes what the object causes: shadows, reflections, things it moves. */
@@ -86,6 +92,8 @@ export interface FrameWindow {
   cap: number;
   step: number;
   base: number;
+  /** The fewest frames a window may have (fal's VOID: 69); `base` when unset. */
+  min?: number;
   overlap?: number;
 }
 
@@ -96,6 +104,13 @@ const VACE_WINDOW: FrameWindow = { cap: 81, step: 4, base: 1 };
  */
 const VACE_PAINTED_WINDOW: FrameWindow = { ...VACE_WINDOW, overlap: 1 };
 const VOID_WINDOW: FrameWindow = { cap: 197, step: 8, base: 5 };
+/** fal's VOID snaps num_frames to the nearest of 69, 77 … 197 (paid-model-apis-4.json): pieces are exactly one of them. */
+const VOID_CLOUD_WINDOW: FrameWindow = { cap: 197, step: 8, base: 5, min: 69 };
+/**
+ * LTX 2.3 renders 8n+1 frames (9–481), and at 720p its IC-LoRA budget ("w × h × frames") is "roughly 6 s" at the
+ * route's 24 fps, about 144 frames, above which it answers 422: pieces of up to 137 frames stay under it at any rate.
+ */
+const LTX_WINDOW: FrameWindow = { cap: 137, step: 8, base: 1, min: 9 };
 /** Bria's erasers take clips "shorter than 5 s": pieces stay a little under. */
 const BRIA_PIECE = 4.8;
 
@@ -129,8 +144,8 @@ export const ERASERS: Eraser[] = [
     engine: "cloud",
     modes: ["type"],
     label: "VOID",
-    note: "Also removes its shadows and reflections · up to 197 frames per piece",
-    maxFrames: 197,
+    note: "Also removes its shadows and reflections · 69–197 frames per piece",
+    window: VOID_CLOUD_WINDOW,
     keepsSound: false,
     effects: true,
   },
@@ -139,9 +154,9 @@ export const ERASERS: Eraser[] = [
     engine: "cloud",
     modes: ["type"],
     label: "LTX 2.3 Clean Plate",
-    note: "Removes every person — no words needed · up to 6 s per piece",
-    maxSeconds: 6,
-    minSeconds: 0.5,
+    note: "Removes every person — no words needed · up to 137 frames per piece at 720p",
+    window: LTX_WINDOW,
+    maxFps: 60,
     keepsSound: false,
     everyone: true,
   },
@@ -200,6 +215,12 @@ export const REMOVE_SCENE = "The same shot with nothing there: the background co
 
 export const CLICK_OPEN_PROBLEM = "Clicking works on the cloud engine. On your ComfyUI, type what to remove or paint over it";
 
+/**
+ * params.extra key: this painted window hands its last tracked mask on to the next one, so the comfyui provider keeps
+ * the graph's mask output (role "mask"); without it that output isn't saved.
+ */
+export const HAND_OFF = "handOffMask";
+
 /** The erasers you can pick for this engine and way of pointing (the effects one only when typing). */
 export function erasersFor(engine: Engine, mode: RemoveMode): Eraser[] {
   return ERASERS.filter((e) => e.engine === engine && e.modes.includes(mode));
@@ -221,15 +242,50 @@ export function chooseEraser(o: { engine: Engine; mode: RemoveMode; effects?: bo
 
 const VERB = /^\s*(?:please\s+)?(?:remove|erase|delete|get rid of|take out|cut out|clean up|wipe out|wipe)\s+/i;
 
+/** Where the objects end and the instructions start: a sentence break, a dash, or a clause such as "… so she…". */
+const LIST_END = /[.;:!?—–(]|\s-\s|\s+(?:so|then|while|but|keep|keeping|leaving|to make|make)\s+/i;
+/** Between two objects: commas, "and", "plus", "including"… */
+const LIST_SPLIT = /\s*,\s*(?:and\s+|plus\s+|also\s+)?|\s+(?:and|plus|&|as well as|along with|together with|including)\s+/i;
+/** A part that starts with one of these is an instruction ("…and fix her fingers"), not another object. */
+const INSTRUCTION = /^(?:keep|make|fix|fill|leave|replace|put|add|let|change|turn|show|restore|blur|paint|extend|move|have|ensure|don't|do|use|give|repair|smooth|cover|continue|preserve|retain|maintain|adjust|clean|reconstruct|inpaint)\b/i;
+/** A part that starts like this describes the object before it ("the man in red, on the left"). */
+const CONTINUES = /^(?:on|at|in|near|behind|under|above|below|beside|next to|by|with|without|inside|outside|over|across|along|around|who|which|that|wearing|holding|carrying|sitting|standing|walking|running)\b/i;
+/** Two colours joined by "and" are one object's look ("the black and white dog"), not two objects. */
+const COLOUR = "black|white|red|green|blue|yellow|orange|purple|pink|brown|grey|gray|silver|gold|golden|beige|dark|light|navy|teal";
+const COLOUR_PAIR = new RegExp(`\\b(${COLOUR})\\s+and\\s+(${COLOUR})\\b`, "gi");
+const JOINED = "\u0001";
+const TARGET_MAX = 160;
+
 /**
- * The object alone, for a segmenter or an eraser that finds things by name (SAM 3.1, Bria, VOID's mask
- * prompt): "Remove the coffee cup from her hands and fix her fingers…" → "the coffee cup".
+ * What to remove, for a segmenter or an eraser that finds things by name (SAM 3.1, Bria, VOID's mask prompt):
+ * the objects alone, comma-separated, which SAM 3.1 (fal) and ComfyUI's SAM 3 text encoder each track as their own
+ * prompt. "Remove the coffee cup from her hands and fix her fingers…" → "the coffee cup"; "the logo and the
+ * watermark" → "the logo, the watermark". Applying it again changes nothing.
  */
 export function targetPhrase(text: string): string {
-  const t = text.trim().replace(VERB, "");
-  const stop = t.search(/\s+(?:from|in)\s+@video\d*|\s+from\s+|[,.;:!?—–(]|\s-\s|\s+(?:and|so|then|while|but|keep|keeping|leaving|to make|make)\s+/i);
-  const out = (stop > 0 ? t.slice(0, stop) : t).replace(/\s+(?:from|in|out of)\s+(?:the\s+)?(?:video|clip|shot|footage|frame)$/i, "").trim();
-  return (out || text.trim()).slice(0, 160);
+  const t = text.trim().replace(VERB, "").replace(COLOUR_PAIR, `$1${JOINED}$2`);
+  const end = t.search(LIST_END);
+  const phrases: string[] = [];
+  const list = (end > 0 ? t.slice(0, end) : t).replace(/(?:\s*,|\s+(?:and|plus|also|&))+\s*$/i, "");
+  for (const raw of list.split(LIST_SPLIT)) {
+    let part = raw.replaceAll(JOINED, " and ").trim().replace(/^(?:and|plus|also|including)\s+/i, "").replace(VERB, "");
+    if (!part) continue;
+    if (INSTRUCTION.test(part)) break;
+    // The object, not where it is in the clip ("the cup from her hands", "the logo from the video").
+    const from = part.search(/(?:^|\s+)(?:from|out of)\s+|(?:^|\s+)in\s+@video\d*/i);
+    if (from >= 0) part = part.slice(0, from);
+    part = part.replace(/\s+(?:from|in|out of)\s+(?:the\s+)?(?:video|clip|shot|footage|frame)$/i, "").trim();
+    if (!part) continue;
+    if (CONTINUES.test(part) && phrases.length) phrases[phrases.length - 1] += ` ${part}`;
+    else if (!phrases.some((p) => p.toLowerCase() === part.toLowerCase())) phrases.push(part);
+  }
+  let out = "";
+  for (const p of phrases) {
+    const next = out ? `${out}, ${p}` : p;
+    if (next.length > TARGET_MAX) break;
+    out = next;
+  }
+  return (out || phrases[0] || text.trim()).slice(0, TARGET_MAX);
 }
 
 /**
@@ -284,7 +340,7 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
  * overlap, each window after the first also reads the last `overlap` frames of the one before.
  */
 export function frameWindows(total: number, w: FrameWindow): number[] {
-  if (total < w.base) return [];
+  if (total < (w.min ?? w.base)) return [];
   const o = w.overlap ?? 0;
   const k = Math.max(1, Math.ceil((total - o) / (w.cap - o)));
   const units = Math.floor((total + (k - 1) * o - k * w.base) / w.step);
@@ -317,6 +373,21 @@ export function planWindows(range: RemoveRange, fps: number, w: FrameWindow): Pi
 }
 
 /**
+ * Cloud routes that count frames (VOID, LTX Clean Plate): cuts on whole frames, back to back, each exactly one
+ * window long, so the route is told the piece's own frame count (nothing for it to snap, pad or drop) and the
+ * joined clip has exactly the range's frames (less fewer than `step` at the end).
+ */
+export function planFrameCuts(range: RemoveRange, fps: number, w: FrameWindow): Piece[] {
+  const total = Math.floor((range.end - range.start) * fps + 1e-6);
+  let at = Math.round(range.start * fps);
+  return frameWindows(total, w).map((frames, index) => {
+    const piece: Piece = { index, start: r6(at / fps), end: r6((at + frames) / fps), frames };
+    at += frames;
+    return piece;
+  });
+}
+
+/**
  * Cloud: equal pieces of at most `max` seconds (on whole frames when the rate is known), so no piece is
  * a sliver (14 s for Bria → three 4.67 s pieces, not two of 4.8 s and one of 4.4 s… or a 0.4 s one).
  */
@@ -333,7 +404,7 @@ export function planCloudPieces(range: RemoveRange, max: number, fps?: number): 
 
 /** The longest piece a cloud eraser takes for this clip. */
 export function pieceSeconds(e: Eraser, fps?: number): number {
-  const byFrames = e.maxFrames ? e.maxFrames / (fps && fps > 0 ? fps : 24) : Infinity;
+  const byFrames = e.window ? e.window.cap / (fps && fps > 0 ? fps : 24) : Infinity;
   return Math.min(e.maxSeconds ?? Infinity, byFrames);
 }
 
@@ -371,14 +442,19 @@ export function removalProblem(e: Eraser, source: RemoveSource, range: RemoveRan
   }
   if (e.window) {
     if (!source.fps) return "Couldn't read this clip's frame rate — save it as an MP4 (H.264) and try again";
-    if (Math.floor(len * source.fps + 1e-6) < e.window.base) return "Select a little more of the clip";
+    const min = e.window.min ?? e.window.base;
+    if (Math.floor(len * source.fps + 1e-6) < min) {
+      if (min === e.window.base) return "Select a little more of the clip";
+      return `${name} needs at least ${min} frames (${(Math.ceil((min / source.fps) * 10) / 10).toFixed(1)} s of this clip) — select more${e.effects ? ", or turn off Shadows and reflections" : ""}`;
+    }
   }
+  if (e.maxFps && source.fps && source.fps > e.maxFps + 0.01) return `${name} renders up to ${e.maxFps} fps (this clip is ${Math.round(source.fps)} fps) — pick another eraser`;
   return null;
 }
 
 /** The pieces a clip is erased in: windows on the open engine, equal cuts on the cloud. */
 export function planPieces(e: Eraser, source: RemoveSource, range: RemoveRange): Piece[] {
-  if (e.window) return source.fps ? planWindows(range, source.fps, e.window) : [];
+  if (e.window) return !source.fps ? [] : e.engine === "open" ? planWindows(range, source.fps, e.window) : planFrameCuts(range, source.fps, e.window);
   return planCloudPieces(range, pieceSeconds(e, source.fps), source.fps);
 }
 
@@ -498,10 +574,13 @@ function eraseRequest(input: RemovalPlanInput, p: Piece): Partial<GenerationRequ
       params: { startTime: p.startTime, endTime: p.endTime, ...seed },
     };
   }
-  // Seconds price per-second models; frame-count routes (VOID, LTX) read the piece's length and the clip's rate.
-  const len = { duration: seconds(p), sourceDuration: seconds(p), ...fps };
+  // Seconds price per-second models; frame-count routes (VOID, LTX) read the piece's length and the clip's rate,
+  // which give exactly its own frame count.
+  const secs = p.frames && input.source.fps ? r6(p.frames / input.source.fps) : seconds(p);
+  const len = { duration: secs, sourceDuration: secs, ...fps };
   if (e.id === "kling-o3" || e.id === "kling-o3-4k-edit") return { prompt: klingPrompt(input.prompt ?? ""), params: { ...len, ...seed } };
-  if (e.everyone) return { params: { ...len, generateAudio: false, ...seed } };
+  // LTX's frame budget (LTX_WINDOW) is the 720p one.
+  if (e.everyone) return { params: { ...len, resolution: "720p", generateAudio: false, ...seed } };
   if (e.modes.includes("type")) return { prompt: targetPhrase(input.prompt ?? ""), params: { ...len, ...seed } };
   // Bria's clicked eraser reads the points itself; the masked one gets SAM 3.1's track.
   return { params: { ...len, ...(e.id === "bria-video-erase-points" ? { points: input.points } : {}), ...seed } };
@@ -536,6 +615,8 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
     pieces.forEach((p, i) => {
       const own = eraseRequest(input, p);
       const painted = e.modes.includes("paint");
+      // Only a window another one waits on saves its last tracked mask (else it would show up as a second result).
+      const handOff = painted && i < n - 1;
       steps.push({
         key: `erase${i}`,
         request: {
@@ -543,6 +624,7 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
           modelId: e.id,
           op,
           ...own,
+          ...(handOff ? { params: { ...own.params, extra: { [HAND_OFF]: true } } } : {}),
           inputs: { video: input.source.url, ...(painted && i === 0 && input.mask ? { mask: input.mask } : {}) },
           step: pieceLabel(p, n, "erase"),
         },
@@ -582,7 +664,10 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
       });
     }
     pieces.forEach((p, i) => {
-      const one = n === 1 && whole;
+      // One piece that is the whole upload: read as it is (a frame-count route's piece only when it is every frame,
+      // else it is cut to its frames, so the route gets exactly what it is told whether it reads num_frames as the
+      // length or as its window).
+      const one = n === 1 && whole && (!p.frames || p.end >= (input.source.duration ?? 0) - 0.05);
       const own = eraseRequest(input, p);
       const after: string[] = [];
       const chain: ChainSlot[] = [];
@@ -646,13 +731,16 @@ export function planRemoval(input: RemovalPlanInput): RemovalPlan {
   const picture = level[0];
   if (!sound) return { steps, final: picture, pieces, sound, tracked };
 
-  // The clip's own sound under the erased picture: the upload (whole clip), or the range cut out of it.
+  // The clip's own sound under the erased picture: the upload (whole clip), or the range cut out of it. Erasers that
+  // work in whole frames leave out the last few (fewer than a step): the sound is cut to the picture's end, except on
+  // the open engine, whose mux trims the sound to the picture itself.
   const after = [picture];
   const chain: ChainSlot[] = [{ slot: "video" }];
   const inputs: GenerationRequest["inputs"] = {};
-  if (whole) inputs.audio = input.source.url;
+  const end = e.window && e.engine === "cloud" ? pieces[n - 1].end : input.range.end;
+  if (whole && end >= (input.source.duration ?? 0) - 0.05) inputs.audio = input.source.url;
   else {
-    steps.push({ key: "sound", request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: input.range.end }, step: { label: "Original sound", index: 1100, of: 1000 } } });
+    steps.push({ key: "sound", request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: end }, step: { label: "Original sound", index: 1100, of: 1000 } } });
     after.push("sound");
     chain.push({ slot: "audio" });
   }
@@ -682,6 +770,15 @@ export interface PreviewPlanInput {
   range: RemoveRange;
   prompt?: string;
   points?: PixelPoint[];
+}
+
+/**
+ * Whether the mask preview shows the mask the eraser itself works from (SAM tracks the object for it: the open
+ * graphs, fal's VOID from its mask prompt, a SAM 3.1 track of clicks or paint), or only how SAM 3.1 reads the words
+ * or clicks (Kling O3 edit and Bria find the object themselves, so their result can differ).
+ */
+export function previewIsEraserMask(e: Eraser, tracked: boolean): boolean {
+  return e.engine === "open" || !!e.effects || tracked;
 }
 
 /**

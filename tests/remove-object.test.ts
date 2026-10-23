@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { getModel } from "@/lib/catalog";
-import { promptOptional, routesFor } from "@/lib/catalog/plan";
+import { getModel, getPreset } from "@/lib/catalog";
+import { buildPayload } from "@/lib/catalog/payload";
+import { planGeneration, promptOptional, routesFor } from "@/lib/catalog/plan";
 import {
   chooseEraser,
   CLICK_OPEN_PROBLEM,
@@ -8,16 +9,20 @@ import {
   erasersFor,
   frameWindows,
   getEraser,
+  HAND_OFF,
   klingPrompt,
   MASK_TRACKER,
   paintedPoints,
   pieceSeconds,
   planCloudPieces,
+  planFrameCuts,
   planMaskPreview,
   planRemoval,
   planWindows,
+  previewIsEraserMask,
   REMOVE,
   REMOVE_EXAMPLES,
+  REMOVE_SCENE,
   REMOVE_TOOLS,
   removalProblem,
   removalTitle,
@@ -27,6 +32,7 @@ import {
   type RemovalPlanInput,
 } from "@/lib/catalog/remove-object";
 import type { PlanStep } from "@/lib/catalog/shorts";
+import type { GenerationRequest, GenInput } from "@/lib/catalog/types";
 
 const src = { url: "/api/files/uploads/clip.mp4", duration: 12, fps: 30, width: 1280, height: 720, hasAudio: true };
 const input = (over: Partial<RemovalPlanInput> & { eraserId?: string } = {}): RemovalPlanInput => {
@@ -44,6 +50,17 @@ const input = (over: Partial<RemovalPlanInput> & { eraserId?: string } = {}): Re
 };
 const keys = (steps: PlanStep[]) => steps.map((s) => s.key);
 const step = (steps: PlanStep[], key: string) => steps.find((s) => s.key === key)!;
+/**
+ * What a step sends to its API, as the server does: planned (model defaults, checks), then mapped by the route's
+ * FieldMap. Chained inputs (a cut piece, a tracked mask) get stand-ins.
+ */
+const payloadOf = (s: PlanStep) => {
+  const chained = Object.fromEntries((s.chain ?? []).map((c) => [c.slot, `/api/files/${c.slot}-from-before.mp4`]));
+  const req = { ...s.request, inputs: { ...chained, ...s.request.inputs } } as GenerationRequest;
+  const p = planGeneration(req, getModel, getPreset);
+  const input = { ...p.params, prompt: p.prompt, video: req.inputs?.video, mask: req.inputs?.mask } as GenInput;
+  return buildPayload(routesFor(p.model, p.op)[0].map!, input);
+};
 
 describe("Remove object: erasers", () => {
   it("points at real catalog models, with the routes and inputs each way of pointing needs", () => {
@@ -92,10 +109,35 @@ describe("Remove object: erasers", () => {
 describe("Remove object: words", () => {
   it("cuts the object out of an instruction for SAM 3.1, Bria and VOID", () => {
     expect(targetPhrase(REMOVE_EXAMPLES[0].prompt)).toBe("the coffee cup");
-    expect(targetPhrase(REMOVE_EXAMPLES[1].prompt)).toBe("the pogo stick the guy is bouncing on");
+    // Higgsfield's pogo example names four things to remove; the instruction after the dash isn't one.
+    expect(targetPhrase(REMOVE_EXAMPLES[1].prompt)).toBe("the pogo stick the guy is bouncing on, the black handle grips in his hands, the platform under his feet, its shadow on the ground");
     expect(targetPhrase("the people walking in the background")).toBe("the people walking in the background");
     expect(targetPhrase("Erase the logo from the video.")).toBe("the logo");
     expect(targetPhrase("get rid of the red car and keep the trees")).toBe("the red car");
+  });
+
+  it("names every object a prompt lists, comma-separated (SAM 3.1 and ComfyUI's SAM 3 track each)", () => {
+    expect(targetPhrase("the logo and the watermark")).toBe("the logo, the watermark");
+    expect(targetPhrase("wires and cables")).toBe("wires, cables");
+    expect(targetPhrase("the cup, the spoon and the plate")).toBe("the cup, the spoon, the plate");
+    expect(targetPhrase("Remove the cup, the spoon, and the plate.")).toBe("the cup, the spoon, the plate");
+    expect(targetPhrase("Remove the cup and remove the plate")).toBe("the cup, the plate");
+    expect(targetPhrase("Remove the dog in @Video1 and the cat")).toBe("the dog, the cat");
+    expect(targetPhrase("the watermark plus the timestamp")).toBe("the watermark, the timestamp");
+    // One object described with "and", or a detail after a comma, stays one.
+    expect(targetPhrase("the black and white dog")).toBe("the black and white dog");
+    expect(targetPhrase("the man in the red jacket, on the left")).toBe("the man in the red jacket on the left");
+    // An instruction after the objects ends the list.
+    expect(targetPhrase("the logo and the watermark, and fill the corner with the sky")).toBe("the logo, the watermark");
+    // Whole objects up to 160 characters.
+    const long = targetPhrase(Array.from({ length: 30 }, (_, i) => `the sticker number ${i + 1}`).join(", "));
+    expect(long.length).toBeLessThanOrEqual(160);
+    expect(long.endsWith("the sticker number 7")).toBe(true);
+    // The provider applies it again to what the planner sent: nothing changes.
+    for (const t of [...REMOVE_EXAMPLES.map((x) => x.prompt), "the logo and the watermark", "the black and white dog", "the man in the red jacket, on the left"]) {
+      expect(targetPhrase(targetPhrase(t))).toBe(targetPhrase(t));
+    }
+    expect(removalTitle({ mode: "type", prompt: "the logo and the watermark" })).toBe("Remove · the logo, the watermark");
   });
 
   it("writes Kling's edit prompt the way Higgsfield does", () => {
@@ -178,6 +220,27 @@ describe("Remove object: windows and pieces", () => {
     expect(pieceSeconds(getEraser("kling-o3")!)).toBe(15);
   });
 
+  it("cuts frame-count routes (VOID, LTX) on whole frames into counts the route takes as they are", () => {
+    const voidCloud = getEraser("void-video-inpainting")!.window!;
+    // fal's VOID snaps num_frames to 69, 77 … 197 (8n+5 from 69): every piece is one of those.
+    for (const total of [69, 70, 150, 197, 198, 300, 600, 1799]) {
+      const got = frameWindows(total, voidCloud);
+      expect(got.every((n) => n >= 69 && n <= 197 && (n - 5) % 8 === 0), `${total}: ${got}`).toBe(true);
+      expect(total - got.reduce((a, b) => a + b, 0)).toBeLessThan(8);
+    }
+    expect(frameWindows(68, voidCloud)).toEqual([]);
+    // 10 s at 30 fps: two 149-frame pieces, back to back on frame boundaries (the last 2 frames are left out).
+    const p = planFrameCuts({ start: 0, end: 10 }, 30, voidCloud);
+    expect(p).toEqual([
+      { index: 0, start: 0, end: 4.966667, frames: 149 },
+      { index: 1, start: 4.966667, end: 9.933333, frames: 149 },
+    ]);
+    // LTX renders 8n+1 frames and stays under its 720p budget (about 144 frames).
+    const ltx = getEraser("ltx-2-3-clean-plate")!.window!;
+    for (const total of [9, 120, 145, 360, 1800]) expect(frameWindows(total, ltx).every((n) => n >= 9 && n <= 137 && (n - 1) % 8 === 0)).toBe(true);
+    expect(planFrameCuts({ start: 1, end: 13 }, 30, ltx).map((x) => x.frames)).toEqual([121, 121, 113]);
+  });
+
   it("says why an eraser can't take a clip", () => {
     const kling = getEraser("kling-o3")!;
     expect(removalProblem(kling, src, { start: 0, end: 2 })).toMatch(/at least 3 s — Bria/);
@@ -187,6 +250,11 @@ describe("Remove object: windows and pieces", () => {
     expect(removalProblem(getEraser("oss-vace-remove")!, { ...src, fps: undefined }, { start: 0, end: 5 })).toMatch(/frame rate/);
     expect(removalProblem(kling, src, { start: 0, end: 13 })).toMatch(/past the end/);
     expect(removalProblem(kling, { ...src, duration: 90 }, { start: 0, end: 90 })).toMatch(/up to 60 s/);
+    // VOID on the cloud takes at least 69 frames; LTX renders at most 60 fps; both need the clip's rate.
+    expect(removalProblem(getEraser("void-video-inpainting")!, src, { start: 0, end: 2 })).toMatch(/at least 69 frames \(2\.3 s of this clip\).*Shadows and reflections/);
+    expect(removalProblem(getEraser("void-video-inpainting")!, src, { start: 0, end: 2.3 })).toBeNull();
+    expect(removalProblem(getEraser("void-video-inpainting")!, { ...src, fps: undefined }, { start: 0, end: 5 })).toMatch(/frame rate/);
+    expect(removalProblem(getEraser("ltx-2-3-clean-plate")!, { ...src, fps: 120 }, { start: 0, end: 5 })).toMatch(/up to 60 fps/);
     expect(tierFor({ width: 1920, height: 1080 })).toBe("1080p");
     expect(tierFor({ width: 720, height: 1280 })).toBe("720p");
     expect(tierFor({ width: 640, height: 360 })).toBe("480p");
@@ -249,19 +317,49 @@ describe("Remove object: cloud pipelines", () => {
     expect(step(plan.steps, "final")).toMatchObject({ after: ["join", "sound"], chain: [{ slot: "video" }, { slot: "audio" }] });
   });
 
-  it("VOID (shadows too): its frame count from the piece, the sound put back after", () => {
+  it("VOID (shadows too): told the piece's exact frame count, the sound cut to the picture and put back", () => {
     const six = { ...src, duration: 6 };
     const plan = planRemoval(input({ eraser: getEraser("void-video-inpainting")!, source: six, range: { start: 0, end: 6 } }));
-    expect(keys(plan.steps)).toEqual(["erase0", "final"]);
-    expect(step(plan.steps, "erase0").request).toMatchObject({ prompt: "the coffee cup", params: { sourceDuration: 6, fps: 30 } });
+    // 180 frames: one 173-frame piece, cut to exactly those frames; the last 7 are left out, and the sound is cut to match.
+    expect(keys(plan.steps)).toEqual(["cut0", "erase0", "sound", "final"]);
+    expect(plan.pieces).toEqual([{ index: 0, start: 0, end: 5.766667, frames: 173 }]);
+    expect(step(plan.steps, "cut0").request.params).toEqual({ startTime: 0, endTime: 5.766667 });
+    expect(step(plan.steps, "erase0")).toMatchObject({ after: ["cut0"], request: { prompt: "the coffee cup", params: { sourceDuration: 5.766667, fps: 30 } } });
+    expect(payloadOf(step(plan.steps, "erase0"))).toMatchObject({ video_url: "/api/files/video-from-before.mp4", mask_prompt: "the coffee cup", prompt: REMOVE_SCENE, num_frames: 173 });
+    expect(step(plan.steps, "sound").request.params).toEqual({ startTime: 0, endTime: 5.766667 });
     // No sound in the clip: nothing to put back.
-    expect(keys(planRemoval(input({ eraser: getEraser("void-video-inpainting")!, range: { start: 0, end: 6 }, source: { ...six, hasAudio: false } })).steps)).toEqual(["erase0"]);
+    expect(keys(planRemoval(input({ eraser: getEraser("void-video-inpainting")!, range: { start: 0, end: 6 }, source: { ...six, hasAudio: false } })).steps)).toEqual(["cut0", "erase0"]);
+    // A clip of exactly 197 frames is read as it is.
+    const exact = planRemoval(input({ eraser: getEraser("void-video-inpainting")!, range: { start: 0, end: 197 / 30 }, source: { ...src, duration: 197 / 30, hasAudio: false } }));
+    expect(keys(exact.steps)).toEqual(["erase0"]);
+    expect(step(exact.steps, "erase0").request.inputs).toEqual({ video: src.url });
+    // 10 s: two cuts of 149 frames, each told 149 (nothing for fal to snap), joined.
+    const ten = planRemoval(input({ eraser: getEraser("void-video-inpainting")!, prompt: "the logo and the watermark", source: { ...src, duration: 10 }, range: { start: 0, end: 10 } }));
+    expect(keys(ten.steps)).toEqual(["cut0", "erase0", "cut1", "erase1", "join", "sound", "final"]);
+    expect(step(ten.steps, "cut1").request.params).toEqual({ startTime: 4.966667, endTime: 9.933333 });
+    for (const k of ["erase0", "erase1"]) expect(payloadOf(step(ten.steps, k))).toMatchObject({ mask_prompt: "the logo, the watermark", num_frames: 149 });
   });
 
-  it("LTX Clean Plate removes every person without words or its own soundtrack", () => {
-    const plan = planRemoval(input({ eraser: getEraser("ltx-2-3-clean-plate")!, prompt: undefined, range: { start: 0, end: 5 } }));
-    expect(step(plan.steps, "erase0").request).toMatchObject({ params: { generateAudio: false } });
+  it("LTX Clean Plate removes every person without words or its own soundtrack, in 8n+1-frame pieces at 720p", () => {
+    const plan = planRemoval(input({ eraser: getEraser("ltx-2-3-clean-plate")!, prompt: undefined, range: { start: 0, end: 5 }, source: { ...src, duration: 5 } }));
+    expect(step(plan.steps, "erase0").request).toMatchObject({ params: { generateAudio: false, resolution: "720p" } });
     expect(step(plan.steps, "erase0").request.prompt).toBeUndefined();
+    // 150 frames: two pieces of 73 (the budget is about 144 frames at 720p).
+    expect(plan.pieces.map((p) => p.frames)).toEqual([73, 73]);
+    expect(payloadOf(step(plan.steps, "erase1"))).toMatchObject({ video_url: "/api/files/video-from-before.mp4", num_frames: 73, frames_per_second: 30, resolution: "720p", generate_audio: false });
+  });
+
+  it("each cloud eraser's API gets the words, the clip, the clicks or the mask in its own fields", () => {
+    const kling = planRemoval(input({ range: { start: 0, end: 12 } }));
+    expect(payloadOf(step(kling.steps, "erase0"))).toMatchObject({ video_url: src.url, prompt: "Remove the coffee cup from @Video1, keep everything else the same." });
+    const bria = planRemoval(input({ eraser: getEraser("bria-video-erase")!, prompt: "Remove the logo and the watermark" }));
+    expect(payloadOf(step(bria.steps, "erase1"))).toMatchObject({ video_url: "/api/files/video-from-before.mp4", prompt: "the logo, the watermark" });
+    const points = [{ x: 400, y: 300, label: "positive" as const }, { x: 10, y: 20, label: "negative" as const }];
+    const short = planRemoval(input({ mode: "click", eraser: getEraser("bria-video-erase-points")!, points, source: { ...src, duration: 4 }, range: { start: 0, end: 4 } }));
+    expect(payloadOf(step(short.steps, "erase0"))).toMatchObject({ video_url: src.url, keypoints: ["{'x':400, 'y':300, 'type':'positive'}", "{'x':10, 'y':20, 'type':'negative'}"] });
+    const long = planRemoval(input({ mode: "click", eraser: getEraser("bria-video-erase-points")!, points }));
+    expect(payloadOf(step(long.steps, "track"))).toMatchObject({ video_url: src.url, apply_mask: false, point_prompts: [{ x: 400, y: 300, label: 1 }, { x: 10, y: 20, label: 0 }] });
+    expect(payloadOf(step(long.steps, "erase0"))).toMatchObject({ video_url: "/api/files/video-from-before.mp4", mask_video_url: "/api/files/mask-from-before.mp4" });
   });
 
   it("Click it, short clip: Bria's clicked eraser reads the points itself", () => {
@@ -329,6 +427,13 @@ describe("Remove object: open pipelines", () => {
     expect(step(plan.steps, "erase2")).toMatchObject({ after: ["erase1"], chain: [{ slot: "mask" }] });
     // Each later window starts on the frame its mask was tracked on, and loses that frame before the join.
     expect(step(plan.steps, "erase1").request.params).toMatchObject({ startTime: 2.658333, endTime: 5.358333 });
+    // Only the windows a later one waits on save their last tracked mask.
+    expect(step(plan.steps, "erase0").request.params?.extra).toEqual({ [HAND_OFF]: true });
+    expect(step(plan.steps, "erase1").request.params?.extra).toEqual({ [HAND_OFF]: true });
+    expect(step(plan.steps, "erase2").request.params?.extra).toBeUndefined();
+    const one = planRemoval(open({ mode: "paint", eraser: getEraser("oss-vace-remove-painted")!, prompt: undefined, mask: "/api/files/uploads/mask.png", range: { start: 0, end: 2 } }));
+    expect(keys(one.steps)).toEqual(["erase0"]);
+    expect(step(one.steps, "erase0").request.params?.extra).toBeUndefined();
     expect(step(plan.steps, "keep1")).toMatchObject({ after: ["erase1"], chain: [{ slot: "video" }], request: { modelId: "oss-trim", op: "trim", params: { startTime: 0.025 } } });
     expect(step(plan.steps, "keep0")).toBeUndefined();
     expect(step(plan.steps, "join").after).toEqual(["erase0", "keep1", "keep2"]);
@@ -348,6 +453,16 @@ describe("Remove object: mask previews", () => {
     expect(step(steps, "preview").request).toMatchObject({ feature: REMOVE.previewFeature, modelId: MASK_TRACKER, prompt: "the coffee cup", params: { duration: 2 } });
     const clicks = planMaskPreview({ engine: "cloud", mode: "click", title: "t", source: src, range: { start: 0, end: 1 }, points: [{ x: 1, y: 2 }] })!;
     expect(step(clicks, "preview").request).toMatchObject({ params: { points: [{ x: 1, y: 2 }], duration: 1 } });
+  });
+
+  it("says when the preview is the eraser's own mask, and when only SAM 3.1's reading of the words or clicks", () => {
+    expect(previewIsEraserMask(getEraser("kling-o3")!, false)).toBe(false);
+    expect(previewIsEraserMask(getEraser("bria-video-erase")!, false)).toBe(false);
+    expect(previewIsEraserMask(getEraser("bria-video-erase-points")!, false)).toBe(false);
+    // SAM 3.1's track is what Bria erases; fal builds VOID's mask with SAM 3; the open graphs track with SAM 3.1.
+    expect(previewIsEraserMask(getEraser("bria-video-erase-points")!, true)).toBe(true);
+    expect(previewIsEraserMask(getEraser("void-video-inpainting")!, false)).toBe(true);
+    expect(previewIsEraserMask(getEraser("oss-vace-remove")!, false)).toBe(true);
   });
 
   it("open: the SAM 3 cut-out of what you typed; no preview for paint or clicks", () => {

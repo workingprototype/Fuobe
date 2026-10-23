@@ -96,6 +96,38 @@ describe("Remove object: estimates", () => {
     expect(e.costUsd).toBeLessThan(1.7);
     expect(e.notes.join(" ")).toMatch(/cut into 3 pieces/);
     expect(e.previewUsd).toBeGreaterThan(0);
+    // Bria finds the object by name itself: the preview is only SAM 3.1's reading of the words.
+    expect(e.previewExact).toBe(false);
+  });
+
+  it("says whether the mask preview is what the eraser works from", async () => {
+    const src = { url: clip, duration: 12, fps: 16, width: 1280, height: 720, hasAudio: true };
+    const kling = await (await estimateRoute.POST(json(body({ source: { ...src, duration: 10 } })))).json();
+    expect(kling).toMatchObject({ modelId: "kling-o3", previewExact: false });
+    const voidE = await (await estimateRoute.POST(json(body({ effects: true, source: src, range: { start: 0, end: 8 } })))).json();
+    expect(voidE).toMatchObject({ modelId: "void-video-inpainting", previewExact: true });
+    const paint = await (await estimateRoute.POST(json(body({ mode: "paint", mask: "/api/files/m.png", source: src })))).json();
+    expect(paint).toMatchObject({ modelId: "bria-video-erase-mask", previewExact: true });
+    const open = await (await estimateRoute.POST(json(body({ engine: "open", source: src })))).json();
+    expect(open).toMatchObject({ modelId: "oss-vace-remove", previewExact: true });
+  });
+
+  it("prices LTX Clean Plate per megapixel of each 720p piece, and VOID per piece of exact frames", async () => {
+    const src = { url: clip, duration: 12, fps: 30, width: 1920, height: 1080, hasAudio: true };
+    const ltx = await (await estimateRoute.POST(json(body({ modelId: "ltx-2-3-clean-plate", prompt: undefined, source: src })))).json();
+    // 360 frames → pieces of 121, 121 and 113 frames at 1280×720: 112 + 112 + 105 MP at $0.0024075 (rounded up per piece).
+    expect(ltx).toMatchObject({ modelId: "ltx-2-3-clean-plate", pieces: 3 });
+    const erase = (112 + 112 + 105) * 0.0024075;
+    expect(ltx.costUsd).toBeGreaterThanOrEqual(erase);
+    expect(ltx.costUsd).toBeLessThan(erase + 0.05);
+    expect(ltx.notes.join(" ")).toMatch(/up to 137 frames/);
+    const voidE = await (await estimateRoute.POST(json(body({ effects: true, source: { ...src, duration: 10 } })))).json();
+    expect(voidE).toMatchObject({ modelId: "void-video-inpainting", pieces: 2 });
+    // The last 2 frames of 300 don't fit VOID's 8-frame steps: said, not hidden.
+    expect(voidE.notes.join(" ")).toMatch(/last 2 frames \(0\.07 s\) are left out/);
+    const short = await estimateRoute.POST(json(body({ effects: true, source: { ...src, duration: 2 } })));
+    expect(short.status).toBe(422);
+    expect((await short.json()).error).toMatch(/at least 69 frames/);
   });
 
   it("prices Kling O3 edit at its edit price, and refuses clips it can't take", async () => {
@@ -131,6 +163,10 @@ describe("Remove object: estimates", () => {
     expect((await words.json()).error).toMatch(/Say what to remove/);
     const points = await estimateRoute.POST(json(body({ mode: "click", points: [{ x: 3, y: 3, label: "negative" }], source: { url: clip, duration: 12, fps: 16 } })));
     expect((await points.json()).error).toMatch(/Click what to remove/);
+    // Kling O3 edit's 2500 characters include its template: longer words are refused before anything runs.
+    const long = await estimateRoute.POST(json(body({ prompt: "the cup ".repeat(301), source: { url: clip, duration: 10, fps: 24, width: 1280, height: 720 } })));
+    expect(long.status).toBe(422);
+    expect((await long.json()).error).toMatch(new RegExp(`up to ${REMOVE.maxPromptChars} characters`));
     setSetting("engineMode", "open");
     const cloud = await estimateRoute.POST(json(body({ source: { url: clip, duration: 12, fps: 16 } })));
     expect((await cloud.json()).error).toMatch(/open-source models only/);
@@ -205,6 +241,16 @@ describe("Remove object: runs", () => {
     expect(second.request.inputs?.mask).not.toBe(mask);
     // …the mask image the window saved (meta.role "mask"), not its video.
     expect(second.request.inputs?.mask).toMatch(/\.svg$/);
+  });
+
+  it("open engine, Paint it, one window: the result is the video alone (no hand-off mask)", async () => {
+    const res = await createRoute.POST(json(body({ engine: "open", mode: "paint", prompt: undefined, mask, range: { start: 0, end: 3 } })));
+    const { final, items } = (await res.json()) as { final: Generation; items: Generation[] };
+    expect(items).toHaveLength(1);
+    expect(final).toMatchObject({ modelId: "oss-vace-remove-painted", feature: REMOVE.feature });
+    const done = await settle(final.id);
+    expect(done.status).toBe("succeeded");
+    expect(done.outputs.map((o) => o.kind)).toEqual(["video"]);
   });
 
   it("open engine, Type it, one window: the eraser's own result is the video", async () => {

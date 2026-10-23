@@ -538,15 +538,16 @@ const open: ModelDef[] = [
     options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
   }),
   // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
-  // (the provider sends it to SAM 3.1 as maskPrompt; the scene the gap is filled with is params.extra.prompt or a
-  // neutral default). One window per job: src/lib/catalog/remove-object.ts tiles longer clips and joins them.
+  // (the provider sends the objects in it to SAM 3.1 as maskPrompt; the scene the gap is filled with is
+  // params.extra.prompt or a neutral default). One window per job: src/lib/catalog/remove-object.ts tiles longer clips
+  // and joins them; run on its own (a Canvas node) a job does the first window only, which the taglines say.
   o({
     id: "oss-vace-remove",
     name: "Wan 2.1 VACE Remove",
     vendor: "Alibaba Wan",
     family: "wan",
     kind: "video",
-    tagline: "Name what to remove: SAM 3.1 follows it, VACE fills the gap, every other pixel stays the original · 24 GB GPU · Apache-2.0",
+    tagline: "Name what to remove: SAM 3.1 follows it, VACE fills the gap, every other pixel stays the original · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
     badges: ["new"],
     routes: [comfy("remove-object", "video-inpaint-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the lightx2v 4-step LoRA; up to 81 frames per window")],
     options: { seed: true, negativePrompt: true },
@@ -557,7 +558,7 @@ const open: ModelDef[] = [
     vendor: "Alibaba Wan",
     family: "wan",
     kind: "video",
-    tagline: "Paint what to remove on the first frame: SAM 3.1 follows it, VACE fills the gap · 24 GB GPU · Apache-2.0",
+    tagline: "Paint what to remove on the first frame: SAM 3.1 follows it, VACE fills the gap · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
     badges: ["new"],
     routes: [comfy("remove-object", "video-inpaint-wan-vace-painted", "first-frame mask (white = remove) tracked by SAM 3.1; the last frame's mask starts the next window")],
     options: { seed: true, negativePrompt: true, requires: { mask: true, msg: "Paint what to remove on the first frame" } },
@@ -568,7 +569,7 @@ const open: ModelDef[] = [
     vendor: "Netflix",
     family: "void",
     kind: "video",
-    tagline: "Removes the object and what it causes — shadows, reflections, things it moves · 24–40 GB GPU (unverified) · CogVideoX License: commercial use needs registration",
+    tagline: "Removes the object and what it causes — shadows, reflections, things it moves · 197 frames a run (Video tools → Remove object does whole clips) · 24–40 GB GPU (unverified) · CogVideoX License: commercial use needs registration",
     badges: ["new"],
     routes: [comfy("remove-object", "video-erase-void", "SAM 3.1 text track + VOID (CogVideoX-5B fine-tune), two passes; up to 197 frames per window")],
     options: { seed: true, negativePrompt: true },

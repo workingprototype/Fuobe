@@ -1,6 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { cueText, parseCues, type Cue } from "@/lib/cues";
+import { HAND_OFF } from "@/lib/catalog/remove-object";
 import { OPERATION_OUTPUT, type MediaKind, type Operation } from "@/lib/catalog/types";
 import type { ProviderAdapter, RemoteOutput } from "./types";
 import { textOutput } from "./llm";
@@ -353,8 +354,9 @@ export const mockProvider: ProviderAdapter = {
         clips: input.audios?.length,
         // Remove background: which file the demo stands for (the cut-out or its alpha mask).
         matteOutput: route.op === "bg-remove-video" ? (input.matteOutput ?? model.options.matteOutputs?.[0] ?? "cutout") : undefined,
-        // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted).
-        lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted",
+        // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted), saved
+        // only for a window the next one waits on (as the comfyui provider does).
+        lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted" && input.extra?.[HAND_OFF] === true,
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).
