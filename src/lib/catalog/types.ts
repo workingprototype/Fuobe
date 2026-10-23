@@ -690,7 +690,7 @@ export interface GenerationRequest {
   presetStrength?: number;
   /** Higgsfield's Mix: a second motion or effect on top of the first, with its own strength. */
   mix?: { presetId: string; strength: number };
-  /** Server-side only: LoRAs added by @element mentions (trained identities). */
+  /** LoRAs added by @element mentions (trained identities, server-side), or a recipe's LoRAs sent by the evaluation harness. */
   loras?: LoraRef[];
   /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
   chainFrom?: "first" | "last";

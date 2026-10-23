@@ -197,6 +197,8 @@ export function planGeneration(
   }
 
   if (req.loras?.length) loras = [...loras, ...req.loras];
+  // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
+  loras = loras.filter((l) => (l.strength ?? 1) !== 0);
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
   const shots = params.shots?.filter((s) => s.prompt.trim());

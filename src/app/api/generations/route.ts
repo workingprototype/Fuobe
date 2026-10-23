@@ -83,6 +83,25 @@ const RequestSchema = z.object({
   presetOptions: z.record(z.string(), z.string()).optional(),
   presetStrength: z.number().min(0).max(1).optional(),
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
+  // A recipe's LoRAs (the evaluation harness, scripts/eval): added after the preset's own. On ComfyUI `file` must
+  // already be in models/loras (ComfyUI checks the name against its list); a cloud LoRA endpoint takes `url`.
+  loras: z
+    .array(
+      z.object({
+        file: z
+          .string()
+          .min(1)
+          .max(200)
+          .regex(/^[\w ()+,.@-]+(\/[\w ()+,.@-]+)*$/, "a file name in ComfyUI's models/loras")
+          .refine((f) => !f.split("/").includes(".."), "a file name in ComfyUI's models/loras"),
+        url: z.string().max(2000).regex(/^https:\/\//, "an https:// link").optional(),
+        strength: z.number().min(-4).max(4).optional(),
+        trigger: z.string().max(200).optional(),
+        target: z.enum(["high", "low", "both"]).optional(),
+      }),
+    )
+    .max(8)
+    .optional(),
   // Image studio: the Color signature / Moodboard picks (its sentences join the prompt on the server).
   signature: SignatureSchema,
   // What a tool calls its result (Trim · 0:01.0–0:02.5, Captions · Karaoke), shown instead of the prompt.
