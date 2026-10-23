@@ -10,6 +10,7 @@ import type {
   PresetRoute,
   Pricing,
 } from "./types";
+import { chainGapProblem, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -286,17 +287,27 @@ function checkVideoToolOptions(model: ModelDef, op: "bg-remove-video" | "depth-v
   if (params.sideBySide && !o.sideBySide) throw new Error(`${model.name} can't put the original next to the depth map`);
 }
 
-/** Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. */
+/**
+ * Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. The open
+ * chain (one start/end-frame clip per pair) also needs every gap to be a clip its model can make.
+ */
 function checkKeyframes(model: ModelDef, n: number, params: GenParams) {
-  const max = model.options.maxImages;
+  const chain = keyframeChain(model);
+  const max = chain ? MAX_KEYFRAMES : model.options.maxImages;
   if (max && n > max) throw new Error(`${model.name} takes up to ${max} keyframes`);
   const times = params.keyframeTimes;
-  if (!times?.length) return;
-  if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
-  if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
   const duration = params.duration ?? model.defaults?.duration;
-  const last = times[times.length - 1];
-  if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
+  if (times?.length) {
+    if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
+    if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
+    const last = times[times.length - 1];
+    if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
+  }
+  if (chain && n > 1) {
+    const length = duration ?? 5;
+    const problem = chainGapProblem(times?.length ? times : frameTimes(spread(n), length), length, { name: model.name, maxSeconds: Math.max(...(model.options.durations ?? [5])) });
+    if (problem) throw new Error(problem);
+  }
 }
 
 type InputKey = keyof NonNullable<GenerationRequest["inputs"]>;

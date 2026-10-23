@@ -25,6 +25,12 @@ const CHATTERBOX_SLIDERS = [
   { param: "temperature", label: "Variety", min: 0.05, max: 2, step: 0.05, default: 0.8 },
 ];
 
+/**
+ * Frames mode on the open engine (Kling 4.0's up to 10 keyframes): one Wan 2.2 start/end-frame clip
+ * per pair of frames, as long as the gap between them, then joined (createKeyframeFilm in src/server/chains.ts).
+ */
+const KEYFRAME_FILM: ModelRoute = { ...comfy("keyframes", "wan22-flf2v-14b", "one start/end-frame clip per pair of frames, joined"), chained: true };
+
 /** Open models have no multi-shot of their own: each shot renders separately, then the clips are joined. */
 const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
@@ -254,7 +260,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Best open video model with Lightx2v 4-step LoRAs — minutes, not hours",
     badges: ["fast", "top"],
-    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
@@ -265,7 +271,7 @@ const open: ModelDef[] = [
     family: "wan",
     kind: "video",
     tagline: "Full-quality Wan 2.2 (20 steps) — text, image and start/end frame",
-    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
