@@ -22,6 +22,7 @@ export type OutputActionId =
   | "lipsync"
   | "add-sound"
   | "voice-change"
+  | "loop-audio"
   | "copy-text"
   | "view-3d"
   | "download"
@@ -100,6 +101,7 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("lipsync", "Lipsync", `/lipsync?audio=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("voice-change", "Change voice", `/audio/voice-change?audio=${q(o.url)}`);
+      link("loop-audio", "Loop / extend", `/audio/loop?audio=${q(o.url)}`);
       break;
     case "text":
       out.push({ id: "copy-text", label: "Copy", placement: "primary" }, file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });

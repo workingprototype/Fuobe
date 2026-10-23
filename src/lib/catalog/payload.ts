@@ -327,7 +327,8 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   }
   if (map.frames && images.length) out[map.frames.key] = images.map((url) => ({ [map.frames!.url]: url, [map.frames!.frames]: 1 }));
   if (map.loop && input.audio) {
-    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration) : map.loop.max;
+    // A length that is a whole number of plays counts as that many (30.003 / 10.001 is a hair over 3 in floats).
+    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration - 1e-6) : map.loop.max;
     out[map.loop.key] = Array.from({ length: Math.max(2, Math.min(map.loop.max, want)) }, () => input.audio);
   }
   if (map.model3d && input.model3d) out[map.model3d] = input.model3d;

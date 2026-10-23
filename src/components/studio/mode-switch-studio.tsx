@@ -22,6 +22,7 @@ import { HUB_MODES, modeHref, type HubKind } from "@/lib/hubs";
 import { CaptionsStudio } from "@/components/captions/captions-studio";
 import { DubStudio } from "@/components/dub/dub-studio";
 import { TrimTool } from "@/components/av/trim-tool";
+import { AudioJoinTool, AudioLoopTool } from "@/components/audio-tools/audio-tools";
 import { ModeStudio, ModeTabs } from "./mode-studio";
 import type { StudioConfig } from "./studio-context";
 
@@ -45,9 +46,9 @@ const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
   },
 };
 
-/** Modes that are their own tool rather than a composer studio (Translate & dub, Captions, Trim). */
+/** Modes that are their own tool rather than a composer studio (Translate & dub, Loop / extend, Join, Captions, Trim). */
 const TOOLS: Partial<Record<HubKind, Record<string, (p: { tabs: React.ReactNode }) => React.ReactNode>>> = {
-  audio: { translate: ({ tabs }) => <DubStudio tabs={tabs} /> },
+  audio: { translate: ({ tabs }) => <DubStudio tabs={tabs} />, loop: ({ tabs }) => <AudioLoopTool tabs={tabs} />, join: ({ tabs }) => <AudioJoinTool tabs={tabs} /> },
   "video-tools": { captions: ({ tabs }) => <CaptionsStudio tabs={tabs} />, trim: ({ tabs }) => <TrimTool tabs={tabs} /> },
 };
 
