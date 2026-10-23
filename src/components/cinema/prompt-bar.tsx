@@ -150,11 +150,14 @@ function DurationChip({ value, effective, onChange }: { value: number; effective
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button type="button" className={cn(chip, chipIdle)} aria-label={effective && effective !== value ? `Duration: ${value}s ${effective}s, the model makes ${effective}s` : `Duration: ${value}s`}>
-          <Clock className="size-3.5" />
+        {/* Named by its content, with the words a screen reader needs hidden from sight: "Duration: 5s, the model makes 6s". */}
+        <button type="button" className={cn(chip, chipIdle)}>
+          <Clock className="size-3.5" aria-hidden />
+          <span className="sr-only">Duration: </span>
           {effective && effective !== value ? (
             <span>
-              <span className="text-muted-foreground line-through">{value}s</span> {effective}s
+              <span className="text-muted-foreground line-through">{value}s</span>
+              <span className="sr-only">, the model makes</span> {effective}s
             </span>
           ) : (
             `${value}s`
@@ -566,6 +569,10 @@ export function PromptBar(props: PromptBarProps) {
     </>
   );
   const picks = directorPicks(settings, draft.mode);
+  // A cinematic still needs camera, lens and focal length: the folded chip warns as the Camera chip does.
+  const cameraNeeded = draft.mode === "image" && draft.imageTool === "still" && (!settings.camera || !settings.lens || !settings.focal);
+  // Starts with what the chip shows ("Director 2"), so the spoken name contains the visible one.
+  const directorName = `Director${picks ? `: ${picks} set` : "'s Panel"}${cameraNeeded ? ", camera needed" : ""}`;
 
   return (
     <div
@@ -689,9 +696,14 @@ export function PromptBar(props: PromptBarProps) {
               title="Director's Panel"
               description="Film setup, camera, palette, light and emotion: every shot follows them."
               trigger={
-                <button type="button" className={cn(chip, picks ? chipOn : chipIdle)} aria-label={picks ? `Director's Panel: ${picks} set` : "Director's Panel"}>
+                <button
+                  type="button"
+                  className={cn(chip, picks ? chipOn : chipIdle, cameraNeeded && "ring-1 ring-warning/60")}
+                  aria-label={directorName}
+                >
                   <Clapperboard className="size-3.5" /> Director
                   {picks > 0 && <span className="font-mono text-[11px] tabular-nums">{picks}</span>}
+                  {cameraNeeded && <span className="size-1.5 rounded-full bg-warning" aria-hidden />}
                 </button>
               }
             >

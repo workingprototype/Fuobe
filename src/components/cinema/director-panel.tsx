@@ -581,7 +581,7 @@ export function EmotionChip({ settings, onChange, characters }: { settings: Dire
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <DirectorChip icon={Smile} label={chipLabel} active={active.length > 0} aria-label={`${chipLabel}: emotion wheel`}>
+        <DirectorChip icon={Smile} label={chipLabel} active={active.length > 0} aria-label={first ? `Emotions: ${chipLabel}` : "Emotions"}>
           {first && <span className="size-2.5 shrink-0 rounded-full" style={{ background: first.color }} />}
         </DirectorChip>
       </PopoverTrigger>
