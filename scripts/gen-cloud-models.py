@@ -425,27 +425,27 @@ model("recraft-crisp", "Recraft Crisp Upscale", "Recraft", "recraft", "image", "
 # (the API's 16-60; Higgsfield's 120 is FPS Boost's) and the enhancement sliders. H.264 so it plays in every browser.
 model("topaz-video", "Topaz Video", "Topaz Labs", "topaz", "video", "Enhance and upscale low- to medium-quality footage, up to 4K and 60 fps",
       [("upscale-video", "topaz/upscale/video/precision")], badges=["4k"],
-      pricing=("second", 0.02, "1080p at 30 fps; 720p $0.01/s, above 1080p $0.06/s; 60 fps doubles", {"byResolution": {"1080p": 0.02, "1440p": 0.06, "4K": 0.06}}),
+      pricing=("second", 0.02, "1080p at 30 fps; 720p $0.01/s, above 1080p $0.06/s; 60 fps doubles", {"byResolution": {"1080p": 0.02, "1440p": 0.06, "4K": 0.06}, "factors": [{"param": "targetFps", "values": {"60": 2}}]}),
       defaults={"resolution": "1080p"}, upscale_tiers=["Original", "1080p", "1440p", "4K"], fps_targets=[24, 30, 60],
       api_defaults={"H264_output": True}, controls=[("model", "Model")],
       sliders=[("recover_detail", "Recover details"), ("noise", "Reduce noise"), ("compression", "Revert compression"), ("halo", "Reduce halo"), ("grain", "Grain")])
 # Topaz Starlight Precise: the generative models (Starlight Precise 2.6 by default; HQ, Mini, Sharp, Fast 2 at half the price).
 model("topaz-starlight", "Topaz Starlight", "Topaz Labs", "topaz", "video", "Recover natural detail in faces, textures and text: generative upscale to 1080p or 4K",
       [("upscale-video", "topaz/upscale/video/generative")], badges=["new", "4k"],
-      pricing=("second", 0.26, "4K at 30 fps; up to 1080p $0.12/s; 60 fps doubles; Starlight Fast 2 is half", {"byResolution": {"1080p": 0.12, "4K": 0.26}}),
+      pricing=("second", 0.26, "4K at 30 fps; up to 1080p $0.12/s; 60 fps doubles; Starlight Fast 2 is half", {"byResolution": {"1080p": 0.12, "4K": 0.26}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "model", "values": {"Starlight Fast 2": 0.5}}]}),
       defaults={"resolution": "4K"}, upscale_tiers=["1080p", "4K"], fps_targets=[24, 30, 60],
       api_defaults={"H264_output": True}, controls=[("model", "Model")], sliders=[("softness", "Softness")])
 # ByteDance Upscale: up to 8K with scene presets ("Common" is the API's general preset).
 model("bytedance-video-upscale", "ByteDance Upscale", "ByteDance", "bytedance-upscaler", "video", "High-fidelity upscaling up to 8K with scene presets",
       [("upscale-video", "fal-ai/bytedance-upscaler/upscale/video")], badges=["new"],
-      pricing=("second", 0.0072, "1080p at 30 fps; 2K $0.0144/s, 4K $0.0288/s (6K / 8K estimated from 4K by pixel count); 60 fps doubles; Pro is 10x", {"byResolution": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0648, "8k": 0.1152}}),
+      pricing=("second", 0.0072, "1080p at 30 fps; 2K $0.0144/s, 4K $0.0288/s (6K / 8K estimated from 4K by pixel count); 60 fps doubles; Pro is 10x", {"byResolution": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0648, "8k": 0.1152}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "enhancement_tier", "values": {"pro": 10}}]}),
       defaults={"resolution": "1080p", "targetFps": 30}, fps_targets=[30, 60],
       controls=[("enhancement_preset", "Preset", {"general": "Common", "ugc": "UGC (social clips)", "short_series": "Short series", "aigc": "AI-generated video", "old_film": "Old film"}),
                 ("enhancement_tier", "Model version"), ("fidelity", "Fidelity"), ("bit_depth", "Bit depth")])
 # FLUX.3 Upscale: Precise (source-faithful, Higgsfield's default) or Creative detail, guided by an optional prompt; 1.5-3x of the clip.
 model("flux-video-upscale", "FLUX.3 Upscale", "Black Forest Labs", "flux", "video", "Preserve the original or creatively enhance detail (MP4, up to 20 s)",
       [("upscale-video", "blackforestlabs/flux-video-upscale")], badges=["new"],
-      pricing=("second", 0.15, "2K, precise; 1080p $0.084/s, 4K $0.33/s; Creative about 1.4x", {"byResolution": {"1080p": 0.084, "1440p": 0.15, "4K": 0.33}}),
+      pricing=("second", 0.15, "2K, precise; 1080p $0.084/s, 4K $0.33/s; Creative about 1.4x", {"byResolution": {"1080p": 0.084, "1440p": 0.15, "4K": 0.33}, "factors": [{"param": "creativity", "values": {"1": 1.4}}]}),
       defaults={"resolution": "1440p"}, upscale_tiers=["1080p", "1440p", "4K"], options={"promptOptional": True},
       api_defaults={"creativity": 0}, controls=[("creativity", "Creativity", {0: "Precise", 1: "Creative"})])
 # SeedVR2: target_resolution only applies in "target" mode (the API's default mode is a 2x factor).
@@ -685,7 +685,7 @@ model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
 model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
       "Smooth frame interpolation to 16–120 fps, or up to 8× slow motion",
       [("interpolate", "topaz/interpolate/video")], badges=["new"],
-      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"),
+      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output", {"factors": [{"param": "model", "values": {"Aion": 1.67}}]}),
       # H.265 unless asked: H.264 plays in every browser.
       api_defaults={"H264_output": True}, controls=[("model", "Model")],
       # Higgsfield's FPS Boost chips (60 by default) and slow motion (the API takes 1-8).

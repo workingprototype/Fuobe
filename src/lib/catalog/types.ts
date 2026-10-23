@@ -507,6 +507,11 @@ export interface Pricing {
    * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
    */
   promo?: { until: string; usd: number; byResolution?: Record<string, number> };
+  /**
+   * Price multipliers by a setting's value (Topaz 60 fps 2x, ByteDance Pro 10x, FLUX.3 Creative about 1.4x):
+   * `param` is "targetFps" or a params.extra key (its control's default when unset); `values` maps a value to its factor.
+   */
+  factors?: { param: string; values: Record<string, number> }[];
 }
 
 export interface ModelDef {

@@ -6801,7 +6801,15 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1080p": 0.02,
         "1440p": 0.06,
         "4K": 0.06
-      }
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        }
+      ]
     }
   },
   {
@@ -6889,7 +6897,21 @@ export const CLOUD_MODELS: ModelDef[] = [
       "byResolution": {
         "1080p": 0.12,
         "4K": 0.26
-      }
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        },
+        {
+          "param": "model",
+          "values": {
+            "Starlight Fast 2": 0.5
+          }
+        }
+      ]
     }
   },
   {
@@ -7000,7 +7022,21 @@ export const CLOUD_MODELS: ModelDef[] = [
         "4k": 0.0288,
         "6k": 0.0648,
         "8k": 0.1152
-      }
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        },
+        {
+          "param": "enhancement_tier",
+          "values": {
+            "pro": 10
+          }
+        }
+      ]
     }
   },
   {
@@ -7067,7 +7103,15 @@ export const CLOUD_MODELS: ModelDef[] = [
         "1080p": 0.084,
         "1440p": 0.15,
         "4K": 0.33
-      }
+      },
+      "factors": [
+        {
+          "param": "creativity",
+          "values": {
+            "1": 1.4
+          }
+        }
+      ]
     }
   },
   {
@@ -12792,7 +12836,15 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "second",
       "usd": 0.03,
-      "note": "1080p 30\u219260 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"
+      "note": "1080p 30\u219260 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output",
+      "factors": [
+        {
+          "param": "model",
+          "values": {
+            "Aion": 1.67
+          }
+        }
+      ]
     }
   },
   {

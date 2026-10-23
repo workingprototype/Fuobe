@@ -423,6 +423,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   if (p.unit === "image") per = usd * n;
   if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
+  // Settings that change the price (60 fps, a Pro tier, a cheaper model).
+  for (const f of p.factors ?? []) {
+    const v = f.param === "targetFps" ? (params.targetFps ?? model.defaults?.targetFps) : (params.extra?.[f.param] ?? model.options.controls?.find((c) => c.param === f.param)?.default);
+    const k = v === undefined || v === null ? undefined : f.values[String(v)];
+    if (k !== undefined && k > 0) per *= k;
+  }
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
   return Math.round(per * jobs * 1000) / 1000;
 }
