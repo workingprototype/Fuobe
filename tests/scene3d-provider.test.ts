@@ -87,7 +87,7 @@ describe("open engine: MoGe 2 scene (scene-mesh-moge)", () => {
 });
 
 describe("open engine: the recomposition on Qwen-Image-Edit 2511 (qwen-image-edit-2511-multi)", () => {
-  it("binds the capture as image 1, the still as image 2, the Multiple-Angles LoRA and the camera words", async () => {
+  it("binds the capture as image 1, the still as image 2, the Multiple-Angles LoRA and its reference pose", async () => {
     const { planCinema } = await import("@/lib/catalog/cinema");
     const plan = planCinema(
       {
@@ -116,7 +116,8 @@ describe("open engine: the recomposition on Qwen-Image-Edit 2511 (qwen-image-edi
     expect(workflow["1201"].inputs.image).toBe("still.png");
     const lora = Object.values(workflow).find((n) => n.class_type === "LoraLoaderModelOnly");
     expect(lora?.inputs).toMatchObject({ lora_name: "qwen-image-edit-2511-multiple-angles-lora.safetensors", strength_model: 1 });
-    expect(String(workflow["170:151"].inputs.prompt)).toMatch(/^<sks> front-left quarter view eye-level shot medium shot\. Re-render this exact camera view/);
+    // The capture already shows the flown view (300° round): the LoRA is told not to turn it again.
+    expect(String(workflow["170:151"].inputs.prompt)).toMatch(/^<sks> front view eye-level shot medium shot\. Re-render this exact camera view/);
     expect(String(workflow["170:151"].inputs.prompt)).toContain("a 50 mm standard lens at f/2.8");
   });
 });

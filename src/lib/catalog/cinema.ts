@@ -1487,10 +1487,15 @@ function planScene(input: CinemaGenerateInput): CinemaPlan {
   );
 }
 
+/** The Multiple-Angles LoRA's reference pose: its input's own camera, so nothing turns. */
+const REFERENCE_POSE: ScenePose = { horizontal: 0, vertical: 0, zoom: 5 };
+
 /**
  * Re-render a captured view. Nano Banana Pro (cloud) and Qwen-Image-Edit 2511 with the Multiple-Angles LoRA
- * (open; its camera words lead the prompt) get the capture as image 1 and the still as image 2. Qwen Multiple
- * Angles on the cloud re-shoots the still itself from the flown camera's angles instead.
+ * (open) get the capture as image 1 and the still as image 2. The LoRA turns its input by the angles it is told,
+ * and the capture already shows the new view, so it is told the reference pose (front view, eye level, medium
+ * shot: keep this camera); the flown angles stay on the take. Qwen Multiple Angles on the cloud re-shoots the
+ * still itself from the flown camera's angles instead.
  */
 function planRecompose(input: CinemaGenerateInput): CinemaPlan {
   const notes: string[] = [];
@@ -1501,7 +1506,7 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
   const cap = input.capture;
   const lens = cap?.lens ?? LENS.default;
   const aperture = cap?.aperture ?? APERTURE.default;
-  const pose = cap?.pose ?? { horizontal: 0, vertical: 0, zoom: 5 };
+  const pose = cap?.pose ?? REFERENCE_POSE;
   const params = fitParams(model, { ...input, batch: 1, resolution: input.resolution ?? "1K" }, notes, "image");
   let request: GenerationRequest;
   if (model.id === "qwen-multiple-angles") {
@@ -1515,12 +1520,14 @@ function planRecompose(input: CinemaGenerateInput): CinemaPlan {
       feature: "cinema-recompose",
       modelId: model.id,
       op: "edit",
-      prompt: open ? `<sks> ${poseWords(pose)}. ${words}` : words,
+      prompt: open ? `<sks> ${poseWords(REFERENCE_POSE)}. ${words}` : words,
       inputs: src && cap ? { images: [cap.url, src] } : undefined,
       params,
       ...(loras?.length ? { loras } : {}),
     };
-    notes.push(`${model.name}${loras?.length ? " with the Multiple-Angles LoRA" : ""} re-renders your capture, with the still as the reference for every detail`);
+    notes.push(
+      `${model.name}${loras?.length ? " with the Multiple-Angles LoRA" : ""} re-renders your capture from its own camera, with the still as the reference for every detail`,
+    );
   }
   const blocker = !src ? "Pick the scene's still" : !cap ? "Capture a view first" : undefined;
   return finish(model, [{ key: "main", request }], notes, blocker);

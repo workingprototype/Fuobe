@@ -90,13 +90,15 @@ describe("planning a recomposition", () => {
     expect(plan.costUsd).toBe(0.035);
   });
 
-  it("open: Qwen-Image-Edit 2511 with the Multiple-Angles LoRA and its camera words first, free", () => {
+  it("open: Qwen-Image-Edit 2511 with the Multiple-Angles LoRA at its reference pose (the capture is the view), free", () => {
     const plan = planCinema(recompose("open", { modelId: "nano-banana-pro" }), ctx);
     expect(plan.model.id).toBe("oss-qwen-edit");
     const req = plan.steps[0].request;
     expect(req.inputs?.images).toEqual([CAPTURE, STILL]);
     expect(req.loras?.[0].file).toBe("qwen-image-edit-2511-multiple-angles-lora.safetensors");
-    expect(req.prompt).toMatch(/^<sks> front-right quarter view elevated shot medium shot\. Re-render this exact camera view/);
+    // The capture is already 45° round and 30° up: the LoRA keeps its camera instead of turning it again.
+    expect(req.prompt).toMatch(/^<sks> front view eye-level shot medium shot\. Re-render this exact camera view/);
+    expect(plan.notes.join(" ")).toMatch(/re-renders your capture from its own camera/);
     expect(plan.costUsd).toBe(0);
   });
 
