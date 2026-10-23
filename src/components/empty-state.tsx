@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, Compass, Home, RotateCcw, TriangleAlert } from "lucide-react";
 import { Suspense } from "react";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { PhoneBar } from "@/components/phone-bar";
 import { Button } from "@/components/ui/button";
 
 /** A calm full-page state (Liner style): serif headline, one muted line, one or two actions. */
@@ -21,9 +21,7 @@ export function PageState({
 }) {
   return (
     <div className="flex min-h-svh min-w-0 flex-col">
-      <div className="sticky top-0 z-20 flex h-12 items-center px-3 md:hidden">
-        <SidebarTrigger />
-      </div>
+      <PhoneBar className="bg-transparent backdrop-blur-none" />
       <div className="mx-auto flex w-full max-w-[520px] flex-1 flex-col items-center justify-center px-6 pb-[12vh] text-center">
         <span className="grid size-12 place-items-center rounded-2xl bg-brand-faint text-brand-text">
           <Icon className="size-5" />

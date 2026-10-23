@@ -2,6 +2,11 @@
 
 /** Group labels the user collapsed, in localStorage. */
 export const NAV_CLOSED_KEY = "fuobe:nav-closed";
+/**
+ * Folded until the user opens them (nothing remembered yet): the sidebar starts short, with Create
+ * and Library in view. ⌘K reaches everything in the folded groups too.
+ */
+export const DEFAULT_NAV_CLOSED: readonly string[] = ["studios", "engine"];
 /** Written by the shadcn SidebarProvider ("true" / "false"). */
 export const SIDEBAR_COOKIE = "sidebar_state";
 
@@ -31,13 +36,16 @@ export function navActive(href: string, pathname: string, search: URLSearchParam
   });
 }
 
-/** Read the collapsed groups (ids) from storage; tolerant of anything unexpected. */
+/**
+ * Read the collapsed groups (ids) from storage; tolerant of anything unexpected. Nothing stored (or
+ * nothing readable) means the defaults; a stored list, even an empty one, is the user's own choice.
+ */
 export function parseClosed(raw: string | null | undefined): string[] {
   try {
-    const v = JSON.parse(raw ?? "[]");
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    const v = raw == null ? null : JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [...DEFAULT_NAV_CLOSED];
   } catch {
-    return [];
+    return [...DEFAULT_NAV_CLOSED];
   }
 }
 
@@ -46,8 +54,21 @@ export function sidebarOpenFromCookie(cookie: string): boolean {
 }
 
 /**
- * Inline script that applies the remembered state to the server-rendered sidebar before the first
- * paint: the collapsed rail (cookie) and collapsed groups (localStorage). React's first client render
- * reads the same values, so hydration matches the patched DOM.
+ * Full-screen studios: a project open in Cinema, Canvas or Layers, and Assist (with its own rail of
+ * chats). They have a sidebar of their own, so the app sidebar folds to its icon rail while one is
+ * open, without touching the remembered choice, and comes back on the way out.
  */
-export const SIDEBAR_STATE_SCRIPT = `(function(){try{var d=document;if(/(?:^|;\\s*)${SIDEBAR_COOKIE}=false(?:;|$)/.test(d.cookie)){var s=d.querySelector('[data-slot="sidebar"]');if(s){s.setAttribute("data-state","collapsed");s.setAttribute("data-collapsible","icon")}}var c=JSON.parse(localStorage.getItem("${NAV_CLOSED_KEY}")||"[]");if(Array.isArray(c))c.forEach(function(g){var e=d.querySelector('[data-nav-group="'+String(g).replace(/[^a-z0-9-]/g,"")+'"]');if(e){e.setAttribute("data-open","false");var b=e.querySelector("[data-nav-toggle]");if(b)b.setAttribute("aria-expanded","false")}})}catch(e){}})()`;
+const FULL_SCREEN = /^\/(?:(?:cinema|canvas|layers)\/[^/]+\/?|assist(?:\/.*)?)$/;
+
+export function isFullScreenStudio(pathname: string): boolean {
+  return FULL_SCREEN.test(pathname);
+}
+
+/**
+ * Inline script that applies the remembered state to the server-rendered sidebar before the first
+ * paint: the collapsed rail (the cookie, or a full-screen studio) and the folded groups
+ * (localStorage). The server renders the default folds (DEFAULT_NAV_CLOSED); a remembered list
+ * opens or folds every foldable group to match. React's first client render reads the same values,
+ * so hydration matches the patched DOM.
+ */
+export const SIDEBAR_STATE_SCRIPT = `(function(){try{var d=document;if(/(?:^|;\\s*)${SIDEBAR_COOKIE}=false(?:;|$)/.test(d.cookie)||${FULL_SCREEN}.test(location.pathname)){var s=d.querySelector('[data-slot="sidebar"]');if(s){s.setAttribute("data-state","collapsed");s.setAttribute("data-collapsible","icon")}}var r=localStorage.getItem("${NAV_CLOSED_KEY}");if(r===null)return;var c=JSON.parse(r);if(!Array.isArray(c))return;d.querySelectorAll("[data-nav-group]").forEach(function(e){var b=e.querySelector("[data-nav-toggle]");if(!b)return;var o=c.indexOf(e.getAttribute("data-nav-group"))<0?"true":"false";e.setAttribute("data-open",o);b.setAttribute("aria-expanded",o)})}catch(e){}})()`;
