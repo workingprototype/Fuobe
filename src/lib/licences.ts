@@ -180,7 +180,13 @@ const KIND_LABEL: Record<string, string> = { image: "Image", video: "Video", aud
 
 /** A model's media kind, or a library workflow's capability, in words. */
 export function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind.replace(/-/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  return (
+    KIND_LABEL[kind] ??
+    kind
+      .replace(/-/g, " ")
+      .replace(/\b(vfx|ocr|tts|sfx|v2a|v2v|t2v|i2v|t2i|flf2v|3d)\b/g, (a) => a.toUpperCase())
+      .replace(/^\w/, (c) => c.toUpperCase())
+  );
 }
 
 export const FLAG_LABEL: Record<LicenceFlag, string> = {

@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { MODELS } from "@/lib/catalog";
 import type { Manifest } from "@/lib/comfy";
-import { buildLicenceList, licenceTerms, UNKNOWN_LICENCE, workflowLicence } from "@/lib/licences";
+import { buildLicenceList, kindLabel, licenceTerms, UNKNOWN_LICENCE, workflowLicence } from "@/lib/licences";
 
 /** The About & licences page (R4-53): every open model's licence, its catches and notices. */
 
@@ -68,6 +68,10 @@ describe("licences", () => {
     expect(list.rows.slice(firstLibrary).every((r) => !r.inCatalog)).toBe(true);
     expect(list.counts.all).toBe(list.rows.length);
     expect(list.counts.clear + list.counts["non-commercial"] + list.counts.territory + list.counts.conditions).toBeGreaterThanOrEqual(list.rows.length);
+  });
+
+  it("names kinds and capabilities in words", () => {
+    expect([kindLabel("model3d"), kindLabel("scene-3d"), kindLabel("ocr"), kindLabel("remove-object")]).toEqual(["3D", "Scene 3D", "OCR", "Remove object"]);
   });
 
   it("collects notices with the models that need them", () => {
