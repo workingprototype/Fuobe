@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
+import { getModel } from "@/lib/catalog";
 import { AUDIO_STUDIO, EDIT_STUDIO, IMAGE_STUDIO, MUSIC_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import {
   ASSIST_EFFORTS,
@@ -654,7 +655,29 @@ export const offline: ModelCall = async ({ messages, ctx, skills }) => {
     const body = results.map((r) => (typeof r.content === "string" ? r.content : "")).join(" ");
     if (results.some((r) => r.is_error)) return reply([text(/declined/i.test(body) ? "Okay, I won't run that. Tell me what to change." : `That didn't start: ${body.replace(/^.*"error":"([^"]+)".*$/, "$1")}`)], "end_turn");
     if (/"saved":/.test(body)) return reply([text("Saved to memory — every chat will follow it from now on.")], "end_turn");
+    // A pick-the-best plan started its stills: say again how to choose the one that moves.
+    const planned = messages.findLast((m) => m.role === "assistant" && typeof m.content !== "string" && m.content.some((b) => b.type === "tool_use"));
+    const use = planned && typeof planned.content !== "string" ? planned.content.find((b) => b.type === "tool_use") : undefined;
+    if (String((use?.input as { summary?: unknown } | undefined)?.summary ?? "").startsWith(PICK_SUMMARY)) {
+      return reply([text(`On it. When the stills are in, ${PICK_ASK}: reply "animate 2" (they're numbered in order), or open one and press Animate.`)], "end_turn");
+    }
     return reply([text(`On it — the results will appear here as they finish. ${FOLLOW_UP[startedKind(body)]}`)], "end_turn");
+  }
+  // "animate 2" after a set of stills (or a bare "2" when asked which one): animate that take.
+  const picked = pickedTake(said);
+  if (picked && (picked.animate || askedToPick(messages))) {
+    const { stills, waiting } = latestStills(messages);
+    const chosen = picked.take === -1 ? stills.at(-1) : stills[picked.take - 1];
+    if (chosen) {
+      const plan = animateTake(chosen, picked.take === -1 ? stills.length : picked.take, ctx.engine, said);
+      return reply(
+        [text(plan.say), { type: "tool_use", id: `toolu_offline_${nanoid(10)}`, name: plan.tool, input: plan.input, caller: { type: "direct" } } as unknown as Anthropic.Beta.BetaToolUseBlock],
+        "tool_use",
+      );
+    }
+    if (waiting) return reply([text("They're still rendering — tell me which one to animate once they're in.")], "end_turn");
+    if (stills.length) return reply([text(`Pick a number from 1 to ${stills.length}.`)], "end_turn");
+    // No stills in this chat: read it as a new request.
   }
   const hint = skills?.find((s) => s.offline)?.offline;
   const plan = offlinePlan(said, ctx.engine, hint);
@@ -678,10 +701,12 @@ const FOLLOW_UP: Record<MediaKind, string> = {
   model3d: "Want another take, or a model from a different photo?",
 };
 
+/** The generation ids a tool result started, in order. */
+const startedIds = (body: string) => [...body.matchAll(/"(?:started|id)":\s*\[?\s*"([\w-]+)"/g)].map((m) => m[1]);
+
 /** The kind of the last generation a tool result started (the end of a chain), image when unknown. */
 function startedKind(body: string): MediaKind {
-  const ids = [...body.matchAll(/"(?:started|id)":\s*\[?\s*"([\w-]+)"/g)].map((m) => m[1]);
-  for (const id of ids.reverse()) {
+  for (const id of startedIds(body).reverse()) {
     const g = getGeneration(id);
     if (g) return g.kind;
   }
@@ -690,13 +715,66 @@ function startedKind(body: string): MediaKind {
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
 const NUM = "(\\d|one|two|three|four|five|six|seven|eight)";
-const num = (s: string) => NUMBER_WORDS[s] ?? Number(s);
+const num = (s: string) => NUMBER_WORDS[s.toLowerCase()] ?? Number(s);
+
+/** Nouns a count can come before ("4 portraits", "three vertical videos", "a 6-frame heist"). */
+const COUNTED = "images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?";
+const COUNT = new RegExp(`\\b${NUM}(?:-|\\s+(?:([\\w-]+)\\s+)?)(${COUNTED})\\b`, "i");
+/** What a still can be called, singular or plural, before "then animate it". */
+const STILL = /\b(stills?|photos?|pictures?|images?|portraits?|headshots?|posters?|frames?|shots?|renders?|key ?visuals?)\b/i;
+/** "… then pick the best and animate it": the person chooses which take moves. */
+const PICK_WORDS = /\b(best|favou?rite|pick|choose|select|strongest|one of them)\b/;
+
+const singular = (noun: string) => noun.replace(/([^s])s$/i, "$1");
 
 /**
- * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats,
- * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs),
- * storyboards, music and voice-overs, translations and scripts, and "remember that …".
- * A loaded skill's offline hints (its kind, format, count and style) fill in what the words leave open.
+ * One take's prompt: "Make 4 moody portraits of a keeper" → "Moody portrait of a keeper". The count
+ * goes to `outputs`; left in the prompt, each image could come back as a grid of four.
+ */
+function oneTake(text: string): string {
+  const s = text
+    .replace(/^\s*(?:please\s+)?(?:make|create|generate|give me|draw|shoot|render|design)(?:\s+me)?\s+/i, "")
+    .replace(COUNT, (_m, _n, adj: string | undefined, noun: string) => `${adj ? `${adj} ` : ""}${singular(noun)}`)
+    .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[\s,;:—–-]+$/, "")
+    .trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "a 10-second video", "into a 5 s clip": the length asked for, in seconds. */
+function secondsAsked(t: string): number | undefined {
+  const m = /\b(\d{1,3})\s*-?\s*(?:s|secs?|seconds?)\b/.exec(t);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** The model's own length closest to the one asked for (a model that lists none takes it as it is). */
+function fitDuration(modelId: string, seconds: number | undefined): number | undefined {
+  if (!seconds) return undefined;
+  const listed = getModel(modelId)?.options.durations;
+  if (!listed?.length) return seconds;
+  return listed.reduce((best, d) => (Math.abs(d - seconds) < Math.abs(best - seconds) ? d : best), listed[0]);
+}
+
+/** Whether a model can make its own soundtrack ("with sound"). */
+const makesSound = (modelId: string) => !!getModel(modelId)?.routes.some((r) => r.map?.generateAudio);
+
+/** How every pick-the-best plan's card title starts (the follow-up reply reads it back). */
+const PICK_SUMMARY = "Pick the best";
+/** The question a pick-the-best plan asks; a bare "2" answers it. */
+const PICK_ASK = "tell me which one to animate";
+
+const engineFor = (preferred: Engine): Engine => {
+  const mode = engineMode();
+  return mode === "both" ? preferred : mode;
+};
+
+/**
+ * Read a request into one tool call: counts ("3 vertical videos", "4 portraits"), formats, lengths,
+ * attachments, multi-shot ("a 3-shot ad"), a still that is then animated (two chained jobs), several
+ * stills to pick the best from before animating, storyboards, music and voice-overs, translations and
+ * scripts, and "remember that …". A loaded skill's offline hints (its kind, format, count and style)
+ * fill in what the words leave open.
  */
 export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta["offline"]): { tool: string; input: Record<string, unknown>; say: string } | null {
   const [body, attached = ""] = message.split(/\n\nAttached files[^\n]*\n/);
@@ -705,8 +783,7 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
   const files = [...attached.matchAll(/^- (image|video|audio|text|model3d) \d+: (\S+)$/gm)].map((m) => ({ kind: m[1], url: m[2] }));
   const images = files.filter((f) => f.kind === "image").map((f) => f.url);
   const t = text.toLowerCase();
-  const mode = engineMode();
-  const engine: Engine = mode === "both" ? preferred : mode;
+  const engine = engineFor(preferred);
 
   // "Remember that I always want 9:16" → a memory (approved like a plan in ask-first mode).
   const memory = /^(?:please\s+)?(?:remember|note|keep in mind)(?:\s+that)?[:,]?\s+(.{4,})$/is.exec(text);
@@ -716,47 +793,64 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
     return { tool: "remember", input: { text: sentence, category: guessCategory(what) }, say: "I'll remember that for every chat." };
   }
 
-  const count = (() => {
-    const m = new RegExp(
-      `\\b${NUM}\\s+(?:[\\w-]+\\s+)?(images?|pictures?|photos?|portraits?|headshots?|avatars?|stills?|posters?|thumbnails?|logos?|icons?|looks?|renders?|versions?|takes?|variations?|options?|videos?|clips?|frames?|panels?|scenes?)\\b`,
-    ).exec(t);
-    return m ? num(m[1]) : hint?.outputs;
-  })();
+  const counted = COUNT.exec(t);
+  const count = counted ? num(counted[1]) : hint?.outputs;
   // "a 3-shot ad", "in 4 shots": one clip cut into shots, not several clips.
   const shots = (() => {
     const m = new RegExp(`\\b${NUM}[- ]shots?\\b`).exec(t) ?? new RegExp(`\\bin\\s+${NUM}\\s+shots\\b`).exec(t);
     return m ? Math.max(2, Math.min(6, num(m[1]))) : undefined;
   })();
   const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : hint?.aspect;
+  const seconds = secondsAsked(t);
+  const withSound = /\b(with|plus|and) (sound|audio|sfx|sound effects)\b/.test(t);
   const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
   const textModel = engine === "open" ? "oss-text-llm" : "text-llm";
   const styled = (p: string) => (hint?.style ? `${p}. ${hint.style}` : p);
+  // The video settings a clip takes from the words: its length (one the model lists) and its own sound.
+  const clipParams = (modelId: string) => {
+    const duration = shots ? undefined : fitDuration(modelId, seconds);
+    return { ...(duration && { duration }), ...(withSound && makesSound(modelId) && { generate_audio: true }) };
+  };
 
   // "… hero still, then animate it": the image first, then a video made from it (one plan, two chained jobs).
   const thenAnimate = /\bthen\b[^.?!]*\b(animate|animated|animation|bring (it|them) to life|make (it|them) move|turn (it|them) into an? (video|clip))\b/.test(t);
-  const [beforeThen] = text.split(/[,;]?\s*\bthen\b/i);
-  if (thenAnimate && /\b(still|photo|picture|image|portrait|poster|frame|shot|render|key ?visual)\b/i.test(beforeThen)) {
-    const subject = beforeThen
-      .replace(new RegExp(`\\b${NUM}[- ]shots?\\s*`, "i"), "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/[\s,;:—–-]+$/, "")
-      .trim();
-    const still = { model_id: pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels), prompt: styled(subject), ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
-    const clip = {
-      model_id: pick(VIDEO_STUDIO.defaultModels),
-      prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`,
-      after: 0,
-      ...(shots && { shots }),
-      ...(aspect && { aspect_ratio: aspect }),
-    };
+  const [beforeThen, ...rest] = text.split(/[,;]?\s*\bthen\b/i);
+  const afterThen = rest.join(" then ").toLowerCase();
+  if (thenAnimate && STILL.test(beforeThen)) {
+    const subject = oneTake(beforeThen);
+    const stills = COUNT.exec(beforeThen);
+    const n = Math.max(1, Math.min(4, stills ? num(stills[1]) : 1));
+    const stillModel = pick(images.length ? EDIT_STUDIO.defaultModels : IMAGE_STUDIO.defaultModels);
+    const clipModel = pick(VIDEO_STUDIO.defaultModels);
+    const still = { model_id: stillModel, prompt: styled(subject), ...(images.length && { images: images.slice(0, 4) }), ...(aspect && { aspect_ratio: aspect }) };
+    const motion = `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`;
+    const clip = (after: number) => ({ model_id: clipModel, prompt: motion, after, ...(shots && { shots }), ...(aspect && { aspect_ratio: aspect }), ...clipParams(clipModel) });
+    // Several stills: the person picks the one to animate ("animate 2"), unless they asked to animate them all.
+    const all = /\b(them all|all of them|each|every one|both)\b/.test(afterThen) || (/\bthem\b/.test(afterThen) && !PICK_WORDS.test(afterThen));
+    if (n > 1 && all) {
+      const pairs = Math.min(3, n);
+      return {
+        tool: "generate",
+        input: { summary: `${pairs} stills, each animated: ${subject.slice(0, 60)}`, jobs: Array.from({ length: pairs }, (_, i) => [still, clip(i * 2)]).flat() },
+        say: `I'll make ${pairs} stills and animate each one — every video starts by itself as soon as its still is ready.`,
+      };
+    }
+    if (n > 1 || PICK_WORDS.test(afterThen)) {
+      const takes = Math.max(2, n);
+      return {
+        tool: "generate",
+        input: { summary: `${PICK_SUMMARY} of ${takes} stills, then animate it: ${subject.slice(0, 60)}`, jobs: [{ ...still, outputs: takes }] },
+        say: `I'll make ${takes} stills first. Once they're in, ${PICK_ASK} — reply "animate 2" (they're numbered in order), or open one and press Animate.`,
+      };
+    }
     return {
       tool: "generate",
-      input: { summary: `Still, then animated: ${subject.slice(0, 70)}`, jobs: [still, clip] },
+      input: { summary: `Still, then animated: ${subject.slice(0, 70)}`, jobs: [still, clip(0)] },
       say: `I'll make the still first, then animate it${shots ? ` as a ${shots}-shot clip` : ""} — the video starts by itself as soon as the still is ready.`,
     };
   }
 
-  if (/\b(storyboard|comic|panels|shot list)\b/.test(t) || (count && /\b(frames|scenes|panels)\b/.test(t))) {
+  if (/\b(storyboard|comic|panels|shot list)\b/.test(t) || (count && /\b(frames|scenes|panels)\b/.test(t)) || (counted && /^(frame|scene|panel)s?$/i.test(counted[3]))) {
     const frames = Math.max(1, Math.min(8, count ?? 4));
     return {
       tool: "create_storyboard",
@@ -802,20 +896,94 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
   const studio = isVideo ? VIDEO_STUDIO : images.length ? EDIT_STUDIO : IMAGE_STUDIO;
   const n = Math.max(1, Math.min(4, count ?? (isVideo ? 1 : 2)));
   const multi = isVideo && shots ? shots : undefined;
+  const modelId = pick(studio.defaultModels);
   const job = {
-    model_id: pick(studio.defaultModels),
-    prompt: styled(text),
+    model_id: modelId,
+    prompt: styled(counted ? oneTake(text) : text),
     ...(images.length && { images: images.slice(0, isVideo ? 1 : 4) }),
     ...(aspect && { aspect_ratio: aspect }),
     ...(n > 1 && { outputs: n }),
     ...(multi && { shots: multi }),
+    ...(isVideo && clipParams(modelId)),
   };
   const what = isVideo
-    ? `${images.length ? "animate your image" : "make the video"}${multi ? ` as ${multi} shots` : ""}`
+    ? `${images.length ? "animate your image" : `make ${n > 1 ? `${n} videos` : "the video"}`}${multi ? ` as ${multi} shots` : ""}`
     : images.length
       ? "edit your image"
       : `make ${n} take${n === 1 ? "" : "s"}`;
   return { tool: "generate", input: { summary: `${isVideo ? "Video" : images.length ? "Edit" : "Image"}: ${text.slice(0, 80)}`, jobs: [job] }, say: `I'll ${what} with the default ${isVideo ? "video" : "image"} model.` };
+}
+
+// ---------------------------------------------------------------------------
+// Picking a take to animate ("animate 2")
+
+const ORDINALS: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, last: -1 };
+const ORDINAL = /(?:#|\b)(\d)(?:st|nd|rd|th)?\b|\b(first|second|third|fourth|fifth|sixth|seventh|eighth|last)\b/;
+
+/**
+ * Which take a short reply names: "animate 2", "the second one", "#3", "go with the last one".
+ * 1-based; -1 is the last. `animate` says the reply asked for motion itself; a bare "2" only
+ * answers a pick-the-best plan's question. Null for anything else, a new request included.
+ */
+export function pickedTake(message: string): { take: number; animate: boolean } | null {
+  const t = message.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (!t || t.length > 60 || COUNT.test(t)) return null;
+  const m = ORDINAL.exec(t);
+  if (!m) return null;
+  const take = m[1] ? Number(m[1]) : ORDINALS[m[2]];
+  if (!take) return null;
+  const animate = /\b(animate|bring (it|that one|this one) to life|make (it|that one|this one) move)\b/.test(t);
+  const bare = new RegExp(
+    `^(?:(?:let'?s|i'?ll|i'?d)\\s+)?(?:(?:go with|use|pick|choose|take|like|want|prefer|animate)\\s+)?(?:the\\s+)?(?:number\\s+|no\\.?\\s*|take\\s+|image\\s+|still\\s+)?(?:${ORDINAL.source})(?:\\s+(?:one|image|still|take|pic(?:ture)?|photo))?(?:,?\\s+please)?$`,
+  ).test(t);
+  return animate || bare ? { take, animate } : null;
+}
+
+type MessageList = MessageParam[];
+
+/** The words of a message (its text blocks). */
+const wordsOf = (c: MessageParam["content"]) => (typeof c === "string" ? c : c.map((b) => (b.type === "text" ? b.text : "")).join("\n"));
+
+/** Did the assistant's last words ask which take to animate? */
+function askedToPick(messages: MessageList): boolean {
+  const last = messages.findLast((m) => m.role === "assistant" && wordsOf(m.content).trim());
+  return !!last && wordsOf(last.content).includes(PICK_ASK);
+}
+
+/**
+ * The stills of the latest tool result that made images, numbered as the chat shows them (each
+ * generation's outputs in order). `waiting`: some are still rendering.
+ */
+function latestStills(messages: MessageList): { stills: { url: string; g: Generation }[]; waiting: boolean } {
+  for (const m of [...messages].reverse()) {
+    if (m.role !== "user" || typeof m.content === "string") continue;
+    for (const b of [...m.content].reverse()) {
+      if (b.type !== "tool_result" || typeof b.content !== "string") continue;
+      const gens = startedIds(b.content)
+        .map((id) => getGeneration(id))
+        .filter((g): g is Generation => !!g && g.kind === "image");
+      if (!gens.length) continue;
+      const stills = gens.flatMap((g) => (g.status === "succeeded" ? g.outputs.filter((o) => o.kind === "image").map((o) => ({ url: o.url, g })) : []));
+      return { stills, waiting: gens.some((g) => g.status === "queued" || g.status === "running") };
+    }
+  }
+  return { stills: [], waiting: false };
+}
+
+/** Animate one picked still with the default video model. */
+function animateTake(still: { url: string; g: Generation }, take: number, preferred: Engine, said: string): { tool: string; input: Record<string, unknown>; say: string } {
+  const engine = engineFor(preferred);
+  const modelId = engine === "open" ? VIDEO_STUDIO.defaultModels.open : VIDEO_STUDIO.defaultModels.cloud;
+  const subject = (still.g.request.prompt ?? "").trim().replace(/[.\s]+$/, "") || "The picture";
+  const duration = fitDuration(modelId, secondsAsked(said.toLowerCase()));
+  return {
+    tool: "generate",
+    input: {
+      summary: `Animate take ${take}: ${subject.slice(0, 70)}`,
+      jobs: [{ model_id: modelId, prompt: `${subject}. The still comes to life: smooth, cinematic camera motion, natural movement.`, images: [still.url], ...(duration && { duration }) }],
+    },
+    say: `I'll animate take ${take} with the default video model.`,
+  };
 }
 
 // ---------------------------------------------------------------------------
