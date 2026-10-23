@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Clapperboard, Cpu, Film, KeyRound, LayoutGrid, Loader2, Plus, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createContext, lazy, Suspense, useCallback, useContext, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { NAV } from "@/components/nav-items";
 import { MediaThumb } from "@/components/studio/result-media";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
@@ -119,7 +119,8 @@ function Hints() {
 /** What the palette lists and searches; mounted only while it's open. */
 function PaletteBody({ onPick, onOpenRecent }: { onPick: (e: PaletteEntry) => void; onOpenRecent: (g: Generation) => void }) {
   const [q, setQ] = useState("");
-  const query = useDeferredValue(q);
+  // Not deferred: ranking ~900 entries takes a millisecond, and Enter must act on the list for what was typed.
+  const query = q;
   const dq = useDebounced(q.trim(), 200);
   const mode = useEngineMode();
   // The apps, motions, effects and models load on first open (and stay for the session).

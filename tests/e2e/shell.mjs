@@ -67,6 +67,8 @@ try {
     const dialog = page.getByRole("dialog", { name: "Search Fuobe" });
     await dialog.waitFor();
     await page.keyboard.type("cinma");
+    // The start list (which also lists Cinema Studio) gives way to the matches.
+    await dialog.getByRole("option", { name: /^New creation/ }).waitFor({ state: "detached" });
     await dialog.getByRole("option", { name: /^Cinema Studio/ }).first().waitFor();
     await page.keyboard.press("Enter");
     await page.waitForURL((u) => new URL(u).pathname === "/cinema", { timeout: 20_000 });
