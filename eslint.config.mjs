@@ -15,6 +15,10 @@ const eslintConfig = defineConfig([
     // Agent worktrees and local data live inside the checkout but aren't part of it.
     ".claude/**",
     "data/**",
+    // The evaluation harness's metrics venv, run results and your own inputs (all git-ignored).
+    "scripts/eval/metrics/.venv/**",
+    "scripts/eval/results/**",
+    "scripts/eval/local/**",
   ]),
 ]);
 

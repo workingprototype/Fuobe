@@ -125,5 +125,8 @@ export function fillTemplate(value, vars) {
   return value;
 }
 
-/** A requestId for a studio route (8–64 characters): the same job id gets the same one, so a resumed run doesn't start a pipeline twice. */
-export const requestIdFor = (runId, jobId) => `eval-${crypto.createHash("sha256").update(`${runId}/${jobId}`).digest("hex").slice(0, 24)}`;
+/**
+ * A requestId for a studio route (8–64 characters). The same job and attempt get the same one, so a run
+ * interrupted mid-submit doesn't start a pipeline twice; a retry of a failed job is a new attempt.
+ */
+export const requestIdFor = (runId, jobId, attempt = 1) => `eval-${crypto.createHash("sha256").update(`${runId}/${jobId}/${attempt}`).digest("hex").slice(0, 24)}`;

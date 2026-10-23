@@ -1,0 +1,354 @@
+#!/usr/bin/env node
+// The evaluation harness's command line: pnpm eval:<command> (or fuobe eval <command>). See
+// scripts/eval/README.md. Every command takes --json for scripts, and --url / --token for the
+// Fuobe to measure (else FUOBE_URL / FUOBE_TOKEN, else what `fuobe login` saved).
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { parseArgs } from "node:util";
+import { loadSuite, suiteFiles, validateAll } from "./lib/cases.mjs";
+import { compareRuns, compareText, promote, promoteText } from "./lib/compare.mjs";
+import { scoreRun } from "./lib/metrics.mjs";
+import { METRICS_DIR, REPO_DIR, resultsDir } from "./lib/paths.mjs";
+import { writeReport } from "./lib/report.mjs";
+import { serveReview, writeReview } from "./lib/review.mjs";
+import { DEFAULT_CLOUD_CAP, money, runEval } from "./lib/run.mjs";
+import { connect } from "./lib/server.mjs";
+import { listRuns, readJsonl, resolveRun } from "./lib/store.mjs";
+
+const list = (v) => (v ? String(v).split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+const num = (v, name) => {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Usage(`--${name} takes a number, not “${v}”`);
+  return n;
+};
+
+class Usage extends Error {}
+
+const COMMON = { url: { type: "string" }, token: { type: "string" }, out: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } };
+const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "identity-model": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
+
+const HELP = {
+  run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
+
+  --suite <name|file>    soul, soul-id, dop, genjutsu, mixed-media, shorts, speak, cinema, selftest (or a path)
+  --engine <e>           demo (free self-test), open (your ComfyUI) or cloud (hosted open models)
+  --looks <a,b>          Soul looks by slug, name or id (v1-general, "Flash editorial")
+  --cases <ids>          case ids or prefixes with * (dop/motion-*)
+  --tags <t>             cases with any of these tags (v1, civitai, train-own…)
+  --variants <a,b>       recipe variants to run (default: the suite's default); all = every variant
+  --model <id>           one model id for every job instead of the suite's targets
+  --limit <n>            at most n cases · --prompts <n> at most n prompts per case · --seeds 1,2
+  --dry-run              list the jobs and the estimated spend; uploads and starts nothing
+  --max-usd <n>          the cloud spend cap (default $${DEFAULT_CLOUD_CAP}); the run stops before going over
+  --concurrency <n>      jobs at a time (open 1, others 4)
+  --resume <runId>       run the failed and missing jobs of an earlier run again
+  --allow-fixtures       use the synthetic fixtures where your own inputs are missing
+  --comfy-url <url>      ComfyUI's address, for memory and its own timings (open engine; default COMFYUI_URL)
+  --label <text>         a note for this run
+  --no-metrics           don't score afterwards · --no-report: don't write the report either`,
+  report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--force]",
+  review: "pnpm eval:review <runId|latest> [--against variants|references|<otherRunId>] [--port 4173] [--no-serve] [--limit n]",
+  compare: "pnpm eval:compare <runA[:variant]> <runB[:variant]> [--fail-on clip,aesthetic] [--threshold 1|5%] [--per-case]",
+  promote: "pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain]",
+  history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
+  validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
+  setup: "pnpm eval:setup [--identity] [--download] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
+};
+
+function usage() {
+  return [
+    "Fuobe evaluation harness. Commands:",
+    ...Object.values(HELP).map((h) => `  ${h.split("\n")[0]}`),
+    "",
+    "Results go to scripts/eval/results/<runId>/ (git-ignored; --out or FUOBE_EVAL_RESULTS to move them).",
+    "More: scripts/eval/README.md",
+  ].join("\n");
+}
+
+/**
+ * @param {string[]} argv the arguments after the command name's position (command first)
+ * @param {{ stdout?: NodeJS.WritableStream, stderr?: NodeJS.WritableStream, env?: Record<string, string | undefined>, fetch?: typeof fetch, signal?: AbortSignal }} [io]
+ * @returns {Promise<number>} the exit code
+ */
+export async function main(argv, io = {}) {
+  const out = io.stdout ?? process.stdout;
+  const err = io.stderr ?? process.stderr;
+  const env = io.env ?? process.env;
+  const print = (s) => out.write(`${s}\n`);
+  const note = (s) => err.write(`${s}\n`);
+  const [command, ...rest] = argv;
+  if (!command || command === "help" || command === "--help" || command === "-h") {
+    print(rest[0] && HELP[rest[0]] ? HELP[rest[0]] : usage());
+    return 0;
+  }
+  const commands = { run, report, review, compare, promote: promoteCmd, history, validate, setup };
+  if (!commands[command]) {
+    note(`Unknown command “${command}”.\n${usage()}`);
+    return 2;
+  }
+  try {
+    return (await commands[command](rest, { print, note, env, io })) ?? 0;
+  } catch (e) {
+    if (e instanceof Usage) {
+      note(`${e.message}\n\n${HELP[command] ?? usage()}`);
+      return 2;
+    }
+    if (env.FUOBE_DEBUG) note(e.stack);
+    note(e.message);
+    return 1;
+  }
+}
+
+function parse(args, options, { positionals = false } = {}) {
+  try {
+    return parseArgs({ args, options: { ...COMMON, ...options }, allowPositionals: positionals, strict: true });
+  } catch (e) {
+    throw new Usage(e.message.replace(/^TypeError \[[A-Z_]+\]: /, ""));
+  }
+}
+
+const root = (values, env) => resultsDir(env, values.out);
+
+async function score(dir, v, ctx) {
+  if (v["no-metrics"]) return null;
+  ctx.note("Scoring the outputs…");
+  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], identityModel: v["identity-model"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
+  if (!r.ok) ctx.note(`Not scored: ${r.reason}. Timing and cost are in the report; pnpm eval:report ${path.basename(dir)} scores it later.`);
+  return r;
+}
+
+function reportAll(dir, rootDir, ctx) {
+  const summary = writeReport(dir, rootDir);
+  const loaded = { dir, runId: summary.runId, rows: readJsonl(path.join(dir, "jobs.jsonl")) };
+  // The latest row per job (a resumed run appends retries).
+  loaded.rows = [...new Map(loaded.rows.map((r) => [r.id, r])).values()];
+  const rv = writeReview(loaded);
+  ctx.note(`Report: ${path.join(dir, "report.html")}`);
+  ctx.note(`Review: ${rv.pairs} blind pair${rv.pairs === 1 ? "" : "s"} · pnpm eval:review ${summary.runId}`);
+  return summary;
+}
+
+function printSummary(summary, ctx) {
+  const free = summary.engine !== "cloud";
+  ctx.print(`${summary.title} · ${summary.engine} · ${summary.counts.succeeded}/${summary.counts.jobs} done${summary.counts.failed ? ` · ${summary.counts.failed} failed` : ""}${summary.counts.skipped ? ` · ${summary.counts.skipped} skipped` : ""} · ${free ? "Free" : money(summary.costUsd.spent)}`);
+  for (const [v, s] of Object.entries(summary.variants)) {
+    const means = Object.entries(s.mean)
+      .map(([k, x]) => `${k} ${k === "costUsd" ? money(x) : Number(x).toFixed(k === "clip" || k === "seconds" ? 1 : 3)}`)
+      .join(" · ");
+    ctx.print(`  ${v}: ${s.succeeded}/${s.jobs}${means ? ` · ${means}` : ""}`);
+  }
+  for (const s of summary.skips.slice(0, 5)) ctx.print(`  skipped ${s.count}: ${s.reason}`);
+  for (const f of summary.failures.slice(0, 5)) ctx.print(`  failed ${f.id}: ${f.error}`);
+}
+
+async function run(args, ctx) {
+  const { values: v } = parse(args, {
+    suite: { type: "string" },
+    engine: { type: "string" },
+    looks: { type: "string" },
+    cases: { type: "string" },
+    tags: { type: "string" },
+    variants: { type: "string" },
+    model: { type: "string" },
+    limit: { type: "string" },
+    prompts: { type: "string" },
+    seeds: { type: "string" },
+    "dry-run": { type: "boolean" },
+    list: { type: "boolean" },
+    "max-usd": { type: "string" },
+    concurrency: { type: "string" },
+    resume: { type: "string" },
+    "allow-fixtures": { type: "boolean" },
+    "comfy-url": { type: "string" },
+    label: { type: "string" },
+    "no-report": { type: "boolean" },
+    ...SCORE,
+  });
+  if (v.help) return ctx.print(HELP.run), 0;
+  const rootDir = root(v, ctx.env);
+  // A resumed run keeps its own suite and engine.
+  const resumeRun = v.resume ? resolveRun(rootDir, v.resume) : null;
+  const before = resumeRun ? JSON.parse(fs.readFileSync(path.join(resumeRun.dir, "run.json"), "utf8")) : null;
+  const suiteName = v.suite ?? before?.harness?.suiteFile ?? before?.suite;
+  if (!suiteName) throw new Usage("Name a suite with --suite (soul, dop, selftest…)");
+  const suite = loadSuite(before?.harness?.suiteFile && !v.suite ? path.join(REPO_DIR, before.harness.suiteFile) : suiteName);
+  const engine = v.engine ?? before?.engine;
+  if (!["demo", "open", "cloud"].includes(engine)) throw new Usage("Pick --engine demo, open or cloud");
+  const variants = v.variants === "all" ? Object.keys(suite.variants ?? { default: {} }) : list(v.variants);
+  const { client, target } = connect({ url: v.url, token: v.token }, { env: ctx.env, fetch: ctx.io.fetch });
+  const ac = new AbortController();
+  const signal = ctx.io.signal ?? ac.signal;
+  const onInt = () => {
+    if (ac.signal.aborted) process.exit(130);
+    ctx.note("Stopping: no new jobs start; the ones running keep going on the server. Ctrl+C again to quit now.");
+    ac.abort();
+  };
+  if (!ctx.io.signal) process.on("SIGINT", onInt);
+  try {
+    const result = await runEval(
+      {
+        suite,
+        engine,
+        variants,
+        cases: list(v.cases),
+        looks: list(v.looks),
+        tags: list(v.tags),
+        limit: num(v.limit, "limit"),
+        prompts: num(v.prompts, "prompts"),
+        seeds: list(v.seeds)?.map((s) => num(s, "seeds")),
+        model: v.model,
+        dryRun: v["dry-run"],
+        maxUsd: num(v["max-usd"], "max-usd"),
+        concurrency: num(v.concurrency, "concurrency"),
+        root: rootDir,
+        resume: resumeRun?.runId,
+        allowFixtures: v["allow-fixtures"],
+        comfyUrl: v["comfy-url"] ?? (engine === "open" ? (ctx.env.COMFYUI_URL ?? "http://127.0.0.1:8188") : undefined),
+        label: v.label,
+      },
+      { client, target, log: ctx.note, signal, fetch: ctx.io.fetch },
+    );
+    if (result.dryRun) {
+      if (v.json) return ctx.print(JSON.stringify(result, null, 2)), 0;
+      const free = engine !== "cloud";
+      ctx.print(`${suite.title} on ${engine} (${result.server})`);
+      ctx.print(`${result.jobs} jobs · ${result.runnable} can run · ${result.skipped} skipped · ${result.cases} cases · estimated ${free ? "Free" : money(result.estimateUsd)}${result.unknownCost ? ` (+${result.unknownCost} without a price)` : ""}${engine === "cloud" ? ` · cap ${money(result.maxUsd)}` : ""}`);
+      if (result.models.length) ctx.print(`Models: ${result.models.join(", ")} · variants: ${result.variants.join(", ")}`);
+      for (const [why, n] of Object.entries(result.skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 8)) ctx.print(`  ${n} skipped: ${why}`);
+      if (v.list) for (const j of result.jobs) ctx.print(`  ${j.skip ? "·" : "▸"} ${j.case} · ${j.variant} · ${j.prompt} · s${j.seed} · ${j.model} · ${j.costUsd == null ? "?" : free ? "Free" : money(j.costUsd)}${j.loras?.applied ? ` · ${j.loras.applied.join(" + ") || "no LoRAs"}` : ""}${j.skip ? ` — ${j.skip}` : ""}`);
+      return 0;
+    }
+    if (v["no-report"]) {
+      ctx.note(`Results: ${result.dir}`);
+      return result.run.results.failed ? 1 : 0;
+    }
+    await score(result.dir, v, ctx);
+    const summary = reportAll(result.dir, rootDir, ctx);
+    if (v.json) ctx.print(JSON.stringify(summary, null, 2));
+    else printSummary(summary, ctx);
+    return summary.counts.failed || result.run.interrupted ? 1 : 0;
+  } finally {
+    if (!ctx.io.signal) process.off("SIGINT", onInt);
+  }
+}
+
+async function report(args, ctx) {
+  const { values: v, positionals } = parse(args, SCORE, { positionals: true });
+  if (v.help) return ctx.print(HELP.report), 0;
+  const rootDir = root(v, ctx.env);
+  const { dir } = resolveRun(rootDir, positionals[0] ?? "latest");
+  await score(dir, v, ctx);
+  const summary = reportAll(dir, rootDir, ctx);
+  if (v.json) ctx.print(JSON.stringify(summary, null, 2));
+  else printSummary(summary, ctx);
+  return 0;
+}
+
+async function review(args, ctx) {
+  const { values: v, positionals } = parse(args, { against: { type: "string" }, port: { type: "string" }, "no-serve": { type: "boolean" }, limit: { type: "string" } }, { positionals: true });
+  if (v.help) return ctx.print(HELP.review), 0;
+  const rootDir = root(v, ctx.env);
+  const { dir, runId } = resolveRun(rootDir, positionals[0] ?? "latest");
+  let against = v.against;
+  if (against && !["variants", "references"].includes(against)) {
+    const other = resolveRun(rootDir, against);
+    against = { dir: other.dir, runId: other.runId, rows: [...new Map(readJsonl(path.join(other.dir, "jobs.jsonl")).map((r) => [r.id, r])).values()] };
+  }
+  const rows = [...new Map(readJsonl(path.join(dir, "jobs.jsonl")).map((r) => [r.id, r])).values()];
+  const r = writeReview({ dir, runId, rows }, { against, limit: num(v.limit, "limit") });
+  if (!r.pairs) ctx.note("Nothing to compare yet: the run needs two variants of a case, your own references (scripts/eval/local/references/…), or --against another run.");
+  if (v["no-serve"]) {
+    ctx.print(r.file);
+    return 0;
+  }
+  const { server, url } = await serveReview(dir, { port: num(v.port, "port") ?? 4173 });
+  ctx.print(`Blind review of ${r.pairs} pair${r.pairs === 1 ? "" : "s"}: ${url}`);
+  ctx.note("Ratings are saved to review/ratings.json as you go. Ctrl+C stops the server; pnpm eval:report then adds them to the summary.");
+  await new Promise((resolve) => {
+    const stop = () => server.close(resolve);
+    process.once("SIGINT", stop);
+    ctx.io.signal?.addEventListener("abort", stop, { once: true });
+  });
+  return 0;
+}
+
+async function compare(args, ctx) {
+  const { values: v, positionals } = parse(args, { "fail-on": { type: "string" }, metric: { type: "string" }, threshold: { type: "string" }, "per-case": { type: "boolean" } }, { positionals: true });
+  if (v.help) return ctx.print(HELP.compare), 0;
+  if (positionals.length !== 2) throw new Usage("Give two runs: pnpm eval:compare <runA> <runB> (latest~1 latest compares the last two)");
+  const rootDir = root(v, ctx.env);
+  const a = resolveRun(rootDir, positionals[0]);
+  const b = resolveRun(rootDir, positionals[1]);
+  const c = compareRuns(a, b, { failOn: list(v["fail-on"] ?? v.metric), threshold: v.threshold, perCase: v["per-case"] });
+  ctx.print(v.json ? JSON.stringify(c, null, 2) : compareText(c));
+  return c.failed ? 1 : 0;
+}
+
+async function promoteCmd(args, ctx) {
+  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" } }, { positionals: true });
+  if (v.help) return ctx.print(HELP.promote), 0;
+  const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
+  const doc = promote(dir, { candidate: v.candidate, alternatives: list(v.against) });
+  ctx.print(v.json ? JSON.stringify(doc, null, 2) : promoteText(doc));
+  return 0;
+}
+
+async function history(args, ctx) {
+  const { values: v } = parse(args, { suite: { type: "string" }, case: { type: "string" }, limit: { type: "string" } });
+  if (v.help) return ctx.print(HELP.history), 0;
+  const rootDir = root(v, ctx.env);
+  const runs = listRuns(rootDir).filter((r) => !v.suite || r.run.suite === v.suite);
+  const rows = readJsonl(path.join(rootDir, "history.jsonl")).filter((r) => (!v.suite || r.suite === v.suite) && (!v.case || r.caseId === v.case));
+  if (v.json) return ctx.print(JSON.stringify({ runs: runs.map((r) => ({ runId: r.runId, ...r.run.results, engine: r.run.engine, suite: r.run.suite, startedAt: r.run.startedAt, label: r.run.label })), history: rows }, null, 2)), 0;
+  if (!runs.length) return ctx.print(`No runs in ${rootDir} yet. Start with: pnpm eval:run --suite selftest --engine demo`), 0;
+  for (const r of runs.slice(0, num(v.limit, "limit") ?? 20)) {
+    const res = r.run.results ?? {};
+    ctx.print(`${r.runId}  ${r.run.engine}  ${res.succeeded ?? 0} done${res.failed ? ` · ${res.failed} failed` : ""}${res.skipped ? ` · ${res.skipped} skipped` : ""}${r.run.engine === "cloud" && r.run.spentUsd != null ? ` · ${money(r.run.spentUsd)}` : ""}${r.run.label ? `  ${r.run.label}` : ""}`);
+  }
+  if (v.case) for (const h of rows) ctx.print(`  ${h.runId} ${h.variant}: ${Object.entries(h.scores).map(([k, x]) => `${k} ${Number(x).toFixed(3)}`).join(" · ")}`);
+  return 0;
+}
+
+async function validate(args, ctx) {
+  const { values: v, positionals } = parse(args, {}, { positionals: true });
+  const results = validateAll(positionals.length ? positionals.map((p) => path.resolve(p)) : suiteFiles());
+  let bad = results.filter((r) => !r.ok).length;
+  const { generated } = await import("./gen-cases.mjs");
+  const gen = generated();
+  const stale = ["soul.json", "dop.json", "case.schema.json"].filter((name) => {
+    const file = path.join(path.dirname(new URL(import.meta.url).pathname), "cases", name);
+    const want = `${JSON.stringify(gen[name], null, 2)}\n`;
+    return !fs.existsSync(file) || fs.readFileSync(file, "utf8") !== want;
+  });
+  if (v.json) return ctx.print(JSON.stringify({ suites: results, stale }, null, 2)), bad || stale.length ? 1 : 0;
+  for (const r of results) {
+    ctx.print(`${r.ok ? "✓" : "✗"} ${path.relative(REPO_DIR, r.file)}${r.ok ? ` · ${r.cases} cases` : ""}`);
+    for (const l of r.lines) ctx.print(`    ${l}`);
+  }
+  for (const s of stale) ctx.print(`✗ cases/${s} is out of date with the research: node scripts/eval/gen-cases.mjs`);
+  bad += stale.length;
+  return bad ? 1 : 0;
+}
+
+async function setup(args, ctx) {
+  const { values: v } = parse(args, { identity: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
+  const step = (cmd, a, opts = {}) => {
+    ctx.note(`$ ${cmd} ${a.join(" ")}`);
+    const r = spawnSync(cmd, a, { cwd: METRICS_DIR, stdio: "inherit", env: ctx.env, ...opts });
+    if (r.error) throw new Error(`${cmd} isn't installed: get uv from https://docs.astral.sh/uv/ (one command), then run pnpm eval:setup again`);
+    if (r.status !== 0) throw new Error(`${cmd} ${a[0]} failed (exit ${r.status})`);
+  };
+  const py = process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python";
+  if (!fs.existsSync(path.join(METRICS_DIR, py))) step("uv", ["venv", ".venv", "--python", ">=3.11"]);
+  step("uv", ["pip", "install", "--python", py, "-r", "requirements.txt", "--torch-backend", v["torch-backend"] ?? "cpu"]);
+  if (v.identity) step("uv", ["pip", "install", "--python", py, "-r", "requirements-identity.txt"]);
+  if (v.download) step(py, ["-m", "fuobe_metrics.download", ...(v.identity ? ["--identity"] : [])]);
+  ctx.print(`Metrics ready in ${path.join(METRICS_DIR, ".venv")}${v.download ? "" : " (weights download on first use, or run pnpm eval:setup --download)"}.`);
+  return 0;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  process.exitCode = await main(process.argv.slice(2));
+}
