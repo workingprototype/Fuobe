@@ -140,6 +140,10 @@ interface ClientStreamState {
   hiddenTimer: ReturnType<typeof setTimeout> | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
   hooked: boolean;
+  /** Keep the stream (or our place in line) while hidden: browser notifications are on and a job hasn't had its notification yet. */
+  keepHidden: (() => boolean) | null;
+  /** "Anyone on screen?" questions waiting for an answer, by id. */
+  seen: Map<string, () => void>;
 }
 
 declare global {
@@ -166,6 +170,8 @@ const live = (): ClientStreamState =>
     hiddenTimer: null,
     stopTimer: null,
     hooked: false,
+    keepHidden: null,
+    seen: new Map(),
   });
 
 const shared = () => typeof navigator !== "undefined" && !!navigator.locks && typeof BroadcastChannel !== "undefined";
@@ -268,6 +274,15 @@ function openChannel() {
   ch.onmessage = (e: MessageEvent) => {
     const m = toChannelMessage(e.data);
     if (!m) return;
+    // Any tab: say so when asked whether Fuobe is on screen; the asker hears the first answer.
+    if (m.type === "seen?") {
+      if (document.visibilityState === "visible") post({ type: "seen", id: m.id });
+      return;
+    }
+    if (m.type === "seen") {
+      s.seen?.get(m.id)?.();
+      return;
+    }
     if (m.type === "hello") {
       if (s.leader) post({ type: "state", connected: s.connected });
       return;
@@ -312,10 +327,14 @@ function stop() {
 function onVisibility() {
   const s = live();
   if (document.visibilityState === "hidden") {
-    s.hiddenTimer ??= setTimeout(() => {
-      s.hiddenTimer = null;
-      stop();
-    }, HIDDEN_GRACE_MS);
+    const arm = () =>
+      setTimeout(() => {
+        // Notifications on and a job not yet notified (running, or finished and settling): the stream is how we hear it, so keep it.
+        if (s.keepHidden?.()) return void (s.hiddenTimer = arm());
+        s.hiddenTimer = null;
+        stop();
+      }, HIDDEN_GRACE_MS);
+    s.hiddenTimer ??= arm();
     return;
   }
   if (s.hiddenTimer) clearTimeout(s.hiddenTimer);
@@ -359,6 +378,36 @@ export function useGenerationStream(): boolean {
   );
 }
 
+/** Whether this tab reads the live stream for the browser (its leader), or its own (no Web Locks). */
+export function leadsStream(): boolean {
+  const s = live();
+  return s.running && (!shared() || s.leader);
+}
+
+/** Keep this tab's stream while it's hidden whenever `keep()` says so (null: the usual 30 s grace). */
+export function keepStreamWhileHidden(keep: (() => boolean) | null): void {
+  live().keepHidden = keep;
+}
+
+/** Whether another Fuobe tab is on screen: asked on the tabs' channel, answered within `ms` (false without one). */
+export function anotherTabVisible(ms = 200): Promise<boolean> {
+  const s = live();
+  if (!s.channel) return Promise.resolve(false);
+  const id = Math.random().toString(36).slice(2);
+  // (A state kept across a hot reload may predate the map.)
+  s.seen ??= new Map();
+  return new Promise((resolve) => {
+    const done = (v: boolean) => {
+      clearTimeout(timer);
+      s.seen.delete(id);
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(false), ms);
+    s.seen.set(id, () => done(true));
+    post({ type: "seen?", id });
+  });
+}
+
 /**
  * Listen to the shared live stream (one per browser) from a view with its own caches, instead of
  * opening another EventSource. Returns whether it's connected; poll when it isn't.
@@ -391,6 +440,22 @@ export function useGenerations(filter: FeedFilter, opts: { keepPrevious?: boolea
     placeholderData: opts.keepPrevious ? keepPreviousData : undefined,
     structuralSharing: shareById,
     refetchInterval: (q) => pollEvery(q.state.data, connected),
+  });
+}
+
+const RUNNING: FeedFilter = { statuses: ["queued", "running"], steps: true, limit: 100 };
+
+/**
+ * Everything queued or running, anywhere (the tab title's job count). The live stream keeps it
+ * current (a job that finishes leaves the list); polling is only a slow safety net.
+ */
+export function useRunningGenerations() {
+  const connected = useGenerationStream();
+  return useQuery({
+    queryKey: feedKey(RUNNING),
+    queryFn: async () => (await json<{ items: Generation[] }>(await fetch(`/api/generations?${filterToSearch(RUNNING)}`))).items,
+    structuralSharing: shareById,
+    refetchInterval: (q) => (q.state.data?.length ? (connected ? 30_000 : 5000) : false),
   });
 }
 

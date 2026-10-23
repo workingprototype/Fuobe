@@ -208,13 +208,21 @@ export function needsCatchUp(was: boolean, now: boolean, everConnected: boolean)
 /**
  * What tabs say to each other on the BroadcastChannel. One tab (the leader) reads the stream and
  * passes on every event and its connection state; a tab that joins says hello to get the state.
+ * Before a system notification the leader asks "anyone on screen?" (`seen?`); a visible tab answers
+ * `seen` with the same id (src/lib/job-watch.ts: nobody is notified while they're looking at Fuobe).
  */
-export type ChannelMessage = { type: "event"; ev: StreamEvent } | { type: "state"; connected: boolean } | { type: "hello" };
+export type ChannelMessage =
+  | { type: "event"; ev: StreamEvent }
+  | { type: "state"; connected: boolean }
+  | { type: "hello" }
+  | { type: "seen?"; id: string }
+  | { type: "seen"; id: string };
 
 export function toChannelMessage(data: unknown): ChannelMessage | null {
   if (!data || typeof data !== "object") return null;
   const m = data as Record<string, unknown>;
   if (m.type === "hello") return { type: "hello" };
+  if ((m.type === "seen?" || m.type === "seen") && typeof m.id === "string" && m.id) return { type: m.type, id: m.id };
   if (m.type === "state" && typeof m.connected === "boolean") return { type: "state", connected: m.connected };
   if (m.type !== "event" || !m.ev || typeof m.ev !== "object") return null;
   const ev = m.ev as Record<string, unknown>;

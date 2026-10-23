@@ -1,6 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EFFECTS, MOTIONS } from "@/lib/catalog";
-import { copyText } from "@/lib/clipboard";
+import { copyText, copyWithToast } from "@/lib/clipboard";
 import { loseContext, releaseVideo } from "@/lib/media-release";
 import { GLYPHS, MOVE_GLYPH, glyphFor } from "@/lib/move-glyphs";
 import {
@@ -18,6 +20,9 @@ import {
 import { createPlaybackStore, MIN_VISIBLE, type PlaybackEnv } from "@/lib/preview-playback";
 import { pageAfter, progressiveStart, syncProgressive } from "@/lib/progressive";
 import { storyboardName } from "@/lib/storyboard-board";
+
+const toasts = vi.hoisted(() => ({ ok: [] as string[], error: [] as string[] }));
+vi.mock("sonner", () => ({ toast: Object.assign((m: string) => void toasts.ok.push(m), { error: (m: string) => void toasts.error.push(m) }) }));
 import { capabilityGroup, usedByIndex } from "@/lib/workflow-usage";
 
 describe("workflow 'used by' index", () => {
@@ -296,6 +301,32 @@ describe("releasing color grading's media", () => {
 describe("copyText", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  /**
+   * Just enough DOM for the execCommand fallback: `copy` dispatches the copy event (with
+   * clipboardData unless `noClipboardData`); `active` is what holds the focus.
+   */
+  function fakeDom({ result = true, fires = true, noClipboardData = false, active = null as unknown }: { result?: boolean; fires?: boolean; noClipboardData?: boolean; active?: unknown } = {}) {
+    const ta = { value: "", style: { cssText: "" }, tabIndex: 0, selectionStart: 0, selectionEnd: 0, setAttribute() {}, focus: vi.fn(), select() {}, setSelectionRange: vi.fn(), remove: vi.fn() };
+    const listeners = new Set<(e: unknown) => void>();
+    const setData = vi.fn();
+    const preventDefault = vi.fn();
+    const body = { appendChild: vi.fn() };
+    const doc = {
+      createElement: () => ta,
+      body,
+      documentElement: {},
+      activeElement: active,
+      addEventListener: (type: string, fn: (e: unknown) => void) => type === "copy" && listeners.add(fn),
+      removeEventListener: (type: string, fn: (e: unknown) => void) => listeners.delete(fn),
+      execCommand: vi.fn(() => {
+        if (fires) listeners.forEach((fn) => fn({ clipboardData: noClipboardData ? null : { setData }, preventDefault }));
+        return result;
+      }),
+    };
+    vi.stubGlobal("document", doc);
+    return { ta, doc, body, setData, preventDefault, listeners };
+  }
+
   it("uses the Clipboard API when there is one", async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -303,25 +334,75 @@ describe("copyText", () => {
     expect(writeText).toHaveBeenCalledWith("hi");
   });
 
-  it("falls back to a selected textarea on plain-http origins (no navigator.clipboard)", async () => {
+  it("falls back to execCommand on plain-http origins (no navigator.clipboard): the copy event carries the text", async () => {
     vi.stubGlobal("navigator", {});
-    const ta = { value: "", style: { cssText: "" }, setAttribute() {}, select() {}, setSelectionRange() {}, remove: vi.fn() };
-    const execCommand = vi.fn(() => true);
-    vi.stubGlobal("document", { createElement: () => ta, body: { appendChild() {} }, activeElement: null, execCommand });
+    const dom = fakeDom();
     expect(await copyText("fuobe_secret")).toBe(true);
-    expect(ta.value).toBe("fuobe_secret");
-    expect(execCommand).toHaveBeenCalledWith("copy");
-    expect(ta.remove).toHaveBeenCalled();
+    expect(dom.doc.execCommand).toHaveBeenCalledWith("copy");
+    // Set on the event itself, so a focus trap that takes the selection away doesn't matter.
+    expect(dom.setData).toHaveBeenCalledWith("text/plain", "fuobe_secret");
+    expect(dom.preventDefault).toHaveBeenCalled();
+    expect(dom.ta.value).toBe("fuobe_secret");
+    expect(dom.ta.remove).toHaveBeenCalled();
+    expect(dom.listeners.size).toBe(0);
+  });
+
+  it("puts the textarea inside the dialog or menu holding the focus, and gives the focus back", async () => {
+    // A Radix dialog or menu traps the focus: a textarea on <body> loses it (and its selection) at once.
+    vi.stubGlobal("navigator", {});
+    const menu = { appendChild: vi.fn() };
+    const item = { closest: vi.fn((sel: string) => (sel.includes('[role="menu"]') ? menu : null)), parentElement: { appendChild: vi.fn() }, focus: vi.fn() };
+    const dom = fakeDom({ active: item });
+    expect(await copyText("a prompt")).toBe(true);
+    expect(menu.appendChild).toHaveBeenCalledWith(dom.ta);
+    expect(dom.body.appendChild).not.toHaveBeenCalled();
+    expect(item.focus).toHaveBeenCalled();
+    // Nothing focused: <body>.
+    const plain = fakeDom();
+    expect(await copyText("x")).toBe(true);
+    expect(plain.body.appendChild).toHaveBeenCalledWith(plain.ta);
+  });
+
+  it("doesn't claim a copy that didn't happen (execCommand says true but nothing held)", async () => {
+    vi.stubGlobal("navigator", {});
+    // No copy event, and the selection is gone (the focus went elsewhere).
+    fakeDom({ fires: false });
+    expect(await copyText("x")).toBe(false);
+    // A browser without clipboardData copies the selection: fine while the textarea still holds it.
+    const dom = fakeDom({ noClipboardData: true });
+    dom.doc.activeElement = dom.ta;
+    dom.ta.selectionEnd = 1;
+    expect(await copyText("x")).toBe(true);
   });
 
   it("says when nothing could be copied", async () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: async () => Promise.reject(new Error("denied")) } });
-    vi.stubGlobal("document", {
-      createElement: () => ({ style: {}, setAttribute() {}, select() {}, setSelectionRange() {}, remove() {} }),
-      body: { appendChild() {} },
-      activeElement: null,
-      execCommand: () => false,
-    });
+    fakeDom({ result: false, fires: false });
     expect(await copyText("x")).toBe(false);
+  });
+
+  it("gives every Copy button the same feedback (copyWithToast)", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: async () => {} } });
+    expect(await copyWithToast("a prompt", "Prompt copied")).toBe(true);
+    expect(toasts.ok.at(-1)).toBe("Prompt copied");
+    // Plain-http LAN origin and a browser that refuses execCommand too: say how to copy by hand.
+    vi.stubGlobal("navigator", {});
+    fakeDom({ result: false, fires: false });
+    expect(await copyWithToast("a link")).toBe(false);
+    expect(toasts.error.at(-1)).toMatch(/select the text/);
+  });
+});
+
+describe("landmarks", () => {
+  it("leaves one <main> per page: the app frame's inset sheet", () => {
+    // Pages render inside StudioChrome, whose SidebarInset is the <main>; a second one inside it
+    // would give screen readers two main landmarks.
+    const files = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : e.name.endsWith(".tsx") ? [path.join(dir, e.name)] : []));
+    const root = path.resolve(__dirname, "../src");
+    const mains = [...files(path.join(root, "components")), ...files(path.join(root, "app/(studio)"))]
+      .filter((f) => /<main[\s>]/.test(fs.readFileSync(f, "utf8")))
+      .map((f) => path.relative(root, f));
+    expect(mains).toEqual(["components/ui/sidebar.tsx"]);
   });
 });

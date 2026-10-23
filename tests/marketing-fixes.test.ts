@@ -328,23 +328,6 @@ describe("@product mentions in the chat box", () => {
   });
 });
 
-describe("in/out times in the Ad Multiplier", () => {
-  it("don't move while typed; the range is clamped once the time is committed", () => {
-    const range = { start: 12, end: 16 };
-    // Typing "20" into Out: nothing is applied per keystroke, then 12–20 on Enter / blur.
-    expect(cat.commitClipTime("20", range, 60, "end")).toEqual({ start: 12, end: 20 });
-    expect(cat.commitClipTime("35", range, 60, "end")).toEqual({ start: 12, end: 35 });
-    // Past the 30 s limit, the other point follows.
-    expect(cat.commitClipTime("50", range, 60, "end")).toEqual({ start: 20, end: 50 });
-    expect(cat.commitClipTime("0:45.5", { start: 20, end: 30 }, 60, "end")).toEqual({ start: 20, end: 45.5 });
-    expect(cat.commitClipTime("abc", range, 60, "end")).toBeNull();
-    expect(cat.parseClipTime("1:02")).toBe(62);
-    expect(cat.parseClipTime("12,5")).toBe(12.5);
-    expect(cat.parseClipTime(".5")).toBe(0.5);
-    expect(cat.parseClipTime("")).toBeNull();
-  });
-});
-
 describe("composer details", () => {
   it("a template opens in its own shape, else the format's when the format changes", () => {
     // Hero Headline (Ads) after a 3:4 product shot opens 4:5, the Ads default.

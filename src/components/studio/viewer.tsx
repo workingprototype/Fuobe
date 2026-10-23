@@ -3,7 +3,6 @@
 import { ChevronLeft, ChevronRight, Columns2, Copy, Info, Layers, MoreHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
@@ -14,6 +13,7 @@ import { formatCost, timeAgo } from "@/lib/format";
 import { trashDaysLeft, userTitle } from "@/lib/library";
 import { isLayered, layerInfo, outputActions, type OutputAction } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
+import { copyWithToast } from "@/lib/clipboard";
 import { CompareSlider } from "./compare-slider";
 import { ACTION_ICONS, downloadUrl, SaveElementForm, useActionRunner } from "./result-actions";
 import { LayersStack, ModelViewer, TextReader } from "./result-media";
@@ -73,10 +73,7 @@ function Details({ g, index }: { g: Generation; index: number }) {
         {g.prompt && g.prompt !== title && <p className="mt-1 line-clamp-6 text-[12px] leading-relaxed break-words text-muted-foreground">Sent to the model: {g.prompt}</p>}
         {g.prompt && (
           <button
-            onClick={() => {
-              void navigator.clipboard.writeText(g.prompt ?? "");
-              toast("Prompt copied");
-            }}
+            onClick={() => void copyWithToast(g.prompt ?? "", "Prompt copied")}
             className="mt-1 inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
           >
             <Copy className="size-3" /> Copy prompt

@@ -8,6 +8,7 @@ import {
   defaultModelForNode,
   describeNode,
   effectiveOp,
+  elementUpdates,
   graphEngine,
   inputPorts,
   isGenerator,
@@ -19,6 +20,7 @@ import {
   promptPlaceholder,
   singleInput,
   topoOrder,
+  withCurrentElements,
   withPlaceholders,
   type CanvasEdge,
   type CanvasGraph,
@@ -193,6 +195,27 @@ describe("canvas graph → plan", () => {
     g.nodes[1].data.prompt = "A portrait of @Maya";
     g.nodes[0].data.handle = "maya";
     expect(describeNode(g, g.nodes[1]).request?.prompt).toBe("A portrait of @Maya");
+  });
+
+  it("follows a renamed element: the node shows its new name and mentions its new @handle", () => {
+    const g: CanvasGraph = {
+      nodes: [
+        node("el", "element", 0, 0, { elementId: "e1", handle: "Maya", name: "Maya", preview: "/api/files/maya.png" }),
+        node("gone", "element", 0, 200, { elementId: "deleted", handle: "Old", name: "Old" }),
+        node("img", "model", 300, 0, { modelId: "nano-banana-pro", prompt: "A portrait" }),
+      ],
+      edges: [edge("el", "img", "elements")],
+    };
+    const now = [{ id: "e1", handle: "Maya_Lee", name: "Maya Lee", references: ["/api/files/maya.png"] }];
+    expect([...elementUpdates(g, now)]).toEqual([["el", { handle: "Maya_Lee", name: "Maya Lee" }]]);
+    const fresh = withCurrentElements(g, now);
+    expect(fresh.nodes[0].data).toMatchObject({ elementId: "e1", handle: "Maya_Lee", name: "Maya Lee" });
+    // An element that's gone keeps what the node had; the rest of the board is the same object.
+    expect(fresh.nodes[1]).toBe(g.nodes[1]);
+    expect(describeNode(fresh, fresh.nodes[2]).request?.prompt).toBe("A portrait\n\nWith @Maya_Lee.");
+    // A new first photo follows too; nothing changed → the same graph.
+    expect(elementUpdates(fresh, [{ ...now[0], references: ["/api/files/new.png"] }]).get("el")).toEqual({ preview: "/api/files/new.png" });
+    expect(withCurrentElements(fresh, now)).toBe(fresh);
   });
 
   it("reports validation errors on the node and blocks what depends on it", () => {

@@ -173,7 +173,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
           <EngineSwitch value={engine} onChange={setEngine} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[920px] min-w-0 flex-1 px-3 pb-32 sm:px-6">
+      <div className="mx-auto w-full max-w-[920px] min-w-0 flex-1 px-3 pb-32 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3 pt-6">
           <Steps step={step} />
         </div>
@@ -338,7 +338,7 @@ export function EpisodeWizard({ channelId, picker }: { channelId: string; picker
             </div>
           </div>
         )}
-      </main>
+      </div>
 
       {channel && settings && (
         <div className="sticky bottom-0 z-20 border-t bg-background/90 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">

@@ -1086,6 +1086,37 @@ export function graphEngine(graph: CanvasGraph): Engine | null {
   return cloud + open === 0 ? null : open > cloud ? "open" : "cloud";
 }
 
+/** What an element node shows and mentions, from the Elements list. */
+export type ElementInfo = { id: string; handle: string; name: string; references: string[] };
+
+/**
+ * Element nodes copy the element's name, @handle and first photo when it's picked. Renaming an
+ * element gives it a new handle too, so a node is brought up to date by its element's id: the patch
+ * for each element node whose element changed (keyed by node id). Elements that are gone, and
+ * nodes without one, are left as they are.
+ */
+export function elementUpdates(graph: CanvasGraph, elements: readonly ElementInfo[]): Map<string, Partial<CanvasNodeData>> {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const out = new Map<string, Partial<CanvasNodeData>>();
+  for (const n of graph.nodes) {
+    const e = n.type === "element" && n.data.elementId ? byId.get(n.data.elementId) : undefined;
+    if (!e) continue;
+    const patch: Partial<CanvasNodeData> = {};
+    if (n.data.handle !== e.handle) patch.handle = e.handle;
+    if (n.data.name !== e.name) patch.name = e.name;
+    if ((n.data.preview ?? undefined) !== (e.references[0] ?? undefined)) patch.preview = e.references[0];
+    if (Object.keys(patch).length) out.set(n.id, patch);
+  }
+  return out;
+}
+
+/** The graph with every element node up to date (the same graph when nothing changed). */
+export function withCurrentElements(graph: CanvasGraph, elements: readonly ElementInfo[]): CanvasGraph {
+  const updates = elementUpdates(graph, elements);
+  if (!updates.size) return graph;
+  return { ...graph, nodes: graph.nodes.map((n) => (updates.has(n.id) ? { ...n, data: { ...n.data, ...updates.get(n.id) } } : n)) };
+}
+
 // ---------------------------------------------------------------------------
 // Graph hygiene
 

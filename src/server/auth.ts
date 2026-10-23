@@ -3,8 +3,9 @@
  * Then every page and API call needs a session cookie (from /login) or an API token
  * (`Authorization: Bearer fuobe_…`).
  *
- * Kept in a small JSON file next to the database, not in SQLite, so the proxy can check
- * requests with nothing but `fs` and `crypto`.
+ * Kept in a small JSON file next to the database, not in SQLite, so the proxy's sign-in check
+ * needs nothing but `fs` and `crypto`. (The proxy does open SQLite, for one primary-key lookup on
+ * record pages only, so an unknown id gets a real 404: src/server/records.ts.)
  */
 import crypto from "node:crypto";
 import fs from "node:fs";

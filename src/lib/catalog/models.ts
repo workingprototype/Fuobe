@@ -1,6 +1,7 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
+import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -934,7 +935,8 @@ const open: ModelDef[] = [
     tagline: "Timed captions from speech in 30 languages (auto-detect) · 4 GB GPU · Apache-2.0",
     badges: ["new", "top"],
     routes: [comfy("transcribe", "captions-qwen3-asr", "Qwen3-ASR 0.6B + ForcedAligner; one cue per line")],
-    options: { sliders: [{ param: "maxChars", label: "Characters per caption", min: 12, max: 60, step: 2, default: 32 }] },
+    // "tl" is the node's second code for Filipino.
+    options: { sliders: [{ param: "maxChars", label: "Characters per caption", min: 12, max: 60, step: 2, default: 32 }], sourceLanguages: Object.keys(ASR_LANGUAGES).filter((c) => c !== "tl") },
   }),
   o({
     id: "oss-captions-burnin",
@@ -964,7 +966,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack, installed only with NC_PACKS=1",
     routes: [comfy("captions", "captions-whisper-burnin", "Whisper large-v3-turbo + ComfyUI-Whisper (CC-BY-NC-SA code)")],
-    options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }] },
+    options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }], sourceLanguages: Object.keys(WHISPER_LANGUAGES) },
   }),
   o({
     id: "oss-qwen35-translate",

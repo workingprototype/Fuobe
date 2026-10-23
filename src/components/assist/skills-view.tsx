@@ -112,7 +112,7 @@ function Skills() {
           </Button>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1100px] min-w-0 flex-1 px-3 pt-4 pb-16 sm:px-6 md:pt-8">
+      <div className="mx-auto w-full max-w-[1100px] min-w-0 flex-1 px-3 pt-4 pb-16 sm:px-6 md:pt-8">
         <p className="max-w-2xl text-[15px] text-pretty text-muted-foreground">
           Playbooks Assist loads for whole kinds of jobs. Type <span className="rounded bg-muted px-1 font-mono text-[13px]">/name</span> at the start of a message to use one, or let Assist pick it. Skills also reach other agents through Fuobe&apos;s MCP server.
         </p>
@@ -163,7 +163,7 @@ function Skills() {
             />
           </TabsContent>
         </Tabs>
-      </main>
+      </div>
       <SkillDetail name={viewing} onClose={() => open(null)} onEdit={(s) => (open(null), setEditing(s))} />
       <SkillEditor
         skill={editing}

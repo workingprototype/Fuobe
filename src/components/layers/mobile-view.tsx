@@ -71,7 +71,7 @@ export function MobileView({
         <h1 className="min-w-0 flex-1 truncate font-heading text-[20px]">{project.name}</h1>
         <DownloadMenu doc={doc} name={project.name} jobs={jobs} compact />
       </header>
-      <main className="mx-auto w-full max-w-xl flex-1 space-y-5 px-4 pb-12">
+      <div className="mx-auto w-full max-w-xl flex-1 space-y-5 px-4 pb-12">
         {!decomposed && !running && !failed ? (
           <div className="space-y-3 rounded-xl border bg-card p-4">
             <div className="flex items-start gap-3">
@@ -165,7 +165,7 @@ export function MobileView({
             ))}
           </ul>
         </section>
-      </main>
+      </div>
     </div>
   );
 }

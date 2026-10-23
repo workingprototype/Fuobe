@@ -21,8 +21,11 @@ import {
   toggleIn,
   type Attachment,
 } from "@/lib/composer";
-import { appStudio, EDIT_STUDIO, IMAGE_STUDIO, JOIN_CLIPS_STUDIO, LIPSYNC_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
+import { appStudio, EDIT_STUDIO, IMAGE_STUDIO, JOIN_CLIPS_STUDIO, LIPSYNC_STUDIO, TRANSCRIBE_STUDIO, VIDEO_STUDIO } from "@/lib/studios";
 import { studioCatalog } from "@/lib/studio-catalog";
+import { buildPayload } from "@/lib/catalog/payload";
+import { asrLanguage, whisperLanguage } from "@/lib/comfy";
+import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 
 const model = (id: string) => {
   const m = getModel(id);
@@ -66,6 +69,46 @@ describe("settings summary", () => {
     expect(settingsShape(model("seedance-2-5"), undefined, "video", true, {}, VIDEO_STUDIO.ops).count).toBe(true);
     expect(settingsShape(model("nano-banana-pro"), "t2i", "image", true).count).toBe(true);
     expect(settingsShape(undefined, "concat", "video", false).count).toBe(false);
+  });
+
+  it("offers the spoken language for transcribers on both engines, detected by default, sent where the API reads it", () => {
+    for (const id of ["scribe-v2", "wizper", "oss-qwen3-asr"]) {
+      const m = model(id);
+      const shape = settingsShape(m, undefined, "text", false);
+      expect(shape.sourceLanguages, id).toEqual(m.options.sourceLanguages);
+      // Detect automatically is the default: nothing on the chip, nothing sent.
+      expect(settingsSummary(shape, {}, m)).toEqual([]);
+      expect(settingsSummary(shape, { sourceLanguage: "es" }, m)).toEqual(["Spanish"]);
+    }
+    expect(settingsShape(model("nano-banana-pro"), "t2i", "image", true).sourceLanguages).toBeNull();
+    // The picked code reaches each API's own language field (Scribe's language_code) or the ComfyUI node's name.
+    const scribe = model("scribe-v2").routes[0].map!;
+    expect(buildPayload(scribe, { audio: "a.mp3", sourceLanguage: "es" })).toMatchObject({ language_code: "es" });
+    for (const code of model("oss-qwen3-asr").options.sourceLanguages!) expect(asrLanguage(code), code).not.toBe("auto");
+    for (const code of model("oss-captions-whisper").options.sourceLanguages!) expect(whisperLanguage(code), code).not.toBe("auto");
+  });
+
+  it("names spoken languages for the picker, by name and once each", () => {
+    expect(["de", "yue", "jw", "fil"].map(spokenLanguageName)).toEqual(["German", "Cantonese", "Javanese", "Filipino"]);
+    const options = spokenLanguageOptions(["fr", "en", "de", "en"]);
+    expect(options.map((o) => o.name)).toEqual(["English", "French", "German"]);
+    expect(spokenLanguageOptions(model("whisper").options.sourceLanguages!).length).toBeGreaterThan(90);
+  });
+
+  it("finds a model's code for a language stored as a name, a locale or an alias", () => {
+    const scribe = model("scribe-v2").options.sourceLanguages!;
+    // Assist stores the language as free text ("Spanish"): reused in Audio → Transcribe, the picker
+    // selects Spanish and the request sends the code, as the chip says.
+    expect(matchSpokenLanguage("Spanish", scribe)).toBe("es");
+    expect(matchSpokenLanguage("spanish", scribe)).toBe("es");
+    expect(matchSpokenLanguage("es", scribe)).toBe("es");
+    expect(matchSpokenLanguage("ES-mx", scribe)).toBe("es");
+    expect(matchSpokenLanguage("pt_BR", scribe)).toBe("pt");
+    expect(matchSpokenLanguage("German (de)", scribe)).toBe("de");
+    // The picker lists one code per name: another code for the same language finds it.
+    expect(matchSpokenLanguage("tl", ["en", "fil"])).toBe("fil");
+    expect(matchSpokenLanguage("Klingon", scribe)).toBeUndefined();
+    expect(matchSpokenLanguage("  ", scribe)).toBeUndefined();
   });
 
   it("counts the changes the chip doesn't spell out", () => {
@@ -242,3 +285,15 @@ describe("studio catalog slice", () => {
     expect(edit.models.map((m) => m.id)).toEqual(expect.arrayContaining([EDIT_STUDIO.defaultModels.cloud, EDIT_STUDIO.defaultModels.open]));
   });
 });
+
+describe("Audio → Transcribe", () => {
+  it("lists the transcribers of both engines, each with its spoken languages, and asks for a recording or a video", () => {
+    const ids = studioCatalog(TRANSCRIBE_STUDIO).models.map((m) => m.id);
+    expect(ids).toEqual(expect.arrayContaining(["scribe-v2", "wizper", "whisper", "oss-qwen3-asr"]));
+    expect(filterModels(studioCatalog(TRANSCRIBE_STUDIO).models, { ops: TRANSCRIBE_STUDIO.ops }).every((m) => m.options.sourceLanguages?.length)).toBe(true);
+    const missing = firstMissingSlot(TRANSCRIBE_STUDIO.slots, {}, TRANSCRIBE_STUDIO.anyOf);
+    expect(blockerFor({ model: true, missing, uploading: false, promptMissing: false })).toEqual({ message: "Add a recording or a video", slot: "audio" });
+    expect(firstMissingSlot(TRANSCRIBE_STUDIO.slots, { video: att("v", "video") }, TRANSCRIBE_STUDIO.anyOf)).toBeUndefined();
+  });
+});
+

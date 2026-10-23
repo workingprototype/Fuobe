@@ -536,7 +536,7 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
           </div>
         )}
       </header>
-      <main className="mx-auto w-full max-w-[1100px] min-w-0 flex-1 space-y-6 px-3 pb-16 sm:px-6">
+      <div className="mx-auto w-full max-w-[1100px] min-w-0 flex-1 space-y-6 px-3 pb-16 sm:px-6">
         {isLoading || !view || !ep ? (
           <div className="space-y-4 pt-6">
             <Skeleton className="h-8 w-96 max-w-full" />
@@ -616,7 +616,7 @@ export function EpisodeView({ id, backHref, backLabel }: { id: string; backHref:
             )}
           </>
         )}
-      </main>
+      </div>
       {open && <Viewer generation={open} index={0} onClose={() => setOpen(null)} />}
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>

@@ -21,9 +21,11 @@ export function MediaDrop({
   hint,
   onDuration,
   onUnreadable,
+  onFile,
   className,
   compact,
   player,
+  preview = true,
 }: {
   /** The preview <video>, for tools that drive it (Trim plays the selection in it). */
   player?: React.Ref<HTMLVideoElement>;
@@ -35,9 +37,13 @@ export function MediaDrop({
   onDuration?: (seconds: number) => void;
   /** The browser can't decode the clip (e.g. H.265): tools fall back to typing times. */
   onUnreadable?: () => void;
+  /** The file picked or dropped, before its upload starts (Trim reads its header from it, not from the server). */
+  onFile?: (f: File) => void;
   className?: string;
   /** A shorter strip once something is attached (editors keep more room for their work). */
   compact?: boolean;
+  /** false: once something is attached, just its name with Replace / Remove (the tool shows it itself: Trim's trimmer). */
+  preview?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -45,6 +51,7 @@ export function MediaDrop({
   const take = (f: File | undefined) => {
     if (!f) return;
     if (kindOfFile(f) !== kind) return void toast(wrongKindMessage(kind));
+    onFile?.(f);
     void fileToSlot(f, onChange, kind);
   };
   const Icon = kind === "video" ? FileVideo : ImagePlus;
@@ -85,38 +92,46 @@ export function MediaDrop({
   if (value) {
     return (
       <div className={cn("overflow-hidden rounded-2xl border bg-background shadow-soft", className)}>
-        <div className={cn("relative grid place-items-center bg-media", compact ? "max-h-[38vh]" : "max-h-[52vh]")}>
-          {kind === "video" ? (
-            <video
-              key={value.preview}
-              ref={player}
-              src={value.preview}
-              controls
-              playsInline
-              preload="metadata"
-              onLoadedMetadata={(e) => {
-                const el = e.currentTarget;
-                if (Number.isFinite(el.duration) && el.duration > 0) return onDuration?.(el.duration);
-                // A recording with no length in its header (MediaRecorder WebM): find it, else fall back to typed times.
-                void realDuration(el).then((d) => (d ? onDuration?.(d) : onUnreadable?.()));
-              }}
-              onError={() => !value.uploading && onUnreadable?.()}
-              className={cn("w-full object-contain", compact ? "max-h-[38vh]" : "max-h-[52vh]")}
-            />
-          ) : (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={value.preview} alt={value.name ?? title} className={cn("w-full object-contain", compact ? "max-h-[38vh]" : "max-h-[52vh]")} />
-          )}
-          {value.uploading && (
-            <div className="absolute inset-0 grid place-items-center bg-background/50" role="status" aria-label="Uploading">
-              <span className="inline-flex items-center gap-2 rounded-full bg-background px-3 py-1.5 text-[13px] font-medium shadow-soft">
-                <Loader2 className="size-3.5 animate-spin" /> Uploading…
-              </span>
-            </div>
-          )}
-        </div>
+        {preview && (
+          <div className={cn("relative grid place-items-center bg-media", compact ? "max-h-[38vh]" : "max-h-[52vh]")}>
+            {kind === "video" ? (
+              <video
+                key={value.preview}
+                ref={player}
+                src={value.preview}
+                controls
+                playsInline
+                preload="metadata"
+                onLoadedMetadata={(e) => {
+                  const el = e.currentTarget;
+                  if (Number.isFinite(el.duration) && el.duration > 0) return onDuration?.(el.duration);
+                  // A recording with no length in its header (MediaRecorder WebM): find it, else fall back to typed times.
+                  void realDuration(el).then((d) => (d ? onDuration?.(d) : onUnreadable?.()));
+                }}
+                onError={() => !value.uploading && onUnreadable?.()}
+                className={cn("w-full object-contain", compact ? "max-h-[38vh]" : "max-h-[52vh]")}
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={value.preview} alt={value.name ?? title} className={cn("w-full object-contain", compact ? "max-h-[38vh]" : "max-h-[52vh]")} />
+            )}
+            {value.uploading && (
+              <div className="absolute inset-0 grid place-items-center bg-background/50" role="status" aria-label="Uploading">
+                <span className="inline-flex items-center gap-2 rounded-full bg-background px-3 py-1.5 text-[13px] font-medium shadow-soft">
+                  <Loader2 className="size-3.5 animate-spin" /> Uploading…
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex min-w-0 items-center gap-1 px-3 py-2">
+          {!preview && <Icon className="size-4 shrink-0 text-muted-foreground" />}
           <p className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{value.name ?? title}</p>
+          {!preview && value.uploading && (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-[12px] text-muted-foreground" role="status">
+              <Loader2 className="size-3 animate-spin" /> Uploading…
+            </span>
+          )}
           <Button variant="ghost" size="sm" className="rounded-full" onClick={() => input.current?.click()}>
             <RefreshCw className="size-3.5" /> Replace
           </Button>

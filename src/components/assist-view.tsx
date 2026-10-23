@@ -174,7 +174,7 @@ export function AssistView() {
       </header>
 
       {!id ? (
-        <main className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-3 pt-[10vh] pb-16 sm:px-6 sm:pt-[14vh]">
+        <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-3 pt-[10vh] pb-16 sm:px-6 sm:pt-[14vh]">
           <div className="w-full max-w-[760px]">
             <div className="mb-6 text-center">
               <h2 className="font-heading text-display text-balance">What are we creating today?</h2>
@@ -202,10 +202,10 @@ export function AssistView() {
               ))}
             </div>
           </div>
-        </main>
+        </div>
       ) : (
         <>
-          <main className="min-h-0 flex-1 overflow-y-auto px-3 sm:px-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 sm:px-6">
             <div className="mx-auto w-full max-w-[760px] py-4">
               {view.isError ? (
                 <div className="py-20 text-center">
@@ -221,7 +221,7 @@ export function AssistView() {
               )}
               <div ref={end} className="h-4" />
             </div>
-          </main>
+          </div>
           <div className="shrink-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6">
             <div className="mx-auto w-full max-w-[760px]">
               <AssistComposer
