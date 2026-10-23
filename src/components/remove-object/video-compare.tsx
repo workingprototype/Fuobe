@@ -9,7 +9,20 @@ import { Button } from "@/components/ui/button";
  * (or use ← → on the slider) to wipe between them. The original follows the result's clock from `start` (the
  * selection's start in the original clip), so both show the same moment.
  */
-export function VideoCompare({ before, after, start = 0, label = "Compare the original and the result" }: { before: string; after: string; start?: number; label?: string }) {
+export function VideoCompare({
+  before,
+  after,
+  start = 0,
+  ratio,
+  label = "Compare the original and the result",
+}: {
+  before: string;
+  after: string;
+  start?: number;
+  /** The clip's width / height: the box keeps that shape while the videos load. */
+  ratio?: number;
+  label?: string;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const a = useRef<HTMLVideoElement>(null);
   const b = useRef<HTMLVideoElement>(null);
@@ -58,14 +71,21 @@ export function VideoCompare({ before, after, start = 0, label = "Compare the or
     <div className="space-y-2">
       <div
         ref={box}
-        className="relative grid touch-none place-items-center overflow-hidden rounded-xl bg-media select-none"
+        className="relative mx-auto grid touch-none place-items-center overflow-hidden rounded-xl bg-media select-none"
+        style={ratio ? { aspectRatio: String(ratio), maxHeight: "56vh" } : undefined}
         onPointerDown={(e) => {
           (e.target as HTMLElement).setPointerCapture(e.pointerId);
           move(e.clientX);
         }}
         onPointerMove={(e) => e.buttons && move(e.clientX)}
       >
-        <video ref={a} src={after} playsInline loop className="block max-h-[56vh] w-full object-contain" onLoadedMetadata={() => b.current && (b.current.currentTime = start)} />
+        <video
+          ref={a}
+          src={after}
+          playsInline
+          loop
+          className={ratio ? "absolute inset-0 size-full object-contain" : "block max-h-[56vh] w-full object-contain"}
+          onLoadedMetadata={() => b.current && (b.current.currentTime = start)} />
         <video
           ref={b}
           src={before}

@@ -49,6 +49,8 @@ interface Run {
   /** The original the result is compared with: the clip and where the selection starts. */
   before: string;
   start: number;
+  /** The clip's shape, so the compare has its size before the videos load. */
+  ratio?: number;
 }
 
 /**
@@ -62,6 +64,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
   const source = useSourceClip(REMOVE.maxBytes);
   const clip = source.clip;
   const trimmer = useRef<VideoTrimmerHandle>(null);
+  const framePanel = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<TrimRange | null>(null);
   const [mode, setMode] = useState<RemoveMode>("type");
   const [prompt, setPrompt] = useState("");
@@ -123,6 +126,18 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
     setPreviewId(null);
   }
 
+  const pickMode = (m: RemoveMode) => {
+    setMode(m);
+    setPreviewId(null);
+    // Clicking and painting happen on the first frame: bring it into view when it's off screen.
+    const el = framePanel.current;
+    if (m === "type" || !el) return;
+    const r = el.getBoundingClientRect();
+    if (r.bottom < 160 || r.top > window.innerHeight - 160) {
+      el.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    }
+  };
+
   const reset = () => {
     source.clear();
     setRange(null);
@@ -165,9 +180,11 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
         : !range || !duration
           ? "Reading the clip…"
           : !eraser
-            ? "problem" in choice
-              ? choice.problem
-              : "Pick how to point at it"
+            ? mode === "click" && engine === "open"
+              ? "Switch to Type it or Paint it"
+              : "problem" in choice
+                ? choice.problem
+                : "Pick how to point at it"
             : !marked
               ? mode === "type"
                 ? "Say what to remove"
@@ -183,7 +200,8 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
     void runGuard(JSON.stringify(body), (requestId) => actions.run.mutateAsync({ ...body, requestId }))
       .then((r) => {
         if (!r) return;
-        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime });
+        const ratio = size.width && size.height ? size.width / size.height : undefined;
+        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio });
         toast("Removing it", { description: "Follow it below — it lands in your Library too." });
       })
       .catch((e: Error) => toast.error(e.message));
@@ -222,7 +240,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
             }}
           />
         ) : (
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
             <div className="min-w-0 space-y-4">
               <Panel>
                 <div className="space-y-3">
@@ -241,45 +259,47 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                   />
                 </div>
               </Panel>
-              <Panel
-                title="First frame"
-                aside={
-                  mode === "click" && engine === "cloud" ? (
-                    <Segmented
-                      label="What a click marks"
-                      value={pointLabel}
-                      onChange={setPointLabel}
-                      className="w-auto"
-                      options={[
-                        { value: "positive", label: "Remove" },
-                        { value: "negative", label: "Keep" },
-                      ]}
+              <div ref={framePanel} className="scroll-mt-[120px]">
+                <Panel
+                  title="First frame"
+                  aside={
+                    mode === "click" && engine === "cloud" ? (
+                      <Segmented
+                        label="What a click marks"
+                        value={pointLabel}
+                        onChange={setPointLabel}
+                        className="w-auto"
+                        options={[
+                          { value: "positive", label: "Remove" },
+                          { value: "negative", label: "Keep" },
+                        ]}
+                      />
+                    ) : null
+                  }
+                >
+                  {frame ? (
+                    <FrameStage
+                      frame={frame}
+                      points={mode === "click" ? points : []}
+                      onPoints={mode === "click" && engine === "cloud" ? setPoints : undefined}
+                      pointLabel={pointLabel}
+                      overlay={mode === "paint" ? paint?.overlay : undefined}
+                      clickable={mode === "click" && engine === "cloud"}
+                      maxPoints={REMOVE.maxPoints}
                     />
-                  ) : null
-                }
-              >
-                {frame ? (
-                  <FrameStage
-                    frame={frame}
-                    points={mode === "click" ? points : []}
-                    onPoints={mode === "click" && engine === "cloud" ? setPoints : undefined}
-                    pointLabel={pointLabel}
-                    overlay={mode === "paint" ? paint?.overlay : undefined}
-                    clickable={mode === "click" && engine === "cloud"}
-                    maxPoints={REMOVE.maxPoints}
-                  />
-                ) : (
-                  <div className="grid aspect-video place-items-center rounded-xl bg-muted text-[13px] text-muted-foreground">
-                    {frameError ? (
-                      <p className="max-w-xs px-4 text-center">This browser can&apos;t show the clip&apos;s frames (an H.265 or ProRes file?). Type it works without them.</p>
-                    ) : (
-                      <Loader2 className="size-5 animate-spin" aria-label="Reading the first frame" />
-                    )}
-                  </div>
-                )}
-                <p className="mt-2 text-[12px] text-muted-foreground">{frameHint(mode, engine, points.length, !!paint)}</p>
-                {preview && <MaskPreview g={preview} />}
-              </Panel>
+                  ) : (
+                    <div className="grid aspect-video place-items-center rounded-xl bg-muted text-[13px] text-muted-foreground">
+                      {frameError ? (
+                        <p className="max-w-xs px-4 text-center">This browser can&apos;t show the clip&apos;s frames (an H.265 or ProRes file?). Type it works without them.</p>
+                      ) : (
+                        <Loader2 className="size-5 animate-spin" aria-label="Reading the first frame" />
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-2 text-[12px] text-muted-foreground">{frameHint(mode, engine, points.length, !!paint)}</p>
+                  {preview && <MaskPreview g={preview} />}
+                </Panel>
+              </div>
             </div>
 
             <Panel className="space-y-4 lg:sticky lg:top-[112px]">
@@ -287,10 +307,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                 <Segmented
                   label="How do you point at it?"
                   value={mode}
-                  onChange={(m) => {
-                    setMode(m);
-                    setPreviewId(null);
-                  }}
+                  onChange={pickMode}
                   options={REMOVE_MODES.map((m) => ({ value: m.id, label: m.label }))}
                 />
               </Field>
@@ -327,10 +344,10 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                 <div className="space-y-2 rounded-xl bg-muted/60 p-3 text-[13px]" role="status">
                   <p>{CLICK_OPEN_PROBLEM}.</p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Button size="sm" variant="outline" className="rounded-full" onClick={() => setMode("type")}>
+                    <Button size="sm" variant="outline" className="rounded-full" onClick={() => pickMode("type")}>
                       <Type className="size-3.5" /> Type it
                     </Button>
-                    <Button size="sm" variant="outline" className="rounded-full" onClick={() => setMode("paint")}>
+                    <Button size="sm" variant="outline" className="rounded-full" onClick={() => pickMode("paint")}>
                       <Brush className="size-3.5" /> Paint it
                     </Button>
                     {engineMode === "both" && (
@@ -412,7 +429,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
                           {estimate.isFetching && <Loader2 className="size-3 animate-spin text-muted-foreground" aria-label="Updating the price" />}
                         </p>
                         {est && (
-                          <p className="truncate text-[12px] text-muted-foreground">
+                          <p className="text-[12px] leading-snug text-muted-foreground">
                             {est.modelName} · {est.seconds} s{est.pieces > 1 ? ` in ${est.pieces} ${engine === "open" ? "windows" : "pieces"}` : ""}
                           </p>
                         )}
@@ -466,7 +483,7 @@ export function RemoveObjectTool({ tabs }: { tabs?: React.ReactNode }) {
 
 function frameHint(mode: RemoveMode, engine: "cloud" | "open", points: number, painted: boolean): string {
   if (mode === "type") return "Name it in the panel — the first frame is here to check what you mean.";
-  if (mode === "click") return engine === "open" ? "Clicking works on the cloud engine." : points ? "Add more points on the same object, or mark what stays with Keep." : "Click the object you want gone. Keyboard: arrows move the crosshair, Enter adds a point.";
+  if (mode === "click") return engine === "open" ? "Points need the cloud engine's SAM 3.1 — the open graphs follow words or paint." : points ? "Add more points on the same object, or mark what stays with Keep." : "Click the object you want gone. Keyboard: arrows move the crosshair, Enter adds a point.";
   return painted ? "Red is what goes. Touch up the paint, or clear it to start over." : "Paint over what should go — the paint only needs to cover it on this frame.";
 }
 
@@ -556,7 +573,7 @@ function RunPanel({ run, onAgain }: { run: Run; onAgain: () => void }) {
         }
       >
         {out ? (
-          <VideoCompare before={run.before} after={out.url} start={run.start} />
+          <VideoCompare before={run.before} after={out.url} start={run.start} ratio={run.ratio} />
         ) : (
           <div className="space-y-3">
             <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(state.progress * 100)} aria-label="Progress">

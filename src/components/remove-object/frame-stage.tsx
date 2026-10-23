@@ -42,6 +42,8 @@ export function FrameStage({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  // The crosshair is for the keyboard: focus that comes with a click doesn't show it.
+  const pointer = useRef(false);
   const add = (x: number, y: number) => {
     if (!onPoints || points.length >= maxPoints) return;
     onPoints([...points, { x: Math.round(x * frame.width), y: Math.round(y * frame.height), label: pointLabel }]);
@@ -76,7 +78,11 @@ export function FrameStage({
               : undefined
           }
           onKeyDown={onKey}
-          onFocus={() => clickable && setCursor((c) => c ?? { x: 0.5, y: 0.5 })}
+          onPointerDown={() => (pointer.current = true)}
+          onFocus={() => {
+            if (clickable && !pointer.current) setCursor((c) => c ?? { x: 0.5, y: 0.5 });
+            pointer.current = false;
+          }}
           onBlur={() => setCursor(null)}
           onClick={(e) => {
             if (!clickable) return;

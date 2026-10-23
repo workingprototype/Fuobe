@@ -112,7 +112,12 @@ describe("Remove object: estimates", () => {
     const e = await (await estimateRoute.POST(json(body({ engine: "open", source: { url: clip, duration: 12, fps: 16, width: 72, height: 128, hasAudio: true } })))).json();
     expect(e).toMatchObject({ modelId: "oss-vace-remove", pieces: 3, costUsd: 0 });
     expect(e.notes.join(" ")).toMatch(/81 frames at a time/);
+    expect(e.notes.join(" ")).toMatch(/runs as 3 windows/);
     expect(e.notes.join(" ")).toMatch(/24 GB GPU/);
+    // Painted windows overlap by a frame: 162 frames take three windows, and the note counts what runs.
+    const painted = await (await estimateRoute.POST(json(body({ engine: "open", mode: "paint", mask: "/api/files/m.png", source: { url: clip, duration: 6, fps: 27 } })))).json();
+    expect(painted).toMatchObject({ modelId: "oss-vace-remove-painted", pieces: 3 });
+    expect(painted.notes.join(" ")).toMatch(/runs as 3 windows/);
     const effects = await (await estimateRoute.POST(json(body({ engine: "open", effects: true, source: { url: clip, duration: 12, fps: 16 } })))).json();
     expect(effects.modelId).toBe("oss-void-remove");
     expect(effects.notes.join(" ")).toMatch(/CogVideoX/);
