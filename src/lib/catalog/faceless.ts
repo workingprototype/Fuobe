@@ -883,8 +883,10 @@ export interface MusicPlan {
  */
 export function musicPlan(music: ModelDef | undefined, loop: ModelDef | undefined, seconds: number): MusicPlan {
   const bed = musicLength(music, seconds);
+  // The bed runs a second past the film when it can; one that only misses that second needs no loop (a whole
+  // second play of Sonilo's 600 s for a 600 s film would be a call for nothing).
+  if (bed >= seconds || !loop) return { bed, loop: null, short: Math.max(0, Math.ceil(seconds - bed)) };
   const need = Math.ceil(seconds) + 1;
-  if (bed >= need || !loop) return { bed, loop: null, short: Math.max(0, Math.ceil(seconds - bed)) };
   const duration = Math.min(LOOP_MAX[loop.id] ?? Infinity, need);
   // A route that only repeats the clip (fal merge-audios) plays it whole; ComfyUI crossfades each seam.
   const repeats = loop.routes.some((r) => r.op === "audio-loop" && !!r.map?.loop);

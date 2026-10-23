@@ -570,6 +570,10 @@ describe("pictures from sources, style references, music length, frame pricing",
     expect(musicPlan(sonilo, cloudLoop, 300)).toEqual({ bed: 301, loop: null, short: 0 });
     expect(musicPlan(sonilo, cloudLoop, 650)).toEqual({ bed: 600, loop: { duration: 651, plays: 2 }, short: 0 });
     expect(musicPlan(ace, undefined, 300)).toEqual({ bed: 240, loop: null, short: 60 });
+    // A bed that covers the film but not the second after it is not looped.
+    expect(musicPlan(sonilo, cloudLoop, 600)).toEqual({ bed: 600, loop: null, short: 0 });
+    expect(musicPlan(ace, openLoop, 240)).toEqual({ bed: 240, loop: null, short: 0 });
+    expect(musicPlan(ace, openLoop, 240.4)).toEqual({ bed: 240, loop: { duration: 242, crossfade: 3 }, short: 0 });
 
     // A five-minute open episode: ACE-Step's 240 s bed, looped to the film with 3 s crossfades, under the voice.
     const open = graphFor({ engine: "open", music: true, voice: null }, placeholderBlocks(300));
