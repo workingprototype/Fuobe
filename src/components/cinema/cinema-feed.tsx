@@ -705,10 +705,10 @@ export function CinemaFeed({
           {groups.map((grp) => (
             <section key={grp.label || "all"} className="space-y-2.5">
               {grp.label && (
-                <h3 className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
+                <h2 className="flex items-center gap-2 text-[12px] font-medium text-muted-foreground">
                   {grp.label}
-                  <span className="font-mono text-[11px] text-subtle-foreground">{grp.units.length}</span>
-                </h3>
+                  <span className="font-mono text-[11px] text-muted-foreground">{grp.units.length}</span>
+                </h2>
               )}
               <div className={layoutCls}>
                 {grp.units.map((u) => (

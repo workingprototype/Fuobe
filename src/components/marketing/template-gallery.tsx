@@ -17,7 +17,8 @@ function TemplateCard({ t, selected, onPick }: { t: MarketingTemplate; selected:
       type="button"
       onClick={() => onPick(t)}
       aria-pressed={selected}
-      aria-label={`${t.name} — ${f.cardLabel}${video ? " video" : ""} template`}
+      // Starts with what the card shows (the format chip, then the name), so speech users can say it.
+      aria-label={`${f.cardLabel} · ${t.name}${video ? " · video" : ""} template`}
       className={cn("group/tpl min-w-0 rounded-2xl text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2", selected && "ring-2 ring-primary ring-offset-2 ring-offset-background")}
     >
       <div className="relative aspect-[3/4] overflow-hidden rounded-2xl bg-muted transition-transform duration-300 ease-move group-hover/tpl:scale-[1.015]">

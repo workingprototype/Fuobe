@@ -213,7 +213,7 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
         {nothingConnected && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
-            <Link href="/settings" className="text-brand-text underline-offset-2 hover:underline">
+            <Link href="/settings" className="text-brand-text underline underline-offset-2">
               {engineMode === "open" ? "Connect ComfyUI" : engineMode === "cloud" ? "Add a fal.ai or Replicate key" : "Add a fal.ai key or connect ComfyUI"}
             </Link>{" "}
             to generate for real.

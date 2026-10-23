@@ -59,7 +59,7 @@ export function Model3dStudio({ names }: { names: Record<string, string> }) {
             </Select>
             <p className="text-[12px] text-muted-foreground">{MODELS_3D[engine].find((m) => m.id === modelId)?.note}</p>
           </div>
-          <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
+          <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
             {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Box className="size-4" />} Make it 3D
           </Button>
           <p className="mt-2 text-[12px] text-muted-foreground">

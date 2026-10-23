@@ -47,7 +47,7 @@ function KitProgress() {
       <p className="text-[12px] font-semibold tracking-wide text-muted-foreground uppercase">Building your product kit</p>
       <ol className="mt-2 grid gap-1 sm:grid-cols-2">
         {KIT_LABELS.map((l, k) => (
-          <li key={l} className={cn("flex items-center gap-2 text-[13px]", k > i && "text-subtle-foreground")}>
+          <li key={l} className={cn("flex items-center gap-2 text-[13px]", k > i && "text-muted-foreground")}>
             {k < i ? <Check className="size-3.5 text-success" /> : k === i ? <Loader2 className="size-3.5 animate-spin text-brand-text" /> : <span className="size-3.5" />}
             {l}
           </li>
@@ -87,7 +87,7 @@ function KitBrand({ brand }: { brand: BrandKit }) {
     <div className="space-y-2.5 rounded-xl border p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[12px] font-medium text-muted-foreground">Logo and colours</p>
-        <span className="text-[11px] text-subtle-foreground">{update.isPending ? "Saving…" : `In the ${brand.name} brand kit`}</span>
+        <span className="text-[11px] text-muted-foreground">{update.isPending ? "Saving…" : `In the ${brand.name} brand kit`}</span>
       </div>
       <LogoField value={brand.logo} onChange={(v) => save({ logo: v ?? "" })} />
       <ColorList
@@ -366,7 +366,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
             <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t pt-4">
               <p className="mr-auto text-[12px] text-muted-foreground">9:16 · up to 12 s · voiceover and captions{est.data?.steps.length ? ` · ${est.data.steps.length} steps` : ""}</p>
               {cost && <span className="font-mono text-[13px] text-muted-foreground">{cost}</span>}
-              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || busy} className={cn(blocker && "bg-muted text-subtle-foreground hover:bg-muted")} title={blocker}>
+              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || busy} className={cn(blocker && "bg-muted text-muted-foreground hover:bg-muted")} title={blocker}>
                 {busy ? <Loader2 className="animate-spin" /> : <Wand2 />} Generate video
               </Button>
             </div>
@@ -386,7 +386,7 @@ export function ClickToAd({ models }: { models: Record<string, ModelInfo> }) {
             }
           />
         </div>
-        <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-subtle-foreground">
+        <p className="flex items-center justify-center gap-1.5 pt-4 text-[12px] text-muted-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 shots or an OmniHuman presenter, ElevenLabs voice, Auto Subtitle · Open source: Wan 2.2, InfiniteTalk, Chatterbox (your voice sample), caption burn-in
         </p>
       </div>

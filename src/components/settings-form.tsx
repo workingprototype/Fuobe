@@ -104,7 +104,7 @@ function EngineModePicker({ value, onChange }: { value: string; onChange: (v: st
               {active && <CheckCircle2 className="ml-auto size-4 text-brand-text" />}
             </span>
             <span className="text-[13px] leading-relaxed text-muted-foreground">{m.body}</span>
-            <span className="text-[12px] text-subtle-foreground">Needs: {m.needs}</span>
+            <span className="text-[12px] text-muted-foreground">Needs: {m.needs}</span>
           </button>
         );
       })}
@@ -335,6 +335,7 @@ export function SettingsForm() {
       </Section>
 
       <Section
+        id="enhance"
         title="Prompt enhancement"
         description="The Enhance toggle rewrites short ideas into rich prompts, and storyboards split stories into frames. Use Claude, a local Ollama model (fully open source), or the built-in offline rewriter. Claude also powers the Assist agent. In Open source only mode, Automatic skips Claude."
       >
@@ -377,7 +378,7 @@ export function SettingsForm() {
         <SecuritySettings />
       </Section>
 
-      <Section title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
+      <Section id="demo" title="Demo mode" description="Lets you click through everything without keys or a GPU. Demo runs return clearly-labelled placeholder media and cost nothing.">
         <Select value={get("demoMode")?.value || "auto"} onValueChange={set("demoMode")}>
           <SelectTrigger aria-label="Demo mode" className="w-full max-w-80">
             <SelectValue />

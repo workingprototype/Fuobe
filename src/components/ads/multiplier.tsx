@@ -471,7 +471,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
             <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
               <p className="mr-auto text-[12px] text-muted-foreground">{est.data?.steps.length ? est.data.steps.map((s) => s.label).join(" → ") : "New versions keep the reference's length and framing"}</p>
               {cost && <span className="font-mono text-[13px] text-muted-foreground">{cost}</span>}
-              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || !!busy} className={cn(blocker && "bg-muted text-subtle-foreground hover:bg-muted")} title={blocker}>
+              <Button size="lg" onClick={() => void generate()} aria-disabled={!!blocker || !!busy} className={cn(blocker && "bg-muted text-muted-foreground hover:bg-muted")} title={blocker}>
                 {busy ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy ?? (versions > 1 ? `Generate ${versions} versions` : "Generate")}
               </Button>
             </div>
@@ -491,7 +491,7 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
             }
           />
         </div>
-        <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-subtle-foreground">
+        <p className="flex flex-wrap items-center justify-center gap-1.5 pt-6 text-center text-[12px] text-muted-foreground">
           <Sparkles className="size-3" /> Cloud: Seedance 2.5 edit (Higgsfield), Kling O3 edit, Gemini Omni Flash · Open source: Wan 2.2 Animate, Wan 2.2 clips joined around your ad
         </p>
       </div>

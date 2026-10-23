@@ -131,9 +131,9 @@ function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draf
         {f.durations && (
           <div>
             <p className="mb-1.5 text-[12px] font-medium text-muted-foreground">Length · {draft.duration}s</p>
-            {f.pipeline === "ugc" && <p className="-mt-1 mb-1.5 text-[11px] text-subtle-foreground">The whole video: the script is sized to what&apos;s left after the hook and the product close-up</p>}
+            {f.pipeline === "ugc" && <p className="-mt-1 mb-1.5 text-[11px] text-muted-foreground">The whole video: the script is sized to what&apos;s left after the hook and the product close-up</p>}
             <input type="range" min={f.durations.min} max={f.durations.max} step={1} value={draft.duration ?? f.durations.default} onChange={(e) => set({ duration: Number(e.target.value) })} aria-label="Length in seconds" className="w-full accent-[var(--primary)]" />
-            <p className="mt-0.5 flex justify-between text-[11px] text-subtle-foreground">
+            <p className="mt-0.5 flex justify-between text-[11px] text-muted-foreground">
               <span>{f.durations.min}s</span>
               <span>{f.durations.max}s</span>
             </p>

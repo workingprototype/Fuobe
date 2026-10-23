@@ -72,7 +72,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
               ) : m.present === false ? (
                 <CircleAlert className="size-3.5 shrink-0 text-warning" aria-label="Missing" />
               ) : (
-                <Circle className="size-3.5 shrink-0 text-subtle-foreground" aria-label="Unknown" />
+                <Circle className="size-3.5 shrink-0 text-muted-foreground" aria-label="Unknown" />
               )}
               <span className="min-w-0 truncate font-mono" title={m.file}>
                 {m.file}
@@ -212,7 +212,7 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
               )}
             >
               {c}
-              <span className="text-[11px] text-subtle-foreground tabular-nums">{n}</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">{n}</span>
             </button>
           ))}
         </div>

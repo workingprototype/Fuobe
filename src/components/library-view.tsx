@@ -668,7 +668,7 @@ function Inner() {
                 {isFetchingNextPage && <Loader2 className="size-3.5 animate-spin" />} Load more
               </button>
             ) : (
-              <p className="text-[12px] text-subtle-foreground">{items.length > 12 ? "That's everything" : ""}</p>
+              <p className="text-[12px] text-muted-foreground">{items.length > 12 ? "That's everything" : ""}</p>
             )}
           </div>
         </div>

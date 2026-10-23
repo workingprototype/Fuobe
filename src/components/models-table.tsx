@@ -25,12 +25,13 @@ function RouteDetails({ row }: { row: ModelRow }) {
         <button
           type="button"
           className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[12px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={`Where ${row.name} runs`}
         >
           <Info className="size-3.5" />
-          <span className="hidden sm:inline">
+          {/* The name starts with the visible text ("3 routes"), so speech users can say it. */}
+          <span className="max-sm:sr-only">
             {row.routes.length} route{row.routes.length === 1 ? "" : "s"}
           </span>
+          <span className="sr-only">: where {row.name} runs</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" collisionPadding={12} className="w-[min(92vw,420px)] p-3">
@@ -42,7 +43,7 @@ function RouteDetails({ row }: { row: ModelRow }) {
             </li>
           ))}
         </ul>
-        <p className="mt-2 font-mono text-[11px] text-subtle-foreground">id {row.id}</p>
+        <p className="mt-2 font-mono text-[11px] text-muted-foreground">id {row.id}</p>
       </PopoverContent>
     </Popover>
   );
@@ -71,8 +72,8 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
         <div className="text-[12px] text-muted-foreground">
           {m.vendor} — {m.tagline}
         </div>
-        {m.note && <div className="mt-0.5 text-[11px] text-subtle-foreground">{m.note}</div>}
-        <div className="mt-1 text-[11px] text-subtle-foreground md:hidden">
+        {m.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{m.note}</div>}
+        <div className="mt-1 text-[11px] text-muted-foreground md:hidden">
           <span className="font-mono text-muted-foreground sm:hidden">{m.price} · </span>
           {m.ops.join(" · ")}
         </div>

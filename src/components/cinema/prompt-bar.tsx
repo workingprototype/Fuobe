@@ -589,7 +589,7 @@ export function PromptBar(props: PromptBarProps) {
           });
         })()}
         <AddRef onFiles={addRefs} onPick={(r) => setDraft((d) => ({ refs: [...d.refs, r] }))} />
-        {!draft.refs.length && <span className="hidden text-[12px] text-subtle-foreground sm:inline">Start frame, references, clips or audio — or @ a character</span>}
+        {!draft.refs.length && <span className="hidden text-[12px] text-muted-foreground sm:inline">Start frame, references, clips or audio — or @ a character</span>}
       </div>
 
       {video && <MoveChips moves={draft.moves} onChange={(moves) => setDraft({ moves })} />}

@@ -514,7 +514,7 @@ function SelectedLayer({ node }: { node: LayerNode }) {
     <div className="space-y-3 border-t px-3 pt-3 pb-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="truncate text-[13px] font-medium">{node.name}</h3>
-        <span className="shrink-0 font-mono text-[11px] text-subtle-foreground">
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
           {Math.round(node.w)} × {Math.round(node.h)}
         </span>
       </div>
@@ -811,7 +811,7 @@ export function LayersPanel() {
           </Button>
         )}
         <h2 className="text-[13px] font-semibold">Layers</h2>
-        <span className="font-mono text-[12px] text-subtle-foreground">{doc.nodes.length}</span>
+        <span className="font-mono text-[12px] text-muted-foreground">{doc.nodes.length}</span>
         <div className="ml-auto">
           <AddLayer />
         </div>

@@ -109,13 +109,13 @@ function ModelRow({
           {m.vendor} · {m.tagline}
         </span>
         {m.worker === "isolated" && (
-          <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-snug text-subtle-foreground">
+          <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-snug text-muted-foreground">
             <Server className="size-3! shrink-0" aria-hidden />
             {ISOLATED_NOTE}
           </span>
         )}
       </span>
-      <span className="shrink-0 text-right text-[11px] text-subtle-foreground tabular-nums">{priceHint(m)}</span>
+      <span className="shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">{priceHint(m)}</span>
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}
       <button
         type="button"

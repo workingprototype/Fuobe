@@ -131,7 +131,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <div className="min-w-0 flex-1">
                     <p className="text-[14px] font-medium">{t.name}</p>
                     <p className="text-[12px] text-muted-foreground">{t.description}</p>
-                    <p className="mt-1 text-[11px] text-subtle-foreground">
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       {t.price} · {t.eta}
                     </p>
                   </div>

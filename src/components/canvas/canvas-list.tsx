@@ -155,7 +155,7 @@ function TemplateCard({ t, engine, onUse, busy }: { t: TemplateCardData; engine:
           <h3 className="text-[14px] font-medium">{t.name}</h3>
           <p className="text-[13px] text-muted-foreground">{t.description}</p>
         </div>
-        <p className="flex items-start gap-1.5 text-[12px] text-subtle-foreground">
+        <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
           {engine === "open" ? <Cpu className="mt-px size-3.5 shrink-0" /> : <Cloud className="mt-px size-3.5 shrink-0" />}
           <span className="line-clamp-2">{models.join(" · ")}</span>
         </p>

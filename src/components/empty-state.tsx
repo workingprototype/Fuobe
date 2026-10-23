@@ -109,7 +109,7 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
       {(message || digest) && (
         <p className="mt-3 rounded-lg bg-muted px-3 py-2 font-mono text-[12px] break-words text-muted-foreground">
           {message}
-          {digest && <span className="block text-subtle-foreground">ref {digest}</span>}
+          {digest && <span className="block text-muted-foreground">ref {digest}</span>}
         </p>
       )}
     </PageState>

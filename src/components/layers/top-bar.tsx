@@ -125,7 +125,7 @@ function SaveBadge({ state, onRetry }: { state: SaveState; onRetry: () => void }
       </span>
     </>
   );
-  const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-subtle-foreground");
+  const cls = cn("inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1 text-[12px] whitespace-nowrap", bad ? "text-warning" : "text-muted-foreground");
   return (
     <Tooltip>
       <TooltipTrigger asChild>

@@ -153,7 +153,7 @@ export function MobileView({
         </div>
         <section aria-labelledby="mobile-layers">
           <h2 id="mobile-layers" className="mb-2 text-[13px] font-semibold">
-            Layers <span className="font-mono font-normal text-subtle-foreground">{rows.length}</span>
+            Layers <span className="font-mono font-normal text-muted-foreground">{rows.length}</span>
           </h2>
           <ul className="divide-y rounded-xl border">
             {rows.map((n) => (
