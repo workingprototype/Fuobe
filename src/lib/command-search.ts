@@ -85,18 +85,21 @@ function fuzzy(word: string, text: string): number {
 }
 
 /**
- * The entry's score for a query (0 = leave it out): every query word must match the label or the
- * keywords. Label matches count in full, keyword matches at half; pages and settings get a small
- * bonus, and a shorter label wins a tie ("Video" before "Video tools").
+ * The entry's score for a query (0 = leave it out): every query word must match the label, the
+ * keywords or the hint. Label matches count in full, keyword matches at half and hint matches a
+ * little less than that (the hint is shared: every row of the Library group has "Library", but
+ * only All creations is the library); pages and settings get a small bonus, and a shorter label
+ * wins a tie ("Video" before "Video tools").
  */
 export function entryScore(query: string, e: PaletteEntry): number {
   const words = normalize(query).split(" ").filter(Boolean);
   if (!words.length) return 0;
   const label = normalize(e.label);
-  const extra = normalize(`${e.hint ?? ""} ${e.keywords ?? ""}`);
+  const keywords = normalize(e.keywords ?? "");
+  const hint = normalize(e.hint ?? "");
   let total = 0;
   for (const w of words) {
-    const s = Math.max(wordScore(w, label), wordScore(w, extra) / 2);
+    const s = Math.max(wordScore(w, label), wordScore(w, keywords) / 2, wordScore(w, hint) * 0.4 - 1);
     if (!s) return 0;
     total += s;
   }
@@ -186,6 +189,14 @@ export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open
     ...presets(index.effects, "effect", (id) => `/video?preset=${id}`),
     ...index.models
       .filter((m) => mode === "both" || m.engine === mode)
-      .map((m): PaletteEntry => ({ key: `model:${m.id}`, kind: "model", label: m.name, hint: m.vendor, href: m.href, keywords: `${m.ops} ${m.engine === "open" ? "open source free" : "cloud"}` })),
+      .map((m): PaletteEntry => ({
+        key: `model:${m.id}`,
+        kind: "model",
+        label: m.name,
+        // With both engines on, a model on each (TRELLIS.2, Join clips) would show twice under one name.
+        hint: mode === "both" && m.engine === "open" ? `${m.vendor} · Open source` : m.vendor,
+        href: m.href,
+        keywords: `${m.ops} ${m.engine === "open" ? "open source free" : "cloud"}`,
+      })),
   ];
 }

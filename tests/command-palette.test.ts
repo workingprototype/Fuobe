@@ -5,6 +5,7 @@ import { NAV } from "@/components/nav-items";
 import { APPS, EFFECTS, getModel, MODELS, MOTIONS } from "@/lib/catalog";
 import { entryScore, indexEntries, normalize, rankPalette, wordScore, type PaletteEntry } from "@/lib/command-search";
 import { modelHref, paletteIndex } from "@/lib/palette-index";
+import { modelSearchText, toModelRow } from "@/lib/model-rows";
 import { hubModePaths, studioRoutes } from "./e2e/_routes.mjs";
 
 const page = (label: string, href: string, keywords?: string): PaletteEntry => ({ key: `page:${href}`, kind: "page", label, href, keywords });
@@ -55,6 +56,14 @@ describe("palette ranking", () => {
     expect(top("upscale")[0]).toBe("Upscale");
   });
 
+  it("opens the page a group is named after, not its shortest row", () => {
+    // Every Library row has the hint "Library"; All creations also has it as a keyword.
+    expect(top("library")[0]).toBe("All creations");
+    expect(top("favorites")[0]).toBe("Favorites");
+    // A hint alone still finds rows (a model by its vendor).
+    expect(entryScore("google", { key: "m", kind: "model", label: "Veo 4", hint: "Google", href: "/video" })).toBeGreaterThan(0);
+  });
+
   it("finds a page by a keyword and with a typo", () => {
     expect(top("tts")).toContain("Audio");
     expect(top("cinma")[0]).toBe("Cinema Studio");
@@ -103,13 +112,44 @@ describe("palette index", () => {
   });
 
   it("opens every model somewhere that exists, in a studio of its kind when there is one", () => {
+    const apps = new Set(APPS.map((a) => `/apps/${a.id}`));
     for (const m of index.models) {
       const p = pathOf(m.href);
-      expect(routes.paths.has(p) || p === "/models", `${m.id} → ${m.href}`).toBe(true);
+      expect(routes.paths.has(p) || apps.has(p), `${m.id} → ${m.href}`).toBe(true);
     }
     expect(modelHref(getModel("nano-banana-pro")!)).toBe("/image?model=nano-banana-pro");
     expect(modelHref(getModel("seedance-2-5")!)).toBe("/video?model=seedance-2-5");
     expect(modelHref(getModel("oss-qwen-edit")!)).toMatch(/^\/(edit|image)\?model=oss-qwen-edit$/);
+  });
+
+  it("opens tool models where they run: Video tools, Image to 3D, an app, Layers, the tool of their kind", () => {
+    expect(modelHref(getModel("bria-video-bg")!)).toBe("/video-tools?model=bria-video-bg");
+    expect(modelHref(getModel("oss-video-depth-vda")!)).toBe("/video-tools/depth?model=oss-video-depth-vda");
+    expect(modelHref(getModel("oss-join-clips")!)).toBe("/video-tools/join?model=oss-join-clips");
+    expect(modelHref(getModel("hunyuan-3d-3-1-pro")!)).toBe("/image-to-3d?model=hunyuan-3d-3-1-pro");
+    expect(modelHref(getModel("oss-trellis2")!)).toBe("/image-to-3d?model=oss-trellis2");
+    expect(modelHref(getModel("recraft-vectorize")!)).toBe("/apps/app-vectorize?model=recraft-vectorize");
+    expect(modelHref(getModel("oss-reactor")!)).toBe("/apps/app-face-swap?model=oss-reactor");
+    expect(modelHref(getModel("seedream-5-layers")!)).toBe("/layers");
+    expect(modelHref(getModel("ideogram-3-text-layers")!)).toBe("/layers");
+    expect(modelHref(getModel("auto-subtitle")!)).toBe("/video-tools/captions");
+    expect(modelHref(getModel("heygen-translate")!)).toBe("/audio/translate");
+    // An app link names one of the app's own models, so the app opens on that route.
+    for (const m of index.models.filter((x) => x.href.startsWith("/apps/"))) {
+      const app = APPS.find((a) => `/apps/${a.id}` === pathOf(m.href))!;
+      expect([app.cloud?.modelId, app.open?.modelId], m.id).toContain(m.id);
+    }
+  });
+
+  it("finds the model on the Models page when nothing else runs it", () => {
+    const fallback = index.models.filter((m) => pathOf(m.href) === "/models");
+    // Only models whose studio isn't in this build (or that only run inside chains) are left.
+    expect(fallback.length).toBeLessThan(30);
+    for (const m of fallback) {
+      const q = new URLSearchParams(m.href.split("?")[1]).get("q");
+      // The Models search (ModelsTable) matches q against this text.
+      expect(q && modelSearchText(toModelRow(getModel(m.id)!)).includes(q.trim().toLowerCase()), m.href).toBeTruthy();
+    }
   });
 
   it("opens every page and settings section the palette lists", () => {
@@ -129,6 +169,14 @@ describe("palette index", () => {
     const openApps = new Set(open.filter((e) => e.kind === "app").map((e) => e.key));
     for (const a of index.apps) expect(openApps.has(`app:${a.id}`)).toBe(a.open);
     expect(indexEntries(index, "both").length).toBeGreaterThan(open.length);
+  });
+
+  it("tells a model's two engines apart when both are on", () => {
+    const hints = (mode: "both" | "open") => indexEntries(index, mode).filter((e) => e.key === "model:oss-trellis2" || e.key === "model:trellis-2").map((e) => e.hint);
+    expect(new Set(hints("both")).size).toBe(2);
+    expect(hints("both")).toContain("Microsoft · Open source");
+    // One engine locked: nothing to tell apart.
+    expect(hints("open")).toEqual(["Microsoft"]);
   });
 
   it("links presets the way their galleries do", () => {
