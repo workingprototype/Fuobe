@@ -9,14 +9,15 @@ import { LookCard } from "@/components/shorts/preset-card";
 import { tabKeys } from "@/components/shorts/ui";
 import { GENJUTSU, type GenjutsuLook } from "@/lib/catalog/genjutsu";
 import { SHORTS_PRESETS, shortsPreview } from "@/lib/catalog/shorts";
+import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { useHiggsfieldLooks } from "./hooks";
 
 export type LookSource = "fuobe" | "higgsfield" | "custom";
 
 /**
- * Restyle's look: one of the 44 Shorts looks, one of Higgsfield's own Genjutsu looks (with a key), or your own look
- * from up to 8 images and a few words.
+ * Restyle's look: one of the 44 Shorts looks, one of Higgsfield's own Genjutsu looks (with a key, on the cloud engine),
+ * or your own look from up to 8 images and a few words.
  */
 export function LookPicker({
   look,
@@ -28,6 +29,7 @@ export function LookPicker({
   words,
   onWords,
   higgsfield,
+  engine,
 }: {
   look: GenjutsuLook | null;
   onLook: (l: GenjutsuLook) => void;
@@ -39,11 +41,13 @@ export function LookPicker({
   onWords: (w: string) => void;
   /** A Higgsfield key is set. */
   higgsfield: boolean;
+  /** Higgsfield's looks run on the cloud engine only. */
+  engine: Engine;
 }) {
   const [q, setQ] = useState("");
-  const tabs: { id: LookSource; label: string }[] = [
+  const tabs: { id: LookSource; label: string; off?: string }[] = [
     { id: "fuobe", label: "Looks" },
-    { id: "higgsfield", label: "Higgsfield" },
+    { id: "higgsfield", label: "Higgsfield", ...(engine === "open" ? { off: "Higgsfield's looks run on the cloud engine" } : {}) },
     { id: "custom", label: "Your own" },
   ];
   const presets = useMemo(() => {
@@ -62,9 +66,11 @@ export function LookPicker({
             aria-selected={source === t.id}
             aria-controls={`look-panel-${t.id}`}
             tabIndex={source === t.id ? 0 : -1}
+            disabled={!!t.off}
+            title={t.off}
             onClick={() => onSource(t.id)}
             className={cn(
-              "flex h-8 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+              "flex h-8 min-w-0 flex-1 items-center justify-center rounded-full px-2 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
               source === t.id && "bg-background text-foreground shadow-soft",
             )}
           >
@@ -75,6 +81,7 @@ export function LookPicker({
 
       {source === "fuobe" && (
         <div role="tabpanel" id="look-panel-fuobe" aria-labelledby="look-tab-fuobe" className="space-y-2">
+          {engine === "open" && <p className="text-[12px] text-muted-foreground">Higgsfield&apos;s own looks run on the cloud engine; these 44 and Your own run on your ComfyUI.</p>}
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search 44 looks — claymation, comic, watercolour…" aria-label="Search looks" className="h-8 pl-8 text-[13px]" />

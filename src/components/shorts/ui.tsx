@@ -55,7 +55,8 @@ export function Segmented<T extends string | number>({
 export function tabKeys(e: React.KeyboardEvent<HTMLElement>) {
   const step = ({ ArrowRight: 1, ArrowLeft: -1 } as Record<string, number>)[e.key];
   if (step === undefined && e.key !== "Home" && e.key !== "End") return;
-  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+  // A disabled tab (one the engine can't run) is skipped: it can't take focus.
+  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]:not(:disabled)')];
   if (!tabs.length) return;
   e.preventDefault();
   const at = tabs.indexOf(document.activeElement as HTMLElement);

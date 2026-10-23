@@ -1,8 +1,9 @@
 "use client";
 
 import { Brush, Download, Loader2, RotateCcw, Sparkles, Undo2, Wand2 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { nanoid } from "nanoid";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import {
   makersFor,
   MODE_TARGETS,
   OPEN_TARGET_PROBLEM,
+  resolutionWords,
   TARGET_LABELS,
   type GenjutsuLook,
   type GenjutsuMode,
@@ -59,10 +61,12 @@ interface Paint {
 interface Run {
   final: string;
   ids: string[];
-  /** The original the result is compared with, and where the selection starts. */
+  /** The original the result is compared with (the uploaded file, not the browser's copy), and where the selection starts. */
   before: string;
   start: number;
   ratio?: number;
+  /** What it was asked with: Run again sends this again (a new seed), whatever the form says now. */
+  body: GenjutsuBody;
 }
 
 const isMode = (v: string | null): v is GenjutsuMode => !!v && GENJUTSU_MODES.some((m) => m.id === v);
@@ -91,7 +95,7 @@ export function GenjutsuStudio() {
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [tier, setTier] = useState<GenjutsuTier>("standard");
   const [quality, setQuality] = useState<GenjutsuQuality>(GENJUTSU.defaultQuality);
-  const [lookSource, setLookSource] = useState<LookSource>("fuobe");
+  const [lookChoice, setLookSource] = useState<LookSource>("fuobe");
   const [look, setLook] = useState<GenjutsuLook | null>(null);
   const [custom, setCustom] = useState<SlotValue[]>([]);
   const [words, setWords] = useState("");
@@ -113,6 +117,9 @@ export function GenjutsuStudio() {
   const prompt = prompts[mode] ?? "";
   const duration = clipDuration(clip);
   const size = clipSize(clip);
+
+  // Higgsfield's looks run on the cloud engine only: the open engine shows the 44 looks (the tab stays where it was).
+  const lookSource: LookSource = engine === "open" && lookChoice === "higgsfield" ? "fuobe" : lookChoice;
 
   const setMode = (m: GenjutsuMode) => {
     setModeState(m);
@@ -174,7 +181,8 @@ export function GenjutsuStudio() {
   }
 
   const apply = (s: GenjutsuSetup) => {
-    setModeState(s.mode);
+    // Through setMode: the URL's ?mode= follows (a reload keeps the pasted mode).
+    setMode(s.mode);
     const e = s.engine && engineMode === "both" ? s.engine : engine;
     if (s.engine && engineMode === "both") setEngine(s.engine);
     if (s.tier) setTier(s.tier);
@@ -196,26 +204,48 @@ export function GenjutsuStudio() {
     toast("Setup pasted", { description: clip ? "Check the references and press Generate." : "Add a clip to run it on." });
   };
 
-  // Hand-offs: ?mode=swap, ?video=/api/files/…, ?image=/api/files/… (a reference), ?setup=gj1.….
+  // Hand-offs: ?mode=swap, ?video=/api/files/…, ?image=/api/files/… (a reference), ?setup=gj1.…. Read as they change, so
+  // "Use in Genjutsu" on a result in this page's own feed (a link to /genjutsu?video=…) loads that clip too. Each value
+  // is applied once; ?image and ?setup leave the URL then (a reload doesn't paste them over what you changed).
+  const [params, setParams] = useState<string | null>(null);
+  const seen = useRef<Record<string, string | null>>({});
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    /* eslint-disable react-hooks/set-state-in-effect -- read once after hydration */
-    const m = p.get("mode");
+    if (params === null) return;
+    const p = new URLSearchParams(params);
+    const arrived = "video" in seen.current;
+    const fresh = (k: string) => {
+      const v = p.get(k);
+      const was = seen.current[k];
+      seen.current[k] = v;
+      return v !== null && v !== was ? v : null;
+    };
+    const m = fresh("mode");
     if (isMode(m)) setModeState(m);
-    const image = p.get("image");
+    const image = fresh("image");
     if (image?.startsWith("/api/files/")) setRefs([asSlot(image)]);
-    const code = p.get("setup");
+    const code = fresh("setup");
     if (code) {
       const s = decodeSetup(code);
       if (s) apply(s);
       else toast.error("That setup code didn't read — ask for it again");
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
-    const video = p.get("video");
-    if (video?.startsWith("/api/files/")) source.adopt(video, video.split("/").pop());
-    // Once, on arrival.
+    const video = fresh("video");
+    if (video?.startsWith("/api/files/")) {
+      clearMarks();
+      setRange(null);
+      source.adopt(video, video.split("/").pop());
+      // A later hand-off comes from this page itself (its feed): back up to the clip.
+      if (arrived) backToTop();
+    }
+    if (p.has("image") || p.has("setup")) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("image");
+      url.searchParams.delete("setup");
+      window.history.replaceState(null, "", url);
+    }
+    // Only a new URL counts; the handlers read the state of this render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [params]);
 
   const setup: GenjutsuSetup = {
     mode,
@@ -230,13 +260,23 @@ export function GenjutsuStudio() {
     ...(references.length ? { references } : {}),
   };
 
-  const reset = () => {
-    source.clear();
-    setRange(null);
+  function clearMarks() {
     setFrame(null);
     setFrameError(false);
     setPoints([]);
     setPaint(null);
+  }
+
+  const reset = () => {
+    source.clear();
+    setRange(null);
+    clearMarks();
+    // The clip is gone: a later hand-off of the same video loads it again.
+    if (new URLSearchParams(window.location.search).has("video")) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("video");
+      window.history.replaceState(null, "", url);
+    }
   };
 
   const uploaded = !!clip?.url && !clip.uploading && !clip.error && !!duration && !!range;
@@ -300,14 +340,18 @@ export function GenjutsuStudio() {
                   ? friendly((estimate.error as Error).message)
                   : null;
 
-  const start = (seed?: number) => {
-    if (blocker || !body) return void toast(blocker ?? "Not ready yet", { id: "genjutsu-blocker" });
-    const b = seed !== undefined ? { ...body, seed } : body;
+  /** Generate (the form as it is), or Run again (`again`: that run's own request, with a new seed). */
+  const start = (again?: Run) => {
+    if (!again && (blocker || !body)) return void toast(blocker ?? "Not ready yet", { id: "genjutsu-blocker" });
+    const base = again?.body ?? body!;
+    const b = again ? { ...base, seed: Math.floor(Math.random() * 2 ** 31) } : base;
+    const ratio = again ? again.ratio : size.width && size.height ? size.width / size.height : undefined;
+    const before = again?.before ?? clip!.url!;
+    const at = again?.start ?? range!.startTime;
     void guard(JSON.stringify(b), (requestId) => runMutation.mutateAsync({ ...b, requestId }))
       .then((r) => {
         if (!r) return;
-        const ratio = size.width && size.height ? size.width / size.height : undefined;
-        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio });
+        setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before, start: at, ratio, body: base });
         toast("Genjutsu is on it", { description: "Follow it below — it lands in your Library too." });
       })
       .catch((e: Error) => toast.error(friendly(e.message)));
@@ -429,6 +473,7 @@ export function GenjutsuStudio() {
                     words={words}
                     onWords={setWords}
                     higgsfield={higgsfield}
+                    engine={engine}
                   />
                 </Panel>
               )}
@@ -451,7 +496,10 @@ export function GenjutsuStudio() {
                       />
                     )}
                   </div>
-                  <p className="mt-2 text-[12px] text-muted-foreground">{REF_HINT[mode]}</p>
+                  <p className="mt-2 text-[12px] text-muted-foreground">
+                    {REF_HINT[mode]}
+                    {maker && maker.refs.max > 0 && ` ${maker.label} uses ${maker.refs.max === 1 ? "the first one" : `up to ${maker.refs.max}`}.`}
+                  </p>
                 </Panel>
               )}
             </div>
@@ -530,7 +578,7 @@ export function GenjutsuStudio() {
                 </Field>
               )}
 
-              <Field label="Resolution" hint={maker && !maker.qualities ? "Keeps your clip's size" : est?.quality && est.quality !== quality ? `Renders ${est.quality}` : undefined}>
+              <Field label="Resolution" hint={maker ? upFirst(resolutionWords(maker, quality)) : undefined}>
                 <Segmented label="Resolution" value={quality} onChange={setQuality} options={GENJUTSU.qualities.map((q) => ({ value: q, label: q }))} />
               </Field>
 
@@ -573,7 +621,7 @@ export function GenjutsuStudio() {
         )}
       </div>
 
-      {run && <RunPanel run={run} onAgain={() => start(Math.floor(Math.random() * 2 ** 31))} />}
+      {run && <RunPanel run={run} onAgain={() => start(run)} />}
 
       {(history.data?.length ?? 0) > 0 && (
         <section className="mt-10" aria-labelledby="genjutsu-history">
@@ -594,9 +642,33 @@ export function GenjutsuStudio() {
           onDone={(r) => r.mask && setPaint({ mask: r.mask, overlay: r.overlay, strokes: r.strokes })}
         />
       )}
+      <Suspense fallback={null}>
+        <UrlParams onChange={setParams} />
+      </Suspense>
     </ToolShell>
   );
 }
+
+/** Reports the URL's query as it changes. It reads the URL, so it sits under its own Suspense (the static shell renders without it). */
+function UrlParams({ onChange }: { onChange: (search: string) => void }) {
+  const search = useSearchParams().toString();
+  useEffect(() => onChange(search), [search, onChange]);
+  return null;
+}
+
+/**
+ * A hand-off from this page's own feed: back up to the clip it now works on. The result's ⋯ menu gives focus back to
+ * its button as it closes, which scrolls down to the feed again (after the router's own scroll to the top), so once
+ * more after that.
+ */
+function backToTop() {
+  window.scrollTo({ top: 0 });
+  const again = () => requestAnimationFrame(() => window.scrollTo({ top: 0 }));
+  window.addEventListener("focusin", again, { once: true });
+  setTimeout(() => window.removeEventListener("focusin", again), 1500);
+}
+
+const upFirst = (t: string | undefined) => (t ? t[0].toUpperCase() + t.slice(1) : undefined);
 
 /** A dropped connection in words (the browser says "Failed to fetch"). */
 const friendly = (msg: string) => (/failed to fetch|networkerror|load failed/i.test(msg) ? "Couldn't reach Fuobe — check that it's running, then try again" : msg);
@@ -609,10 +681,10 @@ function lookPlaceholder(s: LookSource): GenjutsuLook {
 const REF_CTA: Record<GenjutsuMode, string> = { motion: "Add your character", swap: "Add what goes in", insert: "Add what to add", restyle: "Add a character" };
 
 const REF_HINT: Record<GenjutsuMode, string> = {
-  motion: "A clear, full-body picture of the character who takes over the performance. More angles help Genjutsu; Kling and the open engine use the first.",
-  swap: "The thing, person or outfit that goes in — cut out on a plain background works best. Up to 10.",
+  motion: "A clear, full-body picture of the character who takes over the performance. More angles help Genjutsu.",
+  swap: "The thing, person or outfit that goes in — cut out on a plain background works best.",
   insert: "The object or character to add — cut out on a plain background works best.",
-  restyle: "Optional: characters who should appear in the look (Genjutsu Restyle takes up to 5).",
+  restyle: "Optional: characters who should appear in the look.",
 };
 
 const PROMPT_LABEL: Record<GenjutsuMode, (t?: GenjutsuTarget) => string> = {
