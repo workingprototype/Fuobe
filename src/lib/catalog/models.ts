@@ -969,6 +969,18 @@ const open: ModelDef[] = [
     options: { seed: true },
     hidden: true,
   }),
+  // Content Factory "Use as reference": the clip's frames and its sound in one Gemma 4 call → a JSON style brief.
+  o({
+    id: "oss-reference-brief",
+    name: "Reference brief (Gemma 4)",
+    vendor: "Google",
+    family: "gemma",
+    kind: "text",
+    tagline: "Watches a reference clip (a frame a second and its sound) and writes its style brief as JSON · 12 GB GPU · Apache-2.0",
+    routes: [comfy("write", "reference-brief-gemma4", "first 30 s at 24 fps (every 24th frame read, 384 px wide) with the soundtrack; startTime skips ahead")],
+    options: { seed: true, promptless: true },
+    hidden: true,
+  }),
   o({
     id: "oss-infinitetalk-v2v",
     name: "InfiniteTalk Lip Re-sync",
