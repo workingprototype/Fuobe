@@ -129,7 +129,7 @@ try {
   check("P in the viewer unpins", (await gen(made[1].id)).pinnedAt === null);
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
   for (const w of ["paper boats", "sleeping cat"]) await page.getByRole("button", { name: new RegExp(`Select “${tag} ${w}`) }).first().click({ force: true });
   const bar = page.getByRole("toolbar", { name: "Selection" });
   await bar.getByRole("button", { name: "Pin" }).click();
@@ -246,7 +246,7 @@ try {
       check(`390 px, ${scheme}: ${route.replace(C.id, "<folder>")} fits`, fits);
     }
     await openRoute(phone, `${app}/library`, { settleMs: 1200 });
-    await phone.getByRole("button", { name: "Select" }).click();
+    await phone.getByRole("button", { name: "Select", exact: true }).click();
     await phone.getByRole("button", { name: /^Select “/ }).first().click({ force: true });
     const bar = await phone.getByRole("toolbar", { name: "Selection" }).evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
     check(`390 px, ${scheme}: every bulk action fits`, bar);

@@ -857,7 +857,8 @@ function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: strin
   );
 }
 
-const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40";
+// Phones: a little narrower, so the bar keeps every action (and Select all) at 390 px.
+const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 max-sm:px-2";
 
 function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
   return (
