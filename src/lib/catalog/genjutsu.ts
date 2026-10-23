@@ -581,7 +581,7 @@ export function genjutsuProblem(c: GenjutsuCheck): string | null {
   const { width: w, height: h } = c.source;
   if (m.minSeconds && len < m.minSeconds - 0.01) return `${m.label} needs at least ${m.minSeconds} s`;
   if (m.sides && w && h) {
-    if (Math.min(w, h) < m.sides.min) return `${m.label} needs a clip at least ${m.sides.min} px on each side (this one is ${w}×${h})`;
+    if (Math.min(w, h) < m.sides.min) return `${m.label} needs a clip at least ${m.sides.min} px on each side (this one is ${w}×${h}) — pick another model`;
     if (Math.max(w, h) > m.sides.max) return `${m.label} takes clips up to ${m.sides.max} px on a side (this one is ${w}×${h})`;
   }
   if (m.minPixels && w && h && w * h < m.minPixels) return `${m.label} needs a sharper clip (at least ${Math.round(m.minPixels / 1000)} thousand pixels a frame; this one is ${w}×${h}) — Genjutsu Lite takes it`;

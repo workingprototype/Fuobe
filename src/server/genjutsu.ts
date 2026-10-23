@@ -19,7 +19,7 @@ import {
   type Maker,
 } from "@/lib/catalog/genjutsu";
 import { scalePoints, wholeClip, type RemoveRange, type RemoveSource } from "@/lib/catalog/remove-object";
-import type { PlanStep } from "@/lib/catalog/shorts";
+import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
@@ -151,7 +151,8 @@ async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<
   const size = source.width && source.height ? { width: source.width, height: source.height } : null;
   if (target === "click") points = body.frame && size ? scalePoints(body.points!.slice(0, GENJUTSU.maxPoints), body.frame, size) : body.points;
   const pieces = planMakerPieces(maker, source, range);
-  const n = pieces.length || 1;
+  // Restyle on Fuobe's looks runs in the Shorts chain's segments.
+  const n = (body.mode === "restyle" && maker.looks === "fuobe" ? planSegments(range, maker.engine).length : pieces.length) || 1;
   if (target === "paint" && maker.engine === "cloud" && body.mode === "swap" && n > 1) {
     points = opts.probe ? await pointsFromPaint(body.mask!, source, "Paint over what to swap first") : [{ x: 1, y: 1, label: "positive" }];
   }

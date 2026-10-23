@@ -30,6 +30,7 @@ import {
   getMode,
   makersFor,
   MODE_TARGETS,
+  OPEN_TARGET_PROBLEM,
   TARGET_LABELS,
   type GenjutsuLook,
   type GenjutsuMode,
@@ -105,7 +106,10 @@ export function GenjutsuStudio() {
   const guard = useSubmitGuard();
   const history = useGenerations({ features: [GENJUTSU.feature], limit: 24 });
 
-  const target = MODE_TARGETS[mode].length ? (targets[mode] ?? MODE_TARGETS[mode][0]) : undefined;
+  // The ways of pointing this engine has a model for (the open graphs: swap by name, insert by paint).
+  const supported = MODE_TARGETS[mode].filter((t) => makersFor(engine, mode, t).length > 0);
+  const wanted = targets[mode] ?? MODE_TARGETS[mode][0];
+  const target = MODE_TARGETS[mode].length ? (supported.includes(wanted) ? wanted : (supported[0] ?? wanted)) : undefined;
   const prompt = prompts[mode] ?? "";
   const duration = clipDuration(clip);
   const size = clipSize(clip);
@@ -293,7 +297,7 @@ export function GenjutsuStudio() {
               : refs.some((r) => r.uploading) || custom.some((r) => r.uploading)
                 ? "Uploading your images…"
                 : estimate.isError
-                  ? (estimate.error as Error).message
+                  ? friendly((estimate.error as Error).message)
                   : null;
 
   const start = (seed?: number) => {
@@ -306,7 +310,7 @@ export function GenjutsuStudio() {
         setRun({ final: r.final.id, ids: r.items.map((g) => g.id), before: clip!.preview, start: range!.startTime, ratio });
         toast("Genjutsu is on it", { description: "Follow it below — it lands in your Library too." });
       })
-      .catch((e: Error) => toast.error(e.message));
+      .catch((e: Error) => toast.error(friendly(e.message)));
   };
 
   const modeInfo = getMode(mode);
@@ -382,7 +386,10 @@ export function GenjutsuStudio() {
                   ) : (
                     <div className="grid aspect-video place-items-center rounded-xl bg-muted text-[13px] text-muted-foreground">
                       {frameError ? (
-                        <p className="max-w-xs px-4 text-center">This browser can&apos;t show the clip&apos;s frames (an H.265 or ProRes file?). Saying it in words works without them.</p>
+                        <p className="max-w-xs px-4 text-center">
+                          This browser can&apos;t show the clip&apos;s frames (an H.265 or ProRes file?).{" "}
+                          {supported.includes("type") ? "Saying it in words works without them." : "Save it as an MP4 (H.264) and add it again — or say where in words on the cloud engine."}
+                        </p>
                       ) : (
                         <Loader2 className="size-5 animate-spin" aria-label="Reading the first frame" />
                       )}
@@ -458,8 +465,14 @@ export function GenjutsuStudio() {
                     label={mode === "insert" ? "Where does it go?" : "What gets swapped?"}
                     value={target!}
                     onChange={(t) => setTargets((x) => ({ ...x, [mode]: t }))}
-                    options={MODE_TARGETS[mode].map((t) => ({ value: t, label: TARGET_LABELS[mode][t]!.label }))}
+                    options={MODE_TARGETS[mode].map((t) => ({
+                      value: t,
+                      label: TARGET_LABELS[mode][t]!.label,
+                      disabled: !supported.includes(t),
+                      title: supported.includes(t) ? TARGET_LABELS[mode][t]!.hint : "On the cloud engine",
+                    }))}
                   />
+                  {supported.length < MODE_TARGETS[mode].length && <p className="text-[12px] text-muted-foreground">{OPEN_TARGET_PROBLEM[mode]}.</p>}
                 </Field>
               )}
 
@@ -476,18 +489,20 @@ export function GenjutsuStudio() {
                 </Field>
               )}
 
-              <Field label={PROMPT_LABEL[mode](target)} htmlFor="gj-prompt">
-                <Textarea
-                  id="gj-prompt"
-                  value={prompt}
-                  onChange={(e) => setPrompts((x) => ({ ...x, [mode]: e.target.value }))}
-                  maxLength={GENJUTSU.maxPromptChars}
-                  rows={2}
-                  disabled={mode === "restyle" && lookSource !== "higgsfield"}
-                  placeholder={PROMPT_PLACEHOLDER[mode]}
-                  className="resize-none text-[13px]"
-                />
-              </Field>
+              {/* Fuobe's looks are words of their own; extra words go with Higgsfield's looks. */}
+              {(mode !== "restyle" || lookSource === "higgsfield") && (
+                <Field label={PROMPT_LABEL[mode](target)} htmlFor="gj-prompt">
+                  <Textarea
+                    id="gj-prompt"
+                    value={prompt}
+                    onChange={(e) => setPrompts((x) => ({ ...x, [mode]: e.target.value }))}
+                    maxLength={GENJUTSU.maxPromptChars}
+                    rows={2}
+                    placeholder={PROMPT_PLACEHOLDER[mode]}
+                    className="resize-none text-[13px]"
+                  />
+                </Field>
+              )}
 
               {maker && options.length > 1 && (
                 <Field label="Model">
@@ -532,7 +547,7 @@ export function GenjutsuStudio() {
                         </p>
                         {est && (
                           <p className="text-[12px] leading-snug text-muted-foreground">
-                            {est.modelName} · {est.seconds} s{est.pieces > 1 ? ` in ${est.pieces} ${engine === "open" && mode !== "restyle" ? "windows" : "pieces"}` : ""}
+                            {est.modelName} · {est.seconds} s{est.pieces > 1 ? ` in ${est.pieces} ${mode === "restyle" ? "segments" : engine === "open" ? "windows" : "pieces"}` : ""}
                           </p>
                         )}
                       </>
@@ -583,6 +598,9 @@ export function GenjutsuStudio() {
   );
 }
 
+/** A dropped connection in words (the browser says "Failed to fetch"). */
+const friendly = (msg: string) => (/failed to fetch|networkerror|load failed/i.test(msg) ? "Couldn't reach Fuobe — check that it's running, then try again" : msg);
+
 /** Restyle before a look is picked: the kind of look the tab stands for (so the model list matches it). */
 function lookPlaceholder(s: LookSource): GenjutsuLook {
   return s === "higgsfield" ? { kind: "higgsfield", id: "" } : s === "custom" ? { kind: "custom", images: [] } : { kind: "preset", id: "" };
@@ -608,7 +626,7 @@ const PROMPT_PLACEHOLDER: Record<GenjutsuMode, string> = {
   motion: "e.g. “a knight in silver armour, in a stone hall”",
   swap: "e.g. “a white horse trotting at the same pace”",
   insert: "e.g. “on the table, next to the cup”",
-  restyle: "With Higgsfield's looks: e.g. “keep her pink hair”",
+  restyle: "e.g. “keep her pink hair the same in every shot”",
 };
 
 function frameHint(mode: GenjutsuMode, target: GenjutsuTarget | undefined, points: number, painted: boolean): string {
