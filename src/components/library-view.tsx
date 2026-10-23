@@ -1,13 +1,15 @@
 "use client";
 
-import { ArchiveRestore, CheckSquare, ChevronUp, Download, FolderInput, Heart, Loader2, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetCard, cardRatio, type CardApi } from "@/components/library/asset-card";
-import { FilterBar, filterFields, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
+import { FilterBar, filterFields, filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
 import { FolderDialog, FolderHeader, FolderStrip, MoveMenuItems } from "@/components/library/folders";
+import { ReviewMenuItems } from "@/components/library/review";
+import { UploadDeleteProvider } from "@/components/library/upload-delete";
 import { useViewPrefs, ViewOptions, type ViewPrefs } from "@/components/library/view-options";
 import { PageShell } from "@/components/page-shell";
 import { downloadUrl, ForeverConfirmProvider, useConfirmForever } from "@/components/studio/result-actions";
@@ -28,7 +30,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind } from "@/lib/catalog/types";
-import { buildEntries, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
+import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
@@ -213,40 +215,55 @@ function Inner() {
   const uploadsTab = tab.id === "uploads";
   const [q, setQ] = useState("");
   const dq = useDebounced(q.trim(), 250);
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [chosen, setFilters] = useState<Filters>(NO_FILTERS);
   const [prefs, setPrefs] = useViewPrefs();
-  const facets = useLibraryFacets();
   const folders = useFolders();
-  const folder = folderId ? folders.data?.find((f) => f.id === folderId) : undefined;
+  const allFolders = useMemo(() => folders.data ?? [], [folders.data]);
+  const folder = folderId ? allFolders.find((f) => f.id === folderId) : undefined;
+  // The filters chosen stay across tabs and folders; the ones this view hides (Pinned and Show steps
+  // in the Trash, Subfolders in a folder without any, all of them in Uploads) are off here.
+  const filters = useMemo(() => filtersFor(chosen, { trash, uploads: uploadsTab, subfolders: !!folder?.folders }), [chosen, trash, uploadsTab, folder?.folders]);
+  const facets = useLibraryFacets({ steps: filters.steps });
   const actions = useGenerationActions();
   const create = useCreateGeneration();
 
+  // "Subfolders" on: the folder and every folder inside it.
+  const subtree = useMemo(() => (folderId && filters.subfolders && folders.data ? folderAndDescendants(folders.data, folderId) : null), [folderId, filters.subfolders, folders.data]);
   const filter = useMemo<FeedFilter>(
     () => ({
       ...(tab.kinds && { kinds: tab.kinds }),
       ...(tab.id === "favorites" && { favorites: true }),
-      ...(trash && { trashed: true }),
-      ...(folderId && !trash && { folderId }),
+      // The Trash shows everything in it, helper steps too: deleting a Shorts session trashes its steps, and they can come back.
+      ...(trash && { trashed: true, steps: true }),
+      ...(folderId && !trash && (subtree ? { folderIds: subtree } : { folderId })),
       ...(dq && { q: dq }),
       ...filterFields(filters),
     }),
-    [tab, trash, folderId, dq, filters],
+    [tab, trash, folderId, subtree, dq, filters],
   );
-  const lib = useLibrary(filter);
+  // Pinned results sit above the rest of the view (not in the Trash or Uploads); the Pinned filter shows only them.
+  const split = !trash && !uploadsTab && !filters.pinned;
+  const pinnedLib = useLibrary(useMemo(() => ({ ...filter, pinned: true, limit: 200 }), [filter]), { enabled: split });
+  const lib = useLibrary(useMemo(() => (trash || uploadsTab ? filter : { ...filter, pinned: filters.pinned }), [filter, trash, uploadsTab, filters.pinned]));
   const uploads = useUploads();
-  const items = useMemo(() => {
+  const pinnedItems = useMemo(() => (split ? (pinnedLib.data?.pages.flat() ?? []) : []), [split, pinnedLib.data]);
+  const mainItems = useMemo(() => {
     if (!uploadsTab) return lib.data?.pages.flat() ?? [];
     // Uploads search by file name.
     const all = (uploads.data?.pages.flat() ?? []).map(uploadAsGeneration);
     return dq ? all.filter((g) => g.request.prompt?.toLowerCase().includes(dq.toLowerCase())) : all;
   }, [uploadsTab, uploads.data, lib.data, dq]);
-  const built = useMemo(() => buildEntries(items, { stacks: prefs.stacks && !trash && !uploadsTab }), [items, prefs.stacks, trash, uploadsTab]);
-  const entries = useStableEntries(built);
+  const items = useMemo(() => (pinnedItems.length ? [...pinnedItems, ...mainItems] : mainItems), [pinnedItems, mainItems]);
+  const stacks = prefs.stacks && !trash && !uploadsTab;
+  const entries = useStableEntries(useMemo(() => buildEntries(mainItems, { stacks }), [mainItems, stacks]));
+  // Its own stack keys: a batch with pinned and unpinned members has a stack in both sections, expanded and selected apart.
+  const pinnedEntries = useStableEntries(useMemo(() => buildEntries(pinnedItems, { stacks, prefix: "pinned:" }), [pinnedItems, stacks]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const sections = useMemo(() => {
     const when = (e: LibraryEntry) => Math.max(...members(e).map((g) => (trash ? (g.deletedAt ?? g.createdAt) : g.createdAt)));
-    return prefs.splitByDate ? splitByDate(entries, when) : [{ key: 0, label: "", items: entries }];
-  }, [entries, prefs.splitByDate, trash]);
+    const rest = prefs.splitByDate ? splitByDate(entries, when) : [{ key: 0, label: pinnedEntries.length ? "Everything else" : "", items: entries }];
+    return pinnedEntries.length ? [{ key: -1, label: "Pinned", items: pinnedEntries }, ...rest] : rest;
+  }, [entries, pinnedEntries, prefs.splitByDate, trash]);
 
   // --- Selection ---------------------------------------------------------------------------
   const [selecting, setSelecting] = useState(false);
@@ -400,6 +417,9 @@ function Inner() {
   };
   const visibleTabs = TABS.filter((t) => !t.kinds || t.id === "images" || t.id === "videos" || t.id === "audio" || (facets.data?.kinds[t.kinds[0]] ?? 0) > 0 || tab.id === t.id);
   const allFav = selectedGens.length > 0 && selectedGens.every((g) => g.favorite);
+  const allPinned = selectedGens.length > 0 && selectedGens.every((g) => g.pinnedAt);
+  // The bulk bar's review menu checks a status only when every selected result has it.
+  const sameReview = selectedGens.length && selectedGens.every((g) => (g.review ?? null) === (selectedGens[0].review ?? null)) ? (selectedGens[0].review ?? null) : undefined;
 
   const empty = () => {
     if (dq) {
@@ -408,6 +428,16 @@ function Inner() {
           Try another word.{" "}
           <button onClick={() => setQ("")} className="text-brand-text hover:underline">
             Clear search
+          </button>
+        </Empty>
+      );
+    }
+    if (filters.pinned && !dq) {
+      return (
+        <Empty title="Nothing pinned here yet">
+          Pin results from their ⋯ menu (or select some and choose Pin) to keep them at the top.{" "}
+          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text hover:underline">
+            Show everything
           </button>
         </Empty>
       );
@@ -422,6 +452,16 @@ function Inner() {
       );
     }
     if (trash) return <Empty title="Trash is empty">Generations you delete stay here for {TRASH_DAYS} days, then go for good.</Empty>;
+    if (folder?.folders) {
+      return (
+        <Empty title="Nothing here directly">
+          What&apos;s in this folder is in the folders above.{" "}
+          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text hover:underline">
+            Show their results here
+          </button>
+        </Empty>
+      );
+    }
     if (folder) return <Empty title="This folder is empty">Drag cards onto it, or select some and choose Move to folder.</Empty>;
     if (tab.id === "favorites") return <Empty title="Nothing liked yet">Mark the ones you like with the heart to keep them here.</Empty>;
     if (uploadsTab) return <Empty title="No uploads yet">Files you add to a studio show up here.</Empty>;
@@ -439,11 +479,11 @@ function Inner() {
     <PageShell wide>
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-5">
         {folder ? (
-          <FolderHeader folder={folder} onBack={() => go({ folder: undefined })} onMoveOut={(list) => void moveTo(list, null, "Library")} />
+          <FolderHeader folder={folder} all={allFolders} steps={filters.steps} onGo={(f) => go({ folder: f?.id })} onMoveItems={(list, to) => void moveTo(list, to?.id ?? null, to?.name ?? "Library")} />
         ) : foldersLoading ? (
-          <div className="flex h-[52px] min-w-0 items-center gap-2" aria-busy="true" aria-label="Loading folder">
-            <Skeleton className="h-8 w-24 rounded-full" />
-            <Skeleton className="h-7 w-48 rounded-lg" />
+          <div className="flex min-w-0 flex-col gap-1.5" aria-busy="true" aria-label="Loading folder">
+            <Skeleton className="h-7 w-28 rounded-full" />
+            <Skeleton className="h-8 w-48 rounded-lg" />
           </div>
         ) : (
           <div className="min-w-0">
@@ -533,15 +573,15 @@ function Inner() {
         </div>
       )}
 
-      {tab.id === "all" && !folderId && (folders.data?.length || !loading) ? (
+      {(tab.id === "all" && !folderId && (folders.data?.length || !loading)) || (folder && !trash) ? (
         <div className="mb-4">
-          <FolderStrip folders={folders.data ?? []} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
         </div>
       ) : null}
 
       {!uploadsTab && !missingFolder && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <FilterBar value={filters} onChange={setFilters} facets={facets.data} />
+          <FilterBar value={filters} onChange={setFilters} facets={facets.data} subfolders={!!folder?.folders} scoped={!!folderId || tab.id !== "all" || !!dq} trash={trash} />
           {trash && (
             <div className="flex items-center gap-3 text-[13px] text-muted-foreground">
               <span>Items stay here for {TRASH_DAYS} days.</span>
@@ -575,7 +615,8 @@ function Inner() {
           {sections.map((s) => (
             <section key={s.key} aria-label={s.label || "Results"}>
               {s.label && (
-                <h2 className="mb-2.5 flex items-baseline gap-2 text-[13px] font-medium">
+                <h2 className="mb-2.5 flex items-center gap-1.5 text-[13px] font-medium">
+                  {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
                   {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
                 </h2>
               )}
@@ -636,7 +677,19 @@ function Inner() {
       {(selecting || selected.size > 0) && !uploadsTab && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:pl-[var(--sidebar-width,0px)]">
           <div role="toolbar" aria-label="Selection" className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-full border bg-background p-1.5 shadow-strong">
-            <span className="shrink-0 px-2.5 text-[13px] font-medium whitespace-nowrap">{selected.size ? `${selected.size} selected` : "Select items"}</span>
+            {/* Phones show just the count, so every action fits at 390 px. */}
+            <span className="shrink-0 px-2.5 text-[13px] font-medium whitespace-nowrap">
+              {selected.size ? (
+                <>
+                  {selected.size}
+                  <span className="hidden sm:inline"> selected</span>
+                </>
+              ) : (
+                <>
+                  Select<span className="hidden sm:inline"> items</span>
+                </>
+              )}
+            </span>
             {trash ? (
               <>
                 <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
@@ -655,6 +708,22 @@ function Inner() {
                   }}
                 />
                 <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selected.size} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
+                <BarButton
+                  icon={allPinned ? PinOff : Pin}
+                  label={allPinned ? "Unpin" : "Pin"}
+                  disabled={!selected.size}
+                  onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
+                />
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild disabled={!selected.size}>
+                    <button className={BAR} disabled={!selected.size} aria-label="Review status" title="Review status">
+                      <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="center" collisionPadding={12} className="min-w-44">
+                    <ReviewMenuItems value={sameReview} onPick={(r) => void actions.review(selectedGens, r).then((n) => n && toast(r ? `Marked ${n} as ${reviewInfo(r)?.label}` : `Cleared the review status of ${n}`))} />
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild disabled={!selected.size}>
                     <button className={BAR} disabled={!selected.size}>
@@ -687,6 +756,7 @@ function Inner() {
 
       {newFolderFor && (
         <FolderDialog
+          parent={folder ?? null}
           open
           onOpenChange={(v) => !v && setNewFolderFor(null)}
           onSaved={(f) => {
@@ -744,7 +814,9 @@ export function LibraryView() {
   return (
     <Suspense fallback={null}>
       <ForeverConfirmProvider>
-        <Inner />
+        <UploadDeleteProvider>
+          <Inner />
+        </UploadDeleteProvider>
       </ForeverConfirmProvider>
     </Suspense>
   );

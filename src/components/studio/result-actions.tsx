@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   AudioLines,
   Box,
+  CircleDot,
   Clapperboard,
   Columns2,
   Copy,
@@ -17,6 +18,7 @@ import {
   Layers2,
   Mic2,
   MoreHorizontal,
+  Pin,
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
@@ -45,8 +47,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ReviewMenuItems } from "@/components/library/review";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCreateGeneration, useGenerationActions, useSaveElement } from "@/lib/api";
@@ -82,7 +88,10 @@ export const ACTION_ICONS: Record<OutputActionId, LucideIcon> = {
   compare: Columns2,
   reuse: RotateCcw,
   "copy-prompt": Copy,
+  pin: Pin,
+  review: CircleDot,
   delete: Trash2,
+  "delete-upload": Trash2,
   restore: ArchiveRestore,
   "delete-forever": Trash2,
 };
@@ -170,11 +179,18 @@ export function ForeverConfirmProvider({ children }: { children: React.ReactNode
 /** The Trash's confirm step (null outside a ForeverConfirmProvider). */
 export const useConfirmForever = () => useContext(ForeverCtx);
 
+/**
+ * Deleting an upload checks first that nothing uses it (UploadDeleteProvider in
+ * components/library/upload-delete.tsx fills this in; null elsewhere, where uploads aren't shown).
+ */
+export const UploadDeleteContext = createContext<((g: Generation, after?: () => void) => void) | null>(null);
+
 /** Handlers for the actions that aren't plain links. "save-character" is handled by the caller's popover. */
 export function useActionRunner(opts: RunnerOptions = {}) {
   const actions = useGenerationActions();
   const create = useCreateGeneration();
   const confirmForever = useConfirmForever();
+  const deleteUpload = useContext(UploadDeleteContext);
   return (a: OutputAction, g: Generation, index: number) => {
     const o = g.outputs[index];
     switch (a.id) {
@@ -203,6 +219,11 @@ export function useActionRunner(opts: RunnerOptions = {}) {
         return opts.onCompare?.();
       case "view-3d":
         return opts.onOpen?.(g, index);
+      case "pin":
+        void actions.pin([g], !g.pinnedAt);
+        return void toast(g.pinnedAt ? "Unpinned" : "Pinned to the top of the Library", { id: "pin" });
+      case "delete-upload":
+        return deleteUpload?.(g, opts.onDeleted);
       case "delete":
         void actions.trash([g]);
         return opts.onDeleted?.();
@@ -444,12 +465,25 @@ export function ActionMenu({
   label?: string;
   defaultOpen?: boolean;
 }) {
+  const actions = useGenerationActions();
   const destructive = list.filter((a) => a.destructive);
   const rest = list.filter((a) => !a.destructive);
   // Focus goes back to ⋯ when the menu closes, except when it hands over to the Save-as-element popover.
   const handingOff = useRef(false);
   const item = (a: OutputAction) => {
     const Icon = ACTION_ICONS[a.id];
+    if (a.id === "review") {
+      return (
+        <DropdownMenuSub key={a.id}>
+          <DropdownMenuSubTrigger>
+            <Icon /> {a.label}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent collisionPadding={12} className="min-w-44">
+            <ReviewMenuItems value={g.review ?? null} onPick={(r) => void actions.review([g], r)} />
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      );
+    }
     if (a.href && a.download !== undefined) {
       return (
         <DropdownMenuItem key={a.id} asChild>

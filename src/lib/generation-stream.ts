@@ -8,10 +8,10 @@
  */
 import { replaceEqualDeep } from "@tanstack/react-query";
 import type { Generation } from "./catalog/types";
-import { byDeleted, byNewest, matchesFilter, type FeedFilter } from "./library";
+import { listOrder, matchesFilter, type FeedFilter } from "./library";
 
-/** Lists are newest first; the Trash is most recently deleted first. */
-const orderFor = (f: FeedFilter) => (f.trashed ? byDeleted : byNewest);
+/** Lists are newest first; the Trash is most recently deleted first, a pinned list most recently pinned first. */
+const orderFor = listOrder;
 
 export type StreamEvent = { type: "generation"; generation: Generation } | { type: "deleted"; id: string };
 

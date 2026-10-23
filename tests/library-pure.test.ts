@@ -1,9 +1,34 @@
 import { describe, expect, it } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
 import { applyToList, applyToPages, applyToThread, backoff, needsCatchUp, parseSse, shareById, sharePagesById, streamResponse, toChannelMessage, toStreamEvent } from "@/lib/generation-stream";
-import { buildEntries, byDeleted, byNewest, cursorAfter, dayLabel, downloadName, filterToSearch, matchesFilter, splitByDate, trashDaysLeft, userTitle } from "@/lib/library";
+import {
+  buildEntries,
+  byDeleted,
+  byNewest,
+  byPinned,
+  childFolders,
+  cursorAfter,
+  dayLabel,
+  describeUses,
+  downloadName,
+  filterToSearch,
+  folderAndDescendants,
+  folderMoveError,
+  folderPath,
+  folderTree,
+  freeName,
+  isHelperFeature,
+  matchesFilter,
+  MAX_FOLDER_DEPTH,
+  splitByDate,
+  trashDaysLeft,
+  userTitle,
+  zipSegment,
+  type Folder,
+} from "@/lib/library";
 import { toSrt, toVtt } from "@/lib/cues";
 import { cueTime, layerInfo, modelPreview, outputActions, shownOutputs, textOf } from "@/lib/output-actions";
+import { filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
 
 let n = 0;
 function gen(p: Partial<Generation> = {}): Generation {
@@ -52,6 +77,8 @@ describe("outputActions", () => {
       "menu:save-character",
       "menu:reuse",
       "menu:copy-prompt",
+      "menu:pin",
+      "menu:review",
       "menu:delete",
     ]);
     const [animate, download] = outputActions(gen({ id: "abcdef123456" }), 0);
@@ -73,7 +100,21 @@ describe("outputActions", () => {
 
   it("gives videos Extend first and the video hand-offs", () => {
     const g = gen({ kind: "video", op: "t2v", outputs: [{ url: "/api/files/o/v.mp4", kind: "video", draftId: "d1" }] });
-    expect(ids(g)).toEqual(["primary:extend", "bar:download", "bar:favorite", "menu:reframe", "menu:lipsync", "menu:upscale", "menu:add-sound", "menu:grade", "menu:finalize", "menu:copy-prompt", "menu:delete"]);
+    expect(ids(g)).toEqual([
+      "primary:extend",
+      "bar:download",
+      "bar:favorite",
+      "menu:reframe",
+      "menu:lipsync",
+      "menu:upscale",
+      "menu:add-sound",
+      "menu:grade",
+      "menu:finalize",
+      "menu:copy-prompt",
+      "menu:pin",
+      "menu:review",
+      "menu:delete",
+    ]);
   });
 
   it("handles audio, text, 3D, layers, favorites and the Trash", () => {
@@ -330,5 +371,182 @@ describe("round-3 fixes", () => {
     expect(shownOutputs(glb)).toEqual([0]);
     expect(shownOutputs(gen({ outputs: [{ url: "/1.png", kind: "image" }, { url: "/2.png", kind: "image" }] }))).toEqual([0, 1]);
     expect(modelPreview(glb, glb.outputs[0]).video).toBe("/t.mp4");
+  });
+});
+
+describe("round 4: helper steps, pins, review, nested folders, where a file is used", () => {
+  const ev = (g: Generation) => ({ type: "generation" as const, generation: g });
+
+  it("knows every helper feature the studios create, and nothing else", () => {
+    for (const f of ["shorts-step", "mixed-media-step", "marketing-step", "click-to-ad-step", "ad-multiplier-step", "mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard"]) {
+      expect(isHelperFeature(f), f).toBe(true);
+    }
+    for (const f of ["image", "shorts", "mixed-media", "marketing", "click-to-ad", "ad-multiplier", "dub", "katana", "faceless", "explainer", "storyboard", "storyboard-film", "upload", "app:app-step-up"]) {
+      expect(isHelperFeature(f), f).toBe(false);
+    }
+  });
+
+  it("leaves helper steps out of lists that don't name their features, as the server does", () => {
+    const step = gen({ feature: "shorts-step" });
+    expect(matchesFilter(step, {})).toBe(false);
+    expect(matchesFilter(step, { kinds: ["image"] })).toBe(false);
+    expect(matchesFilter(step, { steps: true })).toBe(true);
+    // A studio reading its own steps names them.
+    expect(matchesFilter(gen({ feature: "mixed-media-step" }), { features: ["mixed-media", "mixed-media-step"] })).toBe(true);
+    expect(matchesFilter(step, { features: ["shorts*"] })).toBe(true);
+    // The live stream doesn't slip one into the home feed or the Library.
+    const list = [gen()];
+    expect(applyToList(list, { limit: 6 }, ev(step))).toBe(list);
+    expect(applyToList(list, { limit: 6, steps: true }, ev(step))).toHaveLength(2);
+    expect(filterToSearch({ steps: true }).get("steps")).toBe("1");
+    expect(filterToSearch({}).get("steps")).toBeNull();
+  });
+
+  it("keeps pinned results in their own list, most recently pinned first", () => {
+    const a = gen({ id: "pa", pinnedAt: 100 });
+    const b = gen({ id: "pb", pinnedAt: 300 });
+    const c = gen({ id: "pc", pinnedAt: null });
+    expect(matchesFilter(a, { pinned: true })).toBe(true);
+    expect(matchesFilter(c, { pinned: true })).toBe(false);
+    expect(matchesFilter(a, { pinned: false })).toBe(false);
+    expect(matchesFilter(c, { pinned: false })).toBe(true);
+    expect(matchesFilter(c, {})).toBe(true);
+    expect([a, b].sort(byPinned).map((g) => g.id)).toEqual(["pb", "pa"]);
+    expect(cursorAfter(a, { pinned: true })).toBe("100:pa");
+    expect(cursorAfter(a, {})).toBe(`${a.createdAt}:pa`);
+    expect(filterToSearch({ pinned: true }).get("pinned")).toBe("1");
+    expect(filterToSearch({ pinned: false }).get("pinned")).toBe("0");
+    // Pinning moves a card from the main list to the pinned list (in pin order); unpinning moves it back.
+    const pinnedList = [b, a];
+    const pinnedC = { ...c, pinnedAt: 200, updatedAt: c.updatedAt + 1 };
+    expect(applyToList(pinnedList, { pinned: true }, ev(pinnedC))!.map((g) => g.id)).toEqual(["pb", "pc", "pa"]);
+    expect(applyToList([c], { pinned: false }, ev(pinnedC))).toEqual([]);
+    expect(applyToList(pinnedList, { pinned: true }, ev({ ...a, pinnedAt: null, updatedAt: a.updatedAt + 1 }))!.map((g) => g.id)).toEqual(["pb"]);
+  });
+
+  it("filters by review status, with “none” for results without one", () => {
+    const ok = gen({ review: "approved" });
+    const none = gen({ review: null });
+    expect(matchesFilter(ok, { reviews: ["approved"] })).toBe(true);
+    expect(matchesFilter(ok, { reviews: ["rejected", "needs-review"] })).toBe(false);
+    expect(matchesFilter(none, { reviews: ["none"] })).toBe(true);
+    expect(matchesFilter(ok, { reviews: ["none"] })).toBe(false);
+    expect(filterToSearch({ reviews: ["approved", "none"] }).get("reviews")).toBe("approved,none");
+    expect(filterToSearch({ folderIds: ["a", "b"] }).get("folders")).toBe("a,b");
+    expect(matchesFilter(gen({ folderId: "b" }), { folderIds: ["a", "b"] })).toBe(true);
+    expect(matchesFilter(gen({ folderId: null }), { folderIds: ["a", "b"] })).toBe(false);
+  });
+
+  it("offers Pin and Review on results, and a checked Delete on uploads", () => {
+    const ids = (g: Generation) => outputActions(g, 0).map((a) => a.id);
+    expect(outputActions(gen(), 0).find((a) => a.id === "pin")?.label).toBe("Pin to top");
+    expect(outputActions(gen({ pinnedAt: 5 }), 0).find((a) => a.id === "pin")?.label).toBe("Unpin");
+    expect(ids(gen())).toContain("review");
+    expect(ids(gen({ deletedAt: 5 }))).not.toContain("pin");
+    const upload = gen({ feature: "upload" });
+    expect(ids(upload)).toContain("delete-upload");
+    expect(ids(upload)).not.toContain("pin");
+    expect(ids(upload)).not.toContain("review");
+  });
+
+  const folder = (id: string, parentId: string | null, p: Partial<Folder> = {}): Folder => ({
+    id,
+    name: id.toUpperCase(),
+    color: "lime",
+    count: 0,
+    folders: 0,
+    cover: null,
+    parentId,
+    pinnedAt: null,
+    createdAt: 1,
+    updatedAt: 1,
+    ...p,
+  });
+  // a ─ b ─ c, a ─ d; e at the root
+  const tree = [folder("a", null, { createdAt: 1 }), folder("b", "a", { createdAt: 2 }), folder("c", "b"), folder("d", "a", { createdAt: 3 }), folder("e", null, { createdAt: 2 })];
+
+  it("walks nested folders: children, breadcrumbs, subtrees, tree order", () => {
+    expect(childFolders(tree, null).map((f) => f.id)).toEqual(["a", "e"]);
+    expect(childFolders(tree, "a").map((f) => f.id)).toEqual(["b", "d"]);
+    // Pinned first, in the order they were pinned.
+    const pinned = tree.map((f) => (f.id === "e" ? { ...f, pinnedAt: 9 } : f.id === "d" ? { ...f, pinnedAt: 5 } : f));
+    expect(childFolders(pinned, null).map((f) => f.id)).toEqual(["e", "a"]);
+    expect(childFolders(pinned, "a").map((f) => f.id)).toEqual(["d", "b"]);
+    expect(folderPath(tree, "c").map((f) => f.id)).toEqual(["a", "b", "c"]);
+    expect(folderPath(tree, "gone")).toEqual([]);
+    // A loop in bad data doesn't hang the breadcrumbs.
+    expect(folderPath([folder("x", "y"), folder("y", "x")], "x").map((f) => f.id)).toEqual(["y", "x"]);
+    expect(folderAndDescendants(tree, "a").sort()).toEqual(["a", "b", "c", "d"]);
+    expect(folderAndDescendants(tree, "c")).toEqual(["c"]);
+    expect(folderTree(tree).map(({ folder: f, depth }) => `${f.id}${depth}`)).toEqual(["a0", "b1", "c2", "d1", "e0"]);
+  });
+
+  it("refuses folder moves that would loop or nest too deep, in Higgsfield's words", () => {
+    expect(folderMoveError(tree, "a", "a")).toBe("Cannot move into itself");
+    expect(folderMoveError(tree, "a", "c")).toBe("Cannot move into a subfolder");
+    expect(folderMoveError(tree, "a", "b")).toBe("Cannot move into a subfolder");
+    expect(folderMoveError(tree, "b", "a")).toBe("Already in this folder");
+    expect(folderMoveError(tree, "a", null)).toBe("Already in this folder");
+    expect(folderMoveError(tree, "gone", null)).toBe("That folder doesn't exist anymore");
+    expect(folderMoveError(tree, "a", "gone")).toBe("That folder doesn't exist anymore");
+    expect(folderMoveError(tree, "a", "e")).toBeNull();
+    expect(folderMoveError(tree, "c", null)).toBeNull();
+    expect(folderMoveError(tree, "d", "c")).toBeNull();
+    // A chain MAX_FOLDER_DEPTH deep can't take another level below its last folder, nor a 2-level subtree lower down.
+    const chain = Array.from({ length: MAX_FOLDER_DEPTH }, (_, i) => folder(`l${i}`, i ? `l${i - 1}` : null));
+    expect(folderMoveError([...chain, folder("z", null)], "z", `l${MAX_FOLDER_DEPTH - 1}`)).toMatch(/levels deep/);
+    expect(folderMoveError([...chain, folder("z", null)], "z", `l${MAX_FOLDER_DEPTH - 2}`)).toBeNull();
+    expect(folderMoveError([...chain, folder("z", null), folder("z2", "z")], "z", `l${MAX_FOLDER_DEPTH - 2}`)).toMatch(/levels deep/);
+  });
+
+  it("names folders that move up next to a namesake, and folder paths inside a zip", () => {
+    expect(freeName("Drafts", ["Shots"])).toBe("Drafts");
+    expect(freeName("Drafts", ["drafts", "Drafts 2"])).toBe("Drafts 3");
+    expect(zipSegment("Spring / Summer")).toBe("Spring - Summer");
+    expect(zipSegment('a<b>:"c|?*')).toBe("abc");
+    expect(zipSegment("..")).toBe("Folder");
+    expect(zipSegment("  ")).toBe("Folder");
+  });
+
+  it("says where a file is used, in one line", () => {
+    expect(describeUses([])).toBe("");
+    expect(describeUses([{ what: "result", key: "g1", name: null }])).toBe("1 result");
+    expect(
+      describeUses([
+        { what: "result", key: "g1", name: "a fox" },
+        { what: "result", key: "g2", name: null, trashed: true },
+        { what: "element", key: "c1", name: "Maya" },
+        // A chat found in two tables is one chat.
+        { what: "Assist chat", key: "t1", name: "Posters" },
+        { what: "Assist chat", key: "t1", name: "Posters" },
+        { what: "canvas", key: "k1", name: "A" },
+        { what: "canvas", key: "k2", name: "B" },
+      ]),
+    ).toBe("2 results (1 in the Trash), the element “Maya”, the Assist chat “Posters” and 2 canvases");
+    expect(describeUses([{ what: "result", key: "g", name: "x", trashed: true }])).toBe("the result “x” (in the Trash)");
+  });
+
+  it("keys the Pinned section's stacks apart from the main list's (one batch can have a stack in each)", () => {
+    const pinned = [gen({ batchId: "bx", pinnedAt: 2 }), gen({ batchId: "bx", pinnedAt: 1 })];
+    const rest = [gen({ batchId: "bx" }), gen({ batchId: "bx" })];
+    const top = buildEntries(pinned, { prefix: "pinned:" });
+    const main = buildEntries(rest);
+    expect(top.map((e) => e.key)).toEqual(["pinned:stack:bx"]);
+    expect(main.map((e) => e.key)).toEqual(["stack:bx"]);
+    // Singles keep their id: a result is in one section only.
+    expect(buildEntries([gen({ id: "solo" })], { prefix: "pinned:" }).map((e) => e.key)).toEqual(["solo"]);
+  });
+
+  it("turns off the filters a view hides, keeping the choice for the views that show them", () => {
+    const chosen: Filters = { ...NO_FILTERS, pinned: true, steps: true, subfolders: true, review: "approved" };
+    // The Trash: no Pinned or Show steps chip, so neither can empty it or ask to be cleared.
+    const trash = filtersFor(chosen, { trash: true, subfolders: true });
+    expect(trash).toMatchObject({ pinned: false, steps: false, subfolders: true, review: "approved" });
+    expect(hasFilters(filtersFor({ ...NO_FILTERS, pinned: true }, { trash: true }))).toBe(false);
+    // A folder without subfolders: no Subfolders chip.
+    expect(filtersFor(chosen, {})).toMatchObject({ pinned: true, steps: true, subfolders: false });
+    expect(filtersFor(chosen, { uploads: true })).toBe(NO_FILTERS);
+    // Nothing hidden: the same object, so memoized lists don't refetch.
+    expect(filtersFor(chosen, { subfolders: true })).toBe(chosen);
   });
 });

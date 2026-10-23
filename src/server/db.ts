@@ -438,6 +438,13 @@ const MIGRATIONS: string[] = [
     sent_json TEXT
   );
   CREATE INDEX IF NOT EXISTS assist_thread_state_project ON assist_thread_state(project_id);`,
+  // round 4 (r4/library-plus): nested library folders (a parent), pins on folders and results, and a review status on results.
+  `ALTER TABLE folders ADD COLUMN parent_id TEXT;
+  ALTER TABLE folders ADD COLUMN pinned_at INTEGER;
+  CREATE INDEX IF NOT EXISTS folders_parent ON folders(parent_id);
+  ALTER TABLE generations ADD COLUMN pinned_at INTEGER;
+  ALTER TABLE generations ADD COLUMN review TEXT;
+  CREATE INDEX IF NOT EXISTS generations_pinned ON generations(pinned_at) WHERE pinned_at IS NOT NULL;`,
 ];
 
 declare global {
