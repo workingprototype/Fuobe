@@ -1,3 +1,4 @@
+import { APERTURE, LENS, anglesNote, poseWords, recomposePrompt, type ScenePose } from "@/lib/scene3d";
 import { getModel, getPreset } from "./index";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
@@ -147,6 +148,8 @@ export interface CinemaTakeInfo {
   prompt: string;
   moves?: string[];
   grid?: { size: GridSize; type: GridType };
+  /** A recomposition: the camera of the captured view. */
+  camera?: { lens: number; aperture: number; pose: ScenePose };
 }
 
 /** A generation's membership in a project (and its folder = scene). */
@@ -181,7 +184,7 @@ export interface DirectorMessage {
 }
 
 export type CinemaMode = "video" | "image";
-export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view";
+export type CinemaAction = "generate" | "extend-forward" | "extend-backward" | "edit" | "grid" | "cast" | "location" | "location-view" | "scene" | "recompose";
 export type GridSize = "2x2" | "3x3" | "4x4";
 export type GridType = "freeform" | "zooms" | "shots" | "next_shots" | "prev_shots";
 export type CastValues = Record<string, string | number | string[] | undefined>;
@@ -213,6 +216,17 @@ export interface CinemaGenerateInput {
   cast?: CastValues;
   /** Soul Location: which extra view to render. */
   view?: string;
+  /** "recompose": the view captured in the 3D scene (an uploaded PNG) and the camera it was taken with. */
+  capture?: SceneCapture;
+}
+
+export interface SceneCapture {
+  url: string;
+  /** mm on a full-frame body. */
+  lens: number;
+  /** f-number. */
+  aperture: number;
+  pose: ScenePose;
 }
 
 export interface CinemaContext {
@@ -1129,8 +1143,15 @@ function finish(model: ModelDef, steps: CinemaStep[], notes: string[], blocker?:
   return { model, steps, notes, blocker: first, costUsd: known ? Math.round(total * 1000) / 1000 : null, outputs };
 }
 
-const feature = (action: CinemaAction, mode: CinemaMode) =>
-  action === "grid" ? "cinema-grid" : action === "cast" ? "cinema-cast" : action === "location" || action === "location-view" ? "cinema-location" : mode === "image" ? "cinema-image" : "cinema";
+const FEATURES: Partial<Record<CinemaAction, string>> = {
+  grid: "cinema-grid",
+  cast: "cinema-cast",
+  location: "cinema-location",
+  "location-view": "cinema-location",
+  scene: "cinema-scene",
+  recompose: "cinema-recompose",
+};
+const feature = (action: CinemaAction, mode: CinemaMode) => FEATURES[action] ?? (mode === "image" ? "cinema-image" : "cinema");
 
 /** Prefix the project brief (cast and location prompts are built without the Director). */
 function withBrief(brief: string | undefined, prompt: string): string {
@@ -1438,6 +1459,73 @@ function planEdit(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 3D scene and recomposition (higgsfield-delta-4.md §4.4; paid-model-apis-4.md §8; comfyui-oss-4.md §i)
+
+/** What builds a still's 3D scene: MoGe 2's textured mesh on the open engine, a Marigold depth map on the cloud. */
+export const SCENE_MODELS: Record<Engine, string> = { cloud: "marigold-depth", open: "oss-scene-moge" };
+/** What re-renders a captured view. The first is the default. */
+export const RECOMPOSE_MODELS: Record<Engine, string[]> = { cloud: ["nano-banana-pro", "qwen-multiple-angles"], open: ["oss-qwen-edit"] };
+/** The open scene mesh skips every other pixel: about a quarter of the triangles, light enough for a phone. */
+export const SCENE_DECIMATION = 2;
+
+function planScene(input: CinemaGenerateInput): CinemaPlan {
+  const open = input.engine === "open";
+  const model = getModel(SCENE_MODELS[input.engine])!;
+  const src = input.source?.kind === "image" ? input.source.url : undefined;
+  const notes = [
+    open
+      ? "MoGe 2 turns the whole frame into a textured 3D mesh on your ComfyUI (about 40 s on a CPU)"
+      : "Marigold makes a depth map of the frame, and your browser turns it and the still into a 3D point cloud",
+  ];
+  const params: GenParams = { numOutputs: 1, ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}), ...(open ? { extra: { decimation: SCENE_DECIMATION } } : {}) };
+  return finish(
+    model,
+    [{ key: "main", request: { feature: "cinema-scene", modelId: model.id, op: "scene-3d", prompt: "", inputs: src ? { images: [src] } : undefined, params } }],
+    notes,
+    src ? undefined : "Pick a still to build the scene from",
+  );
+}
+
+/**
+ * Re-render a captured view. Nano Banana Pro (cloud) and Qwen-Image-Edit 2511 with the Multiple-Angles LoRA
+ * (open; its camera words lead the prompt) get the capture as image 1 and the still as image 2. Qwen Multiple
+ * Angles on the cloud re-shoots the still itself from the flown camera's angles instead.
+ */
+function planRecompose(input: CinemaGenerateInput): CinemaPlan {
+  const notes: string[] = [];
+  const open = input.engine === "open";
+  const list = RECOMPOSE_MODELS[input.engine];
+  const model = getModel(input.modelId && list.includes(input.modelId) ? input.modelId : list[0])!;
+  const src = input.source?.kind === "image" ? input.source.url : undefined;
+  const cap = input.capture;
+  const lens = cap?.lens ?? LENS.default;
+  const aperture = cap?.aperture ?? APERTURE.default;
+  const pose = cap?.pose ?? { horizontal: 0, vertical: 0, zoom: 5 };
+  const params = fitParams(model, { ...input, batch: 1, resolution: input.resolution ?? "1K" }, notes, "image");
+  let request: GenerationRequest;
+  if (model.id === "qwen-multiple-angles") {
+    params.extra = { horizontal_angle: pose.horizontal, vertical_angle: pose.vertical, zoom: pose.zoom };
+    request = { feature: "cinema-recompose", modelId: model.id, op: "edit", prompt: anglesNote(lens, aperture, input.prompt), inputs: src ? { images: [src] } : undefined, params };
+    notes.push(`${model.name} re-shoots the still from the angles you flew to (${Math.round(pose.horizontal)}° round, ${Math.round(pose.vertical)}° up, zoom ${pose.zoom}) — the capture itself isn't sent`);
+  } else {
+    const loras = open ? getPreset("app-angles")?.open?.loras : undefined;
+    const words = recomposePrompt(lens, aperture, input.prompt);
+    request = {
+      feature: "cinema-recompose",
+      modelId: model.id,
+      op: "edit",
+      prompt: open ? `<sks> ${poseWords(pose)}. ${words}` : words,
+      inputs: src && cap ? { images: [cap.url, src] } : undefined,
+      params,
+      ...(loras?.length ? { loras } : {}),
+    };
+    notes.push(`${model.name}${loras?.length ? " with the Multiple-Angles LoRA" : ""} re-renders your capture, with the still as the reference for every detail`);
+  }
+  const blocker = !src ? "Pick the scene's still" : !cap ? "Capture a view first" : undefined;
+  return finish(model, [{ key: "main", request }], notes, blocker);
+}
+
 /** Everything a Generate press would run, priced, without running it (the browser shows it live). */
 export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const i = { ...input, settings: input.settings ?? {}, prompt: input.prompt ?? "" };
@@ -1454,6 +1542,10 @@ export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): Cine
       return planExtend(i, ctx);
     case "edit":
       return planEdit(i, ctx);
+    case "scene":
+      return planScene(i);
+    case "recompose":
+      return planRecompose(i);
     default:
       return i.mode === "image" ? planStill(i, ctx) : planVideo(i, ctx);
   }

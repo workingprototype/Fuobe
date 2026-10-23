@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { APERTURE, LENS } from "@/lib/scene3d";
 import { CinemaError } from "./cinema";
 
 /** Request bodies of /api/cinema/** (zod drops unknown keys). */
@@ -78,7 +79,7 @@ export const GenerateBody = z.object({
   input: z.object({
     engine: z.enum(["cloud", "open"]),
     mode: z.enum(["video", "image"]),
-    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view"]).default("generate"),
+    action: z.enum(["generate", "extend-forward", "extend-backward", "edit", "grid", "cast", "location", "location-view", "scene", "recompose"]).default("generate"),
     modelId: z.string().max(80).optional(),
     prompt: z.string().max(60_000).default(""),
     moves: z.array(z.string().max(40)).max(12).optional(),
@@ -96,6 +97,14 @@ export const GenerateBody = z.object({
     grid: z.object({ size: z.enum(["2x2", "3x3", "4x4"]), type: z.enum(["freeform", "zooms", "shots", "next_shots", "prev_shots"]) }).optional(),
     cast: z.record(z.string().max(40), z.union([z.string().max(300), z.number(), z.array(z.string().max(60)).max(10)])).optional(),
     view: z.string().max(20).optional(),
+    capture: z
+      .object({
+        url: FileRef,
+        lens: z.number().min(LENS.min).max(LENS.max),
+        aperture: z.number().min(APERTURE.min).max(APERTURE.max),
+        pose: z.object({ horizontal: z.number().min(0).max(360), vertical: z.number().min(-30).max(90), zoom: z.number().min(0).max(10) }),
+      })
+      .optional(),
   }),
 });
 
