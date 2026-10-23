@@ -88,7 +88,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 await step("skill menu, chip and a chat with the skill loaded", async () => {
   await openRoute(page, `${app}/assist`);
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.click();
   await box.type("/prod");
   await page.getByRole("option", { name: /Product Photographer/ }).waitFor({ timeout: 10_000 });
@@ -108,7 +108,7 @@ await step("skill menu, chip and a chat with the skill loaded", async () => {
 
 await step("remember asks first, then shows on the Memory page", async () => {
   await openRoute(page, `${app}/assist`);
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.fill("Remember that I always want vertical 9:16 videos");
   await box.press("Enter");
   await page.getByText("Remember this?").waitFor({ timeout: 30_000 });
@@ -135,7 +135,7 @@ await step("a project with instructions and a note; its chats carry it", async (
   await page.getByRole("button", { name: "Add note" }).click();
   await page.getByText("Brand voice").first().waitFor({ timeout: 10_000 });
   await shot(page, "flow-project");
-  const box = page.getByRole("combobox", { name: "Message" });
+  const box = page.getByRole("textbox", { name: "Message" });
   await box.fill("Three sneaker stills on pastel backdrops");
   await box.press("Enter");
   await page.waitForURL(/\/assist\?c=/, { timeout: 20_000 });

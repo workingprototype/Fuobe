@@ -21,6 +21,8 @@ import {
 import { useRouter } from "next/navigation";
 import { lazy, Suspense, useState } from "react";
 import { PageShell } from "@/components/page-shell";
+import { Skeleton } from "@/components/ui/skeleton";
+import { HadItemsScript, useHadItems } from "@/components/use-had-items";
 import { CardPending, IntentLink } from "@/components/intent-link";
 import { PresetCard } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
@@ -113,9 +115,9 @@ function RecentStrip({ items }: { items: Generation[] }) {
   );
 }
 
-function Row({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
+function Row({ title, href, children, className }: { title: string; href: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="space-y-3">
+    <section className={cn("space-y-3", className)}>
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-[24px]">{title}</h2>
         <Link href={href} className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground">
@@ -143,6 +145,7 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
   const [prompt, setPrompt] = useState("");
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
+  useHadItems("home-recent", recent.data?.length);
   // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
   // the status: render the server's (status-less) view until hydrated, as useEngineMode does.
   const hydrated = useHydrated();
@@ -239,10 +242,24 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
       </div>
 
       <div className="mt-14 space-y-12">
-        {!!recent.data?.length && (
+        {recent.data?.length ? (
           <Row title="Recent" href="/library">
             <RecentStrip items={recent.data.slice(0, 6)} />
           </Row>
+        ) : (
+          // Loading, in a browser that saw results here last time: the row keeps its place from the first paint, so the rows below don't move down when it arrives.
+          !recent.data && (
+            <>
+              <HadItemsScript name="home-recent" />
+              <Row title="Recent" href="/library" className="hidden [html[data-had-home-recent='1']_&]:block">
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-busy="true" aria-label="Loading recent results">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <Skeleton key={i} className="aspect-square rounded-xl" />
+                  ))}
+                </div>
+              </Row>
+            </>
+          )
         )}
         <Row title="Camera motions" href="/motions">
           <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} engine={locked} />

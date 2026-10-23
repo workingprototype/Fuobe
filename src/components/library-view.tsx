@@ -3,7 +3,7 @@
 import { ArchiveRestore, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetCard, cardRatio, type CardApi } from "@/components/library/asset-card";
 import { FilterBar, filterFields, filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
@@ -143,9 +143,11 @@ const GAP = 8;
 function Masonry({ entries, size, render }: { entries: LibraryEntry[]; size: number; render: (e: LibraryEntry) => React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  useEffect(() => {
+  // Measured before the first paint: a guessed column count, corrected a frame later, moved every card (CLS 0.42 on a phone).
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setWidth(Math.round(el.getBoundingClientRect().width));
     const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
@@ -563,7 +565,7 @@ function Inner() {
               >
                 {t.label}
                 {n ? (
-                  <span className="font-mono text-[11px] text-muted-foreground" aria-label={`${n} items`}>
+                  <span className="min-w-4 font-mono text-[11px] text-muted-foreground tabular-nums" aria-label={`${n} items`}>
                     {n}
                   </span>
                 ) : null}
@@ -573,9 +575,19 @@ function Inner() {
         </div>
       )}
 
-      {(tab.id === "all" && !folderId && (folders.data?.length || !loading)) || (folder && !trash) ? (
+      {/* The folder row has its place from the first paint: arriving later, it pushed the filters and the cards down. */}
+      {(tab.id === "all" && !folderId) || (folder && !trash) ? (
         <div className="mb-4">
-          <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          {folders.data ? (
+            <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          ) : (
+            <div className="-mx-1 flex gap-2 overflow-hidden px-1 py-1" aria-busy="true" aria-label="Loading folders">
+              <div className="flex w-[min(44vw,160px)] shrink-0 items-center gap-2.5 rounded-xl border border-dashed p-2">
+                <Skeleton className="size-11 shrink-0 rounded-lg" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
