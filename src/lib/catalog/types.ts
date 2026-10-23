@@ -447,6 +447,11 @@ export interface ModelRoute {
   note?: string;
   /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
   loraEndpoint?: string;
+  /**
+   * The route runs as several jobs of its workflow, built on the server (ComfyUI keyframes: one
+   * start/end-frame clip of `endpoint` per pair of frames, then joined; src/server/chains.ts).
+   */
+  chained?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";

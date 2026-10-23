@@ -444,6 +444,34 @@ describe("round-4 models on the canvas", () => {
     expect(keyframes.find((p) => p.id === "images")!.multiple).toBe(true);
   });
 
+  it("keeps Wan 2.2 14B's image port a start frame on Auto; its keyframe film is picked, and fed uploaded images", () => {
+    for (const id of ["oss-wan22-14b-fast", "oss-wan22-14b"]) {
+      const auto = inputPorts(modelNode(id)).find((p) => p.id === "images")!;
+      expect(auto).toMatchObject({ label: "Start frame", multiple: false });
+      expect(inputPorts(modelNode(id, "keyframes")).find((p) => p.id === "images")).toMatchObject({ label: "Images", multiple: true });
+    }
+    // Uploaded stills: a film is planned.
+    const files: CanvasGraph = {
+      nodes: [
+        node("a", "image-input", 0, 0, { url: "/api/files/a.png" }),
+        node("b", "image-input", 0, 200, { url: "/api/files/b.png" }),
+        node("m", "model", 300, 0, { modelId: "oss-wan22-14b", mediaKind: "video", op: "keyframes", prompt: "dawn over the bay", params: { duration: 5 } }),
+      ],
+      edges: [edge("a", "m", "images"), edge("b", "m", "images")],
+    };
+    const film = describeNode(files, files.nodes[2]);
+    expect(film.error).toBeUndefined();
+    expect(film.plan?.op).toBe("keyframes");
+    // Generated stills: said on the node before Run (the film's clips are planned from its inputs when it starts).
+    const generated: CanvasGraph = {
+      nodes: [node("img", "model", 0, 0, { modelId: "nano-banana-pro", prompt: "a bay at dawn" }), { ...files.nodes[2] }, files.nodes[0]],
+      edges: [edge("a", "m", "images"), edge("img", "m", "images")],
+    };
+    const d = describeNode(generated, generated.nodes[1]);
+    expect(d.error).toBe("Wan 2.2 14B builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output");
+    expect(planCanvas(generated).errors.map((e) => e.nodeId)).toEqual(["m"]);
+  });
+
   it("runs an eraser fed from the board", () => {
     const g: CanvasGraph = {
       nodes: [node("clip", "video-input", 0, 0, { url: "/api/files/clip.mp4" }), node("m", "model", 300, 0, { modelId: "bria-video-erase", prompt: "the coffee cup" })],

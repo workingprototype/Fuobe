@@ -7,6 +7,7 @@ import { FORMAT_INFO } from "./av/formats";
 import { fpsPlan, fpsSummary } from "./av/fps";
 import { targetShortEdge, upscaledSize, upscaleFactorFor, upscaleTier } from "./av/upscale";
 import { wholeClipProblem, wholeClipTool } from "./av/video-finish";
+import { addFrameAt, frameTimes, framesInputs, removeFrameAt, spread, type FrameSupport } from "./catalog/keyframes";
 import { COLORMAPS, type Engine, type GenParams, type InputSlot, type MatteOutput, type MediaKind, type ModelDef, type Operation, type Preset, type VideoFormat } from "./catalog/types";
 import { spokenLanguageName } from "./speech-languages";
 
@@ -89,6 +90,14 @@ export function settingsShape(
     slowdown: many(o.slowdowns),
     formats: formats && formats.length > 0 ? formats : null,
   };
+}
+
+/**
+ * Frames mode's settings: the strip has its own length control, frames and shots don't mix, and the open
+ * chain makes one film (its clips are the jobs), so it has no batch count.
+ */
+export function framesShape(shape: SettingsShape, chained: boolean): SettingsShape {
+  return { ...shape, duration: null, multiShot: false, count: shape.count && !chained };
 }
 
 export const MATTE_OUTPUT_LABELS: Record<MatteOutput, string> = { cutout: "Cutout video", matte: "Alpha mask" };
@@ -368,8 +377,8 @@ const WRITE_PROMPT = "Write a prompt first";
 
 export interface Blocker {
   message: string;
-  /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile). */
-  slot?: InputSlot["key"];
+  /** The attachment to point at (pulse) when Generate is pressed ("mask": the Paint area tile; "frames": Frames mode's Add frame tile). */
+  slot?: InputSlot["key"] | "frames";
   /** Passes by itself or is plain to see (loading, uploading, the empty prompt box): never spelled out under the composer. */
   quiet?: boolean;
 }
@@ -400,6 +409,8 @@ export function blockerFor(s: {
   model: boolean;
   engineError?: string | null;
   missing?: MissingSlot;
+  /** Frames mode: the start frame to add, or a model that can't follow frames (framesBlocker in catalog/keyframes.ts). */
+  frames?: Blocker | null;
   uploading: boolean;
   maskMissing?: boolean;
   planError?: string | null;
@@ -408,6 +419,7 @@ export function blockerFor(s: {
   if (s.loading) return { message: s.loading, quiet: true };
   if (!s.model) return { message: "Pick a model" };
   if (s.engineError) return { message: s.engineError };
+  if (s.frames) return s.frames;
   if (s.missing) return { message: missingMessage(s.missing), slot: s.missing.key };
   if (s.uploading) return { message: "Uploading…", quiet: true };
   if (s.maskMissing) return { message: "Paint the area to change", slot: "mask" };
@@ -488,17 +500,85 @@ export function placeAttachment<T extends Attachment>(
  * replaced it meanwhile, nothing changes: a finished upload never brings a removed item back.
  */
 export function replaceAttachment<T extends Attachment>(
-  state: { slots: Partial<Record<InputSlot["key"], T | null>>; refs: T[] },
+  state: { slots: Partial<Record<InputSlot["key"], T | null>>; refs: T[]; frames?: FrameAttachment<T>[] },
   id: string,
   v: T | null,
-): { slots?: Partial<Record<InputSlot["key"], T | null>>; refs?: T[] } | null {
+): { slots?: Partial<Record<InputSlot["key"], T | null>>; refs?: T[]; frames?: FrameAttachment<T>[] } | null {
   for (const [k, s] of Object.entries(state.slots) as [InputSlot["key"], T | null][]) {
     if (s?.id === id) return { slots: { ...state.slots, [k]: v ? { ...v, id } : null } };
   }
   if (state.refs.some((r) => r.id === id)) {
     return { refs: v ? state.refs.map((r) => (r.id === id ? { ...v, id } : r)) : state.refs.filter((r) => r.id !== id) };
   }
+  // A frame keeps its place in the clip when its upload finishes; a failed one leaves the strip.
+  const f = state.frames?.findIndex((x) => x.value.id === id) ?? -1;
+  if (f >= 0) return { frames: v ? state.frames!.map((x, i) => (i === f ? { ...x, value: { ...v, id } } : x)) : removeFrame(state.frames!, f) };
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Frames mode (Video studio): up to 10 stills, each at its own place in the clip
+
+/** A frame: its still, and where it sits in the clip (0 = the start, 1 = the end; see src/lib/catalog/keyframes.ts). */
+export interface FrameAttachment<T extends Attachment = Attachment> {
+  value: T;
+  at: number;
+}
+
+/** One more frame at the end (evenly spaced frames stay evenly spaced, placed ones keep their places). */
+export function addFrame<T extends Attachment>(frames: FrameAttachment<T>[], value: T): FrameAttachment<T>[] {
+  const ats = addFrameAt(frames.map((f) => f.at));
+  return [...frames, { value, at: 1 }].map((f, i) => ({ ...f, at: ats[i] }));
+}
+
+/** Frame i taken out; the next one becomes the start frame when the first goes. */
+export function removeFrame<T extends Attachment>(frames: FrameAttachment<T>[], i: number): FrameAttachment<T>[] {
+  const ats = removeFrameAt(frames.map((f) => f.at), i);
+  return frames.filter((_, j) => j !== i).map((f, j) => ({ ...f, at: ats[j] }));
+}
+
+/** Frames mode on: the start and end frames already attached become the first frames (a drawing on the start frame goes). */
+export function enterFrames<T extends Attachment>(slots: Partial<Record<InputSlot["key"], T | null>>): { frames: FrameAttachment<T>[]; slots: Partial<Record<InputSlot["key"], T | null>> } {
+  const values = [slots.image, slots.endImage].filter((v): v is T => !!v);
+  const ats = spread(values.length);
+  return { frames: values.map((value, i) => ({ value, at: ats[i] })), slots: { ...slots, image: null, endImage: null, mask: null, sketch: null } };
+}
+
+/**
+ * What Frames mode sends: the stills in order at their times (or the first and last as start and end
+ * frame, as the model takes them), at the strip's length. Every frame at its time is a keyframes run
+ * (`op`, so a camera motion preset's own operation doesn't replace it). A frame still uploading has no
+ * ref yet and is left out here, so the composer holds Generate ("Uploading…") until every frame is in.
+ */
+export function framesRequest(
+  frames: FrameAttachment[],
+  ctx: { support: FrameSupport; duration: number; chained: boolean },
+): { op?: "keyframes"; images: string[]; endImage?: string; params: Pick<GenParams, "duration" | "keyframeTimes" | "shots" | "multiShot" | "numOutputs"> } {
+  const times = frameTimes(frames.map((f) => f.at), ctx.duration);
+  const kept = frames.map((f, i) => ({ ref: f.value.ref, time: times[i] })).filter((f) => !!f.ref);
+  const sent = framesInputs(kept.map((f) => f.ref), kept.map((f) => f.time), ctx.support);
+  // Frames and shots don't mix; the open chain makes one film (its clips are the jobs).
+  return {
+    ...(sent.keyframeTimes && { op: "keyframes" as const }),
+    images: sent.images ?? [],
+    endImage: sent.endImage,
+    params: { duration: ctx.duration, keyframeTimes: sent.keyframeTimes, shots: undefined, multiShot: undefined, ...(ctx.chained && { numOutputs: 1 }) },
+  };
+}
+
+/** Frames mode has its own strip: the studio's start and end frame tiles (a camera motion's too) aren't asked for. */
+export const framesSlots = <S extends Pick<InputSlot, "key">>(slots: S[]): S[] => slots.filter((s) => s.key !== "image" && s.key !== "endImage");
+
+/** Frames still uploading: Generate waits for them, as it does for any other attachment. */
+export const framesUploading = (frames: FrameAttachment[] | undefined): boolean => !!frames?.some((f) => f.value.uploading);
+
+/**
+ * Frames mode off: the first frame is the start frame again and the last (with two or more) the end
+ * frame. `dropped` counts the frames in between that have no slot to go to (the composer offers Undo).
+ */
+export function leaveFrames<T extends Attachment>(frames: FrameAttachment<T>[], slots: Partial<Record<InputSlot["key"], T | null>>): { slots: Partial<Record<InputSlot["key"], T | null>>; dropped: number } {
+  const end = frames.length > 1 ? frames[frames.length - 1].value : null;
+  return { slots: { ...slots, image: frames[0]?.value ?? null, endImage: end, mask: null, sketch: null }, dropped: Math.max(0, frames.length - 2) };
 }
 
 /**

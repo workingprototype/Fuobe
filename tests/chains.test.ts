@@ -141,3 +141,76 @@ describe("storyboard film", () => {
     expect(dependsOn(final.id)).toEqual([firstRound.id, ...clips.slice(4)]);
   });
 });
+
+describe("keyframe film (Frames mode on the open engine)", () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f0005000201a2e2b6a40000000049454e44ae426082", "hex");
+  const frames = async (n: number) => {
+    const { saveFile } = await import("@/server/storage");
+    return Array.from({ length: n }, () => saveFile({ data: png, contentType: "image/png", source: "upload" }).url);
+  };
+
+  it("renders one Wan 2.2 start/end-frame clip per pair of frames, as long as each gap, then joins them", async () => {
+    const images = await frames(4);
+    const items = gens.createGenerations({
+      feature: "video",
+      modelId: "oss-wan22-14b-fast",
+      op: "keyframes",
+      prompt: "A paper boat drifts down the gutter",
+      inputs: { images },
+      params: { aspectRatio: "16:9", resolution: "480p", duration: 8, keyframeTimes: [0, 2.5, 4, 6.5] },
+    });
+    const [film, ...clips] = items;
+    expect(film).toMatchObject({ modelId: "oss-join-clips", op: "concat" });
+    expect(film.request.step?.label).toBe("Film · 4 frames");
+    // Three pairs, then the 1.5 s after the last frame from that frame alone.
+    expect(clips.map((c) => c.op)).toEqual(["flf2v", "flf2v", "flf2v", "i2v"]);
+    expect(clips.map((c) => c.request.step?.label)).toEqual(["Frames 1 → 2", "Frames 2 → 3", "Frames 3 → 4", "After frame 4"]);
+    expect(clips.map((c) => [c.request.inputs?.images, c.request.inputs?.endImage])).toEqual([
+      [[images[0]], images[1]],
+      [[images[1]], images[2]],
+      [[images[2]], images[3]],
+      [[images[3]], undefined],
+    ]);
+    // Seconds in Wan's 4n + 1 frame steps at 16 fps: 41, 25, 41 and 21 frames (128 in all, 8 s).
+    expect(clips.map((c) => c.request.params?.duration)).toEqual([2.5, 1.5, 2.5, 1.25]);
+    expect(clips.every((c) => c.request.params?.keyframeTimes === undefined && c.batchId === film.batchId)).toBe(true);
+    expect(dependsOn(film.id)).toEqual(clips.map((c) => c.id));
+    expect(film.costUsd).toBe(0);
+    expect((await settle(film.id, 60_000)).status).toBe("succeeded");
+  }, 70_000);
+
+  it("makes one clip and no join for a start and an end frame", async () => {
+    const images = await frames(2);
+    const items = gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "dawn breaks", inputs: { images }, params: { duration: 5, keyframeTimes: [0, 5] } });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ op: "flf2v", modelId: "oss-wan22-14b-fast" });
+    expect(items[0].request.inputs).toEqual({ images: [images[0]], endImage: images[1] });
+    expect(items[0].request.step).toBeUndefined();
+  });
+
+  it("checks the whole film before any clip starts", async () => {
+    const images = await frames(3);
+    const before = gens.listGenerations({ limit: 500 }).length;
+    expect(() =>
+      gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "x", inputs: { images }, params: { duration: 10, keyframeTimes: [0, 2, 9] } }),
+    ).toThrow(/Frames 2 and 3 are 7 s apart/);
+    expect(() => gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "", inputs: { images }, params: { duration: 5, keyframeTimes: [0, 2, 5] } })).toThrow(/prompt/);
+    expect(gens.listGenerations({ limit: 500 }).length).toBe(before);
+  });
+
+  it("refuses to wait for another step's images, in the preview as when it's created", () => {
+    const req = { feature: "canvas", modelId: "oss-wan22-14b-fast", op: "keyframes" as const, prompt: "x", chain: [{ slot: "images" as const }, { slot: "images" as const }] };
+    expect(() => gens.createGenerations(req, { dependsOn: ["a", "b"] })).toThrow(/give it uploaded images and a typed prompt, not another step's output/);
+    expect(() => gens.previewChained(req, 2)).toThrow(/give it uploaded images and a typed prompt, not another step's output/);
+    // Another model's image-to-video waits as before.
+    expect(gens.previewChained({ feature: "canvas", modelId: "oss-wan22-14b-fast", prompt: "x", chainFrom: "first" }, 1).op).toBe("i2v");
+  });
+
+  it("keeps a start frame and a leftover reference an image-to-video clip, not a film", async () => {
+    // A Seedance reference tile carried over to Wan when the engine switches: no times, no film.
+    const images = await frames(2);
+    const items = gens.createGenerations({ feature: "video", modelId: "oss-wan22-14b-fast", prompt: "a fox in snow", inputs: { images }, params: { duration: 5 } });
+    expect(items).toHaveLength(1);
+    expect(items[0].op).toBe("i2v");
+  });
+});

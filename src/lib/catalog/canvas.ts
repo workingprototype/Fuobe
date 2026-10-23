@@ -8,6 +8,7 @@
  * the server (POST /api/canvases/:id/run) plan a graph exactly the same way.
  */
 import { getModel, getPreset, MODELS, supportsOp } from "./index";
+import { chainedWaitMessage, keyframeChain } from "./keyframes";
 import { estimateCost, inferOperation, planGeneration, type Plan } from "./plan";
 import {
   OPERATION_LABELS,
@@ -425,7 +426,10 @@ export function inputPorts(n: Pick<CanvasNode, "type" | "data">): PortDef[] {
   const model = n.data.modelId ? getModel(n.data.modelId) : undefined;
   const all = nodeOps(n, model);
   const fallback: Operation[] = n.type === "model" ? (n.data.mediaKind === "video" ? ["t2v", "i2v"] : n.data.mediaKind === "audio" ? ["tts"] : n.data.mediaKind === "text" ? ["write"] : ["t2i", "edit"]) : [];
-  const ops = n.data.op && all.includes(n.data.op) ? [n.data.op] : all.length ? all : fallback;
+  // On Auto, a keyframe film made clip by clip (the open chain) only runs when it's picked: Auto never infers it
+  // without frame times, which the canvas doesn't set, so Wan's image port stays the start frame.
+  const auto = all.filter((op) => !(op === "keyframes" && model && keyframeChain(model)));
+  const ops = n.data.op && all.includes(n.data.op) ? [n.data.op] : auto.length ? auto : fallback;
   const ids = new Set(ops.flatMap((op) => OP_PORTS[op] ?? []));
   // Start & end frames: shown on image-to-video models that can take an end frame.
   if (ops.includes("i2v") && (model?.options.endFrame || (model && supportsOp(model, "flf2v")))) ids.add("endImage");
@@ -863,6 +867,8 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   if ("error" in built) return { model, costUsd: null, error: built.error };
   try {
     const plan = planGeneration(withPlaceholders(built.request), getModel, getPreset);
+    // A film built clip by clip is planned from its inputs when it starts: it can't wait for another node (said before Run).
+    if (built.deps.length && plan.op === "keyframes" && keyframeChain(plan.model)) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name) };
     return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
   } catch (e) {
     return { ...built, model, costUsd: null, error: (e as Error).message };

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 import type { GenParams, InputSlot, MediaKind, Operation, Preset } from "@/lib/catalog/types";
 import type { FeedFilter } from "@/lib/api";
 import type { Signature } from "@/lib/catalog/palettes";
+import type { FrameAttachment } from "@/lib/composer";
 import type { SlotValue } from "./media-slot";
 
 export type SlotKey = InputSlot["key"];
@@ -66,6 +67,8 @@ export interface StudioConfig {
    * and a cloud route to offer instead (`href` gets `&video=<the attached clip>`).
    */
   comfyOnly?: { note: string; alternative?: { label: string; href: string } };
+  /** Frames mode (Video studio): up to 10 stills, each at its own time in the clip, instead of a start and an end frame. */
+  frames?: boolean;
 }
 
 export interface Draft {
@@ -82,6 +85,8 @@ export interface Draft {
   mix?: { presetId: string; strength: number };
   /** The Color signature and Moodboard picked in the composer (studios with `signature`). */
   signature?: Signature;
+  /** Frames mode is on (studios with `frames`): the stills in order, each at its place in the clip. */
+  frames?: FrameAttachment<SlotValue>[];
 }
 
 interface Actions {

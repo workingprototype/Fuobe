@@ -1,11 +1,13 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
+import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { routesFor } from "@/lib/catalog/plan";
-import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
+import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
-import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained } from "./generations";
+import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained, previewGeneration } from "./generations";
 import { provider } from "./providers";
+import { loadManifest } from "./providers/comfyui";
 
 /**
  * Multi-step jobs built from chained generations: each step waits for the ones it needs and
@@ -161,6 +163,74 @@ export function createShotFilm(original: GenerationRequest, model: ModelDef): Ge
     },
   );
   return [film, ...clips];
+}
+
+/**
+ * Frames mode on an open model (Kling 4.0's keyframes, gap G02): one start/end-frame clip per pair of
+ * neighbouring frames, each as long as the gap between them in the workflow's own frame steps, then
+ * the stretch after the last frame (from it alone) when it isn't at the end, then a join. Two frames
+ * at the start and the end make one clip and no join. Returns the film first, then the clips.
+ */
+export function createKeyframeFilm(original: GenerationRequest, model: ModelDef, route: ModelRoute): Generation[] {
+  // The whole request is checked first (prompt, frame count, gaps), so no clip starts for a film that can't be made.
+  previewGeneration({ ...original, op: "keyframes" });
+  const images = original.inputs?.images ?? [];
+  const duration = original.params?.duration ?? model.defaults?.duration ?? 5;
+  const times = original.params?.keyframeTimes?.length ? original.params.keyframeTimes : frameTimes(spread(images.length), duration);
+  const wf = loadManifest().workflows.find((w) => w.id === route.endpoint);
+  const clips = planKeyframeClips(times, duration, {
+    ...chainTiming(model),
+    fps: Number(wf?.defaults.fps ?? 16),
+    step: Number(wf?.defaults.frameStep ?? 4),
+    maxFrames: wf?.limits?.maxFrames,
+  });
+  const tail = clips.some((c) => c.to === null);
+  assertOneMode([
+    { label: `${model.name} clips`, modelId: model.id, op: "flf2v" },
+    ...(tail ? [{ label: `${model.name} after the last frame`, modelId: model.id, op: "i2v" as const }] : []),
+    ...(clips.length > 1 ? [{ label: "Joining the clips", modelId: joinModelId(model.engine), op: "concat" as const }] : []),
+  ]);
+  const batchId = nanoid(10);
+  const params = { ...original.params };
+  delete params.keyframeTimes;
+  delete params.shots;
+  delete params.multiShot;
+  const rest = { ...original.inputs };
+  delete rest.images;
+  delete rest.endImage;
+  const n = clips.length;
+  const made: Generation[] = [];
+  try {
+    for (const [i, c] of clips.entries()) {
+      const label = c.to === null ? `After frame ${c.from + 1}` : `Frames ${c.from + 1} → ${c.to + 1}`;
+      const request: GenerationRequest = {
+        ...original,
+        op: c.to === null ? "i2v" : "flf2v",
+        inputs: { ...rest, images: [images[c.from]], ...(c.to !== null && { endImage: images[c.to] }) },
+        params: { ...params, duration: c.seconds, numOutputs: 1 },
+        ...(n > 1 ? { step: { label, index: i, of: n + 1 } } : {}),
+      };
+      made.push(createGenerations(request, { batchId })[0]);
+    }
+    if (n === 1) return made;
+    const film = joinClips(
+      made.map((c) => c.id),
+      {
+        engine: model.engine,
+        feature: original.feature,
+        batchId,
+        title: tidy(original.prompt) || "Keyframe film",
+        aspectRatio: params.aspectRatio,
+        resolution: params.resolution,
+        step: { label: `Film · ${images.length} frames`, index: n, of: n + 1 },
+      },
+    );
+    return [film, ...made];
+  } catch (e) {
+    // Don't leave half a film rendering.
+    for (const g of made) void cancelGeneration(g.id);
+    throw e;
+  }
 }
 
 /** Extend for models with no extend API (Kling): last frame → image-to-video on the same model → join. */

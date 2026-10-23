@@ -80,6 +80,8 @@ export const VIDEO_STUDIO: StudioConfig = {
   multiRef: { label: "Add ref", max: 3 },
   sketch: ["draw"],
   presetPicker: "motion",
+  // Kling 4.0's Frames mode: up to 10 keyframes (FLUX 3 Max on the cloud, Wan 2.2 14B clip by clip on the open engine).
+  frames: true,
   defaultModels: { cloud: "seedance-2-5", open: "oss-wan22-14b-fast" },
   suggestions: [
     "A paper boat drifts down a rain-soaked street gutter, macro, slow motion",

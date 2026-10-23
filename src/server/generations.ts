@@ -9,7 +9,8 @@ import { applySketch, stripMotionPaths } from "@/lib/catalog/sketch";
 import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
-import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
+import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
 import {
   LAST_FRAME_CHAIN,
@@ -26,7 +27,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createShotFilm } from "./chains";
+import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
 import { enhancePrompt } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
@@ -443,6 +444,8 @@ export function previewChained(req: GenerationRequest, deps: number) {
   if (!deps) return previewGeneration(req);
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
+  // Refused before anything starts, as createGenerations refuses it.
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -468,11 +471,16 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   if (!opts.dependsOn && original.op === "extend" && shotModel && routesFor(shotModel, "extend").some((r) => r.endpoint === LAST_FRAME_CHAIN)) {
     return createExtendChain(original, shotModel);
   }
+  // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
+  const filmRoute = shotModel && keyframeChain(shotModel);
+  if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost } = p;
+  // A chained route is built from its inputs when it's created; it can't wait for another step's output.
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
