@@ -39,8 +39,11 @@ function initialDraft(
   lookup: { getModel: (id: string) => ModelDef | undefined; getPreset: (id: string) => Preset | undefined },
 ): Draft {
   const preset = sp.get("preset") ? lookup.getPreset(sp.get("preset")!) : config.preset;
-  const presetRoute = preset ? ((engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open) : null;
   const requested = sp.get("model");
+  // An app opened on one of its own models (?model=, from ⌘K) takes that model's route and params.
+  const presetRoute = preset
+    ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
+    : null;
   const modelId =
     (requested && lookup.getModel(requested)?.id) ||
     (preset?.type === "app" ? presetRoute?.modelId : undefined) ||
@@ -362,7 +365,21 @@ function UrlParams({ onChange }: { onChange: (key: string) => void }) {
  * hydrated — are kept. A later change of the params (Animate → Video while on Video) starts a
  * fresh draft instead.
  */
-function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: string; start: Draft; build: React.RefObject<(key: string) => Draft>; ready: boolean; onNavigate: (key: string) => void }) {
+function HandoffSync({
+  startKey,
+  start,
+  build,
+  adopt,
+  ready,
+  onNavigate,
+}: {
+  startKey: string;
+  start: Draft;
+  build: React.RefObject<(key: string) => Draft>;
+  adopt: React.RefObject<(key: string) => void>;
+  ready: boolean;
+  onNavigate: (key: string) => void;
+}) {
   const { setDraft } = useStudioActions();
   const [url, setUrl] = useState<string | null>(null);
   const applied = useRef({ key: startKey, ready, base: start, seen: false });
@@ -375,8 +392,9 @@ function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: 
     const next = build.current(url);
     const base = a.base;
     setDraft((d) => mergeHandoff(base, d, next));
+    adopt.current(url);
     applied.current = { key: url, ready, base: next, seen: true };
-  }, [url, ready, build, setDraft, onNavigate]);
+  }, [url, ready, build, adopt, setDraft, onNavigate]);
   return (
     <Suspense fallback={null}>
       <UrlParams onChange={setUrl} />
@@ -390,7 +408,7 @@ function HandoffSync({ startKey, start, build, ready, onNavigate }: { startKey: 
  * typed or focused before hydration is lost.
  */
 function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: DraftProps) {
-  const [engine] = useEngine();
+  const [engine, setEngine] = useEngine();
   const catalog = useCatalog();
   const bridge = useMemo<ComposerBridge>(() => ({ current: null }), []);
   const build = (key: string) => {
@@ -399,20 +417,32 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
     if (initialPrompt && !d.prompt) d.prompt = initialPrompt;
     return d;
   };
+  // A model named in the URL (?model=, from ⌘K or a hand-off) brings its engine along, as Reuse
+  // does: left on the other engine, the composer would swap it for that engine's default.
+  const adopt = (key: string) => {
+    const id = new URLSearchParams(key).get("model");
+    const m = id ? catalog.getModel(id) : undefined;
+    if (m && m.engine !== engine) setEngine(m.engine);
+  };
   const buildRef = useRef(build);
+  const adoptRef = useRef(adopt);
   useLayoutEffect(() => {
     buildRef.current = build;
+    adoptRef.current = adopt;
   });
   // The draft the composer starts from: the defaults (the URL is unknown in the static shell), or
   // the hand-off params of a client navigation to new ones (a new epoch remounts the provider).
   const [start, setStart] = useState({ key: "", epoch: 0 });
   const initial = useMemo(() => build(start.key), [start, config]); // eslint-disable-line react-hooks/exhaustive-deps
-  const onNavigate = useCallback((key: string) => setStart((s) => ({ key, epoch: s.epoch + 1 })), []);
+  const onNavigate = useCallback((key: string) => {
+    setStart((s) => ({ key, epoch: s.epoch + 1 }));
+    adoptRef.current(key);
+  }, []);
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
       <StudioProvider key={start.epoch} config={config} initial={initial}>
         <StudioBody header={header} tabs={tabs} />
-        <HandoffSync startKey={start.key} start={initial} build={buildRef} ready={catalog.ready} onNavigate={onNavigate} />
+        <HandoffSync startKey={start.key} start={initial} build={buildRef} adopt={adoptRef} ready={catalog.ready} onNavigate={onNavigate} />
       </StudioProvider>
     </ComposerBridgeCtx.Provider>
   );
