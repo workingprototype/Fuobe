@@ -278,6 +278,9 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
   const [busy, setBusy] = useState(false);
   const [pulse, setPulse] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  // Focus anywhere in the composer, its popovers and dialogs included.
+  const [engaged, setEngaged] = useState(false);
+  const composer = useRef<HTMLDivElement>(null);
   const prompt = useRef<HTMLTextAreaElement>(null);
   const set = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
   const f = FORMATS[draft.format];
@@ -324,8 +327,18 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
   const blocker = draft.product === null && f.product === "required" ? "Attach a product to generate" : badSite ? "Enter a valid website URL" : est.data?.blocker;
   const cost = est.data && !est.data.blocker ? (est.data.demo ? "Demo · free" : est.data.costUsd == null ? "" : est.data.costUsd === 0 ? "Free" : `≈ ${formatCost(est.data.costUsd)}`) : "";
 
+  // Until a template is picked or you start on the composer it stays slim (the attachment tiles fold
+  // away), so the template gallery behind it stays in view.
+  const slim = !template && !engaged && !draft.product && !draft.avatar && !draft.reference && !draft.prompt.trim();
+  const leaveComposer = () =>
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (!a || !(composer.current?.contains(a) || a.closest("[data-radix-popper-content-wrapper], [role=dialog]"))) setEngaged(false);
+    });
+
   const generate = async () => {
     if (blocker) {
+      setEngaged(true);
       toast(blocker, { id: "marketing-blocker" });
       setPulse(/product/i.test(blocker) ? "product" : /avatar/i.test(blocker) ? "avatar" : null);
       setTimeout(() => setPulse(null), 1600);
@@ -404,8 +417,14 @@ export function MarketingStudio({ models }: { models: Record<string, ModelInfo> 
 
       {/* Docked composer */}
       <div className="sticky bottom-0 z-20 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
-        <div className="mx-auto w-full max-w-[860px] rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer">
-          <div className="scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-1">
+        <div
+          ref={composer}
+          data-slim={slim || undefined}
+          onFocus={() => setEngaged(true)}
+          onBlur={leaveComposer}
+          className="mx-auto w-full max-w-[860px] rounded-[20px] border bg-background p-2.5 shadow-normal transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-4 focus-within:ring-brand-faint sm:rounded-composer"
+        >
+          <div className={cn("scrollbar-none flex items-center gap-2 overflow-x-auto px-1 pt-1.5 pb-1", slim && "hidden")}>
             {template && (
               <div className="relative flex h-14 shrink-0 items-center gap-2 rounded-xl bg-muted py-1 pr-7 pl-1">
                 <div className="h-12 w-9 overflow-hidden rounded-lg">
