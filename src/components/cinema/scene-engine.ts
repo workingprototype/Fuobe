@@ -78,7 +78,15 @@ const POST_VERT = /* glsl */ `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 
-/** Thin-lens blur gathered over a golden-angle disc (a sample only counts where its own blur reaches), then sRGB. */
+/**
+ * Cracks filled, then a thin-lens blur gathered over a golden-angle disc (a sample only counts where its own blur
+ * reaches and where there is a surface), then sRGB.
+ *
+ * Cracks: where the depth jumps nothing was seen behind the edge (MoGe drops those triangles, points spread apart),
+ * so thin black outlines would show even from where the photo was taken. An empty pixel that surfaces surround on
+ * most sides within `holeRadius` px takes the farthest of them: the background closes over the crack, as it would
+ * behind the edge. Open space (past the scene's border, wide unseen areas) stays empty for the re-render to fill.
+ */
 const POST_FRAG = /* glsl */ `
 #include <packing>
 uniform sampler2D tColor;
@@ -90,13 +98,42 @@ uniform float focus;
 uniform float blur;
 uniform float framePx;
 uniform float maxRadius;
+uniform float holeRadius;
 varying vec2 vUv;
-float distAt(vec2 uv) { return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, cameraNear, cameraFar); }
+const float EMPTY = 0.99999;
+float rawAt(vec2 uv) { return texture2D(tDepth, uv).x; }
+float distOf(float raw) { return -perspectiveDepthToViewZ(raw, cameraNear, cameraFar); }
 float coc(float d) { return min(maxRadius, 0.5 * blur * framePx * abs(d - focus) / max(d, 1e-4)); }
 vec3 toSRGB(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main() {
   vec3 base = texture2D(tColor, vUv).rgb;
-  float r0 = blur > 0.0 ? coc(distAt(vUv)) : 0.0;
+  float raw = rawAt(vUv);
+  if (raw >= EMPTY && holeRadius > 0.0) {
+    int hits = 0;
+    float farthest = -1.0;
+    vec3 fill = base;
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.78539816;
+      vec2 dir = vec2(cos(a), sin(a)) * texel * holeRadius;
+      for (int s = 1; s <= 6; s++) {
+        vec2 uv = vUv + dir * (float(s) / 6.0);
+        float r = rawAt(uv);
+        if (r < EMPTY) {
+          hits++;
+          if (r > farthest) {
+            farthest = r;
+            fill = texture2D(tColor, uv).rgb;
+          }
+          break;
+        }
+      }
+    }
+    if (hits >= 5) {
+      base = fill;
+      raw = farthest;
+    }
+  }
+  float r0 = blur > 0.0 && raw < EMPTY ? coc(distOf(raw)) : 0.0;
   if (r0 > 0.75) {
     vec3 acc = base;
     float wsum = 1.0;
@@ -105,7 +142,8 @@ void main() {
       float r = sqrt(fi / 40.0) * r0;
       float a = fi * 2.39996323;
       vec2 uv = vUv + vec2(cos(a), sin(a)) * r * texel;
-      float w = clamp(coc(distAt(uv)) / max(r, 0.5), 0.0, 1.0);
+      float d = rawAt(uv);
+      float w = d < EMPTY ? clamp(coc(distOf(d)) / max(r, 0.5), 0.0, 1.0) : 0.0;
       acc += texture2D(tColor, uv).rgb * w;
       wsum += w;
     }
@@ -206,6 +244,7 @@ export class SceneEngine {
         blur: { value: 0 },
         framePx: { value: 1 },
         maxRadius: { value: 0 },
+        holeRadius: { value: 0 },
       },
     });
     this.post = new FullScreenQuad(this.postMat);
@@ -433,6 +472,8 @@ export class SceneEngine {
     u.blur.value = v.dof ? blurScale(v.lens, v.aperture, this.focus, v.aspect) : 0;
     u.framePx.value = frameW;
     u.maxRadius.value = Math.min(0.025 * frameW, 48);
+    // Cracks up to about 1.4% of the frame's width close; wider unseen areas stay empty.
+    u.holeRadius.value = Math.max(2, frameW / 70);
     this.renderer.setRenderTarget(out);
     this.post.render(this.renderer);
   }
