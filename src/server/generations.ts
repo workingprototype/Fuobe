@@ -620,14 +620,14 @@ async function submit(
     const prep = async (ref?: string) => {
       if (!ref) return undefined;
       const f = await readRef(ref);
-      return adapter.prepareFile(f.data, f.contentType, f.name);
+      return adapter.prepareFile(f.data, f.contentType, f.name, route);
     };
     const prepMask = async (ref?: string) => {
       if (!ref) return undefined;
       const f = await readRef(ref);
       const fmt = route.map?.maskFormat;
       const data = fmt && fmt !== "white" && f.contentType === "image/png" ? convertMask(f.data, fmt) : f.data;
-      return adapter.prepareFile(data, f.contentType, f.name);
+      return adapter.prepareFile(data, f.contentType, f.name, route);
     };
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {

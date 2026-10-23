@@ -78,6 +78,11 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   const link = (id: OutputActionId, label: string, href: string, placement: OutputAction["placement"] = "menu") => out.push({ id, label, href, placement });
   switch (o.kind) {
     case "image":
+      if (isVector(g, o)) {
+        // The hand-offs all send the picture to models that read pixels, and nothing rasterises an .svg on the way.
+        out.push({ ...file, label: "Download .svg" }, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
+        break;
+      }
       link("animate", "Animate", `/video?image=${q(o.url)}`, "primary");
       out.push(file, { id: "favorite", label: g.favorite ? "Unfavorite" : "Favorite", placement: "bar" });
       link("edit", "Edit", `/edit?image=${q(o.url)}`);
@@ -123,6 +128,16 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
   if (g.prompt) out.push({ id: "copy-prompt", label: "Copy prompt", placement: "menu" });
   out.push({ id: "delete", label: "Delete", placement: "menu", destructive: true });
   return out;
+}
+
+/**
+ * A vector result (an SVG: Vectorize, Recraft's vector styles, an uploaded .svg). Demo pictures are
+ * SVG placeholders standing in for raster results, so they keep the raster hand-offs (except Vectorize's).
+ */
+export function isVector(g: Pick<Generation, "provider" | "op">, o: Pick<OutputFile, "url" | "kind" | "contentType">): boolean {
+  if (o.kind !== "image") return false;
+  const svg = /^image\/svg\+xml\b/i.test(o.contentType ?? "") || o.url.startsWith("data:image/svg+xml") || extensionOf(o) === "svg";
+  return svg && (g.provider !== "mock" || g.op === "vectorize");
 }
 
 /**

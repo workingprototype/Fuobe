@@ -73,6 +73,8 @@
 //   cutout, numGaussians, splatFormat     (TripoSplat: BiRefNet cut-out on/off, number of Gaussians, ply | ksplat | spz)
 //   orbitFrames                           (TripoSplat orbit preview length in frames)
 //   frameWidth                            (reference brief: width the clip's frames are scaled to, px)
+// Keys added with round 4 (engine seams):
+//   curveMode, filterSpeckle, colorPrecision (VTracer: spline | polygon | none curves, specks dropped (px), colour precision bits)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
@@ -101,6 +103,8 @@ export const CUSTOM_NODE_REPOS = {
   'ComfyUI-QwenASR': 'https://github.com/1038lab/ComfyUI-QwenASR',
   'ComfyUI-HunyuanVideo-Foley': 'https://github.com/phazei/ComfyUI-HunyuanVideo-Foley',
   'ComfyUI-Whisper': 'https://github.com/yuvraj108c/ComfyUI-Whisper',
+  // round 4 (engine seams): VTracer image → SVG
+  'ComfyUI-ToSVG': 'https://github.com/Yanick112/ComfyUI-ToSVG',
   // isolated worker only (process-wide side effects / old pins), see scripts/comfy/README.md
   'ComfyUI-LatentSyncWrapper': 'https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper',
   'ComfyUI-ThinkSound_Wrapper': 'https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper',
@@ -2861,5 +2865,26 @@ export const SPEC = [
       'VHS_LoadVideo resamples to 24 fps (fixed: TextGenerate assumes 24 fps and keeps every 24th frame, i.e. 1 fps, each capped at 70 soft tokens); frames = the frame cap at 24 fps (720 = the first 30 s), ' +
       'startFrame = frames skipped at 24 fps, frameWidth = 384 px wide (about 0.7 GB of frames for 720, inferred). In ComfyUI v0.41 only the Gemma 4 and MiniMax text encoders read a video input ' +
       '(the Qwen3.5 encoder ignores it). Same model file as speech-translate-gemma4 (no new download). Whether Gemma 4 E4B takes 30 s of audio in one call is unverified. Validated by /prompt only.',
+  },
+  // ---- round 4 (engine seams): vectorize -------------------------------------------
+  {
+    id: 'image-vectorize-vtracer',
+    title: 'Image to SVG: VTracer traces the colours into stacked vector shapes (no model)',
+    capability: 'vectorize',
+    handBuilt: 'hand-built/image-vectorize-vtracer.json',
+    bindings: {
+      image: [b('1', 'image')],
+      curveMode: [b('2', 'mode')],
+      filterSpeckle: [b('2', 'filter_speckle')],
+      colorPrecision: [b('2', 'color_precision')],
+      filenamePrefix: [b('4', 'filename_prefix')],
+    },
+    outputs: [{ node: '4', kind: 'image' }],
+    vramGb: 0,
+    license: 'MIT (VTracer, ComfyUI-ToSVG); the pack also imports PyMuPDF (AGPL-3.0) for its SVG-to-image node, which this graph doesn\'t use',
+    notes:
+      'The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG\'s colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) ' +
+      'returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under "images", so the provider collects it as an image output). ' +
+      'filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second.',
   },
 ];

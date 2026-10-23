@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-23T00:20:02.191Z",
+  "generatedAt": "2026-10-23T01:27:37.655Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -13275,6 +13275,66 @@
       "license": "Apache-2.0 (Gemma 4); VideoHelperSuite loader GPL-3.0 code",
       "validated": true,
       "notes": "Content Factory \"Use as reference\": the clip's frames AND sound go into one TextGenerate call and come back as a JSON style brief (role brief): format, hook, pacing, shots, visual_style, animation_style, narration, music, captions, topic_ideas (5). The instruction forbids copying the reference's people, logos or exact words. Strip ``` fences before parsing. VHS_LoadVideo resamples to 24 fps (fixed: TextGenerate assumes 24 fps and keeps every 24th frame, i.e. 1 fps, each capped at 70 soft tokens); frames = the frame cap at 24 fps (720 = the first 30 s), startFrame = frames skipped at 24 fps, frameWidth = 384 px wide (about 0.7 GB of frames for 720, inferred). In ComfyUI v0.41 only the Gemma 4 and MiniMax text encoders read a video input (the Qwen3.5 encoder ignores it). Same model file as speech-translate-gemma4 (no new download). Whether Gemma 4 E4B takes 30 s of audio in one call is unverified. Validated by /prompt only."
+    },
+    {
+      "id": "image-vectorize-vtracer",
+      "title": "Image to SVG: VTracer traces the colours into stacked vector shapes (no model)",
+      "capability": "vectorize",
+      "file": "image-vectorize-vtracer.json",
+      "source": "hand-built (scripts/comfy/hand-built/image-vectorize-vtracer.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "curveMode": [
+          {
+            "node": "2",
+            "input": "mode"
+          }
+        ],
+        "filterSpeckle": [
+          {
+            "node": "2",
+            "input": "filter_speckle"
+          }
+        ],
+        "colorPrecision": [
+          {
+            "node": "2",
+            "input": "color_precision"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "filterSpeckle": 4,
+        "colorPrecision": 6
+      },
+      "limits": {},
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "MIT (VTracer, ComfyUI-ToSVG); the pack also imports PyMuPDF (AGPL-3.0) for its SVG-to-image node, which this graph doesn't use",
+      "validated": true,
+      "notes": "The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG's colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under \"images\", so the provider collects it as an image output). filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second.",
+      "buildWarnings": [
+        "node 2: class TS_ImageToSVGStringColor_Vtracer not installed",
+        "node 3: class TS_SVGStringToSVGBytesIO not installed"
+      ]
     }
   ]
 }

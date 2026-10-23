@@ -205,6 +205,25 @@ const open: ModelDef[] = [
     options: {},
   }),
   o({
+    // The Vectorize app's open route (Recraft Vectorize on the cloud): tracing, no model weights.
+    id: "oss-vtracer",
+    name: "VTracer",
+    vendor: "visioncortex",
+    family: "vtracer",
+    kind: "image",
+    tagline: "Traces logos, icons and flat art into a clean, editable SVG · CPU, no model · MIT",
+    routes: [comfy("vectorize", "image-vectorize-vtracer", "colour tracing, stacked shapes")],
+    options: {
+      promptless: true,
+      maxImages: 1,
+      controls: [{ param: "curveMode", label: "Curves", values: ["spline", "polygon"], default: "spline" }],
+      sliders: [
+        { param: "colorPrecision", label: "Colour detail", min: 1, max: 8, step: 1, default: 6 },
+        { param: "filterSpeckle", label: "Ignore specks (px)", min: 0, max: 32, step: 1, default: 4 },
+      ],
+    },
+  }),
+  o({
     id: "oss-seedvr2-image",
     name: "SeedVR2 (image)",
     vendor: "ByteDance Seed",
@@ -888,11 +907,11 @@ const open: ModelDef[] = [
     vendor: "FunAudioLLM",
     family: "thinksound",
     kind: "audio",
-    tagline: "Apache-2.0 sound effects with a step-by-step sound description · 12 GB GPU · needs a separate ComfyUI worker",
+    tagline: "Apache-2.0 sound effects from a description, up to 30 s · 12 GB GPU",
     routes: [comfy("sfx", "sfx-thinksound", "isolated worker (scripts/comfy/README.md)")],
     options: { durations: [3, 5, 8, 10, 20, 30], seed: true },
     defaults: { duration: 8 },
-    hidden: true,
+    worker: "isolated",
   }),
   // Voice, transcription, captions, translation, lip re-sync, soundtrack
   o({
@@ -987,10 +1006,16 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "latentsync",
     kind: "video",
-    tagline: "Mouth-only lip re-sync, identity untouched · 20 GB GPU · OpenRAIL++ · needs a separate ComfyUI worker",
+    tagline: "Re-syncs only the mouth of real footage to a new voice; face, camera and background untouched · 20 GB GPU · OpenRAIL++",
     routes: [comfy("lipsync", "lipsync-latentsync16", "isolated worker (scripts/comfy/README.md)")],
-    options: { seed: true },
-    hidden: true,
+    options: {
+      seed: true,
+      sliders: [
+        { param: "lipsExpression", label: "Lip movement", min: 1, max: 3, step: 0.1, default: 1.5 },
+        { param: "steps", label: "Steps", min: 10, max: 50, step: 1, default: 20 },
+      ],
+    },
+    worker: "isolated",
   }),
   o({
     id: "oss-mux",

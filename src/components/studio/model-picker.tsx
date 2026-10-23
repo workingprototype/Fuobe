@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Cloud, Cpu, SearchX, Star } from "lucide-react";
+import { ChevronDown, Cloud, Cpu, SearchX, Server, Star } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { type Engine, type ModelDef } from "@/lib/catalog/types";
 import { useEngineMode, useStatus } from "@/lib/api";
 import { bestForStudio, groupModels, toggleIn } from "@/lib/composer";
 import { formatCost } from "@/lib/format";
+import { ISOLATED_NOTE } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 import { EngineSwitch } from "./engine-switch";
 import { ResponsivePanel } from "./responsive-panel";
@@ -107,6 +108,12 @@ function ModelRow({
         <span className="block truncate text-[12px] leading-snug text-muted-foreground">
           {m.vendor} · {m.tagline}
         </span>
+        {m.worker === "isolated" && (
+          <span className="mt-0.5 flex items-center gap-1 text-[11px] leading-snug text-subtle-foreground">
+            <Server className="size-3! shrink-0" aria-hidden />
+            {ISOLATED_NOTE}
+          </span>
+        )}
       </span>
       <span className="shrink-0 text-right text-[11px] text-subtle-foreground tabular-nums">{priceHint(m)}</span>
       {/* Pointer only: inside an option it would be a nested control. Keyboard: Alt+S on the highlighted row (starKey). */}

@@ -30,7 +30,7 @@ import {
 } from "@/lib/comfy";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { guessKind } from "@/lib/catalog/payload";
-import type { GenInput, MediaKind, Operation } from "@/lib/catalog/types";
+import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { getSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
@@ -58,8 +58,23 @@ export function getWorkflow(id: string): { manifest: ManifestWorkflow; workflow:
   return { manifest, workflow };
 }
 
-function baseUrl(): string {
-  return getSetting("comfyUrl").replace(/\/+$/, "");
+/**
+ * Which ComfyUI runs a workflow: the main server, or the isolated worker — a second ComfyUI with its own
+ * code copy and virtualenv for node packs that change process-wide state or pin old packages (LatentSync
+ * 1.6, ThinkSound; manifest `worker: "isolated"`, scripts/comfy/README.md). Both take the same token.
+ */
+export type ComfyWorker = "main" | "isolated";
+
+/** Where the isolated worker's address is set, for messages. */
+export const ISOLATED_SETTING = "Settings → Open-source engine · ComfyUI → Isolated worker URL";
+
+function baseUrl(worker: ComfyWorker = "main"): string {
+  return getSetting(worker === "isolated" ? "comfyIsolatedUrl" : "comfyUrl").replace(/\/+$/, "");
+}
+
+/** The worker a workflow runs on. */
+export function workerFor(endpoint: string | undefined): ComfyWorker {
+  return endpoint && loadManifest().workflows.find((w) => w.id === endpoint)?.worker === "isolated" ? "isolated" : "main";
 }
 
 function authHeaders(): Record<string, string> {
@@ -67,27 +82,49 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
-async function comfyFetch(p: string, init: RequestInit = {}): Promise<Response> {
+async function comfyFetch(p: string, init: RequestInit = {}, worker: ComfyWorker = "main"): Promise<Response> {
+  const base = baseUrl(worker);
+  if (worker === "isolated" && !base) {
+    throw new ProviderError(`This model runs on the isolated ComfyUI worker, which isn't set up yet: add its address in ${ISOLATED_SETTING} (or COMFYUI_ISOLATED_URL). scripts/comfy/README.md shows how to start one, usually on port 8189`);
+  }
   try {
-    return await fetch(`${baseUrl()}${p}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } });
+    return await fetch(`${base}${p}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } });
   } catch (e) {
-    throw new ProviderError(`Can't reach ComfyUI at ${baseUrl()} (${(e as Error).message}). Is it running?`);
+    if (worker === "isolated") throw new ProviderError(`The isolated ComfyUI worker at ${base} doesn't answer (${(e as Error).message}). Start it (scripts/comfy/README.md) or check ${ISOLATED_SETTING}`);
+    throw new ProviderError(`Can't reach ComfyUI at ${base} (${(e as Error).message}). Is it running?`);
   }
 }
 
+/**
+ * The isolated worker answered, but not with what was asked (an HTTP error, or a proxy's error page
+ * when the worker behind it is down): say it's that server and where its address is set, so it doesn't
+ * read like the main ComfyUI failed.
+ */
+function isolatedAnswer(what: string, status?: number, detail?: string): ProviderError {
+  const said = status ? `HTTP ${status}` : "something that isn't JSON";
+  return new ProviderError(
+    `The isolated ComfyUI worker at ${baseUrl("isolated")} answered ${said} to ${what}${detail ? ` (${detail})` : ""} — check that it's running (scripts/comfy/README.md) and its address in ${ISOLATED_SETTING}`,
+    status,
+  );
+}
+
+/** A short reason from an error body: its text, unless it's an HTML error page. */
+const reasonOf = (text: string) => (/^\s*</.test(text) ? "" : text.trim().slice(0, 200));
+
 /** GET a ComfyUI JSON endpoint. A non-2xx answer or a body that isn't JSON (a proxy's error page) throws, so the runner retries. */
-async function comfyJson<T>(p: string): Promise<T> {
-  const res = await comfyFetch(p);
-  if (!res.ok) throw new ProviderError(`ComfyUI ${p.split("?")[0]} answered HTTP ${res.status}`, res.status);
+async function comfyJson<T>(p: string, worker: ComfyWorker = "main"): Promise<T> {
+  const res = await comfyFetch(p, {}, worker);
+  const path = p.split("?")[0];
+  if (!res.ok) throw worker === "isolated" ? isolatedAnswer(path, res.status) : new ProviderError(`ComfyUI ${path} answered HTTP ${res.status}`, res.status);
   try {
     return (await res.json()) as T;
   } catch {
-    throw new ProviderError(`ComfyUI ${p.split("?")[0]} sent something that isn't JSON (a proxy error page?)`);
+    throw worker === "isolated" ? isolatedAnswer(path) : new ProviderError(`ComfyUI ${path} sent something that isn't JSON (a proxy error page?)`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Live progress over the ComfyUI websocket (one connection per server URL).
+// Live progress over the ComfyUI websocket (one connection per worker, reopened when its URL changes).
 
 interface Progress {
   value: number;
@@ -96,15 +133,25 @@ interface Progress {
   nodesDone: number;
 }
 
+type ComfySocket = { url: string; ws: WebSocket; clientId: string; progress: Map<string, Progress> };
+
 declare global {
-  var __fuobeComfyWs: { url: string; ws: WebSocket; clientId: string; progress: Map<string, Progress> } | undefined;
+  var __fuobeComfyWs: ComfySocket | undefined;
+  /** The isolated worker's socket. */
+  var __fuobeComfyWsIsolated: ComfySocket | undefined;
   /** Consecutive polls that found a prompt in neither the queue nor the history. */
   var __fuobeComfyMisses: Map<string, number> | undefined;
 }
 
-function ensureSocket(): { clientId: string; progress: Map<string, Progress> } {
-  const url = baseUrl();
-  const cur = globalThis.__fuobeComfyWs;
+const socketOf = (worker: ComfyWorker) => (worker === "isolated" ? globalThis.__fuobeComfyWsIsolated : globalThis.__fuobeComfyWs);
+function setSocket(worker: ComfyWorker, s: ComfySocket | undefined) {
+  if (worker === "isolated") globalThis.__fuobeComfyWsIsolated = s;
+  else globalThis.__fuobeComfyWs = s;
+}
+
+function ensureSocket(worker: ComfyWorker = "main"): { clientId: string; progress: Map<string, Progress> } {
+  const url = baseUrl(worker);
+  const cur = socketOf(worker);
   if (cur && cur.url === url && cur.ws.readyState <= 1) return cur;
   const clientId = cur?.clientId ?? `fuobe-${nanoid(8)}`;
   // Same server: keep the progress of prompts in flight. Another server: those prompt ids mean nothing there.
@@ -142,9 +189,9 @@ function ensureSocket(): { clientId: string; progress: Map<string, Progress> } {
       } catch {}
     };
     ws.onerror = () => {};
-    globalThis.__fuobeComfyWs = { url, ws, clientId, progress };
+    setSocket(worker, { url, ws, clientId, progress });
   } catch {
-    globalThis.__fuobeComfyWs = undefined;
+    setSocket(worker, undefined);
   }
   return { clientId, progress };
 }
@@ -152,6 +199,7 @@ function ensureSocket(): { clientId: string; progress: Map<string, Progress> } {
 /** Forget a finished prompt's progress and missed-poll count. */
 function forget(promptId: string) {
   globalThis.__fuobeComfyWs?.progress.delete(promptId);
+  globalThis.__fuobeComfyWsIsolated?.progress.delete(promptId);
   globalThis.__fuobeComfyMisses?.delete(promptId);
 }
 
@@ -663,10 +711,10 @@ const promptHasPrefix = (prompt: unknown, prefix: string) =>
  * VHS meta-batching re-queues the prompt (new prompt ids) until every frame is done; only the last pass
  * saves the video. Follow the passes by their shared filename prefix.
  */
-async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | undefined): Promise<ComfyOutput[] | "running" | { error: string } | null> {
-  const queue = await comfyJson<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");
+async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | undefined, worker: ComfyWorker): Promise<ComfyOutput[] | "running" | { error: string } | null> {
+  const queue = await comfyJson<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue", worker);
   if ([...(queue.queue_running ?? []), ...(queue.queue_pending ?? [])].some((q) => promptHasPrefix(q[2], prefix))) return "running";
-  const hist = await comfyJson<Record<string, HistoryEntry>>("/history?max_items=64");
+  const hist = await comfyJson<Record<string, HistoryEntry>>("/history?max_items=64", worker);
   const passes = Object.values(hist)
     .filter((e) => promptHasPrefix(e.prompt?.[2], prefix))
     .sort((a, c) => Number(c.prompt?.[0] ?? 0) - Number(a.prompt?.[0] ?? 0));
@@ -674,10 +722,32 @@ async function followMetaBatch(prefix: string, manifest: ManifestWorkflow | unde
   const failed = passes.find((e) => e.status?.status_str === "error");
   if (failed) return { error: explainExecutionError(executionError(failed), manifest) };
   for (const e of passes) {
-    const files = collectOutputs(e, manifest, baseUrl(), authHeaders());
+    const files = collectOutputs(e, manifest, baseUrl(worker), authHeaders());
     if (files.length) return files;
   }
   return null;
+}
+
+/** Upload a file to a worker's input folder; returns the name LoadImage / LoadAudio / LoadVideo take there. */
+async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, name: string): Promise<string> {
+  const form = new FormData();
+  const ext = name.includes(".") ? name.split(".").pop() : contentType.split("/")[1];
+  form.append("image", new Blob([new Uint8Array(data)], { type: contentType }), `fuobe_${nanoid(8)}.${ext}`);
+  form.append("type", "input");
+  form.append("overwrite", "true");
+  const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);
+  }
+  const j = (await res.json()) as { name: string; subfolder?: string };
+  const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
+  // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
+  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name)) {
+    const info = probeMedia(data);
+    if (info) rememberMedia(uploaded, info);
+  }
+  return uploaded;
 }
 
 export const comfyProvider: ProviderAdapter = {
@@ -691,51 +761,46 @@ export const comfyProvider: ProviderAdapter = {
     return cur.ok;
   },
 
-  async prepareFile(data, contentType, name) {
-    const form = new FormData();
-    const ext = name.includes(".") ? name.split(".").pop() : contentType.split("/")[1];
-    form.append("image", new Blob([new Uint8Array(data)], { type: contentType }), `fuobe_${nanoid(8)}.${ext}`);
-    form.append("type", "input");
-    form.append("overwrite", "true");
-    const res = await comfyFetch("/upload/image", { method: "POST", body: form });
-    if (!res.ok) throw new ProviderError(`ComfyUI upload failed: ${res.status} ${await res.text()}`);
-    const j = (await res.json()) as { name: string; subfolder?: string };
-    const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
-    // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
-    if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name)) {
-      const info = probeMedia(data);
-      if (info) rememberMedia(uploaded, info);
-    }
-    return uploaded;
+  // Inputs go to the server that runs the route's workflow (the isolated worker has its own input folder).
+  async prepareFile(data, contentType, name, route?: ModelRoute) {
+    return uploadTo(workerFor(route?.endpoint), data, contentType, name);
   },
 
   async submit({ route, input, generationId }) {
+    const worker = workerFor(route.endpoint);
     const { manifest, workflow: wf, meta } = await prepareWorkflow(route.endpoint, input, {
       generationId,
       op: route.op,
-      upload: (data, contentType, name) => comfyProvider.prepareFile(data, contentType, name),
+      upload: (data, contentType, name) => uploadTo(worker, data, contentType, name),
       media: mediaInfoFor,
-      serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats").catch(() => undefined))?.system?.ram_total,
+      serverRam: async () => (await comfyJson<{ system?: { ram_total?: number } }>("/system_stats", worker).catch(() => undefined))?.system?.ram_total,
     });
-    const { clientId } = ensureSocket();
-    const res = await comfyFetch("/prompt", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: wf, client_id: clientId }),
-    });
+    const { clientId } = ensureSocket(worker);
+    const res = await comfyFetch(
+      "/prompt",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: wf, client_id: clientId }),
+      },
+      worker,
+    );
     const body = (await res.json().catch(() => ({}))) as { prompt_id?: string; error?: { type?: string; message?: string }; node_errors?: unknown };
     if (!res.ok || !body.prompt_id) {
       // A node class the server doesn't have: name the pack to install (opt-in packs like ComfyUI-Whisper).
       const packs = manifest.customNodes.map((c) => c.name);
+      const where = worker === "isolated" ? "the isolated ComfyUI worker" : "your ComfyUI";
       const missingPack =
-        body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on your ComfyUI (see scripts/comfy/README.md)` : undefined;
+        body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
       const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
+      if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
-    return { externalId: body.prompt_id, meta, payload: wf };
+    return { externalId: body.prompt_id, meta: { ...meta, ...(worker === "isolated" && { worker }) }, payload: wf };
   },
 
   async poll({ externalId, meta }) {
+    const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
     let manifest: ManifestWorkflow | undefined;
     try {
       manifest = getWorkflow(String(meta.workflowId)).manifest;
@@ -745,9 +810,9 @@ export const comfyProvider: ProviderAdapter = {
         forget(externalId);
         return { state: "failed" as const, error: explainExecutionError(executionError(entry), manifest) };
       }
-      let outputs = collectOutputs(entry, manifest, baseUrl(), authHeaders());
+      let outputs = collectOutputs(entry, manifest, baseUrl(worker), authHeaders());
       if (!outputs.length && meta.metaBatch && typeof meta.prefix === "string") {
-        const next = await followMetaBatch(meta.prefix, manifest);
+        const next = await followMetaBatch(meta.prefix, manifest, worker);
         if (next === "running") return { state: "running" as const, message: "Rendering the next batch of frames" };
         if (next && "error" in next) {
           forget(externalId);
@@ -761,18 +826,18 @@ export const comfyProvider: ProviderAdapter = {
     };
     const isDone = (e: HistoryEntry | undefined): e is HistoryEntry => !!e && (!!e.status?.completed || e.status?.status_str === "success" || e.status?.status_str === "error");
 
-    const entry = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`))[externalId];
+    const entry = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`, worker))[externalId];
     if (isDone(entry)) return finished(entry);
 
     // Still queued or running?
-    const { progress } = ensureSocket();
+    const { progress } = ensureSocket(worker);
     const p = progress.get(externalId);
-    const queue = await comfyJson<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue");
+    const queue = await comfyJson<{ queue_running?: unknown[][]; queue_pending?: unknown[][] }>("/queue", worker);
     const running = queue.queue_running?.some((q) => q[1] === externalId);
     const pendingIdx = queue.queue_pending?.findIndex((q) => q[1] === externalId) ?? -1;
     if (!running && pendingIdx < 0 && !entry) {
       // It may have finished between the two requests (ComfyUI moves it from the queue to the history at once).
-      const again = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`))[externalId];
+      const again = (await comfyJson<Record<string, HistoryEntry>>(`/history/${externalId}`, worker))[externalId];
       if (isDone(again)) return finished(again);
       const misses = globalThis.__fuobeComfyMisses ?? (globalThis.__fuobeComfyMisses = new Map());
       const n = (misses.get(externalId) ?? 0) + 1;
@@ -789,40 +854,42 @@ export const comfyProvider: ProviderAdapter = {
     return {
       state: "running",
       progress: progressValue && progressValue > 0 ? progressValue : undefined,
-      message: p?.max ? `Sampling ${p.value}/${p.max}` : "Running on ComfyUI",
+      message: p?.max ? `Sampling ${p.value}/${p.max}` : worker === "isolated" ? "Running on the isolated ComfyUI worker" : "Running on ComfyUI",
     };
   },
 
-  async cancel({ externalId }) {
+  async cancel({ externalId, meta }) {
+    const worker: ComfyWorker = meta.worker === "isolated" ? "isolated" : "main";
     forget(externalId);
-    await comfyFetch("/queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ delete: [externalId] }),
-    }).catch(() => {});
-    const q = (await (await comfyFetch("/queue")).json().catch(() => ({}))) as { queue_running?: unknown[][] };
-    if (q.queue_running?.some((r) => r[1] === externalId)) {
-      await comfyFetch("/interrupt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt_id: externalId }),
-      }).catch(() => {});
-    }
+    const post = (path: string, body: unknown) => comfyFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, worker);
+    await post("/queue", { delete: [externalId] }).catch(() => {});
+    const q = (await comfyJson<{ queue_running?: unknown[][] }>("/queue", worker).catch(() => ({}))) as { queue_running?: unknown[][] };
+    if (q.queue_running?.some((r) => r[1] === externalId)) await post("/interrupt", { prompt_id: externalId }).catch(() => {});
   },
 
   async test() {
-    try {
-      const res = await comfyFetch("/system_stats");
-      if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
+    const describe = async (worker: ComfyWorker) => {
+      const res = await comfyFetch("/system_stats", {}, worker);
+      if (!res.ok) throw new ProviderError(`HTTP ${res.status}`);
       const s = (await res.json()) as { system?: { comfyui_version?: string }; devices?: { name?: string; vram_total?: number }[] };
       const dev = s.devices?.[0];
-      return {
-        ok: true,
-        detail: `ComfyUI ${s.system?.comfyui_version ?? ""} · ${dev?.name ?? "unknown device"}${dev?.vram_total ? ` · ${(dev.vram_total / 2 ** 30).toFixed(0)} GB` : ""}`,
-      };
+      return `ComfyUI ${s.system?.comfyui_version ?? ""} · ${dev?.name ?? "unknown device"}${dev?.vram_total ? ` · ${(dev.vram_total / 2 ** 30).toFixed(0)} GB` : ""}`;
+    };
+    let detail: string;
+    try {
+      detail = await describe("main");
     } catch (e) {
       return { ok: false, detail: (e as Error).message };
     }
+    // The isolated worker is optional: say whether it answers, without failing the main server's test.
+    if (baseUrl("isolated")) {
+      const iso = await describe("isolated").then(
+        (d) => `isolated worker: ${d}`,
+        () => `the isolated worker at ${baseUrl("isolated")} doesn't answer`,
+      );
+      detail = `${detail} · ${iso}`;
+    }
+    return { ok: true, detail };
   },
 };
 

@@ -15,6 +15,7 @@ const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const llm = await import("@/server/providers/llm");
 const { getModel, modelsFor } = await import("@/lib/catalog");
+const { probeComfy } = await import("@/server/providers/comfyui");
 
 // A stand-in Ollama: answers numbered subtitle lines line by line, anything else with a prefix.
 const seen: { system: string; user: string; model: string }[] = [];
@@ -284,5 +285,111 @@ describe("LLM provider", () => {
   it("fails a job that a restart interrupted", async () => {
     const res = await llm.llmProvider.poll({ externalId: "llm_gone", meta: {}, route: getModel("text-llm")!.routes[0], model: getModel("text-llm")!, createdAt: Date.now() });
     expect(res).toMatchObject({ state: "failed", error: expect.stringMatching(/Interrupted/) });
+  });
+});
+
+describe("open translation without Ollama: Qwen3.5 on ComfyUI", () => {
+  // A stand-in ComfyUI: runs the translate workflow by answering its instruction + text the way the
+  // stand-in Ollama does, and reports the text through SaveText's history entry.
+  const prompts: { instruction: string; text: string; maxTokens: unknown; clip: unknown }[] = [];
+  const answers = new Map<string, string>();
+  let fail: string | null = null;
+  const comfy = http.createServer((req, res) => {
+    const reply = (v: unknown, status = 200) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(v));
+    };
+    if (req.url === "/system_stats") return reply({ system: { comfyui_version: "0.41.0" } });
+    if (req.url === "/queue") return reply({ queue_running: [], queue_pending: [] });
+    if (req.url?.startsWith("/history/")) {
+      const id = req.url.slice("/history/".length);
+      const text = answers.get(id);
+      return reply(text === undefined ? {} : { [id]: { status: { status_str: "success", completed: true }, outputs: { "4": { text: [text], files: [{ filename: `${id}.txt`, subfolder: "fuobe", type: "output" }] } } } });
+    }
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      if (req.url !== "/prompt") return reply({ error: "not found" }, 404);
+      if (fail) return reply({ error: { type: "prompt_outputs_failed_validation", message: fail }, node_errors: {} }, 400);
+      const wf = (JSON.parse(body) as { prompt: Record<string, { class_type: string; inputs: Record<string, unknown> }> }).prompt;
+      const join = Object.values(wf).find((n) => n.class_type === "StringConcatenate")!.inputs;
+      const gen = Object.values(wf).find((n) => n.class_type === "TextGenerate")!.inputs;
+      const clip = Object.values(wf).find((n) => n.class_type === "CLIPLoader")!.inputs.clip_name;
+      const instruction = String(join.string_a);
+      const text = String(join.string_b);
+      prompts.push({ instruction, text, maxTokens: gen.max_length, clip });
+      const lang = /into (\w+)/.exec(instruction)?.[1] ?? "??";
+      const id = `p${prompts.length}`;
+      answers.set(id, /^\[\d+\]/.test(text) ? text.split("\n").map((l) => l.replace(/^\[(\d+)\]\s*/, (_, n) => `[${n}] (${lang}·qwen) `)).join("\n") : `(${lang}·qwen) ${text}`);
+      reply({ prompt_id: id, number: prompts.length });
+    });
+  });
+  let comfyUrl = "";
+
+  beforeAll(async () => {
+    await new Promise<void>((r) => comfy.listen(0, "127.0.0.1", r));
+    comfyUrl = `http://127.0.0.1:${(comfy.address() as { port: number }).port}`;
+  });
+  afterAll(() => {
+    comfy.close();
+    setSetting("comfyUrl", "");
+  });
+  beforeEach(async () => {
+    prompts.length = 0;
+    fail = null;
+    setSetting("comfyUrl", comfyUrl);
+    // Routing reads the cached reachability; this server shares the test's thread, so answer it here first.
+    await probeComfy(true);
+  });
+
+  it("translates subtitles in the same numbered batches on ComfyUI, keeps the timing and costs nothing", async () => {
+    await useOllama(false);
+    expect(llm.llmBackends({ endpoint: "ollama", op: "translate" })).toEqual(["comfyui"]);
+    // Only translations: writing still needs Ollama, and the cloud model never goes to ComfyUI.
+    expect(llm.llmBackends({ endpoint: "ollama", op: "write" })).toEqual([]);
+    expect(llm.llmBackends({ endpoint: "auto", op: "translate" })).toEqual([]);
+    const [g] = gens.createGenerations({ feature: "dub", modelId: "oss-text-llm", op: "translate", prompt: CUES, params: { targetLanguage: "Spanish", sourceLanguage: "English" } });
+    expect(g.provider).toBe("llm");
+    expect(g.costUsd).toBe(0);
+    const done = await settle(g.id);
+    expect(done.status, done.error ?? "").toBe("succeeded");
+    expect(done.outputs[0]).toMatchObject({ kind: "text", contentType: "application/x-subrip" });
+    expect(done.outputs[0].meta?.cues).toEqual([
+      { start: 0, end: 1.8, text: "(Spanish·qwen) Hello there." },
+      { start: 2, end: 4.25, text: "(Spanish·qwen) This is a test\nwith two lines." },
+    ]);
+    // One prompt for the batch: the subtitle instructions, then the numbered lines, on Qwen3.5 4B.
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].instruction).toMatch(/^You translate subtitles from English into Spanish\./);
+    expect(prompts[0].instruction.endsWith("\n\n")).toBe(true);
+    expect(prompts[0].text).toBe("[1] Hello there.\n[2] This is a test <br> with two lines.");
+    expect(prompts[0]).toMatchObject({ maxTokens: 4096, clip: "qwen3.5_4b_bf16.safetensors" });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("plain text too; with Ollama up, Ollama does it", async () => {
+    await useOllama(false);
+    const [a] = gens.createGenerations({ feature: "captions", modelId: "oss-text-llm", op: "translate", prompt: "Good morning, friends.", params: { targetLanguage: "German" } });
+    expect((await settle(a.id)).outputs[0]).toMatchObject({ kind: "text", text: "(German·qwen) Good morning, friends." });
+    await useOllama(true);
+    prompts.length = 0;
+    expect(llm.llmBackends({ endpoint: "ollama", op: "translate" })).toEqual(["ollama"]);
+    const [b] = gens.createGenerations({ feature: "captions", modelId: "oss-text-llm", op: "translate", prompt: "Good night.", params: { targetLanguage: "German" } });
+    expect((await settle(b.id)).outputs[0].text).toBe("(German) Good night.");
+    expect(prompts).toHaveLength(0);
+  });
+
+  it("a ComfyUI error fails the step with its words; with neither running, the message names both", async () => {
+    await useOllama(false);
+    fail = "Value not in list: clip_name: 'qwen3.5_4b_bf16.safetensors' not in []";
+    const [g] = gens.createGenerations({ feature: "dub", modelId: "oss-text-llm", op: "translate", prompt: "Hello.", params: { targetLanguage: "French" } });
+    const done = await settle(g.id);
+    expect(done.status).toBe("failed");
+    expect(done.error).toMatch(/qwen3\.5_4b_bf16\.safetensors/);
+    setSetting("comfyUrl", "http://127.0.0.1:9");
+    await probeComfy(true);
+    expect(llm.llmBackends({ endpoint: "ollama", op: "translate" })).toEqual([]);
+    setSetting("demoMode", "off");
+    expect(() => gens.createGenerations({ feature: "dub", modelId: "oss-text-llm", op: "translate", prompt: "x", params: { targetLanguage: "French" } })).toThrow(/Connect Ollama, or start ComfyUI with Qwen3\.5 4B/);
   });
 });
