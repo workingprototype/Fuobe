@@ -151,6 +151,19 @@ describe("Cinema API: scene and recomposition in demo mode", () => {
     ]);
   }, 60_000);
 
+  it("keeps the still as the project's cover, not the scene's depth map", async () => {
+    const p = cinema.createProject({ name: "Cover" });
+    const made = generateInProject(p.id, { ...base, engine: "cloud", mode: "image", action: "generate", prompt: "A lighthouse at dusk", settings: { camera: "modern", lens: "clean-sharp", focal: "24mm" } }, null);
+    const still = await settle(made.items[0].id);
+    const cover = () => cinema.listProjects().find((x) => x.id === p.id)!.stats!.cover;
+    expect(cover()).toBe(still.outputs[0].url);
+    for (const engine of ["cloud", "open"] as const) {
+      const s = generateInProject(p.id, { ...base, engine, action: "scene", source: { url: still.outputs[0].url, kind: "image" } }, null);
+      expect((await settle(s.items[0].id)).status).toBe("succeeded");
+      expect(cover()).toBe(still.outputs[0].url);
+    }
+  }, 60_000);
+
   it("re-renders a capture into a new take that remembers the camera", async () => {
     const p = cinema.createProject({ name: "Recompose" });
     const still = upload("still.png");

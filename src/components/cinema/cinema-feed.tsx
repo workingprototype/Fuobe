@@ -567,7 +567,8 @@ export function CinemaFeed({
   const filtered = useMemo(() => {
     const age = { today: 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000 } as const;
     return items.filter((g) => {
-      if (prefs.type !== "all" && !(g.outputs.some((o) => o.kind === prefs.type) || (g.status !== "succeeded" && g.kind === prefs.type))) return false;
+      // A 3D scene is neither an image nor a video (its depth map is an image output): it shows under All types.
+      if (prefs.type !== "all" && (g.feature === "cinema-scene" || !(g.outputs.some((o) => o.kind === prefs.type) || (g.status !== "succeeded" && g.kind === prefs.type)))) return false;
       if (prefs.date === "today" && dayLabel(g.createdAt) !== "Today") return false;
       if (prefs.date !== "all" && prefs.date !== "today" && now - g.createdAt > age[prefs.date]) return false;
       if (prefs.status === "liked" && !g.favorite) return false;
