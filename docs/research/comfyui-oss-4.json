@@ -6568,7 +6568,7 @@
      "result": "FAILS in core v0.41: 'Video chunk 1 could not be encoded compatibly: extradata ... color space' (ConcatenateVideo cannot normalise clips from other encoders)"
     }
    ],
-   "notes": "width/height/fps = the clip's (from its header). Works for clips Fuobe's open engine made (CreateVideo/SaveVideo, sRGB-tagged H.264). For clips from cloud models or uploads, fall back to still-to-clip + the existing video-concat-sound1-2 (decodes and re-encodes, holds every frame in RAM). The ad's sound is padded with card-length silence (AudioConcat) and passed as complete_audio. Silent clips: drop node 2 and use node 12 alone."
+   "notes": "width/height/fps = the clip's (from its header). Works for clips Fuobe's open engine made (CreateVideo/SaveVideo, sRGB-tagged H.264). For clips from cloud models or uploads, fall back to still-to-clip + the existing video-concat-sound1-2 (decodes and re-encodes, holds every frame in RAM). The ad's sound is padded with card-length silence (AudioConcat) and passed as complete_audio. Silent clips: drop node 2 and use node 12 alone. Correction (comfy-graphs-4): drop nodes 2, 12 and 13 and node 14's complete_audio instead (no sound track); node 12 alone as complete_audio gives a sound track only the card's length (checked on CPU)."
   },
   {
    "id": "scene-mesh-moge",
@@ -7253,7 +7253,7 @@
    "validated": true,
    "ranOnCpu": false,
    "cpuRuns": [],
-   "notes": "Added by the round-4 critic. The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02), exported to API format, with the UI-only live-preview patch removed and an H.264 75-frame orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5). Core nodes only (no pack, no worker). Subject only: BiRefNet removes the background first (cutout=false uses the image's own alpha). Output is an .spz splat (ply / ksplat selectable). RenderSplat also takes a CreateCameraInfo look_at camera, so a chosen browser view can be rendered server-side. 3.97 GB of weights.",
+   "notes": "Added by the round-4 critic. The official template 3d_triposplat_image_to_gaussian_splat (2026-06-02), exported to API format, with the UI-only live-preview patch removed and an H.264 75-frame orbit (RenderSplat + CreateCameraInfo orbit yaw 35, pitch 30, distance 2.5). Core nodes only (no pack, no worker). Subject only: BiRefNet removes the background first (cutout=false uses the image's own alpha). Output is an .spz splat (ply / ksplat selectable). RenderSplat also takes a CreateCameraInfo look_at camera, so a chosen browser view can be rendered server-side. 3.78 GB of weights.",
    "addedBy": "round-4 critic (2026-10-22)"
   },
   {

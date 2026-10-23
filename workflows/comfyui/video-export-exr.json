@@ -1,0 +1,39 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "input.mp4"
+    },
+    "_meta": {
+      "title": "Video (video)"
+    }
+  },
+  "2": {
+    "class_type": "GetVideoComponents",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Frames"
+    }
+  },
+  "3": {
+    "class_type": "SaveImageAdvanced",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "filename_prefix": "fuobe/video-export-exr",
+      "format": "exr",
+      "format.bit_depth": "16-bit float",
+      "format.input_color_space": "sRGB"
+    },
+    "_meta": {
+      "title": "OpenEXR frames (scene-linear, half float)"
+    }
+  }
+}

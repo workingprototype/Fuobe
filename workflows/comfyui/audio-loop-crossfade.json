@@ -1,0 +1,411 @@
+{
+  "1": {
+    "class_type": "VHS_LoadAudioUpload",
+    "inputs": {
+      "audio": "music.wav",
+      "start_time": 0,
+      "duration": 0
+    },
+    "_meta": {
+      "title": "Music clip to loop (audio)"
+    }
+  },
+  "2": {
+    "class_type": "AudioAdjustVolume",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "volume": -3
+    },
+    "_meta": {
+      "title": "Headroom so overlapping seams never clip (headroomDb)"
+    }
+  },
+  "3": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "fade.wav"
+    },
+    "_meta": {
+      "title": "Crossfade curve the provider writes: stereo, left = fade-in, right = fade-out, crossfade seconds long (fadeCurve)"
+    }
+  },
+  "4": {
+    "class_type": "SplitAudioChannels",
+    "inputs": {
+      "audio": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Fade-in / fade-out curves"
+    }
+  },
+  "5": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 1
+    },
+    "_meta": {
+      "title": "Crossfade seconds (crossfade; = the curve's length)"
+    }
+  },
+  "6": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 20
+    },
+    "_meta": {
+      "title": "Length of the bed in seconds (duration)"
+    }
+  },
+  "7": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(ceil((a - b) / (c - b)), 1)",
+      "values.a": [
+        "6",
+        0
+      ],
+      "values.b": [
+        "5",
+        0
+      ],
+      "values.c": [
+        "1",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "Repeats needed"
+    }
+  },
+  "8": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Head (first crossfade seconds)"
+    }
+  },
+  "9": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "0 - a",
+      "values.a": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "-crossfade (from the end)"
+    }
+  },
+  "10": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": [
+        "9",
+        0
+      ],
+      "duration": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Tail (last crossfade seconds)"
+    }
+  },
+  "11": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a - 2 * b",
+      "values.a": [
+        "1",
+        1
+      ],
+      "values.b": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Body length"
+    }
+  },
+  "12": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "2",
+        0
+      ],
+      "start_index": [
+        "5",
+        0
+      ],
+      "duration": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Body (between head and tail)"
+    }
+  },
+  "13": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "10",
+        0
+      ],
+      "audio2": [
+        "4",
+        1
+      ],
+      "merge_method": "multiply"
+    },
+    "_meta": {
+      "title": "Tail fading out"
+    }
+  },
+  "14": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "8",
+        0
+      ],
+      "audio2": [
+        "4",
+        0
+      ],
+      "merge_method": "multiply"
+    },
+    "_meta": {
+      "title": "Head fading in"
+    }
+  },
+  "15": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "13",
+        0
+      ],
+      "audio2": [
+        "14",
+        0
+      ],
+      "merge_method": "add"
+    },
+    "_meta": {
+      "title": "Seam: tail into head"
+    }
+  },
+  "16": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "12",
+        0
+      ],
+      "audio2": [
+        "15",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "One repeat = body + seam"
+    }
+  },
+  "20": {
+    "class_type": "StartLoop",
+    "inputs": {
+      "mode": "simple",
+      "mode.num_iterations": [
+        "7",
+        1
+      ],
+      "cache_iterations": false,
+      "initial_iteration_value": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Append one repeat per pass (starts from the head)"
+    }
+  },
+  "21": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "20",
+        4
+      ],
+      "audio2": [
+        "16",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "Bed so far + one repeat"
+    }
+  },
+  "22": {
+    "class_type": "EndLoop",
+    "inputs": {
+      "accumulate": false,
+      "output_value": [
+        "21",
+        0
+      ],
+      "next_iteration_value": [
+        "21",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The looped bed"
+    }
+  },
+  "23": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "22",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "6",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Cut to the requested length"
+    }
+  },
+  "24": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "a - b",
+      "values.a": [
+        "6",
+        0
+      ],
+      "values.b": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Start of the final fade"
+    }
+  },
+  "25": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "23",
+        0
+      ],
+      "start_index": 0,
+      "duration": [
+        "24",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "All but the ending"
+    }
+  },
+  "26": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "23",
+        0
+      ],
+      "start_index": [
+        "9",
+        0
+      ],
+      "duration": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Ending"
+    }
+  },
+  "27": {
+    "class_type": "AudioMerge",
+    "inputs": {
+      "audio1": [
+        "26",
+        0
+      ],
+      "audio2": [
+        "4",
+        1
+      ],
+      "merge_method": "multiply"
+    },
+    "_meta": {
+      "title": "Ending fades out"
+    }
+  },
+  "28": {
+    "class_type": "AudioConcat",
+    "inputs": {
+      "audio1": [
+        "25",
+        0
+      ],
+      "audio2": [
+        "27",
+        0
+      ],
+      "direction": "after"
+    },
+    "_meta": {
+      "title": "Finished bed"
+    }
+  },
+  "29": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": [
+        "28",
+        0
+      ],
+      "filename_prefix": "fuobe/audio-loop-crossfade"
+    },
+    "_meta": {
+      "title": "Save (FLAC)"
+    }
+  }
+}

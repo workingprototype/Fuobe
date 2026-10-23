@@ -1,0 +1,112 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "poster.png"
+    },
+    "_meta": {
+      "title": "Image to read (image)"
+    }
+  },
+  "2": {
+    "class_type": "ImageScaleToMaxDimension",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "upscale_method": "area",
+      "largest_size": 1280
+    },
+    "_meta": {
+      "title": "Longest side the model sees (maxSize; 1280 keeps small print legible)"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "ovisocr3_0.8b_bf16.safetensors",
+      "type": "stable_diffusion",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "OCR model (checkpoint: ovisocr3_0.8b_bf16 default, or qwen3.5_0.8b / 2b / 4b_bf16)"
+    }
+  },
+  "4": {
+    "class_type": "TextGenerate",
+    "inputs": {
+      "clip": [
+        "3",
+        0
+      ],
+      "prompt": "Locate and transcribe every readable line of text in the image. Return a single JSON array in natural reading order.\n\nEach element follows this schema:\n`{\"bbox\": [x_min, y_min, x_max, y_max], \"text\": \"string\"}`\n\nRules:\n1. Use line-level annotations. Each element must represent exactly one visible line of text; keep the words of one line together and do not merge separate lines.\n2. The bbox coordinates are integers scaled to [0, 1000).\n3. Each bbox must tightly enclose its line.\n4. Preserve the original text exactly without translation, paraphrasing, correction, or completion.\n5. Output strictly valid JSON only. Do not output Markdown, explanations, or code fences.",
+      "image": [
+        "2",
+        0
+      ],
+      "max_length": 2048,
+      "sampling_mode": "off",
+      "thinking": false,
+      "use_default_template": true
+    },
+    "_meta": {
+      "title": "Read every text line with its box (instruction)"
+    }
+  },
+  "5": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "4",
+        0
+      ],
+      "filename_prefix": "fuobe/ocr-lines",
+      "format": "json"
+    },
+    "_meta": {
+      "title": "Lines + boxes as JSON text: [{\"bbox\":[x0,y0,x1,y1] in 0-1000, \"text\":\"...\"}]"
+    }
+  },
+  "6": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Size the model saw"
+    }
+  },
+  "7": {
+    "class_type": "StringFormat",
+    "inputs": {
+      "values.a": [
+        "6",
+        0
+      ],
+      "values.b": [
+        "6",
+        1
+      ],
+      "f_string": "{{\"width\": {a}, \"height\": {b}, \"coords\": \"relative-1000\"}}"
+    },
+    "_meta": {
+      "title": "Frame of reference"
+    }
+  },
+  "8": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "7",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Size (text)"
+    }
+  }
+}

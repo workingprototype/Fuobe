@@ -76,6 +76,10 @@ function sampleValue(key, entry, uploads) {
     case 'hints': return 'Fuobe';
     case 'instruction': return String(entry.defaults?.instruction ?? 'Translate into {language}.').replaceAll('{language}', 'Spanish');
     case 'mask': return uploads.mask;
+    case 'maskPrompt': return 'the person on the left';
+    case 'fadeCurve': return uploads.wav;
+    case 'skipPass2': return true; // switches: the non-default branch, so both values are known to pass
+    case 'cutout': return false;
     case 'video': case 'video2': case 'video3': case 'video4': return uploads.mp4;
     case 'audio': case 'audio2': return uploads.wav;
     case 'tracks': {
@@ -101,6 +105,8 @@ function sampleValue(key, entry, uploads) {
 }
 
 const DUMMY_LORAS = { loraHigh: 'fuobe_validate_lora_high.safetensors', loraLow: 'fuobe_validate_lora_low.safetensors', lora: 'fuobe_validate_lora.safetensors' };
+// Loader inputs whose combo lists the server's input folder (the same loaders build-library.mjs requires a binding for).
+const UPLOAD_INPUTS = { LoadImage: 'image', LoadImageMask: 'image', LoadVideo: 'file', VHS_LoadVideo: 'video', LoadAudio: 'audio', VHS_LoadAudioUpload: 'audio' };
 
 function ensureDummy(folder, file, created) {
   const p = path.join(MODELS_DIR, folder, file);
@@ -246,6 +252,17 @@ async function main() {
   const prevSubset = readJson(path.join(OUT_DIR, 'object_info.subset.json'), {});
   const subset = {};
   for (const c of [...classes].sort()) subset[c] = objectInfo[c] || prevSubset[c] || null;
+  // Upload combos list whatever the server's input folder holds right now (other sessions' uploads too):
+  // keep only the validation fixtures, so the file does not change with the server's state.
+  const fixtures = new Set(Object.values(uploads));
+  for (const [cls, inp] of Object.entries(UPLOAD_INPUTS)) {
+    const def = subset[cls] && JSON.parse(JSON.stringify(subset[cls]));
+    const spec = def?.input?.required?.[inp] ?? def?.input?.optional?.[inp];
+    if (!spec) continue;
+    if (Array.isArray(spec[0])) spec[0] = spec[0].filter((o) => fixtures.has(o));
+    else if (Array.isArray(spec[1]?.options)) spec[1].options = spec[1].options.filter((o) => fixtures.has(o));
+    subset[cls] = def;
+  }
   writeJson(path.join(OUT_DIR, 'object_info.subset.json'), subset);
 
   writeJson(manifestPath, manifest);

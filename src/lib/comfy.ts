@@ -56,8 +56,27 @@ export interface ManifestOutput {
   kind: MediaKind;
   /** Audio stems of a voice/background separation. */
   stem?: "voice" | "background";
-  /** What a text or image output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles… */
-  role?: "cues" | "transcript" | "language" | "layers" | "sheet" | "tiles" | "first-frame" | "turntable";
+  /**
+   * What a text, image or 3D output is: timed caption cues, a plain transcript, the detected language, layers, a grid's sheet or tiles…
+   * Round 4: OCR "lines" (JSON, boxes 0–1000) and the "frame" the model saw, an EXR sequence's "frames", a whole-"scene" GLB and its
+   * "depth" map, a Gaussian "splat", a reference video's style "brief".
+   */
+  role?:
+    | "cues"
+    | "transcript"
+    | "language"
+    | "layers"
+    | "sheet"
+    | "tiles"
+    | "first-frame"
+    | "turntable"
+    | "lines"
+    | "frame"
+    | "frames"
+    | "scene"
+    | "depth"
+    | "splat"
+    | "brief";
 }
 
 export interface ManifestWorkflow {
@@ -68,7 +87,7 @@ export interface ManifestWorkflow {
   source: string;
   bindings: Partial<Record<BindingKey, BindingTarget[]>>;
   outputs: ManifestOutput[];
-  defaults: Record<string, number | string>;
+  defaults: Record<string, number | string | boolean>;
   limits?: Record<string, number>;
   models: ManifestModel[];
   customNodes: { name: string; repo: string }[];
