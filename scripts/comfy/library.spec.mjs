@@ -2741,7 +2741,8 @@ export const SPEC = [
       'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format hlg_10bit is this graph as built; pq_10bit binds colorSpace "HDR PQ" ' +
       '(BT.2020 PQ, HDR10\'s transfer, still H.264 High 10: core ComfyUI has no H.265 encoder); exr -> video-sdr-to-hdr-exr. ' +
       'The learned alternative is the LTX-2.5 SDR-To-HDR IC-LoRA (LTX community licence, not built). Decodes the whole clip: RAM grows with the length. ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept. ' +
+      'Through Fuobe with colorSpace HDR PQ (r4/video-finish, 3 s 320x180 25 fps clip with sound): H.264 High 10, yuv420p10le, smpte2084 / bt2020, 75 frames, AAC.',
   },
   {
     id: 'video-export-exr',
@@ -2757,7 +2758,8 @@ export const SPEC = [
       'Node 5 saves an H.264 preview with the clip\'s sound (role preview, added by r4/video-finish): the result shown in the feed; the provider zips the frames onto it (meta.artifacts.exr). ' +
       'The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Storage: /view serves .exr as image/aces, which storage.ts has no extension for, ' +
       'so each frame is saved as an image .bin until EXT_BY_TYPE / TYPE_BY_EXT know exr (feature package; the zip is the deliverable anyway). ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer. ' +
+      'With the preview (r4/video-finish, through Fuobe, 2 s 160x96 30 fps clip with sound): 60 .exr files zipped (2.6 MB, stored) onto an H.264 preview with AAC.',
   },
 
   // ---- Still to clip, ad end card ---------------------------------------------------------
@@ -2894,7 +2896,8 @@ export const SPEC = [
       'and then the provider links FrameInterpolate out). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)), so a clip whose header was unreadable still plays at the right speed. ' +
       'The last frame is held once more before interpolating, so the clip keeps its length (N frames become N x m + 1, about one output frame longer than the source) instead of losing a source frame. ' +
       'slowdown > 1 stretches the clip (2 = twice as long); the provider then drops the sound link (it would no longer match). checkpoint film_net_fp16.safetensors runs FILM (better on large motion, about 31x slower on CPU). ' +
-      'Holds the whole interpolated clip in memory (source frames x m before the selection): the provider refuses clips that need more than half the server\'s RAM.',
+      'Holds the whole interpolated clip in memory (source frames x m before the selection): the provider refuses clips that need more than half the server\'s RAM. ' +
+      'Ran here through Fuobe (CPU, a random-weight RIFE file standing in for the weights): 24 fps 2 s 320x180 -> 60 fps = 121 frames, 2.017 s (m 5, n 2); 25 fps 3 s with sound -> 30 fps at 2x slow motion = 181 frames, 6.03 s, no sound track; 30 fps 2 s with sound -> 24 fps = 49 frames, 2.04 s, sound kept (m 4, n 5).',
   },
   {
     id: 'upscale-video-esrgan-chunked',
@@ -2913,7 +2916,8 @@ export const SPEC = [
       'R4-38: upscale-video-esrgan decodes the whole film (about 38 GB of float frames for 30 s at 480p before the 4x model). This one decodes framesPerBatch frames per pass (VHS_BatchManager re-queues the prompt ' +
       'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (tiled), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
       'into one ffmpeg H.264 encode that stays open across passes; the last pass writes the file with the source\'s sound at the source frame rate. The provider follows the passes by their filename prefix. ' +
-      'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4).',
+      'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4). ' +
+      'Ran here (CPU, a random-weight x4 ESRGAN file standing in for the weights): 30 s 256x144 25 fps with sound -> 1920x1080, 750 frames, AAC, 47 passes of 16 frames in 417 s, ComfyUI\'s RSS peaked 0.87 GB above idle (upscale-video-esrgan on 10 s of the same clip, 4x to 1024x576 only, peaked 3.0 GB above idle); through Fuobe a silent 2 s 24 fps clip -> 1280x720, 48 frames, no audio link.',
   },
   {
     id: 'upscale-video-seedvr2-chunked',
@@ -2963,6 +2967,7 @@ export const SPEC = [
     notes:
       'params.format exr of the sdr-to-hdr operation (Higgsfield\'s "EXR 16-bit: uncompressed frame sequence for compositing"). The same ImageSDRToHDR expansion as video-sdr-to-hdr; SaveImageAdvanced writes each ' +
       'frame as a half-float EXR with input_color_space HDR, i.e. the inverse HLG curve: scene-linear light in Rec.2020 primaries, highlights above 1.0 kept. Node 6 saves the 10-bit HLG MP4 with the clip\'s sound as ' +
-      'the result to watch (role preview); the provider zips the frames (role frames) onto it as meta.artifacts.exr. Decodes the whole clip: RAM grows with the length (the provider refuses what the server can\'t hold).',
+      'the result to watch (role preview); the provider zips the frames (role frames) onto it as meta.artifacts.exr. Decodes the whole clip: RAM grows with the length (the provider refuses what the server can\'t hold). ' +
+      'Ran here through Fuobe (CPU, 2 s 160x96 30 fps clip with sound): 60 half-float EXR frames zipped onto an H.264 High 10 HLG (arib-std-b67, bt2020) preview with AAC.',
   },
 ];
