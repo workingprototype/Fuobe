@@ -18,7 +18,8 @@ const VACE = ["startTime", "duration", "width", "height", "maskGrow", "prompt", 
 const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: [string, string?][] }> = {
   "ocr-lines-qwen35": { capability: "ocr", bindings: ["image", "maxSize", "checkpoint", "instruction", "maxTokens", "filenamePrefix"], outputs: [["text", "lines"], ["text", "frame"]] },
   "video-inpaint-wan-vace": { capability: "remove-object", bindings: ["video", "maskPrompt", ...VACE], outputs: [["video"]] },
-  "video-inpaint-wan-vace-painted": { capability: "remove-object", bindings: ["video", "mask", ...VACE], outputs: [["video"]] },
+  // The painted eraser also saves its last tracked frame's mask, which starts the next window (remove-object package).
+  "video-inpaint-wan-vace-painted": { capability: "remove-object", bindings: ["video", "mask", ...VACE], outputs: [["video"], ["image", "mask"]] },
   "video-erase-void": {
     capability: "remove-object",
     bindings: ["video", "startTime", "duration", "width", "height", "maskPrompt", "maskGrow", "prompt", "negativePrompt", "cfg", "steps", "seed", "skipPass2", "filenamePrefix"],
@@ -54,6 +55,8 @@ const ROUND4: Record<string, { capability: string; bindings: string[]; outputs: 
 const MEDIA: Record<string, string> = { LoadImage: "image", LoadImageMask: "image", LoadVideo: "file", VHS_LoadVideo: "video", LoadAudio: "audio", VHS_LoadAudioUpload: "audio" };
 const ROLES: NonNullable<ManifestOutput["role"]>[] = [
   "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief",
+  // remove-object package: the painted eraser's hand-off mask, the matte graphs' two videos.
+  "mask", "cutout", "matte",
 ];
 
 describe("round-4 ComfyUI workflows", () => {
@@ -189,7 +192,8 @@ for (const id of ["video-inpaint-wan-vace", "video-inpaint-wan-vace-painted", "v
   WINDOWS[id] = {
     cap: 81,
     counts: [[82, 81], [81, 81], [80, 77], [30, 29], [5, 5], [1, 1]],
-    lengthUsers: ["ComfyMathExpression", "ImageFromBatch", ...(id === "video-insert-wan-vace" ? ["RepeatImageBatch"] : []), "WanVaceToVideo"],
+    // The painted eraser also counts back from the window's last frame for the mask it hands on.
+    lengthUsers: ["ComfyMathExpression", "ImageFromBatch", ...(id === "video-insert-wan-vace" ? ["RepeatImageBatch"] : []), ...(id.endsWith("-painted") ? ["ComfyMathExpression"] : []), "WanVaceToVideo"],
     model: "WanVaceToVideo",
     workScales: id.endsWith("-painted") || id === "video-insert-wan-vace" ? 2 : 1,
     sizes: SAMPLE_SIZES.vace,

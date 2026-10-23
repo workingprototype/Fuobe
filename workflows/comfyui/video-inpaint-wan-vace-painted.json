@@ -606,6 +606,61 @@
       "title": "First-frame mask"
     }
   },
+  "74": {
+    "class_type": "MaskToImage",
+    "inputs": {
+      "mask": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Tracked masks as images"
+    }
+  },
+  "75": {
+    "class_type": "ComfyMathExpression",
+    "inputs": {
+      "expression": "max(0, a - 1)",
+      "values.a": [
+        "86",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "The window's last frame"
+    }
+  },
+  "76": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "74",
+        0
+      ],
+      "batch_index": [
+        "75",
+        1
+      ],
+      "length": 1
+    },
+    "_meta": {
+      "title": "Its tracked mask"
+    }
+  },
+  "77": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "76",
+        0
+      ],
+      "filename_prefix": "fuobe/video-inpaint-wan-vace-painted"
+    },
+    "_meta": {
+      "title": "Save the last frame's mask (starts the next window: white = the object)"
+    }
+  },
   "80": {
     "class_type": "Video Slice",
     "inputs": {

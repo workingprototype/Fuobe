@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-23T00:20:02.191Z",
+  "generatedAt": "2026-10-23T01:11:51.812Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -7652,11 +7652,13 @@
       "outputs": [
         {
           "node": "7",
-          "kind": "video"
+          "kind": "video",
+          "role": "cutout"
         },
         {
           "node": "10",
-          "kind": "video"
+          "kind": "video",
+          "role": "matte"
         }
       ],
       "defaults": {},
@@ -7676,7 +7678,7 @@
       "vramGb": 4,
       "license": "MIT (BiRefNet)",
       "validated": true,
-      "notes": "Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs \"images\" (animated: true), not \"videos\": classify by the .webm extension / the declared kind. Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For \"keep only X\" use video-bg-remove-sam3."
+      "notes": "Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs \"images\" (animated: true), not \"videos\": classify by the .webm extension / the declared kind. Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For \"keep only X\" use video-bg-remove-sam3. Roles: node 7 \"cutout\", node 10 \"matte\"; params.extra.keepOutput (\"cutout\" | \"matte\") makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask)."
     },
     {
       "id": "video-bg-remove-sam3",
@@ -7701,13 +7703,23 @@
           {
             "node": "9",
             "input": "filename_prefix"
+          },
+          {
+            "node": "12",
+            "input": "filename_prefix"
           }
         ]
       },
       "outputs": [
         {
           "node": "9",
-          "kind": "video"
+          "kind": "video",
+          "role": "cutout"
+        },
+        {
+          "node": "12",
+          "kind": "video",
+          "role": "matte"
         }
       ],
       "defaults": {},
@@ -7727,7 +7739,7 @@
       "vramGb": 6,
       "license": "Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)",
       "validated": true,
-      "notes": "prompt = what to KEEP (\"person\", \"red car\"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices \"\" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history \"images\" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead."
+      "notes": "prompt = what to KEEP (\"person\", \"red car\"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices \"\" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history \"images\" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. Second output (node 12, role \"matte\", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); params.extra.keepOutput (\"cutout\" | \"matte\") makes the provider drop the other save node, so only the chosen one is encoded."
     },
     {
       "id": "video-depth-da3",
@@ -7740,6 +7752,12 @@
           {
             "node": "1",
             "input": "file"
+          }
+        ],
+        "sideBySide": [
+          {
+            "node": "9",
+            "input": "value"
           }
         ],
         "filenamePrefix": [
@@ -7755,7 +7773,9 @@
           "kind": "video"
         }
       ],
-      "defaults": {},
+      "defaults": {
+        "sideBySide": false
+      },
       "limits": {
         "maxWidth": 2048,
         "maxHeight": 2048
@@ -7787,6 +7807,18 @@
             "input": "file"
           }
         ],
+        "colormap": [
+          {
+            "node": "5",
+            "input": "colormap"
+          }
+        ],
+        "sideBySide": [
+          {
+            "node": "9",
+            "input": "value"
+          }
+        ],
         "filenamePrefix": [
           {
             "node": "7",
@@ -7800,7 +7832,10 @@
           "kind": "video"
         }
       ],
-      "defaults": {},
+      "defaults": {
+        "colormap": "gray",
+        "sideBySide": false
+      },
       "limits": {
         "maxWidth": 2048,
         "maxHeight": 2048
@@ -7815,7 +7850,7 @@
       "vramGb": 4,
       "license": "Apache-2.0 (Video-Depth-Anything-Small); Base/Large and metric variants are CC-BY-NC-4.0 (non-commercial) - keep the vits model",
       "validated": true,
-      "notes": "yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default \".safetensors\" is not in its own option list) -> VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.",
+      "notes": "yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default \".safetensors\" is not in its own option list) -> VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, the depth map scaled to the clip's size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).",
       "autoDownloads": [
         "LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run"
       ]
@@ -11839,6 +11874,10 @@
           {
             "node": "38",
             "input": "filename_prefix"
+          },
+          {
+            "node": "77",
+            "input": "filename_prefix"
           }
         ]
       },
@@ -11846,6 +11885,11 @@
         {
           "node": "38",
           "kind": "video"
+        },
+        {
+          "node": "77",
+          "kind": "image",
+          "role": "mask"
         }
       ],
       "defaults": {
@@ -11907,7 +11951,7 @@
       "vramGb": 24,
       "license": "Apache-2.0 (Wan 2.1 VACE 14B, lightx2v T2V LoRA, umT5, Wan VAE); SAM 3.1 under Meta's SAM License (commercial use allowed under its terms); GrowMaskWithBlur from ComfyUI-KJNodes (GPL-3.0 code)",
       "validated": true,
-      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (in the clip's shape). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame. Validated by /prompt only (no GPU here)."
+      "notes": "mask = a PNG of the window's FIRST frame, read from the red channel: white = the object to remove, black = keep (in the clip's shape). SAM3_VideoTrack takes it as initial_mask and tracks the object through the window. Changed from the research graph: the mask is read from the red channel (Fuobe's mask convention, as flux1-fill-inpaint) instead of alpha. The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip's shape, paste-back into the original frames, the window's sound kept. For a window after the first, the mask must be painted on (or tracked to) that window's first frame: the second output (node 77, role \"mask\", added by the remove-object package) is the tracked mask of the window's LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. Validated by /prompt only (no GPU here)."
     },
     {
       "id": "video-erase-void",

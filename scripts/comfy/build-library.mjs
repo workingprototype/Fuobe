@@ -108,6 +108,8 @@ export const BINDING_KEYS = new Set([
   'maskPrompt', 'maskGrow', 'skipPass2', 'supersample', 'zoomStart', 'zoomEnd', 'panStartX', 'panStartY', 'panEndX', 'panEndY',
   'easeInOut', 'chunkFrames', 'crossfade', 'headroomDb', 'fadeCurve', 'format', 'profile', 'peakNits', 'resolutionLevel', 'fovX',
   'decimation', 'cutout', 'numGaussians', 'splatFormat', 'orbitFrames', 'frameWidth',
+  // remove-object package (round 4)
+  'colormap', 'sideBySide',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
