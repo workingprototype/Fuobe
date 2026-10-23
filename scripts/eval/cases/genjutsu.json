@@ -1,0 +1,62 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "genjutsu",
+  "title": "Fuobe Genjutsu · motion transfer, object swap, restyle",
+  "description": "Runs the Genjutsu studio route (POST /api/genjutsu, priced by /api/genjutsu/estimate) on your reference clips and images in local/genjutsu/: dance.mp4 (a 4–10 s clip of one person moving), character.png (who should move like that, a consenting person or a drawn character), street.mp4 (a clip with an object to swap), object.png (what replaces it), style.png (a look image you own). The Originals (O5) come first in each model list; today's open models run until they exist. On the cloud there is no hosted-open Genjutsu before O5, so the cloud runs only the partner variant (Kling) for reference.",
+  "original": ["fuobe-genjutsu-move", "fuobe-genjutsu-swap", "fuobe-genjutsu-restyle"],
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["fuobe-genjutsu-move", "oss-wan22-animate"] },
+    "cloud": { "models": ["fuobe-genjutsu-move"] },
+    "demo": { "models": ["oss-wan22-animate"] }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["temporal", "clip"], "timeoutSeconds": 2700 },
+  "variants": {
+    "original": { "description": "The Original (or today's open model) as the studio runs it" },
+    "partner": {
+      "description": "A partner model for reference: Kling 3.0 Motion Control, Kling O3 edit",
+      "models": { "cloud": ["kling-motion-control", "kling-o3"] }
+    }
+  },
+  "cases": [
+    {
+      "id": "genjutsu/move",
+      "title": "Motion transfer: your character dances the clip",
+      "inputs": { "video": "local/genjutsu/dance.mp4", "images": ["local/genjutsu/character.png"] },
+      "demoInputs": { "video": "samples/demo-portrait.mp4", "images": ["fixtures/character/drawn-face-1.png"] },
+      "prompts": [{ "id": "dance", "text": "the character performs the dance from the clip, same timing" }],
+      "references": "local/genjutsu/character.png",
+      "metrics": ["temporal", "identity", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": { "engine": "{{engine}}", "mode": "motion", "modelId": "{{modelId}}", "prompt": "{{prompt}}", "references": ["{{inputs.images.0}}"], "source": "{{source:inputs.video}}", "seed": "{{seed}}", "requestId": "{{requestId}}" }
+      }
+    },
+    {
+      "id": "genjutsu/swap",
+      "title": "Object swap: replace the object in the clip",
+      "models": { "open": ["fuobe-genjutsu-swap", "oss-vace-swap"], "cloud": ["fuobe-genjutsu-swap"], "demo": ["oss-vace-swap"] },
+      "inputs": { "video": "local/genjutsu/street.mp4", "images": ["local/genjutsu/object.png"] },
+      "demoInputs": { "video": "samples/demo-landscape.mp4", "images": ["fixtures/palette.png"] },
+      "prompts": [{ "id": "swap", "text": "the car on the left" }],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": { "engine": "{{engine}}", "mode": "swap", "modelId": "{{modelId}}", "target": "type", "subject": "{{prompt}}", "references": ["{{inputs.images.0}}"], "source": "{{source:inputs.video}}", "seed": "{{seed}}", "requestId": "{{requestId}}" }
+      }
+    },
+    {
+      "id": "genjutsu/restyle",
+      "title": "Restyle: the clip in your look",
+      "models": { "open": ["fuobe-genjutsu-restyle", "oss-wan22-vace-restyle"], "cloud": ["fuobe-genjutsu-restyle"], "demo": ["oss-wan22-vace-restyle"] },
+      "inputs": { "video": "local/genjutsu/dance.mp4", "images": ["local/genjutsu/style.png"] },
+      "demoInputs": { "video": "samples/demo-portrait.mp4", "images": ["fixtures/references/warm-1.png"] },
+      "prompts": [{ "id": "look", "text": "the same scene as a warm hand-painted animation" }],
+      "references": "local/genjutsu/style.png",
+      "metrics": ["temporal", "style", "clip"],
+      "submit": {
+        "route": "/api/genjutsu",
+        "body": { "engine": "{{engine}}", "mode": "restyle", "modelId": "{{modelId}}", "look": { "kind": "custom", "images": ["{{inputs.images.0}}"], "words": "{{prompt}}" }, "source": "{{source:inputs.video}}", "seed": "{{seed}}", "requestId": "{{requestId}}" }
+      }
+    }
+  ]
+}

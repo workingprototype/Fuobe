@@ -1,0 +1,26 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "shorts",
+  "title": "Fuobe Shorts · segment restyle",
+  "description": "One segment of a Shorts restyle on your clip (local/shorts/clip.mp4, ≤5 s) with a restyled first frame you made or own (local/shorts/frame0.png): the Wan 2.2 Fun VACE restyle the open Shorts pipeline runs per segment, against LTX 2.3 Reference Restyle on the cloud. Flicker and style are measured; O9 adds the hosted open route.",
+  "original": "fuobe-shorts",
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["fuobe-shorts", "oss-wan22-vace-restyle"] },
+    "cloud": { "models": ["fuobe-shorts", "ltx-2-3-restyle"] },
+    "demo": { "models": ["oss-wan22-vace-restyle"] }
+  },
+  "defaults": { "seeds": [1001, 2002], "metrics": ["temporal", "style", "clip"], "timeoutSeconds": 3600 },
+  "variants": { "restyle": { "description": "The segment restyle as the Shorts pipeline runs it" } },
+  "cases": [
+    {
+      "id": "shorts/segment",
+      "title": "Restyle one segment from its first frame",
+      "op": "v2v",
+      "inputs": { "video": "local/shorts/clip.mp4", "images": ["local/shorts/frame0.png"] },
+      "demoInputs": { "video": "samples/demo-portrait.mp4", "images": ["fixtures/references/warm-1.png"] },
+      "prompts": [{ "id": "anime", "text": "the same shot as a soft anime illustration with clean line art" }],
+      "references": "local/shorts/frame0.png"
+    }
+  ]
+}

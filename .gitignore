@@ -42,3 +42,9 @@ next-env.d.ts
 
 # local data (db, uploads, outputs)
 /data/
+
+# evaluation harness (scripts/eval): your own inputs, run results and the metrics venv stay local
+/scripts/eval/local/
+/scripts/eval/results/
+/scripts/eval/metrics/.venv/
+__pycache__/

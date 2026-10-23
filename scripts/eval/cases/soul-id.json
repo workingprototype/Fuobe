@@ -1,0 +1,51 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "soul-id",
+  "title": "Fuobe Soul ID · character training",
+  "description": "Train a character from a folder of photos you supply (local/characters/<name>/, 10–30 photos of one consenting person: no sunglasses, groups, filters or cropped faces, one full-body shot), then make N images of them. Identity is measured against the same photos. Set \"consent\": true in your copy only when the person agreed; demo runs don't train (they use reference images on drawn faces).",
+  "original": "fuobe-soul-id",
+  "kind": "image",
+  "targets": {
+    "open": { "models": ["oss-z-image-turbo"], "extra": { "steps": 8, "shift": 3 } },
+    "cloud": { "models": ["z-image-turbo-cloud"], "extra": { "num_inference_steps": 8, "enable_prompt_expansion": false } },
+    "demo": { "models": ["oss-z-image-turbo"] }
+  },
+  "defaults": {
+    "seeds": [1001],
+    "params": { "aspectRatio": "3:4" },
+    "metrics": ["identity", "clip", "aesthetic"],
+    "timeoutSeconds": 900
+  },
+  "variants": {
+    "trained": { "description": "The trained character LoRA, @mentioned in every prompt" },
+    "original": {
+      "description": "The same element on the shipped Original (O3 retargets training to fuobe-soul)",
+      "models": { "open": ["fuobe-soul"], "cloud": ["fuobe-soul"], "demo": ["fuobe-soul"] }
+    }
+  },
+  "cases": [
+    {
+      "id": "soul-id/character",
+      "title": "Your character, eight scenes",
+      "train": {
+        "photos": "local/characters/default",
+        "name": "Eval character",
+        "targets": { "open": "aitk-z-image", "cloud": "fal-z-image" },
+        "minPhotos": 5,
+        "consent": false
+      },
+      "references": "local/characters/default",
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png", "fixtures/character/drawn-face-2.png", "fixtures/character/drawn-face-3.png"] },
+      "prompts": [
+        { "id": "chef", "seed": 1101, "text": "{character} as a chef plating a dish in a busy restaurant kitchen" },
+        { "id": "rain", "seed": 1102, "text": "{character} under a clear umbrella on a rainy street at night" },
+        { "id": "beach", "seed": 1103, "text": "{character} walking barefoot on a beach at sunrise, full body" },
+        { "id": "office", "seed": 1104, "text": "close-up of {character} smiling at a desk in a bright office" },
+        { "id": "hiker", "seed": 1105, "text": "{character} hiking a mountain trail with a backpack, wide shot" },
+        { "id": "cafe", "seed": 1106, "text": "{character} reading a book by the window of a small cafe" },
+        { "id": "stage", "seed": 1107, "text": "{character} singing into a microphone on a stage under coloured lights" },
+        { "id": "profile", "seed": 1108, "text": "a side profile portrait of {character}, soft studio light, plain grey backdrop" }
+      ]
+    }
+  ]
+}

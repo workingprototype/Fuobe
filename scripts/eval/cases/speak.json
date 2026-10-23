@@ -1,0 +1,29 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "speak",
+  "title": "Fuobe Speak · talking portraits",
+  "description": "A portrait and a voice track you supply (local/speak/portrait.png of a consenting person, local/speak/voice.wav, 5–15 s of clear speech). Measures lip-sync (a mouth-motion / audio-envelope proxy; SyncNet when you install it, see the README), temporal consistency and identity against the portrait. O11 adds the InfiniteTalk 'Higgsfield-like defaults' preset and Wan 2.2 S2V route.",
+  "original": "fuobe-speak",
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["fuobe-speak", "oss-infinitetalk"] },
+    "cloud": { "models": ["fuobe-speak", "infinitetalk-cloud"] },
+    "demo": { "models": ["oss-infinitetalk"] }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["lipsync", "temporal", "identity"], "timeoutSeconds": 3600 },
+  "variants": {
+    "infinitetalk": { "description": "InfiniteTalk (open: native ComfyUI graph; cloud: fal-ai/infinitalk)" },
+    "s2v": { "description": "Wan 2.2 Speech-to-Video (Speak v1-like)", "models": { "open": ["oss-wan22-s2v"], "demo": ["oss-wan22-s2v"] } }
+  },
+  "cases": [
+    {
+      "id": "speak/portrait",
+      "title": "A portrait speaks your voice track",
+      "op": "avatar",
+      "inputs": { "images": ["local/speak/portrait.png"], "audio": "local/speak/voice.wav" },
+      "demoInputs": { "images": ["fixtures/character/drawn-face-1.png"], "audio": "fixtures/voice.wav" },
+      "prompts": [{ "id": "talk", "text": "the person talks to the camera, natural head movement, subtle expressions" }],
+      "references": "local/speak/portrait.png"
+    }
+  ]
+}
