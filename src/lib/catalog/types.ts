@@ -660,8 +660,10 @@ export interface ChainSlot {
    * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
    * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
    * "model3d" is a 3D model (a mesh to rig).
+   * "mask" is what to change (remove-object): a mask video (SAM 3.1's track of the object), or a still mask of a
+   * window's first frame (the open engine's painted eraser hands the tracked object on from window to window).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "mask" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
