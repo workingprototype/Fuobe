@@ -146,3 +146,13 @@ def consecutive_similarity(embs: np.ndarray) -> float:
     if len(e) < 2:
         return float("nan")
     return float(np.mean(np.sum(e[1:] * e[:-1], axis=1)))
+
+
+def yunet_face(row, scale: float = 1.0) -> dict:
+    """One row of OpenCV's FaceDetectorYN (x, y, w, h, 5 landmarks, score) found on a picture resized by `scale`,
+    in the original picture's pixels: {box: [x0, y0, x1, y1], kps: 5×2, score}. YuNet lists the subject's right
+    eye, left eye, nose tip, right and left mouth corners: in the picture, left to right as ArcFace's template
+    (and insightface's kps) expects them."""
+    r = np.asarray(row, dtype=np.float64)
+    x, y, w, h = r[:4] / scale
+    return {"box": [float(x), float(y), float(x + w), float(y + h)], "kps": (r[4:14] / scale).reshape(5, 2), "score": float(r[14])}

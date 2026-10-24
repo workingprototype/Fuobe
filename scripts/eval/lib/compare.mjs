@@ -95,10 +95,12 @@ export function compareRuns(a, b, opts = {}) {
   const warnings = [];
   const ca = A.metrics?.config ?? {};
   const cb = B.metrics?.config ?? {};
-  for (const [k, label] of [["clip", "CLIP model"], ["style", "style model"], ["identity", "face model"]]) {
+  for (const [k, label] of [["clip", "CLIP model"], ["style", "style model"], ["identity", "face model"], ["faceDetector", "face detector"]]) {
     // metrics.json from before --style-model scored style with CLIP.
-    const x = ca[k] ?? (k === "style" && A.metrics ? "clip" : null);
-    const y = cb[k] ?? (k === "style" && B.metrics ? "clip" : null);
+    // metrics.json from before --face-detector found AuraFace's faces with its own SCRFD.
+    const was = (c, doc) => c[k] ?? (k === "style" && doc ? "clip" : k === "faceDetector" && c.identity === "auraface" ? "scrfd" : null);
+    const x = was(ca, A.metrics);
+    const y = was(cb, B.metrics);
     if (x != null && y != null && x !== y) warnings.push(`the runs were scored with a different ${label} (${x} vs ${y}): rescore one with pnpm eval:report --force and the same options`);
   }
   return {

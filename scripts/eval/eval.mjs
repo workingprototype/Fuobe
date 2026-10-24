@@ -29,7 +29,7 @@ const num = (v, name) => {
 class Usage extends Error {}
 
 const COMMON = { url: { type: "string" }, token: { type: "string" }, out: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } };
-const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "style-model": { type: "string" }, "identity-model": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
+const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "style-model": { type: "string" }, "identity-model": { type: "string" }, "face-detector": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
 
 const HELP = {
   run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
@@ -52,7 +52,7 @@ const HELP = {
   --comfy-url <url>      ComfyUI's address, for memory and its own timings (open engine; default COMFYUI_URL)
   --label <text>         a note for this run
   --no-metrics           don't score afterwards · --no-report: don't write the report either`,
-  report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--style-model clip|dinov2] [--force]",
+  report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--style-model clip|dinov2] [--face-detector yunet|scrfd] [--force]",
   review: "pnpm eval:review <runId|latest> [--against variants|references|<otherRunId>] [--port 4173] [--no-serve] [--limit n]",
   compare: "pnpm eval:compare <runA[:variant]> <runB[:variant]> [--fail-on clip,aesthetic] [--threshold 1|5%] [--per-case]",
   promote: `pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--apply-strengths] [--research file]]
@@ -68,7 +68,7 @@ const HELP = {
   history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
   validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
   trash: "pnpm eval:trash <runId> [--dry-run]   moves the run's generations to that Fuobe's Trash (its results here stay)",
-  setup: "pnpm eval:setup [--identity] [--download [--dinov2]] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
+  setup: "pnpm eval:setup [--identity] [--download [--dinov2] [--scrfd]] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
 };
 
 function usage() {
@@ -128,7 +128,7 @@ const root = (values, env) => resultsDir(env, values.out);
 async function score(dir, v, ctx) {
   if (v["no-metrics"]) return null;
   ctx.note("Scoring the outputs…");
-  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], styleModel: v["style-model"], identityModel: v["identity-model"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
+  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], styleModel: v["style-model"], identityModel: v["identity-model"], faceDetector: v["face-detector"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
   if (!r.ok) ctx.note(`Not scored: ${r.reason}. Timing and cost are in the report; pnpm eval:report ${path.basename(dir)} scores it later.`);
   return r;
 }
@@ -417,7 +417,7 @@ async function covers(args, ctx) {
 }
 
 async function setup(args, ctx) {
-  const { values: v } = parse(args, { identity: { type: "boolean" }, dinov2: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
+  const { values: v } = parse(args, { identity: { type: "boolean" }, dinov2: { type: "boolean" }, scrfd: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
   if (v.help) return ctx.print(HELP.setup), 0;
   const step = (cmd, a, opts = {}) => {
     ctx.note(`$ ${cmd} ${a.join(" ")}`);
@@ -429,7 +429,7 @@ async function setup(args, ctx) {
   if (!fs.existsSync(path.join(METRICS_DIR, py))) step("uv", ["venv", ".venv", "--python", ">=3.11"]);
   step("uv", ["pip", "install", "--python", py, "-r", "requirements.txt", "--torch-backend", v["torch-backend"] ?? "cpu"]);
   if (v.identity) step("uv", ["pip", "install", "--python", py, "-r", "requirements-identity.txt"]);
-  if (v.download) step(py, ["-m", "fuobe_metrics.download", ...(v.identity ? ["--identity"] : []), ...(v.dinov2 ? ["--dinov2"] : [])]);
+  if (v.download) step(py, ["-m", "fuobe_metrics.download", ...(v.identity ? ["--identity"] : []), ...(v.dinov2 ? ["--dinov2"] : []), ...(v.scrfd ? ["--scrfd"] : [])]);
   ctx.print(`Metrics ready in ${path.join(METRICS_DIR, ".venv")}${v.download ? "" : " (weights download on first use, or run pnpm eval:setup --download)"}.`);
   return 0;
 }

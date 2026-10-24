@@ -123,13 +123,33 @@ def test_aesthetic_scores_are_on_the_predictor_scale():
 
 def test_faces_on_drawn_faces_do_not_crash():
     pytest.importorskip("insightface")
-    if not _weights_cached("fal/AuraFace-v1"):
-        pytest.skip("AuraFace weights aren't cached (pnpm eval:setup --identity --download)")
+    if not _weights_cached("fal/AuraFace-v1") or not _weights_cached("opencv/face_detection_yunet"):
+        pytest.skip("AuraFace and YuNet weights aren't cached (pnpm eval:setup --identity --download)")
     from fuobe_metrics.models import Faces
 
     f = Faces("auraface")
+    assert f.detector == "yunet"
     got = f.largest(media.load_image(FIXTURES / "character" / "drawn-face-1.png"))
     assert got is None or (got["embedding"].shape == (512,) and abs(np.linalg.norm(got["embedding"]) - 1) < 1e-3)
+
+
+def test_yunet_aligns_faces_as_auraface_expects():
+    """The same face found by YuNet (MIT, the default) and by the SCRFD AuraFace ships embeds alike: the landmarks are in
+    the order ArcFace's alignment wants. Uses the group photo insightface ships as test data (not in this repo)."""
+    insightface = pytest.importorskip("insightface")
+    photo = pathlib.Path(insightface.__file__).parent / "data" / "images" / "t1.jpg"
+    if not photo.exists():
+        pytest.skip("insightface's sample photo isn't installed")
+    if not _weights_cached("fal/AuraFace-v1") or not _weights_cached("opencv/face_detection_yunet"):
+        pytest.skip("AuraFace and YuNet weights aren't cached (pnpm eval:setup --identity --download --scrfd)")
+    from fuobe_metrics.models import Faces
+
+    picture = media.load_image(photo)
+    yunet = Faces("auraface", detector="yunet").largest(picture)
+    scrfd = Faces("auraface", detector="scrfd").largest(picture)
+    assert yunet["embedding"].shape == (512,) and abs(np.linalg.norm(yunet["embedding"]) - 1) < 1e-6
+    assert all(abs(a - b) < 12 for a, b in zip(yunet["box"], scrfd["box"]))
+    assert float(yunet["embedding"] @ scrfd["embedding"]) > 0.9
 
 
 def test_fixtures_are_where_the_tests_expect():

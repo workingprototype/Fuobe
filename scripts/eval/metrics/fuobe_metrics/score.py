@@ -108,8 +108,11 @@ class Scorer:
             name = self.args.identity_model
             if name == "buffalo_l" and not self.args.accept_noncommercial:
                 raise Missing("buffalo_l is licensed for non-commercial research only: add --accept-noncommercial to use it, or keep the default AuraFace (Apache-2.0)")
-            self._faces = Faces(name, self.device)
-            self.used["identity"] = {**MODELS[name], "key": name}
+            detector = getattr(self.args, "face_detector", "yunet")
+            self._faces = Faces(name, self.device, detector)
+            # The detector is recorded on its own: its licence isn't the recognition model's.
+            found = {"detector": {**MODELS[detector], "key": detector}} if name == "auraface" else {}
+            self.used["identity"] = {**MODELS[name], "key": name, **found}
         return self._faces
 
     # Metric families: each returns a dict of keys from registry.FAMILIES plus notes.
@@ -274,6 +277,7 @@ def main(argv=None) -> int:
     ap.add_argument("--style-model", default="clip", choices=["clip", "dinov2"], help="image embeddings for style similarity")
     ap.add_argument("--identity-model", default="auraface", choices=["auraface", "buffalo_l"])
     ap.add_argument("--accept-noncommercial", action="store_true", help="allow buffalo_l (non-commercial research licence)")
+    ap.add_argument("--face-detector", default="yunet", choices=["yunet", "scrfd"], help="finds faces for AuraFace: YuNet (MIT, default) or the SCRFD AuraFace ships (licence unclear)")
     ap.add_argument("--frames", type=int, default=24, help="frames sampled per clip for temporal metrics")
     ap.add_argument("--fps", type=float, default=8.0, help="sampling rate for temporal metrics")
     ap.add_argument("--force", action="store_true", help="recompute every job")
@@ -293,7 +297,7 @@ def main(argv=None) -> int:
 
     out_file = run_dir / "metrics.json"
     previous = json.loads(out_file.read_text(encoding="utf8")) if out_file.exists() and not args.force else {}
-    config = {"v": VERSION, "clip": args.clip_model, "style": args.style_model, "identity": args.identity_model, "frames": args.frames, "fps": args.fps}
+    config = {"v": VERSION, "clip": args.clip_model, "style": args.style_model, "identity": args.identity_model, "faceDetector": args.face_detector if args.identity_model == "auraface" else "buffalo_l", "frames": args.frames, "fps": args.fps}
     scorer = Scorer(args)
     jobs = read_jobs(run_dir)
     results: dict[str, dict] = {}

@@ -305,15 +305,16 @@ still has its timing and cost, and the report says why the scores are missing.
 | Prompt adherence | `clip` | higher | CLIPScore (100·cos) between the output and the case's own words. Clips are sampled at 4 frames | open_clip ViT-B/32 laion2B, **MIT** (`--clip-model clip-l14`: OpenAI ViT-L/14, MIT) |
 | Aesthetic | `aesthetic` | higher | LAION improved aesthetic predictor v2 on CLIP ViT-L/14 embeddings, about 1–10 | head **Apache-2.0** (christophschuhmann/improved-aesthetic-predictor), CLIP MIT |
 | Style vs references | `style`, `styleNearest` | higher | cosine of the output's embedding to the centroid of the look's reference set, and to the nearest reference | CLIP (default), or `--style-model dinov2`: DINOv2 ViT-S/14 via timm, **Apache-2.0** |
-| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1** (fal, **Apache-2.0**, trained for commercial use) by default. insightface's `buffalo_l` is **non-commercial research only**: opt in with `--identity-model buffalo_l --accept-noncommercial` |
+| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only**: opt in with `--identity-model buffalo_l --accept-noncommercial` |
 | Temporal consistency | `drift`, `driftMax`, `warp` | lower | frame-to-frame CLIP embedding drift (mean and worst jump), and a warp error: Farneback optical flow with a forward-backward occlusion mask | CLIP, OpenCV (Apache-2.0) |
-| Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | AuraFace's detector for the face box when identity is installed, else a fixed lower-centre region |
+| Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | the identity metric's face detector for the face box when identity is installed, else a fixed lower-centre region |
 | SyncNet (optional) | `syncnet` | higher | runs only when `FUOBE_EVAL_SYNCNET_CMD` points at your own SyncNet. It isn't bundled because its weights' licence isn't stated | yours |
 | Shot continuity | `continuity` | higher | CLIP similarity between consecutive shots of a film | CLIP |
 | Time, cost, memory | `seconds`, `costUsd`, `vramGb` | lower | from the runner | — |
 
 Identity needs `pnpm eval:setup --identity`, which installs insightface and onnxruntime (MIT
-libraries). Re-scoring is incremental: a job whose outputs and settings haven't changed keeps its
+libraries). `metrics.json` records the face detector apart from the recognition model, each with its
+licence, and compare warns when two runs used different detectors. Re-scoring is incremental: a job whose outputs and settings haven't changed keeps its
 scores. `--metrics clip,style` re-scores only those families and keeps the others. `--force`
 re-scores everything.
 

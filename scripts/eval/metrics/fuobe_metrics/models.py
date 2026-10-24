@@ -139,14 +139,27 @@ class Aesthetic:
 
 
 class Faces:
-    """Face detection + ArcFace-style embeddings through insightface. AuraFace (Apache-2.0) by default; buffalo_l is opt-in."""
+    """ArcFace-style face embeddings. AuraFace's recognition model (Apache-2.0) by default, with YuNet (MIT) finding
+    and aligning the faces; --face-detector scrfd uses the SCRFD detector AuraFace ships instead (its licence is
+    unclear). buffalo_l (non-commercial research) is opt-in and brings its own detector."""
 
-    def __init__(self, name: str = "auraface", device: str = "cpu"):
+    def __init__(self, name: str = "auraface", device: str = "cpu", detector: str = "yunet"):
         try:
             from insightface.app import FaceAnalysis  # noqa: PLC0415
         except ImportError as e:
             raise Missing("insightface isn't installed: run pnpm eval:setup --identity") from e
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device == "cuda" else ["CPUExecutionProvider"]
+        self.name = name
+        self.detector = detector if name == "auraface" else "own"
+        self.app = None
+        if self.detector == "yunet":
+            import cv2  # noqa: PLC0415
+            from insightface.model_zoo import get_model  # noqa: PLC0415
+
+            self.rec = get_model(_download("auraface", MODELS["auraface"]["recognition"]), providers=providers)
+            self.rec.prepare(ctx_id=0 if device == "cuda" else -1)
+            self.yunet = cv2.FaceDetectorYN.create(_download("yunet", MODELS["yunet"]["file"]), "", (320, 320), 0.6, 0.3, 5000)
+            return
         root = CACHE / "insightface"
         if name == "auraface":
             folder = root / "models" / "auraface"
@@ -155,13 +168,38 @@ class Faces:
                 target = folder / f
                 if not target.exists():
                     target.symlink_to(_download("auraface", f))
-        self.name = name
         self.app = FaceAnalysis(name=name, root=str(root), providers=providers, allowed_modules=["detection", "recognition"])
         self.app.prepare(ctx_id=0 if device == "cuda" else -1, det_size=(640, 640))
 
+    def _yunet_faces(self, bgr) -> list[dict]:
+        """YuNet finds faces of about 10–300 px: try the picture at 640 px on its longest side, then at 320."""
+        import cv2  # noqa: PLC0415
+
+        from .maths import yunet_face  # noqa: PLC0415
+
+        h, w = bgr.shape[:2]
+        for side in (640, 320):
+            scale = min(1.0, side / max(h, w))
+            img = cv2.resize(bgr, (max(1, round(w * scale)), max(1, round(h * scale))), interpolation=cv2.INTER_AREA) if scale < 1 else bgr
+            self.yunet.setInputSize((img.shape[1], img.shape[0]))
+            _, rows = self.yunet.detect(img)
+            if rows is not None and len(rows):
+                return [yunet_face(r, scale) for r in rows]
+        return []
+
     def largest(self, picture) -> dict | None:
         """The largest face in a PIL picture: {embedding, box} or None."""
-        bgr = np.asarray(picture.convert("RGB"))[:, :, ::-1]
+        bgr = np.ascontiguousarray(np.asarray(picture.convert("RGB"))[:, :, ::-1])
+        if self.app is None:
+            from insightface.utils import face_align  # noqa: PLC0415
+
+            faces = self._yunet_faces(bgr)
+            if not faces:
+                return None
+            f = max(faces, key=lambda x: (x["box"][2] - x["box"][0]) * (x["box"][3] - x["box"][1]))
+            crop = face_align.norm_crop(bgr, landmark=f["kps"], image_size=self.rec.input_size[0])
+            emb = np.asarray(self.rec.get_feat(crop), dtype=np.float64).ravel()
+            return {"embedding": emb / (np.linalg.norm(emb) or 1.0), "box": f["box"]}
         faces = self.app.get(bgr)
         if not faces:
             return None

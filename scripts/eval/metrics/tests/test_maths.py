@@ -96,3 +96,15 @@ def test_motion_energy_and_continuity():
     assert maths.motion_energy(frames).tolist() == [0.0, 0.0, 1.0, 1.0]
     assert maths.consecutive_similarity(np.array([[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]])) == pytest.approx(0.5)
     assert math.isnan(maths.consecutive_similarity(np.array([[1.0, 0.0]])))
+
+
+def test_yunet_rows_come_back_in_the_pictures_pixels_with_the_eyes_left_to_right():
+    # A face found on the picture at half size: box x, y, w, h, then right eye, left eye, nose, right and left mouth corners.
+    row = [10, 20, 30, 40, 15, 30, 32, 30, 24, 40, 17, 50, 31, 50, 0.9]
+    f = maths.yunet_face(row, scale=0.5)
+    assert f["box"] == [20.0, 40.0, 80.0, 120.0]
+    assert f["kps"].shape == (5, 2)
+    # The subject's right eye is on the picture's left: ArcFace's template wants that one first.
+    assert f["kps"][0][0] < f["kps"][1][0] and f["kps"][3][0] < f["kps"][4][0]
+    assert f["kps"][2].tolist() == [48.0, 80.0]
+    assert f["score"] == 0.9

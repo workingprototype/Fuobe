@@ -54,12 +54,31 @@ MODELS = {
         "licence": "Apache-2.0 (christophschuhmann/improved-aesthetic-predictor; a mirror of the original weights)",
         "commercial": True,
     },
+    # AuraFace's recognition model. Its card covers that model only: the SCRFD detector the repo also ships is
+    # recorded on its own ("scrfd") and isn't used unless --face-detector scrfd asks for it.
     "auraface": {
         "repo": "fal/AuraFace-v1",
         "files": ["glintr100.onnx", "scrfd_10g_bnkps.onnx"],
+        "recognition": "glintr100.onnx",
         "revision": "af6d057c9b0ec4071d4c49c80e3539258798b609",
-        "licence": "Apache-2.0 (fal/AuraFace-v1, trained on commercially usable data; ships an SCRFD detector)",
+        "licence": "Apache-2.0 (fal/AuraFace-v1's recognition model glintr100.onnx, trained on commercially usable data)",
         "commercial": True,
+    },
+    # Face detectors for AuraFace. YuNet (default) has a clear permissive licence; SCRFD is what AuraFace's own
+    # example uses, but the weights come from insightface's model zoo, released for non-commercial research.
+    "yunet": {
+        "repo": "opencv/face_detection_yunet",
+        "file": "face_detection_yunet_2023mar.onnx",
+        "revision": "3cc26e7f1014a5ee5d74a42acee58bafc9d0a310",
+        "licence": "MIT (Shiqi Yu's YuNet, libfacedetection; OpenCV Zoo)",
+        "commercial": True,
+    },
+    "scrfd": {
+        "repo": "fal/AuraFace-v1",
+        "file": "scrfd_10g_bnkps.onnx",
+        "revision": "af6d057c9b0ec4071d4c49c80e3539258798b609",
+        "licence": "unclear: SCRFD-10G from insightface's model zoo, whose pretrained models insightface releases for non-commercial research (AuraFace's card covers only its recognition model)",
+        "commercial": None,
     },
     "buffalo_l": {
         "repo": "insightface model zoo (downloaded by insightface)",

@@ -12,7 +12,8 @@ from .registry import MODELS
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="fuobe_metrics.download")
-    ap.add_argument("--identity", action="store_true", help="also AuraFace (Apache-2.0) for identity and the lip-sync face box")
+    ap.add_argument("--identity", action="store_true", help="also AuraFace (Apache-2.0) and YuNet (MIT) for identity and the lip-sync face box")
+    ap.add_argument("--scrfd", action="store_true", help="also the SCRFD detector AuraFace ships (licence unclear), for --face-detector scrfd")
     ap.add_argument("--no-aesthetic", action="store_true", help="skip CLIP ViT-L/14 and the aesthetic head (about 1.7 GB)")
     ap.add_argument("--dinov2", action="store_true", help="also DINOv2 ViT-S/14 (Apache-2.0, 88 MB) for --style-model dinov2")
     args = ap.parse_args(argv)
@@ -22,7 +23,9 @@ def main(argv=None) -> int:
     if args.dinov2:
         wanted += [("dinov2-small", MODELS["dinov2-small"]["file"])]
     if args.identity:
-        wanted += [("auraface", f) for f in MODELS["auraface"]["files"]]
+        wanted += [("auraface", MODELS["auraface"]["recognition"]), ("yunet", MODELS["yunet"]["file"])]
+    if args.scrfd:
+        wanted += [("scrfd", MODELS["scrfd"]["file"])]
     for key, f in wanted:
         m = MODELS[key]
         print(f"{m['repo']} · {f} @ {m['revision'][:8]} ({m['licence']})", file=sys.stderr)
