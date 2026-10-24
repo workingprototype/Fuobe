@@ -172,6 +172,10 @@ describe("prices, Generate here and Next episode", () => {
     expect(ep.settings).toMatchObject({ length: 30, animation: "frames", aspect: "9:16", brief: { sceneSeconds: expect.any(Number) } });
     expect(ep.topic).toMatch(/^Episode 1 of the series “The lost city of Ys”/);
     expect(faceless.episodeView(v.episodes[2].id).episode.topic).toMatch(/Earlier episodes: .+; .+\./);
+    // The offline writer keeps a 30-second episode near 30 s, even at the brief's faster pace.
+    await faceless.scriptWritten(v.episodes[0].id);
+    const written = faceless.episodeView(v.episodes[0].id).episode;
+    expect(written.script.blocks.reduce((n, b) => n + b.seconds, 0)).toBeLessThanOrEqual(30 * 1.15);
     // A second click doesn't make it twice.
     expect((await generateRoute.POST(json("POST", { prompt: "The lost city of Ys", settings }), params({ id: series.id }))).status).toBe(409);
     // GET handlers start with connection(), which needs a request scope: read through the server module.

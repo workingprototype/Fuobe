@@ -592,6 +592,8 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       script = { source: "ai", title: parsed.title ?? undefined, blocks: parsed.blocks };
     } else {
       const blocks = offlineScript(topic, ep.kind === "explainer" ? "education" : genre.id, scenes);
+      // The offline beats run about 10 s each: a brief's shorter scenes would overshoot the length, so middle beats go.
+      if (s.brief?.sceneSeconds && !auto) while (blocks.length > 1 && totalSeconds(blocks) > s.length * 1.15) blocks.splice(Math.floor(blocks.length / 2), 1);
       if (elements.length) for (const b of blocks) b.visual = `${b.visual}, with ${elements.map((e) => `@${e.handle}`).join(" and ")}`;
       script = { source: "ai", blocks, offline: true, note: failure ? `${OFFLINE_NOTE} (${failure})` : OFFLINE_NOTE };
     }
