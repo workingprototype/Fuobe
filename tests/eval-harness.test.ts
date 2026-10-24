@@ -390,8 +390,27 @@ describe("report, blind review, compare and promote", () => {
       expect((await fetch(url)).status).toBe(200);
       // Pick the recipe side every time.
       const ratings = key.pairs.map((p: { id: string; left: "a" | "b"; a: { label: string } }) => ({ pair: p.id, choice: (p.a.label === "recipe") === (p.left === "a") ? "left" : "right" }));
-      expect((await fetch(`${url}ratings`, { method: "POST", body: JSON.stringify({ ratings: [{ pair: "x", choice: "maybe" }] }) })).status).toBe(400);
-      expect((await fetch(`${url}ratings`, { method: "POST", body: JSON.stringify({ ratings }) })).status).toBe(204);
+      const json = { "content-type": "application/json" };
+      expect((await fetch(`${url}ratings`, { method: "POST", headers: json, body: JSON.stringify({ ratings: [{ pair: "x", choice: "maybe" }] }) })).status).toBe(400);
+      // Only the review page saves ratings: another site's page sends its own Origin, or plain text (no preflight).
+      const raw = (method: string, p: string, headers: Record<string, string>, body = "") =>
+        new Promise<number>((resolve, reject) => {
+          const req = http.request(new URL(p, url), { method, headers }, (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+          });
+          req.on("error", reject);
+          req.end(body);
+        });
+      const body = JSON.stringify({ ratings });
+      expect(await raw("POST", "/ratings", { ...json, origin: "https://evil.example" }, body)).toBe(403);
+      expect(await raw("POST", "/ratings", { "content-type": "text/plain" }, body)).toBe(415);
+      // A name rebound to 127.0.0.1 isn't this server; a malformed address is refused, and the server stays up.
+      expect(await raw("GET", "/", { host: "evil.example" })).toBe(421);
+      expect(await raw("GET", "/%E0%A4%A", {})).toBe(400);
+      expect((await fetch(url)).status).toBe(200);
+      expect(fs.existsSync(path.join(runDir, "review", "ratings.json"))).toBe(false);
+      expect((await fetch(`${url}ratings`, { method: "POST", headers: { ...json, origin: url.replace(/\/$/, "") }, body })).status).toBe(204);
     } finally {
       await new Promise((r) => server.close(r));
     }

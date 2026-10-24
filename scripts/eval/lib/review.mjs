@@ -190,6 +190,11 @@ $("download").addEventListener("click", () => {
 document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
+  // Space and Enter on a focused button press that button (a keyboard user's "Left is better"), and a focused
+  // clip keeps its own keys: only the page's shortcuts are taken here.
+  const control = e.target instanceof Element ? e.target.closest("button, a, input, select, textarea, summary, video, [contenteditable]") : null;
+  if (control && (k === " " || k === "Enter")) return;
+  if (control && control.tagName === "VIDEO" && k.startsWith("Arrow")) return;
   const choice = k === "ArrowLeft" || k === "1" ? "left" : k === "ArrowRight" || k === "2" ? "right" : k === "ArrowDown" || k === "0" || k === " " ? "same" : k === "s" || k === "S" ? "skip" : null;
   if (choice) { e.preventDefault(); rate(choice); }
   else if (k === "u" || k === "U" || k === "Backspace") { e.preventDefault(); undo(); }
@@ -248,13 +253,26 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json"
  */
 export function serveReview(dir, { port = 0, host = "127.0.0.1" } = {}) {
   const root = path.join(dir, "review");
+  /** The names this server answers to (set once it listens): another Host is a page that rebound its name here. */
+  let hosts = new Set();
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://local");
     const send = (status, body, type = "text/plain; charset=utf-8") => {
       res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
       res.end(body);
     };
+    if (!hosts.has(String(req.headers.host ?? "").toLowerCase())) return send(421, "not this server");
+    let url;
+    try {
+      url = new URL(req.url ?? "/", "http://local");
+    } catch {
+      return send(400, "bad address");
+    }
     if (req.method === "POST" && url.pathname === "/ratings") {
+      // Only the review page itself saves ratings: a page from anywhere else can't (a cross-site form or
+      // fetch either sends its own Origin, or can't send JSON without a preflight this server never answers).
+      const origin = req.headers.origin;
+      if (origin && !hosts.has(origin.replace(/^http:\/\//, "").toLowerCase())) return send(403, "ratings are saved from the review page only");
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) return send(415, "send the ratings as application/json");
       let raw = "";
       for await (const c of req) {
         raw += c;
@@ -272,7 +290,12 @@ export function serveReview(dir, { port = 0, host = "127.0.0.1" } = {}) {
       return send(204, "");
     }
     if (req.method !== "GET" && req.method !== "HEAD") return send(405, "GET or POST /ratings");
-    const rel = decodeURIComponent(url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+    let rel;
+    try {
+      rel = decodeURIComponent(url.pathname === "/" ? "index.html" : url.pathname.slice(1));
+    } catch {
+      return send(400, "bad address");
+    }
     const abs = path.resolve(root, rel);
     if (!abs.startsWith(root + path.sep) || path.basename(abs) === "key.json") return send(404, "not found");
     fs.stat(abs, (err, st) => {
@@ -282,7 +305,13 @@ export function serveReview(dir, { port = 0, host = "127.0.0.1" } = {}) {
       fs.createReadStream(abs).pipe(res);
     });
   });
-  return new Promise((resolve) => server.listen(port, host, () => resolve({ server, url: `http://${host}:${server.address().port}/` })));
+  return new Promise((resolve) =>
+    server.listen(port, host, () => {
+      const p = server.address().port;
+      hosts = new Set([`${host}:${p}`, `localhost:${p}`, `127.0.0.1:${p}`].map((h) => h.toLowerCase()));
+      resolve({ server, url: `http://${host}:${p}/` });
+    }),
+  );
 }
 
 /** A run's rows, for building pairs against another run. */

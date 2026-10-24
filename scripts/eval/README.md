@@ -315,8 +315,9 @@ the variant, model or file.
   change.
 
 Use **←** / **1** for the left result, **→** / **2** for the right one, **↓** / **0** / **Space**
-for "about the same", **S** to skip and **U** / **Backspace** to undo. On a phone, use the three
-buttons. Ratings save to `review/ratings.json` as you go. Opened as a plain file, the page keeps
+for "about the same", **S** to skip and **U** / **Backspace** to undo. Space and Enter on a focused
+button press that button. On a phone, use the three buttons. The server answers only on 127.0.0.1 /
+localhost, and saves ratings only from its own page. Ratings save to `review/ratings.json` as you go. Opened as a plain file, the page keeps
 them in the browser and offers a download. `pnpm eval:report` unblinds the ratings with
 `review/key.json` and adds the preference per variant pair to `summary.json`.
 

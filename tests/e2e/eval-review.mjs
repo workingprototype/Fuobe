@@ -124,6 +124,16 @@ try {
   const page = await ctx.newPage();
   await page.goto(url, { waitUntil: "load" });
   await page.waitForSelector("#stage");
+  // A keyboard user who tabs to "Left is better" and presses Space rates left (the button's own action), not "same".
+  const ratingsFile = path.join(runDir, "review", "ratings.json");
+  const before = fs.existsSync(ratingsFile) ? JSON.parse(fs.readFileSync(ratingsFile, "utf8")).ratings.length : 0;
+  await page.focus('[data-choice="left"]');
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(400);
+  const pressed = JSON.parse(fs.readFileSync(ratingsFile, "utf8")).ratings;
+  check(pressed.length === before + 1 && pressed.at(-1).choice === "left", `review: Space on the focused "Left is better" button rates left (${pressed.at(-1)?.choice})`);
+  await page.keyboard.press("u");
+  await page.waitForTimeout(200);
   for (let i = 0; i < made.pairs; i++) {
     await page.keyboard.press(i < made.pairs / 2 ? "ArrowLeft" : "ArrowRight");
     await page.waitForTimeout(180);
