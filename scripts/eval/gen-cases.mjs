@@ -148,7 +148,7 @@ function dopSuite() {
         catalog: { description: "The catalog preset as it ships (prompt template + today's LoRA map)" },
         "prompt-only": { description: "The preset's prompt without LoRAs (preset strength 0)", presetStrength: 0 },
         research: { description: "The research's LoRA map v2 at the listed strengths on the preset's prompt", presetStrength: 0, loras: "recipe" },
-        partner: { description: "The preset's words on a partner model (Kling 2.5 Turbo), for reference", models: { cloud: ["kling-2-5-turbo"] } },
+        partner: { description: "The preset's words on a partner model (Kling 2.5 Turbo), for reference", models: { cloud: ["kling-2-5-turbo"] }, engines: ["cloud"] },
       },
       cases,
     },

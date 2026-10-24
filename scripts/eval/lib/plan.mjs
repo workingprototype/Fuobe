@@ -97,7 +97,8 @@ export function expandJobs(suite, opts) {
     const metrics = kase.metrics ?? suite.defaults.metrics;
     for (const variantName of variantNames) {
       const variant = variantDefs[variantName];
-      const candidates = opts.model ? [opts.model] : (forEngine(variant.models, engine) ?? forEngine(kase.models, engine) ?? target?.models ?? []);
+      // The models, most specific first: --model, this case's models for the variant, the variant's, the case's, the suite's.
+      const candidates = opts.model ? [opts.model] : (forEngine(kase.variantModels?.[variantName], engine) ?? forEngine(variant.models, engine) ?? forEngine(kase.models, engine) ?? target?.models ?? []);
       const modelId = opts.available ? candidates.find((m) => opts.available.has(m)) : candidates[0];
       for (const p of prompts) {
         const seeds = p.seed !== undefined ? [p.seed] : (opts.seeds ?? suite.defaults.seeds);
@@ -106,7 +107,8 @@ export function expandJobs(suite, opts) {
           /** @type {string | null} */
           let skip = null;
           if (kase.engines && !kase.engines.includes(engine)) skip = `runs on ${kase.engines.join(" / ")} only`;
-          else if (!target && !variant.models && !kase.models) skip = `${suite.suite} has no ${engine} target`;
+          else if (variant.engines && !variant.engines.includes(engine)) skip = `the ${variantName} variant runs on ${variant.engines.join(" / ")} only`;
+          else if (!target && !variant.models && !kase.models && !kase.variantModels?.[variantName]) skip = `${suite.suite} has no ${engine} target`;
           else if (!modelId) skip = `none of ${candidates.join(", ")} is on this Fuobe`;
           else if (missing.length) skip = `missing local input${missing.length > 1 ? "s" : ""} ${missing.join(", ")} (see scripts/eval/README.md → Your own inputs)`;
           if (usedFixtures && !demo) notes.push("ran on the synthetic fixtures (--allow-fixtures), not your own inputs");

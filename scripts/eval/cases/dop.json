@@ -72,7 +72,10 @@
         "cloud": [
           "kling-2-5-turbo"
         ]
-      }
+      },
+      "engines": [
+        "cloud"
+      ]
     }
   },
   "cases": [

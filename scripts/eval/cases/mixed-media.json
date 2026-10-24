@@ -2,12 +2,12 @@
   "$schema": "./case.schema.json",
   "suite": "mixed-media",
   "title": "Fuobe Mixed Media · per-frame looks",
-  "description": "Runs the Mixed Media studio route (POST /api/mixed-media) on your clip (local/mixed-media/clip.mp4, 4–10 s), the first three seconds at 8 fps, for five presets. Measures flicker (temporal drift and warp error) and how close each preset stays to its look (style references in local/references/mixed-media/<preset>/, optional). O9 moves the cloud route to hosted open models.",
+  "description": "Runs the Mixed Media studio route (POST /api/mixed-media) on your clip (local/mixed-media/clip.mp4, 4–10 s), the first three seconds at 8 fps, for five presets. Measures flicker (temporal drift and warp error) and how close each preset stays to its look (style references in local/references/mixed-media/<preset>/, optional). On the cloud it runs the studio's hosted open model (LTX-2.3 restyle on fal); O9 moves it to per-frame hosted open models.",
   "original": "fuobe-mixed-media",
   "kind": "video",
   "targets": {
     "open": { "models": ["oss-mixed-media"] },
-    "cloud": { "models": ["oss-mixed-media"] },
+    "cloud": { "models": ["ltx-2-3-restyle"] },
     "demo": { "models": ["oss-mixed-media"] }
   },
   "defaults": { "seeds": [1001], "metrics": ["temporal", "style"], "timeoutSeconds": 3600 },
@@ -19,7 +19,7 @@
       "inputs": { "video": "local/mixed-media/clip.mp4" },
       "demoInputs": { "video": "samples/demo-portrait.mp4" },
       "references": "local/references/mixed-media/toxic",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "presetId": "mixed-toxic", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-toxic", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
     },
     {
       "id": "mixed-media/two-color",
@@ -27,7 +27,7 @@
       "inputs": { "video": "local/mixed-media/clip.mp4" },
       "demoInputs": { "video": "samples/demo-portrait.mp4" },
       "references": "local/references/mixed-media/two-color",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "presetId": "mixed-two-color", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-two-color", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
     },
     {
       "id": "mixed-media/ultraviolet",
@@ -35,7 +35,7 @@
       "inputs": { "video": "local/mixed-media/clip.mp4" },
       "demoInputs": { "video": "samples/demo-portrait.mp4" },
       "references": "local/references/mixed-media/ultraviolet",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "presetId": "mixed-ultraviolet", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-ultraviolet", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
     },
     {
       "id": "mixed-media/lava",
@@ -43,7 +43,7 @@
       "inputs": { "video": "local/mixed-media/clip.mp4" },
       "demoInputs": { "video": "samples/demo-portrait.mp4" },
       "references": "local/references/mixed-media/lava",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "presetId": "mixed-lava", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-lava", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
     },
     {
       "id": "mixed-media/origami",
@@ -51,7 +51,7 @@
       "inputs": { "video": "local/mixed-media/clip.mp4" },
       "demoInputs": { "video": "samples/demo-portrait.mp4" },
       "references": "local/references/mixed-media/origami",
-      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "presetId": "mixed-origami", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
+      "submit": { "route": "/api/mixed-media", "body": { "engine": "{{engine}}", "modelId": "{{modelId}}", "presetId": "mixed-origami", "source": "{{source:inputs.video}}", "range": { "start": 0, "end": 3 }, "fps": 8, "seed": "{{seed}}", "requestId": "{{requestId}}" } }
     }
   ]
 }

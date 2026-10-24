@@ -13,7 +13,7 @@
   "defaults": { "seeds": [1001], "metrics": ["clip", "temporal", "continuity"], "timeoutSeconds": 3600 },
   "variants": {
     "original": { "description": "The Cinema Original (or today's open / hosted-open model)" },
-    "partner": { "description": "Seedance 2.5 for reference", "models": { "cloud": ["seedance-2-5"] } }
+    "partner": { "description": "Seedance 2.5 for reference", "models": { "cloud": ["seedance-2-5"] }, "engines": ["cloud"] }
   },
   "cases": [
     {

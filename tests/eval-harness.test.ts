@@ -33,6 +33,7 @@ const elements = await import("@/app/api/elements/route");
 const element = await import("@/app/api/elements/[id]/route");
 const genjutsu = await import("@/app/api/genjutsu/route");
 const genjutsuEstimate = await import("@/app/api/genjutsu/estimate/route");
+const mixedEstimate = await import("@/app/api/mixed-media/estimate/route");
 
 // The harness is plain ESM JavaScript (it runs with node, no build step).
 const evalCli = (await import("../scripts/eval/eval.mjs")) as { main: (argv: string[], io?: object) => Promise<number> };
@@ -65,6 +66,7 @@ const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Res
   ["GET", /^\/api\/elements\/([^/]+)$/, (r, m) => element.GET(r, ctx({ id: m[1] }))],
   ["POST", /^\/api\/genjutsu$/, (r) => genjutsu.POST(r)],
   ["POST", /^\/api\/genjutsu\/estimate$/, (r) => genjutsuEstimate.POST(r)],
+  ["POST", /^\/api\/mixed-media\/estimate$/, (r) => mixedEstimate.POST(r)],
 ];
 
 let server: http.Server;
@@ -223,6 +225,44 @@ describe("the runner on the demo provider", () => {
     expect(el).toMatchObject({ status: "demo", photos: 3 });
     const [row] = store.latestJobs(runDir);
     expect(String((row.request as { prompt: string }).prompt)).toContain(`@${el.handle} as a chef`);
+  });
+
+  it("never runs a job through Higgsfield's API, and runs each Genjutsu mode's own partner model", async () => {
+    type Plan = { jobs: { case: string; variant: string; model: string; skip?: string }[] };
+    const dry = async (args: string[]) => JSON.parse((await cli(["run", ...args, "--dry-run", "--json"])).stdout) as Plan;
+    setSetting("falKey", "fal-test-key");
+    setSetting("higgsfieldKey", "hf-id:hf-secret");
+    try {
+      // Cloud provider: Higgsfield. The hosted Z-Image route would go there, so the job is refused, not measured.
+      setSetting("cloudProvider", "higgsfield");
+      const soul = await dry(["--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--variants", "plain", "--prompts", "1"]);
+      expect(soul.jobs.map((j) => j.skip)).toEqual([expect.stringMatching(/would run on Higgsfield's API/)]);
+      // Genjutsu's studio route lists its steps' providers: Motion Control and O3 edit go to Higgsfield, the 4K edit is fal-only.
+      const gh = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
+      const by = (p: Plan) => Object.fromEntries(p.jobs.map((j) => [j.case, j]));
+      expect(by(gh)["genjutsu/move"].skip).toMatch(/Higgsfield's API/);
+      expect(by(gh)["genjutsu/restyle"]).toMatchObject({ model: "kling-o3-4k-edit" });
+      expect(by(gh)["genjutsu/restyle"].skip).toBeUndefined();
+      // On Auto with fal connected, each mode runs its own partner on fal, even with a Higgsfield key set (no Genjutsu Lite).
+      setSetting("cloudProvider", "auto");
+      const g = await dry(["--suite", "genjutsu", "--engine", "cloud", "--variants", "partner", "--allow-fixtures"]);
+      expect(g.jobs.map((j) => [j.case, j.model, j.skip ?? null])).toEqual([
+        ["genjutsu/move", "kling-motion-control", null],
+        // The fixture clip is 768×432: Kling O3's edit wants 720 px on each side (your street.mp4 must be that big).
+        ["genjutsu/swap", "kling-o3", expect.stringMatching(/at least 720 px on each side/)],
+        ["genjutsu/restyle", "kling-o3-4k-edit", null],
+      ]);
+      // Mixed Media names its hosted open model, so the studio runs that one (and says so).
+      const mm = await dry(["--suite", "mixed-media", "--engine", "cloud", "--cases", "mixed-media/toxic", "--allow-fixtures"]);
+      expect(mm.jobs.map((j) => [j.model, j.skip ?? null])).toEqual([["ltx-2-3-restyle", null]]);
+      // A partner variant is a cloud model: on the open engine it would only repeat the Original's run.
+      const open = await dry(["--suite", "genjutsu", "--engine", "open", "--variants", "partner", "--allow-fixtures"]);
+      expect(open.jobs.every((j) => j.skip === "the partner variant runs on cloud only")).toBe(true);
+    } finally {
+      setSetting("cloudProvider", "auto");
+      setSetting("higgsfieldKey", "");
+      setSetting("falKey", "");
+    }
   });
 
   it("refuses an engine the server can't run, and skips jobs that would run as a demo on a real engine", async () => {
@@ -642,5 +682,35 @@ describe("the cloud spend cap", () => {
     await expect(runner.runEval({ suite, engine: "cloud", maxUsd: 0.5, root }, { client: stub.client })).rejects.toThrow(/about \$0\.86, over the spend cap/);
     expect(runner.trainingPrice({ price: "Free" })).toBe(0);
     expect(runner.trainingPrice({ price: "Higgsfield balance" })).toBeNull();
+  });
+});
+
+describe("what a job measures", () => {
+  /** A Fuobe whose Genjutsu estimate answers with `estimate`, and whose status says which providers are connected. */
+  const studioStub = (estimate: Record<string, unknown>, providers: Record<string, { configured: boolean }>) => ({
+    url: "http://stub.local",
+    async request(method: string, p: string) {
+      if (p === "/api/status") return { engineMode: "both", demoMode: "auto", cloudProvider: "auto", providers };
+      if (p === "/api/models") return { items: ["kling-motion-control", "kling-o3", "kling-o3-4k-edit"].map((id) => ({ id })) };
+      if (p === "/api/genjutsu/estimate") return estimate;
+      throw new Error(`stub: no ${method} ${p}`);
+    },
+  });
+  const plan = (client: object) =>
+    runner.runEval({ suite: cases.loadSuite("genjutsu"), engine: "cloud", variants: ["partner"], cases: ["genjutsu/move"], allowFixtures: true, dryRun: true, root: path.join(dir, "measure") }, { client }) as Promise<{ jobs: { skip?: string }[] }>;
+
+  it("skips a job the server would run on another model than the one named", async () => {
+    const swapped = await plan(studioStub({ costUsd: 1, demo: false, modelId: "genjutsu-lite-motion-transfer", providers: ["higgsfield"] }, { fal: { configured: true } }));
+    expect(swapped.jobs[0].skip).toMatch(/Higgsfield's API/);
+    const other = await plan(studioStub({ costUsd: 1, demo: false, modelId: "kling-o3", providers: ["fal"] }, { fal: { configured: true } }));
+    expect(other.jobs[0].skip).toBe("the server would run kling-o3 instead of kling-motion-control, so this wouldn't measure kling-motion-control");
+    const same = await plan(studioStub({ costUsd: 1, demo: false, modelId: "kling-motion-control", providers: ["fal"] }, { fal: { configured: true } }));
+    expect(same.jobs[0].skip).toBeUndefined();
+  });
+
+  it("refuses a studio route that doesn't say where its steps run when that Fuobe has a Higgsfield key", async () => {
+    const older = { costUsd: 1, demo: false, modelId: "kling-motion-control" };
+    expect((await plan(studioStub(older, { fal: { configured: true }, higgsfield: { configured: true } }))).jobs[0].skip).toMatch(/Higgsfield's API/);
+    expect((await plan(studioStub(older, { fal: { configured: true }, higgsfield: { configured: false } }))).jobs[0].skip).toBeUndefined();
   });
 });

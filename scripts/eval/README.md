@@ -52,6 +52,13 @@ harness measures what a user gets.
 - `--engine open` / `cloud` refuse a server whose engine mode excludes them. A job that would come
   back as demo media is skipped and says why: Demo mode is On, no ComfyUI is connected, or there is
   no cloud key.
+- **Never Higgsfield.** Fuobe uses no Higgsfield API: a job whose route would go through Higgsfield's
+  API is skipped, not measured. A generation's preview names its route; a studio route's estimate
+  lists where its steps run. A studio route that doesn't say (an older Fuobe) is skipped when that
+  Fuobe has a Higgsfield key. Connect fal or Replicate and set **Settings → Cloud provider** to Auto,
+  fal or Replicate.
+- **The model it names.** A job the server would run on another model than the one the case names
+  (a studio's default maker, say) is skipped, since it wouldn't measure that model.
 - On the open engine the harness also reads ComfyUI directly (`--comfy-url`, default `COMFYUI_URL`
   or `http://127.0.0.1:8188`). It uses three read-only endpoints: `/system_stats` for memory,
   `/history` for ComfyUI's own timings, and `/object_info/LoraLoader` to name the LoRAs ComfyUI
@@ -104,7 +111,7 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
 | `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
 | `dop` | DoP motions and effects | the 70 the research gives a LoRA | `catalog`, `prompt-only`, `research`, `partner` | temporal, clip |
-| `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` | temporal, clip |
+| `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
 | `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
 | `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
@@ -153,6 +160,7 @@ scripts/eval/local/
   characters/default/*.jpg            # 10–30 photos of ONE consenting person (soul-id)
   dop/start.png, dop/end.png          # a start frame (a person on a bridge fits the prompts), an end frame for transitions
   genjutsu/dance.mp4, character.png, style.png
+  genjutsu/street.mp4, object.png     # street.mp4 at least 720 px on each side (Kling O3's edit, the cloud partner)
   mixed-media/clip.mp4
   shorts/clip.mp4, shorts/frame0.png
   speak/portrait.png, speak/voice.wav
@@ -186,7 +194,8 @@ written from `lib/schema.mjs`.
   "variants": {
     "recipe": { "description": "The recipe as researched", "loras": "recipe" },
     "half":   { "description": "Half strength", "loras": "recipe", "loraScale": 0.5 },
-    "mine":   { "loras": [{ "file": "my-lora.safetensors", "url": "https://huggingface.co/…", "strength": 0.8, "trigger": "myword" }] }
+    "mine":   { "loras": [{ "file": "my-lora.safetensors", "url": "https://huggingface.co/…", "strength": 0.8, "trigger": "myword" }] },
+    "partner": { "models": { "cloud": ["kling-2-5-turbo"] }, "engines": ["cloud"] }   // engines: where the variant runs
   },
   "cases": [
     {
@@ -208,6 +217,8 @@ Other case fields:
   research.
 - `presetId`: a catalog preset.
 - `models` / `op`: per-case models, and the operation.
+- `variantModels`: a variant's models for this case (`{"partner": {"cloud": ["kling-o3"]}}`), over
+  the variant's own. Each Genjutsu mode names its own partner this way.
 - `shots`: a film's shots. Continuity is measured across them.
 - `train`: photos, a target per engine, `consent`, and `minPhotos`.
 - `submit`: a studio route and its body, with `{{inputs.video}}`, `{{source:inputs.video}}`,

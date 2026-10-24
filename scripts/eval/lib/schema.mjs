@@ -110,8 +110,10 @@ const Variant = z
     presetStrength: z.number().min(0).max(1).optional(),
     /** The server's own Original applies the look: send the case's look id in this field and no client recipe. */
     lookParam: z.enum(["presetId", "styleId"]).optional(),
-    /** Other models for this variant (A/B a model against the recipe). */
+    /** Other models for this variant (A/B a model against the recipe). A case can name its own (variantModels). */
     models: PerEngine(z.array(z.string().min(1)).min(1)).optional(),
+    /** The engines this variant runs on (a partner model is a cloud model: on the others it would repeat another variant). */
+    engines: z.array(z.enum(ENGINES)).min(1).optional(),
     params: Params.optional(),
     extra: Json.optional(),
   })
@@ -160,6 +162,8 @@ export const CaseSchema = z
     presetId: z.string().optional(),
     /** Models for this case instead of the suite's targets (a look on another base, a mode with its own model). */
     models: PerEngine(z.array(z.string().min(1)).min(1)).optional(),
+    /** A variant's models for this case, over the variant's own (each mode of a studio has its own partner model). */
+    variantModels: z.record(Slug, PerEngine(z.array(z.string().min(1)).min(1))).optional(),
     op: z.string().optional(),
     prompts: z.array(Prompt).min(1).optional(),
     shots: z.array(Shot).min(1).max(24).optional(),
@@ -219,6 +223,9 @@ export const SuiteSchema = z
       if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", path: ["cases", i, "prompts"], message: "prompt ids repeat" });
       if (c.look && s.recipe !== "soul-look") ctx.addIssue({ code: "custom", path: ["cases", i, "look"], message: 'a look needs "recipe": "soul-look"' });
       if (c.motion && s.recipe !== "motion") ctx.addIssue({ code: "custom", path: ["cases", i, "motion"], message: 'a motion needs "recipe": "motion"' });
+      for (const v of Object.keys(c.variantModels ?? {})) {
+        if (!s.variants?.[v]) ctx.addIssue({ code: "custom", path: ["cases", i, "variantModels", v], message: `no variant ${v} in this suite` });
+      }
     });
     const variants = Object.keys(s.variants ?? { default: {} });
     if (s.defaults.variant && !variants.includes(s.defaults.variant)) {
