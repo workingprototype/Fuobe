@@ -518,7 +518,7 @@ function SetupPanel({
           aria-describedby={blocker ? "shorts-blocker" : undefined}
           className={cn(
             "flex h-11 w-full items-center justify-center gap-2 rounded-full text-[14px] font-medium transition-colors",
-            blocker ? "bg-muted text-subtle-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90",
+            blocker ? "bg-muted text-muted-foreground" : "bg-primary text-primary-foreground hover:bg-primary/90",
           )}
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}

@@ -15,13 +15,15 @@ export interface StudioCatalog {
   lookup?: ModelDef[];
 }
 
-/** A model without its provider field maps (server-only detail). */
+/** A model without its provider field maps (server-only detail), keeping what the composer previews results with. */
 export function slimModel(m: ModelDef): ModelDef {
   return {
     ...m,
     routes: m.routes.map((r) => {
       const copy = { ...r };
       delete copy.map;
+      const { upscaleFactor, numFrames } = r.map ?? {};
+      if (upscaleFactor || numFrames) copy.preview = { ...(upscaleFactor && { upscaleFactor }), ...(numFrames && { numFrames }) };
       return copy;
     }),
   };

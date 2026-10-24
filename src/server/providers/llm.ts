@@ -391,6 +391,33 @@ async function runJob(op: string, input: GenInput, backends: Backend[], job: Llm
   return [textOutput(done.join("\n\n"), null, { language: lang })];
 }
 
+/** Is the Anthropic key accepted? Listing one model costs nothing. */
+async function testClaude(): Promise<{ ok: boolean; detail: string }> {
+  try {
+    await new Anthropic({ apiKey: getSetting("anthropicKey") }).models.list({ limit: 1 }, { timeout: 15_000, maxRetries: 0 });
+    return { ok: true, detail: "Claude key accepted" };
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) return { ok: false, detail: "Anthropic rejected the key (401)" };
+    if (e instanceof Anthropic.PermissionDeniedError) return { ok: false, detail: "That Anthropic key can't use the API (403)" };
+    if (e instanceof Anthropic.APIError && e.status) return { ok: false, detail: `Anthropic answered ${e.status}: ${e.message}` };
+    return { ok: false, detail: `Can't reach Anthropic (${(e as Error).message})` };
+  }
+}
+
+/** Does Ollama answer, and has it pulled the model Settings names? */
+async function testOllama(): Promise<{ ok: boolean; detail: string }> {
+  const model = getSetting("ollamaModel");
+  try {
+    const res = await fetch(`${ollamaUrl()}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { ok: false, detail: `Ollama answered HTTP ${res.status}` };
+    const names = (((await res.json()) as { models?: { name?: string }[] }).models ?? []).map((m) => m.name ?? "");
+    const has = names.some((n) => n === model || n === `${model}:latest` || n.split(":")[0] === model);
+    return has ? { ok: true, detail: `Ollama · ${model} ready` } : { ok: false, detail: `Ollama answers, but ${model} isn't pulled — run: ollama pull ${model}` };
+  } catch (e) {
+    return { ok: false, detail: `Can't reach Ollama at ${ollamaUrl()} (${(e as Error).message})` };
+  }
+}
+
 export const llmProvider: ProviderAdapter = {
   id: "llm",
   label: "Claude or Ollama",
@@ -429,9 +456,34 @@ export const llmProvider: ProviderAdapter = {
     jobs().delete(externalId);
   },
 
-  async test() {
+  /**
+   * Checks each LLM text steps would use: Claude's key (a free model list call) and that Ollama has
+   * its model. Checking the Anthropic key itself (focus) always asks Anthropic, also when text steps
+   * run on Ollama (Open source only, or the Enhancer set to Ollama): Assist can still use the key.
+   * Checking Ollama's address or model asks Ollama.
+   */
+  async test(opts) {
+    if (opts?.focus === "anthropicKey") {
+      if (!getSetting("anthropicKey")) return { ok: false, detail: "No Anthropic key set" };
+      const claude = await testClaude();
+      // A good key that text steps don't use: say where they run, so green doesn't read as "Claude rewrites prompts".
+      const choice = getSetting("enhanceProvider");
+      let elsewhere: string | null = null;
+      if (choice === "none") elsewhere = "text steps are off (Enhancer: Offline rewriter)";
+      else if (choice === "ollama") elsewhere = "text steps use Ollama (Enhancer)";
+      else if (choice === "auto" && engineMode() === "open") elsewhere = "Open source only mode keeps text steps on Ollama";
+      return claude.ok && elsewhere ? { ok: true, detail: `${claude.detail} · ${elsewhere}` } : claude;
+    }
+    if (opts?.focus === "ollamaUrl" || opts?.focus === "ollamaModel") return testOllama();
+    if (getSetting("enhanceProvider") === "none") return { ok: false, detail: "Text steps are off (Enhancer: Offline rewriter)" };
     await probeOllama(true);
     const b = llmBackends({ endpoint: "auto" });
-    return b.length ? { ok: true, detail: `Text steps run on ${b.map((x) => BACKEND_LABEL[x]).join(", then ")}` } : { ok: false, detail: "Add an Anthropic key or start Ollama" };
+    if (!b.length) {
+      return { ok: false, detail: engineMode() === "open" && getSetting("anthropicKey") ? `Open source only mode skips Claude, and Ollama doesn't answer at ${ollamaUrl()}` : `Add an Anthropic key, or start Ollama (nothing answers at ${ollamaUrl()})` };
+    }
+    const checks = await Promise.all(b.map((x) => (x === "claude" ? testClaude() : x === "ollama" ? testOllama() : Promise.resolve({ ok: true, detail: BACKEND_LABEL[x] }))));
+    const detail = checks.map((c) => c.detail).join(" · ");
+    // Fine when the first one works (the rest are fallbacks); otherwise say what failed.
+    return { ok: checks[0].ok, detail: b.length > 1 && checks[0].ok ? `Text steps run on ${b.map((x) => BACKEND_LABEL[x]).join(", then ")} · ${detail}` : detail };
   },
 };

@@ -503,7 +503,7 @@ function Grader() {
             </div>
             {saved && (
               <div className="flex gap-2 text-[12px]">
-                <Link href="/library" className="text-brand-text hover:underline">
+                <Link href="/library" className="text-brand-text underline underline-offset-2">
                   Open library
                 </Link>
                 <a href={`${saved}?download=graded.${input?.kind === "video" ? "webm" : "png"}`} className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">

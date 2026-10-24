@@ -197,7 +197,7 @@ function NewDub({ onStarted }: { onStarted: (id: string) => void }) {
           </p>
           <div className="flex shrink-0 items-center gap-3 self-end sm:self-auto">
             <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} hint={oneShot ? undefined : "Translating costs little; you'll see the voice's price before it speaks"} />
-            <Button size="lg" className={cn("shrink-0 rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={start} disabled={create.isPending} aria-describedby={blocker ? "dub-blocker" : undefined}>
+            <Button size="lg" className={cn("shrink-0 rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={start} disabled={create.isPending} aria-describedby={blocker ? "dub-blocker" : undefined}>
               {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {oneShot ? "Dub it" : "Translate"}
             </Button>
@@ -538,7 +538,7 @@ function Review({ s, lang, time, onSeek }: { s: DubSessionView; lang: string; ti
           <div className="flex items-center gap-3 self-end sm:self-auto">
             <PriceNote price={price.data} loading={price.isFetching && !price.data} error={price.error as Error | null} />
             <Button
-              className={cn("rounded-full", problems.length && "bg-muted text-subtle-foreground hover:bg-muted")}
+              className={cn("rounded-full", problems.length && "bg-muted text-muted-foreground hover:bg-muted")}
               disabled={voice.isPending || stage === "voicing"}
               onClick={() => (problems.length ? toast(problems[0], { id: "dub-blocker" }) : start(cues))}
             >

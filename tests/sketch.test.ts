@@ -47,6 +47,14 @@ describe("applySketch", () => {
     expect(r.prompt).toMatch(/^the car drives off\. The first frame carries drawn directions/);
   });
 
+  it("leaves the mask to video erasers, swaps and inserts, which read it themselves", () => {
+    for (const id of ["bria-video-erase-mask", "oss-vace-remove-painted", "wan-22-vace-inpaint"]) {
+      const m = getModel(id)!;
+      const req = { feature: "video-tools", modelId: id, inputs: { video: "/v.mp4", mask: "/mask.png" } };
+      expect(applySketch(req, m).request, id).toBe(req);
+    }
+  });
+
   it("requires a mask for inpainting", () => {
     expect(() => planGeneration({ feature: "edit", modelId: "oss-flux-fill", prompt: "x", inputs: { images: ["/a.png"] } }, getModel, getPreset)).toThrow(/paint the area/);
   });

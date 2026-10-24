@@ -99,7 +99,9 @@ describe("skills follow the Agent Skills spec", () => {
 
   it("names only models that exist", async () => {
     const { MODELS } = await import("@/lib/catalog");
-    const ids = new Set(MODELS.map((m) => m.id));
+    const { STYLES } = await import("@/lib/catalog/faceless");
+    // Faceless / Explainer style ids (`pastel-flat-2d`…) are named the same way in the faceless-video skill.
+    const ids = new Set([...MODELS.map((m) => m.id), ...STYLES.map((st) => st.id)]);
     for (const file of skillFiles) {
       // `seedance-2-5`, `oss-wan22-14b`…: backticked words with a hyphen and a digit, or an oss- prefix.
       const named = [...fs.readFileSync(file, "utf8").matchAll(/`([a-z][a-z0-9.]*(?:-[a-z0-9.]+)+)`/g)].map((m) => m[1]).filter((w) => /\d/.test(w) || w.startsWith("oss-"));

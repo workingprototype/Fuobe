@@ -239,7 +239,7 @@ export function KatanaStudio() {
               className="min-h-20 resize-none text-[14px]"
               aria-label="Instructions"
             />
-            <p className="mt-1 text-right font-mono text-[11px] text-subtle-foreground">
+            <p className="mt-1 text-right font-mono text-[11px] text-muted-foreground">
               {instructions.length}/{KATANA_LIMITS.maxInstructions}
             </p>
           </Panel>
@@ -279,7 +279,7 @@ export function KatanaStudio() {
                 (blocker ?? "Pricing…")
               )}
             </p>
-            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={start.isPending || scanning !== null}>
+            <Button size="lg" className={cn("rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={start.isPending || scanning !== null}>
               {start.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Recreate
             </Button>
           </div>
@@ -311,7 +311,7 @@ function SegmentBar({ segments, duration }: { segments: Segment[]; duration: num
           </div>
         ))}
       </div>
-      <div className="mt-1 flex justify-between font-mono text-[11px] text-subtle-foreground">
+      <div className="mt-1 flex justify-between font-mono text-[11px] text-muted-foreground">
         <span>0:00</span>
         <span>{formatCueTime(duration)}</span>
       </div>

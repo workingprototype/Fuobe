@@ -285,7 +285,7 @@ function Editor({ video, restored, onReplace }: { video: SlotValue; restored: Sa
           )}
           {engine === "open" && <p className="mb-3 text-[12px] text-muted-foreground">ComfyUI&apos;s caption burn-in draws your lines into the frames chunk by chunk and keeps the sound (CPU is fine, no model).</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <Button className={cn("rounded-full", usesCues(route) && problems.length > 0 && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={burn} disabled={create.isPending}>
+            <Button className={cn("rounded-full", usesCues(route) && problems.length > 0 && "bg-muted text-muted-foreground hover:bg-muted")} onClick={burn} disabled={create.isPending}>
               {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Burn captions
             </Button>
             <Button variant="outline" className="rounded-full" disabled={!cues.length} onClick={() => download(`${name}.srt`, toSrt(cues), "application/x-subrip")}>

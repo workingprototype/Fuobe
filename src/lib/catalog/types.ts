@@ -219,8 +219,16 @@ export const OPERATION_OUTPUT: Record<Operation, MediaKind> = {
 /**
  * Video codecs and containers an export or HDR job can write (params.format): H.264 MP4, 10-bit H.265
  * MP4, ProRes 422 HQ or 4444 in a .mov, lossless FFV1 in a .mkv, or a 16-bit EXR frame sequence.
+ * The open engine's HDR is also written as 10-bit H.264 in BT.2020 with the HLG or PQ (HDR10) curve
+ * (core ComfyUI has no H.265 encoder).
  */
-export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr";
+export type VideoFormat = "h264" | "h265_10bit" | "prores_422_hq" | "prores_4444" | "ffv1" | "exr" | "hlg_10bit" | "pq_10bit";
+
+/** What Remove background makes: the subject on a transparent background, or its black-and-white alpha mask. */
+export type MatteOutput = "cutout" | "matte";
+
+/** Depth map colour maps, in Higgsfield's order (grayscale first: every depth model draws it). */
+export const COLORMAPS = ["grayscale", "turbo", "inferno", "magma", "viridis"] as const;
 
 /** A point on a picture in its own pixels (the first frame of a video). Negative points mark what to keep. */
 export interface PixelPoint {
@@ -380,6 +388,13 @@ export interface FieldMap {
   frameInterval?: string;
   /** Depth map colours (params.colormap: grayscale, turbo, inferno, magma, viridis). */
   colormap?: string | EnumField;
+  /** Boolean field: the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: string;
+  /**
+   * Remove background's output (params.matteOutput) as the API's own value: BiRefNet's `output_mask` true adds
+   * the mask video, and the job keeps the asked-for file (outputs tagged meta.role "cutout" / "matte").
+   */
+  matteOutput?: { key: string; values: Partial<Record<MatteOutput, unknown>> };
   /** Images held as video frames: [{[url]: image, [frames]: 1}] in order (images to video at params.fps). */
   frames?: { key: string; url: string; frames: string };
   /**
@@ -409,6 +424,12 @@ export interface FieldMap {
   omitEmptyPrompt?: boolean;
   /** params.extra keys this route has no field for (a model-wide control only its other routes read): left out. */
   ignore?: string[];
+  /**
+   * An upscaler that takes a factor, not a size (Topaz, FLUX Upscale): params.resolution ("1080p", "4K",
+   * "Original" = 1) becomes target ÷ the clip's shorter edge (GenInput.sourceSize), kept within min–max.
+   * Nothing is sent when the clip's size is unknown (the API's default factor applies).
+   */
+  upscaleFactor?: { key: string; min?: number; max?: number };
 }
 
 export interface ModelRoute {
@@ -417,10 +438,20 @@ export interface ModelRoute {
   /** fal endpoint id, replicate "owner/name", or ComfyUI workflow id from the manifest. */
   endpoint: string;
   map?: FieldMap;
+  /**
+   * The parts of `map` the composer previews a result with ("1920×1080 → 2880×1620", an EXR frame count),
+   * kept by slimModel when it drops the field maps for the browser. The server reads `map`.
+   */
+  preview?: Pick<FieldMap, "upscaleFactor" | "numFrames">;
   /** Optional note shown in the UI (e.g. "uses Lightx2v 4-step LoRA"). */
   note?: string;
   /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
   loraEndpoint?: string;
+  /**
+   * The route runs as several jobs of its workflow, built on the server (ComfyUI keyframes: one
+   * start/end-frame clip of `endpoint` per pair of frames, then joined; src/server/chains.ts).
+   */
+  chained?: true;
 }
 
 export type Badge = "new" | "top" | "fast" | "audio" | "4k" | "hd" | "pro" | "open" | "uncensored" | "beta";
@@ -454,8 +485,8 @@ export interface ModelOptions {
   languages?: string[];
   /** Numeric settings sent as-is (stability, similarity, speed, exaggeration…). */
   sliders?: { param: string; label: string; min: number; max: number; step: number; default: number }[];
-  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…). */
-  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number }[];
+  /** Extra enum settings sent as-is (Cinema Studio's genre, lens, light, grade, camera move…); `labels` names values that read badly (FLUX Upscale's creativity 0 / 1). */
+  controls?: { param: string; label: string; values: (string | number)[]; default?: string | number; labels?: Record<string, string> }[];
   /** Images it needs before it can run (try-on: the person and the garment). */
   minImages?: number;
   /** What each image is, in order ("person photo", "garment"): blockers and slot labels. */
@@ -477,6 +508,21 @@ export interface ModelOptions {
   requires?: { images?: number; prompt?: boolean; mask?: boolean; points?: boolean; msg: string };
   /** Output formats it can write (params.format: SDR to HDR, export). */
   formats?: VideoFormat[];
+  /** Depth maps: the colour maps it draws (params.colormap; see COLORMAPS). Unset = grayscale only. */
+  colormaps?: string[];
+  /** Depth maps: it can put the original clip next to the depth map (params.sideBySide). */
+  sideBySide?: boolean;
+  /** Remove background: what it can make (params.matteOutput), its default first. Unset = the cut-out. */
+  matteOutputs?: MatteOutput[];
+  /** Remove background keeps only what you name (SAM): words, or points clicked on the first frame, are needed. */
+  keepsNamed?: boolean;
+  /**
+   * Frame rates it can reach (params.targetFps): FPS Boost's 24–120, an upscaler's 24 / 30 / 60. Without a
+   * default target (`defaults.targetFps`) the clip's own frame rate is the first choice ("Original").
+   */
+  fpsTargets?: number[];
+  /** Slow-motion factors it takes (params.slowdown; 1 = the clip's speed). */
+  slowdowns?: number[];
 }
 
 export interface Pricing {
@@ -492,6 +538,11 @@ export interface Pricing {
    * prices after it. The catalog applies whichever holds when it loads (FLUX 3 Max: $0.0425/s until 2026-11-07, then $0.17/s).
    */
   promo?: { until: string; usd: number; byResolution?: Record<string, number> };
+  /**
+   * Price multipliers by a setting's value (Topaz 60 fps 2x, ByteDance Pro 10x, FLUX.3 Creative about 1.4x):
+   * `param` is "targetFps" or a params.extra key (its control's default when unset); `values` maps a value to its factor.
+   */
+  factors?: { param: string; values: Record<string, number> }[];
 }
 
 export interface ModelDef {
@@ -505,7 +556,7 @@ export interface ModelDef {
   badges?: Badge[];
   routes: ModelRoute[];
   options: ModelOptions;
-  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice">>;
+  defaults?: Partial<Pick<GenParams, "aspectRatio" | "resolution" | "duration" | "numOutputs" | "generateAudio" | "voice" | "targetFps" | "format">>;
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
@@ -580,6 +631,10 @@ export interface GenParams {
   slowdown?: number;
   /** Depth map colours: grayscale, turbo, inferno, magma or viridis. */
   colormap?: string;
+  /** Depth maps: the original clip next to the result. */
+  sideBySide?: boolean;
+  /** Remove background: the cut-out (transparent video) or its alpha mask (black and white). */
+  matteOutput?: MatteOutput;
   /** Overlay: where its centre goes (0–1 of the background) and its size (1 = its own size). */
   position?: FocusPoint;
   scale?: number;
@@ -665,8 +720,10 @@ export interface ChainSlot {
    * "audio2" is the second audio track (the background stem mixed under the new voice, mux).
    * "audios" is a list of audio clips (the spoken lines a timeline places at their start times).
    * "model3d" is a 3D model (a mesh to rig).
+   * "mask" is what to change (remove-object): a mask video (SAM 3.1's track of the object), or a still mask of a
+   * window's first frame (the open engine's painted eraser hands the tracked object on from window to window).
    */
-  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "prompt";
+  slot: "images" | "endImage" | "video" | "videos" | "audio" | "voiceAudio" | "audio2" | "audios" | "model3d" | "mask" | "prompt";
   /** For list slots: put it before or after the request's own items (default last). */
   position?: "first" | "last";
   /**
@@ -694,6 +751,12 @@ export interface GenInput extends GenParams {
   audios?: string[];
   model3d?: string;
   loras?: LoraRef[];
+  /**
+   * Server-filled from the input clip's header (generations.ts submit): its displayed size (upscale factors,
+   * the upscale tier) and frame rate (open FPS Boost's m / n when the provider's own upload cache has none).
+   */
+  sourceSize?: { width: number; height: number };
+  sourceFps?: number;
 }
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";

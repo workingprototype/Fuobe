@@ -12,6 +12,7 @@ import { uploadFile } from "@/lib/api";
 import { insertSlash, pickSlash, slashQuery, slashSkills, type SkillSummary } from "@/lib/assist";
 import type { MediaKind } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
+import { useEdgeFade } from "@/components/studio/use-edge-fade";
 import { SkillIcon } from "./skill-icon";
 
 interface Attachment {
@@ -52,6 +53,7 @@ export function AssistComposer({
   const input = useRef<HTMLInputElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const [chipRow, fade] = useEdgeFade<HTMLDivElement>();
   const listId = useId();
   const uploading = files.some((f) => !f.url);
   const ready = text.trim().length > 0 && !uploading && !sending && !disabled;
@@ -172,7 +174,7 @@ export function AssistComposer({
           className="max-h-[min(18rem,var(--radix-popover-content-available-height))] w-[min(var(--radix-popover-trigger-width),40rem)] gap-0 overflow-y-auto rounded-2xl border bg-popover p-1 shadow-strong ring-0"
         >
           <div role="listbox" id={listId} aria-label="Skills">
-            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-subtle-foreground">Skills</p>
+            <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">Skills</p>
             {matches.map((s, i) => (
               <button
                 key={s.name}
@@ -271,18 +273,18 @@ export function AssistComposer({
         rows={1}
         placeholder={placeholder}
         aria-label="Message"
-        role={skills?.length ? "combobox" : undefined}
-        aria-expanded={skills?.length ? menuOpen : undefined}
+        // A textarea can't be a combobox (axe aria-allowed-role): it stays a text box that says it has a skills list ("/"), and names the open list and its active row.
+        aria-haspopup={skills?.length ? "listbox" : undefined}
         aria-controls={menuOpen ? listId : undefined}
         aria-activedescendant={menuOpen ? `${listId}-${matches[active]?.name}` : undefined}
         aria-autocomplete={skills?.length ? "list" : undefined}
         className="field-sizing-content max-h-56 min-h-12 w-full resize-none bg-transparent px-2 py-1.5 text-base leading-relaxed outline-none placeholder:text-subtle-foreground"
       />
-      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+      <div className="mt-1 flex min-w-0 items-center gap-1.5">
         <input ref={input} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={(e) => (add(e.target.files), (e.target.value = ""))} />
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" onClick={() => input.current?.click()} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Attach files">
+            <button type="button" onClick={() => input.current?.click()} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground max-sm:size-8" aria-label="Attach files">
               <Paperclip className="size-4" />
             </button>
           </TooltipTrigger>
@@ -310,8 +312,11 @@ export function AssistComposer({
             </TooltipContent>
           </Tooltip>
         )}
-        {footer}
-        <Button size="icon" className="ml-auto size-10 shrink-0 rounded-full" disabled={!ready} onClick={() => void send()} aria-label="Send">
+        {/* Phones: the chips are one row that scrolls (faded at the edge), so the composer keeps its height and Send stays put. */}
+        <div ref={chipRow} style={fade} className="scrollbar-none -my-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1 sm:flex-wrap sm:gap-1.5 sm:overflow-visible">
+          {footer}
+        </div>
+        <Button size="icon" className="size-10 shrink-0 rounded-full" disabled={!ready} onClick={() => void send()} aria-label="Send">
           {sending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
         </Button>
       </div>

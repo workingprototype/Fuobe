@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +20,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import type { CinemaProject } from "@/lib/catalog/cinema";
+import { untitledName } from "@/lib/format";
 import { formatUsd } from "./money";
-import { useCreateProject, useDeleteProject, useUpdateProject } from "./hooks";
+import { useCinemaProjects, useCreateProject, useDeleteProject, useUpdateProject } from "./hooks";
 
 const MAX_DESC = 140;
 
@@ -37,7 +38,14 @@ function ProjectForm({ project, spentUsd, onDone, onDeleted }: FormProps) {
   const create = useCreateProject();
   const update = useUpdateProject(project?.id ?? "");
   const del = useDeleteProject();
-  const [name, setName] = useState(project?.name ?? "");
+  const projects = useCinemaProjects();
+  // A new project starts with a name (selected, so typing replaces it and Enter creates it).
+  const [name, setName] = useState(() => project?.name ?? untitledName((projects.data ?? []).map((p) => p.name)));
+  const nameRef = useRef<HTMLInputElement>(null);
+  const [tried, setTried] = useState(false);
+  useEffect(() => {
+    if (!project) nameRef.current?.select();
+  }, [project]);
   const [description, setDescription] = useState(project?.description ?? "");
   const [cover, setCover] = useState<SlotValue | null>(project?.cover ? { ref: project.cover, preview: project.cover, kind: "image" } : null);
   const [cap, setCap] = useState(project?.costCapUsd != null ? String(project.costCapUsd) : "");
@@ -45,11 +53,14 @@ function ProjectForm({ project, spentUsd, onDone, onDeleted }: FormProps) {
   const pending = create.isPending || update.isPending;
   const capValue = cap.trim() === "" ? null : Number(cap);
   const capBad = capValue !== null && (!Number.isFinite(capValue) || capValue < 0);
+  // Said next to the field (not in a toast that covers the next screen on phones), once Create was pressed.
+  const nameError = tried && !name.trim() ? "Give the project a name" : null;
 
   const submit = () => {
-    if (!name.trim()) return toast.error("Give the project a name");
+    setTried(true);
+    if (!name.trim()) return nameRef.current?.focus();
     if (cover?.uploading) return toast.error("The cover is still uploading");
-    if (capBad) return toast.error("The limit must be a positive amount in dollars");
+    if (capBad) return document.getElementById("cinema-cap")?.focus();
     const body = { name: name.trim(), description: description.trim() || null, cover: cover?.ref || null, costCapUsd: capValue };
     if (project)
       update.mutate(body, {
@@ -77,7 +88,22 @@ function ProjectForm({ project, spentUsd, onDone, onDeleted }: FormProps) {
       >
         <div className="space-y-1.5">
           <Label htmlFor="cinema-name">Project name</Label>
-          <Input id="cinema-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. “Night Shift”" autoFocus maxLength={80} />
+          <Input
+            ref={nameRef}
+            id="cinema-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. “Night Shift”"
+            autoFocus
+            maxLength={80}
+            aria-invalid={!!nameError}
+            aria-describedby={nameError ? "cinema-name-error" : undefined}
+          />
+          {nameError && (
+            <p id="cinema-name-error" className="text-[12px] text-destructive">
+              {nameError}
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -104,8 +130,22 @@ function ProjectForm({ project, spentUsd, onDone, onDeleted }: FormProps) {
             <Label htmlFor="cinema-cap">Spending limit</Label>
             <div className="relative">
               <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-[13px] text-muted-foreground">$</span>
-              <Input id="cinema-cap" inputMode="decimal" value={cap} onChange={(e) => setCap(e.target.value.replace(/[^\d.]/g, ""))} placeholder="No limit" className="pl-6 font-mono" aria-invalid={capBad} />
+              <Input
+                id="cinema-cap"
+                inputMode="decimal"
+                value={cap}
+                onChange={(e) => setCap(e.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="No limit"
+                className="pl-6 font-mono"
+                aria-invalid={capBad}
+                aria-describedby={capBad ? "cinema-cap-error" : undefined}
+              />
             </div>
+            {capBad && (
+              <p id="cinema-cap-error" className="text-[12px] text-destructive">
+                Enter an amount in dollars, like 25 or 7.50
+              </p>
+            )}
             <p className="text-[12px] leading-snug text-muted-foreground">
               An estimate guard: Generate stops before the project&apos;s estimated spend would pass it.
               {project && spentUsd != null ? ` Spent so far ≈ ${formatUsd(spentUsd)}.` : ""}

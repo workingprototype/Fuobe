@@ -55,7 +55,8 @@ export function Segmented<T extends string | number>({
 export function tabKeys(e: React.KeyboardEvent<HTMLElement>) {
   const step = ({ ArrowRight: 1, ArrowLeft: -1 } as Record<string, number>)[e.key];
   if (step === undefined && e.key !== "Home" && e.key !== "End") return;
-  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+  // A disabled tab (one the engine can't run) is skipped: it can't take focus.
+  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]:not(:disabled)')];
   if (!tabs.length) return;
   e.preventDefault();
   const at = tabs.indexOf(document.activeElement as HTMLElement);
@@ -135,7 +136,7 @@ export function ClipDrop({ accept, limits, onFile, onLibrary }: { accept: string
           </PopoverContent>
         </Popover>
       </div>
-      <p className="text-[11px] text-subtle-foreground">or drop it here</p>
+      <p className="text-[11px] text-muted-foreground">or drop it here</p>
       <input
         ref={input}
         type="file"

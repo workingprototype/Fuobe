@@ -1,5 +1,6 @@
 // Cinema Studio keyboard check: ⌘/Ctrl+Enter generates from the prompt bar only — never from a
-// dialog, the side panel or another text field behind which the bar sits.
+// dialog, the side panel or another text field behind which the bar sits. Also: a new project starts
+// named (and says inline when the name is cleared), and a phone folds the Director chips into one.
 // Usage: node tests/e2e/cinema-shortcuts.mjs [appUrl]   (app must be running; demo mode is fine).
 // Exits 1 when a shortcut made a take it shouldn't have (or the prompt bar's didn't make one).
 //
@@ -57,7 +58,50 @@ const check = async (label, act, expect) => {
 };
 const none = (made) => made.length === 0;
 
+const plain = (label, ok, extra = "") => {
+  console.log(`${ok ? "ok  " : "FAIL"} ${label.padEnd(52)}${extra ? ` ${extra}` : ""}`);
+  if (!ok) failures.push(label);
+};
+
 try {
+  // A new project starts named, the name selected; cleared, Create says so under the field (no toast, nothing made).
+  await page.goto(`${app}/cinema`, { waitUntil: "load", timeout: 120_000 });
+  const nameBox = page.getByLabel("Project name");
+  // A click before the page hydrates does nothing: press again until the dialog opens.
+  for (let i = 0; i < 30 && !(await nameBox.count()); i++) {
+    await page.getByRole("button", { name: "New project" }).first().click();
+    await nameBox.waitFor({ timeout: 2000 }).catch(() => {});
+  }
+  await page.waitForTimeout(300);
+  const named = await nameBox.evaluate((el) => ({ value: el.value, all: el.selectionStart === 0 && el.selectionEnd === el.value.length }));
+  plain("a new project starts as Untitled project, selected", /^Untitled project( \d+)?$/.test(named.value) && named.all, JSON.stringify(named));
+  const count = (await call("/api/cinema/projects")).items?.length;
+  await nameBox.fill("");
+  await page.getByRole("button", { name: "Create project" }).click();
+  await page.waitForTimeout(500);
+  const inline = await page.getByText("Give the project a name").count();
+  plain("…cleared, Create says so under the field", inline === 1 && (await nameBox.getAttribute("aria-invalid")) === "true" && (await page.locator("[data-sonner-toast]").count()) === 0);
+  plain("…and makes nothing", (await call("/api/cinema/projects")).items?.length === count);
+  await page.keyboard.press("Escape");
+
+  // Phones: one Director chip opens the panel's chips in a sheet; in Image (stills) it warns that the camera is needed.
+  {
+    const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
+    await phone.goto(`${app}/cinema/${project.id}`, { waitUntil: "domcontentloaded", timeout: 120_000 });
+    await phone.waitForSelector("text=Your first shot", { timeout: 120_000 });
+    const director = phone.getByRole("button", { name: /^Director/ });
+    plain("phone: the Director chips fold into one chip", (await director.count()) === 1 && !(await phone.getByRole("button", { name: "Camera settings" }).isVisible()));
+    await director.tap();
+    const sheet = phone.getByRole("dialog", { name: "Director's Panel" });
+    await sheet.waitFor({ timeout: 10_000 }).catch(() => {});
+    plain("…which opens them in a sheet", (await sheet.getByRole("button", { name: "Camera settings" }).count()) === 1);
+    await phone.keyboard.press("Escape");
+    await phone.getByRole("radio", { name: "Image" }).first().tap().catch(() => {});
+    await phone.waitForTimeout(500);
+    plain("…and in Image it says the camera is needed", /camera needed/.test((await director.getAttribute("aria-label")) ?? ""), (await director.getAttribute("aria-label")) ?? "");
+    await phone.context().close();
+  }
+
   await page.goto(`${app}/cinema/${project.id}`, { waitUntil: "domcontentloaded", timeout: 120_000 });
   await page.waitForSelector("text=Your first shot", { timeout: 120_000 });
   await page.getByPlaceholder(/Describe your scene/).fill("A lighthouse in a storm");

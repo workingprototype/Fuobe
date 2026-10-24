@@ -288,7 +288,7 @@ function ProjectsInner() {
               </PopoverContent>
             </Popover>
           </div>
-          <p className="mt-3 text-[12px] text-subtle-foreground">Upload an image, or pick one you already generated. Images only — JPG, PNG or WebP.</p>
+          <p className="mt-3 text-[12px] text-muted-foreground">Upload an image, or pick one you already generated. Images only — JPG, PNG or WebP.</p>
           <p className="mx-auto mt-4 flex max-w-md items-center justify-center gap-2 rounded-full bg-muted px-3 py-1.5 text-[12px] text-muted-foreground md:hidden">
             <MonitorSmartphone className="size-3.5 shrink-0" /> Layers works best on a larger screen — on a phone you can preview and download.
           </p>

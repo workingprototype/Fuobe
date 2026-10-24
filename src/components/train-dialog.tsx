@@ -131,7 +131,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <div className="min-w-0 flex-1">
                     <p className="text-[14px] font-medium">{t.name}</p>
                     <p className="text-[12px] text-muted-foreground">{t.description}</p>
-                    <p className="mt-1 text-[11px] text-subtle-foreground">
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       {t.price} · {t.eta}
                     </p>
                   </div>
@@ -149,7 +149,7 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
                   <p className="mt-2 text-[12px] text-muted-foreground">
                     {tooFew ? `Needs at least ${t.minImages} photos.` : t.blocker}{" "}
                     {t.blocker && !tooFew && (
-                      <Link href="/settings" className="text-brand-text hover:underline">
+                      <Link href="/settings" className="text-brand-text underline underline-offset-2">
                         Open Settings
                       </Link>
                     )}

@@ -136,7 +136,7 @@ function Project({ p }: { p: AssistProject }) {
               }}
               footer={<NewChatControls choice={choice} setChoice={setChoice} can={can} engine={engine} setEngine={setEngine} askFirst={askFirst} setAskFirst={setAskFirst} />}
             />
-            {!chats.data?.threads.length && <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />}
+            {!chats.data?.threads.length && <SkillStarters skills={available} loading={skills.data === undefined && !skills.isError} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />}
           </div>
         </div>
         <Tabs value={tab} onValueChange={setTab} className="mt-10 gap-4">
@@ -367,7 +367,7 @@ function Sources({ p }: { p: AssistProject }) {
             ) : (
               <p className="px-3 py-4 text-center text-[13px] text-muted-foreground">
                 No elements yet —{" "}
-                <Link href="/elements" className="text-brand-text hover:underline">
+                <Link href="/elements" className="text-brand-text underline underline-offset-2">
                   save a character or product
                 </Link>
                 .

@@ -19,13 +19,19 @@ import {
   ZoomIn,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { GetStarted } from "@/components/get-started";
 import { PageShell } from "@/components/page-shell";
+import { Skeleton } from "@/components/ui/skeleton";
+import { HadItemsScript, useHadItems } from "@/components/use-had-items";
+import { CardPending, IntentLink } from "@/components/intent-link";
 import { PresetCard } from "@/components/preset-gallery";
 import { MediaThumb } from "@/components/studio/result-media";
 import { useEngine, useGenerations, useHydrated, useStatus } from "@/lib/api";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import type { Generation } from "@/lib/catalog/types";
+import { issueStartToken, START_PARAM } from "@/lib/composer";
+import { FIRST_RUN_KEY, FIRST_RUN_SCRIPT, nothingConnected as noConnection, showFirstRun, startLine, type StartQuote } from "@/lib/connections";
 import { userTitle } from "@/lib/library";
 import type { PresetCardData } from "@/lib/preset-cards";
 import { cn } from "@/lib/utils";
@@ -47,16 +53,16 @@ interface Counts {
 
 /** Tool tiles. Append one entry per new destination (the grid holds five per row on wide screens). */
 const tools = (c: Counts) => [
-  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard, hue: 330 },
-  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film, hue: 280 },
-  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles, hue: 20 },
-  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2, hue: 200 },
-  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal, hue: 100 },
-  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network, hue: 260 },
-  { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2, hue: 150 },
-  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace, hue: 320 },
-  { href: "/upscale", label: "Upscale", desc: "Images & video", icon: ZoomIn, hue: 240 },
-  { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines, hue: 60 },
+  { href: "/cinema", label: "Cinema Studio", desc: "Direct a film shot by shot", icon: Clapperboard },
+  { href: "/motions", label: "Camera motions", desc: `${c.motions} director moves`, icon: Film },
+  { href: "/effects", label: "Effects", desc: `${c.effects} viral VFX`, icon: Sparkles },
+  { href: "/apps", label: "Apps", desc: `${c.apps} one-click tools`, icon: Wand2 },
+  { href: "/storyboard", label: "Storyboard", desc: "One idea, consistent frames", icon: GalleryHorizontal },
+  { href: "/canvas", label: "Canvas", desc: "Chain steps into a flow", icon: Network },
+  { href: "/lipsync", label: "Lipsync", desc: "Talking avatars", icon: Mic2 },
+  { href: "/elements", label: "Elements", desc: "@ characters, places, props", icon: ScanFace },
+  { href: "/upscale", label: "Upscale", desc: "Video, FPS, HDR & images", icon: ZoomIn },
+  { href: "/audio", label: "Audio", desc: "Voice, SFX, music", icon: AudioLines },
 ];
 
 /** The latest results as a compact strip of square thumbnails; a tap opens the viewer. */
@@ -112,9 +118,9 @@ function RecentStrip({ items }: { items: Generation[] }) {
   );
 }
 
-function Row({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
+function Row({ title, href, children, className }: { title: string; href: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="space-y-3">
+    <section className={cn("space-y-3", className)}>
       <div className="flex items-center justify-between">
         <h2 className="font-heading text-[24px]">{title}</h2>
         <Link href={href} className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground">
@@ -136,24 +142,70 @@ function CardRow({ cards, href, engine }: { cards: PresetCardData[]; href: (c: P
   );
 }
 
-export function HomeView({ counts, motions, apps, effects }: { counts: Counts; motions: PresetCardData[]; apps: PresetCardData[]; effects: PresetCardData[] }) {
+/**
+ * Runs while the HTML is parsed, ahead of the guide: hides the shell's guide before the first paint
+ * in a browser that already put it away. On the client it renders as inert text/plain (React warns
+ * about executable scripts it renders itself), like the sidebar's state script.
+ */
+function FirstRunScript() {
+  return <script type={typeof window === "undefined" ? "text/javascript" : "text/plain"} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: FIRST_RUN_SCRIPT }} />;
+}
+
+export function HomeView({
+  counts,
+  motions,
+  apps,
+  effects,
+  prices,
+  quotes,
+}: {
+  counts: Counts;
+  motions: PresetCardData[];
+  apps: PresetCardData[];
+  effects: PresetCardData[];
+  /** What a first paid image and clip cost, for the first-run guide. */
+  prices?: string;
+  /** What Start runs in each mode, and its price on the paid engine. */
+  quotes?: Record<string, StartQuote>;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState(MODES[0]);
   const [prompt, setPrompt] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
   const [engine, setEngine, engineMode] = useEngine();
   const recent = useGenerations({ limit: 6 });
+  // How many (up to 6): a phone's grid holds 3 a row, so 1 to 3 results are one row of skeletons, 4 to 6 two.
+  useHadItems("home-recent", recent.data?.length, 6);
   // The page hydrates inside the route's Suspense boundary, possibly after the sidebar already fetched
   // the status: render the server's (status-less) view until hydrated, as useEngineMode does.
   const hydrated = useHydrated();
   const statusData = useStatus().data;
   const status = hydrated ? statusData : undefined;
-  const cloudReady = !!(status?.providers.fal?.configured || status?.providers.replicate?.configured || status?.providers.higgsfield?.configured);
-  const comfyReady = !!status?.providers.comfyui?.configured;
-  const nothingConnected = status && !(engineMode === "open" ? comfyReady : engineMode === "cloud" ? cloudReady : cloudReady || comfyReady);
+  const nothingConnected = !!status && noConnection(status);
+  // Until something is connected (or it's put away): three ways to start, under the composer. It's
+  // in the static shell too (no status yet), so it doesn't push the page down when the status
+  // arrives; FirstRunScript hides it before the first paint in a browser that has put it away.
+  const firstRun = showFirstRun(status);
+  const guide = !status || firstRun;
+  useEffect(() => {
+    if (!status) return;
+    try {
+      localStorage.setItem(FIRST_RUN_KEY, firstRun ? "1" : "0");
+    } catch {}
+    document.documentElement.setAttribute("data-first-run", firstRun ? "1" : "0");
+  }, [status, firstRun]);
 
   const locked = engineMode === "both" ? undefined : engineMode;
 
-  const go = () => router.push(`${mode.href}${prompt.trim() ? `?prompt=${encodeURIComponent(prompt.trim())}` : ""}`);
+  // With a prompt, the studio starts the run itself, or points at the photo it still needs. `go`
+  // carries a one-time token from this tab, so only this button can start a run that way.
+  const go = () => {
+    const p = prompt.trim();
+    router.push(p ? `${mode.href}?prompt=${encodeURIComponent(p)}&${START_PARAM}=${issueStartToken()}` : mode.href);
+  };
+  // What Start will run, and what it costs, before it's pressed (or why it's a demo, and the engine that would run it).
+  const runsFor = status ? startLine(status, quotes?.[mode.id], engine, mode.id as "image" | "video" | "edit") : null;
+  const focusComposer = () => requestAnimationFrame(() => box.current?.focus());
 
   return (
     <PageShell>
@@ -176,6 +228,7 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
                 go();
               }
             }}
+            ref={box}
             rows={2}
             autoFocus
             aria-label="Describe what to create"
@@ -210,10 +263,37 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
             </div>
           </div>
         </div>
-        {nothingConnected && (
+        {runsFor && (
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            {runsFor.text}
+            {runsFor.other && (
+              <>
+                {" · "}
+                <button type="button" onClick={() => setEngine(runsFor.other!)} className="text-brand-text underline underline-offset-2 hover:no-underline">
+                  {runsFor.other === "open" ? "Run it free on your GPU" : "Use your paid key"}
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        {guide ? (
+          <>
+            <FirstRunScript />
+            <GetStarted
+              className={cn("mt-6 max-w-[960px]", !status && "[html[data-first-run='0']_&]:hidden")}
+              status={status}
+              prices={prices}
+              onDemo={focusComposer}
+              onMode={(id) => {
+                setMode(MODES.find((m) => m.id === id) ?? MODES[0]);
+                focusComposer();
+              }}
+            />
+          </>
+        ) : nothingConnected && (
           <p className="mt-4 text-[13px] text-muted-foreground">
             You’re in <span className="font-medium text-foreground">demo mode</span> — outputs are placeholders.{" "}
-            <Link href="/settings" className="text-brand-text underline-offset-2 hover:underline">
+            <Link href="/settings#get-started" className="text-brand-text underline underline-offset-2">
               {engineMode === "open" ? "Connect ComfyUI" : engineMode === "cloud" ? "Add a fal.ai or Replicate key" : "Add a fal.ai key or connect ComfyUI"}
             </Link>{" "}
             to generate for real.
@@ -223,23 +303,46 @@ export function HomeView({ counts, motions, apps, effects }: { counts: Counts; m
 
       <div className="mt-14 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {tools(counts).map((t) => (
-          <Link key={t.href} href={t.href} className="group flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
-            <span className="grid size-9 place-items-center rounded-lg text-white" style={{ background: `linear-gradient(135deg, oklch(0.75 0.15 ${t.hue}), oklch(0.55 0.2 ${t.hue + 40}))` }}>
-              <t.icon className="size-4 transition-transform group-hover:scale-110" />
+          // Neutral chrome (Liner): the tile tints on hover, the colour stays in the content below.
+          <IntentLink key={t.href} href={t.href} className="group relative flex min-w-0 flex-col gap-2 rounded-xl border bg-background p-3 transition-colors hover:bg-accent">
+            <span className="grid size-9 place-items-center rounded-lg bg-muted text-foreground transition-colors group-hover:bg-brand-faint group-hover:text-brand-text">
+              <t.icon className="size-4" />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-[13px] font-medium">{t.label}</span>
               <span className="block text-[12px] text-muted-foreground">{t.desc}</span>
             </span>
-          </Link>
+            <CardPending />
+          </IntentLink>
         ))}
       </div>
 
       <div className="mt-14 space-y-12">
-        {!!recent.data?.length && (
+        {recent.data?.length ? (
           <Row title="Recent" href="/library">
             <RecentStrip items={recent.data.slice(0, 6)} />
           </Row>
+        ) : (
+          // Loading, in a browser that saw results here last time: the row keeps its place from the first paint, so the rows below don't move down when it arrives.
+          !recent.data && (
+            <>
+              <HadItemsScript name="home-recent" />
+              <Row title="Recent" href="/library" className="hidden [html[data-had-home-recent]_&]:block">
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-busy="true" aria-label="Loading recent results">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <Skeleton
+                      key={i}
+                      className={cn(
+                        "aspect-square rounded-xl",
+                        // A phone's second row only when the last visit had more than 3.
+                        i >= 3 && "max-sm:hidden [html[data-had-home-recent='4']_&]:block [html[data-had-home-recent='5']_&]:block [html[data-had-home-recent='6']_&]:block",
+                      )}
+                    />
+                  ))}
+                </div>
+              </Row>
+            </>
+          )
         )}
         <Row title="Camera motions" href="/motions">
           <CardRow cards={motions} href={(p) => `/video?preset=${p.id}`} engine={locked} />

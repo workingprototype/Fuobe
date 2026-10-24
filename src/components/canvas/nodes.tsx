@@ -92,6 +92,7 @@ import {
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
+import { keyCombo } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
@@ -126,7 +127,7 @@ function InPort({ port, count }: { port: PortDef; count: number }) {
         aria-label={`${port.label} input (${PORT_TYPE_LABEL[port.type]})`}
       />
       <span className={cn("font-medium", count > 0 && "text-foreground")}>{port.label}</span>
-      {count > 0 && port.multiple && <span className="font-mono text-subtle-foreground">{count}</span>}
+      {count > 0 && port.multiple && <span className="font-mono text-muted-foreground">{count}</span>}
     </div>
   );
 }
@@ -274,7 +275,7 @@ function MenuItems({ id, kit, items, canConnect, onRename }: { id: string; kit: 
           <DisconnectItems id={id} kit={kit} />
         </kit.SubContent>
       </kit.Sub>
-      {entry({ label: "Duplicate", icon: Copy, onSelect: () => actions.duplicate(id), shortcut: "⌘D", separatorBefore: true })}
+      {entry({ label: "Duplicate", icon: Copy, onSelect: () => actions.duplicate(id), shortcut: keyCombo("D"), separatorBefore: true })}
       {entry({ label: "Delete", icon: Trash2, onSelect: () => actions.remove(id), shortcut: "⌫", destructive: true })}
     </>
   );
@@ -628,7 +629,7 @@ function EngineBadge({ model }: { model?: ModelDef }) {
   return (
     <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-1.5 text-[10px] font-semibold", open ? "bg-success/15 text-success" : "bg-brand-faint text-brand-text")}>
       {open ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
-      {open ? "Open" : "Cloud"}
+      {open ? "Open source" : "Cloud"}
     </span>
   );
 }
@@ -1165,12 +1166,12 @@ function SourcePreview({ node }: { node: Source }) {
   if (isGenerator(node)) {
     if (r.outputs.length) return <OutputThumb o={r.outputs[0].o} onOpen={() => actions.open(node.id, 0)} large />;
     if (r.state !== "idle") return <Results id={node.id} r={r} compact />;
-    return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-subtle-foreground">Not run yet</div>;
+    return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-muted-foreground">Not run yet</div>;
   }
   const kind = KIND_OF[node.type];
   if (kind && node.data.url) return <MediaPreview kind={kind} url={node.data.url} />;
   if (node.type === "prompt") return <p className="line-clamp-6 rounded-lg bg-muted p-2.5 text-[12px] leading-snug">{node.data.text || "Empty text"}</p>;
-  return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-subtle-foreground">Nothing yet</div>;
+  return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-muted-foreground">Nothing yet</div>;
 }
 
 const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<FlowNode>) {

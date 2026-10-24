@@ -1,6 +1,7 @@
 import { CLOUD_MODELS } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
+import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
 
@@ -25,11 +26,19 @@ const CHATTERBOX_SLIDERS = [
   { param: "temperature", label: "Variety", min: 0.05, max: 2, step: 0.05, default: 0.8 },
 ];
 
+/**
+ * Frames mode on the open engine (Kling 4.0's up to 10 keyframes): one Wan 2.2 start/end-frame clip
+ * per pair of frames, as long as the gap between them, then joined (createKeyframeFilm in src/server/chains.ts).
+ */
+const KEYFRAME_FILM: ModelRoute = { ...comfy("keyframes", "wan22-flf2v-14b", "one start/end-frame clip per pair of frames, joined"), chained: true };
+
 /** Open models have no multi-shot of their own: each shot renders separately, then the clips are joined. */
 const CONCAT_SHOTS = { mode: "concat", maxShots: 4 } as const;
 
 const IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"];
 const VID_AR = ["16:9", "9:16", "1:1"];
+/** Open video upscalers: the result's shorter edge (1080p = 1080 px in any shape). */
+const VIDEO_UPSCALE_TIERS = ["720p", "1080p", "1440p", "2160p"];
 
 
 // ---------------------------------------------------------------------------
@@ -254,7 +263,7 @@ const open: ModelDef[] = [
     kind: "video",
     tagline: "Best open video model with Lightx2v 4-step LoRAs — minutes, not hours",
     badges: ["fast", "top"],
-    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b-lightx2v", "Lightx2v 4-step"), comfy("i2v", "wan22-i2v-14b-lightx2v", "Lightx2v 4-step"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
@@ -265,7 +274,7 @@ const open: ModelDef[] = [
     family: "wan",
     kind: "video",
     tagline: "Full-quality Wan 2.2 (20 steps) — text, image and start/end frame",
-    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b")],
+    routes: [comfy("t2v", "wan22-t2v-14b"), comfy("i2v", "wan22-i2v-14b"), comfy("flf2v", "wan22-flf2v-14b"), KEYFRAME_FILM],
     options: { multiShot: CONCAT_SHOTS, aspectRatios: VID_AR, durations: [3, 5, 7], resolutions: ["480p", "720p"], seed: true, negativePrompt: true, endFrame: true },
     defaults: { aspectRatio: "16:9", duration: 5, resolution: "480p" },
   }),
@@ -393,15 +402,18 @@ const open: ModelDef[] = [
     options: { aspectRatios: VID_AR, seed: true, negativePrompt: true },
     defaults: { aspectRatio: "9:16" },
   }),
+  // Video upscalers run in passes of a few frames (VHS meta-batch), so memory stays flat whatever the clip's
+  // length (the whole-clip graphs held about 38 GB of frames for 30 s at 480p). params.resolution = the shorter edge.
   o({
     id: "oss-seedvr2",
     name: "SeedVR2 (video)",
     vendor: "ByteDance Seed",
     family: "seedvr",
     kind: "video",
-    tagline: "One-step diffusion upscaler for video",
-    routes: [comfy("upscale-video", "upscale-video-seedvr2")],
-    options: { seed: true },
+    tagline: "One-step diffusion restoration and upscale, in passes so long clips fit",
+    routes: [comfy("upscale-video", "upscale-video-seedvr2-chunked", "33 frames per pass; each pass restored on its own")],
+    options: { seed: true, resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
   o({
     id: "oss-upscale-video-esrgan",
@@ -409,19 +421,57 @@ const open: ModelDef[] = [
     vendor: "Open source",
     family: "esrgan",
     kind: "video",
-    tagline: "Fast frame-by-frame 4x upscale",
-    routes: [comfy("upscale-video", "upscale-video-esrgan")],
-    options: {},
+    tagline: "Fast frame-by-frame 4x upscale, in passes: any length fits in memory",
+    routes: [comfy("upscale-video", "upscale-video-esrgan-chunked", "Real-ESRGAN x4, then scaled to the size asked for")],
+    options: { resolutions: VIDEO_UPSCALE_TIERS },
+    defaults: { resolution: "1080p" },
   }),
+  // FPS Boost: interpolate by m and keep every n-th frame (src/lib/av/fps.ts), for an exact target and slow motion.
   o({
     id: "oss-rife",
     name: "RIFE interpolation",
     vendor: "Open source",
     family: "rife",
     kind: "video",
-    tagline: "Smooth slow motion and 2x/4x frame rate",
-    routes: [comfy("interpolate", "interpolate-rife")],
-    options: {},
+    tagline: "FPS Boost to 24–120 fps and slow motion; FILM for large motion",
+    routes: [comfy("interpolate", "interpolate-rife-fps", "frame rate from the clip's header: interpolate by m, keep every n-th")],
+    options: {
+      fpsTargets: [...FPS_TARGETS],
+      slowdowns: [...SLOW_MOTION],
+      controls: [
+        {
+          param: "checkpoint",
+          label: "Model",
+          values: ["rife_v4.26.safetensors", "film_net_fp16.safetensors"],
+          default: "rife_v4.26.safetensors",
+          labels: { "rife_v4.26.safetensors": "RIFE 4.26 (fast)", "film_net_fp16.safetensors": "FILM (large motion, slower)" },
+        },
+      ],
+    },
+    defaults: { targetFps: DEFAULT_FPS_TARGET },
+  }),
+  // SDR to HDR and pro export formats (core ComfyUI and VideoHelperSuite, no model weights).
+  o({
+    id: "oss-sdr-to-hdr",
+    name: "SDR to HDR",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "SDR footage expanded to 10-bit HDR: HLG or HDR10 (PQ) MP4, or 16-bit EXR frames",
+    routes: [comfy("sdr-to-hdr", "video-sdr-to-hdr", "an inverse tone map (core ImageSDRToHDR), not a learned model")],
+    options: { formats: ["hlg_10bit", "pq_10bit", "exr"], sliders: [{ param: "peakNits", label: "Peak brightness (nits)", min: 200, max: 2000, step: 50, default: 650 }] },
+    defaults: { format: "hlg_10bit" },
+  }),
+  o({
+    id: "oss-export-video",
+    name: "Pro export",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "ProRes 422 HQ or 4444, H.265 10-bit, lossless FFV1 or 16-bit EXR frames, made on your machine",
+    routes: [comfy("export-video", "video-export-pro-chunked", "VideoHelperSuite with the server's ffmpeg, in passes; EXR: core SaveImageAdvanced")],
+    options: { formats: ["prores_422_hq", "prores_4444", "h265_10bit", "ffv1", "h264", "exr"] },
+    defaults: { format: "prores_422_hq" },
   }),
   o({
     id: "oss-mmaudio",
@@ -521,9 +571,10 @@ const open: ModelDef[] = [
     vendor: "ZhengPeng7",
     family: "birefnet",
     kind: "video",
-    tagline: "Cut the subject out of every frame — transparent WebM plus a matte",
+    tagline: "Cut the subject out of every frame — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-birefnet")],
-    options: {},
+    // The graph saves both; params.matteOutput keeps one (Video tools → Remove background: Cutout video / Alpha mask).
+    options: { promptless: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-matte-sam3",
@@ -531,9 +582,9 @@ const open: ModelDef[] = [
     vendor: "Meta",
     family: "sam",
     kind: "video",
-    tagline: "Keep just the object you name (“the dog”, “the red car”)",
+    tagline: "Keep just what you name (“the dog”, “the red car”) — a transparent WebM, or its alpha mask",
     routes: [comfy("bg-remove-video", "video-bg-remove-sam3")],
-    options: {},
+    options: { keepsNamed: true, matteOutputs: ["cutout", "matte"] },
   }),
   o({
     id: "oss-video-depth-da3",
@@ -541,9 +592,9 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Per-frame depth maps for compositing and 3D effects",
+    tagline: "Per-frame depth maps for compositing and 3D effects · grayscale",
     routes: [comfy("depth-video", "video-depth-da3")],
-    options: {},
+    options: { colormaps: ["grayscale"], sideBySide: true },
   }),
   o({
     id: "oss-video-depth-vda",
@@ -551,9 +602,73 @@ const open: ModelDef[] = [
     vendor: "ByteDance",
     family: "depth-anything",
     kind: "video",
-    tagline: "Temporally stable, flicker-free depth",
+    tagline: "Temporally stable, flicker-free depth · grayscale or inferno",
     routes: [comfy("depth-video", "video-depth-vda-small")],
-    options: {},
+    // VideoDepthAnythingOutput draws gray or inferno only; turbo, magma and viridis are the cloud's.
+    options: { colormaps: ["grayscale", "inferno"], sideBySide: true },
+  }),
+  // Remove object (Video tools → Remove object; docs/research/comfyui-oss-4.md §b). The prompt names what to remove
+  // (the provider sends the objects in it to SAM 3.1 as maskPrompt; the scene the gap is filled with is
+  // params.extra.prompt or a neutral default). One window per job: src/lib/catalog/remove-object.ts tiles longer clips
+  // and joins them; run on its own (a Canvas node) a job does the first window only, which the taglines say.
+  o({
+    id: "oss-vace-remove",
+    name: "Wan 2.1 VACE Remove",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to remove: SAM 3.1 follows it, VACE fills the gap, every other pixel stays the original · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the lightx2v 4-step LoRA; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true },
+  }),
+  o({
+    id: "oss-vace-remove-painted",
+    name: "Wan 2.1 VACE Remove (painted)",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint what to remove on the first frame: SAM 3.1 follows it, VACE fills the gap · 81 frames a run (Video tools → Remove object does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-inpaint-wan-vace-painted", "first-frame mask (white = remove) tracked by SAM 3.1; the last frame's mask starts the next window")],
+    options: { seed: true, negativePrompt: true, requires: { mask: true, msg: "Paint what to remove on the first frame" } },
+  }),
+  o({
+    id: "oss-void-remove",
+    name: "VOID Remove",
+    vendor: "Netflix",
+    family: "void",
+    kind: "video",
+    tagline: "Removes the object and what it causes — shadows, reflections, things it moves · 197 frames a run (Video tools → Remove object does whole clips) · 24–40 GB GPU (unverified) · CogVideoX License: commercial use needs registration",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-erase-void", "SAM 3.1 text track + VOID (CogVideoX-5B fine-tune), two passes; up to 197 frames per window")],
+    options: { seed: true, negativePrompt: true },
+  }),
+  // Genjutsu's Object swap and Insert on the open engine (docs/research/comfyui-oss-4.md §c). Swap: params.extra.maskPrompt
+  // names what goes (else the "replace … with" part of the prompt, see swapTarget), the first reference image is what comes
+  // in, the prompt describes the result. Insert: a painted region held for the whole window. One window per job, as the
+  // eraser: src/lib/catalog/genjutsu.ts tiles longer clips and joins them.
+  o({
+    id: "oss-vace-swap",
+    name: "Wan 2.1 VACE Swap",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Name what to swap: SAM 3.1 follows it, VACE paints your reference in its place, every other pixel stays the original · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-swap", "video-swap-wan-vace", "SAM 3.1 text track + Wan 2.1 VACE 14B with the first reference image; up to 81 frames per window")],
+    options: { seed: true, negativePrompt: true, maxImages: 1 },
+  }),
+  o({
+    id: "oss-vace-insert",
+    name: "Wan 2.1 VACE Insert",
+    vendor: "Alibaba Wan",
+    family: "wan",
+    kind: "video",
+    tagline: "Paint where it goes on the first frame: VACE adds your reference there, held for the whole shot (a still or slow camera) · 81 frames a run (Genjutsu does whole clips) · 24 GB GPU · Apache-2.0",
+    badges: ["new"],
+    routes: [comfy("video-insert", "video-insert-wan-vace", "painted region (white = where it goes) held for every frame + Wan 2.1 VACE 14B with the first reference image")],
+    options: { seed: true, negativePrompt: true, maxImages: 1, requires: { mask: true, msg: "Paint where it goes on the first frame" } },
   }),
   o({
     id: "oss-qwen-relight",
@@ -1040,6 +1155,52 @@ const open: ModelDef[] = [
     options: {},
     hidden: true,
   }),
+  // Faceless / Explainer "Frame by frame" and the Audio hub's Loop / extend and Join (r4/faceless-plus): core nodes, no model.
+  o({
+    id: "oss-ken-burns",
+    name: "Ken Burns",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "A slow pan and zoom over a still, up to 10 s a clip · no model, runs on CPU",
+    routes: [comfy("still-motion", "kenburns-still", "zoom + pan, eased or linear; 10 s per job, longer scenes are split and joined")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"], maxImages: 1, promptless: true },
+    defaults: { aspectRatio: "16:9", resolution: "720p" },
+    hidden: true,
+  }),
+  o({
+    id: "oss-join-encoded",
+    name: "Join clips (copy)",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Joins clips the open engine made, packet by packet: no decode, flat memory · CPU",
+    routes: [comfy("concat", "video-concat-encoded", "one loader per clip; the clips share one size and frame rate")],
+    options: {},
+    hidden: true,
+  }),
+  o({
+    id: "oss-audio-loop",
+    name: "Crossfade loop",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Extends a clip to any length up to 10 minutes, crossfading every seam and fading out at the end · CPU",
+    routes: [comfy("audio-loop", "audio-loop-crossfade", "equal-power seams; the fade curve is written per job")],
+    options: { promptless: true },
+    hidden: true,
+  }),
+  o({
+    id: "oss-audio-join",
+    name: "Crossfade join",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "audio",
+    tagline: "Clips one after another with a crossfade at every seam · CPU",
+    routes: [comfy("audio-join", "audio-join-crossfade", "every clip in one job")],
+    options: { maxAudios: 10, promptless: true },
+    hidden: true,
+  }),
   // Product 3D, try-on
   o({
     id: "oss-trellis2",
@@ -1061,6 +1222,24 @@ const open: ModelDef[] = [
     tagline: "Untextured 3D shape from a photo · 10 GB GPU · licence excludes the EU, UK and South Korea",
     routes: [comfy("image-to-3d", "image-to-3d-hunyuan3d-21")],
     options: { seed: true },
+  }),
+  // Round 4 (r4/cinema-3d): Cinema Studio's "Create 3D scene". The mesh is in the photo's own camera space
+  // (glTF axes, metres), so the viewer starts where the photo was taken.
+  o({
+    id: "oss-scene-moge",
+    name: "MoGe 2 scene",
+    vendor: "Microsoft",
+    family: "moge",
+    kind: "model3d",
+    tagline: "The whole photo as a textured 3D mesh to fly a camera through, plus its depth map · runs on a CPU too (a minute or two) · MIT",
+    badges: ["new"],
+    routes: [comfy("scene-3d", "scene-mesh-moge", "MoGe 2 point map → textured GLB of the whole frame + a depth PNG")],
+    options: {
+      sliders: [
+        { param: "resolutionLevel", label: "Detail", min: 0, max: 9, step: 1, default: 9 },
+        { param: "decimation", label: "Mesh thinning (1 = every pixel)", min: 1, max: 4, step: 1, default: 1 },
+      ],
+    },
   }),
   o({
     id: "oss-tryon-klein",

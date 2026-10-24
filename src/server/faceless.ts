@@ -6,6 +6,7 @@ import {
   AUTO_SECONDS,
   blockCount,
   buildEpisodeGraph,
+  CAMERA_WORDS,
   changedKeys,
   channelName,
   defaultSettings,
@@ -17,7 +18,7 @@ import {
   getStyle,
   MAX_SCRIPT,
   MAX_SOURCES,
-  musicLength,
+  musicPlan,
   narrationText,
   normalizeBlocks,
   OFFLINE_NOTE,
@@ -31,12 +32,14 @@ import {
   planRerun,
   previewLine,
   resolveModels,
+  sameCameraMove,
   sceneSpans,
   sceneTiming,
   scriptBrief,
   scriptSystem,
   splitScript,
   spokenTimes,
+  staleSteps,
   styleRefLimit,
   TIMING_PARTS,
   topicsBrief,
@@ -811,15 +814,13 @@ function advance(ep: FacelessEpisode): FacelessEpisode {
   const part = partOf(graph);
   const status = statusMap(plan.ids);
   const moved = new Set(blocks.filter((b) => plan.timing?.[b.id] !== timing[b.id]).map((b) => b.id));
+  // A step kept from before that the graph now asks for differently is made again too: a bed (or its loop)
+  // that no longer fits the film, or a clip made by another model (a Frame by frame episode rendered before
+  // its scenes became Ken Burns moves).
+  const stale = new Set(staleKeys(graph, plan.ids));
   const changed = graph
-    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || (s.part === "clip" && moved.has(blocks[s.block!].id)))
+    .filter((s) => !plan.ids[s.key] || status[s.key] === "failed" || status[s.key] === "canceled" || stale.has(s.key) || (s.part === "clip" && moved.has(blocks[s.block!].id)))
     .map((s) => s.key);
-  // A bed that no longer covers the film is made again.
-  const music = graph.find((s) => s.key === "music");
-  if (music && plan.ids.music && !changed.includes("music")) {
-    const had = getGeneration(plan.ids.music, { includeDeleted: true })?.request.params?.duration ?? 0;
-    if (had < (music.request.params?.duration ?? 0)) changed.push("music");
-  }
   const rerun = planRerun(graph, changed).rerun.filter((k) => !TIMING_PARTS.has(part(k)));
   const ids = prune(relaunch(graph, plan.ids, rerun, plan.batchId), graph);
   const next: EpisodePlan = { ...plan, ids, timing, untimed: !spoken, awaiting: false };
@@ -849,6 +850,9 @@ export function renderEpisode(id: string): FacelessEpisode {
 const statusMap = (ids: Record<string, string>) =>
   Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, getGeneration(id, { includeDeleted: true })?.status])) as Record<string, string | undefined>;
 
+/** Kept steps whose generation isn't what the graph asks for now (another model or op, a clip of another length, a bed that no longer fits). */
+const staleKeys = (graph: GraphStep[], ids: Record<string, string>) => staleSteps(graph, (k) => (ids[k] ? getGeneration(ids[k], { includeDeleted: true })?.request : undefined));
+
 /** Redo the steps that failed (and what waited on them); finished steps are kept. */
 export function retryEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
@@ -870,6 +874,8 @@ export function retryEpisode(id: string): FacelessEpisode {
     })
     .map((s) => s.key);
   if (!broken.length && !ep.plan.awaiting) return ep;
+  // Kept steps made for an older graph (another model, another length) are redone with what failed.
+  broken.push(...staleKeys(graph, ep.plan.ids).filter((k) => !broken.includes(k)));
   for (const k of planRerun(graph, broken).rerun) if (ep.plan.ids[k]) void cancelGeneration(ep.plan.ids[k]);
   const { ids, awaiting, started } = launch(ep, graph, ep.plan.ids, broken, ep.plan.batchId);
   updateEpisodeRow(id, { status: "rendering", error: null, plan_json: JSON.stringify({ ...ep.plan, ids, awaiting } satisfies EpisodePlan) });
@@ -924,11 +930,21 @@ function changed(ep: FacelessEpisode, c: ChangeInput) {
     }
   }
   const graph = buildGraph(ep, withTiming(blocks, ep.plan.timing), stillEdits);
-  // Steps that failed earlier are redone with the change, so the new version can finish.
+  // Frame by frame: words that read as the move the scene already has would render the same clip again.
+  if (c.part === "motion") {
+    const moves = graph.filter((s) => s.part === "clip" && s.request.op === "still-motion" && ids.includes(blocks[s.block!].id));
+    const same = moves.every((s) => {
+      const g = getGeneration(ep.plan!.ids[s.key] ?? "", { includeDeleted: true });
+      return g?.status === "succeeded" && sameCameraMove(g.request, s.request);
+    });
+    if (moves.length && same) throw new FacelessError(CAMERA_WORDS[ep.settings.engine].same, 422);
+  }
+  // Steps that failed earlier are redone with the change, so the new version can finish; so are kept steps
+  // made for an older graph (another model, another length).
   const status = statusMap(ep.plan.ids);
   const part = partOf(graph);
   const broken = graph.filter((s) => (!status[s.key] && (!ep.plan!.awaiting || TIMING_PARTS.has(part(s.key)))) || status[s.key] === "failed" || status[s.key] === "canceled").map((s) => s.key);
-  const keys = [...changedKeys(graph, ids, c.part), ...broken];
+  const keys = [...new Set([...changedKeys(graph, ids, c.part), ...broken, ...staleKeys(graph, ep.plan.ids)])];
   return { graph, blocks, stillEdits, keys, plan: planRerun(graph, keys), ids };
 }
 
@@ -1015,7 +1031,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
   if (!model) return null;
   const demo = runsAsDemo(model.id, "upscale-video");
   const p = model.pricing;
-  const costUsd = demo ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
+  const costUsd = demo || model.engine === "open" ? 0 : p?.unit === "megapixel" ? Math.round(p.usd * UPSCALE_MP * UPSCALE_FPS * seconds * 100) / 100 : p?.unit === "second" ? Math.round(p.usd * seconds * 100) / 100 : null;
   return { costUsd, demo };
 }
 
@@ -1023,7 +1039,7 @@ function upscaleOffer(ep: FacelessEpisode, seconds: number): EpisodeView["upscal
 export function upscaleEpisode(id: string): FacelessEpisode {
   const ep = mustEpisode(id);
   const modelId = ENGINE_MODELS[ep.settings.engine].upscale;
-  if (!modelId) throw new FacelessError("Upscaling runs on the cloud engine: the open-source upscaler holds every frame of the film in memory", 422);
+  if (!modelId) throw new FacelessError("This engine has no video upscaler", 422);
   const final = finalOf(ep);
   if (!ep.plan || !final) throw new FacelessError("Wait for the episode to finish first", 409);
   const had = ep.plan.upscaled ? getGeneration(ep.plan.upscaled) : null;
@@ -1281,8 +1297,11 @@ function notesFor(settings: EpisodeSettings, seconds: number): { notes?: string[
   if (settings.styleRefs.length > limit) notes.push(`The open-source picture model follows the first ${limit} style references.`);
   if (settings.engine === "open" && settings.styleRefs.length && settings.sourceImages?.length) notes.push("Your style references set the look; the attached images aren't used for the open-source pictures.");
   if (m.music) {
-    const max = musicLength(getModel(m.music), Number.MAX_SAFE_INTEGER);
-    if (seconds > max) notes.push(`The music bed is at most ${Math.floor(max / 60)} min ${max % 60 ? `${max % 60} s ` : ""}long, so the last ${Math.ceil(seconds - max)} s play without music.`);
+    const plan = musicPlan(getModel(m.music), m.loop ? getModel(m.loop) : undefined, seconds);
+    const minutes = (s: number) => `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}`;
+    if (plan.loop?.crossfade) notes.push(`The music is made ${minutes(plan.bed)} long, then looped with a ${plan.loop.crossfade}-second crossfade to cover the film.`);
+    else if (plan.loop) notes.push(`The music is made ${minutes(plan.bed)} long and plays again to cover the film.`);
+    if (plan.short) notes.push(`The music bed goes up to ${minutes(plan.loop?.duration ?? plan.bed)}, so the last ${plan.short} s play without music.`);
   }
   return notes.length ? { notes } : {};
 }

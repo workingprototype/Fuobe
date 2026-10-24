@@ -1,6 +1,7 @@
 "use client";
 
 import { Cloud, Copy, Cpu, Download, FolderDown, Heart, MoreHorizontal, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -13,13 +14,14 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { useCreateGeneration, useGenerationActions } from "@/lib/api";
-import { elapsed, formatCost, ratioValue, timeAgo } from "@/lib/format";
+import { elapsed, formatCost, leftLabel, notePace, ratioValue, timeAgo, timeLeft } from "@/lib/format";
 import { downloadHref, downloadName, userTitle } from "@/lib/library";
-import { isLayered, shownOutputs } from "@/lib/output-actions";
+import { isLayered, nextSteps, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 import { copyWithToast } from "@/lib/clipboard";
-import { TileActions, useCanHover, type RunnerOptions } from "./result-actions";
+import { ACTION_ICONS, TileActions, useCanHover, type RunnerOptions } from "./result-actions";
 import { LayersStack, MediaThumb } from "./result-media";
+import { useNow } from "./use-now";
 import { Viewer } from "./viewer";
 
 export { MediaThumb } from "./result-media";
@@ -35,17 +37,27 @@ export function tileRatio(g: Generation): number {
 
 export function PendingTile({ g, ratio }: { g: Generation; ratio: number }) {
   const { cancel } = useGenerationActions();
+  // The clock runs between the job's reports (a fal queue or Higgsfield may report rarely).
+  const now = useNow(1000);
   const pct = g.progress != null ? Math.round(g.progress * 100) : null;
   const label = g.status === "queued" ? (g.message ?? "Queued") : (g.message ?? "Generating…");
+  // When progress moved (not every poll: each one rewrites updatedAt) gives the pace, so the time left.
+  // Keyed by id: a chain's tile moves on to its next step's generation.
+  const report = g.status === "running" ? g.progress : null;
+  const [track, setTrack] = useState(() => ({ id: g.id, pace: notePace(null, g.updatedAt, report) }));
+  const pace = track.id === g.id ? notePace(track.pace, g.updatedAt, report) : notePace(null, g.updatedAt, report);
+  if (track.id !== g.id || pace !== track.pace) setTrack({ id: g.id, pace });
+  const left = pace.first && pace.last ? timeLeft(pace.first, pace.last, now) : null;
   return (
     <div className="relative h-full overflow-hidden rounded-xl bg-muted" style={{ aspectRatio: ratio }}>
       <div className="skeleton-sweep absolute inset-0 animate-skeleton" />
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3">
         <div className="min-w-0">
           <p className="shimmer-text animate-shimmer-text truncate text-[13px] font-medium">{label}</p>
-          <p className="font-mono text-[11px] text-muted-foreground">
-            {pct != null ? `${pct}% · ` : ""}
-            {elapsed(g.createdAt)}
+          <p className="flex flex-wrap gap-x-1.5 font-mono text-[11px] text-muted-foreground tabular-nums">
+            {pct != null && <span>{pct}%</span>}
+            <span className={cn(pct != null && "before:mr-1.5 before:content-['·']")}>{elapsed(g.createdAt, Math.max(now, g.createdAt))}</span>
+            {left != null && <span className="before:mr-1.5 before:content-['·']">{leftLabel(left)}</span>}
           </p>
         </div>
         <Tooltip>
@@ -198,8 +210,34 @@ const OutputTile = memo(function OutputTile({ g, index, ratio, layered, count }:
   );
 });
 
+/**
+ * Under the newest result: three next steps as chips (Animate, Upscale, Edit for a picture). A
+ * group with several takes has none: which one to animate is picked on its tile.
+ */
+function NextSteps({ g, index }: { g: Generation; index: number }) {
+  const steps = nextSteps(g, index);
+  if (!steps.length) return null;
+  return (
+    <nav aria-label="Next steps" className="flex flex-wrap gap-1.5">
+      {steps.map((a) => {
+        const Icon = ACTION_ICONS[a.id];
+        return (
+          <Link
+            key={a.id}
+            href={a.href!}
+            prefetch={false}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <Icon className="size-3.5" /> {a.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
 /** One request: the user's words in serif, a meta line, then its outputs (or progress / failure). */
-export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generation }) {
+export const GenerationGroup = memo(function GenerationGroup({ g, newest }: { g: Generation; newest?: boolean }) {
   const feed = useFeed();
   const { favorite, trash } = useGenerationActions();
   const ratio = tileRatio(g);
@@ -218,15 +256,15 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
     p.aspectRatio,
     p.resolution,
     p.duration ? `${p.duration >= 1000 ? p.duration / 1000 : p.duration}s` : undefined,
-  ].filter(Boolean);
+  ].filter((x, i, all) => x && all.indexOf(x) === i);
 
   return (
     <section data-gen-id={g.id} className="group/gen animate-fade-up space-y-2.5 [contain-intrinsic-size:auto_330px] [content-visibility:auto]">
       <header className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 font-heading text-[19px] leading-snug" title={g.prompt ?? undefined}>
+          <h2 className="line-clamp-2 font-heading text-[19px] leading-snug" title={g.prompt ?? undefined}>
             {userTitle(g)}
-          </h3>
+          </h2>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               {g.engine === "open" ? <Cpu className="size-3" /> : <Cloud className="size-3" />}
@@ -310,6 +348,7 @@ export const GenerationGroup = memo(function GenerationGroup({ g }: { g: Generat
             shown.map((i) => <OutputTile key={g.outputs[i].url} g={g} index={i} ratio={ratio} count={shown.length} />)
           ))}
       </div>
+      {newest && !layered && shown.length === 1 && <NextSteps g={g} index={shown[0]} />}
     </section>
   );
 });
@@ -344,13 +383,15 @@ export function Feed({
     [openAt, hasReuse],
   );
   if (!items.length) return <>{empty}</>;
+  // The feed is newest first: the next steps go under the first finished result.
+  const newest = items.find((g) => g.status === "succeeded")?.id;
   const flat = items.flatMap((g) => (g.status === "succeeded" ? (isLayered(g) ? [{ g, i: 0 }] : shownOutputs(g).map((i) => ({ g, i }))) : []));
   const pos = open ? flat.findIndex((f) => f.g.id === open.id && (f.i === open.index || isLayered(f.g))) : -1;
   return (
     <FeedCtx.Provider value={api}>
       <div className="space-y-9">
         {items.map((g) => (
-          <GenerationGroup key={g.id} g={g} />
+          <GenerationGroup key={g.id} g={g} newest={g.id === newest} />
         ))}
       </div>
       {open && pos >= 0 && (

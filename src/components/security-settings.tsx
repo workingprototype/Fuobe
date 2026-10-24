@@ -97,7 +97,7 @@ function McpSnippet({ token, needsToken }: { token: string | null; needsToken: b
     <div className="space-y-1.5 sm:w-[36rem] sm:max-w-full">
       <p className="text-[12px] font-medium">Connect an agent over MCP</p>
       <div className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-2">
-        <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[11px] whitespace-nowrap">{cmd}</code>
+        <code tabIndex={0} aria-label="MCP command" className="min-w-0 flex-1 overflow-x-auto rounded-sm font-mono text-[11px] whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring">{cmd}</code>
         <button
           type="button"
           onClick={() => void copyWithToast(cmd)}

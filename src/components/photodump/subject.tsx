@@ -94,7 +94,7 @@ export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolea
           {photos.length}/{MAX_PHOTOS} photos · PNG, JPG, WebP or paste
         </p>
         <p className="text-[12px] text-muted-foreground">
-          Or <Link href="/character-sheet" className="text-brand-text hover:underline">build one with Character Sheet</Link>, then pick it here.
+          Or <Link href="/character-sheet" className="text-brand-text underline underline-offset-2">build one with Character Sheet</Link>, then pick it here.
         </p>
         <p className="text-[11.5px] leading-snug text-muted-foreground">{CREATE_COPY.consent}</p>
         <DialogFooter>

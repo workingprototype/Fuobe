@@ -75,10 +75,21 @@
 //   frameWidth                            (reference brief: width the clip's frames are scaled to, px)
 // Keys added with round 4 (engine seams):
 //   curveMode, filterSpeckle, colorPrecision (VTracer: spline | polygon | none curves, specks dropped (px), colour precision bits)
+// Keys added by the remove-object package (round 4):
+//   colormap*                             (Video Depth Anything's colour map: gray | inferno; params.colormap grayscale → gray)
+//   sideBySide                            (depth maps: the original clip next to the depth map)
+// Keys added with the round-4 video-finish workflows (FPS Boost, chunked upscaling, HDR formats). * = the provider fills it:
+//   every*                                (FPS Boost: keep every n-th interpolated frame; source fps x multiplier / every = the target)
+//   slowdown*                             (FPS Boost: slow-motion factor, params.slowdown; the output fps is divided by it)
+//   shortSide*                            (chunked upscalers: the output's shorter edge in px, params.resolution: 1080p -> 1080)
+//   colorSpace*                           (SDR to HDR: CreateVideo color space, "HDR" = BT.2020 HLG, "HDR PQ" = BT.2020 PQ (HDR10): params.format)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
-// "brief"). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
-// segment per caption cue before submitting).
+// "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
+// and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
+// segment per caption cue before submitting), "timeline", "videos" / "audios" (one loader per clip in inputs.videos / audios),
+// optionalModels (files a model control can pick instead of the graph's own,
+// listed in the manifest with optional: true so missing-model help can name their download).
 
 import fs from 'node:fs';
 
@@ -115,7 +126,7 @@ export const CUSTOM_NODE_REPOS = {
 export const KNOWN_MODELS = {
   'RealESRGAN_x4plus.safetensors': { folder: 'upscale_models', url: 'https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors' },
   'birefnet.safetensors': { folder: 'background_removal', url: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors' },
-  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
+  'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
   'rife_v4.26.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/frame_interpolation/resolve/main/frame_interpolation/rife_v4.26.safetensors' },
   'inswapper_128.onnx': { folder: 'insightface', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx' },
   'GFPGANv1.4.pth': { folder: 'facerestore_models', url: 'https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GFPGANv1.4.pth' },
@@ -208,6 +219,9 @@ export const KNOWN_MODELS = {
   'dino_v3_vit_h.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/clip_vision/dino_v3_vit_h.safetensors' },
   'triposplat_vae_decoder_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/vae/triposplat_vae_decoder_fp16.safetensors' },
   'triposplat_fp16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/VAST-AI/TripoSplat/resolve/main/diffusion_models/triposplat_fp16.safetensors' },
+  // round 4 (r4/video-finish): the chunked SeedVR2 graph is hand-built, so its files are named here (same files as the template).
+  'seedvr2_3b_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_3b_int8_convrot.safetensors' },
+  'seedvr2_ema_vae_fp16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors' },
 };
 
 const WAN_NEG_EN =
@@ -1694,8 +1708,8 @@ export const SPEC = [
     handBuilt: 'hand-built/video-bg-remove-birefnet.json',
     bindings: { video: [b('1', 'file')] },
     outputs: [
-      { node: '7', kind: 'video' },
-      { node: '10', kind: 'video' },
+      { node: '7', kind: 'video', role: 'cutout' },
+      { node: '10', kind: 'video', role: 'matte' },
     ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1703,7 +1717,8 @@ export const SPEC = [
     notes:
       'Core RemoveBackground on every frame -> InvertMask -> JoinImageWithAlpha (it stores 1-mask as alpha, like bg-remove-birefnet) -> SaveWEBM (vp9, crf 24, fps = source fps): an RGBA .webm with real transparency (yuva420p). ' +
       'Second output (node 10) = black/white matte .mp4 for compositing. SaveWEBM reports its file under history outputs "images" (animated: true), not "videos": classify by the .webm extension / the declared kind. ' +
-      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3.',
+      'Per-frame model, so hair edges may flicker (inferred). Source audio is dropped. For "keep only X" use video-bg-remove-sam3. ' +
+      'Roles: node 7 "cutout", node 10 "matte"; params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node (Video tools → Remove background: Cutout video / Alpha mask).',
   },
   {
     id: 'video-bg-remove-sam3',
@@ -1714,20 +1729,26 @@ export const SPEC = [
       video: [b('1', 'file')],
       prompt: [b('4', 'text')],
     },
-    outputs: [{ node: '9', kind: 'video' }],
+    outputs: [
+      { node: '9', kind: 'video', role: 'cutout' },
+      { node: '12', kind: 'video', role: 'matte' },
+    ],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 6,
     license: 'Meta SAM License (royalty-free, commercial use allowed; attribution + acceptable-use terms)',
     notes:
       'prompt = what to KEEP ("person", "red car"). SAM3_VideoTrack (detection_threshold 0.5, max_objects 4, detect_interval 1) -> SAM3_TrackToMask (object_indices "" = all tracked objects) -> InvertMask -> JoinImageWithAlpha -> SaveWEBM (vp9, fps = source). ' +
-      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead.',
+      'Masks are hard-edged; multiply with the BiRefNet matte for hair. Output under history "images" (animated .webm). Template utility_video_segment_sam3 runs SAM3_Detect per frame instead. ' +
+      'Second output (node 12, role "matte", added by the remove-object package) = the black-and-white matte .mp4 of what was kept (MaskToImage -> CreateVideo at the source fps); ' +
+      'params.matteOutput ("cutout" | "matte", on a Remove background job: op bg-remove-video) makes the provider drop the other save node, so only the chosen one is encoded.',
   },
   {
     id: 'video-depth-da3',
     title: 'Video Depth Map (Depth Anything 3 Mono)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-da3.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], sideBySide: [b('9', 'value')] },
+    defaults: { sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1741,7 +1762,8 @@ export const SPEC = [
     title: 'Video Depth Map (Video Depth Anything Small, temporally stable)',
     capability: 'depth-video',
     handBuilt: 'hand-built/video-depth-vda-small.json',
-    bindings: { video: [b('1', 'file')] },
+    bindings: { video: [b('1', 'file')], colormap: [b('5', 'colormap')], sideBySide: [b('9', 'value')] },
+    defaults: { colormap: 'gray', sideBySide: false },
     outputs: [{ node: '7', kind: 'video' }],
     limits: { maxWidth: 2048, maxHeight: 2048 },
     vramGb: 4,
@@ -1749,7 +1771,9 @@ export const SPEC = [
     autoDownloads: ['LoadVideoDepthAnythingModel downloads depth-anything/Video-Depth-Anything-Small video_depth_anything_vits.pth (0.12 GB) into models/videodepthanything on first run'],
     notes:
       'yuvraj108c/ComfyUI-Video-Depth-Anything: LoadVideoDepthAnythingModel(model video_depth_anything_vits.pth - pass it explicitly, the declared default ".safetensors" is not in its own option list) -> ' +
-      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped.',
+      'VideoDepthAnythingProcess(input_size 518, max_res 1280, fp16) -> VideoDepthAnythingOutput(gray) -> CreateVideo (source fps). Designed for long videos with consistent depth across frames. Audio dropped. ' +
+      'colormap = gray | inferno (the only two VideoDepthAnythingOutput offers; turbo / magma / viridis would need a LUT step). sideBySide true = the original clip on the left, ' +
+      'the depth map scaled to the clip\'s size on the right (ImageStitch; an even width for the encoder), through a lazy ComfySwitchNode (remove-object package).',
   },
 
   // ---- palette / colour lock ----------------------------------------------
@@ -2541,7 +2565,10 @@ export const SPEC = [
       maskGrow: [b('11', 'expand')], prompt: [b('16', 'text')], negativePrompt: [b('17', 'text')], checkpoint: [b('20', 'unet_name')],
       loraStrength: [b('21', 'strength_model')], shift: [b('22', 'shift')], seed: [b('23', 'seed')], steps: [b('23', 'steps')], cfg: [b('23', 'cfg')],
     },
-    outputs: [{ node: '38', kind: 'video' }],
+    outputs: [
+      { node: '38', kind: 'video' },
+      { node: '77', kind: 'image', role: 'mask' },
+    ],
     defaults: { checkpoint: 'wan2.1_vace_14B_fp16.safetensors' },
     limits: { maxWidth: 1280, maxHeight: 1280, maxFrames: 81, dimensionMultiple: 16 },
     vramGb: 24,
@@ -2552,7 +2579,10 @@ export const SPEC = [
       'The mask is scaled to the work size like the frames (not cropped), so any PNG size lines up. ' +
       'Everything else as video-inpaint-wan-vace: windows in seconds (startTime, duration; at most 81 frames, the largest 4n+1 decoded), width x height = the work-size budget in the clip\'s shape, ' +
       'paste-back into the original frames, the window\'s sound kept. ' +
-      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame. Validated by /prompt only (no GPU here).',
+      'For a window after the first, the mask must be painted on (or tracked to) that window\'s first frame: the second output (node 77, role "mask", added by the remove-object package) ' +
+      'is the tracked mask of the window\'s LAST frame (SAM3_TrackToMask before GrowMask, at the work size, white = the object), which Fuobe feeds to the next window as its mask, so the object is followed across windows. ' +
+      'The provider keeps node 77 only when params.extra.handOffMask is true (a window another one waits on); otherwise it is dropped, so a single or last window saves just the video. ' +
+      'Validated by /prompt only (no GPU here).',
   },
   {
     id: 'video-erase-void',
@@ -2659,6 +2689,25 @@ export const SPEC = [
       'the two match at the first, middle and last frame and differ in between, and the eased one barely moves over its first and last frames. ' +
       'Crops are whole pixels, so a tiny still steps visibly (the first frame after zoom 1 jumps by one source pixel); supersample and a still larger than the output hide it.',
   },
+  {
+    id: 'video-concat-encoded',
+    title: 'Join clips the open engine encoded, packet by packet in constant memory (core ConcatenateVideo, no decode)',
+    capability: 'concat',
+    handBuilt: 'hand-built/video-concat-encoded.json',
+    bindings: { video: [b('1', 'file')], video2: [b('2', 'file')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    expand: 'videos',
+    limits: { maxClips: 100 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'The Faceless / Explainer "Frame by frame" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. ' +
+      'The template joins two clips (video, video2); the provider rewrites it per request (expand "videos", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ' +
+      'ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI\'s CreateVideo / SaveVideo made at one size and fps), ' +
+      'so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip\'s settings ' +
+      '(still constant memory), and clips of different sizes fail with "could not be encoded compatibly". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. ' +
+      'Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).',
+  },
 
   // ---- Music beds and audio joins --------------------------------------------------------
   {
@@ -2691,11 +2740,14 @@ export const SPEC = [
     handBuilt: 'hand-built/audio-join-crossfade.json',
     bindings: { audio: [b('1', 'audio')], audio2: [b('2', 'audio')], fadeCurve: [b('3', 'audio')], crossfade: [b('5', 'value')] },
     outputs: [{ node: '17', kind: 'audio' }],
+    expand: 'audios',
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core audio nodes; VideoHelperSuite loader, GPL-3.0 code)',
     notes:
       'audio then audio2, overlapped by crossfade seconds (params.crossfade, > 0; 0.02 gives a click-free hard join). fadeCurve = the same curve WAV as audio-loop-crossfade, crossfade seconds long, written by the provider. ' +
-      'More clips (params.audios in order): fold, i.e. join 1+2, then that result + 3, and so on. The output runs at the higher sample rate of the two (AudioConcat resamples) and is saved as FLAC. ' +
+      'More clips (params.audios in order): the provider rewrites the graph for all of them in one prompt (expand "audios", expandAudioJoinWorkflow, r4/faceless-plus): every clip but the last is read by a VHS loader ' +
+      '(for its length), the first gives its body, each middle clip its head, middle and tail, the last its head and the rest, and each seam is tail x fade-out + next head x fade-in, all concatenated in order; ' +
+      'middle clips must be longer than 2 x crossfade. The output runs at the highest sample rate of the clips (AudioConcat resamples) and is saved as FLAC. ' +
       'Clips placed at exact times are audio-timeline\'s job. ' +
       'Ran here (CPU, two sessions): 3 s 44.1 kHz tones + 2 s 48 kHz noise, crossfade 0.5 s -> FLAC 4.500 s at 48 kHz stereo in 0.2-2.1 s; the tones keep their level (-9.0 dB RMS) up to 2.5 s, ' +
       'the overlap ramps over 0.5 s and the noise follows at its own level (-15.2 dB): no headroom is taken off here.',
@@ -2727,15 +2779,18 @@ export const SPEC = [
     title: 'SDR to HDR: expand to Rec.2020 HLG and save 10-bit H.264 (core ImageSDRToHDR, no model)',
     capability: 'sdr-to-hdr',
     handBuilt: 'hand-built/video-sdr-to-hdr.json',
-    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')], colorSpace: [b('4', 'color_space')] },
     outputs: [{ node: '5', kind: 'video' }],
+    defaults: { colorSpace: 'HDR' },
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'An algorithmic inverse tone map (Lottes-style curve blended with a log-gain curve), not a learned model: the open stand-in for Topaz\'s SDR to HDR. peakNits = the target peak white (650 by default, 0 = the calibrated rendering). ' +
-      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format "hlg" is this graph; PQ would be color_space "HDR PQ" on node 4 (not bound). ' +
+      'CreateVideo writes BT.2020 HLG at 10 bits (color_space HDR) and SaveVideo an H.264 High 10 MP4; the sound is kept. params.format hlg_10bit is this graph as built; pq_10bit binds colorSpace "HDR PQ" ' +
+      '(BT.2020 PQ, HDR10\'s transfer, still H.264 High 10: core ComfyUI has no H.265 encoder); exr -> video-sdr-to-hdr-exr. ' +
       'The learned alternative is the LTX-2.5 SDR-To-HDR IC-LoRA (LTX community licence, not built). Decodes the whole clip: RAM grows with the length. ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.2-1.5 s): H.264 High 10, yuv420p10le, bt2020nc / bt2020 / arib-std-b67 (HLG), 16 frames, AAC kept. ' +
+      'Through Fuobe with colorSpace HDR PQ (r4/video-finish, 3 s 320x180 25 fps clip with sound): H.264 High 10, yuv420p10le, smpte2084 / bt2020, 75 frames, AAC.',
   },
   {
     id: 'video-export-exr',
@@ -2743,14 +2798,16 @@ export const SPEC = [
     capability: 'export-video',
     handBuilt: 'hand-built/video-export-exr.json',
     bindings: { video: [b('1', 'file')] },
-    outputs: [{ node: '3', kind: 'image', role: 'frames' }],
+    outputs: [{ node: '5', kind: 'video', role: 'preview' }, { node: '3', kind: 'image', role: 'frames' }],
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core)',
     notes:
       'params.format "exr" of the export-video operation. One half-float .exr per frame (role frames, in frame order); input_color_space sRGB applies the inverse sRGB curve, so the files are scene-linear Rec.709. ' +
+      'Node 5 saves an H.264 preview with the clip\'s sound (role preview, added by r4/video-finish): the result shown in the feed; the provider zips the frames onto it (meta.artifacts.exr). ' +
       'The app zips the sequence. No sound. Decodes the whole clip: RAM grows with the length. Storage: /view serves .exr as image/aces, which storage.ts has no extension for, ' +
       'so each frame is saved as an image .bin until EXT_BY_TYPE / TYPE_BY_EXT know exr (feature package; the zip is the deliverable anyway). ' +
-      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer.',
+      'Ran here (CPU, two sessions, 1 s 64x64 16 fps clip, 0.06-0.2 s): 16 .exr files (<prefix>_00001.exr ...), HALF B/G/R channels, ZIP compression, linear transfer. ' +
+      'With the preview (r4/video-finish, through Fuobe, 2 s 160x96 30 fps clip with sound): 60 .exr files zipped (2.6 MB, stored) onto an H.264 preview with AAC.',
   },
 
   // ---- Still to clip, ad end card ---------------------------------------------------------
@@ -2886,5 +2943,102 @@ export const SPEC = [
       'The open side of Recraft Vectorize / fal image2svg (the Vectorize app). ComfyUI-ToSVG\'s colour VTracer node (stacked layers, spline curves; curveMode polygon gives straight edges) ' +
       'returns the SVG as text, TS_SVGStringToSVGBytesIO wraps it and core SaveSVGNode writes fuobe/<id>_*.svg (reported under "images", so the provider collects it as an image output). ' +
       'filterSpeckle drops specks up to that many pixels, colorPrecision (1-8 bits per channel) sets how many colours are kept. Best on logos, icons and flat art; photos give very many paths. Runs on CPU in about a second.',
+  },
+
+  // ---- round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling and export, HDR EXR ------------------
+  {
+    id: 'interpolate-rife-fps',
+    title: 'FPS Boost and slow motion to an exact frame rate: interpolate by m, keep every n-th frame (core FrameInterpolate)',
+    capability: 'interpolate',
+    handBuilt: 'hand-built/interpolate-rife-fps.json',
+    bindings: {
+      video: [b('1', 'file')], checkpoint: [b('5', 'model_name')], multiplier: [b('6', 'value')], every: [b('8', 'value')], slowdown: [b('10', 'value')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { checkpoint: 'rife_v4.26.safetensors' },
+    // oss-rife's Model control: FILM for large motion.
+    optionalModels: ['film_net_fp16.safetensors'],
+    limits: { maxMultiplier: 16 },
+    vramGb: 2,
+    license: 'RIFE 4.26 and FILM weights from Comfy-Org/frame_interpolation (MIT / Apache-2.0); VideoHelperSuite (GPL-3.0 code) for Select Every Nth',
+    notes:
+      'Higgsfield\'s FPS Boost targets (24 / 30 / 60 / 90 / 120 fps) and slow motion on the open engine. The provider picks m (multiplier, 2-16) and n (every) from the clip\'s own frame rate (its header) so that ' +
+      'source fps x m / n = target x slowdown (src/lib/av/fps.ts: 24 -> 30 m5 n4, 24 -> 60 m5 n2, 24 -> 90 m15 n4, 24 -> 120 m5, 30 -> 60 m2, 60 -> 90 m3 n2, 60 -> 120 m2; a target the source rate is a whole multiple of (60 -> 30: m1 n2) only drops frames, ' +
+      'and then the provider links FrameInterpolate out; other lower targets still interpolate (30 -> 24: m4 n5)). The output fps is computed in the graph from the decoded frame rate (source fps x m / (n x slowdown)); m and n need the header\'s rate, so the provider refuses a clip without one rather than guess. ' +
+      'The last frame is held once more before interpolating, so the clip keeps its length (N frames become N x m + 1, about one output frame longer than the source) instead of losing a source frame. ' +
+      'slowdown > 1 stretches the clip (2 = twice as long); the provider then drops the sound link (it would no longer match). checkpoint film_net_fp16.safetensors runs FILM (better on large motion, about 31x slower on CPU). ' +
+      'Holds the whole interpolated clip in memory (the source frames, their copy with the last frame held, and source frames x m; the selection is a view): the provider refuses clips that need more than half the server\'s RAM. ' +
+      'Ran here through Fuobe (CPU, a random-weight RIFE file standing in for the weights): 24 fps 2 s 320x180 -> 60 fps = 121 frames, 2.017 s (m 5, n 2); 25 fps 3 s with sound -> 30 fps at 2x slow motion = 181 frames, 6.03 s, no sound track; 30 fps 2 s with sound -> 24 fps = 49 frames, 2.04 s, sound kept (m 4, n 5).',
+  },
+  {
+    id: 'upscale-video-esrgan-chunked',
+    title: 'Video Upscale (Real-ESRGAN 4x) in passes of a few frames: memory stays flat whatever the length (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-esrgan-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], upscaleModel: [b('3', 'model_name')], shortSide: [b('5', 'resize_type.shorter_size')],
+    },
+    outputs: [{ node: '7', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 4,
+    license: 'Real-ESRGAN weights (BSD-3-Clause); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'R4-38: upscale-video-esrgan decodes the whole film (about 38 GB of float frames for 30 s at 480p before the 4x model). This one decodes framesPerBatch frames per pass (VHS_BatchManager re-queues the prompt ' +
+      'until the clip is done, as mixed-media-zimage-frames does), upscales them with the model (tiled), scales them so the shorter edge is shortSide px (params.resolution: 1080p -> 1080, the shape kept) and pipes them ' +
+      'into one ffmpeg H.264 encode that stays open across passes; the last pass writes the file with the source\'s sound at the source frame rate. The provider follows the passes by their filename prefix. ' +
+      'framesPerBatch: the provider sizes it from the clip\'s header so a pass holds about 1.5 GB of frames (16 by default). Any spandrel model in models/upscale_models works as upscaleModel (x2 / x4). ' +
+      'Ran here (CPU, a random-weight x4 ESRGAN file standing in for the weights): 30 s 256x144 25 fps with sound -> 1920x1080, 750 frames, AAC, 47 passes of 16 frames in 417 s, ComfyUI\'s RSS peaked 0.87 GB above idle (upscale-video-esrgan on 10 s of the same clip, 4x to 1024x576 only, peaked 3.0 GB above idle); through Fuobe a silent 2 s 24 fps clip -> 1280x720, 48 frames, no audio link.',
+  },
+  {
+    id: 'upscale-video-seedvr2-chunked',
+    title: 'Video Upscale / Restore (SeedVR2 3B int8) in passes of 4n+1 frames: memory stays flat (VHS meta-batch)',
+    capability: 'upscale-video',
+    handBuilt: 'hand-built/upscale-video-seedvr2-chunked.json',
+    bindings: {
+      video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], shortSide: [b('3', 'resize_type.shorter_size')], seed: [b('9', 'seed')],
+    },
+    outputs: [{ node: '13', kind: 'video' }],
+    defaults: { shortSide: 1080 },
+    limits: { maxWidth: 3840, maxHeight: 3840 },
+    vramGb: 16,
+    license: 'SeedVR2 (Apache-2.0); VideoHelperSuite GPL-3.0 code',
+    notes:
+      'The native SeedVR2 nodes of upscale-video-seedvr2 (same files, same settings) run on framesPerBatch frames per pass (33 by default; SeedVR2 pads a pass to 4n+1 frames and crops the padding back) and the ' +
+      'passes are piped into one H.264 encode with the source\'s sound, so a long clip no longer needs the whole film in memory (the template is capped at 20 s). The frames are first scaled so the shorter edge is ' +
+      'shortSide px. Each pass is restored on its own: there is no temporal context across a pass boundary, so a seam every framesPerBatch frames is possible (not measured: no GPU here). Validated by /prompt only.',
+  },
+  {
+    id: 'video-export-pro-chunked',
+    title: 'Pro codec export in passes (ProRes 422 HQ / 4444, H.265 10-bit, FFV1, H.264): memory stays flat (VHS meta-batch)',
+    capability: 'export-video',
+    handBuilt: 'hand-built/video-export-pro-chunked.json',
+    bindings: { video: [b('1', 'video')], framesPerBatch: [b('2', 'frames_per_batch')], format: [b('4', 'format')], profile: [b('4', 'profile')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { format: 'video/ProRes', profile: 'hq' },
+    vramGb: 0,
+    license: 'n/a (no model; VideoHelperSuite GPL-3.0 code and the system ffmpeg\'s prores_ks / libx265 / ffv1 / libx264 encoders)',
+    notes:
+      'video-export-pro with VHS_LoadVideo decoding framesPerBatch frames per pass (64 by default) into one VHS_VideoCombine encode that stays open across passes, at the source frame rate, with the source\'s sound: ' +
+      'the export Fuobe\'s Export mode runs (video-export-pro decodes the whole clip). Same params.format mapping (prores_422_hq -> video/ProRes + hq, prores_4444 -> + 4444, h265_10bit -> video/h265-mp4 (yuv420p10le), ' +
+      'ffv1 -> video/ffv1-mkv, h264 -> video/h264-mp4; exr -> video-export-exr). VHS lists only <prefix>_00001-audio.<ext> when the clip has sound, <prefix>_00001.<ext> otherwise, on the last pass. ' +
+      'Caveat: VHS\'s ProRes "hq" profile leaves the pixel format to prores_ks, which picks yuv444p10le for the RGB frames, so "ProRes 422 HQ" is the HQ profile (apch) carrying 4:4:4 10-bit samples ' +
+      '(FFmpeg decodes it; a strict 4:2:2 file needs a VHS format with -pix_fmt yuv422p10le, which would be a change to the node pack). The same holds for video-export-pro. ' +
+      'Ran here (CPU, r4/video-finish, 3 s 320x180 25 fps clip with sound): ProRes apch / yuv444p10le / PCM and H.265 Main 10 yuv420p10le with AAC; on a silent 2 s 24 fps clip FFV1 gbrap16le .mkv, 48 of 48 frames; each ffprobe-checked.',
+  },
+  {
+    id: 'video-sdr-to-hdr-exr',
+    title: 'SDR to HDR as OpenEXR frames (scene-linear Rec.2020, half float) plus a 10-bit HLG preview (core, no model)',
+    capability: 'sdr-to-hdr',
+    handBuilt: 'hand-built/video-sdr-to-hdr-exr.json',
+    bindings: { video: [b('1', 'file')], peakNits: [b('3', 'algorithm.target_luminance')] },
+    outputs: [{ node: '6', kind: 'video', role: 'preview' }, { node: '4', kind: 'image', role: 'frames' }],
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'params.format exr of the sdr-to-hdr operation (Higgsfield\'s "EXR 16-bit: uncompressed frame sequence for compositing"). The same ImageSDRToHDR expansion as video-sdr-to-hdr; SaveImageAdvanced writes each ' +
+      'frame as a half-float EXR with input_color_space HDR, i.e. the inverse HLG curve: scene-linear light in Rec.2020 primaries, highlights above 1.0 kept. Node 6 saves the 10-bit HLG MP4 with the clip\'s sound as ' +
+      'the result to watch (role preview); the provider zips the frames (role frames) onto it as meta.artifacts.exr. Decodes the whole clip: RAM grows with the length (the provider refuses what the server can\'t hold). ' +
+      'Ran here through Fuobe (CPU, 2 s 160x96 30 fps clip with sound): 60 half-float EXR frames zipped onto an H.264 High 10 HLG (arib-std-b67, bt2020) preview with AAC.',
   },
 ];

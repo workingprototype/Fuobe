@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 import type { GenParams, InputSlot, MediaKind, Operation, Preset } from "@/lib/catalog/types";
 import type { FeedFilter } from "@/lib/api";
 import type { Signature } from "@/lib/catalog/palettes";
+import type { FrameAttachment } from "@/lib/composer";
 import type { SlotValue } from "./media-slot";
 
 export type SlotKey = InputSlot["key"];
@@ -15,6 +16,8 @@ export interface StudioConfig {
   hero: string;
   /** Small line under the hero (e.g. which models an app runs on). */
   subtitle?: string;
+  /** A studio that does the job in more depth, linked under the hero (Edit video → Genjutsu). */
+  related?: { href: string; label: string };
   placeholder: string;
   kind: MediaKind;
   /** Operations whose models appear in the picker. */
@@ -33,6 +36,11 @@ export interface StudioConfig {
   /** Prompt is optional (e.g. motions, upscale). */
   promptOptional?: boolean;
   hidePrompt?: boolean;
+  /**
+   * The prompt box's placeholder for a model that reads an optional prompt in a studio that hides it
+   * (Upscale: FLUX.3 Upscale's details to preserve or enhance); without it such a model gets no box either.
+   */
+  modelPrompt?: string;
   /** Paint tools offered on the first image: an inpaint mask and/or freehand drawing. */
   sketch?: ("mask" | "draw")[];
   /** Open the editor as soon as an image is attached (Inpaint). */
@@ -45,6 +53,22 @@ export interface StudioConfig {
   signature?: boolean;
   /** Models the studio can be moved to (by the signature chips) beyond its picker list and defaults: kept in its model slice. */
   extraModels?: string[];
+  /**
+   * Read the attached clip's header (length, size, frame rate): prices count its seconds and the composer
+   * says what comes out ("24 → 60 fps", "1280×720 → 3840×2160"). Upscale hub video modes.
+   */
+  clipFacts?: boolean;
+  /** Offer every output format of the studio's models on this engine; picking one another model writes moves the request there (SDR to HDR, Export). */
+  formatPicker?: boolean;
+  /** The models' enum settings chip ("Director" by default; "Options" for a tool's settings such as Topaz's model). */
+  controlsTitle?: string;
+  /**
+   * Tools only ComfyUI runs (Export): what to say when none is connected or the install runs cloud APIs only,
+   * and a cloud route to offer instead (`href` gets `&video=<the attached clip>`).
+   */
+  comfyOnly?: { note: string; alternative?: { label: string; href: string } };
+  /** Frames mode (Video studio): up to 10 stills, each at its own time in the clip, instead of a start and an end frame. */
+  frames?: boolean;
 }
 
 export interface Draft {
@@ -61,6 +85,8 @@ export interface Draft {
   mix?: { presetId: string; strength: number };
   /** The Color signature and Moodboard picked in the composer (studios with `signature`). */
   signature?: Signature;
+  /** Frames mode is on (studios with `frames`): the stills in order, each at its place in the clip. */
+  frames?: FrameAttachment<SlotValue>[];
 }
 
 interface Actions {
@@ -129,6 +155,17 @@ export function StudioProvider({
       <DraftCtx.Provider value={draft}>{children}</DraftCtx.Provider>
     </ActionsCtx.Provider>
   );
+}
+
+/**
+ * Home's Start (`?go=<token>`, the token this tab's Home issued): a count the composer runs its
+ * draft for, once per increase, after the handed-over prompt is in place (HandoffSync raises it).
+ * 0: nothing to start.
+ */
+export const StartRequestCtx = createContext(0);
+
+export function useStartRequest(): number {
+  return useContext(StartRequestCtx);
 }
 
 /** Replace a slot value by key, updating only when it's the same upload (async upload callbacks). */

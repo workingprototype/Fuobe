@@ -68,7 +68,7 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
   return (
     <article className="rounded-xl border bg-card p-3 shadow-soft" data-testid={`canvas-card-${node.id}`}>
       <header className="flex items-center gap-2">
-        <span className="font-mono text-[11px] text-subtle-foreground">{index}</span>
+        <span className="font-mono text-[11px] text-muted-foreground">{index}</span>
         <NodeIcon name={NODE_SPECS[node.type].icon} className="size-4 shrink-0 text-muted-foreground" />
         <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold">{nodeLabel(node)}</h3>
         <EngineBadge model={model} />

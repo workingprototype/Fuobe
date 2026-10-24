@@ -1,9 +1,9 @@
 "use client";
 
-import { ArchiveRestore, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
+import { ArchiveRestore, CheckCheck, CheckSquare, ChevronUp, CircleDot, Download, FolderInput, Heart, Loader2, Pin, PinOff, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AssetCard, cardRatio, type CardApi } from "@/components/library/asset-card";
 import { FilterBar, filterFields, filtersFor, hasFilters, NO_FILTERS, type Filters } from "@/components/library/filters";
@@ -30,7 +30,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BULK_MAX, useCreateGeneration, useFolders, useGenerationActions, useLibrary, useLibraryFacets, useUploads, type Asset, type FeedFilter } from "@/lib/api";
 import type { Generation, MediaKind } from "@/lib/catalog/types";
-import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
+import { keyCombo, useModKey } from "@/lib/keys";
+import { buildEntries, folderAndDescendants, reviewInfo, splitByDate, toggleAll, TRASH_DAYS, type LibraryEntry } from "@/lib/library";
 import { isLayered, shownOutputs } from "@/lib/output-actions";
 import { cn } from "@/lib/utils";
 
@@ -143,9 +144,11 @@ const GAP = 8;
 function Masonry({ entries, size, render }: { entries: LibraryEntry[]; size: number; render: (e: LibraryEntry) => React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  useEffect(() => {
+  // Measured before the first paint: a guessed column count, corrected a frame later, moved every card (CLS 0.42 on a phone).
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setWidth(Math.round(el.getBoundingClientRect().width));
     const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
@@ -268,6 +271,7 @@ function Inner() {
   // --- Selection ---------------------------------------------------------------------------
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const mod = useModKey();
   const order = useMemo(() => sections.flatMap((s) => s.items.flatMap((e) => [e, ...(e.type === "stack" && expanded.has(e.key) ? e.items.map((g) => ({ type: "single" as const, key: g.id, g })) : [])])), [sections, expanded]);
   const latest = useRef({ order, selected, items });
   useEffect(() => {
@@ -347,7 +351,8 @@ function Inner() {
       if (e.key === "Escape" && (selecting || latest.current.selected.size)) {
         e.preventDefault();
         clear();
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selecting) {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && (selecting || latest.current.selected.size)) {
+        // In selection mode ⌘/Ctrl+A takes every result loaded under the filters (elsewhere it selects text as usual).
         e.preventDefault();
         setSelected(new Set(latest.current.items.map((g) => g.id)));
       }
@@ -426,7 +431,7 @@ function Inner() {
       return (
         <Empty title={`No matches for “${dq}”`}>
           Try another word.{" "}
-          <button onClick={() => setQ("")} className="text-brand-text hover:underline">
+          <button onClick={() => setQ("")} className="text-brand-text underline underline-offset-2">
             Clear search
           </button>
         </Empty>
@@ -436,7 +441,7 @@ function Inner() {
       return (
         <Empty title="Nothing pinned here yet">
           Pin results from their ⋯ menu (or select some and choose Pin) to keep them at the top.{" "}
-          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, pinned: false })} className="text-brand-text underline underline-offset-2">
             Show everything
           </button>
         </Empty>
@@ -445,7 +450,7 @@ function Inner() {
     if (hasFilters(filters)) {
       return (
         <Empty title="Nothing matches your filters">
-          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters(NO_FILTERS)} className="text-brand-text underline underline-offset-2">
             Clear filters
           </button>
         </Empty>
@@ -456,7 +461,7 @@ function Inner() {
       return (
         <Empty title="Nothing here directly">
           What&apos;s in this folder is in the folders above.{" "}
-          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text hover:underline">
+          <button onClick={() => setFilters({ ...filters, subfolders: true })} className="text-brand-text underline underline-offset-2">
             Show their results here
           </button>
         </Empty>
@@ -468,7 +473,7 @@ function Inner() {
     return (
       <Empty title="Your creations will appear here">
         Generate something and it lands here.{" "}
-        <Link href="/image" className="text-brand-text hover:underline">
+        <Link href="/image" className="text-brand-text underline underline-offset-2">
           Create an image
         </Link>
       </Empty>
@@ -513,8 +518,8 @@ function Inner() {
           {!uploadsTab && (
             <button
               onClick={() => (selecting ? clear() : setSelecting(true))}
-              aria-pressed={selecting}
-              aria-label="Select"
+              // Named for what a press does, and with the word it shows ("Done" while selecting).
+              aria-label={selecting ? "Done selecting" : "Select"}
               title={selecting ? "Done selecting" : "Select several"}
               className={cn(
                 "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors",
@@ -563,7 +568,7 @@ function Inner() {
               >
                 {t.label}
                 {n ? (
-                  <span className="font-mono text-[11px] text-muted-foreground" aria-label={`${n} items`}>
+                  <span className="min-w-4 font-mono text-[11px] text-muted-foreground tabular-nums" aria-label={`${n} items`}>
                     {n}
                   </span>
                 ) : null}
@@ -573,9 +578,19 @@ function Inner() {
         </div>
       )}
 
-      {(tab.id === "all" && !folderId && (folders.data?.length || !loading)) || (folder && !trash) ? (
+      {/* The folder row has its place from the first paint: arriving later, it pushed the filters and the cards down. */}
+      {(tab.id === "all" && !folderId) || (folder && !trash) ? (
         <div className="mb-4">
-          <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          {folders.data ? (
+            <FolderStrip all={allFolders} parent={folder ?? null} steps={filters.steps} onOpen={(f) => go({ folder: f.id })} onMove={(list, f) => void moveTo(list, f.id, f.name)} />
+          ) : (
+            <div className="-mx-1 flex gap-2 overflow-hidden px-1 py-1" aria-busy="true" aria-label="Loading folders">
+              <div className="flex w-[min(44vw,160px)] shrink-0 items-center gap-2.5 rounded-xl border border-dashed p-2">
+                <Skeleton className="size-11 shrink-0 rounded-lg" />
+                <Skeleton className="h-3 w-16" />
+              </div>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -598,7 +613,7 @@ function Inner() {
       {missingFolder ? (
         <Empty title="This folder no longer exists">
           It may have been deleted; what was in it is back in your Library.{" "}
-          <button onClick={() => go({ folder: undefined })} className="text-brand-text hover:underline">
+          <button onClick={() => go({ folder: undefined })} className="text-brand-text underline underline-offset-2">
             Back to Library
           </button>
         </Empty>
@@ -613,12 +628,27 @@ function Inner() {
       ) : (
         <div className={cn("space-y-7 transition-opacity", refreshing && "opacity-70")}>
           {sections.map((s) => (
-            <section key={s.key} aria-label={s.label || "Results"}>
+            <section key={s.key} aria-label={s.label || "Results"} className="group/section">
               {s.label && (
-                <h2 className="mb-2.5 flex items-center gap-1.5 text-[13px] font-medium">
-                  {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
-                  {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
-                </h2>
+                <div className="mb-2.5 flex items-center gap-3">
+                  <h2 className="flex items-center gap-1.5 text-[13px] font-medium">
+                    {s.key === -1 && <Pin className="size-3.5 text-muted-foreground" />}
+                    {s.label} <span className="font-mono text-[11px] font-normal text-muted-foreground">{s.items.reduce((n, e) => n + members(e).length, 0)}</span>
+                  </h2>
+                  {/* Select a whole day (or the pinned ones) at once; again to unselect them. */}
+                  {!uploadsTab && (
+                    <SectionSelect
+                      label={s.label}
+                      ids={s.items.flatMap(ids)}
+                      selected={selected}
+                      quiet={!selecting}
+                      onToggle={(list) => {
+                        setSelecting(true);
+                        setSelected((cur) => toggleAll(cur, list));
+                      }}
+                    />
+                  )}
+                </div>
               )}
               <Cards
                 entries={s.items}
@@ -668,7 +698,7 @@ function Inner() {
                 {isFetchingNextPage && <Loader2 className="size-3.5 animate-spin" />} Load more
               </button>
             ) : (
-              <p className="text-[12px] text-subtle-foreground">{items.length > 12 ? "That's everything" : ""}</p>
+              <p className="text-[12px] text-muted-foreground">{items.length > 12 ? "That's everything" : ""}</p>
             )}
           </div>
         </div>
@@ -679,9 +709,9 @@ function Inner() {
           <div role="toolbar" aria-label="Selection" className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto rounded-full border bg-background p-1.5 shadow-strong">
             {/* Phones show just the count, so every action fits at 390 px. */}
             <span className="shrink-0 px-2.5 text-[13px] font-medium whitespace-nowrap">
-              {selected.size ? (
+              {selectedGens.length ? (
                 <>
-                  {selected.size}
+                  {selectedGens.length}
                   <span className="hidden sm:inline"> selected</span>
                 </>
               ) : (
@@ -690,10 +720,21 @@ function Inner() {
                 </>
               )}
             </span>
+            {/* Shown while any result in view is unselected (a search or filter can hide some of the selection). */}
+            {items.some((g) => !selected.has(g.id)) && (
+              <button
+                onClick={() => setSelected(new Set(items.map((g) => g.id)))}
+                className={cn(BAR, "text-brand-text")}
+                aria-label={`Select all ${items.length}`}
+                title={`Select all ${items.length} shown here (${keyCombo("A", { mod })})`}
+              >
+                <CheckCheck className="size-4" /> <span className="hidden sm:inline">Select all</span> <span className="font-mono text-[11px] tabular-nums">{items.length}</span>
+              </button>
+            )}
             {trash ? (
               <>
-                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selected.size} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
-                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selected.size} onClick={() => confirmForever?.(selectedGens, clear)} />
+                <BarButton icon={ArchiveRestore} label="Restore" disabled={!selectedGens.length} onClick={() => void actions.restore(selectedGens).then((n) => (n && toast(`Restored ${n}`), clear()))} />
+                <BarButton icon={Trash2} label="Delete forever" destructive disabled={!selectedGens.length} onClick={() => confirmForever?.(selectedGens, clear)} />
               </>
             ) : (
               <>
@@ -707,16 +748,16 @@ function Inner() {
                     if (done.length > BULK_MAX) toast(`The zip has the first ${BULK_MAX} of ${done.length}`, { description: "Select the rest and download them as a second zip." });
                   }}
                 />
-                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selected.size} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
+                <BarButton icon={Heart} label={allFav ? "Unlike" : "Like"} disabled={!selectedGens.length} onClick={() => void actions.favoriteMany(selectedGens, !allFav)} />
                 <BarButton
                   icon={allPinned ? PinOff : Pin}
                   label={allPinned ? "Unpin" : "Pin"}
-                  disabled={!selected.size}
+                  disabled={!selectedGens.length}
                   onClick={() => void actions.pin(selectedGens, !allPinned).then((n) => n && toast(allPinned ? `Unpinned ${n}` : `Pinned ${n} to the top`))}
                 />
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size} aria-label="Review status" title="Review status">
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={BAR} disabled={!selectedGens.length} aria-label="Review status" title="Review status">
                       <CircleDot className="size-4" /> <span className="hidden sm:inline">Review</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -725,8 +766,8 @@ function Inner() {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu modal={false}>
-                  <DropdownMenuTrigger asChild disabled={!selected.size}>
-                    <button className={BAR} disabled={!selected.size}>
+                  <DropdownMenuTrigger asChild disabled={!selectedGens.length}>
+                    <button className={BAR} disabled={!selectedGens.length} aria-label="Move to">
                       <FolderInput className="size-4" /> <span className="hidden sm:inline">Move to</span>
                     </button>
                   </DropdownMenuTrigger>
@@ -738,7 +779,7 @@ function Inner() {
                   icon={Trash2}
                   label="Delete"
                   destructive
-                  disabled={!selected.size}
+                  disabled={!selectedGens.length}
                   onClick={() => {
                     void actions.trash(selectedGens);
                     clear();
@@ -747,7 +788,7 @@ function Inner() {
               </>
             )}
             <span className="mx-1 h-5 w-px shrink-0 bg-border" />
-            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all">
+            <button onClick={clear} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground" aria-label="Unselect all, Esc" aria-keyshortcuts="Escape">
               <X className="size-3.5" /> <span className="hidden sm:inline">Unselect all</span> <Kbd className="hidden sm:inline-flex">Esc</Kbd>
             </button>
           </div>
@@ -800,7 +841,26 @@ function Inner() {
   );
 }
 
-const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40";
+/** A date header's "Select" / "Unselect": shown on hover from a mouse, always while selecting or on touch. */
+function SectionSelect({ label, ids, selected, quiet, onToggle }: { label: string; ids: string[]; selected: ReadonlySet<string>; quiet: boolean; onToggle: (ids: string[]) => void }) {
+  const all = ids.length > 0 && ids.every((id) => selected.has(id));
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(ids)}
+      aria-label={`${all ? "Unselect" : "Select"} ${label}, ${ids.length}`}
+      className={cn(
+        "inline-flex h-6 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
+        quiet && "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/section:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+      )}
+    >
+      {all ? "Unselect" : "Select"}
+    </button>
+  );
+}
+
+// Phones: a little narrower, so the bar keeps every action (and Select all) at 390 px.
+const BAR = "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40 max-sm:px-2";
 
 function BarButton({ icon: Icon, label, onClick, disabled, destructive }: { icon: typeof Download; label: string; onClick: () => void; disabled?: boolean; destructive?: boolean }) {
   return (

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,16 +20,9 @@ import { ProjectDot, RailButton } from "@/components/assist/shell";
 import { SkillIcon } from "@/components/assist/skill-icon";
 import { Transcript } from "@/components/assist/transcript";
 import { useAssistActions, useAssistThread, useEngine } from "@/lib/api";
-import { modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
+import { ASSIST_SUGGESTIONS, modeLabel, type AssistAvailability, type AssistModeChoice, type AssistProject, type AssistThread, type SkillSummary } from "@/lib/assist";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
-
-const SUGGESTIONS = [
-  "A 3-shot product ad for a matte black perfume bottle — hero still, then animate it",
-  "Four moody portraits of a lighthouse keeper, 35mm film, then pick the best and animate it",
-  "Storyboard a 6-frame heist in Paris at night",
-  "A 10-second vertical video of a fox running through snow, with sound",
-];
 
 /** Skills offered as one-tap starters on the empty page (Supercomputer's suggestion cards). */
 const STARTER_SKILLS = ["product-photoshoot", "ugc-video", "thumbnail-generation", "faceless-video", "short-film", "localization"];
@@ -43,7 +37,7 @@ export function AskFirst({ checked, onChange }: { checked: boolean; onChange: (v
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <label className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground">
+        <label className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground hover:bg-accent hover:text-foreground max-sm:gap-1.5 max-sm:px-1.5">
           <Switch size="sm" checked={checked} onCheckedChange={onChange} aria-label="Ask before generating" />
           Ask first
         </label>
@@ -81,7 +75,7 @@ export function NewChatControls({
   return (
     <>
       <ModePicker value={choice} onChange={setChoice} availability={can} />
-      <EngineSwitch value={engine} onChange={setEngine} size="sm" />
+      <EngineSwitch value={engine} onChange={setEngine} size="sm" compact />
       <AskFirst checked={askFirst} onChange={setAskFirst} />
     </>
   );
@@ -189,9 +183,9 @@ export function AssistView() {
               onSend={start}
               footer={<NewChatControls choice={choice} setChoice={setChoice} can={can} engine={engine} setEngine={setEngine} askFirst={askFirst} setAskFirst={setAskFirst} />}
             />
-            <SkillStarters skills={available} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />
+            <SkillStarters skills={available} loading={skills.data === undefined && !skills.isError} onPick={(s) => setDraft((d) => ({ key: d.key + 1, text: `/${s.name} ` }))} />
             <div className="mt-6 flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
+              {ASSIST_SUGGESTIONS.map((s) => (
                 <button
                   key={s}
                   onClick={() => start(s).catch((e) => toast.error((e as Error).message))}
@@ -263,8 +257,36 @@ export function AssistView() {
 }
 
 /** One-tap skill starters under the empty composer: picking one types `/name ` into it. */
-export function SkillStarters({ skills, onPick, className }: { skills: SkillSummary[]; onPick: (s: SkillSummary) => void; className?: string }) {
+/**
+ * The starter cards under the composer. While the skills load (`loading`) the six cards are drawn
+ * as same-sized placeholders, so the suggestions below don't jump down when they arrive.
+ */
+export function SkillStarters({ skills, loading, onPick, className }: { skills: SkillSummary[]; loading?: boolean; onPick: (s: SkillSummary) => void; className?: string }) {
   const shown = [...STARTER_SKILLS.map((n) => skills.find((s) => s.name === n)).filter((s): s is SkillSummary => !!s), ...skills.filter((s) => !STARTER_SKILLS.includes(s.name))].slice(0, 6);
+  if (loading && !shown.length) {
+    return (
+      <div className={cn("mt-4", className)} aria-busy="true" aria-label="Loading skills">
+        <div className="flex items-center justify-between px-1 pb-2">
+          <p className="text-[12px] font-medium text-muted-foreground">Start with a skill</p>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {STARTER_SKILLS.map((n) => (
+            <div key={n} aria-hidden className="flex min-w-0 items-center gap-3 rounded-xl border bg-background p-2.5">
+              <Skeleton className="size-9 shrink-0 rounded-lg" />
+              <span className="min-w-0 flex-1">
+                <span className="flex h-[1lh] items-center text-[13px]">
+                  <Skeleton className="h-3 w-1/2" />
+                </span>
+                <span className="flex h-[1lh] items-center text-[12px]">
+                  <Skeleton className="h-2.5 w-4/5" />
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (!shown.length) return null;
   return (
     <div className={cn("mt-4", className)}>

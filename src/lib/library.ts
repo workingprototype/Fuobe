@@ -475,3 +475,17 @@ export function coverOf(items: Generation[]): { g: Generation; o: OutputFile; in
   const g = film ?? done[0];
   return g ? { g, o: g.outputs[0], index: 0 } : null;
 }
+
+/**
+ * Select a group of results (a date's, or everything loaded): every one of `ids` when any is
+ * missing, else none of them. Returns a new set; other selected ids stay as they are.
+ */
+export function toggleAll(selected: ReadonlySet<string>, ids: readonly string[]): Set<string> {
+  const next = new Set(selected);
+  const all = ids.length > 0 && ids.every((id) => next.has(id));
+  for (const id of ids) {
+    if (all) next.delete(id);
+    else next.add(id);
+  }
+  return next;
+}

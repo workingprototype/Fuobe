@@ -50,7 +50,7 @@ export function Field({ label, hint, children, htmlFor }: { label: string; hint?
         <label htmlFor={htmlFor} className="text-[12px] font-medium text-muted-foreground">
           {label}
         </label>
-        {hint && <span className="font-mono text-[12px] text-subtle-foreground">{hint}</span>}
+        {hint && <span className="font-mono text-[12px] text-muted-foreground">{hint}</span>}
       </div>
       {children}
     </div>

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { toast } from "sonner";
 import { ErrorState, NotFoundState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
-import { useSidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CompareSlider } from "@/components/studio/compare-slider";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -101,24 +100,6 @@ export function LayersEditor({ id, models }: { id: string; models: Record<string
   return <EditorSkeleton />;
 }
 
-/**
- * Below 1440 px the app's sidebar folds to icons while the editor is open, so the canvas keeps its
- * room next to a tool's form and the Layers panel (and the top bar its labels); it opens again when you leave.
- */
-function useRoomyCanvas() {
-  const sidebar = useSidebar();
-  const ref = useRef(sidebar);
-  useLayoutEffect(() => {
-    ref.current = sidebar;
-  });
-  useEffect(() => {
-    const s = ref.current;
-    if (s.isMobile || !s.open || window.innerWidth >= 1440) return;
-    s.setOpen(false);
-    return () => ref.current.setOpen(true);
-  }, []);
-}
-
 function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: () => Promise<{ data?: LayerProjectView }>; models: Record<string, LayerModelInfo> }) {
   // The document is the editor's once loaded; later fetches bring jobs and versions.
   const [initial] = useState(view);
@@ -127,7 +108,6 @@ function Editor({ view, refetch, models }: { view: LayerProjectView; refetch: ()
   const isMobile = useIsMobile();
   const [engine, setEngine] = useEngine();
   const status = useStatus().data;
-  useRoomyCanvas();
 
   const [hist, dispatch] = useReducer(historyReducer, initial.doc, (doc) => ({ past: [], present: doc, future: [] }));
   const doc = hist.present;

@@ -1,10 +1,14 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { cueText, parseCues, type Cue } from "@/lib/cues";
+import { HAND_OFF } from "@/lib/catalog/remove-object";
 import { OPERATION_OUTPUT, type MediaKind, type Operation } from "@/lib/catalog/types";
+import { spectralColor } from "@/lib/scene3d";
 import type { ProviderAdapter, RemoteOutput } from "./types";
 import { textOutput } from "./llm";
+import { encodePng } from "../png";
 import { toDataUri } from "../storage";
+import { zip } from "../zip";
 
 /**
  * Demo provider: lets anyone click through the whole product with no API keys or GPU.
@@ -228,7 +232,41 @@ function demoOcr(brief: string): DemoOutput {
   return textOutput(lines.map((l) => l.text).join("\n"), null, { lines, demo: true });
 }
 
+/** A black-and-white mask (white = the object) in the picture's shape. */
+function demoMaskSvg(ar: string): string {
+  const [w, h] = ar === "9:16" || ar === "3:4" || ar === "2:3" ? [360, 640] : ar === "1:1" ? [512, 512] : [640, 360];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#000"/><ellipse cx="${w * 0.55}" cy="${h * 0.6}" rx="${w * 0.12}" ry="${h * 0.14}" fill="#fff"/></svg>`;
+}
+
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : lo));
+
+/**
+ * A depth map like a depth model's PNG, 512 px wide in the request's shape: a back wall, a floor that comes closer
+ * toward the bottom of the frame and three rounded subjects standing on it. Grey (bright = near) like MoGe's on the
+ * open engine; painted with the Spectral colour map (red = near) like Marigold's on the cloud.
+ */
+function demoDepth(prompt: string, aspectRatio: string, spectral: boolean): DemoOutput {
+  const { w: cw, h: ch } = canvas(aspectRatio);
+  const w = 512;
+  const h = Math.max(16, Math.round((w * ch) / cw));
+  const r = rng(hash(`${prompt}#depth`));
+  const blobs = Array.from({ length: 3 }, (_, i) => ({ x: 0.2 + i * 0.3 + (r() - 0.5) * 0.1, y: 0.5 + r() * 0.2, rx: 0.07 + r() * 0.07, ry: 0.14 + r() * 0.12, near: 0.5 + r() * 0.3 }));
+  const data = Buffer.alloc(w * h * 4);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const u = x / (w - 1);
+      const v = y / (h - 1);
+      let near = 0.12 + 0.68 * Math.max(0, (v - 0.4) / 0.6) ** 1.3;
+      for (const b of blobs) {
+        const d = ((u - b.x) / b.rx) ** 2 + ((v - b.y) / b.ry) ** 2;
+        if (d < 1) near = Math.max(near, b.near + 0.08 * Math.sqrt(1 - d));
+      }
+      const n = clamp(near, 0, 1);
+      const g = Math.round(n * 255);
+      data.set(spectral ? [...spectralColor(1 - n), 255] : [g, g, g, 255], (y * w + x) * 4);
+    }
+  return { url: toDataUri(encodePng({ width: w, height: h, data }), "image/png"), kind: "image", contentType: "image/png", meta: { role: "depth", demo: true } };
+}
 
 function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string, ar: string, meta: Record<string, unknown>): DemoOutput[] {
   // The prompt falls back to the op name when a step has none.
@@ -264,9 +302,13 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
         { url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb" } },
         { url: "sample:demo-turntable.mp4", kind: "video", contentType: "video/mp4", meta: { demo: true, turntable: true } },
       ];
-    // Round 4. A scene, a splat and a rig all come back as the demo mesh (a real splat is a .ply or .spz).
-    case "scene-3d":
-      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true } }];
+    // Round 4. A splat and a rig come back as the demo mesh (a real splat is a .ply or .spz). A scene is the
+    // mesh and its depth map on the open engine (MoGe), the depth map alone on the cloud (Marigold).
+    case "scene-3d": {
+      const depth = demoDepth(brief, ar, kind === "image");
+      if (kind === "image") return [depth];
+      return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", scene: true, role: "scene" } }, depth];
+    }
     case "splat":
       return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", splat: true } }];
     case "rig-3d":
@@ -283,6 +325,13 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "audio-join":
       return [{ url: toDataUri(demoWav(clamp(3 * Number(meta.clips ?? 2), 4, 30), [330, 495]), "audio/wav"), kind: "audio", contentType: "audio/wav", meta: { demo: true } }];
     case "remove-object":
+      return [
+        { url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } },
+        // The painted eraser also hands the window's last tracked mask to the next window.
+        ...(meta.lastMask ? [{ url: svgUri(demoMaskSvg(ar)), kind: "image" as const, contentType: "image/svg+xml", meta: { role: "mask", demo: true } }] : []),
+      ];
+    case "bg-remove-video":
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, role: meta.matteOutput } }];
     case "video-swap":
     case "video-insert":
     case "keyframes":
@@ -290,8 +339,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "images-to-video":
       return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } }];
     case "sdr-to-hdr":
-    case "export-video":
-      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, ...(meta.format ? { format: meta.format } : {}) } }];
+    case "export-video": {
+      // EXR frames ride along on the preview clip as a zip (meta.artifacts.exr), as the real routes do.
+      const exr = meta.format === "exr" ? { artifacts: { exr: toDataUri(zip([{ name: "README.txt", data: Buffer.from("Demo mode: a real run puts one 16-bit EXR file per frame here.\n") }]), "application/zip") } } : {};
+      return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, ...(meta.format ? { format: meta.format } : {}), ...exr } }];
+    }
     case "trim":
     case "captions":
     case "mux":
@@ -325,8 +377,9 @@ export const mockProvider: ProviderAdapter = {
       meta: {
         startedAt: Date.now(),
         op: route.op,
-        // Colour matching keeps the input's kind (an image or a video); a timeline is audio or (fal) a video.
-        kind: route.op === "color-match" || route.op === "timeline" ? model.kind : OPERATION_OUTPUT[route.op],
+        // Colour matching keeps the input's kind (an image or a video); a timeline is audio or (fal) a video;
+        // a 3D scene is a mesh (open) or a depth map (cloud).
+        kind: route.op === "color-match" || route.op === "timeline" || route.op === "scene-3d" ? model.kind : OPERATION_OUTPUT[route.op],
         prompt: input.prompt ?? route.op,
         aspectRatio: input.aspectRatio ?? "1:1",
         count: Math.max(1, Math.min(4, input.numOutputs ?? 1)),
@@ -338,6 +391,11 @@ export const mockProvider: ProviderAdapter = {
         duration: input.duration,
         format: input.format,
         clips: input.audios?.length,
+        // Remove background: which file the demo stands for (the cut-out or its alpha mask).
+        matteOutput: route.op === "bg-remove-video" ? (input.matteOutput ?? model.options.matteOutputs?.[0] ?? "cutout") : undefined,
+        // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted), saved
+        // only for a window the next one waits on (as the comfyui provider does).
+        lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted" && input.extra?.[HAND_OFF] === true,
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).

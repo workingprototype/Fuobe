@@ -1,59 +1,10 @@
 "use client";
 
-import Link from "next/link";
+import { useLinkStatus } from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Fragment, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import {
-  AtSign,
-  MessageCircle,
-  GalleryHorizontal,
-  Layers,
-  Layers2,
-  Crop,
-  FastForward,
-  Brush,
-  AudioLines,
-  Boxes,
-  ChevronRight,
-  Clapperboard,
-  Cpu,
-  Film,
-  Home,
-  ImageIcon,
-  LayoutGrid,
-  ListChecks,
-  Mic2,
-  Moon,
-  Network,
-  Plus,
-  Settings,
-  SlidersHorizontal,
-  Sparkles,
-  Star,
-  Sun,
-  Video,
-  Wand2,
-  Workflow,
-  ZoomIn,
-  Library,
-  PersonStanding,
-  Scissors,
-  Shapes,
-  Smartphone,
-  Megaphone,
-  Target,
-  Images,
-  Camera,
-  Shirt,
-  UserRoundCog,
-  Tv,
-  Presentation,
-  Box,
-  Swords,
-  TrendingUp,
-  type LucideIcon,
-} from "lucide-react";
+import { ChevronRight, Clapperboard, Moon, Plus, Search, Sun, X } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -71,103 +22,36 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
-import { GlobalShortcuts } from "@/components/global-shortcuts";
+import { CommandPalette, CommandPaletteProvider, useCommandPalette } from "@/components/command-palette";
+import { IntentLink } from "@/components/intent-link";
 import { JobNotifications } from "@/components/job-notifications";
+import { NAV, type NavGroupDef } from "@/components/nav-items";
 import { useEngineMode, useStatus } from "@/lib/api";
-import { groupId, NAV_CLOSED_KEY, navActive, parseClosed, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
+import { useModKey } from "@/lib/keys";
+import { fullScreenStudio, groupId, NAV_CLOSED_KEY, navActive, parseClosed, sidebarCookie, SIDEBAR_STATE_SCRIPT, sidebarOpenFromCookie } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  /** Shorter label for compact groups (the full one is the tooltip). */
-  short?: string;
-}
-
-interface NavGroupDef {
-  label: string;
-  items: NavItem[];
-  /** Can be folded away; the choice is remembered. */
-  collapsible?: boolean;
-  /** Two small items per row. */
-  compact?: boolean;
-}
-
-/** The sidebar. Add a destination with one line in the right group. */
-const NAV: NavGroupDef[] = [
-  {
-    label: "Library",
-    items: [
-      { href: "/library", label: "All creations", icon: Library },
-      { href: "/library?tab=favorites", label: "Favorites", icon: Star },
-    ],
-  },
-  {
-    label: "Create",
-    items: [
-      { href: "/", label: "Home", icon: Home },
-      { href: "/assist", label: "Assist", icon: MessageCircle },
-      { href: "/image", label: "Image", icon: ImageIcon },
-      { href: "/video", label: "Video", icon: Video },
-      { href: "/edit", label: "Edit", icon: Wand2 },
-      { href: "/layers", label: "Layers", icon: Layers2 },
-      { href: "/inpaint", label: "Inpaint", icon: Brush },
-      { href: "/color-grade", label: "Color grading", icon: SlidersHorizontal },
-      { href: "/motions", label: "Camera motions", icon: Film },
-      { href: "/effects", label: "Effects", icon: Sparkles },
-      { href: "/storyboard", label: "Storyboard", icon: GalleryHorizontal },
-      { href: "/canvas", label: "Canvas", icon: Network },
-      { href: "/apps", label: "Apps", icon: LayoutGrid },
-    ],
-  },
-  {
-    label: "Studios",
-    items: [
-      { href: "/cinema", label: "Cinema Studio", icon: Clapperboard },
-      { href: "/shorts", label: "Shorts Studio", icon: Smartphone },
-      { href: "/mixed-media", label: "Mixed Media", icon: Shapes },
-      { href: "/marketing", label: "Marketing Studio", icon: Megaphone },
-      { href: "/ads", label: "Ads Studio", icon: Target },
-      { href: "/moodboards", label: "Moodboards", icon: Images },
-      { href: "/photodump", label: "Photodump", icon: Camera },
-      { href: "/fashion-factory", label: "Fashion Factory", icon: Shirt },
-      { href: "/character-sheet", label: "Character Sheet", icon: UserRoundCog },
-      { href: "/faceless", label: "Faceless Studio", icon: Tv },
-      { href: "/explainer", label: "Explainer", icon: Presentation },
-      { href: "/lipsync", label: "Lipsync & avatars", icon: Mic2 },
-      { href: "/motion-control", label: "Motion control", icon: PersonStanding },
-      { href: "/video-edit", label: "Edit video", icon: Scissors },
-      { href: "/extend", label: "Extend video", icon: FastForward },
-      { href: "/reframe", label: "Reframe", icon: Crop },
-      { href: "/video-tools", label: "Video tools", icon: Layers },
-      { href: "/elements", label: "Elements", icon: AtSign },
-      { href: "/upscale", label: "Upscale", icon: ZoomIn },
-      { href: "/audio", label: "Audio", icon: AudioLines },
-      { href: "/katana", label: "Katana", icon: Swords },
-      { href: "/image-to-3d", label: "Image to 3D", icon: Box },
-      { href: "/virality", label: "Virality predictor", icon: TrendingUp },
-    ],
-    collapsible: true,
-  },
-  {
-    label: "Engine",
-    items: [
-      { href: "/models", label: "Models", icon: Boxes },
-      { href: "/workflows", label: "ComfyUI workflows", short: "Workflows", icon: Workflow },
-      { href: "/settings", label: "Settings", icon: Settings },
-      { href: "/status", label: "Project status", short: "Status", icon: ListChecks },
-    ],
-    collapsible: true,
-    compact: true,
-  },
-];
 
 const NO_SEARCH = new URLSearchParams();
 
 function StatusDot({ ok }: { ok: boolean | undefined }) {
   return <span className={cn("size-1.5 shrink-0 rounded-full", ok ? "bg-success" : "bg-subtle-foreground")} />;
+}
+
+/**
+ * The row's label. While the clicked row's route loads (useLinkStatus) it marks the row, which tints
+ * (has-[[data-pending]]), so the click shows at once even when the next page takes a moment. Nothing
+ * animates: a shimmer or pulse here costs main-thread frames during the very navigation it waits for
+ * (measured: about +100 ms per click with the CPU slowed 4x).
+ */
+function NavLabel({ children }: { children: React.ReactNode }) {
+  const { pending } = useLinkStatus();
+  return (
+    <span data-pending={pending || undefined} className={cn(pending && "opacity-70")}>
+      {children}
+    </span>
+  );
 }
 
 function Items({ group, pathname, search }: { group: NavGroupDef; pathname: string; search: URLSearchParams }) {
@@ -180,12 +64,15 @@ function Items({ group, pathname, search }: { group: NavGroupDef; pathname: stri
           asChild
           isActive={active}
           tooltip={item.label}
-          className={cn("h-8 text-[13px] data-[active=true]:font-semibold", group.compact && "h-7 gap-1.5 px-2 text-[12px]")}
+          className={cn(
+            "h-8 text-[13px] has-[[data-pending]]:bg-sidebar-accent data-[active=true]:font-semibold",
+            group.compact && "h-7 gap-1.5 px-2 text-[12px]",
+          )}
         >
-          <Link href={item.href} aria-current={active ? "page" : undefined} title={group.compact && item.short ? item.label : undefined}>
+          <IntentLink href={item.href} eager={item.eager} aria-current={active ? "page" : undefined} title={group.compact && item.short ? item.label : undefined}>
             <item.icon />
-            <span>{group.compact ? (item.short ?? item.label) : item.label}</span>
-          </Link>
+            <NavLabel>{group.compact ? (item.short ?? item.label) : item.label}</NavLabel>
+          </IntentLink>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -208,11 +95,12 @@ function ActiveItems({ group }: { group: NavGroupDef }) {
   );
 }
 
+/** The folded groups: remembered in this browser, else Studios and Engine (DEFAULT_NAV_CLOSED), also on the server. */
 function readClosed(): string[] {
   try {
-    return typeof window === "undefined" ? [] : parseClosed(localStorage.getItem(NAV_CLOSED_KEY));
+    return parseClosed(typeof window === "undefined" ? null : localStorage.getItem(NAV_CLOSED_KEY));
   } catch {
-    return [];
+    return parseClosed(null);
   }
 }
 
@@ -231,7 +119,9 @@ function NavGroup({ group, open, onToggle }: { group: NavGroupDef; open: boolean
             className="w-full cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             {group.label}
-            <ChevronRight className="ml-auto size-3.5 transition-transform group-data-[open=true]/nav:rotate-90" />
+            {/* Folded, the label says how much is inside. */}
+            <span className="ml-auto font-normal tracking-normal tabular-nums group-data-[open=true]/nav:hidden">{group.items.length}</span>
+            <ChevronRight className="ml-1 size-3.5 transition-transform group-data-[open=true]/nav:ml-auto group-data-[open=true]/nav:rotate-90" />
           </button>
         </SidebarGroupLabel>
       ) : (
@@ -261,13 +151,86 @@ function SidebarStateScript() {
   );
 }
 
-/** SidebarProvider that starts from the remembered expanded/collapsed state (the shadcn cookie). */
+/** Tells the shell which page is open (the pathname is runtime data, so it's read inside Suspense). */
+function PathWatcher({ onPath }: { onPath: (pathname: string) => void }) {
+  const pathname = usePathname();
+  useEffect(() => onPath(pathname), [pathname, onPath]);
+  return null;
+}
+
+interface ShellState {
+  /** The page that's open (PathWatcher keeps it current). */
+  path: string;
+  /** The expanded/collapsed choice in the cookie. */
+  remembered: boolean;
+  /** Opened or closed by hand in a full-screen studio (fullScreenStudio): lasts while you stay in it. */
+  peek: { studio: string; open: boolean } | null;
+}
+
+/**
+ * SidebarProvider that starts from the remembered expanded/collapsed state (the shadcn cookie). In a
+ * full-screen studio (fullScreenStudio) the sidebar folds to its rail instead; opening it there
+ * lasts until you leave that studio, and neither writes the cookie.
+ */
 export function SidebarShell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
-  const [defaultOpen] = useState(() => (typeof document === "undefined" ? true : sidebarOpenFromCookie(document.cookie)));
+  // The first client render reads the cookie and the URL itself, as the pre-paint script does, so hydration matches.
+  const [state, setState] = useState<ShellState>(() => ({
+    path: typeof window === "undefined" ? "" : window.location.pathname,
+    remembered: typeof document === "undefined" ? true : sidebarOpenFromCookie(document.cookie),
+    peek: null,
+  }));
+  const studio = fullScreenStudio(state.path);
+  const open = studio ? state.peek?.studio === studio && state.peek.open : state.remembered;
+  // Both callbacks are stable, so a new page alone leaves the provider's context as it was and the
+  // sidebar doesn't render again on every navigation. A change is filed by the page it applies to
+  // (the state's own path), never by the page a stale callback was made on.
+  const onOpenChange = useCallback(
+    (value: boolean) =>
+      setState((s) => {
+        const at = fullScreenStudio(s.path);
+        return at ? { ...s, peek: { studio: at, open: value } } : { ...s, remembered: value };
+      }),
+    [],
+  );
+  const onPath = useCallback(
+    (path: string) =>
+      setState((s) => {
+        if (s.path === path) return s;
+        const at = fullScreenStudio(path);
+        return { ...s, path, peek: at && s.peek?.studio === at ? s.peek : null };
+      }),
+    [],
+  );
+  // Only the remembered choice reaches the cookie: a studio's fold or peek never does.
+  useEffect(() => {
+    if (sidebarOpenFromCookie(document.cookie) !== state.remembered) document.cookie = sidebarCookie(state.remembered);
+  }, [state.remembered]);
   return (
-    <SidebarProvider defaultOpen={defaultOpen} style={style}>
+    <SidebarProvider open={open} onOpenChange={onOpenChange} persistOpen={false} style={style}>
+      <Suspense fallback={null}>
+        <PathWatcher onPath={onPath} />
+      </Suspense>
       {children}
     </SidebarProvider>
+  );
+}
+
+/** The first stop for keyboard users: jumps past the sidebar to the page (WCAG 2.4.1). */
+function SkipLink() {
+  return (
+    <a
+      href="#content"
+      onClick={(e) => {
+        // Focus the page without adding #content to the URL (Settings reads its hash for deep links).
+        const main = document.getElementById("content");
+        if (!main) return;
+        e.preventDefault();
+        main.focus();
+      }}
+      className="sr-only rounded-md bg-background px-3 py-2 text-[13px] font-medium shadow-strong focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:outline-2 focus:outline-ring"
+    >
+      Skip to content
+    </a>
   );
 }
 
@@ -276,14 +239,21 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
   return (
     // The shell stays static: the remembered collapsed state is read on the client (and applied
     // before first paint by AppSidebar's inline script), not from cookies() on the server.
-    <SidebarShell style={{ "--sidebar-width": "15.5rem", "--sidebar-width-icon": "3.25rem" } as React.CSSProperties}>
-      <AppSidebar />
-      <SidebarInset className="min-h-svh min-w-0 md:m-0 md:mt-2 md:rounded-none md:rounded-tl-xl md:border-l-[0.5px] md:border-t-[0.5px] md:shadow-[-2px_0_6px_rgba(0,0,0,.02)] md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:mt-2 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:rounded-tl-xl">
-        {children}
-      </SidebarInset>
-      <GlobalShortcuts />
-      <JobNotifications />
-    </SidebarShell>
+    <CommandPaletteProvider>
+      <SidebarShell style={{ "--sidebar-width": "15.5rem", "--sidebar-width-icon": "3.25rem" } as React.CSSProperties}>
+        <SkipLink />
+        <AppSidebar />
+        <SidebarInset
+          id="content"
+          tabIndex={-1}
+          className="min-h-svh min-w-0 outline-none md:m-0 md:mt-2 md:rounded-none md:rounded-tl-xl md:border-t-[0.5px] md:border-l-[0.5px] md:shadow-[-2px_0_6px_rgba(0,0,0,.02)] md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:mt-2 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:rounded-tl-xl"
+        >
+          {children}
+        </SidebarInset>
+        <CommandPalette />
+        <JobNotifications />
+      </SidebarShell>
+    </CommandPaletteProvider>
   );
 }
 
@@ -305,6 +275,43 @@ function useMoreBelow<T extends HTMLElement>() {
     };
   }, []);
   return ref;
+}
+
+/** "Search ⌘K": opens the palette (the keycaps only where there's a keyboard). */
+function SearchRow() {
+  const palette = useCommandPalette();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const mod = useModKey();
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        tooltip={`Search (${mod} K)`}
+        className="h-8 text-[13px]"
+        aria-keyshortcuts="Meta+K Control+K"
+        aria-haspopup="dialog"
+        onClick={() => {
+          if (isMobile) setOpenMobile(false);
+          palette.setOpen(true);
+        }}
+      >
+        <Search />
+        <span>Search</span>
+        <span className="ml-auto flex gap-0.5 group-data-[collapsible=icon]:hidden [@media(hover:none)]:hidden">
+          <Kbd>{mod}</Kbd>
+          <Kbd>K</Kbd>
+        </span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/** The GitHub mark (lucide has no brand icons). */
+function GitHubMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden fill="currentColor">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  );
 }
 
 export function AppSidebar() {
@@ -334,96 +341,92 @@ export function AppSidebar() {
   return (
     <>
       <Sidebar variant="inset" collapsible="icon">
-        <SidebarHeader className="pt-3" onClick={closeOnLink}>
-          <div className="flex h-9 items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:justify-center">
-            <Link href="/" className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
-              <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground shadow-soft">
-                <Clapperboard className="size-4" />
-              </span>
-              <span className="font-heading text-[22px] leading-none">Fuobe</span>
-            </Link>
-            <SidebarTrigger className="text-muted-foreground" />
-          </div>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="New creation" className="h-8 text-[13px]">
-                <Link href="/">
-                  <Plus />
-                  <span>New creation</span>
-                  <span className="ml-auto flex gap-0.5 group-data-[collapsible=icon]:hidden">
-                    <Kbd>⌘</Kbd>
-                    <Kbd>K</Kbd>
-                  </span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent
-          ref={content}
-          onClick={closeOnLink}
-          className="scrollbar-none fade-bottom group-data-[collapsible=icon]:overflow-y-auto"
-        >
-          {NAV.map((group, i) => {
-            const id = groupId(group.label);
-            return (
-              <Fragment key={id}>
-                {/* Icon mode hides the group labels: a hairline keeps the groups apart. */}
-                {i > 0 && <SidebarSeparator className="my-1 hidden group-data-[collapsible=icon]:block" />}
-                <NavGroup group={group} open={!group.collapsible || !closed.includes(id)} onToggle={() => toggle(id)} />
-              </Fragment>
-            );
-          })}
-        </SidebarContent>
-        <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
-          <Link
-            href="/settings"
-            className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden"
-          >
-            {mode !== "open" && (
-              <span className="flex items-center gap-2">
-                <StatusDot ok={cloud} /> Cloud models
-                <span className="ml-auto">{cloud ? "connected" : "add key"}</span>
-              </span>
-            )}
-            {mode !== "cloud" && (
-              <span className="flex items-center gap-2">
-                <StatusDot ok={comfy} /> ComfyUI
-                <span className="ml-auto">{comfy ? "online" : "offline"}</span>
-              </span>
-            )}
-            {mode !== "both" && (
-              <span className="text-[11px] text-subtle-foreground">{mode === "open" ? "Open source only" : "Paid APIs only"}</span>
-            )}
-            {status && !ready && status.demoMode !== "off" && (
-              <span className="mt-0.5 rounded-sm bg-highlight/25 px-1.5 py-0.5 text-[11px] text-highlight-foreground dark:text-highlight">
-                Demo mode · placeholder outputs
-              </span>
-            )}
-          </Link>
-          <SidebarMenu className="flex-row gap-1 group-data-[collapsible=icon]:flex-col">
-            <SidebarMenuItem className="min-w-0 flex-1">
-              <SidebarMenuButton
-                tooltip="Toggle theme"
-                className="h-8 text-[13px]"
-                onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-              >
-                <Sun className="hidden dark:block" />
-                <Moon className="dark:hidden" />
-                <span className="hidden dark:inline">Light mode</span>
-                <span className="dark:hidden">Dark mode</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem className="shrink-0">
-              <SidebarMenuButton asChild tooltip="Open source on GitHub" className="h-8 w-8 justify-center p-0 text-[13px]">
-                <a href="https://github.com/workingprototype/fuobe" target="_blank" rel="noreferrer" title="Open source on GitHub">
-                  <Cpu />
-                  <span className="sr-only">Open source on GitHub</span>
-                </a>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarFooter>
+        {/* The whole sidebar is the app's navigation landmark (the page is the one main landmark). */}
+        <nav aria-label="Main" className="flex min-h-0 w-full flex-1 flex-col">
+          <SidebarHeader className="pt-3" onClick={closeOnLink}>
+            <div className="flex h-9 items-center justify-between gap-2 px-1 group-data-[collapsible=icon]:justify-center">
+              <IntentLink href="/" eager className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+                <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground shadow-soft">
+                  <Clapperboard className="size-4" />
+                </span>
+                <span className="font-heading text-[22px] leading-none">Fuobe</span>
+              </IntentLink>
+              {isMobile ? (
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground" onClick={() => setOpenMobile(false)} aria-label="Close menu">
+                  <X />
+                </Button>
+              ) : (
+                <SidebarTrigger className="text-muted-foreground" />
+              )}
+            </div>
+            <SidebarMenu>
+              <SearchRow />
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild tooltip="New creation" className="h-8 text-[13px] has-[[data-pending]]:bg-sidebar-accent">
+                  <IntentLink href="/" eager>
+                    <Plus />
+                    <NavLabel>New creation</NavLabel>
+                  </IntentLink>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarHeader>
+          <SidebarContent ref={content} onClick={closeOnLink} className="scrollbar-none fade-bottom group-data-[collapsible=icon]:overflow-y-auto">
+            {NAV.map((group, i) => {
+              const id = groupId(group.label);
+              return (
+                <Fragment key={id}>
+                  {/* Icon mode hides the group labels: a hairline keeps the groups apart. */}
+                  {i > 0 && <SidebarSeparator className="my-1 hidden group-data-[collapsible=icon]:block" />}
+                  <NavGroup group={group} open={!group.collapsible || !closed.includes(id)} onToggle={() => toggle(id)} />
+                </Fragment>
+              );
+            })}
+          </SidebarContent>
+          <SidebarFooter className="gap-1 border-t border-sidebar-border" onClick={closeOnLink}>
+            <IntentLink
+              href="/settings"
+              className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent group-data-[collapsible=icon]:hidden"
+            >
+              {mode !== "open" && (
+                <span className="flex items-center gap-2">
+                  <StatusDot ok={cloud} /> Cloud models
+                  <span className="ml-auto">{cloud ? "connected" : "add key"}</span>
+                </span>
+              )}
+              {mode !== "cloud" && (
+                <span className="flex items-center gap-2">
+                  <StatusDot ok={comfy} /> ComfyUI
+                  <span className="ml-auto">{comfy ? "online" : "offline"}</span>
+                </span>
+              )}
+              {mode !== "both" && <span className="text-[11px] text-muted-foreground">{mode === "open" ? "Open source only" : "Paid APIs only"}</span>}
+              {status && !ready && status.demoMode !== "off" && (
+                <span className="mt-0.5 rounded-sm bg-highlight/25 px-1.5 py-0.5 text-[11px] text-highlight-foreground dark:text-highlight">
+                  Demo mode · placeholder outputs
+                </span>
+              )}
+            </IntentLink>
+            <SidebarMenu className="flex-row gap-1 group-data-[collapsible=icon]:flex-col">
+              <SidebarMenuItem className="min-w-0 flex-1">
+                <SidebarMenuButton tooltip="Toggle theme" className="h-8 text-[13px]" onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
+                  <Sun className="hidden dark:block" />
+                  <Moon className="dark:hidden" />
+                  <span className="hidden dark:inline">Light mode</span>
+                  <span className="dark:hidden">Dark mode</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem className="shrink-0">
+                <SidebarMenuButton asChild tooltip="Source code on GitHub" className="h-8 w-8 justify-center p-0 text-[13px]">
+                  <a href="https://github.com/workingprototype/fuobe" target="_blank" rel="noreferrer" title="Source code on GitHub">
+                    <GitHubMark />
+                    <span className="sr-only">Source code on GitHub</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        </nav>
         <SidebarRail />
       </Sidebar>
       <SidebarStateScript />

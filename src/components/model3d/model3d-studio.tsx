@@ -2,7 +2,8 @@
 
 import { Box, Clapperboard, Download, Loader2, Sparkles, Video } from "lucide-react";
 import Link from "next/link";
-import { createElement, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { createElement, Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -18,14 +19,31 @@ import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { recordableType, recordTurntable } from "./turntable";
 
+/** A link's ?model= (from ⌘K) picks that model and its engine. Under its own Suspense: it reads the URL. */
+function UrlModel({ onModel }: { onModel: (engine: "cloud" | "open", id: string) => void }) {
+  const id = useSearchParams().get("model");
+  useEffect(() => {
+    const engine = (["cloud", "open"] as const).find((e) => MODELS_3D[e].some((m) => m.id === id));
+    if (id && engine) onModel(engine, id);
+  }, [id, onModel]);
+  return null;
+}
+
 /** Image to 3D / Product spin: a product photo → a .glb to spin and download, a turntable video, and on to a video. */
 export function Model3dStudio({ names }: { names: Record<string, string> }) {
-  const [engine] = useEngine();
+  const [engine, setEngine] = useEngine();
   const create = useCreateGeneration();
   const results = useGenerations({ features: [MODEL3D_FEATURE, "app:app-image-to-3d"], limit: 24 });
   const [photo, setPhoto] = useState<SlotValue | null>(null);
   const [picked, setPicked] = useState<Partial<Record<"cloud" | "open", string>>>({});
   const modelId = picked[engine] ?? MODELS_3D[engine][0].id;
+  const fromUrl = useCallback(
+    (e: "cloud" | "open", id: string) => {
+      setPicked((p) => ({ ...p, [e]: id }));
+      setEngine(e);
+    },
+    [setEngine],
+  );
   const blocker = !photo ? "Add a product photo" : photo.uploading ? "Uploading…" : null;
   const go = () => {
     if (blocker) return void toast(blocker, { id: "3d-blocker" });
@@ -37,6 +55,9 @@ export function Model3dStudio({ names }: { names: Record<string, string> }) {
   const items = results.data ?? [];
   return (
     <ToolShell title="Image to 3D">
+      <Suspense fallback={null}>
+        <UrlModel onModel={fromUrl} />
+      </Suspense>
       <ToolHero title="Your product, in 3D" subtitle="One clear photo → a textured 3D model (.glb) you can spin, download, record as a turntable and turn into a video." />
       <div className="mx-auto mt-8 grid max-w-[880px] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <MediaDrop kind="image" value={photo} onChange={setPhoto} title="Add a product photo" hint="One object, plain background, well lit" compact />
@@ -59,7 +80,7 @@ export function Model3dStudio({ names }: { names: Record<string, string> }) {
             </Select>
             <p className="text-[12px] text-muted-foreground">{MODELS_3D[engine].find((m) => m.id === modelId)?.note}</p>
           </div>
-          <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-subtle-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
+          <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
             {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Box className="size-4" />} Make it 3D
           </Button>
           <p className="mt-2 text-[12px] text-muted-foreground">

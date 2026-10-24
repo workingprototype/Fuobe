@@ -86,3 +86,14 @@ export function draftToInput(d: CinemaDraft, engine: Engine, settings: DirectorS
     grid: action === "grid" ? d.grid : undefined,
   };
 }
+
+/**
+ * How many of the Director's Panel groups are set (film setup, camera, palette, lighting, emotions),
+ * for the phone's folded "Director" chip. Tempo counts in video mode only, as the panel shows it.
+ */
+export function directorPicks(s: DirectorSettings, mode: CinemaMode): number {
+  const film = !!(s.genre || s.era || (mode === "video" && s.tempo));
+  const camera = !!(s.camera || s.lens || s.focal || s.aperture);
+  const emotions = Object.keys(s.emotions ?? {}).length > 0;
+  return [film, camera, !!s.palette, !!s.lighting, emotions].filter(Boolean).length;
+}

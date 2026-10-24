@@ -74,6 +74,7 @@ describe("outputActions", () => {
       "menu:reference",
       "menu:grade",
       "menu:layers",
+      "menu:genjutsu",
       "menu:save-character",
       "menu:reuse",
       "menu:copy-prompt",
@@ -89,9 +90,9 @@ describe("outputActions", () => {
 
   it("gives SVG results no raster hand-offs, but keeps them on demo placeholders", () => {
     const svg = (p: Partial<Generation>, o: Partial<Generation["outputs"][number]> = {}) => gen({ provider: "fal", outputs: [{ url: "/api/files/outputs/d/logo.svg", kind: "image", contentType: "image/svg+xml", ...o }], ...p });
-    expect(ids(svg({}))).toEqual(["bar:download", "bar:favorite", "menu:copy-prompt", "menu:delete"]);
+    expect(ids(svg({}))).toEqual(["bar:download", "bar:favorite", "menu:copy-prompt", "menu:pin", "menu:review", "menu:delete"]);
     expect(ids(svg({}, { url: "https://v3.fal.media/files/x/logo.svg", contentType: undefined }))[0]).toBe("bar:download");
-    expect(ids(svg({ feature: "upload", provider: "local" }))).toEqual(["bar:download"]);
+    expect(ids(svg({ feature: "upload", provider: "local" }))).toEqual(["bar:download", "menu:delete-upload"]);
     // A demo picture is an SVG standing in for a raster result: it can still be animated (a demo Vectorize result can't).
     expect(ids(svg({ provider: "mock", op: "t2i" }))[0]).toBe("primary:animate");
     expect(ids(svg({ provider: "mock", op: "vectorize" }))[0]).toBe("bar:download");
@@ -109,6 +110,7 @@ describe("outputActions", () => {
       "menu:upscale",
       "menu:add-sound",
       "menu:grade",
+      "menu:genjutsu",
       "menu:finalize",
       "menu:copy-prompt",
       "menu:pin",

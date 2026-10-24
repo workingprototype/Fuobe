@@ -1,3 +1,4 @@
+import { FORMAT_INFO, formatList } from "@/lib/av/formats";
 import type {
   Engine,
   GenerationRequest,
@@ -10,6 +11,7 @@ import type {
   PresetRoute,
   Pricing,
 } from "./types";
+import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -29,8 +31,9 @@ export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op
     if (req.inputs?.video && imgs && has("video-swap")) return "video-swap";
     if (req.inputs?.video && has("remove-object")) return "remove-object";
     if (imgs && req.inputs?.endImage && has("flf2v")) return "flf2v";
-    // Several stills are keyframes when they have times, or when the model takes no references.
-    if (imgs > 1 && has("keyframes") && (req.params?.keyframeTimes?.length || !has("ref2v"))) return "keyframes";
+    // Several stills are keyframes when they have times, or when the model takes no references. The open
+    // chain (a film of several clips) only with times: stills left over from references stay a start frame.
+    if (imgs > 1 && has("keyframes") && (req.params?.keyframeTimes?.length || (!has("ref2v") && !keyframeChain(model)))) return "keyframes";
     if ((imgs > 1 || clipRefs > 0) && has("ref2v")) return "ref2v";
     if (imgs && has("i2v")) return "i2v";
     if (has("t2v")) return "t2v";
@@ -230,6 +233,11 @@ export function planGeneration(
   }
   if (op === "dub" && !req.inputs?.video && !req.inputs?.audio) throw new Error("Add the video to translate");
   if (op === "keyframes") checkKeyframes(model, req.inputs?.images?.length ?? 0, params);
+  // A format the model doesn't write (an API caller, or a request moved to another model).
+  const formats = model.options.formats;
+  if (params.format && formats?.length && !formats.includes(params.format)) {
+    throw new Error(`${model.name} writes ${formatList(formats)}, not ${FORMAT_INFO[params.format]?.short ?? params.format}`);
+  }
   // A join takes as many clips as the API's list does (fal merge-audios: 5); longer joins run in steps.
   const maxAudios = model.options.maxAudios;
   if (op === "audio-join" && maxAudios && (req.inputs?.audios?.length ?? 0) > maxAudios) throw new Error(`${model.name} joins up to ${maxAudios} clips at a time — join the rest in a second step`);
@@ -238,6 +246,11 @@ export function planGeneration(
   if (requires?.prompt && !prompt) throw new Error(requires.msg);
   if (requires?.mask && !req.inputs?.mask) throw new Error(requires.msg);
   if (requires?.points && !params.points?.length) throw new Error(requires.msg);
+  if (op === "bg-remove-video" || op === "depth-video") checkVideoToolOptions(model, op, prompt, params);
+  // Remove background on a model that makes both files: the picker's default (the cut-out) unless asked, so the job
+  // makes the one file the picker showed, not both.
+  const matteOutputs = model.options.matteOutputs;
+  if (op === "bg-remove-video" && !params.matteOutput && matteOutputs && matteOutputs.length > 1) params = { ...params, matteOutput: matteOutputs[0] };
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
@@ -254,17 +267,56 @@ export function planGeneration(
   return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
 }
 
-/** Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. */
+/**
+ * Remove background and Depth map options (Higgsfield's Video tools): what to keep, the cut-out or its alpha mask,
+ * the colour map and side by side, each checked against what the model makes, so nothing is quietly swapped.
+ */
+function checkVideoToolOptions(model: ModelDef, op: "bg-remove-video" | "depth-video", prompt: string, params: GenParams) {
+  const o = model.options;
+  if (op === "bg-remove-video") {
+    // A segmenter keeps what is named (or clicked, where its route reads points): with neither it keeps nothing.
+    const clicked = !!params.points?.length && routesFor(model, op).some((r) => !!r.map?.points);
+    if (o.keepsNamed && !prompt && !clicked) throw new Error("Say what to keep, e.g. “the dog” or “the woman in red”");
+    const outputs = o.matteOutputs ?? ["cutout"];
+    if (params.matteOutput && !outputs.includes(params.matteOutput)) {
+      throw new Error(params.matteOutput === "matte" ? `${model.name} makes the cut-out only — pick BiRefNet or SAM for an alpha mask` : `${model.name} makes the alpha mask only — pick BiRefNet for a cut-out video`);
+    }
+    return;
+  }
+  const maps = o.colormaps ?? ["grayscale"];
+  if (params.colormap && !maps.includes(params.colormap.toLowerCase())) {
+    throw new Error(
+      model.engine === "open"
+        ? `${model.name} draws ${maps.length > 1 ? `${maps.slice(0, -1).join(", ")} or ${maps.at(-1)}` : "grayscale only"} — the open engine has no ${params.colormap}; it's on the cloud`
+        : `${model.name} has no ${params.colormap} colour map`,
+    );
+  }
+  if (params.sideBySide && !o.sideBySide) throw new Error(`${model.name} can't put the original next to the depth map`);
+}
+
+/**
+ * Keyframes: one time per image, from 0 up, inside the clip, no more than the model takes. The open
+ * chain (one start/end-frame clip per pair) also needs every gap to be a clip its model can make.
+ */
 function checkKeyframes(model: ModelDef, n: number, params: GenParams) {
-  const max = model.options.maxImages;
+  const chain = keyframeChain(model);
+  const max = chain ? MAX_KEYFRAMES : model.options.maxImages;
   if (max && n > max) throw new Error(`${model.name} takes up to ${max} keyframes`);
   const times = params.keyframeTimes;
-  if (!times?.length) return;
-  if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
-  if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
   const duration = params.duration ?? model.defaults?.duration;
-  const last = times[times.length - 1];
-  if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
+  if (times?.length) {
+    if (times.length !== n) throw new Error(`Give each of the ${n} keyframes a time`);
+    if (times.some((t, i) => !Number.isFinite(t) || t < 0 || (i > 0 && t <= times[i - 1]))) throw new Error("Keyframe times start at 0 or later and go up");
+    // The open chain's film starts on the first frame (FLUX 3 Max can start it later).
+    if (chain && times[0] !== 0) throw new Error(FIRST_AT_ZERO);
+    const last = times[times.length - 1];
+    if (duration !== undefined && last > duration) throw new Error(`The last keyframe is at ${last}s — make the clip at least that long`);
+  }
+  if (chain && n > 1) {
+    const length = duration ?? 5;
+    const problem = chainGapProblem(times?.length ? times : frameTimes(spread(n), length), length, chainTiming(model));
+    if (problem) throw new Error(problem);
+  }
 }
 
 type InputKey = keyof NonNullable<GenerationRequest["inputs"]>;
@@ -398,17 +450,31 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
   return { ...list, usd: promo.usd, ...(promo.byResolution ? { byResolution: promo.byResolution } : {}) };
 }
 
+/**
+ * Operations whose result is as long as the clip they're given (upscale, FPS Boost, HDR, export): a per-second
+ * price counts the clip's seconds (params.sourceDuration) when the caller knows them, and slow motion bills
+ * the whole stretched result.
+ */
+const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
-export function estimateCost(model: ModelDef, params: GenParams, jobs = 1): number | null {
+export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   const usd = (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
   let per = usd;
+  const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
-  if (p.unit === "second") per = usd * (params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
+  // Settings that change the price (60 fps, a Pro tier, a cheaper model).
+  for (const f of p.factors ?? []) {
+    const v = f.param === "targetFps" ? (params.targetFps ?? model.defaults?.targetFps) : (params.extra?.[f.param] ?? model.options.controls?.find((c) => c.param === f.param)?.default);
+    const k = v === undefined || v === null ? undefined : f.values[String(v)];
+    if (k !== undefined && k > 0) per *= k;
+  }
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
   return Math.round(per * jobs * 1000) / 1000;
 }

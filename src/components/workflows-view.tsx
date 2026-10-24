@@ -24,8 +24,9 @@ interface ComfyStatus {
 }
 
 function downloadScript(wf: WF): string {
+  // Optional alternatives (FILM for RIFE) are listed on the card, not installed by default.
   const lines = wf.models
-    .filter((m) => m.url && m.present !== true)
+    .filter((m) => m.url && m.present !== true && !m.optional)
     .map((m) => `mkdir -p "$COMFYUI/models/${m.folder}" && wget -c -O "$COMFYUI/models/${m.folder}/${m.file}" "${m.url}"`);
   const nodes = wf.customNodes.map((n) => `git -C "$COMFYUI/custom_nodes" clone ${n.repo}`);
   return ["COMFYUI=${COMFYUI:-$HOME/ComfyUI}", ...nodes, ...lines].join("\n");
@@ -39,8 +40,8 @@ async function fetchStatus(): Promise<ComfyStatus> {
 }
 
 function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
-  const missing = wf.models.filter((m) => m.present === false).length;
-  const total = wf.models.reduce((a, m) => a + (m.sizeGb ?? 0), 0);
+  const missing = wf.models.filter((m) => m.present === false && !m.optional).length;
+  const total = wf.models.reduce((a, m) => a + (m.optional ? 0 : (m.sizeGb ?? 0)), 0);
   return (
     <article className="flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -69,15 +70,16 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
             <li key={m.file} className="flex min-w-0 items-center gap-2">
               {m.present === true ? (
                 <CheckCircle2 className="size-3.5 shrink-0 text-success" aria-label="Installed" />
-              ) : m.present === false ? (
+              ) : m.present === false && !m.optional ? (
                 <CircleAlert className="size-3.5 shrink-0 text-warning" aria-label="Missing" />
               ) : (
-                <Circle className="size-3.5 shrink-0 text-subtle-foreground" aria-label="Unknown" />
+                <Circle className="size-3.5 shrink-0 text-muted-foreground" aria-label="Unknown" />
               )}
               <span className="min-w-0 truncate font-mono" title={m.file}>
                 {m.file}
               </span>
               <span className="hidden shrink-0 text-muted-foreground sm:inline">{m.folder}</span>
+              {m.optional && <span className="shrink-0 text-muted-foreground">optional</span>}
               {m.sizeGb ? <span className="ml-auto shrink-0 font-mono text-muted-foreground">{m.sizeGb} GB</span> : null}
               {m.url && (
                 <a href={m.url} target="_blank" rel="noreferrer" className={cn("shrink-0 text-muted-foreground hover:text-foreground", !m.sizeGb && "ml-auto")} aria-label={`Download ${m.file}`}>
@@ -92,7 +94,7 @@ function WorkflowCard({ wf, usedBy }: { wf: WF; usedBy: string[] }) {
         <p className="text-[12px] break-words text-muted-foreground">
           Custom nodes:{" "}
           {wf.customNodes.map((n, i) => (
-            <a key={n.repo} href={n.repo} target="_blank" rel="noreferrer" className="text-brand-text hover:underline">
+            <a key={n.repo} href={n.repo} target="_blank" rel="noreferrer" className="text-brand-text underline underline-offset-2">
               {n.name}
               {i < wf.customNodes.length - 1 ? ", " : ""}
             </a>
@@ -176,7 +178,7 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
         <span className="min-w-0 flex-1 basis-56">
           {data.reachable ? "Connected to ComfyUI — model checkmarks below reflect what’s installed." : "ComfyUI is not reachable, so open-source runs fall back to demo output."}
         </span>
-        <Link href="/settings#comfyui" className="text-brand-text hover:underline">
+        <Link href="/settings#comfyui" className="text-brand-text underline underline-offset-2">
           Server settings
         </Link>
       </div>
@@ -212,7 +214,7 @@ export function WorkflowsView({ routes = [] }: { routes?: ComfyRoute[] }) {
               )}
             >
               {c}
-              <span className="text-[11px] text-subtle-foreground tabular-nums">{n}</span>
+              <span className="text-[11px] text-muted-foreground tabular-nums">{n}</span>
             </button>
           ))}
         </div>

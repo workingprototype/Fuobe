@@ -4,6 +4,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import type { AssistThread, AssistThreadSummary, AssistThreadView } from "./assist";
+import type { TestProvider } from "./connections";
 import type { ElementKind, StudioElement } from "./catalog/elements";
 import type { Engine, Generation, GenerationRequest, MediaKind, ReviewStatus } from "./catalog/types";
 import {
@@ -768,10 +769,34 @@ export function useDeleteElement() {
 export type EngineMode = "both" | "open" | "cloud";
 
 export interface StatusInfo {
-  providers: Record<string, { label: string; configured: boolean }>;
+  /** `ramBytes`: the connected ComfyUI's RAM (comfyui only, when it says). */
+  providers: Record<string, { label: string; configured: boolean; ramBytes?: number }>;
   demoMode: string;
   engineMode: EngineMode;
   cloudProvider: string;
+  /** The first-run guide was put away, or something the engine mode generates with was connected once. */
+  onboarded?: boolean;
+}
+
+/** A connection test's answer (POST /api/providers/test). */
+export interface ConnectionTest {
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Test a provider, with unsaved values (by setting name) in place of the saved ones when given.
+ * `field` is the setting being checked (the Anthropic key, Ollama's address…), so the test checks that one.
+ */
+export async function testConnection(provider: TestProvider, values?: Record<string, string>, field?: string): Promise<ConnectionTest> {
+  const res = await fetch("/api/providers/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider, values, field }) });
+  const body = (await res.json().catch(() => null)) as ConnectionTest | null;
+  return body && typeof body.ok === "boolean" ? body : { ok: false, detail: `The test didn't answer (${res.status})` };
+}
+
+/** Save settings by name (PUT /api/settings); throws the server's message when a value isn't allowed. */
+export async function saveSettings(patch: Record<string, string>): Promise<void> {
+  await json(await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }));
 }
 
 export function useStatus() {
@@ -780,6 +805,27 @@ export function useStatus() {
     queryFn: async () => json<StatusInfo>(await fetch("/api/status")),
     staleTime: 15_000,
     refetchInterval: 30_000,
+  });
+}
+
+/** What an uploaded clip's header says: length, size, frame rate and sound (empty for formats the server can't read). */
+export interface ClipFacts {
+  duration?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  hasAudio?: boolean;
+}
+
+/** The attached clip's facts (Upscale hub: prices by its length, "24 → 60 fps"). Only for uploads and results on this server. */
+export function useClipFacts(url: string | undefined) {
+  return useQuery({
+    queryKey: ["clip-facts", url],
+    enabled: !!url && url.startsWith("/api/files/"),
+    queryFn: async () =>
+      json<ClipFacts>(await fetch("/api/media/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) })),
+    staleTime: Infinity,
+    retry: false,
   });
 }
 

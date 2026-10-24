@@ -98,11 +98,11 @@ const Row = memo(function Row({
   return (
     <li data-cue={index} className={cn("group/cue rounded-xl border px-2 py-1.5 transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_76px]", active ? "border-primary bg-brand-faint/50" : "border-transparent hover:border-border")}>
       <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
-        <button type="button" onClick={() => onSeek?.(cue.start)} className="mr-1 font-mono text-[11px] text-subtle-foreground tabular-nums hover:text-brand-text" aria-label={`Play from line ${index + 1}`}>
+        <button type="button" onClick={() => onSeek?.(cue.start)} className="mr-1 font-mono text-[11px] text-muted-foreground tabular-nums hover:text-brand-text" aria-label={`Play from line ${index + 1}`}>
           {String(index + 1).padStart(2, "0")}
         </button>
         {timeInput("start", start, setStart)}
-        <span className="text-subtle-foreground">→</span>
+        <span className="text-muted-foreground">→</span>
         {timeInput("end", end, setEnd)}
         <div className="ml-auto flex items-center opacity-100 sm:opacity-0 sm:group-focus-within/cue:opacity-100 sm:group-hover/cue:opacity-100">
           <RowAction label="Split at the cursor" line={index} onClick={splitAtCaret} disabled={!cue.text.trim().includes(" ")}>

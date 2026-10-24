@@ -3,7 +3,7 @@
     "sha256": "f18c08cd22f37ccadb81cf557c4624e894c71dd718685e7b3030c92c9893be6a",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.245Z"
+    "at": "2026-10-24T05:04:51.883Z"
   },
   "audio-loop-crossfade": {
     "sha256": "97a181dd41506ca676dd88cb238da5e7871ce7101b74186991e4be33a0a2654c",
@@ -202,6 +202,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-23T00:12:15.716Z"
+  },
+  "interpolate-rife-fps": {
+    "sha256": "ae2495e1eacc960f6d6b95beae519e4ba1c8017a3143c835cdd77613a365721e",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:21.986Z"
   },
   "interpolate-rife-vfi": {
     "sha256": "bec30ae2655d256ad465f02fb5249b7a6ec08c57cd3d6ca2f5425428f1f6f95c",
@@ -497,11 +503,23 @@
     "error": null,
     "at": "2026-10-16T20:57:26.837Z"
   },
+  "upscale-video-esrgan-chunked": {
+    "sha256": "23ca663fd29770482d2c018f97f02966f4540e279e87c2ddf44647f345628cc3",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:22.275Z"
+  },
   "upscale-video-seedvr2": {
     "sha256": "42f7ef1d6ab68d53f96a704037fc443fd207b790562da473c747f9f6e14c34fc",
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.825Z"
+  },
+  "upscale-video-seedvr2-chunked": {
+    "sha256": "c24dd08377b79410406355b72b5b11945f0c1e419ab1bd49228ee31e6b4ac3af",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:25.649Z"
   },
   "v2a-hunyuan-foley": {
     "sha256": "2b6f39b10c3d7bfdef30257682a207b7b89af5f246c38c5aa782de7b3b496359",
@@ -525,13 +543,13 @@
     "sha256": "08da8d310a04add6eb729fb67f3a82b63b0a806368ce49fc498dfe6aeb58c83e",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.314Z"
+    "at": "2026-10-23T16:47:53.381Z"
   },
   "video-bg-remove-sam3": {
-    "sha256": "111df3bc07d19b0b7c05b31150a260799a991fdd82f5b0407fa476338489452a",
+    "sha256": "0d8eb4714dee686b9c5b63a74ff2edd7feccf8eae825e3c6843e00efe1bac1b9",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.559Z"
+    "at": "2026-10-23T16:47:53.446Z"
   },
   "video-concat-2": {
     "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
@@ -550,6 +568,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T23:33:20.703Z"
+  },
+  "video-concat-encoded": {
+    "sha256": "0d99102a6a9bbbc2150ee23ae8d2ac3bbcd5f30903bb374082da2b7a04c51988",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-24T05:04:50.642Z"
   },
   "video-concat-sound1-2": {
     "sha256": "70ed1a9d7d25e3022e0289e8c1c4db3a6471e616201e3c1575150ce68cfef108",
@@ -588,34 +612,40 @@
     "at": "2026-10-21T16:25:18.439Z"
   },
   "video-depth-da3": {
-    "sha256": "4c2dd5a6ee8b99eb9eeaf3ea5c9e7b3439964dc87171afef8dbbe2db53676f81",
+    "sha256": "732796f61d7404fe06f9e1132262778692c7e51ebca7316841ed14b91493e4f7",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:21.879Z"
+    "at": "2026-10-23T16:47:54.176Z"
   },
   "video-depth-vda-small": {
-    "sha256": "aa686ba74bb94dad4ef71f54eed453589d6330e3b25ae79ed5721637fe8902bb",
+    "sha256": "dc83a7795e72cde121a462cc9b3cc684e9619711521d3935fee015209f932dfe",
     "validated": true,
     "error": null,
-    "at": "2026-10-16T23:33:22.128Z"
+    "at": "2026-10-23T16:47:54.852Z"
   },
   "video-erase-void": {
     "sha256": "667f8b59d931311b5081e2407ef53aee0b39a36007cf838ba18b64d5d2681bdc",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.436Z"
+    "at": "2026-10-23T04:45:42.666Z"
   },
   "video-export-exr": {
-    "sha256": "59de86f898829c9ed60d059d038e3a5b3f5df8fdd675a76579eacaae1526c6a8",
+    "sha256": "76efcb75b5995707dc326254ae73cdc806f12714c7543f70511f74f62fd8ca49",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.270Z"
+    "at": "2026-10-23T22:48:20.813Z"
   },
   "video-export-pro": {
     "sha256": "94b6ad366376bad9348ddd79e137b012bed54184e7d269cb66952cee5c1d6ca4",
     "validated": true,
     "error": null,
     "at": "2026-10-23T00:12:21.253Z"
+  },
+  "video-export-pro-chunked": {
+    "sha256": "dce6e5904a85f48e12c30aa0750934f017bb09237026bd4698c29da2126ab562",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:26.054Z"
   },
   "video-extend-wan22-fun-vace": {
     "sha256": "c6e30d4d5acf5d3d97c59fe02194e4b80fc21278ea0e946547060b80efd70ae0",
@@ -627,13 +657,13 @@
     "sha256": "71aaa43c8ac4bb0a764a9a835d96d1c47b33244f741611c7036ebea8ffcef3a7",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:19.803Z"
+    "at": "2026-10-23T04:45:37.134Z"
   },
   "video-inpaint-wan-vace-painted": {
-    "sha256": "2563d3d6a4ecac8d21d7831324eb4c0e93797afce58eaed71015bca3aa7549ab",
+    "sha256": "97d00c52d4c177c408528604cf20116bebf7128fba216021fefe5560f9a8d3fb",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:20.124Z"
+    "at": "2026-10-23T16:47:59.267Z"
   },
   "video-insert-wan-vace": {
     "sha256": "5f57a143e6b2357badf59ebaa3d6d5c834c03330dee79f8af96d9b2307b5be24",
@@ -675,7 +705,13 @@
     "sha256": "f51f27af77dd2f61d51553241b15f6b5af14e6c06ff3342b24e810dff3e87f93",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:21.261Z"
+    "at": "2026-10-23T22:48:17.397Z"
+  },
+  "video-sdr-to-hdr-exr": {
+    "sha256": "76b2183fbe97e482526797aa054dae20fc6ca4ee793c245e6957476dc9fa9572",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-23T22:48:27.080Z"
   },
   "video-segment-resample": {
     "sha256": "957899bf0bd99a4bf9e2407a6149392eccc2ee6d8338088809992025e4d4b45d",

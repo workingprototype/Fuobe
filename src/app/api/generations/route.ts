@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { z } from "zod";
-import { OPERATION_LABELS } from "@/lib/catalog/types";
+import { FORMAT_INFO } from "@/lib/av/formats";
+import { OPERATION_LABELS, type VideoFormat } from "@/lib/catalog/types";
 import { createGenerations, listGenerations, outputKind, previewGeneration } from "@/server/generations";
 import { ensureTrashPurge, listOptionsFrom } from "@/server/library";
 import { SignatureSchema } from "@/server/palettes";
@@ -59,7 +60,7 @@ const RequestSchema = z.object({
       // Round 4: clicked points, keyframe times, output formats, Ken Burns moves, crossfades, retiming, overlays, rigging.
       points: z.array(z.object({ x: z.number(), y: z.number(), label: z.enum(["positive", "negative"]).optional() })).max(64).optional(),
       keyframeTimes: z.array(z.number().min(0).max(600)).max(10).optional(),
-      format: z.enum(["h264", "h265_10bit", "prores_422_hq", "prores_4444", "ffv1", "exr"]).optional(),
+      format: z.enum(Object.keys(FORMAT_INFO) as [VideoFormat, ...VideoFormat[]]).optional(),
       zoomFrom: z.number().min(0.1).max(10).optional(),
       zoomTo: z.number().min(0.1).max(10).optional(),
       panFrom: Focus.optional(),
@@ -71,6 +72,8 @@ const RequestSchema = z.object({
       targetFps: z.number().positive().max(240).optional(),
       slowdown: z.number().min(1).max(8).optional(),
       colormap: z.string().max(40).optional(),
+      sideBySide: z.boolean().optional(),
+      matteOutput: z.enum(["cutout", "matte"]).optional(),
       position: Focus.optional(),
       scale: z.number().positive().max(10).optional(),
       animation: z.union([z.string().max(200), z.number()]).optional(),

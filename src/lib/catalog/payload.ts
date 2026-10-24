@@ -1,5 +1,6 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
-import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MediaKind, type Operation, type PixelPoint } from "./types";
+import { upscaleFactorFor } from "@/lib/av/upscale";
+import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
   if (typeof field === "string") return [field, value];
@@ -325,9 +326,15 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
     const [k, v] = enumValue(map.colormap, input.colormap);
     out[k] = v;
   }
+  if (map.sideBySide && input.sideBySide !== undefined) out[map.sideBySide] = input.sideBySide;
+  if (map.matteOutput && input.matteOutput) {
+    const v = map.matteOutput.values[input.matteOutput];
+    if (v !== undefined) out[map.matteOutput.key] = v;
+  }
   if (map.frames && images.length) out[map.frames.key] = images.map((url) => ({ [map.frames!.url]: url, [map.frames!.frames]: 1 }));
   if (map.loop && input.audio) {
-    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration) : map.loop.max;
+    // A length that is a whole number of plays counts as that many (30.003 / 10.001 is a hair over 3 in floats).
+    const want = input.duration && input.sourceDuration ? Math.ceil(input.duration / input.sourceDuration - 1e-6) : map.loop.max;
     out[map.loop.key] = Array.from({ length: Math.max(2, Math.min(map.loop.max, want)) }, () => input.audio);
   }
   if (map.model3d && input.model3d) out[map.model3d] = input.model3d;
@@ -343,6 +350,11 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numFrames) {
     const n = numFramesValue(map.numFrames, input);
     if (n !== undefined) out[map.numFrames.key] = n;
+  }
+  // Upscalers that take a factor: the tier asked for over the clip's shorter edge (unknown size: the API's default).
+  if (map.upscaleFactor && input.resolution) {
+    const f = upscaleFactorFor(input.resolution, input.sourceSize, map.upscaleFactor.min, map.upscaleFactor.max);
+    if (f !== undefined) out[map.upscaleFactor.key] = f;
   }
   // The API's limits on what Fuobe filled in (params.extra below is sent as given).
   for (const [k, r] of Object.entries(map.ranges ?? {})) if (typeof out[k] === "number") out[k] = inRange(out[k] as number, r);
@@ -660,6 +672,17 @@ function model3dOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * A 3D scene: the whole-scene mesh when the model builds one, else (Marigold's `image`) the depth map that
+ * Cinema Studio turns into a point cloud in the browser, as an image with meta.role "depth".
+ */
+function sceneOutputs(response: unknown): ExtractedOutput[] {
+  const media = extractMedia(response);
+  const depth = media.find((m) => m.kind === "image");
+  if (!depth || media.some((m) => m.kind === "model3d" || /\.(obj|fbx|ply|usdz)(\?|$)/i.test(m.url))) return model3dOutputs(response);
+  return [{ ...depth, meta: { role: "depth" } }];
+}
+
+/**
  * Gaussian splats (TripoSplat's model_mesh, a .ply unless it says .spz) with meta.format; the cut-out the
  * model actually saw is the preview.
  */
@@ -756,6 +779,28 @@ function stemOutputs(response: unknown): ExtractedOutput[] {
 }
 
 /**
+ * Remove background: BiRefNet answers with the cut-out (`video`) and, when asked, its mask (`mask_video`); both are
+ * tagged (meta.role "cutout" / "matte") so the job keeps the one asked for ({@link keepMatte}).
+ */
+function matteOutputs(response: unknown): ExtractedOutput[] {
+  const r = body(response);
+  const cut = isObj(r) ? fileOf(r.video) : undefined;
+  const mask = isObj(r) ? fileOf(r.mask_video) : undefined;
+  if (!cut || !mask) return extractMedia(response);
+  return [
+    { url: cut.url, kind: "video", contentType: cut.contentType, meta: { role: "cutout" } },
+    { url: mask.url, kind: "video", contentType: mask.contentType, meta: { role: "matte" } },
+  ];
+}
+
+/** The results of a Remove background job: only the asked-for file when the answer tagged both (else all of them). */
+export function keepMatte<T extends { meta?: Record<string, unknown> }>(outputs: T[], want: MatteOutput | undefined): T[] {
+  if (!want) return outputs;
+  const kept = outputs.filter((o) => o.meta?.role === want);
+  return kept.length ? kept : outputs;
+}
+
+/**
  * Every result of a provider response, with structure the operation defines: layers (name, z, bbox),
  * text blocks, transcripts (text + cues), 3D models and audio stems. A text operation's response with
  * no media but text comes back as one text output; for media operations a text-only answer (a refusal)
@@ -775,8 +820,10 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "image-to-3d":
     case "text-to-3d":
-    case "scene-3d":
       out = model3dOutputs(response);
+      break;
+    case "scene-3d":
+      out = sceneOutputs(response);
       break;
     case "splat":
       out = splatOutputs(response);
@@ -795,6 +842,9 @@ export function extractOutputs(response: unknown, op?: Operation): ExtractedOutp
       break;
     case "separate-audio":
       out = stemOutputs(response);
+      break;
+    case "bg-remove-video":
+      out = matteOutputs(response);
       break;
     default:
       out = extractMedia(response);

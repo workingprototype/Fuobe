@@ -227,7 +227,7 @@ function SkillGrid({ list, loading, onOpen, onToggle, empty }: { list: SkillSumm
             <Switch size="sm" checked={s.enabled} onCheckedChange={(v) => onToggle(s, v)} aria-label={`${s.enabled ? "Switch off" : "Switch on"} ${s.title}`} className="relative z-10" />
           </div>
           <p className="mt-3 line-clamp-3 text-[13px] text-muted-foreground">{s.description}</p>
-          {s.files.length > 0 && <p className="mt-auto pt-3 text-[11px] text-subtle-foreground">+ {s.files.length} file{s.files.length > 1 ? "s" : ""}</p>}
+          {s.files.length > 0 && <p className="mt-auto pt-3 text-[11px] text-muted-foreground">+ {s.files.length} file{s.files.length > 1 ? "s" : ""}</p>}
         </li>
       ))}
     </ul>
@@ -260,7 +260,7 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
                   {s.studio && (
                     <>
                       {" · "}
-                      <Link href={s.studio} className="text-brand-text hover:underline">
+                      <Link href={s.studio} className="text-brand-text underline underline-offset-2">
                         Open the studio
                       </Link>
                     </>
@@ -284,7 +284,7 @@ function SkillDetail({ name, onClose, onEdit }: { name: string | null; onClose: 
                   <ul className="mt-1 space-y-0.5 font-mono text-[12px] text-muted-foreground">
                     {s.files.map((f) => (
                       <li key={f.path}>
-                        {f.path} <span className="text-subtle-foreground">· {f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KB`}</span>
+                        {f.path} <span className="text-muted-foreground">· {f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KB`}</span>
                       </li>
                     ))}
                   </ul>

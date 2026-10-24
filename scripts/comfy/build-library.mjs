@@ -88,6 +88,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'crossfade', 'headroomDb', 'peakNits', 'resolutionLevel', 'fovX', 'decimation', 'numGaussians', 'orbitFrames', 'frameWidth',
   // round 4 (engine seams)
   'filterSpeckle', 'colorPrecision',
+  // round 4 (r4/video-finish)
+  'every', 'slowdown', 'shortSide',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -112,6 +114,10 @@ export const BINDING_KEYS = new Set([
   'decimation', 'cutout', 'numGaussians', 'splatFormat', 'orbitFrames', 'frameWidth',
   // round 4 (engine seams, see library.spec.mjs header)
   'curveMode', 'filterSpeckle', 'colorPrecision',
+  // remove-object package (round 4)
+  'colormap', 'sideBySide',
+  // round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling, HDR10 (PQ)
+  'every', 'slowdown', 'shortSide', 'colorSpace',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
@@ -312,6 +318,20 @@ async function main() {
         if (size?.gated) model.gated = true;
         models.set(val, model);
       }
+    }
+
+    // Files a model control can pick instead (FILM for RIFE): listed as optional, so missing-model help names them.
+    for (const file of spec.optionalModels || []) {
+      if (models.has(file)) continue;
+      const known = KNOWN_MODELS[file];
+      if (!known?.url) {
+        errs.push(`optional model ${file}: no download URL known`);
+        continue;
+      }
+      const size = await hfSize(known.url, sizeCache);
+      if (size && typeof size === 'object' && size.error) errs.push(`model ${file}: ${known.url} -> ${size.error}`);
+      const bytes = typeof size === 'number' ? size : size?.size;
+      models.set(file, { file, folder: known.folder, url: known.url, sizeGb: bytes ? Math.round((bytes / 1e9) * 100) / 100 : null, optional: true });
     }
 
     // ---- custom nodes

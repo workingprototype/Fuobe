@@ -129,7 +129,7 @@ try {
   check("P in the viewer unpins", (await gen(made[1].id)).pinnedAt === null);
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "Select", exact: true }).click();
   for (const w of ["paper boats", "sleeping cat"]) await page.getByRole("button", { name: new RegExp(`Select “${tag} ${w}`) }).first().click({ force: true });
   const bar = page.getByRole("toolbar", { name: "Selection" });
   await bar.getByRole("button", { name: "Pin" }).click();
@@ -140,6 +140,38 @@ try {
   const [g3, g4] = [await gen(made[3].id), await gen(made[4].id)];
   check("the bulk bar pins and reviews several", !!g3.pinnedAt && !!g4.pinnedAt && g3.review === "rejected" && g4.review === "rejected");
   await page.getByRole("button", { name: "Unselect all" }).click();
+
+  // --- Select all (N), a date's Select, Ctrl/⌘+A, Esc ---------------------------------------------
+  {
+    await library();
+    const shown = await openCards();
+    const picked = () => page.getByRole("button", { name: new RegExp(`^Select “${tag}`), pressed: true }).count();
+    const selectAll = bar.getByRole("button", { name: /^Select all \d+$/ });
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    check("Select all names how many are shown", (await selectAll.getAttribute("aria-label")) === `Select all ${shown}`, await selectAll.getAttribute("aria-label"));
+    await selectAll.click();
+    check("Select all (N) selects every result shown", (await picked()) === shown && (await selectAll.count()) === 0, `${await picked()} of ${shown}`);
+    await page.keyboard.press("Escape");
+    check("Esc unselects and leaves selection mode", (await bar.count()) === 0);
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    const pinnedSection = page.locator("section", { has: page.getByRole("heading", { name: /^Pinned/ }) });
+    await pinnedSection.getByRole("button", { name: /^Select Pinned, 2$/ }).click();
+    check("a section's Select takes that section", (await picked()) === 2 && (await pinnedSection.getByRole("button", { name: /^Unselect Pinned/ }).count()) === 1, `${await picked()} picked`);
+    await pinnedSection.getByRole("button", { name: /^Unselect Pinned/ }).click();
+    check("…and Unselect gives it back", (await picked()) === 0);
+    await page.keyboard.press("ControlOrMeta+a");
+    check("Ctrl/⌘+A in selection mode selects everything shown", (await picked()) === shown, `${await picked()} of ${shown}`);
+    // A search that hides the selection: Select all is back for the results left, and the count is what's shown.
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    for (const w of ["paper boats", "sleeping cat"]) await page.getByRole("button", { name: new RegExp(`Select “${tag} ${w}`) }).first().click({ force: true });
+    await page.getByRole("textbox", { name: "Search prompts" }).fill(`${tag} fox`);
+    await page.waitForTimeout(1500);
+    check("a selection hidden by a search: Select all is offered for what's shown", (await selectAll.count()) === 1 && /^Select\b/.test((await bar.innerText()).trim()), (await bar.innerText()).replace(/\s+/g, " "));
+    await page.getByRole("button", { name: "Unselect all" }).click();
+    await page.getByRole("textbox", { name: "Search prompts" }).fill(tag);
+    await page.waitForTimeout(1500);
+  }
 
   await page.getByRole("button", { name: /Any status/ }).click();
   await page.getByRole("radio", { name: /^Rejected/ }).click();
@@ -246,7 +278,7 @@ try {
       check(`390 px, ${scheme}: ${route.replace(C.id, "<folder>")} fits`, fits);
     }
     await openRoute(phone, `${app}/library`, { settleMs: 1200 });
-    await phone.getByRole("button", { name: "Select" }).click();
+    await phone.getByRole("button", { name: "Select", exact: true }).click();
     await phone.getByRole("button", { name: /^Select “/ }).first().click({ force: true });
     const bar = await phone.getByRole("toolbar", { name: "Selection" }).evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
     check(`390 px, ${scheme}: every bulk action fits`, bar);

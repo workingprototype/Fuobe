@@ -6668,32 +6668,450 @@ export const CLOUD_MODELS: ModelDef[] = [
   },
   {
     "id": "topaz-video",
-    "name": "Topaz Video Upscale",
+    "name": "Topaz Video",
     "vendor": "Topaz Labs",
     "family": "topaz",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Upscale and smooth any clip to 4K / 60fps",
+    "tagline": "Enhance and upscale low- to medium-quality footage, up to 4K and 60 fps",
     "routes": [
       {
         "op": "upscale-video",
         "provider": "fal",
-        "endpoint": "fal-ai/topaz/upscale/video",
+        "endpoint": "topaz/upscale/video/precision",
         "map": {
           "prompt": false,
           "video": "video_url",
-          "fixed": {
-            "upscale_factor": 2
+          "targetFps": "target_fps",
+          "upscaleFactor": {
+            "key": "upscale_factor",
+            "min": 1,
+            "max": 4
+          },
+          "ranges": {
+            "target_fps": {
+              "min": 16,
+              "max": 60,
+              "integer": true
+            }
+          },
+          "defaults": {
+            "H264_output": true
           }
         }
       }
     ],
     "options": {
+      "sliders": [
+        {
+          "param": "recover_detail",
+          "label": "Recover details",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "noise",
+          "label": "Reduce noise",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "compression",
+          "label": "Revert compression",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "halo",
+          "label": "Reduce halo",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0
+        },
+        {
+          "param": "grain",
+          "label": "Grain",
+          "min": 0,
+          "max": 0.1,
+          "step": 0.005,
+          "default": 0
+        }
+      ],
+      "controls": [
+        {
+          "param": "model",
+          "label": "Model",
+          "values": [
+            "Proteus",
+            "Proteus Natural",
+            "Iris",
+            "Iris Low Quality",
+            "Dione DV",
+            "Dione TV",
+            "Dione Robust",
+            "Dione Dehalo",
+            "Dione Robust Dehalo",
+            "Artemis High Quality",
+            "Artemis Medium Quality",
+            "Artemis Low Quality",
+            "Artemis Strong Halo",
+            "Artemis Medium Halo",
+            "Artemis Aliasing & Moire",
+            "Gaia HQ",
+            "Gaia CG",
+            "Gaia 2",
+            "Rhea",
+            "Theia Fine Tune Detail",
+            "Theia Fine Tune Fidelity"
+          ],
+          "default": "Proteus"
+        }
+      ],
+      "fpsTargets": [
+        24,
+        30,
+        60
+      ],
+      "resolutions": [
+        "Original",
+        "1080p",
+        "1440p",
+        "4K"
+      ],
       "promptless": true
+    },
+    "badges": [
+      "4k"
+    ],
+    "defaults": {
+      "resolution": "1080p"
     },
     "pricing": {
       "unit": "second",
-      "usd": 0.02
+      "usd": 0.02,
+      "note": "1080p at 30 fps; 720p $0.01/s, above 1080p $0.06/s; 60 fps doubles",
+      "byResolution": {
+        "1080p": 0.02,
+        "1440p": 0.06,
+        "4K": 0.06
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "topaz-starlight",
+    "name": "Topaz Starlight",
+    "vendor": "Topaz Labs",
+    "family": "topaz",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Recover natural detail in faces, textures and text: generative upscale to 1080p or 4K",
+    "routes": [
+      {
+        "op": "upscale-video",
+        "provider": "fal",
+        "endpoint": "topaz/upscale/video/generative",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "targetFps": "target_fps",
+          "upscaleFactor": {
+            "key": "upscale_factor",
+            "min": 1,
+            "max": 4
+          },
+          "ranges": {
+            "target_fps": {
+              "min": 16,
+              "max": 60,
+              "integer": true
+            }
+          },
+          "defaults": {
+            "H264_output": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "sliders": [
+        {
+          "param": "softness",
+          "label": "Softness",
+          "min": 1,
+          "max": 5,
+          "step": 0.05,
+          "default": 1
+        }
+      ],
+      "controls": [
+        {
+          "param": "model",
+          "label": "Model",
+          "values": [
+            "Starlight Precise 2.6",
+            "Starlight HQ",
+            "Starlight Mini",
+            "Starlight Sharp",
+            "Starlight Fast 2"
+          ],
+          "default": "Starlight Precise 2.6"
+        }
+      ],
+      "fpsTargets": [
+        24,
+        30,
+        60
+      ],
+      "resolutions": [
+        "1080p",
+        "4K"
+      ],
+      "promptless": true
+    },
+    "badges": [
+      "new",
+      "4k"
+    ],
+    "defaults": {
+      "resolution": "4K"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.26,
+      "note": "4K at 30 fps; up to 1080p $0.12/s; 60 fps doubles; Starlight Fast 2 is half",
+      "byResolution": {
+        "1080p": 0.12,
+        "4K": 0.26
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        },
+        {
+          "param": "model",
+          "values": {
+            "Starlight Fast 2": 0.5
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "bytedance-video-upscale",
+    "name": "ByteDance Upscale",
+    "vendor": "ByteDance",
+    "family": "bytedance-upscaler",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "High-fidelity upscaling up to 8K with scene presets",
+    "routes": [
+      {
+        "op": "upscale-video",
+        "provider": "fal",
+        "endpoint": "fal-ai/bytedance-upscaler/upscale/video",
+        "map": {
+          "prompt": false,
+          "video": "video_url",
+          "targetFps": "target_fps",
+          "resolution": "target_resolution",
+          "ranges": {
+            "target_fps": {
+              "min": 24,
+              "max": 120
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "controls": [
+        {
+          "param": "enhancement_preset",
+          "label": "Preset",
+          "values": [
+            "general",
+            "ugc",
+            "short_series",
+            "aigc",
+            "old_film"
+          ],
+          "default": "general",
+          "labels": {
+            "general": "Common",
+            "ugc": "UGC (social clips)",
+            "short_series": "Short series",
+            "aigc": "AI-generated video",
+            "old_film": "Old film"
+          }
+        },
+        {
+          "param": "enhancement_tier",
+          "label": "Model version",
+          "values": [
+            "fast",
+            "standard",
+            "pro"
+          ],
+          "default": "standard"
+        },
+        {
+          "param": "fidelity",
+          "label": "Fidelity",
+          "values": [
+            "high",
+            "medium"
+          ],
+          "default": "high"
+        },
+        {
+          "param": "bit_depth",
+          "label": "Bit depth",
+          "values": [
+            8,
+            10,
+            12
+          ],
+          "default": 8
+        }
+      ],
+      "fpsTargets": [
+        30,
+        60
+      ],
+      "resolutions": [
+        "1080p",
+        "2k",
+        "4k",
+        "6k",
+        "8k"
+      ],
+      "promptless": true
+    },
+    "badges": [
+      "new"
+    ],
+    "defaults": {
+      "resolution": "1080p",
+      "targetFps": 30
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0072,
+      "note": "1080p at 30 fps; 2K $0.0144/s, 4K $0.0288/s (6K / 8K estimated from 4K by pixel count); 60 fps doubles; Pro is 10x",
+      "byResolution": {
+        "1080p": 0.0072,
+        "2k": 0.0144,
+        "4k": 0.0288,
+        "6k": 0.0648,
+        "8k": 0.1152
+      },
+      "factors": [
+        {
+          "param": "targetFps",
+          "values": {
+            "60": 2
+          }
+        },
+        {
+          "param": "enhancement_tier",
+          "values": {
+            "pro": 10
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "flux-video-upscale",
+    "name": "FLUX.3 Upscale",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Preserve the original or creatively enhance detail (MP4, up to 20 s)",
+    "routes": [
+      {
+        "op": "upscale-video",
+        "provider": "fal",
+        "endpoint": "blackforestlabs/flux-video-upscale",
+        "map": {
+          "omitEmptyPrompt": true,
+          "video": "video_url",
+          "upscaleFactor": {
+            "key": "upscale_factor",
+            "min": 1.5,
+            "max": 3
+          },
+          "defaults": {
+            "creativity": 0
+          }
+        }
+      }
+    ],
+    "options": {
+      "controls": [
+        {
+          "param": "creativity",
+          "label": "Creativity",
+          "values": [
+            0,
+            1
+          ],
+          "default": 0,
+          "labels": {
+            "0": "Precise",
+            "1": "Creative"
+          }
+        }
+      ],
+      "resolutions": [
+        "1080p",
+        "1440p",
+        "4K"
+      ],
+      "promptOptional": true
+    },
+    "badges": [
+      "new"
+    ],
+    "defaults": {
+      "resolution": "1440p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.15,
+      "note": "2K, precise; 1080p $0.084/s, 4K $0.33/s; Creative about 1.4x",
+      "byResolution": {
+        "1080p": 0.084,
+        "1440p": 0.15,
+        "4K": 0.33
+      },
+      "factors": [
+        {
+          "param": "creativity",
+          "values": {
+            "1": 1.4
+          }
+        }
+      ]
     }
   },
   {
@@ -6713,11 +7131,24 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "video": "video_url",
           "seed": "seed",
-          "resolution": "target_resolution"
+          "resolution": "target_resolution",
+          "fixed": {
+            "upscale_mode": "target"
+          }
         }
       }
     ],
     "options": {
+      "sliders": [
+        {
+          "param": "noise_scale",
+          "label": "Noise",
+          "min": 0,
+          "max": 1,
+          "step": 0.05,
+          "default": 0.1
+        }
+      ],
       "seed": true,
       "resolutions": [
         "720p",
@@ -6726,6 +7157,9 @@ export const CLOUD_MODELS: ModelDef[] = [
         "2160p"
       ],
       "promptless": true
+    },
+    "defaults": {
+      "resolution": "1080p"
     },
     "pricing": {
       "unit": "megapixel",
@@ -9736,7 +10170,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "birefnet",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Transparent WebM cut-outs of the subject",
+    "tagline": "Transparent WebM cut-outs of the subject, or their alpha mask",
     "routes": [
       {
         "op": "bg-remove-video",
@@ -9745,6 +10179,13 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "prompt": false,
           "video": "video_url",
+          "matteOutput": {
+            "key": "output_mask",
+            "values": {
+              "cutout": false,
+              "matte": true
+            }
+          },
           "fixed": {
             "video_output_type": "VP9 (.webm)",
             "model": "General Use (Heavy)"
@@ -9753,6 +10194,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "matteOutputs": [
+        "cutout",
+        "matte"
+      ],
       "promptless": true
     },
     "pricing": {
@@ -9784,7 +10229,10 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
-      "promptless": true
+      "promptless": true,
+      "matteOutputs": [
+        "cutout"
+      ]
     },
     "pricing": {
       "unit": "second",
@@ -9808,6 +10256,7 @@ export const CLOUD_MODELS: ModelDef[] = [
           "prompt": false,
           "video": "video_url",
           "colormap": "colormap",
+          "sideBySide": "side_by_side",
           "resolution": "resolution",
           "fixed": {
             "model": "VDA-Base"
@@ -9819,6 +10268,14 @@ export const CLOUD_MODELS: ModelDef[] = [
       }
     ],
     "options": {
+      "colormaps": [
+        "grayscale",
+        "turbo",
+        "inferno",
+        "magma",
+        "viridis"
+      ],
+      "sideBySide": true,
       "resolutions": [
         "auto",
         "360p",
@@ -12255,7 +12712,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "sam",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "A mask video of what you name or click, tracked through the clip",
+    "tagline": "The alpha mask of what you name (\u201cthe dog\u201d), tracked through the clip",
     "routes": [
       {
         "op": "bg-remove-video",
@@ -12273,13 +12730,17 @@ export const CLOUD_MODELS: ModelDef[] = [
         }
       }
     ],
-    "options": {},
+    "options": {
+      "keepsNamed": true,
+      "matteOutputs": [
+        "matte"
+      ]
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.015,
       "note": "$0.01 per 16 input frames (24 fps)"
-    },
-    "hidden": true
+    }
   },
   {
     "id": "p-video-replace",
@@ -12378,15 +12839,39 @@ export const CLOUD_MODELS: ModelDef[] = [
           "default": "Apollo"
         }
       ],
-      "promptless": true
+      "fpsTargets": [
+        24,
+        30,
+        60,
+        90,
+        120
+      ],
+      "promptless": true,
+      "slowdowns": [
+        1,
+        2,
+        4,
+        8
+      ]
     },
     "badges": [
       "new"
     ],
+    "defaults": {
+      "targetFps": 60
+    },
     "pricing": {
       "unit": "second",
       "usd": 0.03,
-      "note": "1080p 30\u219260 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"
+      "note": "1080p 30\u219260 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output",
+      "factors": [
+        {
+          "param": "model",
+          "values": {
+            "Aion": 1.67
+          }
+        }
+      ]
     }
   },
   {
@@ -13017,6 +13502,40 @@ export const CLOUD_MODELS: ModelDef[] = [
       "usd": 0.2,
       "note": "+$0.12 with an animation preset"
     }
+  },
+  {
+    "id": "marigold-depth",
+    "name": "Marigold V2 Depth",
+    "vendor": "Marigold",
+    "family": "marigold",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "A depth map of the whole frame, for the 3D scene your browser builds",
+    "routes": [
+      {
+        "op": "scene-3d",
+        "provider": "fal",
+        "endpoint": "fal-ai/marigold-v2",
+        "map": {
+          "prompt": false,
+          "image": "image_url",
+          "seed": "seed",
+          "fixed": {
+            "prediction_type": "depth"
+          }
+        }
+      }
+    ],
+    "options": {
+      "seed": true,
+      "maxImages": 1,
+      "promptless": true
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.03
+    },
+    "hidden": true
   },
   {
     "id": "flux-3-max",

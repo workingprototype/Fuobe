@@ -51,13 +51,15 @@
       ],
       "colormap": "gray"
     },
-    "_meta": {}
+    "_meta": {
+      "title": "Colour map (colormap: gray | inferno)"
+    }
   },
   "6": {
     "class_type": "CreateVideo",
     "inputs": {
       "images": [
-        "5",
+        "10",
         0
       ],
       "fps": [
@@ -84,6 +86,89 @@
     },
     "_meta": {
       "title": "Save depth video"
+    }
+  },
+  "8": {
+    "class_type": "ImageStitch",
+    "inputs": {
+      "image1": [
+        "2",
+        0
+      ],
+      "image2": [
+        "12",
+        0
+      ],
+      "direction": "right",
+      "match_image_size": false,
+      "spacing_width": 0,
+      "spacing_color": "black"
+    },
+    "_meta": {
+      "title": "Original | depth"
+    }
+  },
+  "9": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": false
+    },
+    "_meta": {
+      "title": "Side by side (sideBySide)"
+    }
+  },
+  "10": {
+    "class_type": "ComfySwitchNode",
+    "inputs": {
+      "switch": [
+        "9",
+        0
+      ],
+      "on_true": [
+        "8",
+        0
+      ],
+      "on_false": [
+        "5",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Depth alone, or next to the original"
+    }
+  },
+  "11": {
+    "class_type": "GetImageSize",
+    "inputs": {
+      "image": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "The clip's size"
+    }
+  },
+  "12": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": [
+        "5",
+        0
+      ],
+      "upscale_method": "lanczos",
+      "width": [
+        "11",
+        0
+      ],
+      "height": [
+        "11",
+        1
+      ],
+      "crop": "disabled"
+    },
+    "_meta": {
+      "title": "Depth at the clip's size (an even total width for the encoder)"
     }
   }
 }

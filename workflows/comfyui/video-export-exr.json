@@ -35,5 +35,44 @@
     "_meta": {
       "title": "OpenEXR frames (scene-linear, half float)"
     }
+  },
+  "4": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ],
+      "fps": [
+        "2",
+        2
+      ],
+      "audio": [
+        "2",
+        1
+      ],
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "h264"
+    },
+    "_meta": {
+      "title": "Preview (H.264, with the clip's sound)"
+    }
+  },
+  "5": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "4",
+        0
+      ],
+      "filename_prefix": "fuobe/video-export-exr",
+      "format": "mp4",
+      "format.codec": "h264",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save the preview"
+    }
   }
 }

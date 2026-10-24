@@ -56,7 +56,7 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False):
+          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -64,11 +64,15 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     ranged_durations: a duration that takes any whole second in a range gets the usual picks inside it.
     fit_values: the model offers the union of its routes' aspect ratios and resolutions, so each route lists the
     ones it takes (EnumField.accepts) and gets the closest of them (Grok Imagine on fal and Higgsfield).
+    controls entries may carry a third item: labels for values that read badly ({0: "Precise", 1: "Creative"}).
+    fps_targets: frame rates offered for the API's target_fps (params.targetFps; ModelOptions.fpsTargets).
+    upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
+    turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
     A route's options dict may also set max_images (FieldMap.maxImages) and note."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
-                  ranged_durations=ranged_durations, fit_values=fit_values))
+                  ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or []))
 
 
 # ----- Image
@@ -415,10 +419,39 @@ model("seedvr-image", "SeedVR2 Upscale", "ByteDance Seed", "seedvr", "image", "O
       [("upscale-image", "fal-ai/seedvr/upscale/image")])
 model("recraft-crisp", "Recraft Crisp Upscale", "Recraft", "recraft", "image", "Clean, crisp upscale for design work",
       [("upscale-image", "fal-ai/recraft/upscale/crisp")])
-model("topaz-video", "Topaz Video Upscale", "Topaz Labs", "topaz", "video", "Upscale and smooth any clip to 4K / 60fps",
-      [("upscale-video", "fal-ai/topaz/upscale/video")], pricing=("second", 0.02), fixed={"upscale_factor": 2})
+# Higgsfield's four video upscalers (higgsfield-delta-4.md §4.3), each with the options its API takes.
+# Topaz Video: the precision models (Proteus by default, Artemis / Iris for faces, Rhea for 4K+, Gaia for animation,
+# Theia for fine detail), Original / 1080p / 1440p / 4K (a factor of the clip's size), frame rate Original / 24 / 30 / 60
+# (the API's 16-60; Higgsfield's 120 is FPS Boost's) and the enhancement sliders. H.264 so it plays in every browser.
+model("topaz-video", "Topaz Video", "Topaz Labs", "topaz", "video", "Enhance and upscale low- to medium-quality footage, up to 4K and 60 fps",
+      [("upscale-video", "topaz/upscale/video/precision")], badges=["4k"],
+      pricing=("second", 0.02, "1080p at 30 fps; 720p $0.01/s, above 1080p $0.06/s; 60 fps doubles", {"byResolution": {"1080p": 0.02, "1440p": 0.06, "4K": 0.06}, "factors": [{"param": "targetFps", "values": {"60": 2}}]}),
+      defaults={"resolution": "1080p"}, upscale_tiers=["Original", "1080p", "1440p", "4K"], fps_targets=[24, 30, 60],
+      api_defaults={"H264_output": True}, controls=[("model", "Model")],
+      sliders=[("recover_detail", "Recover details"), ("noise", "Reduce noise"), ("compression", "Revert compression"), ("halo", "Reduce halo"), ("grain", "Grain")])
+# Topaz Starlight Precise: the generative models (Starlight Precise 2.6 by default; HQ, Mini, Sharp, Fast 2 at half the price).
+model("topaz-starlight", "Topaz Starlight", "Topaz Labs", "topaz", "video", "Recover natural detail in faces, textures and text: generative upscale to 1080p or 4K",
+      [("upscale-video", "topaz/upscale/video/generative")], badges=["new", "4k"],
+      pricing=("second", 0.26, "4K at 30 fps; up to 1080p $0.12/s; 60 fps doubles; Starlight Fast 2 is half", {"byResolution": {"1080p": 0.12, "4K": 0.26}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "model", "values": {"Starlight Fast 2": 0.5}}]}),
+      defaults={"resolution": "4K"}, upscale_tiers=["1080p", "4K"], fps_targets=[24, 30, 60],
+      api_defaults={"H264_output": True}, controls=[("model", "Model")], sliders=[("softness", "Softness")])
+# ByteDance Upscale: up to 8K with scene presets ("Common" is the API's general preset).
+model("bytedance-video-upscale", "ByteDance Upscale", "ByteDance", "bytedance-upscaler", "video", "High-fidelity upscaling up to 8K with scene presets",
+      [("upscale-video", "fal-ai/bytedance-upscaler/upscale/video")], badges=["new"],
+      pricing=("second", 0.0072, "1080p at 30 fps; 2K $0.0144/s, 4K $0.0288/s (6K / 8K estimated from 4K by pixel count); 60 fps doubles; Pro is 10x", {"byResolution": {"1080p": 0.0072, "2k": 0.0144, "4k": 0.0288, "6k": 0.0648, "8k": 0.1152}, "factors": [{"param": "targetFps", "values": {"60": 2}}, {"param": "enhancement_tier", "values": {"pro": 10}}]}),
+      defaults={"resolution": "1080p", "targetFps": 30}, fps_targets=[30, 60],
+      controls=[("enhancement_preset", "Preset", {"general": "Common", "ugc": "UGC (social clips)", "short_series": "Short series", "aigc": "AI-generated video", "old_film": "Old film"}),
+                ("enhancement_tier", "Model version"), ("fidelity", "Fidelity"), ("bit_depth", "Bit depth")])
+# FLUX.3 Upscale: Precise (source-faithful, Higgsfield's default) or Creative detail, guided by an optional prompt; 1.5-3x of the clip.
+model("flux-video-upscale", "FLUX.3 Upscale", "Black Forest Labs", "flux", "video", "Preserve the original or creatively enhance detail (MP4, up to 20 s)",
+      [("upscale-video", "blackforestlabs/flux-video-upscale")], badges=["new"],
+      pricing=("second", 0.15, "2K, precise; 1080p $0.084/s, 4K $0.33/s; Creative about 1.4x", {"byResolution": {"1080p": 0.084, "1440p": 0.15, "4K": 0.33}, "factors": [{"param": "creativity", "values": {"1": 1.4}}]}),
+      defaults={"resolution": "1440p"}, upscale_tiers=["1080p", "1440p", "4K"], options={"promptOptional": True},
+      api_defaults={"creativity": 0}, controls=[("creativity", "Creativity", {0: "Precise", 1: "Creative"})])
+# SeedVR2: target_resolution only applies in "target" mode (the API's default mode is a 2x factor).
 model("seedvr-video", "SeedVR2 Video Upscale", "ByteDance Seed", "seedvr", "video", "Restore and upscale video",
-      [("upscale-video", "fal-ai/seedvr/upscale/video")])
+      [("upscale-video", "fal-ai/seedvr/upscale/video")], fixed={"upscale_mode": "target"}, defaults={"resolution": "1080p"},
+      sliders=[("noise_scale", "Noise")])
 model("birefnet-cloud", "BiRefNet background removal", "ZhengPeng7", "birefnet", "image", "Clean cut-outs with hair detail",
       [("bg-remove", "fal-ai/birefnet/v2")], pricing=("image", 0.0), fixed={"operating_resolution": "2048x2048", "output_format": "png"})
 model("elevenlabs-tts", "ElevenLabs v3", "ElevenLabs", "elevenlabs", "audio", "Most expressive speech — audio tags like [whispers] and [laughs]",
@@ -489,14 +522,17 @@ model("elevenlabs-sfx", "ElevenLabs Sound Effects", "ElevenLabs", "elevenlabs", 
       [("sfx", "fal-ai/elevenlabs/sound-effects/v2")], pricing=("second", 0.002), defaults={"duration": 5}, options={"durations": [2, 5, 10, 22]})
 model("elevenlabs-music", "ElevenLabs Music", "ElevenLabs", "elevenlabs", "audio", "Studio-quality songs from a prompt",
       [("music", "fal-ai/elevenlabs/music")], pricing=("minute", 0.6), defaults={"duration": 30}, options={"durations": [15, 30, 60, 120]})
-model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject",
-      [("bg-remove-video", "fal-ai/birefnet/v2/video")], pricing=("second", 0.0), fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
+# Remove background (Video tools): the cut-out, or (BiRefNet: output_mask adds mask_video) its alpha mask.
+model("birefnet-video", "BiRefNet video (hosted)", "ZhengPeng7", "birefnet", "video", "Transparent WebM cut-outs of the subject, or their alpha mask",
+      [("bg-remove-video", "fal-ai/birefnet/v2/video", "fal", {"keys": {"maskOutput": "output_mask"}})], pricing=("second", 0.0),
+      fixed={"video_output_type": "VP9 (.webm)", "model": "General Use (Heavy)"})
 model("bria-video-bg", "Bria video background removal", "Bria", "bria", "video", "Production-grade video matting with audio kept",
       [("bg-remove-video", "bria/video/background-removal/v3")], pricing=("second", 0.05),
-      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"})
+      fixed={"background_color": "Transparent", "output_container_and_codec": "webm_vp9"}, options={"matteOutputs": ["cutout"]})
 model("depth-anything-video-cloud", "Video Depth Anything (hosted)", "ByteDance", "depth-anything", "video", "Stable depth maps for every frame",
-      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked.
-      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap"}})], pricing=("second", 0.04),
+      # The colour map follows params.colormap (Higgsfield's Depth Map picker); grayscale unless asked. Side by side
+      # puts the original clip next to the map.
+      [("depth-video", "fal-ai/depth-anything-video", "fal", {"keys": {"colormap": "colormap", "sideBySide": "side_by_side"}})], pricing=("second", 0.04),
       fixed={"model": "VDA-Base"}, api_defaults={"colormap": "grayscale"})
 model("lightx-relight", "LightX Relight", "LightX", "lightx", "video", "Relight a video from a description and a light direction",
       [("relight-video", "fal-ai/lightx/relight")], pricing=("second", 0.1),
@@ -633,12 +669,13 @@ model("wan-22-vace-inpaint", "Wan 2.2 VACE Fun Inpaint (hosted)", "Alibaba Wan",
                {"byResolution": {"720p": 0.1, "580p": 0.075, "480p": 0.05}}),
       api_defaults={"match_input_num_frames": True, "match_input_frames_per_second": True},
       options={"requires": {"mask": True, "msg": "Paint the area to change on the first frame"}})
-# The mask maker for the erase and swap chains: what you name or click becomes a black-and-white mask video
-# (apply_mask off; whether the matte is clean black and white is unverified without a run).
+# The mask maker for the erase and swap chains, and Remove background's "keep what you name" on the cloud (Higgsfield
+# runs SAM 3 video there): what you name or click becomes a black-and-white mask video (apply_mask off; whether the
+# matte is clean black and white is unverified without a run). fal can't cut out by words, so it makes the mask only.
 model("sam-3-1-video-mask", "SAM 3.1 video mask", "Meta", "sam", "video",
-      "A mask video of what you name or click, tracked through the clip",
-      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False}, hidden=True,
-      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"))
+      "The alpha mask of what you name (“the dog”), tracked through the clip",
+      [("bg-remove-video", "fal-ai/sam-3-1/video")], fixed={"apply_mask": False},
+      pricing=("second", 0.015, "$0.01 per 16 input frames (24 fps)"), options={"keepsNamed": True, "matteOutputs": ["matte"]})
 
 # ----- Swap who or what is on camera
 model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
@@ -652,9 +689,11 @@ model("p-video-replace", "P-Video Replace", "Pruna AI", "p-video", "video",
 model("topaz-fps-boost", "Topaz FPS Boost", "Topaz Labs", "topaz", "video",
       "Smooth frame interpolation to 16–120 fps, or up to 8× slow motion",
       [("interpolate", "topaz/interpolate/video")], badges=["new"],
-      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output"),
+      pricing=("second", 0.03, "1080p 30→60 fps with Apollo or Chronos; 4K $0.06; Aion $0.05 / $0.17; slow motion bills the whole output", {"factors": [{"param": "model", "values": {"Aion": 1.67}}]}),
       # H.265 unless asked: H.264 plays in every browser.
-      api_defaults={"H264_output": True}, controls=[("model", "Model")])
+      api_defaults={"H264_output": True}, controls=[("model", "Model")],
+      # Higgsfield's FPS Boost chips (60 by default) and slow motion (the API takes 1-8).
+      fps_targets=[24, 30, 60, 90, 120], defaults={"targetFps": 60}, options={"slowdowns": [1, 2, 4, 8]})
 # Doubles the frame rate (one new frame per pair) at the clip's own speed; its fps field only applies with
 # use_calculated_fps off, so a target frame rate is not sent.
 model("rife-video-cloud", "RIFE (hosted)", "Open source", "rife", "video",
@@ -706,6 +745,10 @@ model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "O
       controls=[("topology", "Topology")])
 model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
       [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+# Cinema Studio's "Create 3D scene" on the cloud (part 4 §8): a depth map of the whole frame, which the browser
+# turns into a point cloud with the photo's colours. So scene-3d answers with an image on this model.
+model("marigold-depth", "Marigold V2 Depth", "Marigold", "marigold", "image", "A depth map of the whole frame, for the 3D scene your browser builds",
+      [("scene-3d", "fal-ai/marigold-v2")], hidden=True, fixed={"prediction_type": "depth"})
 
 # ----- New video models
 model("flux-3-max", "FLUX 3 Max", "Black Forest Labs", "flux", "video",
@@ -898,7 +941,9 @@ def add_slider(opts, param, label, spec):
     if not spec or "minimum" not in spec or "maximum" not in spec or any(s["param"] == param for s in opts.get("sliders", [])):
         return
     lo, hi = spec["minimum"], spec["maximum"]
-    opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": 0.05 if hi - lo <= 4 else 1,
+    # Narrow ranges (Topaz grain 0-0.1) get a step that still gives them about twenty stops.
+    step = 1 if hi - lo > 4 else 0.05 if hi - lo > 0.2 else round((hi - lo) / 20, 4)
+    opts.setdefault("sliders", []).append({"param": param, "label": label, "min": lo, "max": hi, "step": step,
                                            "default": spec.get("default", lo)})
 
 
@@ -908,14 +953,17 @@ def is_sentinel(v, default):
     return s == "auto" or (s == "none" and str(default).strip().lower() == "none")
 
 
-def add_control(opts, param, label, spec, fallback=None):
-    """fallback: what Fuobe sends when the control is left on Auto (a FieldMap default), shown as the control's default."""
+def add_control(opts, param, label, spec, fallback=None, labels=None):
+    """fallback: what Fuobe sends when the control is left on Auto (a FieldMap default), shown as the control's default.
+    labels: names for values that read badly, only for values the enum has."""
     default = fallback if fallback is not None else (spec or {}).get("default")
     vals = [v for v in ((spec or {}).get("values") or []) if v != "" and not is_sentinel(v, default)]
     if not vals or any(c["param"] == param for c in opts.get("controls", [])):
         return
     keep = default is not None and not is_sentinel(default, default)
-    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": default} if keep else {})})
+    named = {str(k): v for k, v in (labels or {}).items() if k in vals}
+    opts.setdefault("controls", []).append({"param": param, "label": label, "values": vals, **({"default": default} if keep else {}),
+                                            **({"labels": named} if named else {})})
 
 
 def map_fields(fmap):
@@ -1019,6 +1067,15 @@ def part4_slots(op, kf, inputs, m, opts, fmap):
         fmap["frameInterval"] = kf["frameInterval"]
     if "colormap" in kf and op == "depth-video":
         fmap["colormap"] = kf["colormap"]
+        # The picker offers the API's own maps (Higgsfield's Depth Map: Grayscale, Turbo, Inferno, Magma, Viridis).
+        opts["colormaps"] = union(opts.get("colormaps", []), [str(v) for v in enum_of(inputs, kf["colormap"])])
+    # Depth maps beside the original clip, and Remove background's alpha mask (Higgsfield's Video tools options).
+    if "sideBySide" in kf and op == "depth-video" and (inputs.get(kf["sideBySide"]) or {}).get("type") == "boolean":
+        fmap["sideBySide"] = kf["sideBySide"]
+        opts["sideBySide"] = True
+    if "maskOutput" in kf and op == "bg-remove-video" and (inputs.get(kf["maskOutput"]) or {}).get("type") == "boolean":
+        fmap["matteOutput"] = {"key": kf["maskOutput"], "values": {"cutout": False, "matte": True}}
+        opts["matteOutputs"] = ["cutout", "matte"]
     if "frames" in kf and op == "images-to-video":
         item = (inputs.get(kf["frames"]) or {}).get("itemSchema") or {}
         url, frames = next((k for k in item if "url" in k), None), next((k for k in item if "frame" in k), None)
@@ -1150,8 +1207,8 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # The model's own slider/control labels win over the generic voice-setting labels below.
     for path, label in m.get("sliders") or []:
         add_slider(opts, path, label, spec_at(inputs, path))
-    for path, label in m.get("controls") or []:
-        add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path))
+    for path, label, *labels in m.get("controls") or []:
+        add_control(opts, path, label, spec_at(inputs, path), (m.get("api_defaults") or {}).get(path), labels[0] if labels else None)
     for k, v in inputs.items():
         # Voice settings belong to speech models; a transcriber's "temperature" is not a voice's variety.
         if k in SLIDER_LABELS and isinstance(v, dict) and (op in ("tts", "voice-change", "dialogue") or k == "strength"):
@@ -1214,6 +1271,25 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     if "numLayers" in kf:
         fmap["numLayers"] = kf["numLayers"]
     part4_slots(op, kf, inputs, m, opts, fmap)
+    # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
+    if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
+        key = fmap.get("targetFps") or ("target_fps" if "target_fps" in inputs else None)
+        spec = inputs.get(key) or {}
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        bad = [v for v in m["fps_targets"] if (lo is not None and v < lo) or (hi is not None and v > hi)]
+        if key and not bad:
+            fmap["targetFps"] = key
+            opts["fpsTargets"] = union(opts.get("fpsTargets", []), m["fps_targets"])
+        else:
+            warn(f"{m['id']}: frame rates {bad or m['fps_targets']} don't fit {ep}'s target_fps")
+    # Upscalers that take a factor: the resolution tier becomes target / the clip's shorter edge.
+    if m.get("upscale_tiers") and op == "upscale-video":
+        spec = inputs.get("upscale_factor") or {}
+        if spec.get("type") in ("number", "integer"):
+            fmap["upscaleFactor"] = {"key": "upscale_factor", **{k: num(spec[f]) for k, f in (("min", "minimum"), ("max", "maximum")) if num(spec.get(f)) is not None}}
+            opts["resolutions"] = union(opts.get("resolutions", []), m["upscale_tiers"])
+        else:
+            warn(f"{m['id']}: {ep} has no numeric upscale_factor for its tiers")
     # fal compose: the timeline's tracks are built from the clips and their start times (FieldMap.timeline).
     if "tracks" in kf and op == "timeline":
         fmap["timeline"] = kf["tracks"]

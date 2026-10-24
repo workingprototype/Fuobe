@@ -1,4 +1,5 @@
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { db } from "./db";
 
 /**
@@ -43,13 +44,37 @@ export const SETTINGS = {
   enhanceProvider: { key: "enhance.provider", env: "FUOBE_ENHANCE_PROVIDER", default: "auto", options: ["auto", "anthropic", "ollama", "none"] },
   ollamaUrl: { key: "ollama.url", env: "OLLAMA_URL", default: "http://127.0.0.1:11434" },
   ollamaModel: { key: "ollama.model", env: "OLLAMA_MODEL", default: "qwen3:8b" },
+  /** "1" once the first-run guide was put away, or /api/status first saw something the engine mode generates with connected: Home stops offering it. */
+  onboarded: { key: "onboarding.done", default: "0", options: ["0", "1"] },
 } satisfies Record<string, SettingDef>;
 
 export type SettingName = keyof typeof SETTINGS;
 
+/** Unsaved values a connection test runs with (withCandidates), in place of the saved ones. */
+const candidates = new AsyncLocalStorage<Partial<Record<SettingName, string>>>();
+
+/**
+ * Run `fn` as if these settings were saved: Settings' "Save & test" tests a typed key or URL before
+ * writing it. An empty value reads as unset (the environment variable or the default). Nothing is stored.
+ */
+export function withCandidates<T>(values: Partial<Record<SettingName, string>>, fn: () => T): T {
+  return candidates.run(values, fn);
+}
+
+/** Inside withCandidates: whether `name` is being tried with an unsaved value. */
+export function isCandidate(name: SettingName): boolean {
+  return candidates.getStore()?.[name] !== undefined;
+}
+
+/** The value in effect without the unsaved ones (saved, environment or default), also inside withCandidates. */
+export function savedSetting(name: SettingName): string {
+  return candidates.exit(() => getSetting(name));
+}
+
 export function getSetting(name: SettingName): string {
   const def: SettingDef = SETTINGS[name];
-  const row = db().prepare("SELECT value FROM settings WHERE key = ?").get(def.key) as { value: string } | undefined;
+  const candidate = candidates.getStore()?.[name];
+  const row = candidate !== undefined ? { value: candidate.trim() } : (db().prepare("SELECT value FROM settings WHERE key = ?").get(def.key) as { value: string } | undefined);
   const value = row && row.value !== "" ? row.value : def.env && process.env[def.env] ? process.env[def.env]! : (def.default ?? "");
   // An invalid env/db value falls back to the default instead of breaking routing.
   if (def.options && !def.options.includes(value)) return def.default ?? "";
