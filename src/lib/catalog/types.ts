@@ -355,6 +355,11 @@ export interface FieldMap {
    * and one for `audio2` (a background bed), each placed at 0 and as long as `duration` (seconds).
    */
   tracks?: string;
+  /**
+   * How this route (or its `loraEndpoint`) takes LoRAs: generated from the research's hostedLoraEndpoints,
+   * filled by src/lib/catalog/loras.ts (loraFields) from GenInput.loras.
+   */
+  loras?: LoraField;
   // Round 4 (research part 4).
   /**
    * Points clicked on the first frame (params.points, pixels) in the API's shape: "bria" = strings like
@@ -445,7 +450,10 @@ export interface ModelRoute {
   preview?: Pick<FieldMap, "upscaleFactor" | "numFrames">;
   /** Optional note shown in the UI (e.g. "uses Lightx2v 4-step LoRA"). */
   note?: string;
-  /** Same model with LoRA support (fal's `/lora` variants): used when a trained identity is mentioned. */
+  /**
+   * Same model with LoRA support (fal's `/lora` variants): the run switches to it when it carries LoRAs
+   * (a trained identity, a preset's look or motion). `map.loras` says how they go in its payload.
+   */
   loraEndpoint?: string;
   /**
    * The route runs as several jobs of its workflow, built on the server (ComfyUI keyframes: one
@@ -644,15 +652,61 @@ export interface GenParams {
   extra?: Record<string, unknown>;
 }
 
+/**
+ * What a LoRA's licence allows, as read on `snapshotDate` (docs/research/fuobe-originals-recipes-5.json).
+ * A LoRA with no licence is the user's own (a trained identity or style).
+ */
+export interface LoraLicence {
+  /** Outputs may be sold (civitai: the "Image" permission). */
+  commercial: boolean;
+  /** The weights may run on a third-party service such as fal or Replicate (civitai: "Rent"). false = the user's GPU only. */
+  hostedOk: boolean;
+  /** When the licence or the civitai permissions were read (YYYY-MM-DD). */
+  snapshotDate: string;
+  /** The licence as written ("Apache-2.0", "civitai permissions: Image, Rent, Sell"). */
+  name?: string;
+  /** civitai's permission list on that date (Image, RentCivit, Rent, Sell, SellMerge). */
+  permissions?: string[];
+}
+
 export interface LoraRef {
-  /** File name as placed in ComfyUI models/loras. */
+  /** File name as placed in ComfyUI models/loras (unique there: civitai files are renamed, several are called V1.safetensors). */
   file: string;
+  /** Where the file downloads from (a pinned civitai version or a Hugging Face file). */
   url?: string;
   strength?: number;
   trigger?: string;
-  /** Wan 2.2 MoE: which expert gets the LoRA. */
+  /** Wan 2.2 MoE: which expert gets the LoRA (fal's `transformer`). Wan 2.1 LoRAs go on both. */
   target?: "high" | "low" | "both";
+  /** fal's `weight_name`: the file inside the repo or archive `url` names. */
+  weightName?: string;
+  /** A copy the cloud engine can fetch without the user's token (a mirror on fal or Replicate storage). */
+  hostedUrl?: string;
+  /** The civitai model version the file is pinned to (never "latest": newer versions are often for another base). */
+  version?: string;
+  licence?: LoraLicence;
 }
+
+/** Scale limits of a LoRA field. */
+export interface LoraRange {
+  min: number;
+  max: number;
+}
+
+/**
+ * How a cloud API takes LoRAs (FieldMap.loras, generated from the research's hostedLoraEndpoints):
+ * - "items": fal's `loras: [{path, scale, transformer?, weight_name?}]`, up to `max` (unset: none stated);
+ *   `transformer` = the API's default expert when items take one (Wan 2.2, LTX-2.3 quality); `weightName`
+ *   = items take a weight_name; `required` = the API refuses an empty list (LTX-2.3 22B);
+ * - "arrays": Replicate's `lora_weights: [url]` + `lora_scales: [number]` (prunaai/z-image-turbo-lora);
+ * - "experts": one LoRA per Wan 2.2 expert, each a URL field and a scale field (Replicate wan-2.2 fast);
+ * - "single": one URL field and one scale field (Replicate qwen-image-edit-2511).
+ */
+export type LoraField =
+  | { shape: "items"; key: string; max?: number; required?: boolean; range?: LoraRange; transformer?: "high" | "low" | "both"; weightName?: boolean }
+  | { shape: "arrays"; weights: string; scales: string; max?: number; range?: LoraRange }
+  | { shape: "experts"; high: { weights: string; scale: string }; low: { weights: string; scale: string }; range?: LoraRange }
+  | { shape: "single"; weights: string; scale: string; range?: LoraRange };
 
 /** What the UI posts to /api/generations. Asset references are local asset ids or URLs. */
 export interface GenerationRequest {
