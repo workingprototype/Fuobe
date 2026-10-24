@@ -1,6 +1,6 @@
 "use client";
 
-import { AtSign, Check, ImagePlus, Loader2, RotateCcw, Shuffle, Sparkles, UserRoundPlus, X } from "lucide-react";
+import { AtSign, Check, Dices, ImagePlus, Loader2, RotateCcw, Shuffle, Sparkles, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -94,7 +94,7 @@ function CastForm({ fields, values, set }: { fields: CastFieldData[]; values: Ca
  * a sheet that is already a character (its image is one of the character's references) shows that
  * character instead, also after a reload.
  */
-function SaveCharacter({ item, extra, defaultName }: { item: Generation; extra: string[]; defaultName: string }) {
+export function SaveCharacter({ item, extra, defaultName }: { item: Generation; extra: string[]; defaultName: string }) {
   const [name, setName] = useState(defaultName);
   const save = useSaveElement();
   const elements = useElements();
@@ -273,6 +273,15 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
               <Textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={5} placeholder="Who are they? e.g. “a 26-year-old surfer and photographer from Lisbon, freckles, sun-bleached curls”" aria-label="Describe your character" />
               <p className="text-[12px] text-muted-foreground">Runs the AI Influencer app: Higgsfield&apos;s character-sheet model on the cloud, Z-Image Turbo on the open engine.</p>
             </div>
+          )}
+
+          {mode !== "reference" && (
+            <Link
+              href="/influencer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <Dices className="size-3.5" aria-hidden /> Build one game-style in the AI Influencer builder: 19 categories, creatures, Shuffle
+            </Link>
           )}
 
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-3">

@@ -1,0 +1,418 @@
+"use client";
+
+import { Dices, ImagePlus, Loader2, RotateCcw, Sparkles, TriangleAlert, Info, X } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import { SaveCharacter } from "@/components/fashion/character-sheet";
+import { PageHeader, PageShell } from "@/components/page-shell";
+import { useRun, useRunPreview, type RunPreview } from "@/components/photodump/hooks";
+import { ResultsGrid } from "@/components/photodump/results";
+import { UploadBox } from "@/components/photodump/upload-box";
+import { EngineSwitch } from "@/components/studio/engine-switch";
+import { fileToList, type SlotValue } from "@/components/studio/media-slot";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import {
+  categoriesFor,
+  CREATURE_TYPES,
+  describeInfluencer,
+  FEATURE,
+  HUMAN_TIERS,
+  INFLUENCER_START,
+  influencerBlocker,
+  influencerName,
+  MAX_CLOTHING,
+  MAX_DIRECTION,
+  resetPicks,
+  seededRandom,
+  setTier,
+  shuffleInfluencer,
+  summaryRows,
+  togglePick,
+  toggleLock,
+  type InfluencerStart,
+  type InfluencerState,
+} from "@/lib/influencer";
+import { cn } from "@/lib/utils";
+import { CATEGORY_ICON, LockButton, OptionTiles, pickRule, TierPanel } from "./option-panel";
+
+const STARTS: [InfluencerStart, string][] = [
+  ["scratch", "From scratch"],
+  ["reference", "From a reference"],
+  ["face", "Add your face"],
+];
+
+const CLOUD_MODELS: { id: string; label: string; note: string; higgsfield?: boolean }[] = [
+  { id: "auto", label: "Best available", note: "AI Influencer with a Higgsfield key, else Nano Banana Pro" },
+  { id: "ai-influencer", label: "AI Influencer · Higgsfield", note: "Higgsfield's own character sheet, from your picks", higgsfield: true },
+  { id: "nano-banana-pro", label: "Nano Banana Pro", note: "A wide sheet from the compiled description" },
+  { id: "seedream-5-pro", label: "Seedream 5.0 Pro", note: "Photoreal, from the compiled description" },
+];
+
+type Message = { kind: "conflict" | "note"; text: string } | null;
+
+/** Arrow keys move along the rail's tabs (and pick), Home / End jump to the ends. */
+function tabKeys(e: React.KeyboardEvent<HTMLElement>) {
+  const step = ({ ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 } as Record<string, number>)[e.key];
+  if (step === undefined && e.key !== "Home" && e.key !== "End") return;
+  const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+  e.preventDefault();
+  const at = tabs.indexOf(document.activeElement as HTMLElement);
+  const next = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (Math.max(at, 0) + step + tabs.length) % tabs.length;
+  tabs[next].focus();
+  tabs[next].click();
+}
+
+/** The body priced on the server, settled for a moment so a run of clicks prices once. */
+function useSettled<T>(value: T, ms = 250): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+function RunInfo({ preview, loading, blocker }: { preview?: RunPreview & { steps?: number }; loading: boolean; blocker: string | null }) {
+  if (blocker) return <p className="text-[12.5px] text-destructive">{blocker}</p>;
+  if (!preview) return <p className="h-5 text-[12.5px] text-muted-foreground">{loading ? "Pricing…" : ""}</p>;
+  if (preview.error) return <p className="text-[12.5px] text-destructive">{preview.error}</p>;
+  const cost = preview.demo ? "Demo · free" : preview.costUsd === 0 ? "Free · your GPU" : preview.costUsd == null ? "price unknown" : `≈ $${preview.costUsd.toFixed(2)}`;
+  return (
+    <div className="space-y-0.5 text-[12.5px] text-muted-foreground" aria-live="polite">
+      <p>
+        Runs on <span className="font-medium text-foreground">{preview.modelName}</span> · 1 character sheet · <span className="font-medium text-foreground tabular-nums">{cost}</span>
+      </p>
+      {preview.notes.map((n) => (
+        <p key={n}>{n}</p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * /influencer: Higgsfield's AI Influencer builder, game-style. Pick a character type (three human
+ * tiers, six creature types), then options in 18 categories, or Shuffle; conflicts are refused in
+ * Higgsfield's words. A live summary, a Direction, a face or reference photo and up to three
+ * clothing references, then one character sheet to save as a character.
+ */
+export function InfluencerBuilder() {
+  const [engine, setEngine] = useEngine();
+  const status = useStatus().data;
+  const higgsfield = !!status?.providers?.higgsfield?.configured;
+  const [state, setState] = useState<InfluencerState>(INFLUENCER_START);
+  const [active, setActive] = useState("tier");
+  const [message, setMessage] = useState<Message>(null);
+  const [start, setStart] = useState<InfluencerStart>("scratch");
+  const [photo, setPhoto] = useState<SlotValue | null>(null);
+  const [clothing, setClothing] = useState<SlotValue[]>([]);
+  const [direction, setDirection] = useState("");
+  const [modelId, setModelId] = useState("auto");
+  const [ids, setIds] = useState<string[]>([]);
+  const clothingInput = useRef<HTMLInputElement>(null);
+
+  const categories = useMemo(() => categoriesFor(state.tier), [state.tier]);
+  const category = categories.find((c) => c.id === active);
+  const tab = category ? category.id : "tier";
+  const summary = describeInfluencer(state);
+  const rows = summaryRows(state);
+  const tierLabel = HUMAN_TIERS.find((t) => t.id === state.tier)?.label ?? CREATURE_TYPES.find((c) => c.id === state.tier)?.label ?? "";
+
+  const uploading = !!photo?.uploading || clothing.some((c) => c.uploading);
+  const photoRef = start === "scratch" ? undefined : photo?.ref;
+  const blocker = influencerBlocker({ state, direction, start, photo: photoRef, clothing: clothing.map((c) => c.ref) });
+  const body = useMemo(
+    () =>
+      uploading
+        ? null
+        : { engine, state, direction: direction.trim() || undefined, start, photo: photoRef, clothing: clothing.map((c) => c.ref), modelId: engine === "cloud" && modelId !== "auto" ? modelId : undefined },
+    [uploading, engine, state, direction, start, photoRef, clothing, modelId],
+  );
+  const settled = useSettled(body);
+  const preview = useRunPreview("/api/influencer", blocker ? null : settled);
+  const run = useRun<NonNullable<typeof body>>("/api/influencer");
+
+  const { data } = useGenerations({ features: [FEATURE], limit: 30 });
+  // This visit's sheets; after a reload, the most recent ones.
+  const mine = useMemo(() => (ids.length ? (data ?? []).filter((g) => ids.includes(g.id)) : (data ?? []).slice(0, 2)), [data, ids]);
+  const latest = mine.find((g) => g.status === "succeeded");
+
+  const pick = (cat: string, id: string) => {
+    const r = togglePick(state, cat, id);
+    setState(r.state);
+    setMessage(r.conflict ? { kind: "conflict", text: r.conflict } : r.note ? { kind: "note", text: r.note } : null);
+  };
+  const changeTier = (tier: InfluencerState["tier"]) => {
+    const r = setTier(state, tier);
+    setState(r.state);
+    setMessage(r.dropped.length ? { kind: "note", text: `Not in ${HUMAN_TIERS.find((t) => t.id === tier)?.label ?? CREATURE_TYPES.find((c) => c.id === tier)?.label}: ${r.dropped.join(", ")} — removed` } : null);
+  };
+  const shuffle = () => {
+    setState((s) => shuffleInfluencer(s, seededRandom(Math.floor(Math.random() * 2 ** 31)), { reference: start !== "scratch" && !!photo }));
+    setMessage(null);
+  };
+  const addClothing = (files: Iterable<File>) => {
+    const list = [...files].filter((f) => /^image\/(png|jpe?g|webp)$/.test(f.type));
+    if (clothing.length + list.length > MAX_CLOTHING) toast("You can add up to three clothing references");
+    list.slice(0, MAX_CLOTHING - clothing.length).forEach((f) => fileToList(f, setClothing, "image"));
+  };
+  const create = () => {
+    if (blocker) return toast(blocker);
+    if (!body) return toast("Wait for the uploads to finish");
+    run.mutate(body, {
+      onSuccess: (r) => setIds((xs) => [...r.items.map((g) => g.id), ...xs]),
+      onError: (e) => toast.error((e as Error).message || "Couldn't start the sheet"),
+    });
+  };
+
+  return (
+    <PageShell wide>
+      <PageHeader title="AI Influencer" description="Build an original character, game-style: pick a look in up to 18 categories or Shuffle, then get a character sheet to save as a character.">
+        <EngineSwitch value={engine} onChange={setEngine} />
+      </PageHeader>
+
+      <div className="grid gap-4 lg:grid-cols-[184px_minmax(0,1fr)] xl:grid-cols-[184px_minmax(0,1fr)_360px]">
+        {/* The rail: Character type, then the categories this type shows. Phones scroll it sideways inside itself. */}
+        <div
+          role="tablist"
+          aria-label="Categories"
+          aria-orientation="vertical"
+          onKeyDown={tabKeys}
+          className="scrollbar-none -mx-4 flex min-w-0 gap-1 overflow-x-auto px-4 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
+        >
+          {[{ id: "tier", label: "Character type" }, ...categories].map((c) => {
+            const Icon = CATEGORY_ICON[c.id];
+            const on = tab === c.id;
+            const count = c.id === "tier" ? 0 : (state.picks[c.id]?.length ?? 0);
+            return (
+              <button
+                key={c.id}
+                id={`ib-tab-${c.id}`}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                aria-controls="ib-panel"
+                tabIndex={on ? 0 : -1}
+                onClick={() => setActive(c.id)}
+                className={cn(
+                  "flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-[13px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-8 lg:rounded-lg lg:px-2.5",
+                  on && "bg-brand-faint text-brand-text hover:bg-brand-faint-hover hover:text-brand-text",
+                )}
+              >
+                {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
+                <span className="lg:min-w-0 lg:flex-1 lg:truncate lg:text-left">{c.label}</span>
+                {c.id === "tier" ? (
+                  <span className="text-[11.5px] text-muted-foreground">{tierLabel}</span>
+                ) : count ? (
+                  <span className="grid h-4.5 min-w-4.5 place-items-center rounded-full bg-primary px-1 text-[11px] text-primary-foreground tabular-nums" aria-label={`${count} picked`}>
+                    {count}
+                  </span>
+                ) : null}
+                {state.locked.includes(c.id) && <span className="sr-only">(kept on Shuffle)</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        <section id="ib-panel" role="tabpanel" aria-labelledby={`ib-tab-${tab}`} className="min-w-0 space-y-4 rounded-2xl border bg-background p-4 sm:p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="mr-auto min-w-0">
+              <h2 className="font-heading text-[22px] leading-tight">{category?.label ?? "Character type"}</h2>
+              <p className="text-[12.5px] text-muted-foreground">{category ? pickRule(category) : "Human tiers or a creature, then everything else"}</p>
+            </div>
+            {category && <LockButton locked={state.locked.includes(category.id)} label={category.label} onToggle={() => setState((s) => toggleLock(s, category.id))} />}
+            <Button variant="outline" size="sm" onClick={shuffle}>
+              <Dices /> Shuffle
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => (setState(resetPicks), setMessage(null))}>
+              <RotateCcw /> Reset all
+            </Button>
+          </div>
+          <div aria-live="polite">
+            {message && (
+              <p className={cn("flex items-start gap-2 rounded-xl px-3 py-2 text-[13px]", message.kind === "conflict" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
+                {message.kind === "conflict" ? <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden /> : <Info className="mt-0.5 size-4 shrink-0" aria-hidden />}
+                {message.text}
+              </p>
+            )}
+          </div>
+          {category ? (
+            <OptionTiles category={category} state={state} onPick={(id) => pick(category.id, id)} />
+          ) : (
+            <TierPanel
+              state={state}
+              onTier={changeTier}
+              onSpecies={(species) => setState((s) => ({ ...s, species }))}
+              onBodyColor={(bodyColor) => setState((s) => ({ ...s, bodyColor }))}
+            />
+          )}
+        </section>
+
+        <aside aria-label="Your character" className="min-w-0 space-y-4 lg:col-span-2 xl:col-span-1">
+          <div className="space-y-3 rounded-2xl border bg-background p-4">
+            <h2 className="text-[13px] font-medium">Your character</h2>
+            <p className="font-heading text-[18px] leading-snug" aria-live="polite">
+              {summary}
+            </p>
+            {rows.length > 0 && (
+              <ul className="flex flex-wrap gap-1.5" aria-label="Your picks">
+                {rows.map((r) => (
+                  <li key={r.category}>
+                    <button type="button" onClick={() => setActive(r.category)} className="max-w-full rounded-full bg-muted px-2.5 py-1 text-left text-[12px] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                      {r.label}: <span className="font-medium text-foreground">{r.options}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="space-y-3 rounded-2xl border bg-background p-4">
+            <div role="radiogroup" aria-label="How to start" onKeyDown={radioKeys} className="scrollbar-none flex max-w-full overflow-x-auto rounded-full bg-muted p-0.5">
+              {STARTS.map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={start === id}
+                  tabIndex={radioTab(start === id)}
+                  onClick={() => setStart(id)}
+                  className={cn("h-8 flex-1 shrink-0 rounded-full px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition outline-none focus-visible:ring-2 focus-visible:ring-ring", start === id && "bg-background text-foreground shadow-soft")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {start !== "scratch" && (
+              <div className="space-y-1.5">
+                <UploadBox
+                  value={photo}
+                  onChange={setPhoto}
+                  title={start === "face" ? "Your photo" : "Reference image"}
+                  hint={start === "face" ? "A clear, front-facing photo of your face" : "A character whose look to start from"}
+                  className="h-44"
+                />
+                <p className="text-[12px] text-muted-foreground">
+                  {start === "face" ? "Your face goes on the character you build." : "The character starts from this look; your picks change it."} Shuffle keeps the gender, ethnicity and age{state.tier === "normal" ? ", skin and eye colour" : ""} the photo decides.
+                </p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <p className="text-[13px] font-medium">
+                Clothing references <span className="font-normal text-muted-foreground">· up to {MAX_CLOTHING}</span>
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {clothing.map((c, i) => (
+                  <div key={c.id ?? i} className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={c.preview} alt={`Clothing reference ${i + 1}`} className="size-full object-cover" />
+                    {c.uploading && (
+                      <span className="absolute inset-0 grid place-items-center bg-background/60" role="status" aria-label="Uploading">
+                        <Loader2 className="size-4 animate-spin" />
+                      </span>
+                    )}
+                    <button type="button" aria-label={`Remove clothing reference ${i + 1}`} onClick={() => setClothing((xs) => xs.filter((x) => x !== c))} className="absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full bg-foreground/80 text-background">
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+                {clothing.length < MAX_CLOTHING && (
+                  <button
+                    type="button"
+                    onClick={() => clothingInput.current?.click()}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => (e.preventDefault(), addClothing(e.dataTransfer.files))}
+                    className="grid aspect-square place-items-center rounded-lg border border-dashed text-muted-foreground transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Add clothing references"
+                  >
+                    <ImagePlus className="size-5" />
+                  </button>
+                )}
+                <input ref={clothingInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => (addClothing(e.target.files ?? []), (e.target.value = ""))} />
+              </div>
+            </div>
+            <label className="block space-y-1.5">
+              <span className="flex items-baseline justify-between gap-2 text-[13px] font-medium">
+                Direction
+                <span className={cn("text-[11.5px] font-normal text-muted-foreground tabular-nums", direction.length > MAX_DIRECTION && "text-destructive")}>
+                  {direction.length.toLocaleString("en-US")} / {MAX_DIRECTION.toLocaleString("en-US")}
+                </span>
+              </span>
+              <Textarea value={direction} onChange={(e) => setDirection(e.target.value)} rows={3} placeholder="Who are they? e.g. “a ceramicist from Porto who posts studio vlogs”" />
+            </label>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border bg-background p-4">
+            {engine === "cloud" ? (
+              <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="space-y-1.5">
+                {CLOUD_MODELS.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={modelId === m.id}
+                    tabIndex={radioTab(modelId === m.id)}
+                    onClick={() => setModelId(m.id)}
+                    className={cn(
+                      "flex w-full min-w-0 items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                      modelId === m.id && "border-primary bg-brand-faint hover:bg-brand-faint-hover",
+                    )}
+                  >
+                    <span className={cn("mt-1 size-3 shrink-0 rounded-full border-2", modelId === m.id ? "border-primary bg-primary" : "border-border-strong")} />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-medium">{m.label}</span>
+                      <span className="block text-[12px] leading-snug text-muted-foreground">
+                        {m.note}
+                        {m.higgsfield && !higgsfield && " · needs a Higgsfield key"}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[12.5px] text-muted-foreground">
+                Open source: Z-Image Turbo draws the sheet (the Soul Cast sheet workflow); with a photo or clothing, Qwen-Image-Edit 2511 then puts them on it. <span className="font-medium text-foreground">Free</span> on your GPU.
+              </p>
+            )}
+            <RunInfo preview={blocker ? undefined : (settled ? preview.data : undefined)} loading={preview.isFetching} blocker={blocker} />
+            <Button className="w-full" onClick={create} disabled={run.isPending || uploading}>
+              {run.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} {run.isPending ? "Starting…" : "Generate character sheet"}
+            </Button>
+          </div>
+        </aside>
+      </div>
+
+      <section className="mt-8 space-y-3" aria-labelledby="ib-sheets">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="ib-sheets" className="font-heading text-[22px]">
+            {ids.length ? "Your sheets" : "Recent sheets"}
+          </h2>
+          <p className="text-[12.5px] text-muted-foreground">
+            Also in <Link href="/character-sheet" className="text-brand-text underline underline-offset-2">Character Sheet</Link> from your own photos
+          </p>
+        </div>
+        {mine.length ? (
+          <>
+            <ResultsGrid
+              items={mine}
+              ratio={2}
+              className="sm:grid-cols-1 lg:grid-cols-2"
+              onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
+            />
+            {latest && <SaveCharacter key={latest.id} item={latest} extra={start === "face" && photo && !photo.uploading ? [photo.ref] : []} defaultName={influencerName(state)} />}
+          </>
+        ) : (
+          <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed p-6 text-center">
+            <div className="max-w-md space-y-1">
+              <p className="font-heading text-[20px]">Your character sheet appears here</p>
+              <p className="text-[13px] text-muted-foreground">A portrait and full-body views of the same character on white — then save it as a character to use in any prompt with @.</p>
+            </div>
+          </div>
+        )}
+      </section>
+    </PageShell>
+  );
+}
