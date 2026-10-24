@@ -110,7 +110,7 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `selftest` | the harness itself | 5 small tools (trim, palette lock, join, frame, image) | — | temporal, clip |
 | `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
 | `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
-| `dop` | DoP motions and effects | the 70 the research gives a LoRA | `catalog`, `prompt-only`, `research`, `partner` | temporal, clip |
+| `dop` | DoP motions and effects | the 70 the research gives a LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
 | `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
 | `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
@@ -132,6 +132,20 @@ Soul variants, all on the same subjects and seeds:
 - **plain**: the base model with the subject alone.
 - **original**: the shipped `fuobe-soul` Original, which applies the look on the server. It is
   skipped until that Original exists.
+
+DoP variants, on your start frame with two seeds:
+
+- **catalog**: the preset as it ships, with today's open LoRA if it has one.
+- **prompt-only**: preset strength 0, so the preset's words without its LoRAs. The server leaves the
+  LoRA's trigger word out too, since it means nothing without the LoRA.
+- **research**: the research's LoRA map at the listed strengths, its trigger words in front of the
+  words (`trigger, prompt`, as a Soul look's).
+- **partner**: the preset's words on Kling 2.5 Turbo (cloud only).
+
+A variant that would send the server the same request as an earlier variant of the same case, prompt
+and seed (model, route, final prompt, LoRAs, settings and inputs) is skipped and names the one it
+repeats. Most DoP presets have no open LoRA in today's catalog, so their prompt-only run would repeat
+the catalog run.
 
 ### Licence rules in the runs
 

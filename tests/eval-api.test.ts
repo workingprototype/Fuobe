@@ -79,15 +79,22 @@ describe("planGeneration with request LoRAs", () => {
     expect(plan.loras.map((l) => l.file)).toEqual(["a.safetensors"]);
   });
 
-  it("preset strength 0 is the motion's prompt without its LoRAs (the harness's prompt-only baseline)", () => {
-    const motion = getPreset("motion-dolly-in");
-    expect(motion?.open?.loras?.length, "a motion with an open LoRA").toBeGreaterThan(0);
-    const req = { feature: "eval", presetId: motion!.id, modelId: motion!.open!.modelId, prompt: "a cyclist on a coastal road", inputs: { images: ["start.png"] } };
-    const full = planGeneration(req, getModel, getPreset);
-    const none = planGeneration({ ...req, presetStrength: 0 }, getModel, getPreset);
-    expect(full.loras.length).toBeGreaterThan(0);
-    expect(none.loras).toEqual([]);
-    expect(none.prompt).toBe(full.prompt);
+  it("preset strength 0 is the motion's prompt without its LoRAs or their trigger words (the harness's prompt-only baseline)", () => {
+    for (const id of ["motion-dolly-in", "effect-thunder-god"]) {
+      const motion = getPreset(id);
+      const trigger = motion?.open?.loras?.find((l) => l.trigger)?.trigger;
+      expect(trigger, `${id}: a preset with an open LoRA and a trigger`).toBeTruthy();
+      const req = { feature: "eval", presetId: motion!.id, modelId: motion!.open!.modelId, prompt: "a cyclist on a coastal road", inputs: { images: ["start.png"] } };
+      const full = planGeneration(req, getModel, getPreset);
+      const none = planGeneration({ ...req, presetStrength: 0 }, getModel, getPreset);
+      expect(full.loras.length).toBeGreaterThan(0);
+      expect(full.prompt.startsWith(`${trigger}. `)).toBe(true);
+      expect(none.loras).toEqual([]);
+      // The trigger means nothing without its LoRA: the rest of the preset's words stay.
+      expect(none.prompt).toBe(full.prompt.slice(trigger!.length + 2));
+      // Half strength keeps the LoRA, so its trigger stays too.
+      expect(planGeneration({ ...req, presetStrength: 0.5 }, getModel, getPreset).prompt).toBe(full.prompt);
+    }
   });
 });
 

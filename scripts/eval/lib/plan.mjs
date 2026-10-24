@@ -132,8 +132,9 @@ export function expandJobs(suite, opts) {
             notes.push(...picked.notes);
             // A variant that is about the recipe's LoRAs means nothing when none of them can run here.
             if (!skip && variant.loras === "recipe" && picked.wanted && !loras.length) skip = `none of the recipe's LoRAs can run on ${engine === "cloud" ? "the cloud" : modelId}: ${picked.notes.join("; ")}`;
+            // Triggers lead, joined like a look's ("triggers, prompt": the research's template convention).
             const triggers = triggersOf(loras);
-            if (triggers) prompt = `${triggers} ${p.text}`.trim();
+            if (triggers) prompt = `${triggers}, ${p.text}`.trim();
           } else if (variant.loras && variant.loras !== "recipe" && variant.loras !== "none") {
             loras = lorasFor(null, variant, engine).loras;
           }

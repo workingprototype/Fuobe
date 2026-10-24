@@ -197,7 +197,7 @@ export async function runEval(opts, io) {
   }
 
   // Price every runnable job with what the server says the route runs.
-  const priced = [];
+  let priced = [];
   for (const job of jobs) {
     if (job.skip) continue;
     try {
@@ -222,6 +222,17 @@ export async function runEval(opts, io) {
       job.skip = `the server refused it: ${e.message}`;
     }
   }
+  // Two variants of one case, prompt and seed that would send the server the same thing (a catalog preset with no
+  // open LoRA is its own prompt-only run) run once: the later variant is skipped and names the one it repeats.
+  const firstOf = new Map();
+  for (const job of priced) {
+    const sig = requestSignature(job);
+    if (!sig) continue;
+    const first = firstOf.get(`${job.key}|${sig}`);
+    if (first) job.skip = `the same request as the ${first.variant} variant (same model, route, prompt, LoRAs and settings)`;
+    else firstOf.set(`${job.key}|${sig}`, job);
+  }
+  priced = priced.filter((j) => !j.skip);
   const training = sum([...trainingUsd.entries()].filter(([caseId]) => jobs.some((x) => x.caseId === caseId && !x.skip)).map(([, usd]) => usd));
   const estimate = sum(priced.map((j) => j.preview.costUsd)) + training;
   const unknownCost = priced.filter((j) => j.preview.costUsd == null).length;
@@ -363,6 +374,17 @@ export async function runEval(opts, io) {
   run.results = { succeeded: count("succeeded"), failed: count("failed") + count("timeout") + count("canceled"), skipped: count("skipped"), interrupted: count("interrupted") };
   writeJson(path.join(dir, "run.json"), run);
   return { runId, dir, run, rows };
+}
+
+/**
+ * What the server would run for a generation job, as one string: model, operation, route, its final prompt,
+ * the LoRAs it loads, the settings, the inputs. Null when the preview doesn't say (a studio route, an older Fuobe).
+ */
+function requestSignature(job) {
+  const p = job.preview;
+  if (job.submit || !p || typeof p.prompt !== "string" || !p.loras) return null;
+  const loras = (p.loras.applied ?? []).map((l) => [l.file, l.strength ?? 1, l.target ?? "both"]);
+  return JSON.stringify([p.modelId ?? job.model.id, p.op ?? null, p.route?.endpoint ?? null, p.prompt, loras, job.request.params ?? {}, job.request.negativePrompt ?? null, job.request.presetId ?? null, job.inputs]);
 }
 
 /** What a job is, for its row (also written for jobs that never ran). */

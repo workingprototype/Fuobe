@@ -198,7 +198,16 @@ export function planGeneration(
 
   if (req.loras?.length) loras = [...loras, ...req.loras];
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
-  loras = loras.filter((l) => (l.strength ?? 1) !== 0);
+  const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
+  // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
+  // effect. …", see withOssLoras), which means nothing to the model without the LoRA.
+  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
+  for (const l of loras) {
+    if ((l.strength ?? 1) !== 0 || !l.trigger || keptTriggers.has(l.trigger)) continue;
+    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
+    if (lead) prompt = prompt.slice(lead.length);
+  }
+  loras = kept;
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
   const shots = params.shots?.filter((s) => s.prompt.trim());

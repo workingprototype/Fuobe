@@ -610,13 +610,18 @@ describe("runEval as a library", () => {
   it("expands, prices and lists a dry run without uploading anything", async () => {
     const before = seen.filter((s) => s === "POST /api/uploads").length;
     const suite = cases.loadSuite("dop");
-    const plan = (await runner.runEval({ suite, engine: "demo", dryRun: true, limit: 2, variants: ["catalog", "prompt-only", "research"], root: results }, { client: createClient({ url: base }) })) as { jobs: { variant: string; loras?: { applied: string[] } }[]; runnable: number };
-    expect(plan.runnable).toBe(12);
+    const plan = (await runner.runEval({ suite, engine: "demo", dryRun: true, cases: ["dop/motion-overhead", "dop/effect-thunder-god"], variants: ["catalog", "prompt-only", "research"], root: results }, { client: createClient({ url: base }) })) as { jobs: { case: string; variant: string; skip?: string; loras?: { applied: string[] } }[]; runnable: number };
     expect(seen.filter((s) => s === "POST /api/uploads").length).toBe(before);
-    const research = plan.jobs.find((j) => j.variant === "research")!;
-    expect(research.loras?.applied.length).toBeGreaterThan(0);
-    const promptOnly = plan.jobs.find((j) => j.variant === "prompt-only")!;
-    expect(promptOnly.loras?.applied).toEqual([]);
+    const job = (c: string, v: string) => plan.jobs.find((j) => j.case === c && j.variant === v)!;
+    // Overhead has no LoRA in today's catalog: its prompt-only run would repeat the catalog run, so it's skipped.
+    expect(job("dop/motion-overhead", "catalog").loras?.applied).toEqual([]);
+    expect(job("dop/motion-overhead", "prompt-only").skip).toBe("the same request as the catalog variant (same model, route, prompt, LoRAs and settings)");
+    expect(job("dop/motion-overhead", "research").loras?.applied.length).toBeGreaterThan(0);
+    // Thunder God has one: catalog, prompt-only and research all run (2 seeds each).
+    expect(job("dop/effect-thunder-god", "catalog").loras?.applied).toEqual(["electrify_50_epochs.safetensors@1"]);
+    expect(job("dop/effect-thunder-god", "prompt-only").loras?.applied).toEqual([]);
+    expect(job("dop/effect-thunder-god", "prompt-only").skip).toBeUndefined();
+    expect(plan.runnable).toBe(10);
   });
 });
 
