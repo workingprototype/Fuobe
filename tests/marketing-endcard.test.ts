@@ -25,6 +25,8 @@ const { saveFile } = await import("@/server/storage");
 const { prepareWorkflow } = await import("@/server/providers/comfyui");
 const { getModel } = await import("@/lib/catalog");
 const { END_CARD, END_CARD_MODELS, endCardSteps } = await import("@/lib/catalog/marketing");
+const { planEndCard, siteLabel } = await import("@/components/marketing/end-card");
+const { themeFrom } = await import("@/components/ads/layout");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -186,5 +188,51 @@ describe("the open end-card workflows through the ComfyUI provider", () => {
     const [h] = at(wf, m, "height") as number[];
     expect(w % 2 + (h % 2)).toBe(0);
     expect(h / w).toBeCloseTo(16 / 9, 1);
+  });
+});
+
+describe("the end card the page draws", () => {
+  // A stand-in for canvas text metrics: half the font size per character.
+  const measure = (text: string, font: string) => text.length * Number(/(\d+)px/.exec(font)![1]) * 0.5;
+  const theme = themeFrom({ colors: ["#c1121f", "#fdf0d5"], fonts: { heading: "Playfair Display" } });
+  const inside = (r: { x: number; y: number; w?: number; h?: number }, W = END_CARD.size.w, H = END_CARD.size.h) => {
+    expect(r.x).toBeGreaterThanOrEqual(0);
+    expect(r.y).toBeGreaterThanOrEqual(0);
+    expect(r.x + (r.w ?? 0)).toBeLessThanOrEqual(W);
+    expect(r.y + (r.h ?? 0)).toBeLessThanOrEqual(H);
+  };
+
+  it("centres the logo, the product name and the CTA pill on the brand colour, the address at the foot", () => {
+    const plan = planEndCard({ theme, content: { brand: "Dermaco", product: "Barrier Cream", cta: "Shop now", website: "dermaco.com" }, logo: { w: 800, h: 200 }, measure });
+    expect(plan).toMatchObject({ w: 720, h: 1280, bg: "#c1121f", image: null });
+    expect(plan.brand).toBeUndefined();
+    const { logo, headline, cta, body } = plan;
+    expect(logo!.x + logo!.w / 2).toBeCloseTo(360, 0);
+    expect(logo!.w / logo!.h).toBeCloseTo(4, 1);
+    expect(headline).toMatchObject({ lines: ["Barrier Cream"], align: "center", x: 360, color: theme.onAccent });
+    expect(headline.y).toBeGreaterThan(logo!.y + logo!.h);
+    expect(cta!.x + cta!.w / 2).toBeCloseTo(360, 0);
+    expect(cta!.y).toBeGreaterThan(headline.y + headline.lineHeight);
+    expect(cta!.color).toBe(theme.onAccent);
+    expect(cta!.text.lines).toEqual(["Shop now"]);
+    expect(body!.lines).toEqual(["dermaco.com"]);
+    expect(body!.y).toBeGreaterThan(cta!.y + cta!.h);
+    for (const r of [logo!, cta!, { x: 0, y: body!.y, h: body!.lineHeight }]) inside(r);
+  });
+
+  it("writes the brand's name when there is no logo, and leaves out a CTA nobody wrote", () => {
+    const plan = planEndCard({ theme, content: { brand: "Dermaco", product: "A very long product name that keeps going and going for a while" }, logo: null, measure });
+    expect(plan.logo).toBeUndefined();
+    expect(plan.brand!.lines).toEqual(["DERMACO"]);
+    expect(plan.cta).toBeUndefined();
+    expect(plan.headline.lines.length).toBeLessThanOrEqual(2);
+    for (const l of plan.headline.lines) expect(measure(l, plan.headline.font)).toBeLessThanOrEqual(720 - 144 + 1);
+  });
+
+  it("names the shop by its address", () => {
+    expect(siteLabel("https://www.dermaco.com/products/cream")).toBe("dermaco.com");
+    expect(siteLabel("shop.example.org")).toBe("shop.example.org");
+    expect(siteLabel(undefined)).toBeUndefined();
+    expect(siteLabel("not a url at all")).toBeUndefined();
   });
 });
