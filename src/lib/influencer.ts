@@ -135,18 +135,23 @@ export function togglePick(state: InfluencerState, category: string, id: string)
   return { state: { ...state, picks }, ...(was && { note: `${c.label}: up to ${c.max} — ${was} was replaced` }) };
 }
 
-/** Switch the character type: picks the new tier doesn't show are dropped (named in `dropped`), and so are new conflicts. */
+/**
+ * Switch the character type: picks the new tier doesn't show are dropped, and so are new conflicts.
+ * `dropped` names them: the option, or the category when the new type doesn't show it at all.
+ */
 export function setTier(state: InfluencerState, tier: InfluencerTier): { state: InfluencerState; dropped: string[] } {
   if (tier === state.tier) return { state, dropped: [] };
   const dropped: string[] = [];
   const picks: Record<string, string[]> = {};
+  const shown = new Set(categoriesFor(tier).map((c) => c.id));
   for (const [cat, ids] of Object.entries(state.picks)) {
     const c = CATEGORY.get(cat);
     if (!c) continue;
     const keep = ids.filter((id) => {
       const o = c.options.find((x) => x.id === id);
       const ok = !!o && optionVisible(o, tier, cat);
-      if (!ok && o) dropped.push(o.label);
+      // A whole category the new type doesn't have is named once ("Skin color"), else the option ("Hair horns").
+      if (!ok && o) dropped.push(shown.has(cat) ? o.label : c.label);
       return ok;
     });
     if (keep.length) picks[cat] = keep;
@@ -160,11 +165,10 @@ export function setTier(state: InfluencerState, tier: InfluencerTier): { state: 
     picks[cat] = (picks[cat] ?? []).filter((x) => !ids.includes(x));
     if (!picks[cat].length) delete picks[cat];
   }
-  const creature = isCreature(tier);
-  const sameType = creature && state.tier === tier;
+  // A species belongs to its type; a body colour carries over to another creature.
   return {
-    state: { tier, picks, locked: state.locked, ...(sameType && state.species && { species: state.species }), ...(creature && state.bodyColor && { bodyColor: state.bodyColor }) },
-    dropped,
+    state: { tier, picks, locked: state.locked, ...(isCreature(tier) && state.bodyColor && { bodyColor: state.bodyColor }) },
+    dropped: [...new Set(dropped)],
   };
 }
 
@@ -628,7 +632,9 @@ export function describeInfluencer(state: InfluencerState): string {
   ].filter((x): x is string => !!x);
   const accessories = state.picks.accessory ?? [];
   const parts = [subject(state), ...body];
-  if (pick1(state, "facial_hair") === "fh_none") parts.push("clean-shaven");
+  // "Clean" is what Shuffle gives everyone but men and trans men: said only where it means something.
+  const g = pick1(state, "gender");
+  if (pick1(state, "facial_hair") === "fh_none" && (g === "male" || g === "trans_man" || !g)) parts.push("clean-shaven");
   if (withs.length) parts.push(`with ${list(withs)}`);
   const outfit = phrases(state, "aesthetic")[0];
   if (outfit) parts.push(`wearing ${outfit}`);
@@ -839,7 +845,7 @@ export function planInfluencer(run: InfluencerRun, caps: PlanCaps): InfluencerPl
     notes.push(photo ? (start === "face" ? "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 puts your face on it" : "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 matches it to your reference") : "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 dresses it in your clothing");
     return {
       steps: [
-        { ...sheet, request: { ...sheet.request, feature: `${FEATURE}-step`, title: `${title} · sheet` } },
+        { ...sheet, request: { ...sheet.request, feature: `${FEATURE}-step`, title: `${title} · sheet`, step: { label: "Drawing the sheet", index: 0, of: 2 } } },
         {
           key: "dress",
           after: "sheet",
@@ -852,6 +858,7 @@ export function planInfluencer(run: InfluencerRun, caps: PlanCaps): InfluencerPl
             inputs: { images: [...(photo ? [photo] : []), ...used] },
             params: { numOutputs: 1 },
             title,
+            step: { label: start === "face" ? "With your face" : start === "reference" ? "Matched to your reference" : "Dressed", index: 1, of: 2 },
           },
         },
       ],

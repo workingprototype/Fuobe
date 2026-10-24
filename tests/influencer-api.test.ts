@@ -71,6 +71,7 @@ describe("/api/influencer", () => {
     ]);
     expect(run.items[0].prompt).toBe(compileCastPrompt({ state: state as never, direction: "A potter from Porto" }));
     expect(run.sheet.id).toBe(run.items[1].id);
+    expect(run.items.map((g: { request: { step?: { label: string } } }) => g.request.step?.label)).toEqual(["Drawing the sheet", "With your face"]);
     expect(new Set(run.items.map((g: { batchId: string }) => g.batchId))).toEqual(new Set([run.batchId]));
     const done = await settle(run.sheet.id);
     expect(done.status).toBe("succeeded");
@@ -97,7 +98,9 @@ describe("/api/influencer", () => {
     expect(redone.request.inputs?.images).toHaveLength(2);
     const one = await (await post({ engine: "cloud", state, start: "scratch" })).json();
     await gens.cancelGeneration(one.items[0].id);
-    expect(retryPhoto(one.items[0].id)[0]).toMatchObject({ feature: "influencer", batchId: one.batchId });
+    expect(one.items).toHaveLength(1);
+    expect(one.items[0].request.step).toBeUndefined();
+    expect(retryPhoto(one.items[0].id)[0]).toMatchObject({ feature: "influencer", batchId: one.items[0].batchId });
   }, 60_000);
 
   it("follows the engine mode", async () => {

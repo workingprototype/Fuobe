@@ -193,12 +193,12 @@ describe("switching the character type", () => {
     expect(r.dropped).toEqual(["Short legs"]);
   });
 
-  it("keeps the species within its type and the body colour for creatures", () => {
+  it("drops the species of the old type, and keeps the body colour for creatures", () => {
     const cat = S("cats", { gender: ["male"] }, { species: "persian", bodyColor: "#ff8800" });
     expect(setTier(cat, "dogs").state).toMatchObject({ tier: "dogs", bodyColor: "#ff8800", picks: { gender: ["male"] } });
     expect(setTier(cat, "dogs").state.species).toBeUndefined();
     expect(setTier(cat, "normal").state.bodyColor).toBeUndefined();
-    expect(setTier(S("normal", { skin_tone: ["st_fair"] }), "cats").dropped).toEqual(["Fair"]);
+    expect(setTier(S("normal", { skin_tone: ["st_fair"], freak_face: ["fn_freckles", "fn_dimples"], gender: ["male"] }), "cats").dropped).toEqual(["Skin color", "Features"]);
   });
 
   it("Reset all clears the picks and locks but keeps the type", () => {
@@ -312,7 +312,8 @@ describe("the prompt compiler", () => {
     expect(describeInfluencer(S("normal", { hair: ["hair_afro"] }))).toBe("A person, with an afro.");
     expect(describeInfluencer(S("normal", { hair: ["hair_long"], hair_colour: ["hc_platinum"] }))).toContain("long platinum blonde hair");
     expect(describeInfluencer(S("normal", { hair: ["hair_bald"], hair_colour: ["hc_red"] }))).toContain("a bald head");
-    expect(describeInfluencer(S("normal", { gender: ["female"], facial_hair: ["fh_none"], accessory: ["acc_none"] }))).toBe("A woman, clean-shaven, no accessories.");
+    expect(describeInfluencer(S("normal", { gender: ["female"], facial_hair: ["fh_none"], accessory: ["acc_none"] }))).toBe("A woman, no accessories.");
+    expect(describeInfluencer(S("normal", { gender: ["male"], facial_hair: ["fh_none"] }))).toBe("A man, clean-shaven.");
   });
 
   it("words the tier: realistic, bold caricature, extreme caricature, anthropomorphic {species}", () => {

@@ -126,7 +126,7 @@ export function TierPanel({ state, onTier, onSpecies, onBodyColor }: { state: In
         </span>
         <span className="min-w-0">
           <span className="block text-[13px] font-medium">{label}</span>
-          <span className="block truncate text-[12px] text-muted-foreground">{hint}</span>
+          <span className="block text-[12px] leading-snug text-muted-foreground">{hint}</span>
         </span>
       </button>
     );
@@ -140,7 +140,7 @@ export function TierPanel({ state, onTier, onSpecies, onBodyColor }: { state: In
         </div>
         <div className="space-y-2">
           <p className="text-[12px] font-medium text-muted-foreground">Creature</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{CREATURE_TYPES.map((c) => tile(c.id, c.label, `Anthropomorphic ${c.label.toLowerCase()}`))}</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{CREATURE_TYPES.map((c) => tile(c.id, c.label, `${c.species.length} species`))}</div>
         </div>
       </div>
       {creature && (
@@ -197,7 +197,7 @@ export function OptionTiles({ category, state, onPick }: { category: InfluencerC
   const Icon = CATEGORY_ICON[category.id] ?? Sparkles;
   const colour = category.kind === "color";
   return (
-    <div role="group" aria-label={category.label} className={cn("grid gap-2", colour ? "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4" : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4")}>
+    <div role="group" aria-label={category.label} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {category.options.map((o) => {
         const on = picked.includes(o.id);
         const conflict = on ? null : conflictFor(state, category.id, o.id);

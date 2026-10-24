@@ -13,6 +13,7 @@ import { EngineSwitch } from "@/components/studio/engine-switch";
 import { fileToList, type SlotValue } from "@/components/studio/media-slot";
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useEngine, useGenerations, useStatus } from "@/lib/api";
 import {
@@ -113,10 +114,17 @@ export function InfluencerBuilder() {
   const [modelId, setModelId] = useState("auto");
   const [ids, setIds] = useState<string[]>([]);
   const clothingInput = useRef<HTMLInputElement>(null);
+  const model = CLOUD_MODELS.find((m) => m.id === modelId) ?? CLOUD_MODELS[0];
 
   const categories = useMemo(() => categoriesFor(state.tier), [state.tier]);
   const category = categories.find((c) => c.id === active);
   const tab = category ? category.id : "tier";
+  // The rail scrolls sideways on phones: keep the open category in view (a summary chip can open any).
+  const railMoved = useRef(false);
+  useEffect(() => {
+    if (!railMoved.current) return void (railMoved.current = true);
+    document.getElementById(`ib-tab-${tab}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab]);
   const summary = describeInfluencer(state);
   const rows = summaryRows(state);
   const tierLabel = HUMAN_TIERS.find((t) => t.id === state.tier)?.label ?? CREATURE_TYPES.find((c) => c.id === state.tier)?.label ?? "";
@@ -174,7 +182,7 @@ export function InfluencerBuilder() {
         <EngineSwitch value={engine} onChange={setEngine} />
       </PageHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[184px_minmax(0,1fr)] xl:grid-cols-[184px_minmax(0,1fr)_360px]">
+      <div className="grid gap-4 lg:grid-cols-[212px_minmax(0,1fr)] xl:grid-cols-[212px_minmax(0,1fr)_340px]">
         {/* The rail: Character type, then the categories this type shows. Phones scroll it sideways inside itself. */}
         <div
           role="tablist"
@@ -271,7 +279,7 @@ export function InfluencerBuilder() {
           </div>
 
           <div className="space-y-3 rounded-2xl border bg-background p-4">
-            <div role="radiogroup" aria-label="How to start" onKeyDown={radioKeys} className="scrollbar-none flex max-w-full overflow-x-auto rounded-full bg-muted p-0.5">
+            <div role="radiogroup" aria-label="How to start" onKeyDown={radioKeys} className="grid grid-cols-3 rounded-2xl bg-muted p-0.5">
               {STARTS.map(([id, label]) => (
                 <button
                   key={id}
@@ -280,7 +288,7 @@ export function InfluencerBuilder() {
                   aria-checked={start === id}
                   tabIndex={radioTab(start === id)}
                   onClick={() => setStart(id)}
-                  className={cn("h-8 flex-1 shrink-0 rounded-full px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition outline-none focus-visible:ring-2 focus-visible:ring-ring", start === id && "bg-background text-foreground shadow-soft")}
+                  className={cn("min-h-8 rounded-[14px] px-1.5 py-1 text-[12.5px] leading-tight font-medium text-muted-foreground transition outline-none focus-visible:ring-2 focus-visible:ring-ring", start === id && "bg-background text-foreground shadow-soft")}
                 >
                   {label}
                 </button>
@@ -347,30 +355,26 @@ export function InfluencerBuilder() {
 
           <div className="space-y-3 rounded-2xl border bg-background p-4">
             {engine === "cloud" ? (
-              <div role="radiogroup" aria-label="Model" onKeyDown={radioKeys} className="space-y-1.5">
-                {CLOUD_MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={modelId === m.id}
-                    tabIndex={radioTab(modelId === m.id)}
-                    onClick={() => setModelId(m.id)}
-                    className={cn(
-                      "flex w-full min-w-0 items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                      modelId === m.id && "border-primary bg-brand-faint hover:bg-brand-faint-hover",
-                    )}
-                  >
-                    <span className={cn("mt-1 size-3 shrink-0 rounded-full border-2", modelId === m.id ? "border-primary bg-primary" : "border-border-strong")} />
-                    <span className="min-w-0">
-                      <span className="block text-[13px] font-medium">{m.label}</span>
-                      <span className="block text-[12px] leading-snug text-muted-foreground">
-                        {m.note}
-                        {m.higgsfield && !higgsfield && " · needs a Higgsfield key"}
-                      </span>
-                    </span>
-                  </button>
-                ))}
+              <div className="space-y-1.5">
+                <label htmlFor="ib-model" className="text-[13px] font-medium">
+                  Model
+                </label>
+                <Select value={modelId} onValueChange={setModelId}>
+                  <SelectTrigger id="ib-model" className="w-full" aria-describedby="ib-model-note">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLOUD_MODELS.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p id="ib-model-note" className="text-[12px] leading-snug text-muted-foreground">
+                  {model.note}
+                  {model.higgsfield && !higgsfield && " · needs a Higgsfield key"}
+                </p>
               </div>
             ) : (
               <p className="text-[12.5px] text-muted-foreground">
@@ -399,7 +403,7 @@ export function InfluencerBuilder() {
             <ResultsGrid
               items={mine}
               ratio={2}
-              className="sm:grid-cols-1 lg:grid-cols-2"
+              className="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2"
               onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
             />
             {latest && <SaveCharacter key={latest.id} item={latest} extra={start === "face" && photo && !photo.uploading ? [photo.ref] : []} defaultName={influencerName(state)} />}

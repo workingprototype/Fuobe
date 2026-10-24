@@ -3,6 +3,7 @@ import { getModel } from "@/lib/catalog";
 import type { Engine } from "@/lib/catalog/types";
 import { cleanState, planInfluencer, type InfluencerRun, type InfluencerStart } from "@/lib/influencer";
 import { createPipeline } from "./chains";
+import { createGenerations } from "./generations";
 import { planCaps, previewRun, runEngine } from "./photodump";
 
 /**
@@ -46,8 +47,13 @@ export function previewInfluencer(body: InfluencerBody) {
 
 export function createInfluencer(body: InfluencerBody) {
   const p = plan(body);
-  const title = p.steps[p.steps.length - 1].request.title ?? "AI Influencer";
+  const last = p.steps[p.steps.length - 1];
+  const title = last.request.title ?? "AI Influencer";
+  if (p.steps.length === 1) {
+    // One job: no "Step 1 of 1" on its tile.
+    const items = createGenerations({ ...last.request, batchTitle: title });
+    return { batchId: items[0]?.batchId ?? items[0]?.id, items, sheet: items[items.length - 1], notes: p.notes, modelId: p.modelId };
+  }
   const { batchId, items, byKey } = createPipeline(p.steps.map((s) => ({ ...s, request: { ...s.request, batchTitle: title } })));
-  const last = p.steps[p.steps.length - 1].key;
-  return { batchId, items, sheet: byKey[last], notes: p.notes, modelId: p.modelId };
+  return { batchId, items, sheet: byKey[last.key], notes: p.notes, modelId: p.modelId };
 }
