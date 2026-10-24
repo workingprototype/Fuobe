@@ -1,6 +1,6 @@
 // The case-file format (scripts/eval/cases/*.json): one suite per Fuobe Original, its targets per
 // engine, the recipe variants to compare, and the cases (prompt sets with pinned seeds, inputs,
-// references, training runs, shot lists). `pnpm eval:validate` and tests/eval-cases.test.ts check
+// references, training runs, shot lists). `pnpm eval:validate` and tests/eval-harness.test.ts check
 // every file against it; `schemaJson()` writes cases/case.schema.json for editors.
 import { z } from "zod";
 

@@ -129,3 +129,20 @@ def test_faces_on_drawn_faces_do_not_crash():
 def test_fixtures_are_where_the_tests_expect():
     assert (FIXTURES / "palette.png").exists()
     assert pathlib.Path(media.__file__).name == "media.py"
+
+
+def test_dinov2_style_embeddings_rank_the_matching_reference_first():
+    pytest.importorskip("torch")
+    pytest.importorskip("timm")
+    if not _weights_cached("timm/vit_small_patch14_dinov2.lvd142m"):
+        pytest.skip("DINOv2 weights aren't cached (pnpm eval:setup --download --dinov2)")
+    from fuobe_metrics import maths
+    from fuobe_metrics.models import Dino
+
+    d = Dino()
+    refs = d.images([media.load_image(FIXTURES / "references" / "warm-1.png")])
+    pics = d.images([media.load_image(FIXTURES / "references" / "warm-2.png"), media.load_image(FIXTURES / "palette.png")])
+    assert refs.shape == (1, 384) and abs(np.linalg.norm(refs[0]) - 1) < 1e-4
+    warm = maths.reference_similarity(pics[0], refs)["centroid"]
+    stripes = maths.reference_similarity(pics[1], refs)["centroid"]
+    assert warm > stripes

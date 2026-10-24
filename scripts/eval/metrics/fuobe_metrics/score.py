@@ -19,7 +19,7 @@ import numpy as np
 
 from . import maths
 from .media import audio_track, have_ffmpeg, images_of, kind_of, video_frames
-from .models import MODELS, Aesthetic, Clip, Faces, Missing, device_of
+from .models import MODELS, Aesthetic, Clip, Dino, Faces, Missing, device_of
 from .registry import FAMILIES
 
 VERSION = 1
@@ -74,6 +74,7 @@ class Scorer:
         self._clip_l14 = None
         self._aesthetic = None
         self._faces = None
+        self._dino = None
         self.used: dict[str, dict] = {}
         self.skipped: dict[str, str] = {}
 
@@ -91,6 +92,16 @@ class Scorer:
             self._aesthetic = Aesthetic(self._clip_l14)
             self.used["aesthetic"] = {"head": MODELS["aesthetic-v2"], "clip": MODELS["clip-l14"]}
         return self._aesthetic
+
+    def style_model(self):
+        """The image embedder style similarity uses: CLIP (default, already loaded for prompt adherence) or DINOv2."""
+        if getattr(self.args, "style_model", "clip") != "dinov2":
+            self.used["style"] = {**MODELS[self.args.clip_model], "key": self.args.clip_model}
+            return self.clip()
+        if self._dino is None:
+            self._dino = Dino(self.device)
+            self.used["style"] = {**MODELS["dinov2-small"], "key": "dinov2-small"}
+        return self._dino
 
     def faces(self):
         if self._faces is None:
@@ -135,8 +146,9 @@ class Scorer:
         pics = [p for o in outs for p in images_of(o, frames=4)]
         if not pics:
             return {"_note": "no picture to score"}
-        ref_emb = self.clip().images(refs)
-        out_emb = maths.l2norm(self.clip().images(pics).mean(axis=0))
+        model = self.style_model()
+        ref_emb = model.images(refs)
+        out_emb = maths.l2norm(model.images(pics).mean(axis=0))
         s = maths.reference_similarity(out_emb, ref_emb)
         return {"style": round(s["centroid"], 4), "styleNearest": round(s["nearest"], 4), "_refs": s["n"]}
 
@@ -259,6 +271,7 @@ def main(argv=None) -> int:
     ap.add_argument("--metrics", help="families to compute (default: each job's own list)")
     ap.add_argument("--device", default="cpu", help="cpu (default), cuda, mps or auto")
     ap.add_argument("--clip-model", default="clip-b32", choices=["clip-b32", "clip-l14"])
+    ap.add_argument("--style-model", default="clip", choices=["clip", "dinov2"], help="image embeddings for style similarity")
     ap.add_argument("--identity-model", default="auraface", choices=["auraface", "buffalo_l"])
     ap.add_argument("--accept-noncommercial", action="store_true", help="allow buffalo_l (non-commercial research licence)")
     ap.add_argument("--frames", type=int, default=24, help="frames sampled per clip for temporal metrics")
@@ -280,7 +293,7 @@ def main(argv=None) -> int:
 
     out_file = run_dir / "metrics.json"
     previous = json.loads(out_file.read_text(encoding="utf8")) if out_file.exists() and not args.force else {}
-    config = {"v": VERSION, "clip": args.clip_model, "identity": args.identity_model, "frames": args.frames, "fps": args.fps}
+    config = {"v": VERSION, "clip": args.clip_model, "style": args.style_model, "identity": args.identity_model, "frames": args.frames, "fps": args.fps}
     scorer = Scorer(args)
     jobs = read_jobs(run_dir)
     results: dict[str, dict] = {}

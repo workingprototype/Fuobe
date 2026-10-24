@@ -19,7 +19,7 @@ export function pythonCommand(env = process.env) {
 }
 
 /** Score a run folder; resolves with {ok, file, doc, skipped} and streams the scorer's progress to `log`. */
-export function scoreRun(dir, { metrics, device, clipModel, identityModel, acceptNoncommercial, force, log = () => {}, env = process.env } = {}) {
+export function scoreRun(dir, { metrics, device, clipModel, styleModel, identityModel, acceptNoncommercial, force, log = () => {}, env = process.env } = {}) {
   const py = pythonCommand(env);
   if (!py) return Promise.resolve({ ok: false, reason: "No Python for the metrics: run pnpm eval:setup (needs uv), or set FUOBE_EVAL_PYTHON" });
   const args = [
@@ -30,6 +30,7 @@ export function scoreRun(dir, { metrics, device, clipModel, identityModel, accep
     ...(metrics ? ["--metrics", metrics] : []),
     ...(device ? ["--device", device] : []),
     ...(clipModel ? ["--clip-model", clipModel] : []),
+    ...(styleModel ? ["--style-model", styleModel] : []),
     ...(identityModel ? ["--identity-model", identityModel] : []),
     ...(acceptNoncommercial ? ["--accept-noncommercial"] : []),
     ...(force ? ["--force"] : []),

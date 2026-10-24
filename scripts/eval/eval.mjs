@@ -7,9 +7,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadSuite, suiteFiles, validateAll } from "./lib/cases.mjs";
-import { compareRuns, compareText, promote, promoteText } from "./lib/compare.mjs";
+import { compareRuns, compareText, promote, promoteText, researchRecords } from "./lib/compare.mjs";
 import { scoreRun } from "./lib/metrics.mjs";
 import { METRICS_DIR, REPO_DIR, resultsDir } from "./lib/paths.mjs";
+import { RECIPES_FILE } from "./lib/recipes.mjs";
 import { writeReport } from "./lib/report.mjs";
 import { serveReview, writeReview } from "./lib/review.mjs";
 import { DEFAULT_CLOUD_CAP, money, runEval } from "./lib/run.mjs";
@@ -27,7 +28,7 @@ const num = (v, name) => {
 class Usage extends Error {}
 
 const COMMON = { url: { type: "string" }, token: { type: "string" }, out: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } };
-const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "identity-model": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
+const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, device: { type: "string" }, "clip-model": { type: "string" }, "style-model": { type: "string" }, "identity-model": { type: "string" }, "accept-noncommercial": { type: "boolean" }, force: { type: "boolean" } };
 
 const HELP = {
   run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
@@ -48,13 +49,13 @@ const HELP = {
   --comfy-url <url>      ComfyUI's address, for memory and its own timings (open engine; default COMFYUI_URL)
   --label <text>         a note for this run
   --no-metrics           don't score afterwards · --no-report: don't write the report either`,
-  report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--force]",
+  report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--style-model clip|dinov2] [--force]",
   review: "pnpm eval:review <runId|latest> [--against variants|references|<otherRunId>] [--port 4173] [--no-serve] [--limit n]",
   compare: "pnpm eval:compare <runA[:variant]> <runB[:variant]> [--fail-on clip,aesthetic] [--threshold 1|5%] [--per-case]",
-  promote: "pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain]",
+  promote: "pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--research file]]   --record writes the verdicts into the research JSON",
   history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
   validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
-  setup: "pnpm eval:setup [--identity] [--download] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
+  setup: "pnpm eval:setup [--identity] [--download [--dinov2]] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
 };
 
 function usage() {
@@ -114,7 +115,7 @@ const root = (values, env) => resultsDir(env, values.out);
 async function score(dir, v, ctx) {
   if (v["no-metrics"]) return null;
   ctx.note("Scoring the outputs…");
-  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], identityModel: v["identity-model"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
+  const r = await scoreRun(dir, { metrics: v.metrics, device: v.device, clipModel: v["clip-model"], styleModel: v["style-model"], identityModel: v["identity-model"], acceptNoncommercial: v["accept-noncommercial"], force: v.force, log: ctx.note, env: ctx.env });
   if (!r.ok) ctx.note(`Not scored: ${r.reason}. Timing and cost are in the report; pnpm eval:report ${path.basename(dir)} scores it later.`);
   return r;
 }
@@ -287,11 +288,26 @@ async function compare(args, ctx) {
 }
 
 async function promoteCmd(args, ctx) {
-  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" } }, { positionals: true });
+  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" }, record: { type: "boolean" }, research: { type: "string" } }, { positionals: true });
   if (v.help) return ctx.print(HELP.promote), 0;
   const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
   const doc = promote(dir, { candidate: v.candidate, alternatives: list(v.against) });
   ctx.print(v.json ? JSON.stringify(doc, null, 2) : promoteText(doc));
+  if (!v.record) return 0;
+  // --record: the verdicts go into the research JSON for a person to review (git diff), never a default.
+  if (doc.engine === "demo") throw new Error("A demo run measures the harness, not models: there is nothing to record in the research.");
+  const records = researchRecords(doc);
+  if (!records.length) return ctx.note("No look or motion in this run to record."), 0;
+  const file = path.resolve(v.research ?? path.join(REPO_DIR, RECIPES_FILE));
+  const recordsFile = path.join(dir, "research-records.json");
+  fs.writeFileSync(recordsFile, `${JSON.stringify(records, null, 2)}\n`);
+  const py = ctx.env.FUOBE_EVAL_PYTHON ?? (process.platform === "win32" ? "python" : "python3");
+  const r = spawnSync(py, ["-I", path.join(METRICS_DIR, "fuobe_metrics", "research.py"), recordsFile, file], { encoding: "utf8", env: ctx.env });
+  if (r.error) throw new Error(`--record needs Python 3 (${py} isn't there; set FUOBE_EVAL_PYTHON)`);
+  if (r.status !== 0) throw new Error(`Recording failed: ${(r.stderr || r.stdout).trim().split("\n").at(-1)}`);
+  const res = JSON.parse(r.stdout);
+  ctx.note(`Recorded ${res.recorded} result${res.recorded === 1 ? "" : "s"} in ${path.relative(REPO_DIR, file) || file} (each entry's "eval" list). Review the diff; recipes and defaults change only by hand.`);
+  for (const m of res.missing) ctx.note(`  not in the research: ${JSON.stringify(m)}`);
   return 0;
 }
 
@@ -333,7 +349,7 @@ async function validate(args, ctx) {
 }
 
 async function setup(args, ctx) {
-  const { values: v } = parse(args, { identity: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
+  const { values: v } = parse(args, { identity: { type: "boolean" }, dinov2: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
   const step = (cmd, a, opts = {}) => {
     ctx.note(`$ ${cmd} ${a.join(" ")}`);
     const r = spawnSync(cmd, a, { cwd: METRICS_DIR, stdio: "inherit", env: ctx.env, ...opts });
@@ -344,7 +360,7 @@ async function setup(args, ctx) {
   if (!fs.existsSync(path.join(METRICS_DIR, py))) step("uv", ["venv", ".venv", "--python", ">=3.11"]);
   step("uv", ["pip", "install", "--python", py, "-r", "requirements.txt", "--torch-backend", v["torch-backend"] ?? "cpu"]);
   if (v.identity) step("uv", ["pip", "install", "--python", py, "-r", "requirements-identity.txt"]);
-  if (v.download) step(py, ["-m", "fuobe_metrics.download", ...(v.identity ? ["--identity"] : [])]);
+  if (v.download) step(py, ["-m", "fuobe_metrics.download", ...(v.identity ? ["--identity"] : []), ...(v.dinov2 ? ["--dinov2"] : [])]);
   ctx.print(`Metrics ready in ${path.join(METRICS_DIR, ".venv")}${v.download ? "" : " (weights download on first use, or run pnpm eval:setup --download)"}.`);
   return 0;
 }

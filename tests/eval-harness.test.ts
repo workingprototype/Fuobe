@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -370,6 +371,40 @@ describe("report, blind review, compare and promote", () => {
     // Demo runs never promote anything.
     const demo = fakeRun("fake-demo-1", "demo", { ...scored("recipe", 0.9, 30), ...scored("prompt-only", 0.1, 30) });
     expect(compare.promote(demo).results[0].reasons[0]).toBe("demo media, not model output");
+  });
+
+  it("promote --record writes each verdict into the research entry it measured, and nothing else", async () => {
+    const python = spawnSync("python3", ["--version"]).status === 0 ? "python3" : null;
+    if (!python) return; // no Python 3 here: the pytest covers the writer where there is one
+    const research = path.join(process.cwd(), "docs/research/fuobe-originals-recipes-5.json");
+    const copy = path.join(dir, "research-copy.json");
+    fs.copyFileSync(research, copy);
+    const before = fs.readFileSync(copy, "utf8");
+    const look = "464ea177-8d40-4940-8d9d-b438bab269c7";
+    // fake-open-2 has half strength beating the recipe: give its rows the look they measured.
+    const runDir = path.join(results, "fake-open-2");
+    const rows = store.latestJobs(runDir).map((r) => ({ ...r, recipe: { ...r.recipe, look: { id: look, slug: "v1-general" }, ...(r.variant === "half-strength" && { applied: [{ file: "a.safetensors", strength: 0.35 }] }) } }));
+    fs.writeFileSync(path.join(runDir, "jobs.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const run = async (args: string[]) => {
+      const err = sink();
+      const code = await evalCli.main(["promote", ...args, "--record", "--research", copy], { stdout: sink().stream, stderr: err.stream, env: { ...process.env, FUOBE_EVAL_RESULTS: results, FUOBE_EVAL_PYTHON: python } });
+      return { code, stderr: err.text() };
+    };
+    const r = await run(["fake-open-2"]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/Recorded 1 result/);
+    await run(["fake-open-2"]); // again: the record is replaced, not added
+    const after = JSON.parse(fs.readFileSync(copy, "utf8"));
+    const entry = after.presets.find((p: { id: string }) => p.id === look);
+    expect(entry.eval).toHaveLength(1);
+    expect(entry.eval[0]).toMatchObject({ engine: "open", case: "soul/look-a", runId: "fake-open-2", verdict: "lower strengths", mainMetric: "style", suggestedLoras: [{ file: "a.safetensors", strength: 0.35 }] });
+    // Only the record and its convention line are new: recipes, strengths and the file's format stay.
+    delete entry.eval;
+    delete after.conventions.eval;
+    expect(after).toEqual(JSON.parse(before));
+    expect(fs.readFileSync(copy, "utf8")).not.toMatch(/\\u[0-9a-f]{4}/);
+    // Demo runs have nothing to record.
+    expect((await run(["fake-demo-1"])).stderr).toMatch(/demo run measures the harness/);
   });
 
   it("compare prints wins and losses and fails when a chosen metric regresses beyond the threshold", async () => {

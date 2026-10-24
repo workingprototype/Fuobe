@@ -168,6 +168,8 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const reasons = [];
     const notes = [];
     let verdictText;
+    /** The strengths a winning half-strength variant ran at: what the record suggests. */
+    let suggested = null;
     const recipe = ok[0]?.recipe ?? mine[0]?.recipe;
     // 1. licence and completeness
     const applied = recipe?.applied ?? recipe?.sent?.loras ?? [];
@@ -191,7 +193,10 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
       if (mc.candidate == null || mc.alternative == null) reasons.push(`no ${main} scores against ${alt} (run pnpm eval:report)`);
       else if (mc.candidate < mc.alternative) {
         reasons.push(`${alt} scores higher on ${main} (${fmt(main, mc.alternative)} vs ${fmt(main, mc.candidate)})`);
-        if (/half/.test(alt)) notes.push("half strength wins: the LoRAs over-cook here — lower their strengths in the research JSON and run again");
+        if (/half/.test(alt)) {
+          notes.push("half strength wins: the LoRAs over-cook here — lower their strengths in the research JSON and run again");
+          suggested = (theirs[0].recipe?.applied ?? theirs[0].recipe?.sent?.loras ?? []).map((l) => ({ file: l.file, strength: l.strength ?? 1 }));
+        }
       }
       if (row.clip.candidate != null && row.clip.alternative != null && row.clip.candidate < row.clip.alternative - rule.clipGuard) reasons.push(`it follows the prompt worse than ${alt} (CLIP ${fmt("clip", row.clip.candidate)} vs ${fmt("clip", row.clip.alternative)})`);
       if (main !== "aesthetic" && row.aesthetic.candidate != null && row.aesthetic.alternative != null && row.aesthetic.candidate < row.aesthetic.alternative - rule.aestheticGuard) reasons.push(`it looks worse than ${alt} (aesthetic ${fmt("aesthetic", row.aesthetic.candidate)} vs ${fmt("aesthetic", row.aesthetic.alternative)})`);
@@ -206,7 +211,7 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     else if (forCand + forAlt && forCand / (forCand + forAlt) < rule.minPreference) reasons.push(`people preferred it ${Math.round((100 * forCand) / (forCand + forAlt))}% of the time, the rule wants ${Math.round(rule.minPreference * 100)}%`);
     // Over-cooking is its own verdict: the fix is a lower strength, not another recipe.
     verdictText = !reasons.length ? "promote" : notes.length ? "lower strengths" : "hold";
-    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, candidate: cand, verdict: verdictText, reasons, notes, mainMetric: main, against, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null });
+    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, target: researchTarget(recipe), candidate: cand, verdict: verdictText, reasons, notes, mainMetric: main, against, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null, ...(suggested && { suggested }) });
   }
   const doc = {
     runId: L.run.runId,
@@ -221,6 +226,40 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
   };
   writeJson(path.join(dir, "promote.json"), doc);
   return doc;
+}
+
+/** Which research entry a case measured: a Soul look (presets[id]) or a motion / effect (motionsEffects). */
+function researchTarget(recipe) {
+  if (recipe?.kind === "soul-look" && recipe.look?.id) return { look: recipe.look.id };
+  const motion = recipe?.motion ?? (recipe?.presets?.length === 1 ? recipe.presets[0] : null);
+  return motion ? { motion } : null;
+}
+
+const round = (x) => (typeof x === "number" ? Math.round(x * 10000) / 10000 : x);
+
+/**
+ * The records `promote --record` writes into the research JSON (fuobe_metrics/research.py puts them in
+ * place): one per case that measured a look or a motion. Demo runs have nothing to record.
+ */
+export function researchRecords(doc, { date = new Date().toISOString().slice(0, 10) } = {}) {
+  if (doc.engine === "demo") return [];
+  return doc.results
+    .filter((r) => r.target)
+    .map((r) => ({
+      target: r.target,
+      engine: doc.engine,
+      case: r.caseId,
+      runId: doc.runId,
+      date,
+      candidate: r.candidate,
+      verdict: r.verdict,
+      reasons: r.reasons,
+      ...(r.notes.length && { notes: r.notes }),
+      mainMetric: r.mainMetric,
+      against: r.against.map((a) => Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v && typeof v === "object" ? { candidate: round(v.candidate), alternative: round(v.alternative) } : v]))),
+      loras: r.recipe?.loras ?? [],
+      ...(r.suggested && { suggestedLoras: r.suggested }),
+    }));
 }
 
 export function promoteText(doc) {

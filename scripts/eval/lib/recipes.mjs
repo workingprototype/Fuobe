@@ -114,6 +114,7 @@ export function recipeFor(kind, kase) {
     if (!m) throw new Error(`No research entry for the motion or effect “${kase.motion}” (${RECIPES_FILE} → motionsEffects)`);
     return {
       kind: m.kind,
+      motion: kase.motion,
       source: `${RECIPES_FILE} → motionsEffects (${m.presets.join(", ")})`,
       presets: m.presets,
       status: m.status,

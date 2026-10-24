@@ -66,9 +66,13 @@ MODELS = {
         "licence": "non-commercial research only (insightface model packs)",
         "commercial": False,
     },
+    # Style similarity on image features alone (--style-model dinov2): DINOv2 ViT-S/14 as timm packs it.
     "dinov2-small": {
-        "repo": "facebook/dinov2-small",
-        "licence": "Apache-2.0",
+        "arch": "vit_small_patch14_dinov2.lvd142m",
+        "repo": "timm/vit_small_patch14_dinov2.lvd142m",
+        "file": "model.safetensors",
+        "revision": "4610ca143709d58a633b6397a74412c2c3842454",
+        "licence": "Apache-2.0 (facebookresearch/dinov2)",
         "commercial": True,
     },
 }

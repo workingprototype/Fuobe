@@ -78,6 +78,37 @@ class Clip:
             return self.torch.nn.functional.normalize(e, dim=-1).float().cpu().numpy()
 
 
+class Dino:
+    """DINOv2 ViT-S/14 image embeddings through timm (Apache-2.0), at 224 px for the CPU: a style and content
+    descriptor that, unlike CLIP, owes nothing to captions (--style-model dinov2)."""
+
+    def __init__(self, device: str = "cpu"):
+        try:
+            import timm  # noqa: PLC0415
+        except ImportError as e:
+            raise Missing("timm isn't installed: run pnpm eval:setup") from e
+        torch = _torch()
+        m = MODELS["dinov2-small"]
+        weights = _download("dinov2-small", m["file"])
+        self.model = timm.create_model(m["arch"], pretrained=True, pretrained_cfg_overlay={"file": weights}, num_classes=0, img_size=224)
+        self.model.eval().to(device)
+        cfg = {**timm.data.resolve_data_config({}, model=self.model), "input_size": (3, 224, 224)}
+        self.preprocess = timm.data.create_transform(**cfg)
+        self.device = device
+        self.torch = torch
+
+    def images(self, pictures) -> np.ndarray:
+        if not pictures:
+            return np.zeros((0, 1))
+        with self.torch.no_grad():
+            out = []
+            for i in range(0, len(pictures), 16):
+                batch = self.torch.stack([self.preprocess(p.convert("RGB")) for p in pictures[i : i + 16]]).to(self.device)
+                e = self.model(batch)
+                out.append(self.torch.nn.functional.normalize(e, dim=-1).float().cpu().numpy())
+        return np.concatenate(out)
+
+
 class Aesthetic:
     """The LAION improved aesthetic predictor (v2, sac+logos+ava1 linear MSE) on CLIP ViT-L/14 embeddings: about 1–10."""
 
