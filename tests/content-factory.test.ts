@@ -351,11 +351,20 @@ describe("Generate in Claude", () => {
     expect(m).toContain("Make a video about: What if cars could fly");
     expect(m).toContain('load_skill "faceless-video"');
     expect(m).toContain("estimate_job");
-    expect(m).toMatch(/Run faceless_episode once per episode with style ".+", aspect_ratio "9:16" and voice "JBFqnCBsd6RMkjVDRZzb"/);
+    expect(m).toMatch(/Run faceless_episode once per episode with style_id "colorful-3d", style ".+", aspect_ratio "9:16" and voice "JBFqnCBsd6RMkjVDRZzb"/);
     expect(m).toContain("never the reference's people");
     expect(m).not.toContain("voice_sample");
     expect(m).not.toMatch(/\n\n\n/);
     expect(claudeMessage({ ...base, episodes: 1, engine: "open" })).toMatch(/^Make a faceless short-video episode[\s\S]*voice_sample/);
+  });
+
+  it("splits a long episode into parts of at most 8 scenes (the tool's limit)", () => {
+    // 1 min fits in 8 scenes of 7–8 s; 3 min needs 18 scenes of 10 s: 3 parts of 6.
+    expect(claudeMessage({ ...base, length: 60 })).toMatch(/write 8 scenes: narration of at most \d+ words each \(about 8 s spoken\)/);
+    const m = claudeMessage({ ...base, length: 180, episodes: 1 });
+    expect(m).toMatch(/as 3 parts of about 6 scenes/);
+    expect(m).toContain("Run faceless_episode once per part");
+    expect(claudeMessage({ ...base, length: 30 })).not.toContain("parts of");
   });
 
   it("stays within 64 KB however long the prompt is", () => {

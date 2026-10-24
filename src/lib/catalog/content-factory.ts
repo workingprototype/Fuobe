@@ -983,6 +983,8 @@ export function briefCostUsd(o: { seconds: number; framesUsd?: number; transcrib
 
 /** Research: the composed message is capped at 64 KB. */
 export const MAX_CLAUDE_MESSAGE = 64 * 1024;
+/** faceless_episode (src/server/assist/studio-tools.ts) takes 2–8 scenes a call: a longer episode goes in parts. */
+export const TOOL_MAX_SCENES = 8;
 
 export function mcpCommand(origin: string, needsToken: boolean): string {
   return `claude mcp add --transport http fuobe ${origin.replace(/\/+$/, "")}/api/mcp${needsToken ? ' --header "Authorization: Bearer fuobe_…"' : ""}`;
@@ -1001,8 +1003,12 @@ export function claudeMessage(o: {
   reference?: string | null;
 }): string {
   const style = animationStyle(o.animation);
-  const sceneSecs = sceneSecondsFor(style, o.brief.shotSeconds);
+  // The tool takes up to 8 scenes: longer scenes first (up to 10 s each), then the episode in parts.
+  const sceneSecs = Math.min(BLOCK_SECONDS, Math.max(sceneSecondsFor(style, o.brief.shotSeconds), Math.round(o.length / TOOL_MAX_SCENES)));
   const scenes = scenesFor(o.length, sceneSecs);
+  const parts = Math.ceil(scenes / TOOL_MAX_SCENES);
+  const perPart = Math.max(2, Math.ceil(scenes / parts));
+  const styleId = getStyle(o.brief.styleId).id;
   const words = wordsFor(sceneSecs);
   const look = `${getStyle(o.brief.styleId).look}. ${o.brief.look}`;
   const n = Math.max(1, Math.min(MAX_EPISODES, o.episodes));
@@ -1020,9 +1026,12 @@ export function claudeMessage(o: {
     "How to make it:",
     `1. Load the faceless-video skill (load_skill "faceless-video").`,
     n > 1 ? `2. Plan ${n} episode titles that build on each other, and show them to me.` : "2. Pick a specific, clickable title.",
-    `3. For each episode write ${scenes} scene${scenes === 1 ? "" : "s"}: narration of at most ${words} words each (about ${sceneSecs} s spoken), the first one a hook as the brief says, and a visual for each in the look above. ${style.writer}`,
-    `4. Price each episode with estimate_job (tool "faceless_episode") and wait for my OK before running anything.`,
-    `5. Run faceless_episode once per episode with style "${look.replace(/"/g, "'").slice(0, 600)}", aspect_ratio "${o.aspect}"${o.voice ? ` and voice "${o.voice}"` : ""}, then follow it with check_generations and give me the links when they're done.`,
+    `3. For each episode write ${Math.max(2, scenes)} scenes: narration of at most ${words} words each (about ${sceneSecs} s spoken), the first one a hook as the brief says, and a visual for each in the look above. ${style.writer}`,
+    parts > 1
+      ? `   faceless_episode takes up to ${TOOL_MAX_SCENES} scenes a call, so make each episode as ${parts} parts of about ${perPart} scenes (“Part 1”, “Part 2”…), one call per part.`
+      : "",
+    `4. Price each ${parts > 1 ? "part" : "episode"} with estimate_job (tool "faceless_episode") and wait for my OK before running anything.`,
+    `5. Run faceless_episode once per ${parts > 1 ? "part" : "episode"} with style_id "${styleId}", style "${look.replace(/"/g, "'").slice(0, 600)}", aspect_ratio "${o.aspect}"${o.voice ? ` and voice "${o.voice}"` : ""}, then follow it with check_generations and give me the links when they're done.`,
     o.engine === "open" ? "The open-source engine clones the narrator's voice: ask me for a 10–60 s voice sample (voice_sample) before running." : "",
   ].filter((l, i, all) => l !== "" || (all[i - 1] !== "" && i > 0));
   let out = lines.join("\n");
@@ -1048,6 +1057,7 @@ export interface SeriesReference {
   seconds?: number;
   width?: number;
   height?: number;
+  fps?: number;
 }
 
 export type AnalysisStatus = "reading" | "ready" | "failed";
