@@ -68,7 +68,7 @@
       "loras": "none"
     },
     "original": {
-      "description": "The shipped Original on the server (O2's fuobe-soul): the look id goes in presetId and the server applies its own recipe",
+      "description": "The shipped Original on the server (O2's fuobe-soul): the look's Fuobe id (v1-general) goes in presetId and the server applies its own recipe",
       "models": {
         "open": [
           "fuobe-soul"

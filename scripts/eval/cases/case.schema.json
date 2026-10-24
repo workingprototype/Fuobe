@@ -640,10 +640,7 @@
           },
           "lookParam": {
             "type": "string",
-            "enum": [
-              "presetId",
-              "styleId"
-            ]
+            "const": "presetId"
           },
           "models": {
             "type": "object",

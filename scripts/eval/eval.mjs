@@ -57,6 +57,7 @@ const HELP = {
   promote: "pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--research file]]   --record writes the verdicts into the research JSON",
   history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
   validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
+  trash: "pnpm eval:trash <runId> [--dry-run]   moves the run's generations to that Fuobe's Trash (its results here stay)",
   setup: "pnpm eval:setup [--identity] [--download [--dinov2]] [--torch-backend cpu|auto|cu128…]   the metrics venv (needs uv)",
 };
 
@@ -86,7 +87,7 @@ export async function main(argv, io = {}) {
     print(rest[0] && HELP[rest[0]] ? HELP[rest[0]] : usage());
     return 0;
   }
-  const commands = { run, report, review, compare, promote: promoteCmd, history, validate, setup };
+  const commands = { run, report, review, compare, promote: promoteCmd, history, validate, setup, trash };
   if (!commands[command]) {
     note(`Unknown command “${command}”.\n${usage()}`);
     return 2;
@@ -352,6 +353,37 @@ async function validate(args, ctx) {
   for (const s of stale) ctx.print(`✗ cases/${s} is out of date with the research: node scripts/eval/gen-cases.mjs`);
   bad += stale.length;
   return bad ? 1 : 0;
+}
+
+/**
+ * A run's generations to the Trash of the Fuobe it ran on: the harness's renders stay out of the Library
+ * anyway (feature "eval" is a helper), but a studio route's steps carry the studio's own feature. The run's
+ * folder here keeps its outputs and scores. The token rides only to that server, as with every command.
+ */
+async function trash(args, ctx) {
+  const { values: v, positionals } = parse(args, { "dry-run": { type: "boolean" } }, { positionals: true });
+  if (v.help) return ctx.print(HELP.trash), 0;
+  const { dir, runId } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
+  const run = JSON.parse(fs.readFileSync(path.join(dir, "run.json"), "utf8"));
+  if (!run.server?.url && !v.url) throw new Error(`${runId} doesn't say which Fuobe it ran on: name it with --url`);
+  // Every attempt's generations, and a studio route's steps.
+  const ids = [...new Set(readJsonl(path.join(dir, "jobs.jsonl")).flatMap((r) => [...(r.generations ?? []), ...(r.steps ?? [])]))];
+  const { client, target } = connect({ url: v.url ?? run.server?.url, token: v.token }, { env: ctx.env, home: ctx.io.home, fetch: ctx.io.fetch });
+  if (v["dry-run"]) return ctx.print(`${ids.length} generation${ids.length === 1 ? "" : "s"} of ${runId} would go to the Trash on ${target.url}`), 0;
+  let moved = 0;
+  let gone = 0;
+  for (const id of ids) {
+    try {
+      await client.request("DELETE", `/api/generations/${encodeURIComponent(id)}`);
+      moved++;
+    } catch (e) {
+      if (e.status === 404) gone++;
+      else throw e;
+    }
+  }
+  if (v.json) return ctx.print(JSON.stringify({ runId, server: target.url, moved, gone }, null, 2)), 0;
+  ctx.print(`Moved ${moved} generation${moved === 1 ? "" : "s"} of ${runId} to the Trash on ${target.url}${gone ? ` (${gone} were gone already)` : ""}. The run's results here stay; empty the Trash in Fuobe to delete them for good.`);
+  return 0;
 }
 
 async function setup(args, ctx) {

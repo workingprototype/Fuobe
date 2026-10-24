@@ -43,6 +43,7 @@ const runner = (await import("../scripts/eval/lib/run.mjs")) as {
   lorasMissing: (jobs: object[], installed: string[] | null) => { file: string; url?: string; jobs: number }[] | null;
   trainingPrice: (target: { price?: string } | null) => number | null;
 };
+const plan = (await import("../scripts/eval/lib/plan.mjs")) as { expandJobs: (suite: object, opts: object) => { request: Record<string, unknown> & { loras?: unknown[] } }[] };
 const report = (await import("../scripts/eval/lib/report.mjs")) as { writeReport: (dir: string, root: string) => Record<string, unknown> };
 const review = (await import("../scripts/eval/lib/review.mjs")) as {
   writeReview: (run: object, opts?: object) => { pairs: number };
@@ -60,6 +61,7 @@ const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Res
   ["GET", /^\/api\/models$/, (r) => models.GET(r)],
   ["POST", /^\/api\/generations$/, (r) => generations.POST(r)],
   ["GET", /^\/api\/generations\/([^/]+)$/, (r, m) => generation.GET(r, ctx({ id: m[1] }))],
+  ["DELETE", /^\/api\/generations\/([^/]+)$/, (r, m) => generation.DELETE(r, ctx({ id: m[1] }))],
   ["POST", /^\/api\/uploads$/, (r) => uploads.POST(r)],
   ["GET", /^\/api\/files\/(.+)$/, (r, m) => files.GET(r, ctx({ path: m[1].split("/").map(decodeURIComponent) }))],
   ["POST", /^\/api\/elements$/, (r) => elements.POST(r)],
@@ -306,6 +308,24 @@ describe("the runner on the demo provider", () => {
     } finally {
       setSetting("falKey", "");
     }
+  });
+
+  it("keeps its renders out of the Library, and trash moves a run's generations to the Trash", async () => {
+    const { listGenerations } = await import("@/server/generations");
+    const runDir = path.join(results, selftestRun);
+    const ids = [...new Set(store.readJsonl(path.join(runDir, "jobs.jsonl")).flatMap((r) => (r.generations as string[] | undefined) ?? []))];
+    expect(ids.length).toBeGreaterThanOrEqual(5);
+    // feature "eval" is a helper: the Library and Home feeds leave it out unless they ask for steps.
+    const listed = (o: object) => new Set(listGenerations({ limit: 1000, ...o }).map((g) => g.id));
+    expect(ids.filter((id) => listed({}).has(id))).toEqual([]);
+    expect(ids.filter((id) => listed({ steps: true }).has(id))).toEqual(ids);
+    const dry = await cli(["trash", selftestRun, "--dry-run"]);
+    expect(dry.stdout).toMatch(new RegExp(`${ids.length} generations of ${selftestRun} would go to the Trash on ${base.replace(/[.]/g, "\\.")}`));
+    const before = seen.filter((x) => x.startsWith("DELETE /api/generations/")).length;
+    const r = await cli(["trash", selftestRun]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(new RegExp(`Moved ${ids.length} generations of ${selftestRun} to the Trash`));
+    expect(seen.filter((x) => x.startsWith("DELETE /api/generations/")).length - before).toBe(ids.length);
   });
 
   it("resume runs only what isn't done", async () => {
@@ -605,6 +625,14 @@ describe("runEval as a library", () => {
     ]);
     // ComfyUI didn't answer: nothing to say.
     expect(runner.lorasMissing(jobs, null)).toBeNull();
+  });
+
+  it("sends the shipped Soul Original the look's Fuobe id, never a Higgsfield one", () => {
+    const { expandJobs } = plan;
+    const jobs = expandJobs(cases.loadSuite("soul"), { engine: "open", looks: ["v1-general"], variants: ["original"], prompts: 1 });
+    expect(jobs[0].request).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-general" });
+    expect(jobs[0].request.loras).toBeUndefined();
+    expect(JSON.stringify(jobs[0].request)).not.toContain("464ea177-8d40-4940-8d9d-b438bab269c7");
   });
 
   it("expands, prices and lists a dry run without uploading anything", async () => {

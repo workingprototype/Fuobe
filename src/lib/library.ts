@@ -124,11 +124,12 @@ export function listOrder(f: Pick<FeedFilter, "trashed" | "pinned">): (a: Genera
  * Jobs nobody asked to see on their own: the steps a chain runs before its result (a Shorts cut, a
  * Click to Ad voiceover, an Ad Multiplier hook: every "<studio>-step" feature), and helper jobs a
  * studio starts by itself (a Mixed Media preview frame, a Faceless channel avatar or narrator sample,
- * a moodboard's cover). The Library and the home feed leave them out unless "Show steps" is on; a
- * list that names its features (a studio reading its own steps) gets what it asks for.
+ * a moodboard's cover), and the evaluation harness's runs (scripts/eval: hundreds of test renders). The
+ * Library and the home feed leave them out unless "Show steps" is on; a list that names its features
+ * (a studio reading its own steps) gets what it asks for.
  */
 export const HELPER_SUFFIX = "-step";
-export const HELPER_FEATURES = ["mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard"] as const;
+export const HELPER_FEATURES = ["mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard", "eval"] as const;
 
 export function isHelperFeature(feature: string): boolean {
   return feature.endsWith(HELPER_SUFFIX) || (HELPER_FEATURES as readonly string[]).includes(feature);

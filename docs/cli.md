@@ -229,13 +229,15 @@ tools and Fuobe's skills as prompts.
 
 ### `fuobe eval` — measure the Fuobe Originals
 
-From a Fuobe checkout, `fuobe eval <command>` is the evaluation harness (`pnpm eval:<command>`), run
-against the same server and token as the other commands:
+From a Fuobe checkout, `fuobe eval <command>` is the evaluation harness (`pnpm eval:<command>`). It
+finds the server and token as the other commands do, so the saved token goes only to the server it was
+saved for, even when `--url` names another:
 
 ```bash
 fuobe eval run --suite selftest --engine demo        # a free self-test of the harness
 fuobe eval run --suite soul --engine open --looks v1-general --variants recipe,prompt-only
 fuobe eval compare latest~1 latest --fail-on clip --threshold 1   # exit 1 on a regression
+fuobe eval trash latest                              # the run's generations to that Fuobe's Trash
 ```
 
 See [`scripts/eval/README.md`](../scripts/eval/README.md) for the suites, metrics, blind review and

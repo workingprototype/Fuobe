@@ -25,7 +25,8 @@
     "eval:promote": "node scripts/eval/eval.mjs promote",
     "eval:history": "node scripts/eval/eval.mjs history",
     "eval:validate": "node scripts/eval/eval.mjs validate",
-    "eval:setup": "node scripts/eval/eval.mjs setup"
+    "eval:setup": "node scripts/eval/eval.mjs setup",
+    "eval:trash": "node scripts/eval/eval.mjs trash"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

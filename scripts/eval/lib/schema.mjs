@@ -108,8 +108,8 @@ const Variant = z
     preset: z.boolean().optional(),
     /** Motions / effects: 0 runs the preset's prompt without its catalog LoRAs. */
     presetStrength: z.number().min(0).max(1).optional(),
-    /** The server's own Original applies the look: send the case's look id in this field and no client recipe. */
-    lookParam: z.enum(["presetId", "styleId"]).optional(),
+    /** The server's own Original applies the look: send the look's Fuobe id ("v1-general") as presetId and no client recipe. */
+    lookParam: z.literal("presetId").optional(),
     /** Other models for this variant (A/B a model against the recipe). A case can name its own (variantModels). */
     models: PerEngine(z.array(z.string().min(1)).min(1)).optional(),
     /** The engines this variant runs on (a partner model is a cloud model: on the others it would repeat another variant). */

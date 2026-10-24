@@ -148,7 +148,6 @@ export function expandJobs(suite, opts) {
             seed,
           };
           const extra = { ...target?.extra, ...suite.defaults.extra, ...kase.extra, ...variant.extra };
-          if (lookOnServer && variant.lookParam === "styleId") params.styleId = recipe.look.id;
           if (Object.keys(extra).length) params.extra = extra;
           const request = {
             feature: "eval",
@@ -157,7 +156,8 @@ export function expandJobs(suite, opts) {
             // A training case's "{character}" becomes the trained element's @handle in the runner.
             ...(prompt && { prompt }),
             ...(p.negative && { negativePrompt: p.negative }),
-            ...(lookOnServer && variant.lookParam === "presetId" ? { presetId: recipe.look.id } : presetId ? { presetId } : {}),
+            // The Original applies the look on the server, named by its Fuobe id ("v1-general"): a Higgsfield look id never leaves the harness.
+            ...(lookOnServer ? { presetId: recipe.look.slug } : presetId ? { presetId } : {}),
             ...(variant.presetStrength !== undefined && presetId && { presetStrength: variant.presetStrength }),
             ...(loras.length && { loras }),
             params,

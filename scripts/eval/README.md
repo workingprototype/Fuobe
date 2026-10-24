@@ -59,6 +59,10 @@ harness measures what a user gets.
   fal or Replicate.
 - **The model it names.** A job the server would run on another model than the one the case names
   (a studio's default maker, say) is skipped, since it wouldn't measure that model.
+- **Your Library stays yours.** Every generation the harness starts has the feature `eval`, a helper
+  like a studio's steps: the Library and Home feeds leave it out unless **Show steps** is on. A studio
+  route's steps (Genjutsu, Mixed Media) carry that studio's feature instead. `pnpm eval:trash <runId>`
+  moves a run's generations, studio steps included, to that Fuobe's Trash.
 - On the open engine the harness also reads ComfyUI directly (`--comfy-url`, default `COMFYUI_URL`
   or `http://127.0.0.1:8188`). It uses three read-only endpoints: `/system_stats` for memory,
   `/history` for ComfyUI's own timings, and `/object_info/LoraLoader` to name the LoRAs ComfyUI
@@ -76,6 +80,7 @@ harness measures what a user gets.
 | `pnpm eval:history` | Lists runs, newest first, and the per-case scores of one case (`--case soul/v1-general`) |
 | `pnpm eval:validate` | Checks every case file, and that the generated suites match the research |
 | `pnpm eval:setup` | Creates the metrics venv with uv (`--identity`, `--download`, `--dinov2`, `--torch-backend`) |
+| `pnpm eval:trash <runId>` | Moves the run's generations to the Trash of the Fuobe it ran on (`--dry-run` counts them). The run's folder here keeps its outputs and scores |
 
 Every command takes `--json`. Runs are named by id, by path, or as `latest`, `latest~1` (the run
 before) and so on. `pnpm eval:<command> --help` lists each command's options.
@@ -130,8 +135,9 @@ Soul variants, all on the same subjects and seeds:
 - **prompt-only**: the same words without LoRAs. Does each LoRA earn its slot?
 - **half-strength**: every LoRA at half strength. This is the over-cooking check.
 - **plain**: the base model with the subject alone.
-- **original**: the shipped `fuobe-soul` Original, which applies the look on the server. It is
-  skipped until that Original exists.
+- **original**: the shipped `fuobe-soul` Original, which applies the look on the server. The look
+  goes as its Fuobe id in `presetId` (`v1-general`, the slug `--looks` takes); a Higgsfield look id never
+  leaves the harness. O2's look ids should match these slugs. It is skipped until that Original exists.
 
 DoP variants, on your start frame with two seeds:
 

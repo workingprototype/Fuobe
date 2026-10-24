@@ -69,7 +69,7 @@ function soulSuite() {
       "half-strength": { description: "The recipe with every LoRA at half strength (over-cooking check)", loraScale: 0.5 },
       plain: { description: "The base model with the subject prompt alone", template: false, loras: "none" },
       original: {
-        description: "The shipped Original on the server (O2's fuobe-soul): the look id goes in presetId and the server applies its own recipe",
+        description: "The shipped Original on the server (O2's fuobe-soul): the look's Fuobe id (v1-general) goes in presetId and the server applies its own recipe",
         models: { open: ["fuobe-soul"], cloud: ["fuobe-soul"], demo: ["fuobe-soul"] },
         lookParam: "presetId",
       },
