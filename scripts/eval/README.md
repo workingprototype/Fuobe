@@ -35,8 +35,9 @@ pnpm eval:review latest                               # rate the pairs blind, wi
 pnpm eval:promote latest                              # does the recipe win?
 ```
 
-`fuobe eval <command>` runs the same commands from the `fuobe` CLI (from a Fuobe checkout) and uses
-the CLI's saved server and token.
+`fuobe eval <command>` runs the same commands from the `fuobe` CLI (from a Fuobe checkout). It finds
+the server and token the way every `fuobe` command does, so the token `fuobe login` saved goes only to
+the server it was saved for, even when `--url` names another one.
 
 ### Which Fuobe it talks to
 

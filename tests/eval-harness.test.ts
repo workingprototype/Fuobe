@@ -459,6 +459,31 @@ describe("report, blind review, compare and promote", () => {
     expect(await main(["eval", "history", "--suite", "soul", "--json"], io)).toBe(0);
   });
 
+  it("fuobe eval sends the saved token only to the server it was saved for, even when --url names another", async () => {
+    const { main } = (await import("../bin/lib/cli.mjs")) as { main: (argv: string[], io: object) => Promise<number> };
+    const config = path.join(dir, "saved-config.json");
+    fs.writeFileSync(config, JSON.stringify({ url: "http://saved.local:3000", token: "SAVED-SECRET-TOKEN" }));
+    const calls: string[] = [];
+    const stub = async (input: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(input instanceof Request ? input.url : input));
+      const auth = new Headers(init?.headers).get("authorization") ?? "none";
+      calls.push(`${u.host} ${u.pathname} ${auth}`);
+      const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+      if (u.pathname === "/api/status") return json({ engineMode: "both", demoMode: "auto", providers: {} });
+      if (u.pathname === "/api/models") return json({ items: ["oss-trim", "oss-palette-video", "oss-join-clips", "oss-extract-frame", "oss-z-image-turbo"].map((id) => ({ id })) });
+      return json({ demo: true, providerId: "mock", costUsd: 0 });
+    };
+    const io = () => ({ stdout: sink().stream, stderr: sink().stream, env: { PATH: process.env.PATH, FUOBE_EVAL_RESULTS: results, FUOBE_CONFIG: config }, cwd: process.cwd(), home: dir, fetch: stub, columns: 100, stdinIsTTY: false, stderrIsTTY: false, now: Date.now, sleep: async () => {}, onInterrupt: () => () => {}, ask: async () => "", readStdin: async () => "" });
+    expect(await main(["eval", "run", "--suite", "selftest", "--engine", "demo", "--dry-run", "--url", "http://other.example:4000"], io())).toBe(0);
+    expect(calls.length).toBeGreaterThan(2);
+    expect(calls.every((c) => c.startsWith("other.example:4000 ") && c.endsWith(" none")), calls.join("\n")).toBe(true);
+    // Without --url the saved server gets its own token, as with every other fuobe command.
+    calls.length = 0;
+    expect(await main(["eval", "run", "--suite", "selftest", "--engine", "demo", "--dry-run"], io())).toBe(0);
+    expect(calls.length).toBeGreaterThan(2);
+    expect(calls.every((c) => c.startsWith("saved.local:3000 ") && c.endsWith(" Bearer SAVED-SECRET-TOKEN")), calls.join("\n")).toBe(true);
+  });
+
   it("history lists runs, newest first", async () => {
     const h = await cli(["history", "--json"]);
     const doc = JSON.parse(h.stdout);

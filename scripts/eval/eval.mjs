@@ -70,7 +70,7 @@ function usage() {
 
 /**
  * @param {string[]} argv the arguments after the command name's position (command first)
- * @param {{ stdout?: NodeJS.WritableStream, stderr?: NodeJS.WritableStream, env?: Record<string, string | undefined>, fetch?: typeof fetch, signal?: AbortSignal }} [io]
+ * @param {{ stdout?: NodeJS.WritableStream, stderr?: NodeJS.WritableStream, env?: Record<string, string | undefined>, home?: string, fetch?: typeof fetch, signal?: AbortSignal }} [io]
  * @returns {Promise<number>} the exit code
  */
 export async function main(argv, io = {}) {
@@ -178,7 +178,7 @@ async function run(args, ctx) {
   const engine = v.engine ?? before?.engine;
   if (!["demo", "open", "cloud"].includes(engine)) throw new Usage("Pick --engine demo, open or cloud");
   const variants = v.variants === "all" ? Object.keys(suite.variants ?? { default: {} }) : list(v.variants);
-  const { client, target } = connect({ url: v.url, token: v.token }, { env: ctx.env, fetch: ctx.io.fetch });
+  const { client, target } = connect({ url: v.url, token: v.token }, { env: ctx.env, home: ctx.io.home, fetch: ctx.io.fetch });
   const ac = new AbortController();
   const signal = ctx.io.signal ?? ac.signal;
   const onInt = () => {

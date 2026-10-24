@@ -752,8 +752,10 @@ async function evalHarness(ctx) {
   const entry = new URL("../../scripts/eval/eval.mjs", import.meta.url);
   if (!fs.existsSync(entry)) throw new ApiError("fuobe eval runs from a Fuobe checkout: scripts/eval isn't next to this CLI (clone the repo and run it there).");
   const { main: harness } = await import(entry.href);
-  const env = { ...ctx.io.env, ...(ctx.target.url && !ctx.io.env.FUOBE_URL && { FUOBE_URL: ctx.target.url }), ...(ctx.target.token && !ctx.io.env.FUOBE_TOKEN && { FUOBE_TOKEN: ctx.target.token }) };
-  return harness(ctx.positionals, { stdout: ctx.io.stdout, stderr: ctx.io.stderr, env, fetch: ctx.io.fetch });
+  // The harness finds its server the way this CLI does (--url / --token, FUOBE_URL / FUOBE_TOKEN, then the
+  // saved config, from the same home), so the saved token still rides only to the server it was saved for.
+  // Handing it over as FUOBE_TOKEN would send it to whatever server a later --url names.
+  return harness(ctx.positionals, { stdout: ctx.io.stdout, stderr: ctx.io.stderr, env: ctx.io.env, home: ctx.io.home, fetch: ctx.io.fetch });
 }
 
 /** @type {Record<string, Command>} */
