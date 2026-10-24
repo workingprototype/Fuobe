@@ -111,6 +111,9 @@ function itemsOf(v: unknown): unknown[] | undefined {
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
+/** How far past 1000 an answer that doesn't say its units must reach before it reads as pixels. */
+const PIXELS_PAST = 1100;
+
 /**
  * The size the corners are measured in: 1000 for the relative boxes the instruction asks for, 1 for
  * boxes that are already fractions, the frame's pixels when it says the corners are pixels.
@@ -120,8 +123,11 @@ function unitsFor(all: [number, number, number, number][], frame?: OcrFrame): [n
   if (sized && frame.coords === "pixels") return [frame.width!, frame.height!];
   const max = Math.max(0, ...all.flat());
   if (max <= 1.0001) return [1, 1];
-  // Past 1000 the model answered in the pixels of the picture it saw (older Qwen-VL habits).
-  return max > 1000.5 && sized ? [frame.width!, frame.height!] : [1000, 1000];
+  // The workflow says 0–1000 (ocr-lines-qwen35's frame always does): a box reaching past 1000 is an
+  // overshoot, kept to the image below, not a sign the other boxes are pixels.
+  if (frame?.coords === "relative-1000") return [1000, 1000];
+  // Units unsaid: well past 1000, the model answered in the pixels of the picture it saw (older Qwen-VL habits).
+  return max > PIXELS_PAST && sized ? [frame.width!, frame.height!] : [1000, 1000];
 }
 
 /** A model's OCR answer as lines with 0–1 boxes, in the order it read them. */

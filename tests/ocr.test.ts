@@ -38,6 +38,18 @@ describe("OCR answers → lines with 0–1 boxes", () => {
     // Under 1000 the boxes stay relative (what the instruction asks for), size or not.
     expect(parseOcrLines('[{"bbox": [100, 100, 600, 200], "text": "Rel"}]', frame).lines[0].bbox).toEqual([0.1, 0.1, 0.5, 0.1]);
     expect(parseOcrLines('[{"bbox": [128, 96, 640, 192], "text": "Px"}]', { ...frame, coords: "pixels" }).lines[0].bbox).toEqual([0.1, 0.1, 0.4, 0.1]);
+    // A little past 1000 with the units unsaid is an overshoot, not pixels.
+    expect(parseOcrLines('[{"bbox": [100, 100, 600, 200], "text": "A"}, {"bbox": [900, 900, 1005, 980], "text": "B"}]', frame).lines[0].bbox).toEqual([0.1, 0.1, 0.5, 0.1]);
+  });
+
+  it("trusts the frame's declared 0–1000: one box overshooting doesn't move the others", () => {
+    // What ocr-lines-qwen35's frame output always says (the size the model saw, coords relative-1000).
+    const frame = { width: 1280, height: 960, coords: "relative-1000" };
+    const { lines } = parseOcrLines('[{"bbox": [100, 100, 600, 200], "text": "A"}, {"bbox": [900, 900, 1080, 1040], "text": "B"}]', frame);
+    expect(lines).toEqual([
+      { text: "A", bbox: [0.1, 0.1, 0.5, 0.1] },
+      { text: "B", bbox: [0.9, 0.9, 0.1, 0.1] },
+    ]);
   });
 
   it("puts swapped corners in order, keeps boxes on the image, and drops what isn't a line", () => {
