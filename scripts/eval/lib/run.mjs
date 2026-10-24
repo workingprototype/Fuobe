@@ -13,7 +13,7 @@ import { expandJobs, planSummary } from "./plan.mjs";
 import { fillTemplate, probeClip, requestIdFor, uploader } from "./media.mjs";
 import { RECIPES_FILE, LOOKS_FILE } from "./recipes.mjs";
 import { engineProblem, serverFacts } from "./server.mjs";
-import { appendJsonl, latestJobs, newRunId, readJson, runDir, writeJson } from "./store.mjs";
+import { appendJsonl, latestJobs, newRunId, readJson, readJsonl, runDir, writeJson } from "./store.mjs";
 
 const TERMINAL = new Set(["succeeded", "failed", "canceled"]);
 /** The cloud's spend cap when none is given (US$). The open engine and demo runs are free. */
@@ -36,6 +36,27 @@ const gitCommit = () => {
     return null;
   }
 };
+
+/**
+ * What a job's row cost: the server's actual figure, else the estimate once anything was submitted
+ * (a job that never reached the server cost nothing). Every attempt's row counts: a retry pays again.
+ */
+export const rowSpend = (r) => r.costUsd?.actual ?? (r.generations?.length || r.status === "succeeded" ? (r.costUsd?.estimate ?? 0) : 0);
+
+/** What earlier attempts of a run already spent: every row in jobs.jsonl, and the training runs in elements.json. */
+export function spentSoFar(dir) {
+  const rows = readJsonl(path.join(dir, "jobs.jsonl"));
+  const trainings = Object.values(readJson(path.join(dir, "elements.json"), {}));
+  return sum(rows.map(rowSpend)) + sum(trainings.map((t) => (t.training ? (t.costUsd ?? t.estimateUsd ?? 0) : 0) + (t.earlierUsd ?? 0)));
+}
+
+/** A training target's price as the server words it ("≈ $0.85 (1,000 steps)", "Free"); null when it names no amount. */
+export function trainingPrice(target) {
+  if (!target) return null;
+  if (/^\s*free\b/i.test(target.price ?? "")) return 0;
+  const m = /\$\s*([\d,]+(?:\.\d+)?)/.exec(target.price ?? "");
+  return m ? Number(m[1].replaceAll(",", "")) : null;
+}
 
 /** The LoRA files the jobs load that aren't in ComfyUI's list (null list: ComfyUI didn't answer, so nothing to say). */
 export function lorasMissing(jobs, installed) {
@@ -82,6 +103,7 @@ const routeResult = (answer, how) => {
  * @property {number} [limit] @property {number} [prompts] @property {number[]} [seeds] @property {string} [model]
  * @property {boolean} [dryRun] price and list the jobs; nothing is uploaded or started
  * @property {number} [maxUsd] stop before the run's cost goes over this (cloud default DEFAULT_CLOUD_CAP)
+ * @property {boolean} [allowUnpriced] run cloud jobs the server can't price (they count once their cost is known)
  * @property {number} [concurrency] jobs at a time (open 1, cloud 4, demo 4)
  * @property {string} root the results folder
  * @property {string} [resume] a run id to continue (failed and missing jobs run again)
@@ -140,6 +162,24 @@ export async function runEval(opts, io) {
     const why = trainingProblem(j, engine);
     if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
   }
+  // What each training would cost (cloud): the server's price for its target. A Higgsfield target never runs
+  // (Fuobe measures its own Originals), and one without a price can't sit under the spend cap.
+  const trainingUsd = new Map();
+  const savedElements = dir ? readJson(path.join(dir, "elements.json"), {}) : {};
+  // A training an earlier attempt started (and paid for) isn't priced again: the resume waits for it.
+  const willTrain = trainCases.filter((j) => !j.skip && engine === "cloud" && !j.train.element && !["succeeded", "training"].includes(savedElements[j.caseId]?.status));
+  if (willTrain.length) {
+    const targets = (await client.request("GET", "/api/elements/eval-price/trainings").catch(() => null))?.targets ?? [];
+    for (const j of willTrain) {
+      const t = targets.find((x) => x.id === j.train.target);
+      const usd = trainingPrice(t);
+      let why = null;
+      if (t?.provider === "higgsfield") why = `training target ${j.train.target} runs on Higgsfield's API: Fuobe's evaluation never uses it (train on fal or your GPU)`;
+      else if (usd == null && !opts.allowUnpriced) why = `training on ${j.train.target} has no price${t ? ` (the server says “${t.price}”)` : ""}, so the spend cap can't cover it: --allow-unpriced runs it anyway`;
+      if (why) for (const x of jobs.filter((y) => y.caseId === j.caseId && !y.skip)) x.skip = why;
+      else trainingUsd.set(j.caseId, usd ?? 0);
+    }
+  }
 
   // Price every runnable job with what the server says the route runs.
   const priced = [];
@@ -158,12 +198,14 @@ export async function runEval(opts, io) {
             : `would run as a demo: ${p.modelName ?? job.model.id} has no ${engine === "open" ? "ComfyUI" : "cloud provider"} connected on that Fuobe`;
       }
       else if (engine !== "demo" && p.engine && p.engine !== engine) job.skip = `${p.modelName ?? job.model.id} is ${p.engine === "open" ? "an open-source" : "a cloud"} model, not ${engine}`;
+      else if (engine === "cloud" && p.costUsd == null && !opts.allowUnpriced) job.skip = "the server can't price it, so the spend cap can't cover it: --allow-unpriced runs it anyway (it counts once its cost is known)";
       else priced.push(job);
     } catch (e) {
       job.skip = `the server refused it: ${e.message}`;
     }
   }
-  const estimate = sum(priced.map((j) => j.preview.costUsd));
+  const training = sum([...trainingUsd.entries()].filter(([caseId]) => jobs.some((x) => x.caseId === caseId && !x.skip)).map(([, usd]) => usd));
+  const estimate = sum(priced.map((j) => j.preview.costUsd)) + training;
   const unknownCost = priced.filter((j) => j.preview.costUsd == null).length;
 
   // On the open engine: which of the LoRAs the jobs load ComfyUI doesn't have yet (they are never committed;
@@ -175,10 +217,15 @@ export async function runEval(opts, io) {
   if (opts.dryRun) {
     const final = planSummary(jobs);
     const { jobs: total, ...counts } = final;
-    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, total, ...counts, estimateUsd: estimate, unknownCost, maxUsd: Number.isFinite(maxUsd) ? maxUsd : null, ...(missingLoras && { missingLoras }), jobs: jobs.map(publicJob) };
+    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, total, ...counts, estimateUsd: estimate, ...(training && { trainingUsd: training }), unknownCost, maxUsd: Number.isFinite(maxUsd) ? maxUsd : null, ...(missingLoras && { missingLoras }), jobs: jobs.map(publicJob) };
   }
-  if (engine === "cloud" && estimate > maxUsd) {
-    throw new Error(`This run would cost about ${money(estimate)}, over the spend cap of ${money(maxUsd)}. Raise it with --max-usd ${Math.ceil(estimate)} or run fewer jobs (--looks, --cases, --limit, --prompts).`);
+  // On a resume, what the earlier attempts spent counts against the same cap; jobs already done don't run again.
+  const spentBefore = previous ? spentSoFar(dir) : 0;
+  const doneBefore = new Set(previous ? latestJobs(dir).filter((r) => r.status === "succeeded").map((r) => r.id) : []);
+  const toSpend = sum(priced.filter((j) => !doneBefore.has(j.id)).map((j) => j.preview.costUsd)) + training;
+  if (engine === "cloud" && spentBefore + toSpend > maxUsd + 1e-9) {
+    const already = spentBefore ? ` (${money(spentBefore)} already spent in this run, ${money(toSpend)} to go)` : "";
+    throw new Error(`This run would cost about ${money(spentBefore + toSpend)}${already}, over the spend cap of ${money(maxUsd)}. Raise it with --max-usd ${Math.ceil(spentBefore + toSpend)} or run fewer jobs (--looks, --cases, --limit, --prompts).`);
   }
 
   // The run's record: what ran, where, with which research files, before anything starts.
@@ -198,6 +245,7 @@ export async function runEval(opts, io) {
     variantInfo: Object.fromEntries(summary.variants.map((v) => [v, suite.variants?.[v]?.description ?? ""])),
     maxUsd: Number.isFinite(maxUsd) ? maxUsd : null,
     estimateUsd: estimate,
+    ...(training && { trainingUsd: training }),
     harness: { commit: gitCommit(), recipes: { file: RECIPES_FILE, sha: fileSha(path.join(REPO_DIR, RECIPES_FILE)) }, looks: { file: LOOKS_FILE, sha: fileSha(path.join(REPO_DIR, LOOKS_FILE)) }, suiteFile: path.relative(REPO_DIR, suite.file ?? "") },
     startedAt: previous?.startedAt ?? now(),
     resumedAt: previous ? now() : undefined,
@@ -214,35 +262,74 @@ export async function runEval(opts, io) {
     appendJsonl(path.join(dir, "jobs.jsonl"), { ...recordBase(job), status: "skipped", skip: job.skip, at: now() });
   }
 
+  let spent = spentBefore;
   for (const j of trainCases) {
     if (jobs.some((x) => x.caseId === j.caseId && !x.skip)) {
       try {
-        elements.set(j.caseId, await prepareElement(client, j, { engine, runId, dir, up, log, sleep, now, signal: io.signal }));
+        const el = await prepareElement(client, j, { engine, runId, dir, up, log, sleep, now, signal: io.signal, estimateUsd: trainingUsd.get(j.caseId) });
+        elements.set(j.caseId, el);
+        // A training that ran now is paid for (its actual cost when the server knows it).
+        if (!el.reused && el.training) spent += el.costUsd ?? el.estimateUsd ?? 0;
       } catch (e) {
         for (const x of priced.filter((y) => y.caseId === j.caseId)) x.skip = `training didn't finish: ${e.message}`;
+        // A training that failed after starting may still have been billed: count its estimate.
+        if (readJson(path.join(dir, "elements.json"), {})[j.caseId]?.training) spent += trainingUsd.get(j.caseId) ?? 0;
       }
     }
   }
 
-  let spent = 0;
   const queue = priced.filter((j) => !j.skip && done.get(j.id)?.status !== "succeeded");
   for (const j of priced.filter((x) => x.skip)) appendJsonl(path.join(dir, "jobs.jsonl"), { ...recordBase(j), status: "skipped", skip: j.skip, at: now() });
   const kept = priced.length - queue.length - priced.filter((x) => x.skip).length;
   if (kept) log(`${kept} job${kept === 1 ? "" : "s"} already done in this run; running the other ${queue.length}`);
 
+  // The cap holds while jobs run side by side: each job reserves its price before it starts, and one the server
+  // couldn't price (--allow-unpriced) reserves whatever is left of the cap, so nothing else starts beside it.
+  // A job that doesn't fit waits for running ones to settle, and is skipped only when nothing running could free
+  // money. What a job really cost replaces its reservation as it ends.
+  let inFlight = 0;
+  let waiting = [];
+  const settle = () => {
+    const w = waiting;
+    waiting = [];
+    for (const wake of w) wake();
+  };
+  const reserve = async (job) => {
+    if (engine !== "cloud") return 0;
+    for (;;) {
+      const price = job.preview.costUsd;
+      const need = price ?? Math.max(0, maxUsd - spent);
+      if (price != null ? spent + need <= maxUsd + 1e-9 : spent < maxUsd - 1e-9) {
+        spent += need;
+        return need;
+      }
+      if (!inFlight) return null;
+      await new Promise((wake) => waiting.push(wake));
+    }
+  };
   let finished = 0;
   await pool(queue, concurrency, async (job) => {
     if (io.signal?.aborted) return;
-    const est = job.preview.costUsd ?? 0;
-    if (engine === "cloud" && spent + est > maxUsd + 1e-9) {
+    const est = await reserve(job);
+    if (est === null) {
       appendJsonl(path.join(dir, "jobs.jsonl"), { ...recordBase(job), status: "skipped", skip: `the spend cap (${money(maxUsd)}) was reached`, at: now() });
       return;
     }
-    spent += est;
+    if (io.signal?.aborted) {
+      spent -= est;
+      return settle();
+    }
     const attempt = (done.get(job.id)?.attempt ?? 0) + 1;
-    const row = await runJob(client, job, { engine, runId, dir, up, comfy, element: elements.get(job.caseId), attempt, log, sleep, now, signal: io.signal, pollMs: io.pollMs ?? (engine === "demo" ? 500 : 2000) });
-    // The actual cost replaces the estimate once the server knows it.
-    if (row.costUsd?.actual != null) spent += row.costUsd.actual - est;
+    inFlight++;
+    let row;
+    try {
+      row = await runJob(client, job, { engine, runId, dir, up, comfy, element: elements.get(job.caseId), attempt, log, sleep, now, signal: io.signal, pollMs: io.pollMs ?? (engine === "demo" ? 500 : 2000) });
+    } finally {
+      inFlight--;
+    }
+    // What it really cost replaces the reservation: the server's figure, the estimate when it has none, nothing when it never started.
+    spent += rowSpend(row) - est;
+    settle();
     appendJsonl(path.join(dir, "jobs.jsonl"), row);
     finished++;
     const took = row.timing?.wallMs != null ? ` in ${(row.timing.wallMs / 1000).toFixed(1)} s` : "";
@@ -253,7 +340,7 @@ export async function runEval(opts, io) {
   const count = (s) => rows.filter((r) => r.status === s).length;
   run.finishedAt = now();
   run.interrupted = !!io.signal?.aborted || undefined;
-  run.spentUsd = sum(rows.map((r) => r.costUsd?.actual ?? (r.status === "succeeded" ? r.costUsd?.estimate : 0)));
+  run.spentUsd = Math.round(spentSoFar(dir) * 1e6) / 1e6;
   run.results = { succeeded: count("succeeded"), failed: count("failed") + count("timeout") + count("canceled"), skipped: count("skipped"), interrupted: count("interrupted") };
   writeJson(path.join(dir, "run.json"), run);
   return { runId, dir, run, rows };
@@ -345,10 +432,17 @@ async function prepareElement(client, job, ctx) {
   const t = job.train;
   const file = path.join(ctx.dir, "elements.json");
   const saved = readJson(file, {});
-  const reuse = t.element ?? saved[job.caseId]?.id;
-  if (reuse && saved[job.caseId]?.status !== "failed") {
+  const prev = saved[job.caseId];
+  // An element the case names, one this run already trained, or (demo) already made: use it as it is.
+  const reuse = t.element ?? (prev?.id && (prev.status === "succeeded" || prev.status === "demo") ? prev.id : null);
+  if (reuse) {
     const el = await client.request("GET", `/api/elements/${encodeURIComponent(reuse)}`);
-    if (ctx.engine === "demo" || t.element || el.status !== "training") return { id: el.id, handle: el.handle, reused: true };
+    return { id: el.id, handle: el.handle, reused: true };
+  }
+  // A training this run started and didn't see finish (a resume): wait for it instead of paying for another.
+  if (prev?.id && prev.training && prev.status === "training") {
+    ctx.log(`Waiting for the training this run started (${prev.training})`);
+    return waitForTraining(client, prev, { ...ctx, file, caseId: job.caseId, resumed: true });
   }
   // Demo runs don't train: the fixtures' drawn faces become the element's reference images.
   const photos = ctx.engine === "demo" ? Object.values(job.inputs).flat() : listMedia(t.photos).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
@@ -362,24 +456,33 @@ async function prepareElement(client, job, ctx) {
     return record;
   }
   ctx.log(`Training ${name} on ${t.target} with ${refs.length} photos`);
-  const started = ctx.now();
   const tr = await client.request("POST", `/api/elements/${encodeURIComponent(el.id)}/trainings`, { json: { target: t.target } });
-  writeJson(file, { ...saved, [job.caseId]: { ...record, training: tr.id, target: t.target, status: "training", startedAt: started } });
+  // An earlier training of this case that failed was paid for too: its cost stays in the run's spend.
+  const earlierUsd = prev?.training ? (prev.costUsd ?? prev.estimateUsd ?? 0) + (prev.earlierUsd ?? 0) : prev?.earlierUsd;
+  const started = { ...record, training: tr.id, target: t.target, status: "training", startedAt: ctx.now(), estimateUsd: ctx.estimateUsd ?? null, ...(earlierUsd && { earlierUsd }) };
+  writeJson(file, { ...saved, [job.caseId]: started });
+  return waitForTraining(client, started, { ...ctx, file, caseId: job.caseId });
+}
+
+/** Poll an element's training until it ends; the record in elements.json follows it. */
+async function waitForTraining(client, record, ctx) {
+  const save = (patch) => writeJson(ctx.file, { ...readJson(ctx.file, {}), [ctx.caseId]: { ...record, ...patch } });
   for (;;) {
     if (ctx.signal?.aborted) throw new Error("stopped");
     await ctx.sleep(15_000);
-    const list = await client.request("GET", `/api/elements/${encodeURIComponent(el.id)}/trainings`);
-    const now = (list.items ?? []).find((x) => x.id === tr.id);
+    const list = await client.request("GET", `/api/elements/${encodeURIComponent(record.id)}/trainings`);
+    const now = (list.items ?? []).find((x) => x.id === record.training);
     if (now?.status === "succeeded") {
-      const done = { ...record, training: tr.id, target: t.target, status: "succeeded", costUsd: now.costUsd ?? null, startedAt: started, finishedAt: ctx.now() };
-      writeJson(file, { ...readJson(file, {}), [job.caseId]: done });
-      return done;
+      const done = { ...record, status: "succeeded", costUsd: now.costUsd ?? null, finishedAt: ctx.now() };
+      save(done);
+      // A training seen through from an earlier attempt was counted in that attempt's spend already.
+      return ctx.resumed ? { ...done, reused: true } : done;
     }
     if (now?.status === "failed" || now?.status === "canceled") {
-      writeJson(file, { ...readJson(file, {}), [job.caseId]: { ...record, training: tr.id, status: "failed", error: now.error } });
+      save({ status: "failed", error: now.error, costUsd: now.costUsd ?? null });
       throw new Error(now.error ?? "the training failed");
     }
-    if (ctx.now() - started > 4 * 3600_000) throw new Error("still training after 4 hours");
+    if (ctx.now() - record.startedAt > 4 * 3600_000) throw new Error("still training after 4 hours");
   }
 }
 
@@ -392,6 +495,8 @@ async function runJob(client, job, ctx) {
   const t0 = ctx.now();
   const row = { ...base, attempt: ctx.attempt, at: t0, costUsd: { estimate: job.preview?.costUsd ?? null } };
   let watched = [];
+  /** The generations as last seen: a download that breaks after they finished still keeps their cost and timing. */
+  let final = [];
   ctx.comfy?.start();
   try {
     const inputs = job.train ? {} : await ctx.up.inputs(job.inputs);
@@ -422,7 +527,7 @@ async function runJob(client, job, ctx) {
 
     // Wait for every generation (a studio route's final step waits for the steps before it).
     const deadline = t0 + (job.timeoutSeconds ?? 1800) * 1000;
-    let final = watched;
+    final = watched;
     for (;;) {
       final = await Promise.all(watched.map((g) => (TERMINAL.has(g.status) ? g : getGeneration(client, g.id))));
       watched = final;
@@ -446,9 +551,9 @@ async function runJob(client, job, ctx) {
     if (row.status === "succeeded") row.outputs = await download(client, final, path.join(ctx.dir, "outputs", safeName(job.id)), ctx.dir);
     return row;
   } catch (e) {
+    row.error = row.status === "succeeded" ? `the results didn't download: ${e.message}` : e.message;
     row.status = "failed";
-    row.error = e.message;
-    return finish(row, [], t0, ctx);
+    return finish(row, final, t0, ctx);
   } finally {
     ctx.comfy?.stop();
   }

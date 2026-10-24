@@ -40,6 +40,7 @@ const cases = (await import("../scripts/eval/lib/cases.mjs")) as { loadSuite: (n
 const runner = (await import("../scripts/eval/lib/run.mjs")) as {
   runEval: (opts: object, io: object) => Promise<Record<string, unknown>>;
   lorasMissing: (jobs: object[], installed: string[] | null) => { file: string; url?: string; jobs: number }[] | null;
+  trainingPrice: (target: { price?: string } | null) => number | null;
 };
 const report = (await import("../scripts/eval/lib/report.mjs")) as { writeReport: (dir: string, root: string) => Record<string, unknown> };
 const review = (await import("../scripts/eval/lib/review.mjs")) as {
@@ -514,5 +515,132 @@ describe("runEval as a library", () => {
     expect(research.loras?.applied.length).toBeGreaterThan(0);
     const promptOnly = plan.jobs.find((j) => j.variant === "prompt-only")!;
     expect(promptOnly.loras?.applied).toEqual([]);
+  });
+});
+
+/**
+ * A stand-in Fuobe for the runner's cloud logic: previews at a fixed price, generations that finish on the
+ * second look and report their own cost, and (optionally) downloads that break. Records what was started and
+ * how many ran at once.
+ */
+function cloudStub(o: { previewUsd: number | null; actualUsd: number | null; failDownload?: boolean; models?: string[]; trainingTargets?: object[]; route?: { provider: string; endpoint: string } }) {
+  let n = 0;
+  const started: string[] = [];
+  const looked = new Set<string>();
+  let running = 0;
+  let most = 0;
+  const models = o.models ?? ["trim-video", "join-clips", "extract-frame"];
+  const client = {
+    url: "http://stub.local",
+    async request(method: string, p: string, opts: { json?: Record<string, unknown>; query?: Record<string, unknown> } = {}) {
+      if (p === "/api/status") return { engineMode: "both", demoMode: "auto", cloudProvider: "auto", providers: { fal: { configured: true } } };
+      if (p === "/api/models") return { items: models.map((id) => ({ id })) };
+      if (p === "/api/uploads") return { url: `/api/files/uploads/${++n}.mp4` };
+      if (p.endsWith("/trainings") && method === "GET") return { targets: o.trainingTargets ?? [], items: [] };
+      if (p === "/api/generations" && opts.query?.preview) return { demo: false, providerId: o.route?.provider ?? "fal", costUsd: o.previewUsd, model: { id: opts.json?.modelId }, route: o.route ?? { provider: "fal", endpoint: "fal-ai/ffmpeg-api" }, prompt: opts.json?.prompt ?? "", loras: { applied: [], dropped: [] } };
+      if (p === "/api/generations" && method === "POST") {
+        const id = `g${++n}`;
+        started.push(id);
+        running++;
+        most = Math.max(most, running);
+        return { items: [{ id, status: "queued" }] };
+      }
+      const m = /^\/api\/generations\/(.+)$/.exec(p);
+      if (m) {
+        if (!looked.has(m[1])) {
+          looked.add(m[1]);
+          return { id: m[1], status: "running" };
+        }
+        running--;
+        return { id: m[1], status: "succeeded", costUsd: o.actualUsd, modelId: "trim-video", provider: "fal", createdAt: 1, completedAt: 2, outputs: [{ url: `/api/files/out/${m[1]}.mp4`, kind: "video" }] };
+      }
+      throw new Error(`stub: no ${method} ${p}`);
+    },
+    async download(_url: string, dest: string) {
+      if (o.failDownload) throw new Error("connection reset");
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, "x");
+      return 1;
+    },
+  };
+  return { client, started, most: () => most };
+}
+
+describe("the cloud spend cap", () => {
+  const root = path.join(dir, "cap-results");
+  const run = (o: Record<string, unknown>, stub: ReturnType<typeof cloudStub>) =>
+    runner.runEval({ suite: cases.loadSuite("selftest"), engine: "cloud", seeds: [1, 2, 3], root, ...o }, { client: stub.client, sleep: async () => {}, pollMs: 0 }) as Promise<{ runId: string; dir: string; run: { spentUsd: number; results: Record<string, number> }; rows: Row[] }>;
+
+  it("doesn't start a job the server can't price, unless asked, and then runs it alone and stops at the cap", async () => {
+    const none = cloudStub({ previewUsd: null, actualUsd: 2 });
+    const r = await run({ maxUsd: 1 }, none);
+    expect(none.started).toEqual([]);
+    const cloudRows = r.rows.filter((x) => !/^runs on/.test(String(x.skip)));
+    expect(cloudRows).toHaveLength(9);
+    expect(cloudRows.every((x) => x.status === "skipped" && /can't price it/.test(String(x.skip)))).toBe(true);
+    expect(r.run.spentUsd).toBe(0);
+    // --allow-unpriced: the first one holds what's left of the cap, so nothing starts beside it; once it has cost $2 nothing else starts.
+    const some = cloudStub({ previewUsd: null, actualUsd: 2 });
+    const r2 = await run({ maxUsd: 1, allowUnpriced: true }, some);
+    expect(some.started).toHaveLength(1);
+    expect(some.most()).toBe(1);
+    expect(r2.run.spentUsd).toBe(2);
+    expect(r2.rows.filter((x) => x.status === "skipped" && !/^runs on/.test(String(x.skip))).map((x) => x.skip)).toEqual(Array(8).fill("the spend cap ($1.00) was reached"));
+  });
+
+  it("keeps the cap with jobs running side by side, counts an earlier attempt's spend on --resume, and keeps a paid job's cost when its download breaks", async () => {
+    const stub = cloudStub({ previewUsd: 0.4, actualUsd: 0.4 });
+    // 9 jobs at $0.40 are $3.60: the run refuses to start over a $1 cap.
+    await expect(run({ maxUsd: 1 }, stub)).rejects.toThrow(/about \$3\.60, over the spend cap of \$1\.00/);
+    expect(stub.started).toEqual([]);
+    const first = await run({ maxUsd: 5, limit: 1 }, stub);
+    expect(first.run.spentUsd).toBeCloseTo(1.2, 6);
+    // Resuming the same run under a $1.50 cap: $1.20 is already spent, and the jobs left can't fit.
+    const statusOf = (rows: Row[]) => rows.map((x) => x.status).join(",");
+    fs.appendFileSync(path.join(first.dir, "jobs.jsonl"), `${JSON.stringify({ ...first.rows[0], status: "failed", error: "pretend", attempt: 1, costUsd: { estimate: 0.4, actual: 0.4 }, generations: ["gx"] })}\n`);
+    await expect(run({ maxUsd: 1.5, resume: first.runId }, stub)).rejects.toThrow(/\$1\.60 already spent in this run/);
+    const again = await run({ maxUsd: 5, resume: first.runId }, stub);
+    expect(statusOf(again.rows)).toBe("succeeded,succeeded,succeeded");
+    // Three paid attempts, one pretend failure and one retry: $2.00.
+    expect(again.run.spentUsd).toBeCloseTo(2, 6);
+    // Jobs that cost more than their price: once the real spend reaches the cap, nothing else starts.
+    const dear = cloudStub({ previewUsd: 0.25, actualUsd: 1 });
+    const capped = await run({ maxUsd: 1, limit: 1, seeds: [1, 2, 3, 4], concurrency: 1 }, dear);
+    expect(dear.started).toHaveLength(1);
+    expect(capped.run.spentUsd).toBe(1);
+    const broken = cloudStub({ previewUsd: 0.4, actualUsd: 0.5, failDownload: true });
+    const r = await run({ maxUsd: 5, limit: 1 }, broken);
+    expect(r.rows.every((x) => x.status === "failed" && /didn't download: connection reset/.test(String(x.error)))).toBe(true);
+    expect(r.rows.map((x) => (x.costUsd as { actual: number }).actual)).toEqual([0.5, 0.5, 0.5]);
+    expect(r.run.spentUsd).toBeCloseTo(1.5, 6);
+  });
+
+  it("prices cloud training before anything starts, and never trains on Higgsfield", async () => {
+    const suiteFile = path.join(dir, "train-suite.json");
+    const train = (target: string) => ({ photos: path.join(process.cwd(), "scripts/eval/fixtures/character"), targets: { cloud: target }, minPhotos: 3, consent: true });
+    fs.writeFileSync(
+      suiteFile,
+      JSON.stringify({
+        suite: "train-cap",
+        title: "Training under the cap",
+        description: "x",
+        original: "fuobe-soul",
+        kind: "image",
+        targets: { cloud: { models: ["z-image-turbo-cloud"] } },
+        cases: [
+          { id: "t/fal", title: "fal", train: train("fal-z-image"), prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
+          { id: "t/hf", title: "hf", train: train("soul-id-v2"), prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] },
+        ],
+      }),
+    );
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["z-image-turbo-cloud"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $0.85 (1,000 steps)" }, { id: "soul-id-v2", provider: "higgsfield", price: "Higgsfield balance" }] });
+    const suite = cases.loadSuite(suiteFile);
+    const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: stub.client })) as { estimateUsd: number; trainingUsd: number; jobs: { case: string; skip?: string }[] };
+    expect(dry.trainingUsd).toBe(0.85);
+    expect(dry.estimateUsd).toBeCloseTo(0.86, 6);
+    expect(dry.jobs.find((j) => j.case === "t/hf")?.skip).toMatch(/Higgsfield's API/);
+    await expect(runner.runEval({ suite, engine: "cloud", maxUsd: 0.5, root }, { client: stub.client })).rejects.toThrow(/about \$0\.86, over the spend cap/);
+    expect(runner.trainingPrice({ price: "Free" })).toBe(0);
+    expect(runner.trainingPrice({ price: "Higgsfield balance" })).toBeNull();
   });
 });

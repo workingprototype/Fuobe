@@ -153,7 +153,8 @@ export function summarize(loaded) {
       failed: rows.filter((r) => ["failed", "timeout", "canceled", "interrupted"].includes(r.status)).length,
       skipped: rows.filter((r) => r.status === "skipped").length,
     },
-    costUsd: { estimate: run.estimateUsd ?? null, spent: ok.reduce((a, r) => a + (r.costUsd?.actual ?? r.costUsd?.estimate ?? 0), 0) },
+    // Spent: every attempt that reached the server and any training, as the runner counted it against the cap.
+    costUsd: { estimate: run.estimateUsd ?? null, spent: run.spentUsd ?? ok.reduce((a, r) => a + (r.costUsd?.actual ?? r.costUsd?.estimate ?? 0), 0), ...(run.trainingUsd && { training: run.trainingUsd }) },
     metrics: { keys: metricKeys, models: metrics?.models ?? {}, skipped: metrics?.skipped ?? (metrics ? {} : { all: "not scored yet: pnpm eval:report runs the metrics" }), device: metrics?.device ?? null },
     variants: perVariant,
     pairs,

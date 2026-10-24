@@ -80,8 +80,14 @@ Useful `run` options:
   jobs.
 - `--variants recipe,prompt-only` or `all`: the recipe variants to run. Each suite has a default.
 - `--model <id>`: one model id for every job, instead of the suite's targets.
-- `--max-usd 2`: the cloud spend cap. The run is priced first. It refuses to start over the cap, and
-  it stops before a job would go over.
+- `--max-usd 2`: the cloud spend cap. The run is priced first, training included. It refuses to start
+  over the cap, and it starts no job that would go over it: each job reserves its price before it
+  starts, and its real cost replaces the reservation when it ends. A resumed run counts what its earlier
+  attempts spent (every attempt that reached the server, and any training).
+- A cloud job or training the server can't price is skipped, because the cap can't cover it.
+  `--allow-unpriced` runs it anyway: it holds whatever is left of the cap while it runs, so nothing
+  starts beside it, and its cost counts once the server reports it. Such a job can take the run over
+  the cap by its own cost. A training target on Higgsfield's API never runs.
 - `--concurrency`: open 1, others 4.
 - `--resume <runId>`: runs only the failed and missing jobs again. Ctrl+C stops new jobs from
   starting; the jobs already running finish on the server.

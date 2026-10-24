@@ -42,7 +42,9 @@ const HELP = {
   --model <id>           one model id for every job instead of the suite's targets
   --limit <n>            at most n cases · --prompts <n> at most n prompts per case · --seeds 1,2
   --dry-run              list the jobs and the estimated spend; uploads and starts nothing
-  --max-usd <n>          the cloud spend cap (default $${DEFAULT_CLOUD_CAP}); the run stops before going over
+  --max-usd <n>          the cloud spend cap (default $${DEFAULT_CLOUD_CAP}): jobs, training and an earlier attempt's spend count;
+                         the run refuses to start over it and starts no job that would go over it
+  --allow-unpriced       also run cloud jobs (and training) the server can't price; they count once their cost is known
   --concurrency <n>      jobs at a time (open 1, others 4)
   --resume <runId>       run the failed and missing jobs of an earlier run again
   --allow-fixtures       use the synthetic fixtures where your own inputs are missing
@@ -159,6 +161,7 @@ async function run(args, ctx) {
     "dry-run": { type: "boolean" },
     list: { type: "boolean" },
     "max-usd": { type: "string" },
+    "allow-unpriced": { type: "boolean" },
     concurrency: { type: "string" },
     resume: { type: "string" },
     "allow-fixtures": { type: "boolean" },
@@ -202,6 +205,7 @@ async function run(args, ctx) {
         model: v.model,
         dryRun: v["dry-run"],
         maxUsd: num(v["max-usd"], "max-usd"),
+        allowUnpriced: v["allow-unpriced"],
         concurrency: num(v.concurrency, "concurrency"),
         root: rootDir,
         resume: resumeRun?.runId,
