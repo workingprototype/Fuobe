@@ -163,6 +163,8 @@ Originals":
 - A civitai link is left out on the cloud until a mirrored copy exists, because civitai answers 401
   without your token.
 - A non-commercial LoRA is noted, and a recipe that uses one can't be promoted.
+- A LoRA link (your own variant's included) must be on Hugging Face, civitai, fal or Replicate: the API
+  refuses other hosts, since the server may download an unknown file from it before a ComfyUI run.
 
 A job records which LoRAs it asked for, which ones the route actually loaded, and which ones were
 left out and why.
@@ -264,8 +266,9 @@ Everything goes to `scripts/eval/results/` (git-ignored; move it with `--out` or
 results/
   history.jsonl                 # one line per run × case × variant: mean scores (pnpm eval:history)
   <runId>/
-    run.json                    # suite, engine, filters, variants, the server and ComfyUI it ran on,
-                                #   git commit, the research files' hashes, spend cap and spend
+    run.json                    # suite, engine, filters, variants and the candidate, the server and ComfyUI it ran on,
+                                #   git commit, the research files' hashes, spend cap, the training estimate and the spend
+    elements.json               # training cases: the element made or trained, its training and what it cost
     jobs.jsonl                  # one row per job, appended as each one ends (see below)
     outputs/<jobId>/…           # the downloaded results
     metrics.json                # scores per job (and per film), which model made them, at which revision, under which licence
