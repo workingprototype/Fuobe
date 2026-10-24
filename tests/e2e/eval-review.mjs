@@ -90,16 +90,22 @@ try {
       page.on("pageerror", (e) => errors.push(e.message));
 
       await page.goto(pathToFileURL(path.join(runDir, "report.html")).href, { waitUntil: "load" });
+      // The contact sheet's pictures load lazily: bring each into view (a run of clips may have one picture at the end).
+      await page.evaluate(async () => {
+        for (const m of document.querySelectorAll("img, video")) m.scrollIntoView({ block: "center" });
+        await Promise.all([...document.images].map((i) => i.decode().catch(() => {})));
+        window.scrollTo(0, 0);
+      });
       await page.waitForTimeout(300);
       const report = await page.evaluate(() => ({
         overflow: document.scrollingElement.scrollWidth - window.innerWidth,
         bg: getComputedStyle(document.body).backgroundColor,
-        imgs: [...document.images].filter((i) => i.complete && i.naturalWidth > 0).length,
+        imgs: [...document.images].filter((i) => i.complete && i.naturalWidth > 0).length + [...document.querySelectorAll("video")].filter((v) => v.readyState >= 1).length,
         h1: document.querySelector("h1")?.textContent,
       }));
       check(report.overflow <= 0, `report ${name} ${scheme}: no sideways scroll (${report.overflow}px over)`);
       check(scheme === "dark" ? report.bg === "rgb(9, 9, 11)" : report.bg === "rgb(255, 255, 255)", `report ${name} ${scheme}: ${scheme} background (${report.bg})`);
-      check(report.imgs > 0, `report ${name} ${scheme}: ${report.imgs} images load`);
+      check(report.imgs > 0, `report ${name} ${scheme}: ${report.imgs} pictures and clips load`);
       await page.screenshot({ path: path.join(shots, `report-${name}-${scheme}.png`), fullPage: false });
 
       await page.goto(url, { waitUntil: "load" });

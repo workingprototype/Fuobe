@@ -438,6 +438,15 @@ describe("report, blind review, compare and promote", () => {
     const unknown = await cli(["compare", "fake-open-1", "fake-open-3", "--fail-on", "smell"]);
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toMatch(/Unknown metric “smell”/);
+    // Scores from different metric models are flagged, not silently compared.
+    const m3 = path.join(results, "fake-open-3", "metrics.json");
+    const saved = fs.readFileSync(m3, "utf8");
+    fs.writeFileSync(m3, JSON.stringify({ ...JSON.parse(saved), config: { clip: "clip-b32", style: "dinov2" } }));
+    try {
+      expect((await cli(["compare", "fake-open-1", "fake-open-3"])).stdout).toMatch(/^! the runs were scored with a different style model \(clip vs dinov2\)[^\n]*\n\nmetric/m);
+    } finally {
+      fs.writeFileSync(m3, saved);
+    }
   });
 
   it("fuobe eval hands its arguments to the harness, with the CLI's server and token", async () => {

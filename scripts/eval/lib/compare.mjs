@@ -91,7 +91,18 @@ export function compareRuns(a, b, opts = {}) {
       }
     }
   }
+  // Scores made by different metric models don't compare (CLIP vs DINOv2 style, B/32 vs L/14 CLIP…).
+  const warnings = [];
+  const ca = A.metrics?.config ?? {};
+  const cb = B.metrics?.config ?? {};
+  for (const [k, label] of [["clip", "CLIP model"], ["style", "style model"], ["identity", "face model"]]) {
+    // metrics.json from before --style-model scored style with CLIP.
+    const x = ca[k] ?? (k === "style" && A.metrics ? "clip" : null);
+    const y = cb[k] ?? (k === "style" && B.metrics ? "clip" : null);
+    if (x != null && y != null && x !== y) warnings.push(`the runs were scored with a different ${label} (${x} vs ${y}): rescore one with pnpm eval:report --force and the same options`);
+  }
   return {
+    warnings,
     a: { runId: A.run.runId, suite: A.run.suite, engine: A.run.engine, variant: va },
     b: { runId: B.run.runId, suite: B.run.suite, engine: B.run.engine, variant: vb },
     matched: keys.length,
@@ -121,6 +132,7 @@ const signed = (metric, g) => `${g >= 0 ? "+" : "−"}${fmt(metric, Math.abs(g))
 export function compareText(c) {
   const name = (x) => `${x.runId}${x.variant ? `:${x.variant}` : ""} (${x.suite} · ${x.engine})`;
   const lines = [`A ${name(c.a)}`, `B ${name(c.b)}`, `${c.matched} jobs in both${c.onlyA || c.onlyB ? ` · ${c.onlyA} only in A · ${c.onlyB} only in B` : ""}`, ""];
+  for (const w of c.warnings ?? []) lines.push(`! ${w}`, "");
   if (!c.metrics.length) lines.push("No scores to compare (run pnpm eval:report on both runs first).");
   const w = Math.max(10, ...c.metrics.map((r) => r.label.length));
   if (c.metrics.length) lines.push(`${"metric".padEnd(w)}  ${"A".padStart(9)}  ${"B".padStart(9)}  ${"B better".padStart(8)}  ${"worse".padStart(5)}  ${"same".padStart(4)}  gain`);

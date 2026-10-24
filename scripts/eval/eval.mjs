@@ -330,6 +330,7 @@ async function history(args, ctx) {
 
 async function validate(args, ctx) {
   const { values: v, positionals } = parse(args, {}, { positionals: true });
+  if (v.help) return ctx.print(HELP.validate), 0;
   const results = validateAll(positionals.length ? positionals.map((p) => path.resolve(p)) : suiteFiles());
   let bad = results.filter((r) => !r.ok).length;
   const { generated } = await import("./gen-cases.mjs");
@@ -351,6 +352,7 @@ async function validate(args, ctx) {
 
 async function setup(args, ctx) {
   const { values: v } = parse(args, { identity: { type: "boolean" }, dinov2: { type: "boolean" }, download: { type: "boolean" }, "torch-backend": { type: "string" } });
+  if (v.help) return ctx.print(HELP.setup), 0;
   const step = (cmd, a, opts = {}) => {
     ctx.note(`$ ${cmd} ${a.join(" ")}`);
     const r = spawnSync(cmd, a, { cwd: METRICS_DIR, stdio: "inherit", env: ctx.env, ...opts });
