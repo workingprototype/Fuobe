@@ -45,6 +45,7 @@ import { NotFoundState } from "@/components/empty-state";
 import { MediaThumb } from "@/components/studio/feed";
 import { Viewer } from "@/components/studio/viewer";
 import {
+  CAMERA_WORDS,
   formatLength,
   getStyle,
   PART_LABELS,
@@ -236,6 +237,8 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
   const one = scenes.length === 1 ? scenes[0] : null;
   const still = one?.still?.generation;
   const stillImg = still?.outputs.find((o) => o.kind === "image");
+  // Frame by frame moves a camera over the picture (Ken Burns): its Motion reads camera words only.
+  const camera = ep.settings.animation === "frames" ? CAMERA_WORDS[ep.settings.engine] : null;
 
   const discard = () => {
     setInstruction("");
@@ -322,8 +325,8 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
             onChange={(e) => setInstruction(e.target.value)}
             maxLength={1000}
             rows={2}
-            aria-label={part === "picture" ? "Describe what to change in the picture" : "Describe the new movement"}
-            placeholder={part === "picture" ? "e.g. make it night, add a lighthouse on the cliff" : "e.g. slow zoom out, the flags wave in the wind"}
+            aria-label={part === "picture" ? "Describe what to change in the picture" : camera ? "Describe the new camera move" : "Describe the new movement"}
+            placeholder={part === "picture" ? "e.g. make it night, add a lighthouse on the cliff" : (camera?.placeholder ?? "e.g. slow zoom out, the flags wave in the wind")}
             className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-[14px] outline-none [field-sizing:content] focus:border-primary placeholder:text-subtle-foreground"
           />
         )}
@@ -335,7 +338,7 @@ function SceneEditor({ view, scenes, onClose, onOpen }: { view: View; scenes: Sc
                 ? part === "picture"
                   ? "The picture is edited, then the scene is animated again."
                   : part === "motion"
-                    ? "The picture is kept; the scene is animated again."
+                    ? (camera?.hint ?? "The picture is kept; the scene is animated again.")
                     : "Edit the lines above."
                 : preview.isError
                   ? (preview.error as Error).message

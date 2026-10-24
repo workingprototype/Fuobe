@@ -32,6 +32,8 @@ import {
   type ManifestWorkflow,
 } from "@/lib/comfy";
 import { fpsPlan } from "@/lib/av/fps";
+import { crossfadeProblem, fadeCurveWav } from "@/lib/av/crossfade";
+import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins";
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
@@ -590,6 +592,12 @@ function videoFinishValues(manifest: ManifestWorkflow, input: GenInput, clip: Me
   return out;
 }
 
+/** Per-job length limits a graph enforces (manifest limits.maxDurationSec), in words. */
+const OVER_LIMIT: Record<string, (s: number) => string> = {
+  "still-motion": (s) => `Ken Burns on the open engine makes up to ${s} s per clip — split a longer move into pieces`,
+  "audio-loop": (s) => `Loops on the open engine run up to ${s / 60} minutes (${s} s)`,
+};
+
 /**
  * Turn a canonical request into the exact ComfyUI prompt: picks the workflow variant, maps Fuobe's inputs
  * onto the workflow's bindings (sizes, frames, trim times, languages, palettes, layers…), uploads files the
@@ -653,6 +661,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.prompt = (input.dialogue ?? []).filter((l) => l.text.trim()).map((l) => `SPEAKER ${l.voice === "B" ? "B" : "A"}: ${l.text.trim()}`).join("\n");
   }
   if (ctx.op === "voice-change") values.audio2 = input.voiceAudio;
+  // A join of audio clips takes them in order: the graph binds the first two, expandAudioJoinWorkflow the rest.
+  const audios = input.audios ?? [];
+  if (manifest.expand === "audios" && audios.length) {
+    values.audio = audios[0];
+    values.audio2 = audios[1];
+  }
   // A voice track on the video's timeline: the clips are the spoken lines (the template binds the first).
   if (ctx.op === "timeline") values.audio = input.audios?.[0] ?? input.audio;
   // Speech workflows read the soundtrack with LoadAudio, which also takes a video upload.
@@ -736,6 +750,29 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (b.tags && !b.prompt) values.tags = input.prompt;
   if (b.description && !extra.description) values.description = input.prompt;
   if (b.numLayers && input.numLayers) values.numLayers = Math.max(1, Math.min(Number(manifest.limits?.maxLayers ?? 10), Math.round(input.numLayers)));
+
+  // Ken Burns (kenburns-still): the move's zoom, crop centre and easing.
+  if (b.zoomStart && input.zoomFrom !== undefined) values.zoomStart = input.zoomFrom;
+  if (b.zoomEnd && input.zoomTo !== undefined) values.zoomEnd = input.zoomTo;
+  if (b.panStartX && input.panFrom) Object.assign(values, { panStartX: input.panFrom.x, panStartY: input.panFrom.y });
+  if (b.panEndX && input.panTo) Object.assign(values, { panEndX: input.panTo.x, panEndY: input.panTo.y });
+  if (b.easeInOut && input.easing) values.easeInOut = input.easing === "linear" ? 0 : 1;
+  const maxSeconds = Number(manifest.limits?.maxDurationSec ?? 0);
+  if (maxSeconds && b.duration && Number(values.duration ?? d.duration ?? 0) > maxSeconds + 0.001) {
+    throw new ProviderError(OVER_LIMIT[manifest.capability]?.(maxSeconds) ?? `This workflow makes up to ${maxSeconds} s per job`);
+  }
+  // Loops and joins with a crossfade: core ComfyUI has no gain ramp, so the curve is a tiny WAV written here
+  // (left = fade-in, right = fade-out, exactly the crossfade long). Clips too short for it are refused up front.
+  if (b.fadeCurve) {
+    const fade = Math.max(0.02, Number(input.crossfade ?? d.crossfade ?? 1));
+    if (b.crossfade) values.crossfade = fade;
+    const loop = manifest.capability === "audio-loop";
+    const lengths = (loop ? [values.audio] : audios.length ? audios : [values.audio, values.audio2 ?? extra.audio2]).map((name) => ctx.media?.(String(name ?? ""))?.duration);
+    const problem = lengths.every((l): l is number => typeof l === "number") ? crossfadeProblem(lengths, fade, loop ? "loop" : "join") : null;
+    if (problem) throw new ProviderError(problem);
+    if (extra.fadeCurve === undefined) values.fadeCurve = await ctx.upload(Buffer.from(fadeCurveWav(fade, extra.curve === "linear" ? "linear" : "equal-power")), "audio/wav", "fade_curve.wav");
+  }
+  delete extra.curve;
 
   // Soul HEX: the hex list as words, plus a swatch the ColorTransfer lock matches.
   const palette = (input.palette ?? []).filter((p) => typeof p === "string" && p.trim());
@@ -885,6 +922,13 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     } catch (e) {
       throw new ProviderError((e as Error).message);
     }
+  }
+  // Joins of more clips than the template binds: one loader per clip, in one prompt.
+  try {
+    if (manifest.expand === "videos" && clips.length > 2) wf = expandVideoJoinWorkflow(wf, clips);
+    if (manifest.expand === "audios" && audios.length > 2) wf = expandAudioJoinWorkflow(wf, audios);
+  } catch (e) {
+    throw new ProviderError((e as Error).message);
   }
   if (input.loras?.length) wf = injectLoras(wf, input.loras);
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).

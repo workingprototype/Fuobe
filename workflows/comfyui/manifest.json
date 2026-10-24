@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-23T22:48:01.569Z",
+  "generatedAt": "2026-10-24T05:04:42.430Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -12605,6 +12605,50 @@
       "notes": "The still-motion operation: params.zoomFrom / zoomTo -> zoomStart / zoomEnd (1 = the widest crop with the output's shape, 1.25 = 25 % closer), params.panFrom / panTo {x, y} -> panStartX/Y and panEndX/Y (the crop centre, 0-1 of the still, clamped so the crop stays inside), params.easing \"ease-in-out\" -> easeInOut 1 ((1 - cos(pi t)) / 2), \"linear\" -> 0; duration, fps and width x height (the output size) as usual. Presets (app side): push in zoom 1 -> 1.2; pull out 1.2 -> 1; pan left zoom 1.15, x 0.6 -> 0.4; pan up zoom 1.15, y 0.6 -> 0.4; a gentle end-card push-in 1 -> 1.05. Core loops (StartLoop/EndLoop, ComfyUI 2026-09-15): the outer loop runs one pass per chunk of chunkFrames frames, the inner loop crops each frame (ImageCrop) and scales it (lanczos) to width x height, each chunk is encoded at once (CreateVideo h264) and ConcatenateVideo joins them, so finished chunks can leave memory. supersample upsizes the still once so crop steps are half a source pixel. At most 10 s per job: RAM still grows by about one output frame per frame (~11 MB at 720p) until ComfyUI's RAM-pressure cache evicts chunks; split longer scenes. Changed from the research graph: easeInOut (node 19) blends linear and eased progress (the research graph was always eased). Research runs (4-core CPU): 2 s 640x360 25 fps 17.9 s; 5 s 1280x720 30 fps 75.6 s (+2.6 GB RSS); 10 s 1280x720 30 fps 142.1 s (+3.7 GB RSS, both under RAM pressure). Ran here (shared CPU server, two sessions, 64x64 still, 2 s 320x180 25 fps, chunks of 20): 50 frames, 2.000 s H.264 in 8.5-9.3 s (easeInOut 1) and 7.6-11.2 s (0); the two match at the first, middle and last frame and differ in between, and the eased one barely moves over its first and last frames. Crops are whole pixels, so a tiny still steps visibly (the first frame after zoom 1 jumps by one source pixel); supersample and a still larger than the output hide it."
     },
     {
+      "id": "video-concat-encoded",
+      "title": "Join clips the open engine encoded, packet by packet in constant memory (core ConcatenateVideo, no decode)",
+      "capability": "concat",
+      "file": "video-concat-encoded.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-concat-encoded.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "file"
+          }
+        ],
+        "video2": [
+          {
+            "node": "2",
+            "input": "file"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "video"
+        }
+      ],
+      "defaults": {},
+      "limits": {
+        "maxClips": 100
+      },
+      "models": [],
+      "customNodes": [],
+      "vramGb": 0,
+      "license": "n/a (no model; ComfyUI core)",
+      "validated": true,
+      "notes": "The Faceless / Explainer \"Frame by frame\" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. The template joins two clips (video, video2); the provider rewrites it per request (expand \"videos\", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI's CreateVideo / SaveVideo made at one size and fps), so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip's settings (still constant memory), and clips of different sizes fail with \"could not be encoded compatibly\". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).",
+      "expand": "videos"
+    },
+    {
       "id": "audio-loop-crossfade",
       "title": "Music bed of any length: loop a clip with equal-power crossfades and a fade-out (core audio nodes + core loop)",
       "capability": "audio-loop",
@@ -12732,7 +12776,8 @@
       "vramGb": 0,
       "license": "n/a (no model; ComfyUI core audio nodes; VideoHelperSuite loader, GPL-3.0 code)",
       "validated": true,
-      "notes": "audio then audio2, overlapped by crossfade seconds (params.crossfade, > 0; 0.02 gives a click-free hard join). fadeCurve = the same curve WAV as audio-loop-crossfade, crossfade seconds long, written by the provider. More clips (params.audios in order): fold, i.e. join 1+2, then that result + 3, and so on. The output runs at the higher sample rate of the two (AudioConcat resamples) and is saved as FLAC. Clips placed at exact times are audio-timeline's job. Ran here (CPU, two sessions): 3 s 44.1 kHz tones + 2 s 48 kHz noise, crossfade 0.5 s -> FLAC 4.500 s at 48 kHz stereo in 0.2-2.1 s; the tones keep their level (-9.0 dB RMS) up to 2.5 s, the overlap ramps over 0.5 s and the noise follows at its own level (-15.2 dB): no headroom is taken off here."
+      "notes": "audio then audio2, overlapped by crossfade seconds (params.crossfade, > 0; 0.02 gives a click-free hard join). fadeCurve = the same curve WAV as audio-loop-crossfade, crossfade seconds long, written by the provider. More clips (params.audios in order): the provider rewrites the graph for all of them in one prompt (expand \"audios\", expandAudioJoinWorkflow, r4/faceless-plus): every clip but the last is read by a VHS loader (for its length), the first gives its body, each middle clip its head, middle and tail, the last its head and the rest, and each seam is tail x fade-out + next head x fade-in, all concatenated in order; middle clips must be longer than 2 x crossfade. The output runs at the highest sample rate of the clips (AudioConcat resamples) and is saved as FLAC. Clips placed at exact times are audio-timeline's job. Ran here (CPU, two sessions): 3 s 44.1 kHz tones + 2 s 48 kHz noise, crossfade 0.5 s -> FLAC 4.500 s at 48 kHz stereo in 0.2-2.1 s; the tones keep their level (-9.0 dB RMS) up to 2.5 s, the overlap ramps over 0.5 s and the noise follows at its own level (-15.2 dB): no headroom is taken off here.",
+      "expand": "audios"
     },
     {
       "id": "video-export-pro",

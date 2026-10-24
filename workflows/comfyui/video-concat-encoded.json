@@ -1,0 +1,53 @@
+{
+  "1": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "clip1.mp4"
+    },
+    "_meta": {
+      "title": "Clip 1 (video; copied, not decoded, when the clips match)"
+    }
+  },
+  "2": {
+    "class_type": "LoadVideo",
+    "inputs": {
+      "file": "clip2.mp4"
+    },
+    "_meta": {
+      "title": "Clip 2 (the provider adds one loader per further clip)"
+    }
+  },
+  "3": {
+    "class_type": "ConcatenateVideo",
+    "inputs": {
+      "videos.video0": [
+        "1",
+        0
+      ],
+      "videos.video1": [
+        "2",
+        0
+      ],
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Concatenate Video (packet copy for matching clips, else one clip at a time is re-encoded)"
+    }
+  },
+  "4": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "3",
+        0
+      ],
+      "filename_prefix": "fuobe/video-concat-encoded",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "Save Video"
+    }
+  }
+}

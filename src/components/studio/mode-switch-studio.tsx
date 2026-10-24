@@ -27,6 +27,7 @@ import { CaptionsStudio } from "@/components/captions/captions-studio";
 import { DubStudio } from "@/components/dub/dub-studio";
 import { TrimTool } from "@/components/av/trim-tool";
 import { RemoveObjectTool } from "@/components/remove-object/remove-object-tool";
+import { AudioJoinTool, AudioLoopTool } from "@/components/audio-tools/audio-tools";
 import { ModeStudio, ModeTabs } from "./mode-studio";
 import type { StudioConfig } from "./studio-context";
 
@@ -51,9 +52,13 @@ const CONFIGS: Record<HubKind, Record<string, StudioConfig>> = {
   },
 };
 
-/** Modes that are their own tool rather than a composer studio (Translate & dub, Remove object, Captions, Trim). */
+/** Modes that are their own tool rather than a composer studio (Translate & dub, Loop / extend, Join, Remove object, Captions, Trim). */
 const TOOLS: Partial<Record<HubKind, Record<string, (p: { tabs: React.ReactNode }) => React.ReactNode>>> = {
-  audio: { translate: ({ tabs }) => <DubStudio tabs={tabs} /> },
+  audio: {
+    translate: ({ tabs }) => <DubStudio tabs={tabs} />,
+    loop: ({ tabs }) => <AudioLoopTool tabs={tabs} />,
+    join: ({ tabs }) => <AudioJoinTool tabs={tabs} />,
+  },
   "video-tools": {
     "remove-object": ({ tabs }) => <RemoveObjectTool tabs={tabs} />,
     captions: ({ tabs }) => <CaptionsStudio tabs={tabs} />,

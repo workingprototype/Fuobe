@@ -87,7 +87,8 @@
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
 // and black-and-white videos: params.matteOutput keeps one)). Entry fields: worker "isolated" (needs its own ComfyUI, see README), expand "captions" (the provider writes one
-// segment per caption cue before submitting), optionalModels (files a model control can pick instead of the graph's own,
+// segment per caption cue before submitting), "timeline", "videos" / "audios" (one loader per clip in inputs.videos / audios),
+// optionalModels (files a model control can pick instead of the graph's own,
 // listed in the manifest with optional: true so missing-model help can name their download).
 
 import fs from 'node:fs';
@@ -2688,6 +2689,25 @@ export const SPEC = [
       'the two match at the first, middle and last frame and differ in between, and the eased one barely moves over its first and last frames. ' +
       'Crops are whole pixels, so a tiny still steps visibly (the first frame after zoom 1 jumps by one source pixel); supersample and a still larger than the output hide it.',
   },
+  {
+    id: 'video-concat-encoded',
+    title: 'Join clips the open engine encoded, packet by packet in constant memory (core ConcatenateVideo, no decode)',
+    capability: 'concat',
+    handBuilt: 'hand-built/video-concat-encoded.json',
+    bindings: { video: [b('1', 'file')], video2: [b('2', 'file')] },
+    outputs: [{ node: '4', kind: 'video' }],
+    expand: 'videos',
+    limits: { maxClips: 100 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core)',
+    notes:
+      'The Faceless / Explainer "Frame by frame" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. ' +
+      'The template joins two clips (video, video2); the provider rewrites it per request (expand "videos", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ' +
+      'ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI\'s CreateVideo / SaveVideo made at one size and fps), ' +
+      'so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip\'s settings ' +
+      '(still constant memory), and clips of different sizes fail with "could not be encoded compatibly". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. ' +
+      'Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).',
+  },
 
   // ---- Music beds and audio joins --------------------------------------------------------
   {
@@ -2720,11 +2740,14 @@ export const SPEC = [
     handBuilt: 'hand-built/audio-join-crossfade.json',
     bindings: { audio: [b('1', 'audio')], audio2: [b('2', 'audio')], fadeCurve: [b('3', 'audio')], crossfade: [b('5', 'value')] },
     outputs: [{ node: '17', kind: 'audio' }],
+    expand: 'audios',
     vramGb: 0,
     license: 'n/a (no model; ComfyUI core audio nodes; VideoHelperSuite loader, GPL-3.0 code)',
     notes:
       'audio then audio2, overlapped by crossfade seconds (params.crossfade, > 0; 0.02 gives a click-free hard join). fadeCurve = the same curve WAV as audio-loop-crossfade, crossfade seconds long, written by the provider. ' +
-      'More clips (params.audios in order): fold, i.e. join 1+2, then that result + 3, and so on. The output runs at the higher sample rate of the two (AudioConcat resamples) and is saved as FLAC. ' +
+      'More clips (params.audios in order): the provider rewrites the graph for all of them in one prompt (expand "audios", expandAudioJoinWorkflow, r4/faceless-plus): every clip but the last is read by a VHS loader ' +
+      '(for its length), the first gives its body, each middle clip its head, middle and tail, the last its head and the rest, and each seam is tail x fade-out + next head x fade-in, all concatenated in order; ' +
+      'middle clips must be longer than 2 x crossfade. The output runs at the highest sample rate of the clips (AudioConcat resamples) and is saved as FLAC. ' +
       'Clips placed at exact times are audio-timeline\'s job. ' +
       'Ran here (CPU, two sessions): 3 s 44.1 kHz tones + 2 s 48 kHz noise, crossfade 0.5 s -> FLAC 4.500 s at 48 kHz stereo in 0.2-2.1 s; the tones keep their level (-9.0 dB RMS) up to 2.5 s, ' +
       'the overlap ramps over 0.5 s and the noise follows at its own level (-15.2 dB): no headroom is taken off here.',
