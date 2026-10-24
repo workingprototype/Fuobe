@@ -96,7 +96,8 @@ export async function main(argv, io) {
   }
 
   try {
-    const { values, positionals } = parseArgs(rest, cmd.options ?? {}, name);
+    // A passthrough command (eval) parses its own arguments.
+    const { values, positionals } = cmd.passthrough ? { values: {}, positionals: rest } : parseArgs(rest, cmd.options ?? {}, name);
     if (values.help) {
       print(commandHelp(name));
       return EXIT.ok;

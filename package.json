@@ -17,7 +17,17 @@
     "test:e2e:mobile": "node tests/e2e/no-horizontal-scroll.mjs",
     "test:e2e:shell": "node tests/e2e/shell.mjs",
     "gen:catalog": "python3 scripts/gen-cloud-models.py && python3 scripts/gen-higgsfield-models.py && python3 scripts/gen-higgsfield-presets.py && python3 scripts/gen-oss-loras.py && node scripts/gen-icon-map.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "eval:run": "node scripts/eval/eval.mjs run",
+    "eval:report": "node scripts/eval/eval.mjs report",
+    "eval:review": "node scripts/eval/eval.mjs review",
+    "eval:compare": "node scripts/eval/eval.mjs compare",
+    "eval:promote": "node scripts/eval/eval.mjs promote",
+    "eval:history": "node scripts/eval/eval.mjs history",
+    "eval:validate": "node scripts/eval/eval.mjs validate",
+    "eval:setup": "node scripts/eval/eval.mjs setup",
+    "eval:trash": "node scripts/eval/eval.mjs trash",
+    "eval:covers": "node scripts/eval/eval.mjs covers"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

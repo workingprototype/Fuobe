@@ -197,6 +197,17 @@ export function planGeneration(
   }
 
   if (req.loras?.length) loras = [...loras, ...req.loras];
+  // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
+  const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
+  // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
+  // effect. …", see withOssLoras), which means nothing to the model without the LoRA.
+  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
+  for (const l of loras) {
+    if ((l.strength ?? 1) !== 0 || !l.trigger || keptTriggers.has(l.trigger)) continue;
+    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
+    if (lead) prompt = prompt.slice(lead.length);
+  }
+  loras = kept;
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
   const shots = params.shots?.filter((s) => s.prompt.trim());
@@ -456,6 +467,23 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
  * the whole stretched result.
  */
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
+
+/**
+ * Which of a plan's LoRAs a route really applies, and why the others are left out: ComfyUI loads every file
+ * (injectLoras); fal switches to the model's LoRA endpoint for LoRAs with a URL; other routes take none.
+ * The preview reports it, so a caller (the evaluation harness) records the recipe that ran, not the one it asked for.
+ */
+export function routeLoras(route: Pick<ModelRoute, "provider" | "loraEndpoint">, loras: LoraRef[]): { applied: LoraRef[]; dropped: { file: string; reason: string }[] } {
+  if (route.provider === "comfyui") return { applied: loras, dropped: [] };
+  const applied: LoraRef[] = [];
+  const dropped: { file: string; reason: string }[] = [];
+  for (const l of loras) {
+    if (route.provider !== "fal" || !route.loraEndpoint) dropped.push({ file: l.file, reason: "this route takes no LoRAs" });
+    else if (!l.url) dropped.push({ file: l.file, reason: "no URL to send to the LoRA endpoint" });
+    else applied.push(l);
+  }
+  return { applied, dropped };
+}
 
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
 export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation): number | null {

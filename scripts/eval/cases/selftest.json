@@ -1,0 +1,59 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "selftest",
+  "title": "Harness self-test",
+  "description": "Checks the harness itself: submit, wait, download, telemetry and metrics. In demo mode every case returns demo media for free. On the open engine these are the CPU tools that need no model weights (trim, palette lock, extract frame, join), so a ComfyUI without a GPU runs them for real; on the cloud they are fal's FFmpeg utilities (a few cents).",
+  "original": "harness",
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["oss-trim"] },
+    "cloud": { "models": ["trim-video"] },
+    "demo": { "models": ["oss-trim"] }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["temporal"], "timeoutSeconds": 600 },
+  "variants": {
+    "default": { "description": "As the case says" }
+  },
+  "cases": [
+    {
+      "id": "selftest/trim",
+      "title": "Trim a clip to one second",
+      "inputs": { "video": "samples/demo-landscape.mp4" },
+      "params": { "startTime": 0.5, "endTime": 1.5 }
+    },
+    {
+      "id": "selftest/palette-video",
+      "title": "Palette lock on a clip",
+      "models": { "open": ["oss-palette-video"], "demo": ["oss-palette-video"] },
+      "engines": ["demo", "open"],
+      "op": "color-match",
+      "inputs": { "video": "samples/demo-portrait.mp4", "images": ["fixtures/palette.png"] },
+      "references": "fixtures/palette.png",
+      "metrics": ["temporal", "style"]
+    },
+    {
+      "id": "selftest/join",
+      "title": "Join two clips",
+      "models": { "open": ["oss-join-clips"], "cloud": ["join-clips"], "demo": ["oss-join-clips"] },
+      "op": "concat",
+      "inputs": { "videos": ["samples/demo-square.mp4", "samples/demo-square.mp4"] }
+    },
+    {
+      "id": "selftest/frame",
+      "title": "Extract the first frame",
+      "models": { "open": ["oss-extract-frame"], "cloud": ["extract-frame"], "demo": ["oss-extract-frame"] },
+      "op": "frame",
+      "inputs": { "video": "samples/demo-square.mp4" },
+      "prompts": [{ "id": "frame", "text": "a frame of a short demo clip" }],
+      "metrics": ["clip"]
+    },
+    {
+      "id": "selftest/image",
+      "title": "Text to image (demo media in demo mode)",
+      "models": { "open": ["oss-z-image-turbo"], "cloud": ["z-image-turbo-cloud"], "demo": ["oss-z-image-turbo"] },
+      "engines": ["demo"],
+      "prompts": [{ "id": "fox", "text": "a red fox in fresh snow, golden hour" }],
+      "metrics": ["clip", "aesthetic"]
+    }
+  ]
+}

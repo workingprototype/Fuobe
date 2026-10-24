@@ -10,7 +10,7 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
 import {
   LAST_FRAME_CHAIN,
@@ -436,8 +436,21 @@ function prepare(original: GenerationRequest) {
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, demo, providerId, cost } = prepare(req);
-  return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+  const { plan, route, demo, providerId, cost } = prepare(req);
+  const loras = routeLoras(route, plan.loras);
+  return {
+    model: plan.model,
+    op: plan.op,
+    jobs: plan.jobs,
+    outputs: plan.jobs * plan.perJobOutputs,
+    demo,
+    providerId,
+    costUsd: cost === null ? null : cost * plan.jobs,
+    // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
+    route: { provider: route.provider, endpoint: loras.applied.length && route.provider === "fal" && route.loraEndpoint ? route.loraEndpoint : route.endpoint },
+    prompt: plan.prompt,
+    loras,
+  };
 }
 
 /** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */

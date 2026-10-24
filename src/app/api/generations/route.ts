@@ -9,6 +9,23 @@ import { SignatureSchema } from "@/server/palettes";
 /** A point on a picture as fractions of its width and height. */
 const Focus = z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
 
+/**
+ * Where a LoRA named in a request may be downloaded from. A file the server doesn't know is fetched from its
+ * link before a ComfyUI run (or by fal / Replicate), so an open link would let any token holder make the
+ * server fetch an internal address into models/loras. Every research LoRA is on Hugging Face or civitai;
+ * trained and mirrored copies live in fal's or Replicate's file stores.
+ */
+const LORA_HOSTS = ["huggingface.co", "hf.co", "civitai.com", "fal.media", "replicate.delivery"];
+function loraHostOk(link: string): boolean {
+  try {
+    const u = new URL(link);
+    const host = u.hostname.toLowerCase();
+    return u.protocol === "https:" && !u.username && !u.password && LORA_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
+}
+
 const RequestSchema = z.object({
   feature: z.string().min(1),
   presetId: z.string().optional(),
@@ -83,6 +100,32 @@ const RequestSchema = z.object({
   presetOptions: z.record(z.string(), z.string()).optional(),
   presetStrength: z.number().min(0).max(1).optional(),
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
+  // A recipe's LoRAs (the evaluation harness, scripts/eval): added after the preset's own. On ComfyUI `file` must
+  // already be in models/loras (ComfyUI checks the name against its list); a cloud LoRA endpoint takes `url`.
+  loras: z
+    .array(
+      z.object({
+        file: z
+          .string()
+          .min(1)
+          .max(200)
+          // Brackets too: Redmond's Z-Image LoRAs are called "[ZImage.Turbo]FilmStill_Redmond.safetensors".
+          .regex(/^[\w ()[\]+,.@-]+(\/[\w ()[\]+,.@-]+)*$/, "a file name in ComfyUI's models/loras")
+          .refine((f) => !f.split("/").includes(".."), "a file name in ComfyUI's models/loras"),
+        // Only the public model hubs and the cloud providers' file stores: the server (or a provider) may fetch it.
+        url: z
+          .string()
+          .max(2000)
+          .regex(/^https:\/\//, "an https:// link")
+          .refine(loraHostOk, "a LoRA link on Hugging Face, civitai, fal or Replicate")
+          .optional(),
+        strength: z.number().min(-4).max(4).optional(),
+        trigger: z.string().max(200).optional(),
+        target: z.enum(["high", "low", "both"]).optional(),
+      }),
+    )
+    .max(8)
+    .optional(),
   // Image studio: the Color signature / Moodboard picks (its sentences join the prompt on the server).
   signature: SignatureSchema,
   // What a tool calls its result (Trim · 0:01.0–0:02.5, Captions · Karaoke), shown instead of the prompt.

@@ -1,0 +1,5 @@
+# Optional: face identity (ArcFace-style embeddings). pnpm eval:setup --identity installs it.
+# The default face model is AuraFace v1 (fal/AuraFace-v1, Apache-2.0, trained for commercial use).
+# insightface's own buffalo_l pack is non-commercial research only: it is opt-in (--identity-model buffalo_l).
+insightface==2.1                # MIT (the library; model packs have their own licences)
+onnxruntime==1.31.0             # MIT

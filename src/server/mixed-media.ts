@@ -17,7 +17,7 @@ import {
 } from "@/lib/catalog/mixed-media";
 import { clipLengthProblem, type PlanStep } from "@/lib/catalog/shorts";
 import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
-import type { Engine, Generation } from "@/lib/catalog/types";
+import type { Engine, Generation, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getGeneration, previewChained } from "./generations";
@@ -104,21 +104,26 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
 
 const withChain = (s: PlanStep) => ({ ...s.request, ...(s.chain ? { chain: s.chain } : {}) });
 
-function price(steps: PlanStep[]): { costUsd: number | null; demo: boolean } {
+function price(steps: PlanStep[]): { costUsd: number | null; demo: boolean; providers: ProviderId[] } {
   let cost: number | null = 0;
   let demo = false;
+  const providers = new Set<ProviderId>();
   for (const s of steps) {
     const p = previewChained(withChain(s), s.after?.length ?? 0);
     demo ||= p.demo;
+    providers.add(p.providerId);
     cost = cost === null || p.costUsd === null ? null : cost + p.costUsd;
   }
-  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo };
+  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo, providers: [...providers] };
 }
 
 export interface MixedEstimate {
   costUsd: number | null;
   previewUsd: number | null;
   demo: boolean;
+  /** The model that restyles the clip, and where the steps run ("mock" for demo steps), for the evaluation harness. */
+  modelId: string;
+  providers: ProviderId[];
   frames: number;
   fps: number;
   notes: string[];
@@ -128,7 +133,7 @@ export async function estimateMixed(body: MixedBody): Promise<MixedEstimate> {
   const { input, frames, notes } = await planInput(body, { probe: false });
   const full = price(planMixed(input).steps);
   const preview = price([planMixedPreview({ ...input, frameUrl: body.frameUrl ?? "/api/files/placeholder.png" })]);
-  return { ...full, previewUsd: preview.costUsd, frames, fps: input.fps, notes };
+  return { ...full, previewUsd: preview.costUsd, modelId: input.modelId, frames, fps: input.fps, notes };
 }
 
 function run(steps: PlanStep[]): { batchId: string; items: Generation[]; byKey: Record<string, Generation> } {

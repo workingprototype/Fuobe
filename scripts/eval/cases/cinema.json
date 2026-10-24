@@ -1,0 +1,38 @@
+{
+  "$schema": "./case.schema.json",
+  "suite": "cinema",
+  "title": "Fuobe Cinema · shot lists",
+  "description": "Short films as shot lists: each shot is its own clip with the same seed, so a recipe's adherence (CLIP per shot), flicker (temporal) and continuity across shots (CLIP image similarity between the shots) can be compared. Cloud runs on LTX 2.5 (open weights, hosted) until O6's fuobe-cinema exists; the partner variant runs Seedance 2.5 for reference.",
+  "original": "fuobe-cinema",
+  "kind": "video",
+  "targets": {
+    "open": { "models": ["fuobe-cinema", "oss-wan22-14b-fast"], "op": "t2v", "params": { "aspectRatio": "16:9", "duration": 5 } },
+    "cloud": { "models": ["fuobe-cinema", "ltx-2-5"], "op": "t2v", "params": { "aspectRatio": "16:9", "duration": 6 } },
+    "demo": { "models": ["oss-wan22-14b-fast"], "op": "t2v", "params": { "aspectRatio": "16:9", "duration": 5 } }
+  },
+  "defaults": { "seeds": [1001], "metrics": ["clip", "temporal", "continuity"], "timeoutSeconds": 3600 },
+  "variants": {
+    "original": { "description": "The Cinema Original (or today's open / hosted-open model)" },
+    "partner": { "description": "Seedance 2.5 for reference", "models": { "cloud": ["seedance-2-5"] }, "engines": ["cloud"] }
+  },
+  "cases": [
+    {
+      "id": "cinema/lighthouse",
+      "title": "The lighthouse keeper (3 shots)",
+      "shots": [
+        { "id": "establish", "prompt": "Wide establishing shot of a lighthouse on a rocky cliff at dusk, waves breaking below, the camera slowly pushes in" },
+        { "id": "keeper", "prompt": "Medium shot inside the lighthouse: an old keeper in a wool sweater climbs the spiral stairs holding a lantern, warm light" },
+        { "id": "lamp", "prompt": "Close-up of the keeper's face lit by the turning lamp, he looks out to sea, the beam sweeps across the dark water" }
+      ]
+    },
+    {
+      "id": "cinema/chase",
+      "title": "Rooftop chase (3 shots)",
+      "shots": [
+        { "id": "run", "prompt": "Handheld tracking shot of a courier in a yellow jacket running across wet rooftops at night, neon below" },
+        { "id": "jump", "prompt": "Low angle: the courier leaps the gap between two buildings, slow motion, rain in the air" },
+        { "id": "land", "prompt": "Wide shot from above as the courier lands and rolls on the next roof, the city glowing behind" }
+      ]
+    }
+  ]
+}
