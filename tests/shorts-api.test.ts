@@ -28,6 +28,7 @@ const mixedRoute = await import("@/app/api/mixed-media/route");
 const mixedPreviewRoute = await import("@/app/api/mixed-media/preview/route");
 const mixedEstimateRoute = await import("@/app/api/mixed-media/estimate/route");
 const mixedRetryRoute = await import("@/app/api/mixed-media/retry/route");
+const mixedProgressRoute = await import("@/app/api/mixed-media/progress/route");
 
 const json = (method: string, body?: unknown) =>
   new Request("http://x/api", { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -463,5 +464,17 @@ describe("Mixed Media renders", () => {
     expect(redo.map((g) => g.request.chainFilled)).toEqual([undefined, undefined, undefined, undefined]);
     expect(await settle(again.final.id)).toMatchObject({ status: "succeeded" });
     expect(gens.getGeneration(redo[3].id)!.request.inputs?.images).toHaveLength(2);
+    expect(mixed.framesProgress(again.final.batchId)).toEqual({ total: 4, done: 4, running: 0 });
+  });
+
+  it("says which frame failed and why, not just that an earlier step didn't finish", async () => {
+    const { final } = await mixed.createMixed(mm({ engine: "cloud", range: { start: 1, end: 2 }, fps: 4 }) as never);
+    const edits = gens.listGenerations({ batchId: final.batchId!, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    await gens.cancelGeneration(edits[1].id);
+    expect(await settle(final.id)).toMatchObject({ status: "failed" });
+    const res = await mixedProgressRoute.GET(new Request(`http://x/api/mixed-media/progress?batch=${final.batchId}`));
+    const progress = await res.json();
+    expect(progress).toMatchObject({ total: 4, failed: { label: "Frame 2 of 4", error: "Canceled" } });
+    expect((await mixedProgressRoute.GET(new Request("http://x/api/mixed-media/progress"))).status).toBe(400);
   });
 });

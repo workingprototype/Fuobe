@@ -23,6 +23,7 @@ import {
   mixedPreview,
   mixedRangeProblem,
   nearestResolution,
+  type MixedMode,
   type MixedPreset,
   type MixedResolution,
   type MixedValues,
@@ -34,7 +35,7 @@ import { downloadHref, downloadName } from "@/lib/library";
 import type { TrimRange } from "@/lib/trim-range";
 import { cn } from "@/lib/utils";
 import { MixedHistory } from "./history";
-import { renderSteps, useMixedActions, useMixedEstimate, useWatchedChain, useWatchedGeneration, type MixedBody } from "./hooks";
+import { isFrameRender, renderSteps, useFramesProgress, useMixedActions, useMixedEstimate, useWatchedChain, useWatchedGeneration, type MixedBody } from "./hooks";
 import { AdvancedSettings, loadSaved } from "./settings";
 
 type Tab = "presets" | "history" | "how";
@@ -48,11 +49,11 @@ const HOW = [
   { step: "Choose a preset", text: "Browse 33 mixed-media looks — sketch, comic, paper, neon, marble — and pick the one that fits your clip." },
   { step: "Upload your video", text: "Add a clip and trim it to up to 10 seconds. It needs at least 4 frames per second." },
   { step: "Customize settings", text: "Each preset has its own colours, materials and intensity. Save them per preset; they stay in this browser." },
-  { step: "Generate & preview", text: "Make one preview frame first to check the look, then render the whole video. The open engine restyles it frame by frame at the rate you pick; cloud models restyle it as smooth video." },
+  { step: "Generate & preview", text: "Make one preview frame first to check the look, then render the whole video, frame by frame at the rate you pick. On the cloud, Fast restyles it in one video-to-video pass instead." },
 ];
 
 /** Mixed Media: pick a look, add a ≤10 s clip, tune the settings, preview one frame, render. */
-export function MixedStudio({ models }: { models: Record<Engine, RestyleModelInfo[]> }) {
+export function MixedStudio({ models, frameModels }: { models: Record<Engine, RestyleModelInfo[]>; frameModels: RestyleModelInfo[] }) {
   const [tab, setTab] = useState<Tab>("presets");
   const [engine, setEngine] = useEngine();
   useEffect(() => {
@@ -102,10 +103,10 @@ export function MixedStudio({ models }: { models: Record<Engine, RestyleModelInf
               <p className="text-[12px] font-semibold tracking-[0.14em] text-brand-text uppercase">No prompts, just vibe</p>
               <h2 className="mt-2 font-heading text-display text-balance">Turn any video into mixed-media art</h2>
               <p className="mx-auto mt-2 max-w-[560px] text-body text-pretty text-muted-foreground">
-                33 looks, each with its own colours and materials. Preview one frame first, then render the clip — frame by frame at the rate you choose on the open engine.
+                33 looks, each with its own colours and materials. Preview one frame first, then render the clip frame by frame at the rate you choose.
               </p>
             </div>
-            <Workspace engine={engine} models={models[engine]} />
+            <Workspace engine={engine} models={models[engine]} frameModels={frameModels} />
           </>
         )}
       </div>
@@ -129,8 +130,9 @@ function How({ onStart }: { onStart: () => void }) {
       <div className="mt-6 rounded-2xl bg-muted/60 p-5 text-[13px] text-muted-foreground">
         <p className="font-medium text-foreground">Cost</p>
         <p className="mt-1">
-          On the open engine a render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames), and every frame runs on your GPU for free.
-          Cloud models restyle the clip as video and are priced by the model (per second or per video); the estimate shows before you generate.
+          A render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames). On the open engine every frame runs on your GPU for free; on the
+          cloud each frame is redrawn by an image model and priced per frame (Nano Banana 2 or Seedream 5.0 Flash). Fast restyles the clip in one video-to-video pass,
+          priced by the model. The estimate shows before you generate.
         </p>
       </div>
       <div className="mt-6 text-center">
@@ -142,7 +144,7 @@ function How({ onStart }: { onStart: () => void }) {
   );
 }
 
-function Workspace({ engine, models }: { engine: Engine; models: RestyleModelInfo[] }) {
+function Workspace({ engine, models, frameModels }: { engine: Engine; models: RestyleModelInfo[]; frameModels: RestyleModelInfo[] }) {
   const [presetId, setPresetId] = useState<string | null>(null);
   const preset = MIXED_PRESETS.find((p) => p.id === presetId) ?? null;
   const [values, setValues] = useState<MixedValues>({});
@@ -218,7 +220,7 @@ function Workspace({ engine, models }: { engine: Engine; models: RestyleModelInf
         )}
       </section>
       <aside ref={panel} id="mm-editor" className="scrollbar-none min-w-0 scroll-mt-16 lg:sticky lg:top-16 lg:max-h-[calc(100svh-4.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl">
-        <Editor engine={engine} models={models} preset={preset} values={values} setValues={setValues} />
+        <Editor engine={engine} models={models} frameModels={frameModels} preset={preset} values={values} setValues={setValues} />
       </aside>
       {preset && !panelVisible && (
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 lg:hidden">
@@ -244,13 +246,15 @@ type FpsChoice = number | "manual";
 
 function Editor({
   engine,
-  models,
+  models: restyleModels,
+  frameModels,
   preset,
   values,
   setValues,
 }: {
   engine: Engine;
   models: RestyleModelInfo[];
+  frameModels: RestyleModelInfo[];
   preset: MixedPreset | null;
   values: MixedValues;
   setValues: (v: MixedValues) => void;
@@ -269,12 +273,19 @@ function Editor({
   const [fpsChoice, setFpsChoice] = useState<FpsChoice>(MIXED.defaultFps as number);
   const [manual, setManual] = useState<number>(MIXED.defaultFps);
   const [resolution, setResolution] = useState<MixedResolution>("1K");
-  const [pickedModel, setModel] = useState<Record<Engine, string>>({ cloud: "", open: "" });
-  const modelId = pickedModel[engine] || models[0]?.id;
+  // Cloud: frame by frame (the default, priced per frame) or Fast (one video-to-video pass).
+  const [mode, setMode] = useState<MixedMode>("frames");
+  const cloud = engine === "cloud";
+  const frameMode = cloud && mode === "frames";
+  const models = frameMode ? frameModels : restyleModels;
+  const slot = frameMode ? "frames" : engine;
+  const [pickedModel, setModel] = useState<Record<Engine | "frames", string>>({ cloud: "", open: "", frames: "" });
+  const modelId = pickedModel[slot] || models[0]?.id;
   const model = models.find((m) => m.id === modelId);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  // Every step of the latest render (cut → restyle → sound), so a failed step shows its own error.
+  // Every main step of the latest render (cut → frames or restyle → sound), so a failed step shows its own error.
   const [renderIds, setRenderIds] = useState<string[]>([]);
+  const [renderFrames, setRenderFrames] = useState(0);
   const [anchorOff, setAnchorOff] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
   const actions = useMixedActions();
@@ -292,20 +303,25 @@ function Editor({
   const seconds = mmRange ? mmRange.end - mmRange.start : 0;
   const problem = mmRange ? mixedRangeProblem(mmRange, duration, sourceFps) : null;
   const frames = mmRange ? mixedFrames(seconds, fps) : 0;
-  // Cloud models restyle the cut as video: the frame rate is the open engine's, and the resolution
-  // is the model's own setting nearest to 1K / 2K / 4K (choices that land on the same one are off).
-  const cloud = engine === "cloud";
-  const lengthIssue = (m: RestyleModelInfo) => (cloud && seconds ? clipLengthProblem(m, seconds) : null);
+  // Fast restyles the cut as video: the resolution is the model's own setting nearest to 1K / 2K / 4K
+  // (choices that land on the same one are off). Per frame draws each frame at 1K–4K (Seedream up to 2K).
+  const fast = cloud && !frameMode;
+  const lengthIssue = (m: RestyleModelInfo) => (fast && seconds ? clipLengthProblem(m, seconds) : null);
   const resOptions = MIXED.resolutions.map((r, i) => {
-    const at = cloud ? nearestResolution(model?.resolutions, r) : undefined;
-    const prev = i > 0 && cloud ? nearestResolution(model?.resolutions, MIXED.resolutions[i - 1]) : undefined;
-    return { value: r, label: r, hint: at, disabled: cloud && !!at && at === prev, title: cloud && at === prev ? `${model?.name} renders up to ${at}` : at };
+    if (frameMode) {
+      const capped = r === "4K" && modelId === "seedream-5-flash";
+      return { value: r, label: r, hint: undefined, disabled: capped, title: capped ? `${model?.name} draws frames up to 2K` : `Each frame at ${r}` };
+    }
+    const at = fast ? nearestResolution(model?.resolutions, r) : undefined;
+    const prev = i > 0 && fast ? nearestResolution(model?.resolutions, MIXED.resolutions[i - 1]) : undefined;
+    return { value: r, label: r, hint: at, disabled: fast && !!at && at === prev, title: fast && at === prev ? `${model?.name} renders up to ${at}` : at };
   });
-  const showResolution = !cloud || resOptions.some((o) => o.hint && !o.disabled && o.value !== "1K");
+  const showResolution = !fast || resOptions.some((o) => o.hint && !o.disabled && o.value !== "1K");
   const resShown: MixedResolution = resOptions.find((o) => o.value === resolution)?.disabled ? ([...resOptions].reverse().find((o) => !o.disabled)?.value ?? "1K") : resolution;
-  const modelRes = cloud ? nearestResolution(model?.resolutions, resShown) : undefined;
+  const modelRes = fast ? nearestResolution(model?.resolutions, resShown) : undefined;
   const previewImage = preview?.status === "succeeded" ? preview.outputs.find((o) => o.kind === "image") : undefined;
-  const anchor = engine === "cloud" && model?.image && previewImage && !anchorOff ? previewImage.url : undefined;
+  // Per frame always starts from the approved preview; Fast only when the model takes a still.
+  const anchor = cloud && (frameMode || model?.image) && previewImage && !anchorOff ? previewImage.url : undefined;
 
   const body: MixedBody | null =
     preset && mmRange && !problem
@@ -318,14 +334,15 @@ function Editor({
           fps,
           resolution: resShown,
           modelId,
+          ...(cloud ? { mode } : {}),
           ...(anchor ? { anchor } : {}),
         }
       : null;
   const estimate = useMixedEstimate(body);
   const est = estimate.data;
 
-  // A new clip, preset or engine starts without a preview.
-  const key = `${preset?.id}|${clip?.preview}|${engine}`;
+  // A new clip, preset or engine starts without a preview (and so does another frame editor: the preview is its own work).
+  const key = `${preset?.id}|${clip?.preview}|${engine}|${frameMode ? modelId : ""}`;
   const [lastKey, setLastKey] = useState(key);
   if (key !== lastKey) {
     setLastKey(key);
@@ -385,6 +402,7 @@ function Editor({
       .then((r) => {
         if (!r) return;
         setRenderIds(r.items.map((g) => g.id));
+        setRenderFrames(r.frames ?? 0);
         toast("Rendering your video", { description: "It shows up in History too." });
       })
       .catch((e: Error) => toast.error(e.message));
@@ -442,7 +460,21 @@ function Editor({
         )}
       </Field>
 
-      {!cloud && (
+      {cloud && (
+        <Field label="Restyle" hint={frameMode ? "Every frame redrawn · priced per frame" : "One video-to-video pass · priced by the model"}>
+          <Segmented<MixedMode>
+            label="Restyle"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "frames", label: "Per frame", title: "Each frame is redrawn by an image model, looking at the frame before it" },
+              { value: "fast", label: "Fast", title: "A video model restyles the whole clip in one pass" },
+            ]}
+          />
+        </Field>
+      )}
+
+      {(!cloud || frameMode) && (
         <Field label="Frame rate" hint={sourceFps ? `Uploaded video has ${Math.round(sourceFps)} FPS` : "8 FPS is the classic stop-motion look"}>
           <Segmented<FpsChoice>
             label="Frame rate"
@@ -551,7 +583,7 @@ function Editor({
         )}
         {anchor && (
           <p className="flex items-center gap-1.5 text-[12px] text-brand-text">
-            <Wand2 className="size-3.5 shrink-0" /> {model?.name} follows this frame for the whole video
+            <Wand2 className="size-3.5 shrink-0" /> {frameMode ? "Every frame is matched to this one" : `${model?.name} follows this frame for the whole video`}
             <button type="button" onClick={() => setAnchorOff(true)} className="ml-auto text-muted-foreground underline-offset-2 hover:underline">
               Don&apos;t use it
             </button>
@@ -575,13 +607,18 @@ function Editor({
       <div className="space-y-3 border-t pt-4">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[13px] text-muted-foreground">
-            {!mmRange ? "Estimate" : cloud ? `${seconds.toFixed(1)} s${modelRes ? ` · ${modelRes}` : ""}` : `${frames} frames · ${fps} FPS`}
+            {!mmRange ? "Estimate" : fast ? `${seconds.toFixed(1)} s${modelRes ? ` · ${modelRes}` : ""}` : `${est?.frames ?? frames} frames · ${+(est?.fps ?? fps).toFixed(2)} FPS`}
           </span>
           <span className="flex items-center gap-1.5 font-mono text-[13px] font-medium tabular-nums" aria-live="polite">
             {estimate.isFetching && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
             {body ? costText(est, engine) : "—"}
           </span>
         </div>
+        {frameMode && est && !est.demo && typeof est.perFrameUsd === "number" && (
+          <p className="text-[12px] text-muted-foreground tabular-nums">
+            {est.frames} frames × ${est.perFrameUsd.toFixed(3).replace(/0$/, "")} a frame ({model?.name}), plus a few cents to cut and rebuild the clip
+          </p>
+        )}
         {clip?.url && !clip.uploading && !clip.error && clip.info && clip.info.hasAudio === undefined && (
           <p className="flex gap-1.5 text-[12px] leading-snug text-muted-foreground">
             <Info className="mt-0.5 size-3.5 shrink-0" />
@@ -613,17 +650,28 @@ function Editor({
             {blocker}
           </p>
         )}
-        {render.length > 0 && <LatestRender chain={render} />}
+        {render.length > 0 && <LatestRender chain={render} frames={renderFrames} />}
       </div>
     </div>
   );
 }
 
-/** The latest render: its steps' progress, the failing step's own error, or the video. */
-function LatestRender({ chain }: { chain: (Generation | undefined)[] }) {
+/** The latest render: its steps' progress (a per-frame render counts its frames), the failing step's own error, or the video. */
+function LatestRender({ chain, frames }: { chain: (Generation | undefined)[]; frames: number }) {
   const g = chain[chain.length - 1];
   // Steps still loading read as working, not as deleted.
-  const state = chain.some((x) => !x) ? ({ status: "working", label: "Rendering", progress: 0 } as const) : chainState(renderSteps(chain));
+  const steps = chain.some((x) => !x) ? null : chainState(renderSteps(chain));
+  const perFrame = frames > 0 && isFrameRender(chain);
+  const redrawing = perFrame && steps?.status === "working" && steps.label === "Redrawing the frames";
+  const progress = useFramesProgress(perFrame ? g?.batchId : null, redrawing || steps?.status === "failed").data;
+  let state = steps ?? ({ status: "working", label: "Rendering", progress: 0 } as const);
+  if (redrawing && progress?.total) {
+    // The frames are most of the work: show them as the bar between taking and rebuilding them.
+    const at = chain.findIndex((x) => x?.op === "images-to-video");
+    state = { ...state, label: `Redrawing frames · ${progress.done} of ${progress.total}`, progress: (at + progress.done / progress.total) / chain.length };
+  }
+  // A frame that failed: say which and why (the steps after it only say an earlier step didn't finish).
+  if (state.status === "failed" && progress?.failed) state = { ...state, label: `${progress.failed.label} failed`, error: progress.failed.error };
   const out = g?.status === "succeeded" ? g.outputs.find((o) => o.kind === "video") : undefined;
   return (
     <div className="space-y-2 rounded-xl bg-muted/50 p-3" aria-live="polite">

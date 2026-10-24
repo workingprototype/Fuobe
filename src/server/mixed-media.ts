@@ -218,6 +218,31 @@ export function retryMixed(id: string): { final: Generation; items: Generation[]
   return { final: p.byKey[id], ...followed(p) };
 }
 
+export interface FramesProgress {
+  /** Frame edits in the render. */
+  total: number;
+  done: number;
+  running: number;
+  /** The first frame that failed or was canceled, with its own error (the steps after it only say an earlier step didn't finish). */
+  failed?: { label: string; error: string };
+}
+
+/** A per-frame render's frame edits at a glance (the page follows the main steps, not hundreds of frames). */
+export function framesProgress(batchId: string): FramesProgress {
+  const rows = db().prepare("SELECT status, COUNT(*) AS n FROM generations WHERE batch_id = ? AND feature = ? GROUP BY status").all(batchId, MIXED_FRAME_FEATURE) as { status: string; n: number }[];
+  const count = (...s: string[]) => rows.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
+  const out: FramesProgress = { total: count("queued", "running", "succeeded", "failed", "canceled"), done: count("succeeded"), running: count("running") };
+  if (count("failed", "canceled")) {
+    // The first one to fail, not the frames after it that only waited for it.
+    const bad = db()
+      .prepare("SELECT status, error, request_json FROM generations WHERE batch_id = ? AND feature = ? AND status IN ('failed', 'canceled') ORDER BY (error LIKE '%earlier step%') ASC, created_at ASC LIMIT 1")
+      .get(batchId, MIXED_FRAME_FEATURE) as { status: string; error: string | null; request_json: string };
+    const label = (JSON.parse(bad.request_json) as { step?: { label?: string } }).step?.label ?? "A frame";
+    out.failed = { label, error: bad.status === "canceled" ? "Canceled" : (bad.error ?? "Something went wrong") };
+  }
+  return out;
+}
+
 /** One frame with the current settings. */
 export async function createMixedPreview(body: MixedBody): Promise<Generation> {
   const { input } = await planInput(body, { probe: true });

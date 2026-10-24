@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue } from "react";
-import type { MixedResolution, MixedValues } from "@/lib/catalog/mixed-media";
+import type { MixedMode, MixedResolution, MixedValues } from "@/lib/catalog/mixed-media";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { useGenerationEvents } from "@/lib/api";
 import { send } from "@/components/shorts/hooks";
@@ -18,6 +18,8 @@ export interface MixedBody {
   fps: number;
   resolution: MixedResolution;
   modelId?: string;
+  /** Cloud: frame by frame (default) or Fast. */
+  mode?: MixedMode;
   anchor?: string;
   frameUrl?: string;
   /** Client nonce: a repeat of it gets the first answer (see useSubmitGuard). */
@@ -29,8 +31,29 @@ export interface MixedEstimate {
   previewUsd: number | null;
   demo: boolean;
   frames: number;
+  /** The rate frames are taken at (cloud Per frame: the clip's own over a whole number). */
   fps: number;
+  mode?: MixedMode;
+  /** Cloud Per frame: what one redrawn frame costs. */
+  perFrameUsd?: number | null;
   notes: string[];
+}
+
+export interface FramesProgress {
+  total: number;
+  done: number;
+  running: number;
+  failed?: { label: string; error: string };
+}
+
+/** A per-frame render's frame edits (counts and the first failure), polled while `live`; read once otherwise. */
+export function useFramesProgress(batchId: string | null | undefined, live: boolean) {
+  return useQuery({
+    queryKey: ["mixed-media", "frames", batchId],
+    queryFn: async () => send<FramesProgress>(`/api/mixed-media/progress?batch=${encodeURIComponent(batchId!)}`, "GET"),
+    enabled: !!batchId,
+    refetchInterval: live ? 2000 : false,
+  });
 }
 
 export function useMixedEstimate(body: MixedBody | null) {
@@ -77,20 +100,38 @@ export function useWatchedChain(ids: string[]): (Generation | undefined)[] {
   }).map((q) => q.data);
 }
 
+/** What a step of a render is doing (a per-frame render's assembly waits while the frames are redrawn). */
+function stepLabel(g: Generation): string {
+  switch (g.op) {
+    case "trim":
+      return "Cutting the clip";
+    case "mux":
+      return "Putting the sound back";
+    case "extract-frames":
+      return "Taking the frames";
+    case "images-to-video":
+      return g.status === "queued" && !g.progress ? "Redrawing the frames" : "Putting the frames together";
+    case "concat":
+      return "Joining the clips";
+    default:
+      return "Restyling";
+  }
+}
+
 /** What each step of a render is doing, for chainState(). */
 export function renderSteps(chain: (Generation | undefined)[]): { g?: Generation; label: string }[] {
-  return chain.map((g) => ({
-    g,
-    label: !g ? "A step" : g.op === "trim" ? "Cutting the clip" : g.op === "mux" ? "Putting the sound back" : "Restyling",
-  }));
+  return chain.map((g) => ({ g, label: g ? stepLabel(g) : "A step" }));
 }
+
+/** A per-frame render (its frames were taken by an extract step). */
+export const isFrameRender = (chain: (Generation | undefined)[]) => chain.some((g) => g?.op === "extract-frames");
 
 export function useMixedActions() {
   const qc = useQueryClient();
   const seed = (g: Generation) => qc.setQueryData(["mixed-media", "generation", g.id], g);
   return {
     render: useMutation({
-      mutationFn: (b: MixedBody) => send<{ final: Generation; items: Generation[] }>("/api/mixed-media", "POST", b),
+      mutationFn: (b: MixedBody) => send<{ final: Generation; items: Generation[]; frames?: number }>("/api/mixed-media", "POST", b),
       onSuccess: (r) => {
         r.items.forEach(seed);
         void qc.invalidateQueries({ queryKey: ["generations"] });
@@ -102,7 +143,7 @@ export function useMixedActions() {
     }),
     /** Run a finished-or-failed render again with the same settings (History's "Try again"). */
     retry: useMutation({
-      mutationFn: (v: { id: string; requestId?: string }) => send<{ final: Generation; items: Generation[] }>("/api/mixed-media/retry", "POST", v),
+      mutationFn: (v: { id: string; requestId?: string }) => send<{ final: Generation; items: Generation[]; frames?: number }>("/api/mixed-media/retry", "POST", v),
       onSuccess: (r) => {
         r.items.forEach(seed);
         void qc.invalidateQueries({ queryKey: ["generations"] });
