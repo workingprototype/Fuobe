@@ -354,12 +354,12 @@ describe("Mixed Media renders", () => {
     expect(await settle(final.id)).toMatchObject({ status: "succeeded" });
   });
 
-  it("renders on the cloud: cut → restyle anchored on the preview still → the cut's sound", async () => {
+  it("renders on the cloud (Fast): cut → restyle anchored on the preview still → the cut's sound", async () => {
     const preview = await (await mixedPreviewRoute.POST(json("POST", mm({ engine: "cloud", frameUrl: png })))).json();
     expect(preview).toMatchObject({ modelId: "nano-banana-2", op: "edit", feature: "mixed-media-preview" });
     const still = await settle(preview.id);
     const anchor = still.outputs[0].url;
-    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", anchor }) as never);
+    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", mode: "fast", anchor }) as never);
     expect(items.map((g) => g.modelId)).toEqual(["trim-video", "ltx-2-3-restyle", "merge-audio-video"]);
     expect(items[1].request.inputs?.images).toEqual([anchor]);
     expect(items[1].request.params?.extra).toEqual({ preprocessor: "canny" });
@@ -368,7 +368,7 @@ describe("Mixed Media renders", () => {
   });
 
   it("tries a failed render again with the same settings, from its first step", async () => {
-    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", range: { start: 1, end: 4 } }) as never);
+    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", mode: "fast", range: { start: 1, end: 4 } }) as never);
     // The restyle stops: the soundtrack step then fails with the generic "An earlier step didn't finish".
     await gens.cancelGeneration(items[1].id);
     expect(await settle(final.id)).toMatchObject({ status: "failed", error: "An earlier step didn't finish" });
@@ -396,11 +396,11 @@ describe("Mixed Media renders", () => {
   });
 
   it("refuses a cut the cloud model won't take, before anything is paid for", async () => {
-    const res = await mixedRoute.POST(json("POST", mm({ engine: "cloud", modelId: "kling-o3-4k-edit", range: { start: 2, end: 3.4 } })));
+    const res = await mixedRoute.POST(json("POST", mm({ engine: "cloud", mode: "fast", modelId: "kling-o3-4k-edit", range: { start: 2, end: 3.4 } })));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe("Kling O3 4K Edit needs at least 3 s — select more, or pick LTX 2.3 Reference Restyle");
     // LTX takes it.
-    const est = await mixed.estimateMixed(mm({ engine: "cloud", range: { start: 2, end: 3.4 } }) as never);
+    const est = await mixed.estimateMixed(mm({ engine: "cloud", mode: "fast", range: { start: 2, end: 3.4 } }) as never);
     expect(est.costUsd).toBe(0);
   });
 
@@ -408,5 +408,60 @@ describe("Mixed Media renders", () => {
     const res = await mixedPreviewRoute.POST(json("POST", mm({ engine: "cloud" })));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/Couldn't grab a frame/);
+  });
+
+  it("prices the cloud per-frame render from the editor's price per frame", async () => {
+    setSetting("falKey", "fal-test-key");
+    try {
+      const est = await mixed.estimateMixed(mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 30 }, range: { start: 0, end: 10 }, fps: 8 }) as never);
+      expect(est).toMatchObject({ mode: "frames", frames: 75, fps: 7.5, perFrameUsd: 0.08, demo: false, previewUsd: 0.08 });
+      expect(est.notes).toContain("Frames are every 4th frame of this 30 FPS clip: 7.5 FPS, 75 frames");
+      // 75 frames × $0.08, plus the cut, the extraction and the assembly (fal compute, about free).
+      expect(est.costUsd).toBeGreaterThanOrEqual(6);
+      expect(est.costUsd).toBeLessThan(6.01);
+      const big = await mixed.estimateMixed(mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 10 }, fps: 24, resolution: "4K" }) as never);
+      expect(big).toMatchObject({ frames: 240, fps: 24, perFrameUsd: 0.16 });
+      expect(big.costUsd).toBeGreaterThanOrEqual(38.4);
+      const flash = await mixed.estimateMixed(mm({ engine: "cloud", modelId: "seedream-5-flash", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 5 }, fps: 8 }) as never);
+      expect(flash).toMatchObject({ frames: 40, perFrameUsd: 0.027 });
+      expect(flash.notes.join(" ")).toMatch(/Seedream 5\.0 Flash takes no seed/);
+      // Fast keeps the video-to-video price, and says what it skips.
+      const fast = await mixed.estimateMixed(mm({ engine: "cloud", mode: "fast", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 5 } }) as never);
+      expect(fast.mode).toBe("fast");
+      expect(fast.perFrameUsd).toBeUndefined();
+      expect(fast.notes.join(" ")).toMatch(/Per frame redraws every frame/);
+      // No frame rate, no per-frame plan.
+      const res = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12 } })));
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatch(/pick Fast/);
+    } finally {
+      setSetting("falKey", "");
+    }
+  });
+
+  it("renders on the cloud frame by frame (demo) and tries it again from new frames", async () => {
+    const res = await mixedRoute.POST(json("POST", mm({ engine: "cloud", range: { start: 1, end: 2 }, fps: 4, requestId: "mm-frames-0001" })));
+    expect(res.status).toBe(201);
+    const { final, items, frames } = await res.json();
+    // The page follows the main steps; the per-frame edits are counted.
+    expect(frames).toBe(4);
+    expect(items.map((g: Generation) => g.op)).toEqual(["trim", "extract-frames", "images-to-video", "mux"]);
+    const done = await settle(final.id);
+    expect(done).toMatchObject({ status: "succeeded", feature: "mixed-media" });
+    const edits = gens.listGenerations({ batchId: final.batchId, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    expect(edits.map((g) => g.request.step?.label)).toEqual(["Frame 1 of 4", "Frame 2 of 4", "Frame 3 of 4", "Frame 4 of 4"]);
+    const extracted = gens.getGeneration(items[1].id)!.outputs;
+    expect(edits[0].request.inputs?.images).toEqual([extracted[0].url]);
+    expect(edits[2].request.inputs?.images).toEqual([extracted[2].url, edits[1].outputs[0].url]);
+    expect(gens.getGeneration(items[2].id)!.request.inputs?.images).toEqual(edits.map((g) => g.outputs[0].url));
+
+    const again = await (await mixedRetryRoute.POST(json("POST", { id: final.id, requestId: "mm-frames-retry1" }))).json();
+    expect(again.frames).toBe(4);
+    const redo = gens.listGenerations({ batchId: again.final.batchId, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    // Rebuilt from the stored steps without the old frames in them.
+    expect(redo.map((g) => g.request.inputs)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(redo.map((g) => g.request.chainFilled)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(await settle(again.final.id)).toMatchObject({ status: "succeeded" });
+    expect(gens.getGeneration(redo[3].id)!.request.inputs?.images).toHaveLength(2);
   });
 });

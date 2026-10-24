@@ -166,7 +166,13 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "image",
       "usd": 0.08,
-      "note": "2K 1.5x, 4K 2x"
+      "note": "2K 1.5x, 4K 2x, 0.5K 0.75x",
+      "byResolution": {
+        "0.5K": 0.06,
+        "1K": 0.08,
+        "2K": 0.12,
+        "4K": 0.16
+      }
     }
   },
   {
@@ -488,6 +494,90 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "image",
       "usd": 0.035
+    }
+  },
+  {
+    "id": "seedream-5-flash",
+    "name": "Seedream 5.0 Flash",
+    "vendor": "ByteDance",
+    "family": "seedream",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The fastest, cheapest Seedream 5 \u2014 quick edits in bulk",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "bytedance/seedream/v5/flash/text-to-image",
+        "map": {
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          }
+        }
+      },
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "bytedance/seedream/v5/flash/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "badges": [
+      "fast"
+    ],
+    "defaults": {
+      "aspectRatio": "3:4"
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.027
     }
   },
   {
