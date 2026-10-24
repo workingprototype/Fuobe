@@ -66,7 +66,7 @@ export const LORA_LIBRARY: LoraEntry[] = [
   {
     "key": "realism",
     "name": "suayptalha Z-Image-Turbo Realism",
-    "file": "pytorch_lora_weights.safetensors",
+    "file": "suayptalha-z-image-turbo-realism.safetensors",
     "url": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA/resolve/main/pytorch_lora_weights.safetensors",
     "page": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA",
     "strength": 0.7,
@@ -2070,9 +2070,9 @@ export const LORA_LIBRARY: LoraEntry[] = [
     "hostedEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora (IC-LoRAs: fal-ai/ltx-2.3-22b/reference-video-to-video/lora)"
   },
   {
-    "key": "lora-weights-step-02000",
+    "key": "theburgstall-earthzoomout-ltx2-19b",
     "name": "TheBurgstall EarthZoomOut (LTX-2)",
-    "file": "lora_weights_step_02000.safetensors",
+    "file": "theburgstall-earthzoomout-ltx2-19b.safetensors",
     "url": "https://huggingface.co/TheBurgstall/EarthZoomOut-LoRA-LTX-2-19b/resolve/main/lora_weights_step_02000.safetensors",
     "page": "https://huggingface.co/TheBurgstall/EarthZoomOut-LoRA-LTX-2-19b",
     "strength": 1.0,
@@ -3078,7 +3078,7 @@ export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = [
     ],
     "status": "add-lora",
     "loras": [
-      "lora-weights-step-02000"
+      "theburgstall-earthzoomout-ltx2-19b"
     ],
     "bothEnginesToday": false,
     "newSinceMid2026": false,

@@ -2,9 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loraEntry, loraRef } from "@/lib/catalog/loras";
 import type { LoraRef } from "@/lib/catalog/types";
+
+// The route's GET opts out of prerendering with connection(), which needs a request scope.
+vi.mock("next/server", () => ({ connection: async () => {} }));
 
 // The downloader reads the civitai key and the LoRA folder from the settings table: a throwaway data folder.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-lora-fetch-"));
@@ -196,5 +199,33 @@ describe("Before a cloud run", () => {
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
     await expect(prepareCloudLoras([wiggle], "replicate", up.fn)).rejects.toThrow(/runs only on your GPU/);
     expect(up.sent).toEqual([]);
+  });
+});
+
+describe("Settings → LoRAs (/api/loras)", () => {
+  it("lists the library with licences and what is in the folder, and never the key", async () => {
+    const route = await import("@/app/api/loras/route");
+    setSetting("civitaiKey", KEY);
+    setSetting("comfyLorasDir", folder);
+    fs.writeFileSync(path.join(folder, "AWPortrait-Z.safetensors"), "x");
+    const res = await route.GET();
+    const text = await res.text();
+    expect(text).not.toContain(KEY);
+    const body = JSON.parse(text) as { folder: string; civitaiKey: boolean; loras: { key: string; inFolder: boolean; licence: string; target?: string }[] };
+    expect(body).toMatchObject({ folder, civitaiKey: true });
+    expect(body.loras.find((l) => l.key === "awportrait")).toMatchObject({ inFolder: true, licence: "Commercial · GPU and cloud" });
+    expect(body.loras.find((l) => l.key === "civitai-2490836-wiggle-redmond")).toMatchObject({ inFolder: false, licence: "Commercial · your GPU only", target: "high" });
+  });
+
+  it("downloads one LoRA on request, or says why it can't", async () => {
+    const route = await import("@/app/api/loras/route");
+    const post = (file: unknown) => route.POST(new Request("http://x/api/loras", { method: "POST", body: JSON.stringify({ file }) }));
+    expect((await post("AWPortrait-Z.safetensors")).status).toBe(422);
+    expect(await (await post("AWPortrait-Z.safetensors")).json()).toEqual({ error: "Set the LoRA folder first (ComfyUI's models/loras on this machine)" });
+    expect((await post("nope.safetensors")).status).toBe(422);
+    setSetting("comfyLorasDir", folder);
+    net = network(hfRoutes(AW_BODY));
+    const ok = await post("AWPortrait-Z.safetensors");
+    expect(await ok.json()).toEqual({ file: "AWPortrait-Z.safetensors", sizeBytes: AW_BODY.length, sha256: sha(AW_BODY) });
   });
 });

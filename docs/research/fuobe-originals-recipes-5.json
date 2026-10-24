@@ -5295,7 +5295,7 @@
    "name": "suayptalha Z-Image-Turbo Realism",
    "url": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA/resolve/main/pytorch_lora_weights.safetensors",
    "page": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA",
-   "file": "pytorch_lora_weights.safetensors",
+   "file": "suayptalha-z-image-turbo-realism.safetensors",
    "trigger": "Realism",
    "strength": 0.7,
    "base": "z-image-turbo",
@@ -6711,7 +6711,7 @@
      "name": "suayptalha Z-Image-Turbo Realism",
      "url": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA/resolve/main/pytorch_lora_weights.safetensors",
      "page": "https://huggingface.co/suayptalha/Z-Image-Turbo-Realism-LoRA",
-     "file": "pytorch_lora_weights.safetensors",
+     "file": "suayptalha-z-image-turbo-realism.safetensors",
      "trigger": "Realism",
      "strength": 0.6,
      "base": "z-image-turbo",
@@ -14631,7 +14631,7 @@
      "notes": "",
      "hostedEndpoint": "unverified: fal's LoRA endpoints are LTX-2.3; an LTX-2 19B LoRA may not load",
      "checked": "2026-10-23",
-     "file": "lora_weights_step_02000.safetensors"
+     "file": "theburgstall-earthzoomout-ltx2-19b.safetensors"
     }
    ],
    "hosted": {

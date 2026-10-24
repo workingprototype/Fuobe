@@ -10,7 +10,8 @@ Hugging Face files) into ComfyUI's loras folder, or mirrors them for the cloud e
 Fails (exit 1) when an entry breaks the licence rules of the build plan:
 - a civitai entry without a pinned version id or a permission snapshot, or whose commercial / hostedOk
   flags disagree with its permissions (Image = outputs may be sold, Rent = may run on fal / Replicate);
-- two entries with the same local file name but different downloads (ComfyUI keys LoRAs on the name);
+- two entries with the same local file name but different downloads (ComfyUI keys LoRAs on the name), or a
+  name many unrelated LoRAs share (pytorch_lora_weights.safetensors, lora_weights_step_02000.safetensors…);
 - a file name that isn't a plain file name.
 
 Run:  python3 scripts/gen-lora-library.py
@@ -25,6 +26,9 @@ DATA = json.loads((ROOT / "docs/research/fuobe-originals-recipes-5.json").read_t
 AS_OF = DATA["asOf"]
 DOWNLOADS = {"direct", "civitai-token", "hf-gated"}
 SAFE_FILE = re.compile(r"^[\w.\-\[\]() ]+\.safetensors$")
+# Names many unrelated LoRAs share (diffusers' and trainers' defaults): a file already in ComfyUI's folder under such
+# a name may be another LoRA, so the library renames them (research: "file").
+GENERIC_FILE = re.compile(r"^(pytorch_lora_weights|adapter_model|diffusion_pytorch_model|model|lora|lora_weights(_step_\d+)?|v\d+)\.safetensors$", re.I)
 errors = []
 
 
@@ -83,6 +87,8 @@ def entry(raw, key, group, checked=None, spare=False):
     # Licence rules (build plan → "Licence rules for Originals" → enforced by tests).
     if not SAFE_FILE.match(out["file"]) or "/" in out["file"] or ".." in out["file"]:
         errors.append(f"{where}: file {out['file']!r} is not a plain .safetensors name")
+    if GENERIC_FILE.match(out["file"]):
+        errors.append(f"{where}: file {out['file']!r} is a name other LoRAs use too; give it a unique one")
     if out["download"] not in DOWNLOADS:
         errors.append(f"{where}: unknown download {out['download']!r}")
     if not url.startswith("https://"):
