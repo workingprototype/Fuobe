@@ -287,7 +287,7 @@ const round = (x) => (typeof x === "number" ? Math.round(x * 10000) / 10000 : x)
  * The records `promote --record` writes into the research JSON (fuobe_metrics/research.py puts them in
  * place): one per case that measured a look or a motion. Demo runs have nothing to record.
  */
-export function researchRecords(doc, { date = new Date().toISOString().slice(0, 10) } = {}) {
+export function researchRecords(doc, { date = new Date().toISOString().slice(0, 10), applyStrengths = false } = {}) {
   if (doc.engine === "demo") return [];
   return doc.results
     .filter((r) => r.target)
@@ -305,6 +305,8 @@ export function researchRecords(doc, { date = new Date().toISOString().slice(0, 
       against: r.against.map((a) => Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v && typeof v === "object" ? { candidate: round(v.candidate), alternative: round(v.alternative) } : v]))),
       loras: r.recipe?.loras ?? [],
       ...(r.suggested && { suggestedLoras: r.suggested }),
+      // --apply-strengths: research.py lowers the entry's LoRAs to the strengths half strength won with.
+      ...(applyStrengths && r.verdict === "lower strengths" && r.suggested?.length && { applyStrengths: true }),
     }));
 }
 

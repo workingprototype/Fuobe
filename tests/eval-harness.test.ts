@@ -538,6 +538,53 @@ describe("report, blind review, compare and promote", () => {
     expect(fs.readFileSync(copy, "utf8")).not.toMatch(/\\u[0-9a-f]{4}/);
     // Demo runs have nothing to record.
     expect((await run(["fake-demo-1"])).stderr).toMatch(/demo run measures the harness/);
+    // --apply-strengths: where half strength won, the entry's LoRAs take the strengths it ran (AWPortrait-Z 0.6 → 0.3), and the record says so.
+    const halves = store.latestJobs(runDir).map((r) => (r.variant === "half-strength" ? { ...r, recipe: { ...r.recipe, applied: [{ file: "AWPortrait-Z.safetensors", strength: 0.3 }] } } : r));
+    fs.writeFileSync(path.join(runDir, "jobs.jsonl"), halves.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    const lowered = await run(["fake-open-2", "--apply-strengths"]);
+    expect(lowered.code, lowered.stderr).toBe(0);
+    expect(lowered.stderr).toMatch(/General: AWPortrait-Z\.safetensors 0\.6 → 0\.3/);
+    const changed = JSON.parse(fs.readFileSync(copy, "utf8"));
+    const e2 = changed.presets.find((p: { id: string }) => p.id === look);
+    expect(e2.loras.map((l: { file: string; strength: number }) => [l.file, l.strength])).toEqual([["AWPortrait-Z.safetensors", 0.3], ["lenovo_z.safetensors", 0.35]]);
+    expect(e2.eval[0].appliedStrengths).toEqual([{ file: "AWPortrait-Z.safetensors", from: 0.6, to: 0.3 }]);
+    expect((await evalCli.main(["promote", "fake-open-2", "--apply-strengths"], { stdout: sink().stream, stderr: sink().stream, env: { ...process.env, FUOBE_EVAL_RESULTS: results } }))).toBe(2);
+  });
+
+  it("covers: the best render of each promoted case becomes its preset's cover, small, and listed for the gallery", async () => {
+    const pub = path.join(dir, "covers-public");
+    const out = path.join(pub, "previews", "soul");
+    const manifest = path.join(dir, "covers-manifest.ts");
+    const covers = (args: string[]) => cli(["covers", ...args, "--public-dir", pub, "--manifest", manifest]);
+    // A DoP run of clips: research beats catalog on its words, and the review agreed.
+    const clip = (c: number, w: number) => ({ clip: c, warp: w, drift: 0.02 });
+    const scores = Object.fromEntries(["s1001", "s2002", "s3003"].flatMap((s, i) => [[`effect-thunder-god--bridge--${s}--research`, clip(32 + i, 0.01)], [`effect-thunder-god--bridge--${s}--catalog`, clip(28, 0.02)]]));
+    const runDir = fakeRun("fake-dop-covers", "open", scores, { request: { presetId: "effect-thunder-god" } } as Partial<Row>, { candidate: "research", variants: ["catalog", "research"] });
+    const rows = store.latestJobs(runDir).map((r) => {
+      fs.copyFileSync(path.join(process.cwd(), "public/samples/demo-portrait.mp4"), path.join(runDir, "outputs", `${r.id}.mp4`));
+      return { ...r, outputs: [{ file: `outputs/${r.id}.mp4`, kind: "video" }] };
+    });
+    fs.writeFileSync(path.join(runDir, "jobs.jsonl"), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    // Not reviewed yet: held, so no cover.
+    expect((await covers(["fake-dop-covers"])).stdout).toMatch(/0 covers[\s\S]*hold: only a promoted recipe's render becomes a cover/);
+    review3(runDir);
+    rateFor(runDir, "research");
+    const dry = await covers(["fake-dop-covers", "--dry-run"]);
+    expect(dry.stdout).toMatch(/1 cover from fake-dop-covers \(open, research\) would be made\n  effect-thunder-god ← effect-thunder-god--bridge--s3003--research \(best clip 34\.000\)/);
+    expect(fs.existsSync(out)).toBe(false);
+    if (spawnSync("ffmpeg", ["-version"]).status !== 0) return; // encoding needs ffmpeg
+    const r = await covers(["fake-dop-covers"]);
+    expect(r.code, r.stderr).toBe(0);
+    const entry = (await import("../scripts/eval/lib/covers.mjs")).readManifest(manifest)["effect-thunder-god"];
+    expect(entry).toEqual({ poster: "/previews/soul/effect-thunder-god.jpg", video: "/previews/soul/effect-thunder-god.mp4", run: "fake-dop-covers", engine: "open", model: "", variant: "research" });
+    const probe = JSON.parse(spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height:format=duration", "-of", "json", path.join(out, "effect-thunder-god.mp4")], { encoding: "utf8" }).stdout);
+    expect(Math.max(probe.streams[0].width, probe.streams[0].height)).toBeLessThanOrEqual(512);
+    expect(Number(probe.format.duration)).toBeLessThanOrEqual(4.1);
+    expect(fs.statSync(path.join(out, "effect-thunder-god.jpg")).size).toBeGreaterThan(0);
+    // The gallery reads the manifest's format: a TS module whose entries round-trip.
+    expect(fs.readFileSync(manifest, "utf8")).toMatch(/^\/\*\*[\s\S]*export const PRESET_PREVIEWS: Record<string, PresetPreviewMedia> = \{\n {2}"effect-thunder-god": \{/m);
+    // Demo media never becomes a cover.
+    expect((await cli(["covers", "fake-demo-1"])).stderr).toMatch(/never becomes a cover/);
   });
 
   it("compare prints wins and losses and fails when a chosen metric regresses beyond the threshold", async () => {

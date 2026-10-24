@@ -8,6 +8,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadSuite, suiteFiles, validateAll } from "./lib/cases.mjs";
 import { compareRuns, compareText, promote, promoteText, researchRecords } from "./lib/compare.mjs";
+import { makeCovers } from "./lib/covers.mjs";
 import { scoreRun } from "./lib/metrics.mjs";
 import { METRICS_DIR, REPO_DIR, resultsDir } from "./lib/paths.mjs";
 import { RECIPES_FILE } from "./lib/recipes.mjs";
@@ -54,7 +55,16 @@ const HELP = {
   report: "pnpm eval:report <runId|latest> [--no-metrics] [--metrics clip,style] [--device cpu|cuda|auto] [--style-model clip|dinov2] [--force]",
   review: "pnpm eval:review <runId|latest> [--against variants|references|<otherRunId>] [--port 4173] [--no-serve] [--limit n]",
   compare: "pnpm eval:compare <runA[:variant]> <runB[:variant]> [--fail-on clip,aesthetic] [--threshold 1|5%] [--per-case]",
-  promote: "pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--research file]]   --record writes the verdicts into the research JSON",
+  promote: `pnpm eval:promote <runId> [--candidate recipe] [--against prompt-only,half-strength,plain] [--record [--apply-strengths] [--research file]]
+
+  --record             writes each case's verdict into the research JSON entry it measured
+  --apply-strengths    with --record: where half strength won, lowers that entry's LoRA strengths to the ones it ran
+                       (review the diff, then pnpm gen:catalog and run both engines again)`,
+  covers: `pnpm eval:covers <runId> [--variant <name>] [--dry-run] [--public-dir public] [--manifest src/lib/preset-previews.generated.ts]
+
+  The best render of each promoted case becomes its preset's cover: encoded small into public/previews/<suite>/
+  and listed in src/lib/preset-previews.generated.ts, which the gallery cards show. --variant takes that
+  variant's renders for every case instead (catalog: what ships today). Demo runs never make covers.`,
   history: "pnpm eval:history [--suite soul] [--case soul/v1-general] [--limit 20]",
   validate: "pnpm eval:validate [suite files…]   checks every case file and that the generated suites match the research",
   trash: "pnpm eval:trash <runId> [--dry-run]   moves the run's generations to that Fuobe's Trash (its results here stay)",
@@ -87,7 +97,7 @@ export async function main(argv, io = {}) {
     print(rest[0] && HELP[rest[0]] ? HELP[rest[0]] : usage());
     return 0;
   }
-  const commands = { run, report, review, compare, promote: promoteCmd, history, validate, setup, trash };
+  const commands = { run, report, review, compare, promote: promoteCmd, history, validate, setup, trash, covers };
   if (!commands[command]) {
     note(`Unknown command “${command}”.\n${usage()}`);
     return 2;
@@ -294,15 +304,16 @@ async function compare(args, ctx) {
 }
 
 async function promoteCmd(args, ctx) {
-  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" }, record: { type: "boolean" }, research: { type: "string" } }, { positionals: true });
+  const { values: v, positionals } = parse(args, { candidate: { type: "string" }, against: { type: "string" }, record: { type: "boolean" }, "apply-strengths": { type: "boolean" }, research: { type: "string" } }, { positionals: true });
   if (v.help) return ctx.print(HELP.promote), 0;
   const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
   const doc = promote(dir, { candidate: v.candidate, alternatives: list(v.against) });
   ctx.print(v.json ? JSON.stringify(doc, null, 2) : promoteText(doc));
+  if (v["apply-strengths"] && !v.record) throw new Usage("--apply-strengths goes with --record");
   if (!v.record) return 0;
   // --record: the verdicts go into the research JSON for a person to review (git diff), never a default.
   if (doc.engine === "demo") throw new Error("A demo run measures the harness, not models: there is nothing to record in the research.");
-  const records = researchRecords(doc);
+  const records = researchRecords(doc, { applyStrengths: v["apply-strengths"] });
   if (!records.length) return ctx.note("No look or motion in this run to record."), 0;
   const file = path.resolve(v.research ?? path.join(REPO_DIR, RECIPES_FILE));
   const recordsFile = path.join(dir, "research-records.json");
@@ -313,6 +324,11 @@ async function promoteCmd(args, ctx) {
   if (r.status !== 0) throw new Error(`Recording failed: ${(r.stderr || r.stdout).trim().split("\n").at(-1)}`);
   const res = JSON.parse(r.stdout);
   ctx.note(`Recorded ${res.recorded} result${res.recorded === 1 ? "" : "s"} in ${path.relative(REPO_DIR, file) || file} (each entry's "eval" list). Review the diff; recipes and defaults change only by hand.`);
+  if (res.lowered?.length) {
+    ctx.note(`Lowered the strengths of ${res.lowered.length} LoRA${res.lowered.length === 1 ? "" : "s"} where half strength won:`);
+    for (const l of res.lowered) ctx.note(`  ${l.entry}: ${l.file} ${l.from} → ${l.to}`);
+    ctx.note("Review the diff, run pnpm gen:catalog, and measure both engines again before committing.");
+  }
   for (const m of res.missing) ctx.note(`  not in the research: ${JSON.stringify(m)}`);
   return 0;
 }
@@ -383,6 +399,20 @@ async function trash(args, ctx) {
   }
   if (v.json) return ctx.print(JSON.stringify({ runId, server: target.url, moved, gone }, null, 2)), 0;
   ctx.print(`Moved ${moved} generation${moved === 1 ? "" : "s"} of ${runId} to the Trash on ${target.url}${gone ? ` (${gone} were gone already)` : ""}. The run's results here stay; empty the Trash in Fuobe to delete them for good.`);
+  return 0;
+}
+
+async function covers(args, ctx) {
+  const { values: v, positionals } = parse(args, { variant: { type: "string" }, "dry-run": { type: "boolean" }, "public-dir": { type: "string" }, manifest: { type: "string" } }, { positionals: true });
+  if (v.help) return ctx.print(HELP.covers), 0;
+  const { dir } = resolveRun(root(v, ctx.env), positionals[0] ?? "latest");
+  const r = makeCovers(dir, { variant: v.variant, dryRun: v["dry-run"], publicDir: v["public-dir"] && path.resolve(v["public-dir"]), manifest: v.manifest && path.resolve(v.manifest) });
+  if (v.json) return ctx.print(JSON.stringify(r, null, 2)), 0;
+  ctx.print(`${r.covers.length} cover${r.covers.length === 1 ? "" : "s"} from ${r.runId} (${r.engine}, ${r.variant})${v["dry-run"] ? " would be made" : ""}`);
+  for (const c of r.covers) ctx.print(`  ${c.key} ← ${c.job}${c.metric ? ` (best ${c.metric}${c.score != null ? ` ${Number(c.score).toFixed(3)}` : ""})` : ""}`);
+  for (const sk of r.skipped.slice(0, 10)) ctx.print(`  · ${sk.caseId}: ${sk.why}`);
+  if (r.skipped.length > 10) ctx.print(`  · and ${r.skipped.length - 10} more`);
+  if (r.covers.length && !v["dry-run"]) ctx.note("Look at the media and the diff of src/lib/preset-previews.generated.ts before committing them.");
   return 0;
 }
 

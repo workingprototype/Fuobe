@@ -20,7 +20,7 @@ def record(engine="open", case="soul/v1-general", verdict="hold", **target):
 def test_records_land_in_their_entry_and_replace_the_same_engine_and_case():
     d = doc()
     out = research.apply_records(d, [record(), record(engine="cloud"), record(motion="crane up", case="dop/motion-crane-up")])
-    assert out == {"recorded": 3, "missing": []}
+    assert out == {"recorded": 3, "missing": [], "lowered": []}
     assert [r["engine"] for r in d["presets"][0]["eval"]] == ["open", "cloud"]
     assert "target" not in d["presets"][0]["eval"][0]
     assert d["motionsEffects"][0]["eval"][0]["preset"] == "crane up"
@@ -50,3 +50,18 @@ def test_the_file_keeps_its_format(tmp_path):
     assert "Café → film" in text and "\\u" not in text
     assert text.endswith("}\n") and text.startswith('{\n "conventions"')
     assert json.loads(text)["presets"][0]["loras"][0]["strength"] == 1.0
+
+
+def test_apply_strengths_lowers_only_the_entry_it_measured_and_says_so():
+    d = doc()
+    suggested = [{"file": "a.safetensors", "strength": 0.5}, {"file": "not-in-entry.safetensors", "strength": 0.2}]
+    lower = {**record(verdict="lower strengths"), "suggestedLoras": suggested}
+    # Without applyStrengths the suggestion is only recorded.
+    research.apply_records(d, [lower])
+    assert d["presets"][0]["loras"][0]["strength"] == 1.0
+    out = research.apply_records(d, [{**lower, "applyStrengths": True}])
+    assert d["presets"][0]["loras"][0]["strength"] == 0.5
+    assert out["lowered"] == [{"entry": "General", "file": "a.safetensors", "from": 1.0, "to": 0.5}]
+    rec = d["presets"][0]["eval"][-1]
+    assert rec["appliedStrengths"] == [{"file": "a.safetensors", "from": 1.0, "to": 0.5}]
+    assert "applyStrengths" not in rec

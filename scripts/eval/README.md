@@ -76,7 +76,8 @@ harness measures what a user gets.
 | `pnpm eval:report <runId\|latest>` | Scores again (only what changed) and rewrites `summary.json`, `report.html` and the history lines |
 | `pnpm eval:review <runId>` | Serves the blind A/B page and saves ratings next to the run |
 | `pnpm eval:compare <runA> <runB>` | Wins, losses and mean gain per metric. Exits 1 when a guarded metric regresses |
-| `pnpm eval:promote <runId>` | Applies the promote rule. `--record` writes the verdicts into the research JSON |
+| `pnpm eval:promote <runId>` | Applies the promote rule. `--record` writes the verdicts into the research JSON; `--apply-strengths` also lowers over-cooked strengths there |
+| `pnpm eval:covers <runId>` | Turns each promoted case's best render into its preset's cover (`public/previews/`, `src/lib/preset-previews.generated.ts`) |
 | `pnpm eval:history` | Lists runs, newest first, and the per-case scores of one case (`--case soul/v1-general`) |
 | `pnpm eval:validate` | Checks every case file, and that the generated suites match the research |
 | `pnpm eval:setup` | Creates the metrics venv with uv (`--identity`, `--download`, `--dinov2`, `--torch-backend`) |
@@ -392,12 +393,30 @@ entry. Each record holds:
 - the LoRAs it ran, and the strengths to try when half strength won.
 
 A newer record for the same engine and case replaces the older one. The file keeps its format, so
-the diff shows only the records. Recording never changes a recipe, a strength or a default. Those
-remain code changes that a person reviews:
+the diff shows only the records. Recording alone never changes a recipe, a strength or a default.
 
-1. Edit the research JSON.
-2. Regenerate the catalog.
-3. Check both engines.
+`--record --apply-strengths` does lower strengths that over-cook: where half strength won, the entry's
+LoRAs take the strengths that variant ran, and the record lists each change (`appliedStrengths`). It
+still lands as a diff for a person to review. Defaults stay code changes that a person reviews:
+
+1. Review the research JSON's diff (or edit it).
+2. Regenerate the catalog (`pnpm gen:catalog`).
+3. Measure both engines again.
+
+## Covers: the renders become the preview media
+
+`pnpm eval:covers <runId>` takes the best render of each **promoted** case (best on the case's main
+metric) and makes it that preset's cover. A still becomes a JPEG of at most 768 px; a clip becomes its
+first 4 seconds, muted, at most 512 px, with its first frame as the poster. They go to
+`public/previews/<suite>/`, and `src/lib/preset-previews.generated.ts` lists them by preset id (a
+DoP preset, `effect-thunder-god`) or look id (`v1-general`). The gallery cards play a listed cover
+instead of their procedural preview.
+
+- `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
+- `--dry-run` lists what it would pick.
+- Only Fuobe's own renders become covers: a demo run never does, nor a render whose LoRAs aren't
+  commercial. No Higgsfield preview is used anywhere.
+- It needs ffmpeg. Look at the media and the generated file's diff before committing them.
 
 ## Tests
 
