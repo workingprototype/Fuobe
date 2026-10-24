@@ -92,7 +92,8 @@ const RequestSchema = z.object({
           .string()
           .min(1)
           .max(200)
-          .regex(/^[\w ()+,.@-]+(\/[\w ()+,.@-]+)*$/, "a file name in ComfyUI's models/loras")
+          // Brackets too: Redmond's Z-Image LoRAs are called "[ZImage.Turbo]FilmStill_Redmond.safetensors".
+          .regex(/^[\w ()[\]+,.@-]+(\/[\w ()[\]+,.@-]+)*$/, "a file name in ComfyUI's models/loras")
           .refine((f) => !f.split("/").includes(".."), "a file name in ComfyUI's models/loras"),
         url: z.string().max(2000).regex(/^https:\/\//, "an https:// link").optional(),
         strength: z.number().min(-4).max(4).optional(),

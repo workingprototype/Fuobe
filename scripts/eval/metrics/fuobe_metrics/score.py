@@ -307,6 +307,10 @@ def main(argv=None) -> int:
             continue
         outs = media_outputs(run_dir, job)
         row: dict = {"_fp": fp}
+        if wanted and old:
+            # --metrics re-scores those families only: the job's other scores stay.
+            redo = {k for f in wanted for k in FAMILIES.get(f, [])} | {f"_{f}Refs" for f in wanted}
+            row.update({k: v for k, v in old.items() if k not in redo and k not in {"_fp", "_notes"}})
         notes = []
         for fam in fams:
             if fam in scorer.skipped:

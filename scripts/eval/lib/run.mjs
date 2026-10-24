@@ -135,7 +135,12 @@ export async function runEval(opts, io) {
       const p = await price(client, job, inputs, { engine, runId: runId ?? "dry-run" });
       job.preview = p;
       if (engine === "demo" && !p.demo) job.skip = `would run for real on ${p.providerId}: turn on Settings → Demo mode for a free self-test`;
-      else if (engine !== "demo" && p.demo) job.skip = `would run as a demo: ${p.modelName ?? job.model.id} has no ${engine === "open" ? "ComfyUI" : "cloud provider"} connected on that Fuobe`;
+      else if (engine !== "demo" && p.demo) {
+        job.skip =
+          facts.demoMode === "on"
+            ? "would run as a demo: Demo mode is On on that Fuobe (set Settings → Demo mode to Auto or Off to measure real models)"
+            : `would run as a demo: ${p.modelName ?? job.model.id} has no ${engine === "open" ? "ComfyUI" : "cloud provider"} connected on that Fuobe`;
+      }
       else if (engine !== "demo" && p.engine && p.engine !== engine) job.skip = `${p.modelName ?? job.model.id} is ${p.engine === "open" ? "an open-source" : "a cloud"} model, not ${engine}`;
       else priced.push(job);
     } catch (e) {

@@ -78,6 +78,12 @@ def test_score_cli_on_a_run_without_models(tmp_path):
     doc = json.loads((run / "metrics.json").read_text())
     assert doc["version"] == 1 and "j1" in doc["jobs"] and doc["groups"] == {}
     assert main([str(run), "--metrics", "smell"]) == 2
+    # Re-scoring some families keeps the job's other scores.
+    doc["jobs"]["j1"].update({"_fp": "older", "clip": 30.5, "drift": 0.01})
+    (run / "metrics.json").write_text(json.dumps(doc))
+    assert main([str(run), "--metrics", "continuity"]) == 0
+    kept = json.loads((run / "metrics.json").read_text())["jobs"]["j1"]
+    assert kept["clip"] == 30.5 and kept["drift"] == 0.01 and kept["_fp"] != "older"
 
 
 def _weights_cached(key):

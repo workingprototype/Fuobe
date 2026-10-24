@@ -224,7 +224,14 @@ describe("the runner on the demo provider", () => {
   it("refuses an engine the server can't run, and skips jobs that would run as a demo on a real engine", async () => {
     const dry = await cli(["run", "--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--dry-run"]);
     expect(dry.code, dry.stderr).toBe(0);
-    expect(dry.stdout).toMatch(/would run as a demo/);
+    expect(dry.stdout).toMatch(/would run as a demo: Z-Image Turbo \(hosted\) has no cloud provider connected/);
+    // With Demo mode On, that is the reason given (a connected engine wouldn't help).
+    setSetting("demoMode", "on");
+    try {
+      expect((await cli(["run", "--suite", "soul", "--engine", "open", "--looks", "v1-general", "--dry-run"])).stdout).toMatch(/Demo mode is On on that Fuobe/);
+    } finally {
+      setSetting("demoMode", "auto");
+    }
     setSetting("engineMode", "open");
     try {
       const r = await cli(["run", "--suite", "soul", "--engine", "cloud", "--looks", "v1-general"]);

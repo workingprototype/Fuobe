@@ -29,6 +29,9 @@ describe("POST /api/generations with a recipe's LoRAs", () => {
       { file: "AWPortrait-Z.safetensors", url: "https://huggingface.co/Shakker-Labs/AWPortrait-Z/resolve/main/AWPortrait-Z.safetensors", strength: 0.6 },
       { file: "civitai-2463391-hardflash.safetensors", strength: 0.7, trigger: "hardflashy" },
       { file: "wan/camera-overhead-high.safetensors", strength: 1, target: "high" },
+      // Every file name the research uses (brackets, spaces, parentheses).
+      { file: "[ZImage.Turbo]FilmStill_Redmond.safetensors", strength: 0.8 },
+      { file: "zimageturbo_Sunbleach_Photograph_Style_Lora_TAV2_000002500_(recommended).safetensors", strength: 0.7 },
     ];
     expect((await post({ ...soul, loras })).status).toBe(200);
     const made = await post({ ...soul, loras }, false);
@@ -52,6 +55,17 @@ describe("POST /api/generations with a recipe's LoRAs", () => {
       expect(r.body.error).toMatch(/^loras\./);
     }
     expect((await post({ ...soul, loras: Array.from({ length: 9 }, (_, i) => ({ file: `l${i}.safetensors` })) })).status).toBe(400);
+  });
+
+  it("takes every LoRA file name in the research (the harness sends them as they are)", async () => {
+    const research = JSON.parse(fs.readFileSync(path.join(process.cwd(), "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
+    type L = { file?: string };
+    const files = [...new Set<string>([...research.presets, ...research.motionsEffects].flatMap((e: { loras?: L[] }) => (e.loras ?? []).map((l) => l.file ?? "")).filter(Boolean))];
+    expect(files.length).toBeGreaterThan(50);
+    for (let i = 0; i < files.length; i += 8) {
+      const r = await post({ ...soul, loras: files.slice(i, i + 8).map((file) => ({ file })) });
+      expect(r.status, `${r.body.error} (${files.slice(i, i + 8).join(", ")})`).toBe(200);
+    }
   });
 });
 
