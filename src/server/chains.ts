@@ -313,20 +313,20 @@ const asList = (a: string | string[] | undefined) => (a === undefined ? [] : Arr
 /** Chain slots that take an audio output (and so may pick a stem). */
 const AUDIO_SLOTS = new Set<ChainSlot["slot"]>(["audio", "voiceAudio", "audio2"]);
 
-/** Kahn's algorithm: steps in an order where every `after` comes first; throws on a cycle. */
+/** Kahn's algorithm: steps in an order where every `after` comes first; throws on a cycle. Linear in steps + edges (a per-frame render has hundreds). */
 function topoOrder(steps: PipelineStep[]): PipelineStep[] {
-  const byKey = new Map(steps.map((s) => [s.key, s]));
   const indegree = new Map(steps.map((s) => [s.key, new Set(asList(s.after)).size]));
+  const next = new Map<string, PipelineStep[]>();
+  for (const t of steps) for (const a of new Set(asList(t.after))) next.set(a, [...(next.get(a) ?? []), t]);
   const ready = steps.filter((s) => indegree.get(s.key) === 0);
   const out: PipelineStep[] = [];
-  while (ready.length) {
-    const s = ready.shift()!;
+  for (let i = 0; i < ready.length; i++) {
+    const s = ready[i];
     out.push(s);
-    for (const t of steps) {
-      if (!new Set(asList(t.after)).has(s.key)) continue;
+    for (const t of next.get(s.key) ?? []) {
       const n = indegree.get(t.key)! - 1;
       indegree.set(t.key, n);
-      if (n === 0) ready.push(byKey.get(t.key)!);
+      if (n === 0) ready.push(t);
     }
   }
   if (out.length < steps.length) {
@@ -344,7 +344,8 @@ function topoOrder(steps: PipelineStep[]): PipelineStep[] {
  *
  * A chain slot takes the first output of its kind from the step it names, or with `stem` the
  * audio output whose `meta.stem` matches — that's how one separate-audio step feeds both the voice
- * to clone and the background to mix back in.
+ * to clone and the background to mix back in — or with `index` its output number i: one step per
+ * index fans a list out (a step per extracted frame), one step with a slot per index gathers it back.
  *
  * @example Dub a clip into Spanish in the speaker's own voice, over the original music and effects
  * ```ts
@@ -386,6 +387,8 @@ export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}
     if (chain && chain.length !== after.length) throw new Error(`Step “${s.key}” has ${chain.length} chain slot${chain.length === 1 ? "" : "s"} for ${after.length} earlier step${after.length === 1 ? "" : "s"}`);
     const stray = chain?.find((c) => c.stem && !AUDIO_SLOTS.has(c.slot));
     if (stray) throw new Error(`Step “${s.key}”: a stem (“${stray.stem}”) only goes into an audio slot, not “${stray.slot}”`);
+    const badIndex = chain?.find((c) => c.index !== undefined && !(Number.isInteger(c.index) && c.index >= 0));
+    if (badIndex) throw new Error(`Step “${s.key}”: an output number must be a whole number from 0 (got ${badIndex.index})`);
   }
   const ordered = topoOrder(steps);
   const n = steps.length;

@@ -568,6 +568,12 @@ export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | un
   // A mask: the output made as one (meta.role "mask": a painted window's last tracked frame), else a mask video, else a still.
   if (s.slot === "mask") return outputs.find((o) => o.meta?.role === "mask") ?? outputs.find((o) => o.kind === "video") ?? outputs.find((o) => o.kind === "image");
   const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
+  if (s.index !== undefined) {
+    if (!ofKind.length) return undefined;
+    const at = (o: OutputFile, i: number) => (typeof o.meta?.index === "number" ? o.meta.index : i);
+    const ordered = ofKind.map((o, i) => ({ o, i: at(o, i) })).sort((a, b) => a.i - b.i);
+    return (ordered.find((x) => x.i === s.index) ?? ordered[Math.min(s.index, ordered.length - 1)]).o;
+  }
   if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
   const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
   return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
@@ -620,6 +626,28 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
     else if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios") inputs[s.slot] = urls[i];
   });
   return { ...req, prompt, inputs };
+}
+
+/**
+ * A stored step as it was before the runner filled its chain slots (`chainFilled`): the chained list
+ * items come out from the front ("first") and the back ("last"), single slots are emptied, and the
+ * step's own items stay. A retry rebuilds the step from new dependencies this way. Text that filled a
+ * "prompt" slot can't be told from the prompt, so it stays.
+ */
+export function unfilledRequest(req: GenerationRequest, deps: number): GenerationRequest {
+  const { chainFilled, ...rest } = req;
+  if (!chainFilled) return rest;
+  const slots = slotsFor(rest, deps);
+  const inputs = { ...rest.inputs };
+  for (const k of ["images", "videos", "audios"] as const) {
+    const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
+    const list = inputs[k] ?? [];
+    const own = list.slice(count("first"), list.length - count("last"));
+    if (own.length) inputs[k] = own;
+    else delete inputs[k];
+  }
+  for (const s of slots) if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios" && s.slot !== "prompt") delete inputs[s.slot];
+  return { ...rest, inputs: Object.keys(inputs).length ? inputs : undefined };
 }
 
 /** Generations this process is handing to a provider right now (shared across hot reloads and bundles). */
@@ -677,7 +705,7 @@ async function advanceDependents(): Promise<void> {
       const model = getModel(request.modelId);
       if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
-      const original = withChainInputs(request, values as string[]);
+      const original: GenerationRequest = { ...withChainInputs(request, values as string[]), chainFilled: true };
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
       if (mode.error) throw new Error(mode.error);

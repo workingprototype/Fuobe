@@ -696,6 +696,8 @@ export interface GenerationRequest {
   chainFrom?: "first" | "last";
   /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
   chain?: ChainSlot[];
+  /** Server-set when the runner filled the chain slots from the earlier steps' outputs (a retry takes them out again: unfilledRequest). */
+  chainFilled?: boolean;
   /** Storyboard frame this request makes (shown under the frame). */
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
@@ -732,6 +734,14 @@ export interface ChainSlot {
    * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
    */
   stem?: string;
+  /**
+   * Fan-out from a step that makes a list (extract-frames: one image per frame): take the dependency's
+   * output number `index` of the slot's kind (0-based, by `meta.index` when the outputs carry it). Past
+   * the end it takes the last one, so a provider that returns a frame fewer than planned holds the last
+   * frame instead of failing the whole render. One step per index fans a list out; a step with one slot
+   * per index gathers it back in order.
+   */
+  index?: number;
 }
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
