@@ -140,7 +140,7 @@ export function makeCovers(dir, opts = {}) {
     }
     picked.push({ caseId, key: coverKey(best), row: best, metric, score: metric ? (jobScores(best, L.metrics)[metric] ?? null) : null });
   }
-  const result = { runId: L.run.runId, engine: L.run.engine, variant, covers: [], skipped };
+  const result = { runId: L.run.runId, engine: L.run.engine, variant, covers: [], skipped, manifest: opts.manifest ?? MANIFEST_FILE, folder: outDir };
   if (opts.dryRun) {
     result.covers = picked.map((p) => ({ key: p.key, caseId: p.caseId, job: p.row.id, metric: p.metric, score: p.score }));
     return result;

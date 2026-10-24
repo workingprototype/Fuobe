@@ -412,7 +412,7 @@ async function covers(args, ctx) {
   for (const c of r.covers) ctx.print(`  ${c.key} ← ${c.job}${c.metric ? ` (best ${c.metric}${c.score != null ? ` ${Number(c.score).toFixed(3)}` : ""})` : ""}`);
   for (const sk of r.skipped.slice(0, 10)) ctx.print(`  · ${sk.caseId}: ${sk.why}`);
   if (r.skipped.length > 10) ctx.print(`  · and ${r.skipped.length - 10} more`);
-  if (r.covers.length && !v["dry-run"]) ctx.note("Look at the media and the diff of src/lib/preset-previews.generated.ts before committing them.");
+  if (r.covers.length && !v["dry-run"]) ctx.note(`Look at the media in ${path.relative(REPO_DIR, r.folder) || r.folder} and the diff of ${path.relative(REPO_DIR, r.manifest) || r.manifest} before committing them.`);
   return 0;
 }
 
