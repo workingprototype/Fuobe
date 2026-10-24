@@ -218,6 +218,7 @@ async function run(args, ctx) {
       ctx.print(`${result.total} jobs · ${result.runnable} can run · ${result.skipped} skipped · ${result.cases} cases · estimated ${free ? "Free" : money(result.estimateUsd)}${result.unknownCost ? ` (+${result.unknownCost} without a price)` : ""}${engine === "cloud" ? ` · cap ${money(result.maxUsd)}` : ""}`);
       if (result.models.length) ctx.print(`Models: ${result.models.join(", ")} · variants: ${result.variants.join(", ")}`);
       for (const [why, n] of Object.entries(result.skipReasons).sort((a, b) => b[1] - a[1]).slice(0, 8)) ctx.print(`  ${n} skipped: ${why}`);
+      if (result.missingLoras?.length) ctx.print(`LoRAs ComfyUI doesn't have yet (${result.missingLoras.length}): ${result.missingLoras.map((l) => `${l.file} (${l.jobs} job${l.jobs === 1 ? "" : "s"})`).join(", ")}`);
       if (v.list) for (const j of result.jobs) ctx.print(`  ${j.skip ? "·" : "▸"} ${j.case} · ${j.variant} · ${j.prompt} · s${j.seed} · ${j.model}${j.skip ? "" : ` · ${j.costUsd == null ? "price unknown" : free ? "Free" : money(j.costUsd)}`}${j.loras?.applied ? ` · ${j.loras.applied.join(" + ") || "no LoRAs"}` : ""}${j.skip ? ` — ${j.skip}` : ""}`);
       return 0;
     }

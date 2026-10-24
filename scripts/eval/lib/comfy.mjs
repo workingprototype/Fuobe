@@ -46,6 +46,16 @@ export function comfyProbe(url, opts = {}) {
         return null;
       }
     },
+    /** The LoRA files ComfyUI has in models/loras (its LoraLoader's list), or null when it doesn't answer. */
+    async loras() {
+      try {
+        const o = await get("/object_info/LoraLoader", 8000);
+        const list = o?.LoraLoader?.input?.required?.lora_name?.[0];
+        return Array.isArray(list) ? list : null;
+      } catch {
+        return null;
+      }
+    },
     /** Start sampling (reference-counted, so concurrent jobs share one sampler). */
     start() {
       users++;

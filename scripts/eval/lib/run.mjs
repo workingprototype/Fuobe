@@ -37,6 +37,22 @@ const gitCommit = () => {
   }
 };
 
+/** The LoRA files the jobs load that aren't in ComfyUI's list (null list: ComfyUI didn't answer, so nothing to say). */
+export function lorasMissing(jobs, installed) {
+  if (!installed) return null;
+  const have = new Set(installed);
+  const missing = new Map();
+  for (const j of jobs) {
+    for (const l of j.preview?.loras?.applied ?? j.request?.loras ?? []) {
+      if (!l.file || have.has(l.file)) continue;
+      const m = missing.get(l.file) ?? { file: l.file, ...(l.url && { url: l.url }), jobs: 0 };
+      m.jobs++;
+      missing.set(l.file, m);
+    }
+  }
+  return [...missing.values()];
+}
+
 /** Run `fn` over `items` with at most `n` at a time, in order of start. */
 async function pool(items, n, fn) {
   let next = 0;
@@ -150,17 +166,22 @@ export async function runEval(opts, io) {
   const estimate = sum(priced.map((j) => j.preview.costUsd));
   const unknownCost = priced.filter((j) => j.preview.costUsd == null).length;
 
+  // On the open engine: which of the LoRAs the jobs load ComfyUI doesn't have yet (they are never committed;
+  // the server downloads pinned copies where it can, else they go in ComfyUI's models/loras by hand).
+  const comfy = engine === "open" && opts.comfyUrl ? comfyProbe(opts.comfyUrl, { fetch: io.fetch }) : null;
+  const missingLoras = comfy ? lorasMissing(priced, await comfy.loras()) : null;
+  if (missingLoras?.length && !opts.dryRun) log(`ComfyUI doesn't have ${missingLoras.length} of the LoRAs these jobs load yet (${missingLoras.slice(0, 3).map((l) => l.file).join(", ")}${missingLoras.length > 3 ? "…" : ""}): jobs fail unless the server fetches them first or you put them in ComfyUI's models/loras.`);
+
   if (opts.dryRun) {
     const final = planSummary(jobs);
     const { jobs: total, ...counts } = final;
-    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, total, ...counts, estimateUsd: estimate, unknownCost, maxUsd: Number.isFinite(maxUsd) ? maxUsd : null, jobs: jobs.map(publicJob) };
+    return { dryRun: true, suite: suite.suite, engine, server: io.target?.url ?? client.url, total, ...counts, estimateUsd: estimate, unknownCost, maxUsd: Number.isFinite(maxUsd) ? maxUsd : null, ...(missingLoras && { missingLoras }), jobs: jobs.map(publicJob) };
   }
   if (engine === "cloud" && estimate > maxUsd) {
     throw new Error(`This run would cost about ${money(estimate)}, over the spend cap of ${money(maxUsd)}. Raise it with --max-usd ${Math.ceil(estimate)} or run fewer jobs (--looks, --cases, --limit, --prompts).`);
   }
 
   // The run's record: what ran, where, with which research files, before anything starts.
-  const comfy = engine === "open" && opts.comfyUrl ? comfyProbe(opts.comfyUrl, { fetch: io.fetch }) : null;
   const comfyInfo = comfy ? await comfy.info() : null;
   const run = {
     runId,
@@ -171,7 +192,7 @@ export async function runEval(opts, io) {
     engine,
     label: opts.label ?? previous?.label ?? null,
     server: { url: io.target?.url ?? client.url, engineMode: facts.engineMode, demoMode: facts.demoMode, cloudProvider: facts.cloudProvider, providers: facts.providers },
-    comfy: comfy ? { url: comfy.url, ...(comfyInfo ?? { unreachable: true }) } : null,
+    comfy: comfy ? { url: comfy.url, ...(comfyInfo ?? { unreachable: true }), ...(missingLoras?.length && { missingLoras }) } : null,
     filters,
     variants: summary.variants,
     variantInfo: Object.fromEntries(summary.variants.map((v) => [v, suite.variants?.[v]?.description ?? ""])),

@@ -37,7 +37,10 @@ const genjutsuEstimate = await import("@/app/api/genjutsu/estimate/route");
 // The harness is plain ESM JavaScript (it runs with node, no build step).
 const evalCli = (await import("../scripts/eval/eval.mjs")) as { main: (argv: string[], io?: object) => Promise<number> };
 const cases = (await import("../scripts/eval/lib/cases.mjs")) as { loadSuite: (n: string) => Record<string, unknown>; validateAll: () => { ok: boolean; file: string; lines: string[] }[] };
-const runner = (await import("../scripts/eval/lib/run.mjs")) as { runEval: (opts: object, io: object) => Promise<Record<string, unknown>> };
+const runner = (await import("../scripts/eval/lib/run.mjs")) as {
+  runEval: (opts: object, io: object) => Promise<Record<string, unknown>>;
+  lorasMissing: (jobs: object[], installed: string[] | null) => { file: string; url?: string; jobs: number }[] | null;
+};
 const report = (await import("../scripts/eval/lib/report.mjs")) as { writeReport: (dir: string, root: string) => Record<string, unknown> };
 const review = (await import("../scripts/eval/lib/review.mjs")) as {
   writeReview: (run: object, opts?: object) => { pairs: number };
@@ -456,6 +459,17 @@ describe("report, blind review, compare and promote", () => {
 });
 
 describe("runEval as a library", () => {
+  it("names the LoRAs ComfyUI doesn't have yet, once each with how many jobs load them", () => {
+    const job = (files: string[], applied = true) => (applied ? { preview: { loras: { applied: files.map((file) => ({ file, url: `https://x/${file}` })) } } } : { request: { loras: files.map((file) => ({ file })) } });
+    const jobs = [job(["a.safetensors", "b.safetensors"]), job(["a.safetensors"]), job(["[ZImage.Turbo]c.safetensors"], false)];
+    expect(runner.lorasMissing(jobs, ["b.safetensors"])).toEqual([
+      { file: "a.safetensors", url: "https://x/a.safetensors", jobs: 2 },
+      { file: "[ZImage.Turbo]c.safetensors", jobs: 1 },
+    ]);
+    // ComfyUI didn't answer: nothing to say.
+    expect(runner.lorasMissing(jobs, null)).toBeNull();
+  });
+
   it("expands, prices and lists a dry run without uploading anything", async () => {
     const before = seen.filter((s) => s === "POST /api/uploads").length;
     const suite = cases.loadSuite("dop");
