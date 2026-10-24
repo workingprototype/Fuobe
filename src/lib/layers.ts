@@ -519,6 +519,17 @@ export function bboxFromAlpha(data: ArrayLike<number>, width: number, height: nu
   return maxX < 0 ? null : [minX, minY, maxX - minX + 1, maxY - minY + 1];
 }
 
+/**
+ * Whether RGBA pixels are a cut-out rather than a full-frame picture: at least `share` of them mostly
+ * clear (a decomposition's layer, a removed background). A few soft edge pixels don't count.
+ */
+export function seeThrough(rgba: ArrayLike<number>, share = 0.005): boolean {
+  const n = Math.floor(rgba.length / 4);
+  let clear = 0;
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 128) clear++;
+  return n > 0 && clear / n >= share;
+}
+
 /** Where a document point falls inside a (rotated) layer: [u, v] in 0–1, or null when outside. */
 export function toLocal(node: Pick<LayerNode, "x" | "y" | "w" | "h" | "rotation">, px: number, py: number): [number, number] | null {
   const cx = node.x + node.w / 2;
@@ -1047,10 +1058,14 @@ export const INPAINT_TINT = "rgba(255, 59, 48, 0.55)";
 /** Inpaint models with no mask input: they're shown the painted area tinted red instead. */
 export const INPAINT_SEES_TINT = new Set(["nano-banana-pro"]);
 
-/** The instruction an Inpaint run sends: what goes in the painted area, and that nothing else changes. */
-export function inpaintPrompt(prompt: string, keepAlpha = false): string {
+/**
+ * The instruction an Inpaint run sends: what goes in the painted area, blended in. Nothing about the
+ * background, even on a see-through layer: only the painted area changes, and the cut-out step that
+ * follows restores the transparency.
+ */
+export function inpaintPrompt(prompt: string): string {
   const p = prompt.trim().replace(/[.\s]+$/, "");
-  return `${p}. Blend it into the surroundings with matching light, perspective and grain.${keepAlpha ? " Keep the subject on a plain, even background." : ""}`;
+  return `${p}. Blend it into the surroundings with matching light, perspective and grain.`;
 }
 
 // ---------------------------------------------------------------------------

@@ -338,7 +338,7 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
       if (!prompt) throw new LayersError("Say what should fill the painted area", 400);
       const model = toolModel(tool, engine, input.modelId);
       // Mask models take the mask; edit models are shown the painted area tinted red (applySketch picks).
-      add("inpaint", base(model, { op: "inpaint", prompt: inpaintPrompt(prompt, s.keepAlpha), inputs: { images: [needImage()], mask: input.mask, ...(input.sketch ? { sketch: input.sketch } : {}) }, params: aspectFor(model) }));
+      add("inpaint", base(model, { op: "inpaint", prompt: inpaintPrompt(prompt), inputs: { images: [needImage()], mask: input.mask, ...(input.sketch ? { sketch: input.sketch } : {}) }, params: aspectFor(model) }));
       if (s.keepAlpha) cutout("inpaint");
       break;
     }

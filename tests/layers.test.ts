@@ -51,6 +51,7 @@ import {
   needsDetectedSize,
   placeTextBlocks,
   readableBackdrop,
+  seeThrough,
   coverage,
   defaultLayers,
   exportScale,
@@ -469,6 +470,20 @@ describe("edit text", () => {
     expect(readableBackdrop(px([0, 0, 0, 0]))).toBe("#ffffff");
   });
 
+  it("keeps transparency by default only for see-through layers, not full-frame pictures", () => {
+    const pixels = (n: number, clear: number) => Array.from({ length: n }, (_, i) => [200, 120, 90, i < clear ? 0 : 255]).flat();
+    // A whole-image Inpaint or Enhancer result: opaque everywhere.
+    expect(seeThrough(pixels(1000, 0))).toBe(false);
+    // A soft edge pixel or two doesn't make a cut-out.
+    expect(seeThrough(pixels(1000, 2))).toBe(false);
+    // A decomposition's layer or a removed background.
+    expect(seeThrough(pixels(1000, 400))).toBe(true);
+    expect(seeThrough(pixels(1000, 5))).toBe(true);
+    // Half-clear pixels count as clear below 128.
+    expect(seeThrough([0, 0, 0, 127, 0, 0, 0, 255])).toBe(true);
+    expect(seeThrough([])).toBe(false);
+  });
+
   it("lays detected lines out in the frame the detector read, like the cloud route's blocks", () => {
     const rows = placeTextBlocks(
       [
@@ -489,7 +504,6 @@ describe("edit text", () => {
 describe("inpaint and Save as element", () => {
   it("asks for the painted area only", () => {
     expect(inpaintPrompt("  a red scarf.  ")).toBe("a red scarf. Blend it into the surroundings with matching light, perspective and grain.");
-    expect(inpaintPrompt("a hat", true)).toMatch(/grain\. Keep the subject on a plain, even background\.$/);
   });
 
   it("names a layer's element and guesses its kind", () => {

@@ -11,6 +11,7 @@ import {
   exportScale,
   layerExportScale,
   nativeSize,
+  seeThrough,
   slugify,
   sourceBoxOf,
   sourceRect,
@@ -67,7 +68,7 @@ export function sizeOf(img: HTMLImageElement): [number, number] {
 }
 
 /** A layer's source rectangle in the loaded image's own pixels (the stored crop may be in other units for SVGs). */
-function srcRectFor(node: LayerNode, img: HTMLImageElement): Box {
+function srcRectFor(node: Pick<LayerNode, "crop" | "natural">, img: HTMLImageElement): Box {
   const [iw, ih] = sizeOf(img);
   const r = sourceRect(node);
   if (!r) return [0, 0, iw, ih];
@@ -259,6 +260,25 @@ export async function uploadDerived(blob: Blob, name: string): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
   if (!res.ok || !body.url) throw new Error(body.error ?? "Couldn't save the picture for the model. Please try again.");
   return body.url;
+}
+
+/**
+ * Whether a layer's own pixels (its crop of the image, before its mask and soft edge, which a new
+ * version keeps anyway) are see-through: a cut-out or a decomposition's layer, not a full-frame
+ * picture. Measured on a copy at most 256 px wide.
+ */
+export async function hasSeeThrough(node: Pick<LayerNode, "src" | "crop" | "natural">): Promise<boolean> {
+  const img = await loadImage(node.src);
+  const [sx, sy, sw, sh] = srcRectFor(node, img);
+  const k = Math.min(1, 256 / Math.max(sw, sh, 1));
+  const w = Math.max(1, Math.round(sw * k));
+  const h = Math.max(1, Math.round(sh * k));
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  return seeThrough(ctx.getImageData(0, 0, w, h).data);
 }
 
 /** The alpha box of an image in its own pixels (measured on a copy at most 1024 px wide). */

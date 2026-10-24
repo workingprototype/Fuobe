@@ -64,6 +64,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Field } from "./bits";
 import { costLabel, modelsFor, TOOL_FOR_JOB, useEditor } from "./editor-context";
+import { useKeepAlpha } from "./keep-alpha";
 import { downloadLayer, loadImage, sizeOf } from "./render";
 import { SaveElementDialog } from "./save-element";
 
@@ -496,8 +497,8 @@ function SelectedLayer({ node }: { node: LayerNode }) {
   const options = modelsFor(models, TOOL_MODELS.regenerate[engine]);
   const [modelId, setModelId] = useState<string | undefined>();
   const model = options.find((m) => m.id === modelId) ?? options[0];
-  // Layers cut out of a picture keep their transparency; the bottom layer is usually a full picture.
-  const [keepAlpha, setKeepAlpha] = useState(node.z > 0);
+  // Layers cut out of a picture keep their transparency; full pictures (the bottom layer, a whole-image result) don't.
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
   const [starting, setStarting] = useState(false);
   const running = busyJob(node.id);
   // The newest failed run on this layer, whichever tool started it (its form can try again).

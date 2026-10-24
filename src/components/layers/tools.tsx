@@ -79,6 +79,7 @@ import { cn } from "@/lib/utils";
 import { Field, Segmented } from "./bits";
 import { costLabel, isFailed, isRunning, latestJob, modelsFor, useEditor, type Target, type ToolId } from "./editor-context";
 import { LayerGrader } from "./grade-gl";
+import { useKeepAlpha } from "./keep-alpha";
 import { LayerThumb } from "./layers-panel";
 import { loadImage, ratioOf, renderDoc, renderNative, sizeOf, uploadRender } from "./render";
 
@@ -674,9 +675,9 @@ function RelightTool() {
   const [light, setLight] = useState(RELIGHT_LIGHTS[0][0]);
   const [direction, setDirection] = useState(RELIGHT_DIRECTIONS[0][0]);
   const [extra, setExtra] = useState("");
-  const [keepAlpha, setKeepAlpha] = useState(!!selected && selected.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(selected);
   return (
-    <SimpleTool tool="relight" verb="Relight" failedTitle="Couldn't relight it" settings={{ light, direction, keepAlpha: !!selected && keepAlpha }} prompt={extra.trim() || undefined}>
+    <SimpleTool tool="relight" verb="Relight" failedTitle="Couldn't relight it" settings={{ light, direction, keepAlpha }} prompt={extra.trim() || undefined}>
       <Field label="Lighting">
         <Chips label="Lighting" value={light} options={RELIGHT_LIGHTS.map(([l]) => l)} onChange={setLight} />
       </Field>
@@ -699,11 +700,10 @@ function AnglesTool() {
   const [tilt, setTilt] = useState(0);
   const [zoom, setZoom] = useState(5);
   const [angle, setAngle] = useState(ANGLES[0][0]);
-  const [keepAlpha, setKeepAlpha] = useState(!!selected && selected.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(selected);
   const sliders = picker.modelId === "qwen-multiple-angles";
-  const keep = !!selected && keepAlpha;
   return (
-    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" picker={picker} settings={sliders ? { rotate, tilt, zoom, keepAlpha: keep } : { angle, keepAlpha: keep }}>
+    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" picker={picker} settings={sliders ? { rotate, tilt, zoom, keepAlpha } : { angle, keepAlpha }}>
       {sliders ? (
         <>
           <Field label="Rotate" hint={`${rotate}°`}>
@@ -892,7 +892,7 @@ function InpaintTool() {
   const { target, node } = useTarget();
   const { modelId, model, setModelId } = useToolModel("inpaint");
   const [prompt, setPrompt] = useState("");
-  const [keepAlpha, setKeepAlpha] = useState(!!node && node.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
   const [painted, setPainted] = useState<Box | null>(null);
   const { busy, go } = useRun();
   const [preparing, setPreparing] = useState(false);
@@ -952,7 +952,7 @@ function InpaintTool() {
       sk.drawImage(tint, 0, 0);
       const name = node?.name ?? "image";
       const [image, maskUrl, sketchUrl] = await Promise.all([uploadRender(picture, `inpaint-${name}`), uploadRender(mask, `inpaint-mask-${name}`), uploadRender(sketch, `inpaint-marked-${name}`)]);
-      await go({ tool: "inpaint", target, image, mask: maskUrl, sketch: sketchUrl, modelId, prompt: prompt.trim(), settings: { keepAlpha: !!node && keepAlpha }, label: "Inpaint" });
+      await go({ tool: "inpaint", target, image, mask: maskUrl, sketch: sketchUrl, modelId, prompt: prompt.trim(), settings: { keepAlpha }, label: "Inpaint" });
     } catch (e) {
       toast.error((e as Error).message || "Couldn't prepare the painted area");
     } finally {
@@ -1026,11 +1026,11 @@ function EnhanceTool() {
   const info = ENHANCE_LOOKS.find((l) => l.id === look)!;
   const { modelId, model, setModelId } = useToolModel("enhance", enhanceModels(look, engine));
   const [extra, setExtra] = useState("");
-  const [keepAlpha, setKeepAlpha] = useState(!!node && node.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
   const { busy, go } = useRun();
   const job = latestJob(jobs, ["enhance"], node?.id ?? null);
   const detail = look === "detail";
-  const run = () => void go({ tool: "enhance", target, modelId, prompt: detail ? undefined : extra.trim() || undefined, settings: { look, keepAlpha: !detail && !!node && keepAlpha }, label: info.verb });
+  const run = () => void go({ tool: "enhance", target, modelId, prompt: detail ? undefined : extra.trim() || undefined, settings: { look, keepAlpha: !detail && keepAlpha }, label: info.verb });
   return (
     <div className="space-y-4">
       <Scope node={node} />

@@ -162,7 +162,8 @@ describe("job steps", () => {
       ["inpaint", "oss-flux-fill", "inpaint"],
       ["cutout", "oss-rmbg", "bg-remove"],
     ]);
-    expect(open[0].request.prompt).toMatch(/Keep the subject on a plain, even background\.$/);
+    // Only the painted area changes: no plain-background ask, the cut-out restores the transparency.
+    expect(open[0].request.prompt).toBe("a vase of tulips. Blend it into the surroundings with matching light, perspective and grain.");
     expect(open[1]).toMatchObject({ after: "inpaint", chain: [{ slot: "images" }] });
     expect(() => steps({ ...paint, mask: undefined })).toThrow(/Paint over the area/);
     expect(() => steps({ ...paint, prompt: " " })).toThrow(/fill the painted area/);
