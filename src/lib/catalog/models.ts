@@ -1406,9 +1406,17 @@ const AI_INFLUENCER: ModelDef = {
   kind: "image",
   tagline: "An original character sheet from a short brief — human or creature",
   badges: ["new"],
-  routes: [{ op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", seed: "seed", seedRange: [1, 1000000] } }],
+  // The builder (/influencer) sends Higgsfield's own fields as params.extra: tier, selection (category →
+  // option ids), pinned_species and body_color. A photo (Add your face, a reference) goes to image_url,
+  // clothing references to item_image_urls (up to 3).
+  routes: [
+    { op: "t2i", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", images: "item_image_urls", maxImages: 3, seed: "seed", seedRange: [1, 1000000] } },
+    { op: "edit", provider: "higgsfield", endpoint: "higgsfield/ai-influencer", map: { prompt: "brief", image: "image_url", moreImages: "item_image_urls", seed: "seed", seedRange: [1, 1000000] } },
+  ],
   options: {
     seed: true,
+    maxImages: 4,
+    promptOptional: true,
     controls: [{ param: "tier", label: "Look", values: ["normal", "freak", "total", "insects", "frogs", "cats", "dogs", "capybaras", "birds"], default: "normal" }],
   },
   pricing: { unit: "image", usd: 0.05 },
