@@ -13,7 +13,7 @@ import path from "node:path";
 import { fmt, gain, METRIC_INFO, METRIC_ORDER, verdict } from "./metric-info.mjs";
 import { jobScores, loadRun } from "./report.mjs";
 import { aggregateRatings } from "./review.mjs";
-import { writeJson } from "./store.mjs";
+import { candidateOf, writeJson } from "./store.mjs";
 
 const mean = (xs) => {
   const v = xs.filter((x) => typeof x === "number" && !Number.isNaN(x));
@@ -151,25 +151,38 @@ export function compareText(c) {
  * with the same prompts and seeds:
  *  1. its licence allows it: every LoRA it loaded is commercial, hostable when the run is on the
  *     cloud, and none of the recipe's LoRAs was left out on this engine;
- *  2. it made at least `minJobs` results for the look;
+ *  2. it made at least `minJobs` results for the case;
  *  3. against every alternative in the run (prompt only, half strength, the bare base, today's
- *     default…) it scores at least as well on the look's main metric (style when the look has
- *     references, else aesthetic), and it doesn't give up more than 1.0 CLIP or 0.15 aesthetic;
- *  4. people prefer it in a blind review: at least `minRatings` ratings against the alternatives,
- *     and at least 55% of the non-tie ones for the candidate.
- * Half strength beating the full recipe means the LoRAs over-cook: lower them (and run again).
- * Passing the rule makes a recipe eligible; the catalog default is still changed by hand, in a
- * reviewed commit, on both engines.
+ *     default…) it scores at least as well on the case's main metric, and gives up no more than the
+ *     guards allow on the others (CLIP, aesthetic, and on clips the warp error and drift). The main
+ *     metric is the first the case has scores for, in MAIN_METRICS order: style when it has references,
+ *     lip-sync and identity where those are measured, then aesthetic, then CLIP (a DoP motion's
+ *     words), then warp error;
+ *  4. people prefer it in a blind review of this case's own pictures: at least `minRatings` ratings
+ *     against the alternatives (every pair the review offered when it offered fewer), and at least
+ *     `minPreference` of the non-tie ones for the candidate.
+ * Half strength beating the full recipe means the LoRAs over-cook: lower them (and run again). A licence
+ * problem holds the recipe whatever else happened. Passing the rule makes a recipe eligible; the catalog
+ * default is still changed by hand, in a reviewed commit, on both engines.
  */
-export const PROMOTE_RULE = { minJobs: 3, clipGuard: 1.0, aestheticGuard: 0.15, minRatings: 6, minPreference: 0.55 };
+export const PROMOTE_RULE = { minJobs: 3, clipGuard: 1.0, aestheticGuard: 0.15, warpGuard: 0.002, driftGuard: 0.004, minRatings: 6, minPreference: 0.55 };
+
+/** The metrics a case is judged on, most specific first (see PROMOTE_RULE). */
+export const MAIN_METRICS = ["style", "lipsync", "identity", "aesthetic", "clip", "warp"];
+
+/** b is at least as good as a on `metric` (each metric's own direction). */
+const atLeast = (metric, b, a) => (METRIC_INFO[metric]?.better === "lower" ? b <= a : b >= a);
+/** How much worse b is than a on `metric` (positive: worse). */
+const worseBy = (metric, b, a) => (METRIC_INFO[metric]?.better === "lower" ? b - a : a - b);
 
 export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = {}) {
+  rule = { ...PROMOTE_RULE, ...rule };
   const L = loadRun(dir);
   const variants = L.run.variants ?? [...new Set(L.rows.map((r) => r.variant))];
-  const cand = candidate ?? variants[0];
+  const cand = candidate ?? candidateOf(L.run, variants);
   if (!variants.includes(cand)) throw new Error(`The run has no variant “${cand}” (it has ${variants.join(", ")})`);
   const alts = (alternatives?.length ? alternatives : variants.filter((v) => v !== cand)).filter((v) => variants.includes(v));
-  const ratings = aggregateRatings(L);
+  const guards = { clip: rule.clipGuard, aesthetic: rule.aestheticGuard, warp: rule.warpGuard, drift: rule.driftGuard };
   const results = [];
   for (const caseId of [...new Set(L.rows.map((r) => r.caseId))]) {
     const rows = L.rows.filter((r) => r.caseId === caseId);
@@ -177,9 +190,11 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const ok = mine.filter((r) => r.status === "succeeded");
     const scoresOf = (list) => list.map((r) => jobScores(r, L.metrics));
     const m = (list, k) => mean(scoresOf(list).map((s) => s[k]));
+    /** Licence problems hold a recipe whatever the scores say; the rest can be fixed by another run. */
+    const licence = [];
     const reasons = [];
     const notes = [];
-    let verdictText;
+    let overcooked = false;
     /** The strengths a winning half-strength variant ran at: what the record suggests. */
     let suggested = null;
     const recipe = ok[0]?.recipe ?? mine[0]?.recipe;
@@ -188,42 +203,61 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const lib = new Map((recipe?.loras ?? []).map((l) => [l.file, l]));
     const nonCommercial = applied.filter((l) => lib.get(l.file)?.commercial === false);
     const notHostable = L.run.engine === "cloud" ? applied.filter((l) => lib.get(l.file)?.hostedOk === false) : [];
-    if (recipe?.commercialOk === false || nonCommercial.length) reasons.push(`non-commercial LoRA${nonCommercial.length > 1 ? "s" : ""}: ${nonCommercial.map((l) => l.file).join(", ") || "the recipe is flagged"}`);
-    if (notHostable.length) reasons.push(`not allowed on hosted services: ${notHostable.map((l) => l.file).join(", ")}`);
+    if (recipe?.commercialOk === false || nonCommercial.length) licence.push(`non-commercial LoRA${nonCommercial.length > 1 ? "s" : ""}: ${nonCommercial.map((l) => l.file).join(", ") || "the recipe is flagged"}`);
+    if (notHostable.length) licence.push(`not allowed on hosted services: ${notHostable.map((l) => l.file).join(", ")}`);
     if (mine.some((r) => r.recipe?.complete === false || r.recipe?.sent?.complete === false)) reasons.push("some of the recipe's LoRAs were left out on this engine, so this isn't the recipe");
     // 2. enough results
     if (ok.length < rule.minJobs) reasons.push(`${ok.length} result${ok.length === 1 ? "" : "s"}, the rule wants ${rule.minJobs}`);
     // 3. metrics against each alternative
-    const main = scoresOf(ok).some((s) => s.style != null) ? "style" : "aesthetic";
+    const main = MAIN_METRICS.find((k) => scoresOf(ok).some((x) => typeof x[k] === "number")) ?? null;
+    if (ok.length && !main) reasons.push("no scores to judge it by (run pnpm eval:report)");
     const against = [];
+    const endpointsOf = (list) => [...new Set(list.map((r) => r.route?.endpoint).filter(Boolean))];
     for (const alt of alts) {
       const theirs = rows.filter((r) => r.variant === alt && r.status === "succeeded");
       if (!theirs.length) continue;
-      const row = { variant: alt, [main]: { candidate: m(ok, main), alternative: m(theirs, main) }, clip: { candidate: m(ok, "clip"), alternative: m(theirs, "clip") }, aesthetic: { candidate: m(ok, "aesthetic"), alternative: m(theirs, "aesthetic") } };
+      const row = { variant: alt };
+      for (const k of [...new Set([main, "clip", "aesthetic", "warp", "drift"].filter(Boolean))]) {
+        const pair = { candidate: m(ok, k), alternative: m(theirs, k) };
+        if (pair.candidate != null || pair.alternative != null) row[k] = pair;
+      }
       against.push(row);
-      const mc = row[main];
-      if (mc.candidate == null || mc.alternative == null) reasons.push(`no ${main} scores against ${alt} (run pnpm eval:report)`);
-      else if (mc.candidate < mc.alternative) {
-        reasons.push(`${alt} scores higher on ${main} (${fmt(main, mc.alternative)} vs ${fmt(main, mc.candidate)})`);
+      const mc = main ? row[main] : null;
+      if (main && (mc?.candidate == null || mc?.alternative == null)) reasons.push(`no ${main} scores against ${alt} (run pnpm eval:report)`);
+      else if (main && !atLeast(main, mc.candidate, mc.alternative)) {
+        reasons.push(`${alt} scores better on ${main} (${fmt(main, mc.alternative)} vs ${fmt(main, mc.candidate)})`);
         if (/half/.test(alt)) {
+          overcooked = true;
           notes.push("half strength wins: the LoRAs over-cook here — lower their strengths in the research JSON and run again");
           suggested = (theirs[0].recipe?.applied ?? theirs[0].recipe?.sent?.loras ?? []).map((l) => ({ file: l.file, strength: l.strength ?? 1 }));
         }
       }
-      if (row.clip.candidate != null && row.clip.alternative != null && row.clip.candidate < row.clip.alternative - rule.clipGuard) reasons.push(`it follows the prompt worse than ${alt} (CLIP ${fmt("clip", row.clip.candidate)} vs ${fmt("clip", row.clip.alternative)})`);
-      if (main !== "aesthetic" && row.aesthetic.candidate != null && row.aesthetic.alternative != null && row.aesthetic.candidate < row.aesthetic.alternative - rule.aestheticGuard) reasons.push(`it looks worse than ${alt} (aesthetic ${fmt("aesthetic", row.aesthetic.candidate)} vs ${fmt("aesthetic", row.aesthetic.alternative)})`);
+      for (const [k, limit] of Object.entries(guards)) {
+        const g = row[k];
+        if (k === main || g?.candidate == null || g?.alternative == null) continue;
+        if (worseBy(k, g.candidate, g.alternative) > limit) reasons.push(`it gives up ${METRIC_INFO[k].label.toLowerCase()} against ${alt} (${fmt(k, g.candidate)} vs ${fmt(k, g.alternative)}, the rule allows ${fmt(k, limit)})`);
+      }
+      // Different endpoints may have different defaults (fal's Z-Image runs LoRAs on /lora): said, not held against it.
+      const ea = endpointsOf(ok);
+      const eb = endpointsOf(theirs);
+      if (ea.length && eb.length && ea.join() !== eb.join()) notes.push(`ran on ${ea.join(", ")}, ${alt} on ${eb.join(", ")}: their defaults may differ`);
     }
     if (!against.length) reasons.push("no alternative in this run to beat (run it with --variants recipe,prompt-only,half-strength,plain)");
-    // 4. blind review
-    const rated = ratings.pairs.filter((p) => (p.a === cand && alts.includes(p.b)) || (p.b === cand && alts.includes(p.a)));
+    // 4. blind review of this case's own pairs
+    const ratings = aggregateRatings(L, { caseId });
+    const isAgainst = (p) => (p.a === cand && alts.includes(p.b)) || (p.b === cand && alts.includes(p.a));
+    const rated = ratings.pairs.filter(isAgainst);
+    const offered = Object.entries(ratings.available ?? {}).filter(([k]) => isAgainst({ a: k.split("|")[0], b: k.split("|")[1] })).reduce((n, [, c]) => n + c, 0);
     const forCand = rated.reduce((n, p) => n + (p.a === cand ? p.aWins : p.bWins), 0);
     const forAlt = rated.reduce((n, p) => n + (p.a === cand ? p.bWins : p.aWins), 0);
     const ties = rated.reduce((n, p) => n + p.ties, 0);
-    if (forCand + forAlt + ties < rule.minRatings) reasons.push(`needs a blind review: ${forCand + forAlt + ties} rating${forCand + forAlt + ties === 1 ? "" : "s"} for the whole run, the rule wants ${rule.minRatings} (pnpm eval:review)`);
+    const want = offered ? Math.min(rule.minRatings, offered) : rule.minRatings;
+    const got = forCand + forAlt + ties;
+    if (got < want) reasons.push(`needs a blind review of this case: ${got} rating${got === 1 ? "" : "s"} against the alternatives, the rule wants ${want}${offered && offered < rule.minRatings ? " (every pair the review offered)" : ""} (pnpm eval:review)`);
     else if (forCand + forAlt && forCand / (forCand + forAlt) < rule.minPreference) reasons.push(`people preferred it ${Math.round((100 * forCand) / (forCand + forAlt))}% of the time, the rule wants ${Math.round(rule.minPreference * 100)}%`);
-    // Over-cooking is its own verdict: the fix is a lower strength, not another recipe.
-    verdictText = !reasons.length ? "promote" : notes.length ? "lower strengths" : "hold";
-    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, target: researchTarget(recipe), candidate: cand, verdict: verdictText, reasons, notes, mainMetric: main, against, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null, ...(suggested && { suggested }) });
+    // A licence problem holds the recipe; over-cooking is its own verdict (the fix is a lower strength, not another recipe).
+    const verdictText = licence.length ? "hold" : !reasons.length ? "promote" : overcooked ? "lower strengths" : "hold";
+    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, target: researchTarget(recipe), candidate: cand, verdict: verdictText, reasons: [...licence, ...reasons], notes, mainMetric: main, against, ratings: { forCandidate: forCand, forAlternatives: forAlt, ties, offered }, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null, ...(suggested && { suggested }) });
   }
   const doc = {
     runId: L.run.runId,

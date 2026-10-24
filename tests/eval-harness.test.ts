@@ -48,7 +48,7 @@ const review = (await import("../scripts/eval/lib/review.mjs")) as {
   writeReview: (run: object, opts?: object) => { pairs: number };
   serveReview: (dir: string, opts?: object) => Promise<{ server: http.Server; url: string }>;
 };
-const compare = (await import("../scripts/eval/lib/compare.mjs")) as { promote: (dir: string, opts?: object) => { results: { caseId: string; verdict: string; reasons: string[]; notes: string[] }[] } };
+const compare = (await import("../scripts/eval/lib/compare.mjs")) as { promote: (dir: string, opts?: object) => { candidate: string; results: { caseId: string; verdict: string; reasons: string[]; notes: string[]; mainMetric: string }[] } };
 const store = (await import("../scripts/eval/lib/store.mjs")) as { latestJobs: (d: string) => Row[]; readJsonl: (f: string) => Record<string, unknown>[] };
 const { createClient } = (await import("../bin/lib/client.mjs")) as { createClient: (t: { url: string }) => unknown };
 
@@ -323,13 +323,13 @@ describe("the runner on the demo provider", () => {
 });
 
 /** A run folder made by hand: rows and metrics as the runner and the scorer write them. */
-function fakeRun(name: string, engine: string, scores: Record<string, Record<string, number>>, extra: Partial<Row> = {}) {
+function fakeRun(name: string, engine: string, scores: Record<string, Record<string, number>>, extra: Partial<Row> = {}, runExtra: Record<string, unknown> = {}) {
   const runDir = path.join(results, name);
   fs.mkdirSync(path.join(runDir, "outputs"), { recursive: true });
   const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f0005000201a2e2b6a40000000049454e44ae426082", "hex");
   const ids = Object.keys(scores);
   const variants = [...new Set(ids.map((id) => id.split("--").at(-1)!))];
-  fs.writeFileSync(path.join(runDir, "run.json"), JSON.stringify({ runId: name, suite: "soul", title: "Fuobe Soul", engine, variants, startedAt: Date.now(), server: { url: "x" } }));
+  fs.writeFileSync(path.join(runDir, "run.json"), JSON.stringify({ runId: name, suite: "soul", title: "Fuobe Soul", engine, variants, startedAt: Date.now(), server: { url: "x" }, ...runExtra }));
   const rows = ids.map((id) => {
     const [caseId, promptId, seed, variant] = id.split("--");
     fs.writeFileSync(path.join(runDir, "outputs", `${id}.png`), png);
@@ -399,21 +399,38 @@ describe("report, blind review, compare and promote", () => {
     expect(s.ratings).toEqual({ total: 3, pairs: [{ a: "recipe", b: "prompt-only", aWins: 3, bWins: 0, ties: 0, preferA: 1 }] });
   });
 
-  it("promotes a recipe only when it wins on metrics and in the blind review, and says when strengths over-cook", () => {
-    const runDir = path.join(results, "fake-open-1");
-    // 3 ratings are fewer than the rule's 6.
-    let doc = compare.promote(runDir);
-    expect(doc.results[0].verdict).toBe("hold");
-    expect(doc.results[0].reasons.join(" ")).toMatch(/needs a blind review: 3 ratings/);
-    const ratingsFile = path.join(runDir, "review", "ratings.json");
-    const saved = JSON.parse(fs.readFileSync(ratingsFile, "utf8"));
-    const key = JSON.parse(fs.readFileSync(path.join(runDir, "review", "key.json"), "utf8"));
-    // Six ratings: the same three pairs rated by a second reviewer (another key entry per pair).
-    key.pairs = [...key.pairs, ...key.pairs.map((p: { id: string }) => ({ ...p, id: `${p.id}-2` }))];
-    fs.writeFileSync(path.join(runDir, "review", "key.json"), JSON.stringify(key));
-    fs.writeFileSync(ratingsFile, JSON.stringify({ ...saved, ratings: [...saved.ratings, ...saved.ratings.map((r: { pair: string }) => ({ ...r, pair: `${r.pair}-2` }))] }));
-    doc = compare.promote(runDir);
+  /** Rate the review's pairs (those `only` keeps, at most `limit`) for the `winner` variant, as the page saves them. */
+  const rateFor = (runDir: string, winner: string, only: (caseId: string) => boolean = () => true, limit = Infinity) => {
+    const key = JSON.parse(fs.readFileSync(path.join(runDir, "review", "key.json"), "utf8")) as { pairs: { id: string; caseId: string; left: "a" | "b"; a: { label: string } }[] };
+    const ratings = key.pairs.filter((p) => only(p.caseId)).slice(0, limit).map((p) => ({ pair: p.id, choice: (p.a.label === winner) === (p.left === "a") ? "left" : "right" }));
+    fs.writeFileSync(path.join(runDir, "review", "ratings.json"), JSON.stringify({ ratings }));
+    return ratings.length;
+  };
+  const review3 = (runDir: string) => review.writeReview({ dir: runDir, runId: path.basename(runDir), rows: store.latestJobs(runDir) });
+  type Verdicts = { candidate: string; results: { caseId: string; verdict: string; reasons: string[]; notes: string[]; mainMetric: string }[] };
+  const verdicts = (d: Verdicts) => Object.fromEntries(d.results.map((r) => [r.caseId, r.verdict]));
+
+  it("promotes a look only on its own blind ratings, and says when strengths over-cook", () => {
+    // fake-open-1: one look, three pairs, all three rated for the recipe (every pair the review offered).
+    let doc = compare.promote(path.join(results, "fake-open-1")) as Verdicts;
     expect(doc.results[0]).toMatchObject({ verdict: "promote", reasons: [] });
+    // Three looks, the recipe best on style in each; six pairs per look against prompt only and half strength.
+    const looks = ["look-a", "look-b", "look-c"];
+    const scores: Record<string, Record<string, number>> = {};
+    for (const look of looks) {
+      for (const [variant, style] of [["recipe", 0.8], ["prompt-only", 0.7], ["half-strength", 0.75]] as const) {
+        for (const seed of ["s1001", "s2002", "s3003"]) scores[`${look}--p1--${seed}--${variant}`] = { style, clip: 30, aesthetic: 6 };
+      }
+    }
+    const runDir = fakeRun("fake-open-looks", "open", scores);
+    expect(review3(runDir).pairs).toBe(18);
+    // Only looks A and C were rated: B is held, though six ratings exist for the run.
+    rateFor(runDir, "recipe", (c) => c !== "soul/look-b");
+    doc = compare.promote(runDir) as Verdicts;
+    expect(verdicts(doc)).toEqual({ "soul/look-a": "promote", "soul/look-b": "hold", "soul/look-c": "promote" });
+    expect(doc.results[1].reasons).toEqual(["needs a blind review of this case: 0 ratings against the alternatives, the rule wants 6 (pnpm eval:review)"]);
+    rateFor(runDir, "recipe", (c) => c === "soul/look-b", 3);
+    expect((compare.promote(runDir) as Verdicts).results[1].reasons[0]).toMatch(/3 ratings against the alternatives, the rule wants 6/);
     // Half strength scoring higher on the look's main metric: lower the strengths instead.
     const over = fakeRun("fake-open-2", "open", { ...scored("recipe", 0.8, 30), ...scored("half-strength", 0.9, 30) });
     const d2 = compare.promote(over);
@@ -422,6 +439,32 @@ describe("report, blind review, compare and promote", () => {
     // Demo runs never promote anything.
     const demo = fakeRun("fake-demo-1", "demo", { ...scored("recipe", 0.9, 30), ...scored("prompt-only", 0.1, 30) });
     expect(compare.promote(demo).results[0].reasons[0]).toBe("demo media, not model output");
+  });
+
+  it("judges a clip on its words and guards its flicker; a licence problem holds whatever else won", () => {
+    // A DoP motion: no style or aesthetic scores, so prompt adherence decides; the suite names its candidate.
+    const clipScores = (warp: number) => ({
+      ...Object.fromEntries(["s1001", "s2002", "s3003"].map((s) => [`motion-a--bridge--${s}--research`, { clip: 32, warp, drift: 0.02 }])),
+      ...Object.fromEntries(["s1001", "s2002", "s3003"].map((s) => [`motion-a--bridge--${s}--catalog`, { clip: 28, warp: 0.03, drift: 0.02 }])),
+    });
+    const good = fakeRun("fake-dop-1", "open", clipScores(0.01), {}, { candidate: "research", variants: ["catalog", "research"] });
+    review3(good);
+    rateFor(good, "research");
+    const d = compare.promote(good) as Verdicts;
+    expect(d.candidate).toBe("research");
+    expect(d.results[0]).toMatchObject({ verdict: "promote", mainMetric: "clip", reasons: [] });
+    // Better words but more flicker than the guard allows: held.
+    const flicker = fakeRun("fake-dop-2", "open", clipScores(0.04), {}, { candidate: "research", variants: ["catalog", "research"] });
+    review3(flicker);
+    rateFor(flicker, "research");
+    expect((compare.promote(flicker) as Verdicts).results[0].reasons).toEqual(["it gives up warp error (flicker) against catalog (0.0400 vs 0.0300, the rule allows 0.0020)"]);
+    // The recipe is the candidate even when it isn't the run's first variant; a non-commercial LoRA holds it even though half strength won.
+    const nc = { recipe: { kind: "soul-look", commercialOk: false, loras: [{ file: "nc.safetensors", commercial: false, hostedOk: true }], applied: [{ file: "nc.safetensors", strength: 0.7 }], complete: true, sent: { complete: true, loras: [] } } };
+    const lic = fakeRun("fake-open-nc", "open", { ...scored("half-strength", 0.9, 30), ...scored("recipe", 0.8, 30) }, nc);
+    const d3 = compare.promote(lic) as Verdicts;
+    expect(d3.candidate).toBe("recipe");
+    expect(d3.results[0].verdict).toBe("hold");
+    expect(d3.results[0].reasons[0]).toBe("non-commercial LoRA: nc.safetensors");
   });
 
   it("promote --record writes each verdict into the research entry it measured, and nothing else", async () => {

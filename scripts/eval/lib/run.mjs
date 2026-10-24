@@ -260,6 +260,7 @@ export async function runEval(opts, io) {
     comfy: comfy ? { url: comfy.url, ...(comfyInfo ?? { unreachable: true }), ...(missingLoras?.length && { missingLoras }) } : null,
     filters,
     variants: summary.variants,
+    ...(suite.defaults.candidate && { candidate: suite.defaults.candidate }),
     variantInfo: Object.fromEntries(summary.variants.map((v) => [v, suite.variants?.[v]?.description ?? ""])),
     maxUsd: Number.isFinite(maxUsd) ? maxUsd : null,
     estimateUsd: estimate,

@@ -7,7 +7,7 @@ import { esc, href, page } from "./html.mjs";
 import { fmt, gain, METRIC_INFO, METRIC_ORDER, verdict } from "./metric-info.mjs";
 import { aggregateRatings } from "./review.mjs";
 import { money } from "./run.mjs";
-import { latestJobs, readJson, writeHistory, writeJson } from "./store.mjs";
+import { candidateOf, latestJobs, readJson, writeHistory, writeJson } from "./store.mjs";
 
 const mean = (xs) => {
   const v = xs.filter((x) => typeof x === "number" && !Number.isNaN(x));
@@ -82,11 +82,11 @@ export function summarize(loaded) {
     };
   }
 
-  // Variants of the same job key (case/prompt/seed), each against the first variant of the run.
-  const base = variants[0];
+  // Variants of the same job key (case/prompt/seed), each against the run's candidate (the recipe under test).
+  const base = candidateOf(run, variants);
   const byKey = new Map();
   for (const x of scored) if (x.row.status === "succeeded") byKey.set(`${x.row.key}|${x.row.variant}`, x);
-  const pairs = variants.slice(1).map((other) => {
+  const pairs = variants.filter((v) => v !== base).map((other) => {
     const res = {};
     for (const k of metricKeys) {
       const s = { wins: 0, losses: 0, ties: 0, gains: [] };
@@ -158,6 +158,7 @@ export function summarize(loaded) {
     metrics: { keys: metricKeys, models: metrics?.models ?? {}, skipped: metrics?.skipped ?? (metrics ? {} : { all: "not scored yet: pnpm eval:report runs the metrics" }), device: metrics?.device ?? null },
     variants: perVariant,
     pairs,
+    candidate: base,
     ratings: aggregateRatings(loaded),
     cases,
     failures: rows.filter((r) => r.status !== "succeeded" && r.status !== "skipped").map((r) => ({ id: r.id, status: r.status, error: r.error })),

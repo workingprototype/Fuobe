@@ -7,6 +7,16 @@ import path from "node:path";
 
 export const runDir = (root, runId) => path.join(root, runId);
 
+/**
+ * The variant a run puts up for promotion: the one run.json names (the suite's defaults.candidate), else
+ * "recipe" when the run has it, else its first variant. The review pairs it with each of the others.
+ */
+export function candidateOf(run, variants) {
+  const named = run?.candidate;
+  if (named && variants.includes(named)) return named;
+  return variants.includes("recipe") ? "recipe" : variants[0];
+}
+
 /** 20261023-224501-soul-open-a1b2 */
 export function newRunId(suite, engine, now = new Date()) {
   const p = (n) => String(n).padStart(2, "0");

@@ -142,6 +142,7 @@ function dopSuite() {
         prompts: [{ id: "bridge", text: "a woman in a red coat on a city bridge at golden hour" }],
         metrics: ["temporal", "clip"],
         variant: "catalog",
+        candidate: "research",
         timeoutSeconds: 2700,
       },
       variants: {

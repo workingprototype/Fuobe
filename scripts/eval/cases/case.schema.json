@@ -538,6 +538,10 @@
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*$"
         },
+        "candidate": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
         "timeoutSeconds": {
           "default": 1800,
           "type": "number",

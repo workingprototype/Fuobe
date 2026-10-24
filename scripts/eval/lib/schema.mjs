@@ -203,6 +203,8 @@ export const SuiteSchema = z
         extra: Json.optional(),
         metrics: z.array(z.enum(METRICS)).default(["clip"]),
         variant: Slug.optional(),
+        /** The variant the promote rule judges and the blind review pairs with the others (default: recipe, else the first). */
+        candidate: Slug.optional(),
         timeoutSeconds: z.number().positive().default(1800),
       })
       .strict()
@@ -228,8 +230,8 @@ export const SuiteSchema = z
       }
     });
     const variants = Object.keys(s.variants ?? { default: {} });
-    if (s.defaults.variant && !variants.includes(s.defaults.variant)) {
-      ctx.addIssue({ code: "custom", path: ["defaults", "variant"], message: `no variant ${s.defaults.variant} (have ${variants.join(", ")})` });
+    for (const k of ["variant", "candidate"]) {
+      if (s.defaults[k] && !variants.includes(s.defaults[k])) ctx.addIssue({ code: "custom", path: ["defaults", k], message: `no variant ${s.defaults[k]} (have ${variants.join(", ")})` });
     }
   });
 

@@ -9,7 +9,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { esc, page } from "./html.mjs";
-import { latestJobs, readJson, writeJson } from "./store.mjs";
+import { candidateOf, latestJobs, readJson, writeJson } from "./store.mjs";
 
 const IMAGE = /\.(png|jpe?g|webp|gif|svg)$/i;
 const VIDEO = /\.(mp4|mov|m4v|webm)$/i;
@@ -21,7 +21,8 @@ const mainOutput = (row) => (row.outputs ?? []).find((o) => (o.kind === "image" 
 /**
  * The pairs to rate.
  * @param {{ dir: string, rows: object[] }} run
- * @param {{ against?: "variants" | "references" | { dir: string, runId: string, rows: object[] }, limit?: number }} [opts]
+ * @param {{ against?: "variants" | "references" | { dir: string, runId: string, rows: object[] }, limit?: number, base?: string }} [opts]
+ *   base: the variant paired with each of the others (default: the run's candidate, see candidateOf)
  */
 export function buildPairs(run, opts = {}) {
   const ok = run.rows.filter((r) => r.status === "succeeded" && mainOutput(r));
@@ -30,12 +31,13 @@ export function buildPairs(run, opts = {}) {
   const side = (label, file, extra = {}) => ({ label, file, ...extra });
   const pairs = [];
   if (against === "variants") {
-    const base = variants[0];
+    // The candidate against each alternative: the pairs the promote rule reads.
+    const base = opts.base && variants.includes(opts.base) ? opts.base : candidateOf(run.run ?? readJson(path.join(run.dir, "run.json"), null), variants);
     const byKey = new Map(ok.map((r) => [`${r.key}|${r.variant}`, r]));
     for (const r of ok.filter((x) => x.variant === base)) {
-      for (const v of variants.slice(1)) {
+      for (const v of variants.filter((x) => x !== base)) {
         const o = byKey.get(`${r.key}|${v}`);
-        if (o) pairs.push({ a: side(base, path.join(run.dir, mainOutput(r).file), { job: r.id }), b: side(v, path.join(run.dir, mainOutput(o).file), { job: o.id }), prompt: r.prompt, caseTitle: r.caseTitle });
+        if (o) pairs.push({ a: side(base, path.join(run.dir, mainOutput(r).file), { job: r.id }), b: side(v, path.join(run.dir, mainOutput(o).file), { job: o.id }), prompt: r.prompt, caseTitle: r.caseTitle, caseId: r.caseId });
       }
     }
   } else if (against === "references") {
@@ -45,13 +47,13 @@ export function buildPairs(run, opts = {}) {
       if (!refs.length) continue;
       // Spread the references over the case's jobs, so one image isn't the yardstick for all of them.
       const ref = refs[parseInt(hash(r.id).slice(0, 8), 16) % refs.length];
-      pairs.push({ a: side(r.variant, path.join(run.dir, out.file), { job: r.id }), b: side("reference", ref, { reference: ref }), prompt: r.prompt, caseTitle: r.caseTitle });
+      pairs.push({ a: side(r.variant, path.join(run.dir, out.file), { job: r.id }), b: side("reference", ref, { reference: ref }), prompt: r.prompt, caseTitle: r.caseTitle, caseId: r.caseId });
     }
   } else {
     const other = new Map(against.rows.filter((r) => r.status === "succeeded" && mainOutput(r)).map((r) => [`${r.key}|${r.variant}`, r]));
     for (const r of ok) {
       const o = other.get(`${r.key}|${r.variant}`);
-      if (o) pairs.push({ a: side(`${r.variant} (this run)`, path.join(run.dir, mainOutput(r).file), { job: r.id }), b: side(`${o.variant} (${against.runId})`, path.join(against.dir, mainOutput(o).file), { job: o.id, run: against.runId }), prompt: r.prompt, caseTitle: r.caseTitle });
+      if (o) pairs.push({ a: side(`${r.variant} (this run)`, path.join(run.dir, mainOutput(r).file), { job: r.id }), b: side(`${o.variant} (${against.runId})`, path.join(against.dir, mainOutput(o).file), { job: o.id, run: against.runId }), prompt: r.prompt, caseTitle: r.caseTitle, caseId: r.caseId });
     }
   }
   return pairs.slice(0, opts.limit ?? Infinity).map((p) => {
@@ -89,7 +91,7 @@ export function writeReview(run, opts = {}) {
   writeJson(path.join(out, "key.json"), {
     runId: run.runId,
     against: opts.against?.runId ?? opts.against ?? null,
-    pairs: pairs.map((p) => ({ id: p.id, a: p.a, b: p.b, left: p.aLeft ? "a" : "b" })),
+    pairs: pairs.map((p) => ({ id: p.id, caseId: p.caseId, a: p.a, b: p.b, left: p.aLeft ? "a" : "b" })),
   });
   fs.writeFileSync(path.join(out, "index.html"), reviewHtml(run.runId, items));
   return { pairs: items.length, file: path.join(out, "index.html") };
@@ -202,12 +204,24 @@ document.addEventListener("keydown", (e) => {
   return page({ title: `Blind review · ${runId}`, body, head: css, script });
 }
 
-/** Ratings unblinded with the key: per pair of labels, how often each side won. */
-export function aggregateRatings(loaded) {
+/**
+ * Ratings unblinded with the key: per pair of labels, how often each side won. With `caseId`, only that
+ * case's pairs count (a look is judged on its own pictures), and `available` says how many pairs of each
+ * kind the review offered for it.
+ * @param {{ dir: string, rows?: object[], key?: object, ratings?: object }} loaded
+ * @param {{ caseId?: string }} [opts]
+ */
+export function aggregateRatings(loaded, opts = {}) {
   const key = loaded.key ?? readJson(path.join(loaded.dir, "review", "key.json"), null);
   const ratings = loaded.ratings ?? readJson(path.join(loaded.dir, "review", "ratings.json"), null);
-  if (!key || !ratings?.ratings?.length) return { total: 0, pairs: [] };
-  const byId = new Map(key.pairs.map((p) => [p.id, p]));
+  // Keys written before pairs carried their case: the case of the job on either side.
+  const caseOfJob = new Map((loaded.rows ?? []).map((r) => [r.id, r.caseId]));
+  const caseOf = (p) => p.caseId ?? caseOfJob.get(p.a?.job) ?? caseOfJob.get(p.b?.job) ?? null;
+  const keyPairs = (key?.pairs ?? []).filter((p) => !opts.caseId || caseOf(p) === opts.caseId);
+  const available = {};
+  for (const p of keyPairs) available[`${p.a.label}|${p.b.label}`] = (available[`${p.a.label}|${p.b.label}`] ?? 0) + 1;
+  if (!key || !ratings?.ratings?.length) return { total: 0, pairs: [], ...(opts.caseId && { available }) };
+  const byId = new Map(keyPairs.map((p) => [p.id, p]));
   const last = new Map();
   for (const r of ratings.ratings) last.set(r.pair, r);
   const groups = new Map();
@@ -223,7 +237,7 @@ export function aggregateRatings(loaded) {
     else g.ties++;
     groups.set(`${p.a.label}|${p.b.label}`, g);
   }
-  return { total, pairs: [...groups.values()].map((g) => ({ ...g, preferA: g.aWins + g.bWins ? g.aWins / (g.aWins + g.bWins) : null })) };
+  return { total, pairs: [...groups.values()].map((g) => ({ ...g, preferA: g.aWins + g.bWins ? g.aWins / (g.aWins + g.bWins) : null })), ...(opts.caseId && { available }) };
 }
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".m4v": "video/mp4" };

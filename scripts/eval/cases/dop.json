@@ -51,6 +51,7 @@
       "clip"
     ],
     "variant": "catalog",
+    "candidate": "research",
     "timeoutSeconds": 2700
   },
   "variants": {

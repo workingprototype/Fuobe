@@ -306,8 +306,9 @@ needs people's ratings.
 page shows two results side by side. Their order comes from a hash, and nothing on the page names
 the variant, model or file.
 
-- `--against variants` is the default when the run has two or more variants. It pairs the first
-  variant with each of the others on the same case, prompt and seed.
+- `--against variants` is the default when the run has two or more variants. It pairs the run's
+  candidate (see [the promote rule](#the-promote-rule)) with each of the others on the same case,
+  prompt and seed.
 - `--against references` is the default otherwise. It pairs each output with one of your references
   from `local/references/…`.
 - `--against <otherRunId>` pairs the same jobs across two runs, for example before and after a
@@ -336,21 +337,28 @@ check can't pass just because the metric never ran. Every report appends its per
 
 ## The promote rule
 
-A recipe (the candidate variant, `recipe` by default) is **eligible** to become a look's default
-only when one run, on the same prompts and seeds, shows all of the following:
+The candidate is the variant a suite names in `defaults.candidate` (DoP: `research`), else `recipe`
+when the run has it, else the run's first variant; `--candidate` picks another. It is **eligible** to
+become the default only when one run, on the same prompts and seeds, shows all of the following for
+the case:
 
 1. **Licence**: every LoRA it loaded is commercial, and is hostable when the run is on the cloud.
-   None of the recipe's LoRAs was left out on that engine.
-2. **Enough results**: at least 3 for the look.
+   None of the recipe's LoRAs was left out on that engine. A licence problem holds the recipe whatever
+   else won.
+2. **Enough results**: at least 3 for the case.
 3. **Metrics**: against every alternative in the run (prompt only, half strength, the bare base,
-   today's default), it scores at least as well on the look's main metric. That is style when the
-   look has references, else aesthetic. It also gives up no more than 1.0 CLIP or 0.15 aesthetic.
-4. **People**: at least 6 blind ratings against the alternatives, with at least 55 % of the non-tie
-   ratings going to the candidate.
+   today's default), it scores at least as well on the case's main metric: the first of style (a look
+   with references), lip-sync, identity, aesthetic, CLIP (a DoP motion's words) and warp error that the
+   case has scores for. It also gives up no more than 1.0 CLIP, 0.15 aesthetic, and on clips 0.002 warp
+   error and 0.004 drift.
+4. **People**: at least 6 blind ratings of this case's own pairs against the alternatives (every pair
+   the review offered, when it offered fewer), with at least 55 % of the non-tie ratings going to the
+   candidate. Ratings of other looks don't count.
 
 If half strength wins, the verdict is **lower strengths**, not another recipe: the LoRAs over-cook,
-so lower them in the research JSON and run again. Demo runs never promote anything. A run on one
-engine says to check the other engine too.
+so lower them in the research JSON and run again. When the candidate and an alternative ran on
+different endpoints (fal's Z-Image runs LoRAs on `/lora`), the verdict says so. Demo runs never
+promote anything. A run on one engine says to check the other engine too.
 
 `pnpm eval:promote <runId>` writes `promote.json`. `--record` also writes each case's verdict into
 the research JSON (`docs/research/fuobe-originals-recipes-5.json`). The verdict goes in the `eval`
