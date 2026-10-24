@@ -47,6 +47,11 @@ describe("POST /api/generations with a recipe's LoRAs", () => {
       { file: "/abs.safetensors" },
       { file: "ok.safetensors", url: "http://insecure.example/x.safetensors" },
       { file: "ok.safetensors", url: "file:///etc/passwd" },
+      // Only the model hubs and the providers' file stores: the server may fetch an unknown file's link.
+      { file: "ok.safetensors", url: "https://internal.host/x.safetensors" },
+      { file: "ok.safetensors", url: "https://10.0.0.5/x.safetensors" },
+      { file: "ok.safetensors", url: "https://huggingface.co@evil.example/x.safetensors" },
+      { file: "ok.safetensors", url: "https://huggingface.co.evil.example/x.safetensors" },
       { file: "ok.safetensors", strength: 9 },
       { file: "ok.safetensors", target: "middle" },
     ]) {
@@ -57,10 +62,22 @@ describe("POST /api/generations with a recipe's LoRAs", () => {
     expect((await post({ ...soul, loras: Array.from({ length: 9 }, (_, i) => ({ file: `l${i}.safetensors` })) })).status).toBe(400);
   });
 
+  it("takes LoRA links on Hugging Face, civitai, fal and Replicate", async () => {
+    for (const url of ["https://huggingface.co/a/b/resolve/main/x.safetensors", "https://civitai.com/api/download/models/2463391", "https://v3.fal.media/files/x/lora.safetensors", "https://replicate.delivery/pbxt/x/lora.safetensors"]) {
+      expect((await post({ ...soul, loras: [{ file: "ok.safetensors", url }] })).status, url).toBe(200);
+    }
+  });
+
   it("takes every LoRA file name in the research (the harness sends them as they are)", async () => {
     const research = JSON.parse(fs.readFileSync(path.join(process.cwd(), "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
     type L = { file?: string };
     const files = [...new Set<string>([...research.presets, ...research.motionsEffects].flatMap((e: { loras?: L[] }) => (e.loras ?? []).map((l) => l.file ?? "")).filter(Boolean))];
+    // And every link: they're all on hosts the API takes.
+    const urls = [...new Set<string>([...research.presets, ...research.motionsEffects].flatMap((e: { loras?: (L & { url?: string })[] }) => (e.loras ?? []).map((l) => l.url ?? "")).filter(Boolean))];
+    for (let i = 0; i < urls.length; i += 8) {
+      const r = await post({ ...soul, loras: urls.slice(i, i + 8).map((url, j) => ({ file: `l${j}.safetensors`, url })) });
+      expect(r.status, r.body.error).toBe(200);
+    }
     expect(files.length).toBeGreaterThan(50);
     for (let i = 0; i < files.length; i += 8) {
       const r = await post({ ...soul, loras: files.slice(i, i + 8).map((file) => ({ file })) });
