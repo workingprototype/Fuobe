@@ -153,6 +153,11 @@ export function applyBindings(
 
 const MODEL_LOADERS = new Set(["UNETLoader", "CheckpointLoaderSimple", "UnetLoaderGGUF", "ImageOnlyCheckpointLoader"]);
 
+/** Whether a graph has a diffusion model loader LoRAs can be attached after (wrapper graphs load models their own way). */
+export function canTakeLoras(wf: ComfyWorkflow): boolean {
+  return Object.values(wf).some((n) => MODEL_LOADERS.has(n.class_type));
+}
+
 /**
  * Insert LoraLoaderModelOnly nodes after every diffusion model loader (or only the
  * high/low-noise expert for Wan 2.2 MoE when a LoRA targets one of them) and rewire

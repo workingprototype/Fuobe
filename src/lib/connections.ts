@@ -4,7 +4,7 @@
  * address looks like, when to offer the first-run guide, and each connection's one-line status.
  */
 
-export type TestProvider = "fal" | "replicate" | "higgsfield" | "comfyui" | "llm";
+export type TestProvider = "fal" | "replicate" | "higgsfield" | "comfyui" | "llm" | "civitai";
 
 /** The settings each provider's connection test reads; an unsaved value for one of them can be tested before it's saved. */
 export const PROVIDER_SETTINGS = {
@@ -13,6 +13,8 @@ export const PROVIDER_SETTINGS = {
   higgsfield: ["higgsfieldKey"],
   comfyui: ["comfyUrl", "comfyToken", "comfyIsolatedUrl"],
   llm: ["anthropicKey", "ollamaUrl", "ollamaModel", "enhanceProvider"],
+  // Not a model provider: the key that downloads a recipe's civitai LoRAs (Settings → LoRAs).
+  civitai: ["civitaiKey"],
 } as const satisfies Record<TestProvider, readonly string[]>;
 
 export type ConnectionSetting = (typeof PROVIDER_SETTINGS)[TestProvider][number];
@@ -33,6 +35,8 @@ export function candidateValues(provider: TestProvider, values?: unknown, value?
   return out;
 }
 
+/** Where to get a civitai API key (Settings → LoRAs links to it). */
+export const CIVITAI_KEYS_URL = "https://civitai.com/user/account";
 /** Where to get a fal.ai key (the guide and Settings link to it). */
 export const FAL_KEYS_URL = "https://fal.ai/dashboard/keys";
 /** The ComfyUI address a local install listens on. */

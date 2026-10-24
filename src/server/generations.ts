@@ -33,7 +33,8 @@ import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains"
 import { enhancePrompt } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
-import { probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { ensureLorasOnComfy, prepareCloudLoras } from "./loras";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -300,6 +301,9 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_thread_state.skills_json": "skill names",
   "skills.meta_json": "SKILL.md front matter",
   "skills.files_json": "a skill's own text files, stored inline",
+  "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
+  "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
+  "lora_mirrors.licence_json": "the licence and civitai permissions a LoRA copy was made under",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
@@ -801,6 +805,13 @@ async function submit(
         input.resolution = tier.resolution;
         if (providerId !== "mock" && plan.model.engine !== "open") update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, resolution: tier.resolution }, 1, plan.op) });
       }
+    }
+    // LoRA files: ComfyUI gets the ones it lacks downloaded into its loras folder; a cloud run gets a civitai
+    // file mirrored once to the provider's storage (the civitai key never leaves this server).
+    if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
+      input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
+    } else if (input.loras?.length && providerId === "comfyui") {
+      await ensureLorasOnComfy(input.loras, await comfyLoraFiles(route), (message) => update(id, { message }));
     }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();
