@@ -93,6 +93,10 @@ describe("Inpaint and Enhancer on the open engine", () => {
     expect(String(skin("prompt")[0])).toMatch(/^Give the portrait a subtle natural retouch/);
     const detail = await bind(step({ tool: "enhance", settings: { look: "detail" } }));
     expect(detail("image")).toEqual(["/api/files/a.png"]);
+    // 2×, not the graph's default 4×: SeedVR2's output multiplier, ESRGAN's resize after its fixed 4×.
+    expect(detail("scale")).toEqual([2]);
+    const esrgan = await bind(step({ tool: "enhance", modelId: "oss-upscale-image", settings: { look: "detail" } }));
+    expect(esrgan("scale")).toEqual([0.5]);
   });
 });
 

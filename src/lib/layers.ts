@@ -270,11 +270,18 @@ export const ENHANCE_LOOKS: { id: EnhanceLook; label: string; verb: string; hint
     hint: "Removes blur and noise, restores crisp edges",
     prompt: "Sharpen the image: remove blur, noise and compression artefacts and restore crisp detail in edges, eyes, hair, fabric and text.",
   },
-  { id: "detail", label: "Detail", verb: "Restore detail", hint: "An upscaler rebuilds fine detail: twice the pixels, same place on the canvas" },
+  { id: "detail", label: "Detail", verb: "Restore detail", hint: "An upscaler rebuilds fine detail at twice the width and height, in the same place on the canvas" },
 ];
 
 /** The upscalers behind the Detail look (the Upscale tool's, Topaz with its face pass first). */
 export const ENHANCE_DETAIL_MODELS: { cloud: string[]; open: string[] } = { cloud: ["topaz-image", "seedvr-image"], open: ["oss-seedvr2-image", "oss-upscale-image"] };
+
+/**
+ * Detail is 2× on every engine: the cloud upscalers are 2× as listed (Topaz, SeedVR's upscale_factor),
+ * the open graphs default to 4× and take a `scale` (SeedVR2's output multiplier; ESRGAN's resize after
+ * its fixed 4×, so 0.5 nets 2×). A 2048-px layer would otherwise come back at 8192 px.
+ */
+export const ENHANCE_DETAIL_SCALE: Record<string, number> = { "oss-seedvr2-image": 2, "oss-upscale-image": 0.5 };
 
 /** The models a look offers on an engine (the first is the default). */
 export function enhanceModels(look: EnhanceLook | undefined, engine: "cloud" | "open"): string[] {

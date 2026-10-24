@@ -9,6 +9,7 @@ import {
   clampLayers,
   CUTOUT_MODELS,
   defaultLayers,
+  ENHANCE_DETAIL_SCALE,
   enhanceModels,
   enhancePrompt,
   initialDoc,
@@ -347,8 +348,9 @@ export function jobSteps(input: LayerJobInput, opts: { batchTitle?: string } = {
       const ask = enhancePrompt(look, prompt);
       const model = toolModel(tool, engine, input.modelId, enhanceModels(look, engine));
       if (!ask) {
-        // Detail: an upscaler rebuilds it (the layer keeps its place with more pixels, as Upscale does).
-        add("enhance", base(model, { op: "upscale-image", inputs: { images: [needImage()] }, params: aspectFor(model) }));
+        // Detail: an upscaler rebuilds it at 2× (the layer keeps its place with more pixels, as Upscale does).
+        const scale = ENHANCE_DETAIL_SCALE[model.id];
+        add("enhance", base(model, { op: "upscale-image", inputs: { images: [needImage()] }, params: { ...aspectFor(model), ...(scale ? { extra: { scale } } : {}) } }));
         break;
       }
       add("enhance", base(model, { op: "edit", prompt: s.keepAlpha ? `${ask} Keep the subject on a plain, even background.` : ask, inputs: { images: [needImage()] }, params: aspectFor(model) }));

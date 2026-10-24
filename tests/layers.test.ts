@@ -43,6 +43,7 @@ import {
   TOOL_MODELS,
   zipPlan,
   ENHANCE_DETAIL_MODELS,
+  ENHANCE_DETAIL_SCALE,
   ENHANCE_LOOKS,
   elementDraft,
   enhanceModels,
@@ -578,6 +579,8 @@ describe("tools and prices", () => {
     );
     // Every look but Detail has an instruction.
     expect(ENHANCE_LOOKS.filter((l) => !l.prompt).map((l) => l.id)).toEqual(["detail"]);
+    // The open upscalers' 2× scales belong to Detail's own models.
+    expect(Object.keys(ENHANCE_DETAIL_SCALE).every((id) => ENHANCE_DETAIL_MODELS.open.includes(id))).toBe(true);
   });
 
   it("prices a decomposition per layer", () => {

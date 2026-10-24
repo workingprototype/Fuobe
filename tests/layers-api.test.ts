@@ -180,7 +180,10 @@ describe("job steps", () => {
     const detail = steps({ tool: "enhance", settings: { look: "detail" } })[0].request;
     expect(detail).toMatchObject({ modelId: "topaz-image", op: "upscale-image" });
     expect(detail.prompt).toBeUndefined();
-    expect(steps({ tool: "enhance", engine: "open", settings: { look: "detail" } })[0].request.modelId).toBe("oss-seedvr2-image");
+    // 2× on every engine: Topaz and SeedVR are 2× as listed, the open graphs (4× by default) get a scale.
+    expect(detail.params?.extra).toBeUndefined();
+    expect(steps({ tool: "enhance", engine: "open", settings: { look: "detail" } })[0].request).toMatchObject({ modelId: "oss-seedvr2-image", params: { extra: { scale: 2 } } });
+    expect(steps({ tool: "enhance", engine: "open", modelId: "oss-upscale-image", settings: { look: "detail" } })[0].request.params).toMatchObject({ extra: { scale: 0.5 } });
     expect(() => steps({ tool: "enhance", modelId: "topaz-image", settings: { look: "skin" } })).toThrow(/can't run this tool/);
     // A transparent layer gets its cut-out back after a retouch.
     expect(steps({ tool: "enhance", settings: { look: "skin", keepAlpha: true } }).map((x) => x.key)).toEqual(["enhance", "cutout"]);
