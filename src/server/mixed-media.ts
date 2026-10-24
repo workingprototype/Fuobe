@@ -99,7 +99,7 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
   const anchor = mode === "frames" ? body.anchor : mode === "fast" && body.anchor && takesImage(modelId) ? body.anchor : undefined;
   if (mode === "fast") {
     if (body.anchor && !anchor) notes.push(`${model?.name} restyles from words only — the preview frame isn't sent`);
-    notes.push(`${model?.name} restyles the clip as smooth video in one pass — Per frame redraws every frame like Higgsfield`);
+    notes.push(`${model?.name} restyles the clip as smooth video in one pass — Per frame redraws every frame of it instead`);
   } else if (!mode && body.resolution !== "1K") notes.push("The open engine renders up to 1536 px on the long side");
   const name = (body.source.name ?? "").replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, 40);
   return {

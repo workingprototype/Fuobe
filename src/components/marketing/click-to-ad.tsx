@@ -68,7 +68,12 @@ function EndCardPreview({ input, className }: { input: EndCardInput; className?:
   const ref = useRef<HTMLCanvasElement>(null);
   const key = JSON.stringify(input);
   useEffect(() => {
-    if (ref.current) void renderEndCard(ref.current, JSON.parse(key) as EndCardInput, 0.3);
+    // The logo and fonts load at their own pace: only the latest look is drawn.
+    let live = true;
+    if (ref.current) void renderEndCard(ref.current, JSON.parse(key) as EndCardInput, 0.3, () => live);
+    return () => {
+      live = false;
+    };
   }, [key]);
   const words = [input.content.brand, input.content.product, input.content.cta].filter(Boolean).join(", ");
   return <canvas ref={ref} role="img" aria-label={`End card preview: ${words}`} className={cn("aspect-[9/16] rounded-lg border bg-muted", className)} />;

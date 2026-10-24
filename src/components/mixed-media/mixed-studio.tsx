@@ -665,10 +665,12 @@ function LatestRender({ chain, frames }: { chain: (Generation | undefined)[]; fr
   const redrawing = perFrame && steps?.status === "working" && steps.label === "Redrawing the frames";
   const progress = useFramesProgress(perFrame ? g?.batchId : null, redrawing || steps?.status === "failed").data;
   let state = steps ?? ({ status: "working", label: "Rendering", progress: 0 } as const);
-  if (redrawing && progress?.total) {
-    // The frames are most of the work: show them as the bar between taking and rebuilding them.
-    const at = chain.findIndex((x) => x?.op === "images-to-video");
-    state = { ...state, label: `Redrawing frames · ${progress.done} of ${progress.total}`, progress: (at + progress.done / progress.total) / chain.length };
+  if (perFrame && state.status === "working") {
+    // The frames are most of the work: the cut and the extraction fill the first tenth of the bar, redrawing the
+    // frames the next eight, putting them back together (and the sound) the last tenth.
+    const at = Math.max(1, chain.findIndex((x) => x?.op === "images-to-video")) / chain.length;
+    const p = redrawing ? 0.1 + 0.8 * (progress?.total ? progress.done / progress.total : 0) : state.progress < at ? (state.progress / at) * 0.1 : 0.9 + ((state.progress - at) / (1 - at)) * 0.1;
+    state = { ...state, progress: p, ...(redrawing && progress?.total ? { label: `Redrawing frames · ${progress.done} of ${progress.total}` } : {}) };
   }
   // A frame that failed: say which and why (the steps after it only say an earlier step didn't finish).
   if (state.status === "failed" && progress?.failed) state = { ...state, label: `${progress.failed.label} failed`, error: progress.failed.error };

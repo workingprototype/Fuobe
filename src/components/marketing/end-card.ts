@@ -88,9 +88,13 @@ export interface EndCardInput {
   logo?: string | null;
 }
 
-/** Draw the card on `canvas` at `scale` (1 = the full 720 × 1280 card). */
-export async function renderEndCard(canvas: HTMLCanvasElement, input: EndCardInput, scale = 1): Promise<void> {
+/**
+ * Draw the card on `canvas` at `scale` (1 = the full 720 × 1280 card). Fonts and the logo load first;
+ * `current` says whether this drawing is still wanted then (a newer one for the same canvas wins).
+ */
+export async function renderEndCard(canvas: HTMLCanvasElement, input: EndCardInput, scale = 1, current: () => boolean = () => true): Promise<void> {
   const [logo] = await Promise.all([input.logo ? loadImage(input.logo).catch(() => null) : null, ensureFont(input.theme.heading), ensureFont(input.theme.body)]);
+  if (!current()) return;
   const { w, h } = END_CARD.size;
   canvas.width = Math.round(w * scale);
   canvas.height = Math.round(h * scale);
