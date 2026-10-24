@@ -12,6 +12,7 @@ import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
+import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import {
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
@@ -20,6 +21,7 @@ import {
   type GenerationRequest,
   type MediaKind,
   type GenInput,
+  type LoraRef,
   type ModelRoute,
   type OutputFile,
   type ProviderId,
@@ -358,14 +360,16 @@ export function deleteGeneration(id: string): void {
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
  * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
  */
-export function chooseRoute(candidates: ModelRoute[], images = 0): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = []): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
   const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
-  const real = routes.find((r) => routeReady(r) && takes(r));
+  // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix);
+  // otherwise the first ready one runs and fitLoras says which LoRAs it leaves out.
+  const real = routes.find((r) => routeReady(r) && takes(r) && lorasFit(r, loras)) ?? routes.find((r) => routeReady(r) && takes(r));
   if (real) return { route: real, demo: false };
   const short = routes.find(routeReady);
   if (short) {
@@ -422,7 +426,11 @@ function prepare(original: GenerationRequest) {
   // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
   if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0);
+  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras);
+  // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
+  // takes at most so many (the plan's notes say which were left out). Open runs carry them all.
+  const fitted = fitLoras(plan.loras, route);
+  plan = { ...plan, loras: fitted.loras };
   // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
   if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
@@ -430,14 +438,24 @@ function prepare(original: GenerationRequest) {
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
-  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op) };
+  const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
+  return { req, plan, route, demo, providerId, notes: fitted.notes, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
 }
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, demo, providerId, cost } = prepare(req);
-  return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+  const { plan, demo, providerId, cost, notes } = prepare(req);
+  return {
+    model: plan.model,
+    op: plan.op,
+    jobs: plan.jobs,
+    outputs: plan.jobs * plan.perJobOutputs,
+    demo,
+    providerId,
+    costUsd: cost === null ? null : cost * plan.jobs,
+    ...(notes.length && { notes }),
+  };
 }
 
 /** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */

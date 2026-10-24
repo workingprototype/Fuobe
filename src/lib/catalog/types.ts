@@ -415,8 +415,15 @@ export interface FieldMap {
    * A frame count for routes that render only as many frames as asked (LTX 2.3 clean plate and HDR, VOID):
    * the clip's length (params.sourceDuration, else params.duration) × the frame rate (params.fps, else
    * `fps`), kept within min–max. Nothing is sent when the length is unknown (the API's default applies).
+   * Also video models whose length is a frame count (Wan 2.2, LTX-2.3 22B), where `step` keeps the count at
+   * step·n + 1 (Wan 4n+1, LTX 8n+1).
    */
-  numFrames?: { key: string; fps: number; min?: number; max?: number };
+  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number };
+  /**
+   * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
+   * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
+   */
+  size?: { width: string; height: string; multiple: number; max?: number; base?: number };
   /**
    * Limits the API checks on numeric fields Fuobe fills (round 4: target fps, slow motion, frame interval,
    * overlay position and scale, Ken Burns length…): a value is rounded when the field takes whole numbers
@@ -551,6 +558,8 @@ export interface Pricing {
    * `param` is "targetFps" or a params.extra key (its control's default when unset); `values` maps a value to its factor.
    */
   factors?: { param: string; values: Record<string, number> }[];
+  /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
+  withLoras?: number;
 }
 
 export interface ModelDef {

@@ -38,6 +38,18 @@ for e in RESEARCH_4["endpoints"]:
     prev = EPS.get((e["provider"], e["endpoint"]))
     EPS[(e["provider"], e["endpoint"])] = {**e, "keyFields": {**((prev or {}).get("keyFields") or {}), **(e.get("keyFields") or {})}}
 
+# Originals (docs/research/fuobe-originals-recipes-5.json): the hosted open-weight endpoints that take LoRAs
+# (hostedLoraEndpoints: the LoRA field's shape, maximum and whether it's required, plus the full inputs where
+# scripts/fetch-hosted-schemas.py read them) and the plain endpoints of the same models (hostedBaseEndpoints).
+ORIGINALS = json.loads((ROOT / "docs/research/fuobe-originals-recipes-5.json").read_text(encoding="utf-8"))
+HOSTED_LORA = {(e["provider"], e["id"]): e for e in ORIGINALS["hostedLoraEndpoints"]}
+for e in ORIGINALS["hostedLoraEndpoints"]:
+    if e.get("inputs"):
+        EPS[(e["provider"], e["id"])] = {"provider": e["provider"], "endpoint": e["id"], "operation": e["op"], "status": e["status"], "verified": True,
+                                         "inputs": e["inputs"], "keyFields": e.get("keyFields") or {}, "output": e.get("output"), "price": e.get("price")}
+for e in ORIGINALS.get("hostedBaseEndpoints") or []:
+    EPS[(e["provider"], e["endpoint"])] = e
+
 IMG_AR = ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "5:4", "4:5"]
 IMAGE_SIZE_MAP = {
     "1:1": "square_hd", "4:3": "landscape_4_3", "3:4": "portrait_4_3", "16:9": "landscape_16_9",
@@ -56,7 +68,8 @@ M = []
 
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
-          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None):
+          sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
+          frame_step=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -68,11 +81,14 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     fps_targets: frame rates offered for the API's target_fps (params.targetFps; ModelOptions.fpsTargets).
     upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
     turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
-    A route's options dict may also set max_images (FieldMap.maxImages) and note."""
+    frame_step: video models whose length is a frame count (Wan 2.2: 4n+1, LTX: 8n+1): FieldMap.numFrames.step.
+    A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
+    FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
-                  ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or []))
+                  ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
+                  frame_step=frame_step))
 
 
 # ----- Image
@@ -151,7 +167,27 @@ model("wan-2-7-image", "Wan 2.7 Image", "Alibaba Wan", "wan", "image",
       [("t2i", "fal-ai/wan/v2.7/pro/text-to-image"), ("edit", "fal-ai/wan/v2.7/pro/edit")], defaults={"aspectRatio": "16:9"})
 model("z-image-turbo-cloud", "Z-Image Turbo (hosted)", "Alibaba Tongyi", "z-image", "image",
       "Sub-second photoreal images",
-      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"})], badges=["fast"], defaults={"aspectRatio": "1:1"})
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora"}),
+       # Replicate's LoRA build of the same weights (lora_weights[] + lora_scales[]); one image per run.
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True})], badges=["fast"], defaults={"aspectRatio": "1:1"})
+# Originals (O1): open-weight models hosted on fal / Replicate that take LoRA URLs (docs/research/fuobe-originals-recipes-5.md §3).
+# Apache-2.0 weights, so the same recipe runs on the user's GPU; a run with LoRAs switches to the /lora endpoint.
+model("qwen-image-2512-cloud", "Qwen-Image 2512 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights Qwen-Image: clean lettering and long prompts",
+      [("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora"})],
+      pricing=("megapixel", 0.02, "rounded up to whole megapixels"), defaults={"aspectRatio": "1:1"})
+model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights instruction edits with several references",
+      [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"})
+model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs", "flux", "image",
+      "The Apache-2.0 FLUX.2: cheapest drafts and edits",
+      [("t2i", "fal-ai/flux-2/klein/4b", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/lora"}),
+       ("edit", "fal-ai/flux-2/klein/4b/edit", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"})],
+      badges=["fast"], defaults={"aspectRatio": "1:1"})
+model("wan-2-2-a14b-image-cloud", "Wan 2.2 A14B Image (hosted)", "Alibaba Wan", "wan", "image",
+      "Open-weights Wan 2.2 stills that take Wan LoRAs",
+      [("t2i", "fal-ai/wan/v2.2-a14b/text-to-image/lora", "fal")], defaults={"aspectRatio": "16:9"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -349,6 +385,27 @@ model("flux-3-video", "FLUX.3 Video", "Black Forest Labs", "flux", "video", "BFL
        ("flf2v", "blackforestlabs/flux-3/first-last-frame-to-video"), ("v2v", "blackforestlabs/flux-3/edit-video"),
        ("extend", "blackforestlabs/flux-3/extend-video")],
       badges=["new"], defaults={"aspectRatio": "16:9"})
+# Originals (O1): Wan 2.2 A14B and LTX-2.3 22B open weights on fal / Replicate, with camera and effect LoRAs.
+# fal's Wan 2.2 interpolates to 32 fps by default (doubled frames): interpolator_model none keeps 16 fps (research §3.1).
+WAN22_FAL = {"interpolator_model": "none"}
+model("wan-2-2-a14b-cloud", "Wan 2.2 A14B (hosted)", "Alibaba Wan", "wan", "video", "Open-weights Wan 2.2 that takes camera and effect LoRAs",
+      [("t2v", "fal-ai/wan/v2.2-a14b/text-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/text-to-video/lora", "defaults": WAN22_FAL}),
+       ("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "defaults": WAN22_FAL}),
+       # One LoRA per expert (lora_weights_transformer = high noise, _2 = low noise): a Mix runs on fal.
+       ("t2v", "wan-video/wan-2.2-t2v-fast", "replicate"), ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate")],
+      pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+               {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=4)
+# LTX-2.3 22B (LTX-2 Community licence: free under US$10M annual revenue). Prompt expansion is on by default and would
+# rewrite a compiled Director prompt, so it is off; sound follows the audio toggle.
+model("ltx-2-3-22b-cloud", "LTX-2.3 22B (hosted)", "Lightricks", "ltx", "video", "Open-weights LTX-2.3 with sound, camera and motion LoRAs",
+      [("t2v", "fal-ai/ltx-2.3-22b/text-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora"}),
+       ("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"}),
+       ("extend", "fal-ai/ltx-2.3-22b/extend-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora"}),
+       ("v2v", "fal-ai/ltx-2.3-22b/video-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"})],
+      badges=["audio"], api_defaults={"enable_prompt_expansion": False},
+      pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
+      defaults={"aspectRatio": "16:9", "duration": 5}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
@@ -972,6 +1029,10 @@ def map_fields(fmap):
     for k, v in fmap.items():
         if k in ("fixed", "defaults"):
             out += list(v)
+        elif k == "loras":
+            out += lora_field_names(v)
+        elif k == "size":
+            out += [v["width"], v["height"]]
         elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
@@ -981,6 +1042,63 @@ def map_fields(fmap):
             # Ken Burns: the zoom direction and easing are fields of their own.
             out += [v[f]["key"] for f in ("direction", "easing") if isinstance(v.get(f), dict) and isinstance(v[f].get("key"), str)]
     return [f.split(".")[0] for f in out]
+
+
+def lora_field_names(f):
+    """The payload fields a FieldMap.loras writes."""
+    if f["shape"] == "items":
+        return [f["key"]]
+    if f["shape"] == "arrays":
+        return [f["weights"], f["scales"]]
+    if f["shape"] == "single":
+        return [f["weights"], f["scale"]]
+    return [f[x][y] for x in ("high", "low") for y in ("weights", "scale")]
+
+
+def scale_range(spec):
+    lo, hi = num((spec or {}).get("minimum")), num((spec or {}).get("maximum"))
+    return {"min": lo, "max": hi} if lo is not None and hi is not None else None
+
+
+def lora_field(provider, ep):
+    """FieldMap.loras for an endpoint that takes LoRAs, from its research inputs and its hostedLoraEndpoints record."""
+    inputs = (EPS.get((provider, ep)) or {}).get("inputs") or {}
+    summary = (HOSTED_LORA.get((provider, ep)) or {}).get("lora") or {}
+    if provider == "replicate":
+        expert = ("lora_weights_transformer", "lora_scale_transformer", "lora_weights_transformer_2", "lora_scale_transformer_2")
+        if set(expert) <= set(inputs):
+            f = {"shape": "experts", "high": {"weights": expert[0], "scale": expert[1]}, "low": {"weights": expert[2], "scale": expert[3]}}
+            rng = scale_range(inputs[expert[1]])
+        elif (inputs.get("lora_weights") or {}).get("type") == "array" and "lora_scales" in inputs:
+            f = {"shape": "arrays", "weights": "lora_weights", "scales": "lora_scales"}
+            rng = None
+        elif "lora_weights" in inputs and "lora_scale" in inputs:
+            f = {"shape": "single", "weights": "lora_weights", "scale": "lora_scale"}
+            rng = scale_range(inputs["lora_scale"])
+        else:
+            return None
+        if rng:
+            f["range"] = rng
+        return f
+    key = summary.get("field") or "loras"
+    spec = inputs.get(key)
+    if not spec or spec.get("type") != "array":
+        return None
+    item = spec.get("itemSchema") or {}
+    f = {"shape": "items", "key": key}
+    mx = summary.get("maxCount") if isinstance(summary.get("maxCount"), int) else num((re.search(r"maximum (\d+)", spec.get("desc") or "") or [None, None])[1])
+    if mx:
+        f["max"] = mx
+    if spec.get("required") or summary.get("required"):
+        f["required"] = True
+    rng = scale_range(item.get("scale"))
+    if rng:
+        f["range"] = rng
+    if item.get("transformer"):
+        f["transformer"] = item["transformer"].get("default") or "both"
+    if "weight_name" in item:
+        f["weightName"] = True
+    return f
 
 
 def mask_format(ep):
@@ -1124,6 +1242,12 @@ def part4_ranges(op, inputs, fmap):
 
 def build_route(op, ep, provider, m, opts, ropts=None):
     ropts = ropts or {}
+    # A Replicate model run by version ("owner/name:<version>") is researched under its name.
+    if ropts.get("pin"):
+        version = (HOSTED_LORA.get((provider, ep)) or {}).get("version")
+        if not version:
+            warn(f"{m['id']}: {ep} has no researched version to pin")
+            return None
     e = EPS.get((provider, ep))
     if not e:
         warn(f"{m['id']}: endpoint {provider}:{ep} not in research")
@@ -1270,6 +1394,26 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["styleId"] = kf["styleId"]
     if "numLayers" in kf:
         fmap["numLayers"] = kf["numLayers"]
+    # Video models whose length is a frame count (Wan 2.2 num_frames at 16 fps, LTX-2.3 at 24): the duration picked
+    # becomes frames (FieldMap.numFrames, 4n+1 / 8n+1 by model), and the durations offered are the ones that fit.
+    nf = kf.get("numFrames") or (kf.get("duration") if kf.get("duration") in ("num_frames", "frames") else None)
+    if nf and op in ("t2v", "i2v", "flf2v", "extend", "v2v") and (inputs.get(nf) or {}).get("type") == "integer":
+        kf.pop("duration", None)
+        kf.pop("numFrames", None)
+        spec = inputs.get(nf) or {}
+        fps_key = kf.get("fps") or next((k for k in ("fps", "frames_per_second") if k in inputs), None)
+        fps = num((inputs.get(fps_key) or {}).get("default")) or 16
+        lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        fmap["numFrames"] = {"key": nf, "fps": fps, **({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}),
+                             **({"step": m["frame_step"]} if m.get("frame_step") else {})}
+        opts["durations"] = union(opts.get("durations", []), [d for d in NICE_DURATIONS if (lo is None or d * fps >= lo) and (hi is None or d * fps <= hi + (m.get("frame_step") or 0))])
+    # Width and height fields (Replicate's Z-Image LoRA model): computed from the aspect ratio (FieldMap.size).
+    if "width" in kf and "height" in kf and "aspectRatio" not in kf:
+        w, h = inputs.get(kf["width"]) or {}, inputs.get(kf["height"]) or {}
+        mx = [x for x in (num(w.get("maximum")), num(h.get("maximum"))) if x is not None]
+        fmap["size"] = {"width": kf["width"], "height": kf["height"], "multiple": 16, **({"max": min(mx)} if mx else {}),
+                        **({"base": num(w.get("default"))} if num(w.get("default")) else {})}
+        opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
     part4_slots(op, kf, inputs, m, opts, fmap)
     # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
     if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
@@ -1424,13 +1568,29 @@ def build_route(op, ep, provider, m, opts, ropts=None):
     # Inpaint routes say what the mask's paint means (edit routes get theirs when the inpaint route is derived).
     if op == "inpaint" and "mask" in fmap and mask_format(ep):
         fmap["maskFormat"] = mask_format(ep)
-    route = {"op": op, "provider": provider, "endpoint": ep, "map": fmap}
+    # LoRAs (O1): the field the route's LoRA endpoint (or the endpoint itself) takes them in, from the research.
+    lora_ep = ropts.get("loraEndpoint")
+    lf = lora_field(provider, lora_ep or ep)
+    if lf:
+        fmap["loras"] = lf
+    elif lora_ep:
+        warn(f"{m['id']}: LoRA endpoint {lora_ep} has no researched LoRA field")
+    route = {"op": op, "provider": provider, "endpoint": f"{ep}:{version}" if ropts.get("pin") else ep, "map": fmap}
     if ropts.get("note"):
         route["note"] = ropts["note"]
-    if ropts.get("loraEndpoint"):
-        if (provider, ropts["loraEndpoint"]) not in EPS:
-            warn(f"{m['id']}: LoRA endpoint {ropts['loraEndpoint']} not in research")
-        route["loraEndpoint"] = ropts["loraEndpoint"]
+    if lora_ep:
+        le = EPS.get((provider, lora_ep))
+        if not le:
+            warn(f"{m['id']}: LoRA endpoint {lora_ep} not in research")
+        else:
+            # The same payload goes to both endpoints: every field the route sends must be one the LoRA endpoint takes.
+            missing = [f for f in map_fields(fmap) if f not in (le.get("inputs") or {})]
+            if missing:
+                warn(f"{m['id']}: {lora_ep} has no {missing} (sent by {ep})")
+        rec = HOSTED_LORA.get((provider, lora_ep)) or {}
+        if rec.get("commercialWeights") is False:
+            warn(f"{m['id']}: {lora_ep} runs non-commercial weights ({rec.get('baseLicence')}): never an Original's default")
+        route["loraEndpoint"] = lora_ep
     return route, e
 
 
@@ -1497,6 +1657,12 @@ for m in M:
         pricing = {"unit": u, "usd": usd, **({"note": note[0]} if note else {}), **extra}
     elif first_e:
         pricing = parse_price(first_e)
+    # What a run costs on the route's LoRA endpoint, when its price is in the same unit (fal's /lora variants cost more).
+    lora_eps = [r["loraEndpoint"] for r in routes if r.get("loraEndpoint")]
+    if pricing and lora_eps and "withLoras" not in pricing:
+        lp = parse_price(EPS.get((routes[0]["provider"], lora_eps[0])) or {})
+        if lp and lp["unit"] == pricing["unit"]:
+            pricing["withLoras"] = lp["usd"]
     d = {
         "id": m["id"], "name": m["name"], "vendor": m["vendor"], "family": m["family"], "engine": "cloud",
         "kind": m["kind"], "tagline": m["tagline"], "routes": routes, "options": opts,

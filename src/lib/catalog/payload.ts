@@ -1,5 +1,6 @@
 import { readTimeline, timelineTracks } from "@/lib/av/timeline";
 import { upscaleFactorFor } from "@/lib/av/upscale";
+import { loraFields } from "./loras";
 import { OPERATION_OUTPUT, type DurationField, type EnumField, type FieldMap, type GenInput, type MatteOutput, type MediaKind, type Operation, type PixelPoint } from "./types";
 
 function enumValue(field: string | EnumField, value: string): [string, unknown] {
@@ -65,7 +66,31 @@ export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pic
   const seconds = input.sourceDuration ?? input.duration;
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
   const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fps;
+  // Wan wants 4n+1 frames and LTX 8n+1: the nearest count of that form that fits.
+  if (f.step) {
+    const step = f.step;
+    const fit = (n: number) => Math.round((n - 1) / step) * step + 1;
+    let n = fit(seconds * fps);
+    while (f.max !== undefined && n > f.max) n -= step;
+    while (f.min !== undefined && n < f.min) n += step;
+    return n;
+  }
   return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
+}
+
+/** Width and height for an aspect ratio on a `base`×`base` pixel budget (FieldMap.size). */
+export function sizeValue(f: NonNullable<FieldMap["size"]>, aspectRatio: string | undefined): { width: number; height: number } {
+  const base = f.base ?? 1024;
+  const ratio = (aspectRatio && ratioOf(aspectRatio)) || 1;
+  const round = (v: number) => Math.max(f.multiple, Math.round(v / f.multiple) * f.multiple);
+  let width = round(base * Math.sqrt(ratio));
+  let height = round(base / Math.sqrt(ratio));
+  if (f.max !== undefined && Math.max(width, height) > f.max) {
+    const k = f.max / Math.max(width, height);
+    width = Math.min(f.max, round(width * k));
+    height = Math.min(f.max, round(height * k));
+  }
+  return { width, height };
 }
 
 /** Path segments that would reach Object.prototype (or a constructor) instead of the payload. */
@@ -303,6 +328,13 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.styleId && input.styleId) out[map.styleId] = input.styleId;
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
+  if (map.size) {
+    const { width, height } = sizeValue(map.size, input.aspectRatio);
+    out[map.size.width] = width;
+    out[map.size.height] = height;
+  }
+  // LoRAs (a look, a motion, a trained identity) in the API's shape; the provider calls the route's LoRA endpoint then.
+  if (map.loras && input.loras?.length) Object.assign(out, loraFields(map.loras, input.loras));
 
   // Round 4: clicked points, keyframes, formats, Ken Burns, overlays, retiming, frames and 3D (research part 4).
   if (map.points && input.points?.length) out[map.points.key] = pointsValue(map.points.format, input.points);

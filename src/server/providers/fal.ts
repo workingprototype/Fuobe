@@ -1,5 +1,6 @@
 import "server-only";
 import { createFalClient } from "@fal-ai/client";
+import { loraEndpointFor, routeLoraField } from "@/lib/catalog/loras";
 import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { ProviderError, type ProviderAdapter } from "./types";
@@ -58,11 +59,16 @@ export const falProvider: ProviderAdapter = {
   },
 
   async submit({ route, input }) {
-    const payload = buildPayload(route.map ?? {}, input);
-    // Trained identities (fal LoRA URLs) switch to the model's LoRA endpoint.
-    const loras = (input.loras ?? []).filter((l) => l.url);
-    const endpoint = loras.length && route.loraEndpoint ? route.loraEndpoint : route.endpoint;
-    if (endpoint !== route.endpoint) payload.loras = loras.map((l) => ({ path: l.url, scale: l.strength ?? 1 }));
+    // LoRAs (trained identities, a recipe's looks and motions) go in the route's LoRA field (FieldMap.loras:
+    // `transformer` per file on Wan 2.2, `weight_name`, at most the API's maximum) and switch to its LoRA endpoint.
+    const map = { ...route.map, loras: routeLoraField(route) };
+    const payload = buildPayload(map, input);
+    let endpoint: string;
+    try {
+      endpoint = loraEndpointFor({ ...route, map }, input.loras);
+    } catch (e) {
+      throw new ProviderError((e as Error).message);
+    }
     const res = (await falFetch(`${QUEUE}/${endpoint}`, {
       method: "POST",
       body: JSON.stringify(payload),
