@@ -227,6 +227,20 @@ Desktop, Cursor, Codex…) take the server entry it prints on stderr (`fuobe mcp
 The agent then has `search_models`, `estimate_cost`, `generate`, `check_generations`, the studio
 tools and Fuobe's skills as prompts.
 
+### `fuobe eval` — measure the Fuobe Originals
+
+From a Fuobe checkout, `fuobe eval <command>` is the evaluation harness (`pnpm eval:<command>`), run
+against the same server and token as the other commands:
+
+```bash
+fuobe eval run --suite selftest --engine demo        # a free self-test of the harness
+fuobe eval run --suite soul --engine open --looks v1-general --variants recipe,prompt-only
+fuobe eval compare latest~1 latest --fail-on clip --threshold 1   # exit 1 on a regression
+```
+
+See [`scripts/eval/README.md`](../scripts/eval/README.md) for the suites, metrics, blind review and
+the promote rule.
+
 ## Skills for other agents
 
 Fuobe's skills are [Agent Skills](https://agentskills.io/specification), so the open `skills` CLI

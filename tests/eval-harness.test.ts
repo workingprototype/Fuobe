@@ -395,6 +395,16 @@ describe("report, blind review, compare and promote", () => {
     expect(unknown.stderr).toMatch(/Unknown metric “smell”/);
   });
 
+  it("fuobe eval hands its arguments to the harness, with the CLI's server and token", async () => {
+    const { main } = (await import("../bin/lib/cli.mjs")) as { main: (argv: string[], io: object) => Promise<number> };
+    const out = sink();
+    const err = sink();
+    const io = { stdout: out.stream, stderr: err.stream, env: { ...process.env, FUOBE_EVAL_RESULTS: results, FUOBE_CONFIG: path.join(dir, "no-config.json") }, cwd: process.cwd(), home: dir, fetch, columns: 100, stdinIsTTY: false, stderrIsTTY: false, now: Date.now, sleep: async () => {}, onInterrupt: () => () => {}, ask: async () => "", readStdin: async () => "" };
+    expect(await main(["eval", "compare", "fake-open-1", "fake-open-3", "--fail-on", "clip", "--threshold", "0.5"], io)).toBe(1);
+    expect(out.text()).toMatch(/Regressions:/);
+    expect(await main(["eval", "history", "--suite", "soul", "--json"], io)).toBe(0);
+  });
+
   it("history lists runs, newest first", async () => {
     const h = await cli(["history", "--json"]);
     const doc = JSON.parse(h.stdout);
