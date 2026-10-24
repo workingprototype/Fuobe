@@ -924,10 +924,10 @@ function InpaintTool() {
     return () => clearTimeout(t);
   }, [paint, paintVersion]);
 
+  // A fresh canvas, not the old one wiped: the stage keeps its red copy per canvas and stroke count.
   const clear = () => {
     if (!paint) return;
-    paint.canvas.getContext("2d")!.clearRect(0, 0, paint.canvas.width, paint.canvas.height);
-    setPaint({ ...paint });
+    setPaint({ ...paint, canvas: blankCanvas(paint.canvas.width, paint.canvas.height)[0] });
     setPainted(null);
   };
 
