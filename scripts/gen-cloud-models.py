@@ -179,7 +179,9 @@ model("qwen-image-2512-cloud", "Qwen-Image 2512 (hosted)", "Alibaba Qwen", "qwen
 model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qwen", "qwen-image", "image",
       "Open-weights instruction edits with several references",
       [("edit", "fal-ai/qwen-image-edit-2511", "fal", {"loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"}),
-       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"})
+       ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
+      # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
+      fit_values=True)
 model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs", "flux", "image",
       "The Apache-2.0 FLUX.2: cheapest drafts and edits",
       [("t2i", "fal-ai/flux-2/klein/4b", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/lora"}),
@@ -388,14 +390,18 @@ model("flux-3-video", "FLUX.3 Video", "Black Forest Labs", "flux", "video", "BFL
 # Originals (O1): Wan 2.2 A14B and LTX-2.3 22B open weights on fal / Replicate, with camera and effect LoRAs.
 # fal's Wan 2.2 interpolates to 32 fps by default (doubled frames): interpolator_model none keeps 16 fps (research §3.1).
 WAN22_FAL = {"interpolator_model": "none"}
+WAN22_REPLICATE = {"interpolate_output": False}
 model("wan-2-2-a14b-cloud", "Wan 2.2 A14B (hosted)", "Alibaba Wan", "wan", "video", "Open-weights Wan 2.2 that takes camera and effect LoRAs",
       [("t2v", "fal-ai/wan/v2.2-a14b/text-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/text-to-video/lora", "defaults": WAN22_FAL}),
        ("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "defaults": WAN22_FAL}),
        # One LoRA per expert (lora_weights_transformer = high noise, _2 = low noise): a Mix runs on fal.
-       ("t2v", "wan-video/wan-2.2-t2v-fast", "replicate"), ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate")],
+       # Replicate's t2v interpolates to 30 fps by default (interpolate_output true): off, so both stay at 16 fps.
+       ("t2v", "wan-video/wan-2.2-t2v-fast", "replicate", {"defaults": WAN22_REPLICATE}),
+       ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate", {"defaults": WAN22_REPLICATE})],
       pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
                {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
-      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=4)
+      # Replicate takes 480p / 720p only and t2v only 16:9 / 9:16: each route lists what it takes (fit_values).
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=4, fit_values=True)
 # LTX-2.3 22B (LTX-2 Community licence: free under US$10M annual revenue). Prompt expansion is on by default and would
 # rewrite a compiled Director prompt, so it is off; sound follows the audio toggle.
 model("ltx-2-3-22b-cloud", "LTX-2.3 22B (hosted)", "Lightricks", "ltx", "video", "Open-weights LTX-2.3 with sound, camera and motion LoRAs",
@@ -1404,8 +1410,9 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fps_key = kf.get("fps") or next((k for k in ("fps", "frames_per_second") if k in inputs), None)
         fps = num((inputs.get(fps_key) or {}).get("default")) or 16
         lo, hi = num(spec.get("minimum")), num(spec.get("maximum"))
+        # Extend's num_frames is the length to add (the picked duration), never the input clip's own length.
         fmap["numFrames"] = {"key": nf, "fps": fps, **({"min": lo} if lo is not None else {}), **({"max": hi} if hi is not None else {}),
-                             **({"step": m["frame_step"]} if m.get("frame_step") else {})}
+                             **({"step": m["frame_step"]} if m.get("frame_step") else {}), **({"fromDuration": True} if op == "extend" else {})}
         opts["durations"] = union(opts.get("durations", []), [d for d in NICE_DURATIONS if (lo is None or d * fps >= lo) and (hi is None or d * fps <= hi + (m.get("frame_step") or 0))])
     # Width and height fields (Replicate's Z-Image LoRA model): computed from the aspect ratio (FieldMap.size).
     if "width" in kf and "height" in kf and "aspectRatio" not in kf:

@@ -2,16 +2,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { getModel } from "@/lib/catalog";
+import { getModel, getPreset, PRESETS } from "@/lib/catalog";
 import { fitLoras, loraEntry, loraRef } from "@/lib/catalog/loras";
-import type { GenInput, LoraRef, ModelRoute } from "@/lib/catalog/types";
+import { planGeneration } from "@/lib/catalog/plan";
+import type { Generation, GenInput, LoraRef, ModelRoute } from "@/lib/catalog/types";
 
 // Providers and route choice read keys and preferences from the settings table: a throwaway database.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-replicate-lora-"));
 process.env.FUOBE_DATA_DIR = dir;
 const { replicateProvider } = await import("@/server/providers/replicate");
 const { setSetting } = await import("@/server/settings");
-const { chooseRoute } = await import("@/server/generations");
+const { chooseRoute, createGenerations, getGeneration, previewGeneration } = await import("@/server/generations");
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 async function submit(route: ModelRoute, input: GenInput): Promise<{ url: string; body: Record<string, unknown> }> {
@@ -95,5 +96,71 @@ describe("Replicate LoRA payloads", () => {
     // Local-only LoRAs don't count: they never go to the cloud.
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
     expect(chooseRoute(routes, 1, [...one, wiggle]).route.provider).toBe("replicate");
+  });
+
+  it("wan-2.2 t2v fast: stays at 16 fps (interpolate_output off) and gets only values it takes", async () => {
+    const r = route("wan-2-2-a14b-cloud", "t2v");
+    const { url, body } = await submit(r, { prompt: "a street", aspectRatio: "1:1", resolution: "580p", duration: 5 });
+    expect(url).toBe("https://api.replicate.com/v1/models/wan-video/wan-2.2-t2v-fast/predictions");
+    // Replicate's t2v takes 16:9 / 9:16 and 480p / 720p: the nearest shape, the largest tier not above 580p.
+    expect(body.input).toMatchObject({ interpolate_output: false, aspect_ratio: "16:9", resolution: "480p", num_frames: 81 });
+    const i2v = await submit(route("wan-2-2-a14b-cloud", "i2v"), { prompt: "go", images: ["https://x/a.png"], resolution: "720p", duration: 5 });
+    expect(i2v.body.input).toMatchObject({ interpolate_output: false, resolution: "720p" });
+    // fal's routes take every value the model offers.
+    expect(route("wan-2-2-a14b-cloud", "t2v", "fal").map?.resolution).toEqual({ key: "resolution", accepts: ["480p", "580p", "720p"] });
+  });
+
+  it("qwen-image-edit-2511: an aspect ratio Replicate lacks goes as the nearest one it takes", async () => {
+    const r = route("qwen-image-edit-2511-cloud", "edit");
+    const { body } = await submit(r, { prompt: "wider", images: ["https://x/a.png"], aspectRatio: "21:9" });
+    expect((body.input as Record<string, unknown>).aspect_ratio).toBe("16:9");
+  });
+
+  it("prefers a route that makes the length asked, and says what a route that can't makes", () => {
+    setSetting("falKey", "id:secret");
+    setSetting("replicateToken", "r8_test");
+    setSetting("cloudProvider", "replicate");
+    setSetting("demoMode", "auto");
+    const routes = getModel("wan-2-2-a14b-cloud")!.routes.filter((r) => r.op === "i2v");
+    // Replicate's fast model renders 81–121 frames (5–7.5 s at 16 fps); fal's 17–161.
+    expect(chooseRoute(routes, 1, [], 5).route.provider).toBe("replicate");
+    expect(chooseRoute(routes, 1, [], 10).route.provider).toBe("fal");
+    expect(chooseRoute(routes, 1, [], 3).route.provider).toBe("fal");
+    // Only Replicate connected: it runs, and the plan says the clip is shorter than asked.
+    setSetting("falKey", "");
+    const req = { feature: "video", modelId: "wan-2-2-a14b-cloud", prompt: "a wave", inputs: { images: ["https://x/a.png"] }, params: { duration: 10 } };
+    const p = previewGeneration(req);
+    expect(p.providerId).toBe("replicate");
+    expect(p.notes).toEqual(["Wan 2.2 A14B (hosted) on Replicate makes 5–7.5 s clips, so this one is about 7.5 s, not 10 s"]);
+    expect(previewGeneration({ ...req, params: { duration: 5 } }).notes).toBeUndefined();
+    setSetting("cloudProvider", "auto");
+  });
+
+  it("puts the user's own LoRA first, so a look's LoRAs give way to it on an API that takes so many", () => {
+    const preset = PRESETS.find((x) => /motion|effect/.test(x.type) && x.open?.modelId === "oss-wan22-14b" && x.open.loras?.length)!;
+    const identity: LoraRef = { file: "", url: "https://v3.fal.media/files/maya.safetensors", strength: 1, trigger: "mya" };
+    const plan = planGeneration({ feature: "motion", presetId: preset.id, modelId: "oss-wan22-14b", prompt: "x", inputs: { images: ["a.png"] }, loras: [identity] }, getModel, getPreset);
+    expect(plan.loras[0]).toEqual(identity);
+    expect(plan.loras.length).toBe(1 + preset.open!.loras!.length);
+    // Three look LoRAs and the identity on fal's 3-slot Z-Image: the identity stays, the last look goes.
+    const looks = ["awportrait", "lenovo", "grainscape"].map((k) => loraRef(loraEntry(k)!));
+    const fitted = fitLoras([identity, ...looks], route("z-image-turbo-cloud", "t2i", "fal"));
+    expect(fitted.loras).toEqual([identity, looks[0], looks[1]]);
+    expect(fitted.notes).toEqual([`This API takes up to 3 LoRAs, so ${loraEntry("grainscape")!.name} is left out`]);
+  });
+
+  it("returns what a run leaves out with the generations it creates", async () => {
+    setSetting("demoMode", "on");
+    const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
+    const [g] = createGenerations({ feature: "image", modelId: "z-image-turbo-cloud", prompt: "a cat", loras: [wiggle] });
+    expect(g.notes).toEqual(["Wiggle Redmond runs only on your GPU (the licence doesn't allow hosting it), so this cloud run leaves it out"]);
+    // Not stored: the run itself is an ordinary one.
+    for (let i = 0; i < 200; i++) {
+      const now = getGeneration(g.id) as Generation;
+      if (!["queued", "running"].includes(now.status)) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(getGeneration(g.id)?.notes).toBeUndefined();
+    setSetting("demoMode", "auto");
   });
 });

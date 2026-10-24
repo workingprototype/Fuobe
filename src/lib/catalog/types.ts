@@ -416,9 +416,10 @@ export interface FieldMap {
    * the clip's length (params.sourceDuration, else params.duration) × the frame rate (params.fps, else
    * `fps`), kept within min–max. Nothing is sent when the length is unknown (the API's default applies).
    * Also video models whose length is a frame count (Wan 2.2, LTX-2.3 22B), where `step` keeps the count at
-   * step·n + 1 (Wan 4n+1, LTX 8n+1).
+   * step·n + 1 (Wan 4n+1, LTX 8n+1). `fromDuration`: the frames to add (extend), so params.duration counts,
+   * never the input clip's length, at the clip's own frame rate when it is known (fal's LTX-2.3 extend matches it).
    */
-  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number };
+  numFrames?: { key: string; fps: number; min?: number; max?: number; step?: number; fromDuration?: boolean };
   /**
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
    * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
@@ -691,7 +692,10 @@ export interface LoraRef {
   weightName?: string;
   /** A copy the cloud engine can fetch without the user's token (a mirror on fal or Replicate storage). */
   hostedUrl?: string;
-  /** The civitai model version the file is pinned to (never "latest": newer versions are often for another base). */
+  /**
+   * The version the file is pinned to: a civitai model version id (never "latest": newer versions are often for
+   * another base), or the Hugging Face commit its URL resolves at.
+   */
   version?: string;
   licence?: LoraLicence;
 }
@@ -880,6 +884,11 @@ export interface Generation {
   pinnedAt?: number | null;
   /** Review status (null: none). */
   review?: ReviewStatus | null;
+  /**
+   * What the run leaves out or changes, said when it is created (LoRAs a cloud run can't carry, a clip length
+   * the API rounds). Only on the answer that creates it; not stored.
+   */
+  notes?: string[];
 }
 
 /** Input slot a preset asks the user for. */

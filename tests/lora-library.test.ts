@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { LORA_LIBRARY, LORA_LIBRARY_AS_OF, MOTION_EFFECT_LORAS } from "@/lib/catalog/lora-library.generated";
-import { civitaiVersion, licenceLine, loraByFile, loraEntry, loraRef, needsToken } from "@/lib/catalog/loras";
+import { civitaiVersion, libraryEntry, licenceLine, loraByFile, loraEntry, loraRef, needsToken } from "@/lib/catalog/loras";
 
 const ROOT = path.resolve(__dirname, "..");
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -14,7 +14,8 @@ describe("LoRA library (lora-library.generated.ts)", () => {
     const research = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
     expect(LORA_LIBRARY.filter((e) => e.group === "look")).toHaveLength(research.loraLibrary.length);
     for (const l of research.loraLibrary) expect(loraEntry(l.key)?.file).toBe(l.file);
-    for (const m of research.motionsEffects) for (const l of m.loras ?? []) expect(loraByFile(l.file)?.url).toBe(l.url);
+    // Hugging Face files download at the commit their hash was read at (resolve/<revision>/…).
+    for (const m of research.motionsEffects) for (const l of m.loras ?? []) expect(loraByFile(l.file)?.url).toBe(l.revision ? l.url.replace("/resolve/main/", `/resolve/${l.revision}/`) : l.url);
     expect(MOTION_EFFECT_LORAS).toHaveLength(research.motionsEffects.length);
     expect(LORA_LIBRARY_AS_OF).toBe(research.asOf);
   });
@@ -53,6 +54,37 @@ describe("LoRA library (lora-library.generated.ts)", () => {
     }
   });
 
+  it("pins every file to exact bytes: a SHA256 and size, and Hugging Face files to a commit", () => {
+    for (const e of LORA_LIBRARY) {
+      expect(e.sha256, e.key).toMatch(/^[0-9a-f]{64}$/);
+      expect(e.sizeBytes, e.key).toBeGreaterThan(1_000_000);
+      if (e.url.startsWith("https://huggingface.co/")) {
+        const rev = /\/resolve\/([0-9a-f]{40})\//.exec(e.url)?.[1];
+        expect(rev, e.key).toBeDefined();
+        expect(e.version).toBe(rev);
+      }
+    }
+    // A ref built from the research's resolve/main URL (or by hand, without loraRef) is still the library file.
+    const aw = loraEntry("awportrait")!;
+    expect(libraryEntry({ file: "", url: aw.url.replace(/\/resolve\/[0-9a-f]{40}\//, "/resolve/main/") })).toBe(aw);
+    expect(libraryEntry({ file: "renamed.safetensors", url: loraEntry("y2k")!.url })?.key).toBe("y2k");
+    expect(libraryEntry({ file: "mine.safetensors", url: "https://v3.fal.media/files/mine.safetensors" })).toBeUndefined();
+  });
+
+  it("never makes a non-commercial LoRA a motion or effect default, and keeps GPU-only ones in local-only rows", () => {
+    const defaults = new Set(["add-lora", "replace", "relight-route", "weak-candidate", "local-only"]);
+    for (const m of MOTION_EFFECT_LORAS.filter((x) => defaults.has(x.status))) {
+      for (const k of m.loras) {
+        expect(loraEntry(k)!.licence.commercial, `${m.presets[0]}: ${k}`).toBe(true);
+        if (m.status !== "local-only") expect(loraEntry(k)!.licence.hostedOk, `${m.presets[0]}: ${k}`).toBe(true);
+      }
+    }
+    // BTS: a licence conflict between its Hugging Face and civitai pages, so it waits (prompt-only).
+    const bts = MOTION_EFFECT_LORAS.find((m) => m.presets.includes("BTS"))!;
+    expect(bts.status).toBe("licence-hold");
+    expect(loraEntry(bts.loras[0])!.licence.commercial).toBe(false);
+  });
+
   it("flags non-commercial and local-only LoRAs and never uses them for a default look", () => {
     // Every look a Soul preset uses allows selling outputs and running on fal / Replicate (licence rules).
     for (const e of LORA_LIBRARY.filter((x) => x.group === "look" && !x.spare)) {
@@ -82,8 +114,13 @@ describe("LoRA library (lora-library.generated.ts)", () => {
     expect(loraRef(loraEntry("awportrait")!).strength).toBe(0.6);
   });
 
-  it("is what the generator writes (no hand edits) and the generator refuses a civitai entry without a version", () => {
+  it("is what the generator writes (no hand edits) and the generator refuses what breaks the licence and pin rules", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-lora-gen-"));
+    const research = () => JSON.parse(fs.readFileSync(path.join(ROOT, "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
+    const refuses = (data: unknown, why: RegExp) => {
+      fs.writeFileSync(path.join(tmp, "docs/research/fuobe-originals-recipes-5.json"), JSON.stringify(data));
+      expect(() => execFileSync("python3", [path.join(tmp, "scripts/gen-lora-library.py")], { stdio: "pipe" })).toThrow(why);
+    };
     try {
       // A copy of the repo layout the script reads, with one civitai URL unpinned.
       fs.mkdirSync(path.join(tmp, "scripts"));
@@ -93,11 +130,26 @@ describe("LoRA library (lora-library.generated.ts)", () => {
       fs.copyFileSync(path.join(ROOT, "docs/research/fuobe-originals-recipes-5.json"), path.join(tmp, "docs/research/fuobe-originals-recipes-5.json"));
       execFileSync("python3", [path.join(tmp, "scripts/gen-lora-library.py")], { stdio: "pipe" });
       expect(fs.readFileSync(path.join(tmp, "src/lib/catalog/lora-library.generated.ts"), "utf8")).toBe(fs.readFileSync(path.join(ROOT, "src/lib/catalog/lora-library.generated.ts"), "utf8"));
-      const research = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/research/fuobe-originals-recipes-5.json"), "utf8"));
-      const y2k = research.loraLibrary.find((l: { key: string }) => l.key === "y2k");
-      y2k.url = "https://civitai.com/models/2979601";
-      fs.writeFileSync(path.join(tmp, "docs/research/fuobe-originals-recipes-5.json"), JSON.stringify(research));
-      expect(() => execFileSync("python3", [path.join(tmp, "scripts/gen-lora-library.py")], { stdio: "pipe" })).toThrow(/pinned version/);
+      type Raw = { key?: string; presets?: string[]; status?: string; loras?: Raw[]; url?: string; sha256?: string; revision?: string };
+      // A civitai entry without a pinned version.
+      let data = research();
+      data.loraLibrary.find((l: Raw) => l.key === "y2k").url = "https://civitai.com/models/2979601";
+      refuses(data, /pinned version/);
+      // A non-commercial LoRA made a default (BTS back to add-lora).
+      data = research();
+      data.motionsEffects.find((m: Raw) => m.presets?.includes("BTS")).status = "add-lora";
+      refuses(data, /BTS \(add-lora\).*commercial: false/);
+      // A GPU-only (RentCivit) LoRA in a row that would send it to the cloud.
+      data = research();
+      data.motionsEffects.find((m: Raw) => m.presets?.includes("Wiggle")).status = "add-lora";
+      refuses(data, /hostedOk: false.*local-only/);
+      // A file without its SHA256 pin, and a Hugging Face file without its commit.
+      data = research();
+      delete data.loraLibrary.find((l: Raw) => l.key === "y2k").sha256;
+      refuses(data, /no SHA256 pin/);
+      data = research();
+      delete data.loraLibrary.find((l: Raw) => l.key === "awportrait").revision;
+      refuses(data, /without a pinned commit/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

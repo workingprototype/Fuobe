@@ -1873,7 +1873,16 @@ export const CLOUD_MODELS: ModelDef[] = [
         "map": {
           "images": "image",
           "seed": "seed",
-          "aspectRatio": "aspect_ratio",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4"
+            ]
+          },
           "loras": {
             "shape": "single",
             "weights": "lora_weights",
@@ -5984,8 +5993,22 @@ export const CLOUD_MODELS: ModelDef[] = [
             "max": 161,
             "step": 4
           },
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
           "defaults": {
             "interpolator_model": "none"
           },
@@ -6018,8 +6041,23 @@ export const CLOUD_MODELS: ModelDef[] = [
             "max": 161,
             "step": 4
           },
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
           "defaults": {
             "interpolator_model": "none"
           },
@@ -6049,8 +6087,23 @@ export const CLOUD_MODELS: ModelDef[] = [
             "max": 121,
             "step": 4
           },
-          "aspectRatio": "aspect_ratio",
-          "resolution": "resolution",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolate_output": false
+          },
           "loras": {
             "shape": "experts",
             "high": {
@@ -6079,7 +6132,16 @@ export const CLOUD_MODELS: ModelDef[] = [
             "max": 121,
             "step": 4
           },
-          "resolution": "resolution",
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolate_output": false
+          },
           "loras": {
             "shape": "experts",
             "high": {
@@ -6251,6 +6313,15 @@ export const CLOUD_MODELS: ModelDef[] = [
           "video": "video_url",
           "seed": "seed",
           "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8,
+            "fromDuration": true
+          },
           "defaults": {
             "enable_prompt_expansion": false
           },
@@ -6276,6 +6347,14 @@ export const CLOUD_MODELS: ModelDef[] = [
           "video": "video_url",
           "seed": "seed",
           "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
           "aspectRatio": {
             "key": "video_size",
             "values": {

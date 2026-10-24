@@ -7,7 +7,7 @@ docs/research/fuobe-originals-recipes-5.json in the same shape as paid-model-api
 - hostedLoraEndpoints[<id>].inputs / keyFields / output  for the LoRA endpoints in LORA (fal OpenAPI,
   or the schema embedded in a Replicate model page, pinned to the research's version);
 - hostedBaseEndpoints[]  for the plain endpoints of the same models that no earlier research file
-  has (LTX-2.3 22B, FLUX.2 [klein] 4B), with their price from fal's llms.txt.
+  has (LTX-2.3 22B t2v / i2v / extend / v2v, FLUX.2 [klein] 4B), with their price from fal's llms.txt.
 
 keyFields (which input is the prompt, the image, the clip…) are this script's curation, as in the
 earlier research files. scripts/gen-cloud-models.py reads both lists.
@@ -50,6 +50,10 @@ LORA = {
 BASE = {
     "fal-ai/ltx-2.3-22b/image-to-video": ("i2v", {**{k: v for k, v in LTX.items() if k != "loras"}, "image": "image_url", "endImage": "end_image_url"}),
     "fal-ai/ltx-2.3-22b/text-to-video": ("t2v", {k: v for k, v in LTX.items() if k != "loras"}),
+    # Read so their routes send num_frames (the length picked), as the /lora variants do.
+    # Extend keeps the clip's own size (video_size "auto"), so no aspect ratio is mapped.
+    "fal-ai/ltx-2.3-22b/extend-video": ("extend", {**{k: v for k, v in LTX.items() if k not in ("loras", "aspectRatio")}, "video": "video_url", "endImage": "end_image_url"}),
+    "fal-ai/ltx-2.3-22b/video-to-video": ("v2v", {**{k: v for k, v in LTX.items() if k != "loras"}, "video": "video_url"}),
     "fal-ai/flux-2/klein/4b": ("t2i", {k: v for k, v in KLEIN.items() if k != "loras"}),
     "fal-ai/flux-2/klein/4b/edit": ("edit", {**{k: v for k, v in KLEIN.items() if k != "loras"}, "images": "image_urls"}),
 }

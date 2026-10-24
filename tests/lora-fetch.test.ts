@@ -3,11 +3,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loraEntry, loraRef } from "@/lib/catalog/loras";
+import { fitLoras, lorasFit, loraEntry, loraRef } from "@/lib/catalog/loras";
 import type { LoraRef } from "@/lib/catalog/types";
 
 // The route's GET opts out of prerendering with connection(), which needs a request scope.
 vi.mock("next/server", () => ({ connection: async () => {} }));
+// The library pins each file's SHA256: two entries are pinned to the small stand-in files these tests serve.
+vi.mock("@/lib/catalog/lora-library.generated", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/catalog/lora-library.generated")>();
+  const { createHash } = await import("node:crypto");
+  const body = (s: string) => Buffer.from(s.repeat(64));
+  const pin = (s: string) => ({ sha256: createHash("sha256").update(body(s)).digest("hex"), sizeBytes: body(s).length });
+  const fake: Record<string, ReturnType<typeof pin>> = { awportrait: pin("awportrait"), y2k: pin("y2k-style") };
+  return { ...real, LORA_LIBRARY: real.LORA_LIBRARY.map((e) => (fake[e.key] ? { ...e, ...fake[e.key] } : e)) };
+});
 
 // The downloader reads the civitai key and the LoRA folder from the settings table: a throwaway data folder.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-lora-fetch-"));
@@ -77,19 +86,42 @@ const civitaiRoutes = (body: Buffer, opts: { modelId?: number; permissions?: str
 });
 
 describe("LoRA downloads (pinned, checked, never leaking the civitai key)", () => {
-  it("downloads a Hugging Face file directly under its unique name and checks its SHA256", async () => {
+  it("downloads a Hugging Face file at its pinned commit under its unique name and checks its SHA256", async () => {
+    expect(aw.url).toMatch(/\/resolve\/[0-9a-f]{40}\/AWPortrait-Z\.safetensors$/);
     net = network(hfRoutes(AW_BODY));
     const got = await downloadLora(aw, folder);
     expect(got.path).toBe(path.join(folder, "AWPortrait-Z.safetensors"));
     expect(fs.readFileSync(got.path).equals(AW_BODY)).toBe(true);
-    expect(got).toMatchObject({ sha256: sha(AW_BODY), sizeBytes: AW_BODY.length, version: "abc123", sourceUrl: aw.url });
+    expect(got).toMatchObject({ sha256: sha(AW_BODY), sizeBytes: AW_BODY.length, version: aw.version, sourceUrl: aw.url });
     expect(fs.readdirSync(folder)).toEqual(["AWPortrait-Z.safetensors"]);
   });
 
-  it("keeps nothing when the bytes don't match the stated hash", async () => {
-    net = network(hfRoutes(AW_BODY, "0".repeat(64)));
+  it("keeps nothing that isn't the pinned file, even when the source vouches for it", async () => {
+    // The file was replaced upstream: Hugging Face states the new bytes' own hash, the library pinned the old ones.
+    const swapped = bytes("someone else's weights");
+    net = network(hfRoutes(swapped));
     await expect(downloadLora(aw, folder)).rejects.toThrow(/doesn't match/);
+    // A file outside the library is checked against what the source states.
+    const mine = { file: "mine.safetensors", url: "https://huggingface.co/me/mine/resolve/main/mine.safetensors" };
+    net = network({ [mine.url]: (c: Call) => (c.method === "HEAD" ? new Response(null, { status: 302, headers: { "x-linked-etag": `"${"0".repeat(64)}"` } }) : new Response(new Uint8Array(AW_BODY))) });
+    await expect(downloadLora(mine, folder)).rejects.toThrow(/doesn't match/);
     expect(fs.readdirSync(folder)).toEqual([]);
+  });
+
+  it("won't fetch a file it can't check (no pin, and the source states no hash)", async () => {
+    setSetting("civitaiKey", KEY);
+    // civitai's version API is down: an unpinned civitai file can't be checked.
+    const other = { file: "civitai-999-other.safetensors", url: "https://civitai.com/api/download/models/999", version: "999" };
+    net = network({ "https://civitai.com/api/v1/model-versions/999": () => new Response("down", { status: 503 }), [other.url]: () => new Response(new Uint8Array(Y2K_BODY)) });
+    await expect(downloadLora(other, folder)).rejects.toThrow(/can't be checked/);
+    expect(net.calls.filter((c) => c.url.includes("/api/download/"))).toEqual([]);
+    // A Hugging Face file whose HEAD states nothing.
+    const mine = { file: "mine.safetensors", url: "https://huggingface.co/me/mine/resolve/main/mine.safetensors" };
+    net = network({ [mine.url]: () => new Response(new Uint8Array(AW_BODY)) });
+    await expect(downloadLora(mine, folder)).rejects.toThrow(/can't be checked/);
+    // The pinned library file needs no answer from the source to be checked.
+    net = network({ [aw.url!]: (c: Call) => (c.method === "HEAD" ? new Response("down", { status: 503 }) : new Response(new Uint8Array(AW_BODY))) });
+    await expect(downloadLora(aw, folder)).resolves.toMatchObject({ sha256: sha(AW_BODY) });
   });
 
   it("asks for a civitai key before touching a civitai download", async () => {
@@ -200,6 +232,47 @@ describe("Before a cloud run", () => {
     await expect(prepareCloudLoras([wiggle], "replicate", up.fn)).rejects.toThrow(/runs only on your GPU/);
     expect(up.sent).toEqual([]);
   });
+
+  it("keeps a GPU-only file off the cloud even when the ref carries no licence, and when civitai doesn't answer", async () => {
+    setSetting("civitaiKey", KEY);
+    const entry = loraEntry("civitai-2490836-wiggle-redmond")!;
+    // Built by hand (no loraRef, so no licence): the library's licence still counts.
+    const bare: LoraRef = { file: entry.file, url: entry.url, strength: 1 };
+    const fitted = fitLoras([bare], { provider: "fal", loraEndpoint: "fal-ai/wan/v2.2-a14b/image-to-video/lora" });
+    expect(fitted.loras).toEqual([]);
+    expect(fitted.notes[0]).toMatch(/^Wiggle Redmond runs only on your GPU/);
+    // Even with civitai's API down (nothing to re-read), it is never downloaded or copied.
+    net = network({ "https://civitai.com/api/": () => new Response("down", { status: 503 }) });
+    const up = upload();
+    await expect(prepareCloudLoras([bare], "fal", up.fn)).rejects.toThrow(/runs only on your GPU/);
+    // A hostable civitai file isn't copied either while civitai can't confirm its permissions: no answer, no copy.
+    await expect(prepareCloudLoras([y2k], "fal", up.fn)).rejects.toThrow(/Couldn't confirm on civitai/);
+    expect(up.sent).toEqual([]);
+    expect(net.calls.filter((c) => c.url.includes("/api/download/"))).toEqual([]);
+  });
+
+  it("leaves a gated Hugging Face LoRA out of a cloud run with a note, never failing the run", async () => {
+    const relight = loraRef(loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!);
+    const fpv = loraRef(loraEntry("ltx2-3-fpv-motion")!);
+    const ltx = { provider: "fal" as const, map: { loras: { shape: "items" as const, key: "loras", required: true } }, loraEndpoint: "fal-ai/ltx-2.3-22b/image-to-video/lora" };
+    const fitted = fitLoras([relight, fpv], ltx);
+    expect(fitted.loras).toEqual([fpv]);
+    expect(fitted.notes).toEqual([`${loraEntry("ltx-2-3-22b-ic-lora-relight-1-0")!.name} is in a gated Hugging Face repo, so this cloud run leaves it out (on your GPU it runs once you've accepted the licence)`]);
+    // It counts as nothing to carry when routes are compared, and is refused by name if it gets this far.
+    expect(lorasFit({ provider: "replicate", map: { loras: { shape: "single", weights: "w", scale: "s" } } }, [relight])).toBe(true);
+    await expect(prepareCloudLoras([relight], "fal", upload().fn)).rejects.toThrow(/gated Hugging Face repo, so it can't be sent to fal\.ai/);
+  });
+
+  it("mirrors the pinned bytes, not a same-named file of other bytes in the LoRA folder", async () => {
+    setSetting("civitaiKey", KEY);
+    setSetting("comfyLorasDir", folder);
+    fs.writeFileSync(path.join(folder, y2k.file), "another LoRA with the same name");
+    net = network(civitaiRoutes(Y2K_BODY));
+    const up = upload();
+    await prepareCloudLoras([y2k], "fal", up.fn);
+    expect(up.sent).toEqual([{ name: y2k.file, size: Y2K_BODY.length }]);
+    expect(listLoraCopies().find((c) => c.target === "fal")?.sha256).toBe(sha(Y2K_BODY));
+  });
 });
 
 describe("Settings → LoRAs (/api/loras)", () => {
@@ -215,6 +288,20 @@ describe("Settings → LoRAs (/api/loras)", () => {
     expect(body).toMatchObject({ folder, civitaiKey: true });
     expect(body.loras.find((l) => l.key === "awportrait")).toMatchObject({ inFolder: true, licence: "Commercial · GPU and cloud" });
     expect(body.loras.find((l) => l.key === "civitai-2490836-wiggle-redmond")).toMatchObject({ inFolder: false, licence: "Commercial · your GPU only", target: "high" });
+  });
+
+  it("says when the LoRA folder setting isn't a folder it can read, instead of failing", async () => {
+    const route = await import("@/app/api/loras/route");
+    const file = path.join(folder, "not-a-folder.txt");
+    fs.writeFileSync(file, "x");
+    setSetting("comfyLorasDir", file);
+    const res = await route.GET();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { folderProblem?: string; loras: unknown[] };
+    expect(body.folderProblem).toBe(`The LoRA folder ${file} is a file, not a folder`);
+    expect(body.loras.length).toBeGreaterThan(100);
+    setSetting("comfyLorasDir", path.join(folder, "missing"));
+    expect(((await (await route.GET()).json()) as { folderProblem?: string }).folderProblem).toMatch(/doesn't exist on this machine/);
   });
 
   it("downloads one LoRA on request, or says why it can't", async () => {

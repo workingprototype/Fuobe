@@ -11,7 +11,7 @@ import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type Rev
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
-import { keepMatte } from "@/lib/catalog/payload";
+import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import {
   LAST_FRAME_CHAIN,
@@ -23,6 +23,7 @@ import {
   type GenInput,
   type LoraRef,
   type ModelRoute,
+  type Operation,
   type OutputFile,
   type ProviderId,
 } from "@/lib/catalog/types";
@@ -363,17 +364,22 @@ export function deleteGeneration(id: string): void {
  * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
  * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
+ * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
-export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = []): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = [], seconds?: number): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
   const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
-  // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix);
-  // otherwise the first ready one runs and fitLoras says which LoRAs it leaves out.
-  const real = routes.find((r) => routeReady(r) && takes(r) && lorasFit(r, loras)) ?? routes.find((r) => routeReady(r) && takes(r));
+  // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix), then one
+  // that makes the length asked; otherwise the first ready one runs and the plan's notes say what it changes.
+  const ok = (r: ModelRoute) => routeReady(r) && takes(r);
+  const long = (r: ModelRoute) => framedLength(r.map?.numFrames, seconds) === undefined;
+  const real =
+    routes.find((r) => ok(r) && lorasFit(r, loras) && long(r)) ?? routes.find((r) => ok(r) && lorasFit(r, loras)) ?? routes.find((r) => ok(r) && long(r)) ?? routes.find(ok);
   if (real) return { route: real, demo: false };
   const short = routes.find(routeReady);
   if (short) {
@@ -430,11 +436,23 @@ function prepare(original: GenerationRequest) {
   // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
   if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras);
+  // The length asked of a clip that is made (not one that follows its input video's length).
+  const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
+  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all.
   const fitted = fitLoras(plan.loras, route);
   plan = { ...plan, loras: fitted.loras };
+  const notes = [...fitted.notes];
+  // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
+  const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
+  if (made !== undefined && route.map?.numFrames) {
+    const f = route.map.numFrames;
+    const fps = plan.params.fps && plan.params.fps > 0 ? plan.params.fps : f.fps;
+    const half = (x: number) => Math.round(x * 2) / 2;
+    const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
+    notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
+  }
   // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
   if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
@@ -443,8 +461,11 @@ function prepare(original: GenerationRequest) {
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
-  return { req, plan, route, demo, providerId, notes: fitted.notes, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
+  return { req, plan, route, demo, providerId, notes, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
 }
+
+/** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
+const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "extend", "keyframes"]);
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
@@ -501,7 +522,7 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
-  const { req, plan, route, demo, providerId, cost } = p;
+  const { req, plan, route, demo, providerId, cost, notes } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
   const jobs = waits ? 1 : plan.jobs;
@@ -545,7 +566,9 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
           .join(", ")})`,
       )
       .run(row);
-    created.push(toGeneration(row));
+    // What the run leaves out or changes (LoRAs a cloud run can't carry, a length the API rounds) goes back
+    // with it, so the composer and API clients can say so; it isn't stored.
+    created.push(notes.length ? { ...toGeneration(row), notes } : toGeneration(row));
     if (!waits) void submit(id, route, providerId, plan, req, i);
   }
   ensureRunner();

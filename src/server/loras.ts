@@ -2,7 +2,7 @@ import "server-only";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { cloudPath, civitaiVersion, loraByFile, loraName, needsToken, type LoraEntry } from "@/lib/catalog/loras";
+import { cloudPath, civitaiVersion, gated, libraryEntry, localOnly, loraByFile, loraName, needsToken, type LoraEntry } from "@/lib/catalog/loras";
 import type { LoraRef } from "@/lib/catalog/types";
 import { DATA_DIR, db } from "./db";
 import { getSetting } from "./settings";
@@ -10,11 +10,12 @@ import { getSetting } from "./settings";
 /**
  * LoRA files for both engines. Nothing here is committed to the repo: files are fetched when a run needs them.
  * - Open engine: before a ComfyUI run, a LoRA its server lacks is downloaded into ComfyUI's loras folder
- *   (Settings → LoRA folder): Hugging Face files directly, civitai files by their pinned version with the
- *   user's civitai key, checked against the SHA256 (or size) the source states, saved under the unique `file`.
+ *   (Settings → LoRA folder): Hugging Face files at their pinned commit, civitai files by their pinned version
+ *   with the user's civitai key, checked against the SHA256 pinned in the library (else the one the source
+ *   states), saved under the unique `file`. A file whose bytes can't be checked is not kept.
  * - Cloud engine: a civitai LoRA can't go to fal or Replicate as a URL (civitai answers 401 without the key,
- *   and the key never leaves this server), so it is mirrored once to the provider's storage, when the
- *   model's civitai permissions still include "Rent".
+ *   and the key never leaves this server), so it is mirrored once to the provider's storage, only when civitai
+ *   confirms that day that the model's permissions still include "Rent" (no answer, no copy).
  * Every copy is recorded in `lora_mirrors` with the licence / permission snapshot it was made under.
  */
 
@@ -179,7 +180,7 @@ export interface Downloaded {
  * under the final name only when they match.
  */
 export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (message: string) => void): Promise<Downloaded> {
-  const entry = loraByFile(ref.file);
+  const entry = libraryEntry(ref);
   const name = loraName(ref);
   const url = entry?.url ?? ref.url;
   if (!url) throw new LoraError(`${name} has no download address — put ${ref.file} in ComfyUI/models/loras`);
@@ -190,6 +191,8 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
   let expect: { sha256?: string; sizeBytes?: number } = {};
   let version: string | null = null;
   let fetchUrl = url;
+  // The bytes must match a hash: the one pinned in the library (read once, committed), else the one the source states.
+  const unchecked = () => new LoraError(`Couldn't read what ${new URL(url).host} says ${name} is, so the download can't be checked and Fuobe won't fetch it. Try again in a moment`);
   if (needsToken(url)) {
     version = ref.version ?? entry?.version ?? civitaiVersion(url) ?? null;
     if (!version || civitaiVersion(url) !== version) throw new LoraError(`${name} isn't pinned to a civitai version, so Fuobe won't download it`);
@@ -197,12 +200,15 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
     if (!token) throw new LoraError(`${name} downloads from civitai, which needs your free API key: add it in Settings → LoRAs (civitai.com/user/account)`);
     const facts = await civitaiVersionFacts(version);
     if (facts.modelId && entry?.civitaiModel && facts.modelId !== entry.civitaiModel) throw new LoraError(`civitai version ${version} belongs to another model than ${name}`);
-    expect = facts;
+    expect = entry?.sha256 ? { sha256: entry.sha256, sizeBytes: entry.sizeBytes } : facts;
+    if (!expect.sha256) throw unchecked();
     fetchUrl = withToken(url, token);
   } else {
     const facts = await hfFacts(url);
-    expect = facts;
-    version = facts.revision ?? null;
+    expect = entry?.sha256 ? { sha256: entry.sha256, sizeBytes: entry.sizeBytes } : facts;
+    version = entry?.version ?? facts.revision ?? null;
+    // A Hugging Face file always states its SHA256; other hosts (a trained LoRA on fal storage) state none.
+    if (!expect.sha256 && /^https:\/\/huggingface\.co\//.test(url)) throw unchecked();
   }
   onProgress?.(`Downloading ${name}${expect.sizeBytes ? ` (${mb(expect.sizeBytes)})` : ""}`);
   let res: Response;
@@ -251,6 +257,8 @@ export async function downloadLora(ref: LoraRef, dir: string, onProgress?: (mess
   return { path: dest, sha256, sizeBytes: bytes, sourceUrl: url, version };
 }
 
+const sha256File = (file: string) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+
 /** One download per file at a time (two jobs needing the same LoRA wait for the same download). */
 const inFlight = new Map<string, Promise<Downloaded>>();
 
@@ -292,7 +300,7 @@ export async function ensureLorasOnComfy(loras: LoraRef[] | undefined, listed: s
   };
   const missing = loras.filter((l) => l.file && !have.has(l.file) && !onDisk(l.file));
   for (const l of missing) {
-    const entry = loraByFile(l.file);
+    const entry = libraryEntry(l);
     const name = loraName(l);
     if (!l.url && !entry) throw new LoraError(`ComfyUI doesn't have ${l.file}: put it in ComfyUI/models/loras`);
     if (!dir) {
@@ -319,27 +327,43 @@ export async function prepareCloudLoras(
   onProgress?: (m: string) => void,
 ): Promise<LoraRef[] | undefined> {
   if (!loras?.length) return loras;
+  const host = target === "fal" ? "fal.ai" : "Replicate";
   const out: LoraRef[] = [];
   for (const l of loras) {
+    const entry = libraryEntry(l);
+    const name = loraName(l);
+    // The library's licence counts even when the ref carries none: a GPU-only file never reaches a provider.
+    if (localOnly(l)) throw new LoraError(`${name} runs only on your GPU (its licence doesn't allow hosting it)`);
     if (cloudPath(l)) {
       out.push(l);
       continue;
     }
-    const entry = loraByFile(l.file);
-    const name = loraName(l);
-    if (!l.url || !needsToken(l.url)) throw new LoraError(`${name} can't be sent to ${target === "fal" ? "fal.ai" : "Replicate"}: it has no public download`);
-    if (l.licence?.hostedOk === false) throw new LoraError(`${name} runs only on your GPU (its licence doesn't allow hosting it)`);
+    if (gated(l)) throw new LoraError(`${name} is in a gated Hugging Face repo, so it can't be sent to ${host}: it runs on your GPU once you've accepted its licence`);
+    if (!l.url || !needsToken(l.url)) throw new LoraError(`${name} can't be sent to ${host}: it exists only as a file on your ComfyUI`);
     const cached = getCopy(l.file, target);
     if (cached?.hostedUrl && Date.now() - cached.createdAt < MIRROR_TTL_MS[target]) {
       out.push({ ...l, hostedUrl: cached.hostedUrl });
       continue;
     }
-    // The hosting right is read again before a copy is made: civitai permissions can change.
-    const now = entry?.civitaiModel ? await civitaiPermissions(entry.civitaiModel) : null;
-    if (now && !now.includes("Rent")) {
+    // The hosting right is read again before a copy is made (civitai permissions can change). No answer, no copy.
+    const version = l.version ?? entry?.version ?? civitaiVersion(l.url);
+    const modelId = entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined);
+    const now = modelId ? await civitaiPermissions(modelId) : null;
+    if (!now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host}. Try again in a moment, or run it on your GPU`);
+    if (!now.includes("Rent")) {
       throw new LoraError(`${name}'s civitai licence no longer allows running it on a hosted service, so it can only run on your GPU`);
     }
-    const local = [getSetting("comfyLorasDir"), LORA_CACHE_DIR].filter(Boolean).map((d) => path.join(d, l.file)).find((p) => fs.existsSync(p));
+    // A copy already on this machine is used when its bytes are the pinned ones (a same-named file may be another LoRA).
+    const local = [getSetting("comfyLorasDir"), LORA_CACHE_DIR]
+      .filter(Boolean)
+      .map((d) => {
+        try {
+          return lorasPath(d, l.file);
+        } catch {
+          return "";
+        }
+      })
+      .find((p) => p && fs.existsSync(p) && (!entry?.sha256 || sha256File(p) === entry.sha256));
     let file = local;
     let facts: Pick<Downloaded, "sha256" | "sizeBytes" | "version"> | null = null;
     if (!file) {
@@ -347,7 +371,7 @@ export async function prepareCloudLoras(
       file = got.path;
       facts = got;
     }
-    onProgress?.(`Copying ${name} to ${target === "fal" ? "fal.ai" : "Replicate"} (once)`);
+    onProgress?.(`Copying ${name} to ${host} (once)`);
     const data = fs.readFileSync(file);
     const hostedUrl = await upload(data, path.basename(l.file));
     recordCopy({
@@ -378,17 +402,26 @@ export async function downloadToComfy(file: string): Promise<LoraCopy> {
   return getCopy(file, "comfyui")!;
 }
 
-/** Which library files are in the LoRA folder now (a file someone put there by hand counts too). */
-export function filesInLoraFolder(): Set<string> {
+/**
+ * Which library files are in the LoRA folder now (a file someone put there by hand counts too), and what is
+ * wrong with the folder setting when it can't be read (not a folder, no permission).
+ */
+export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
   const dir = getSetting("comfyLorasDir");
-  const out = new Set<string>();
-  if (!dir || !fs.existsSync(dir)) return out;
-  for (const e of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!e.isFile() || !e.name.endsWith(".safetensors")) continue;
-    const rel = path.relative(dir, path.join(e.parentPath ?? dir, e.name)).split(path.sep).join("/");
-    out.add(rel);
+  const files = new Set<string>();
+  if (!dir) return { files };
+  if (!fs.existsSync(dir)) return { files, problem: `The LoRA folder ${dir} doesn't exist on this machine` };
+  try {
+    for (const e of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!e.isFile() || !e.name.endsWith(".safetensors")) continue;
+      const rel = path.relative(dir, path.join(e.parentPath ?? dir, e.name)).split(path.sep).join("/");
+      files.add(rel);
+    }
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return { files, problem: code === "ENOTDIR" ? `The LoRA folder ${dir} is a file, not a folder` : `Fuobe can't read the LoRA folder ${dir} (${code ?? (e as Error).message})` };
   }
-  return out;
+  return { files };
 }
 
 /** Test the civitai key (Settings → Save & test): civitai's /me answers 200 for a good key. */

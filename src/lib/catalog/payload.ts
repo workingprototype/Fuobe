@@ -62,10 +62,11 @@ function inRange(n: number, r: Range): number {
 }
 
 /** How many frames a frame-count route renders for the clip (FieldMap.numFrames), or undefined when its length is unknown. */
-export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps">): number | undefined {
-  const seconds = input.sourceDuration ?? input.duration;
+export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pick<GenInput, "sourceDuration" | "duration" | "fps" | "sourceFps">): number | undefined {
+  // Extend adds the length picked; other routes render the clip's own length when there is one.
+  const seconds = f.fromDuration ? input.duration : (input.sourceDuration ?? input.duration);
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined;
-  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fps;
+  const fps = input.fps !== undefined && input.fps > 0 ? input.fps : f.fromDuration && input.sourceFps && input.sourceFps > 0 ? input.sourceFps : f.fps;
   // Wan wants 4n+1 frames and LTX 8n+1: the nearest count of that form that fits.
   if (f.step) {
     const step = f.step;
@@ -76,6 +77,20 @@ export function numFramesValue(f: NonNullable<FieldMap["numFrames"]>, input: Pic
     return n;
   }
   return inRange(seconds * fps, { min: f.min, max: f.max, integer: true });
+}
+
+/**
+ * The clip length (seconds) a frame-count route makes when asked for `seconds`, or undefined when it makes
+ * that length (within a quarter second) or isn't a frame-count route. Replicate's Wan 2.2 fast renders 81–121
+ * frames, so 3 s comes back as 5 s and 10 s as 7.5 s.
+ */
+export function framedLength(f: FieldMap["numFrames"] | undefined, seconds: number | undefined, fps?: number): number | undefined {
+  if (!f || seconds === undefined || !(seconds > 0)) return undefined;
+  const rate = fps !== undefined && fps > 0 ? fps : f.fps;
+  const n = numFramesValue(f, { duration: seconds, fps: rate });
+  if (n === undefined) return undefined;
+  const made = n / rate;
+  return Math.abs(made - seconds) > 0.25 ? made : undefined;
 }
 
 /** Width and height for an aspect ratio on a `base`×`base` pixel budget (FieldMap.size). */

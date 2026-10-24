@@ -48,14 +48,24 @@ function describeError(body: unknown): string {
   return typeof d === "string" ? d : JSON.stringify(d).slice(0, 500);
 }
 
+/** A plain file name with an extension to upload under ("x.safetensors", "dataset.zip"), or undefined. */
+function fileName(name: string | undefined): string | undefined {
+  const base = name?.split(/[\\/]/).pop()?.trim();
+  return base && /^[\w.\-()[\] ]{1,200}\.[A-Za-z0-9]{1,12}$/.test(base) && !base.startsWith(".") ? base : undefined;
+}
+
 export const falProvider: ProviderAdapter = {
   id: "fal",
   label: "fal.ai",
   isConfigured: () => !!key(),
 
-  async prepareFile(data, contentType) {
+  async prepareFile(data, contentType, name) {
     const client = createFalClient({ credentials: key() });
-    return client.storage.upload(new Blob([new Uint8Array(data)], { type: contentType }));
+    // The file keeps its name (and so its extension): an unnamed blob is stored as "<time>.<subtype>", and
+    // a LoRA mirrored as application/octet-stream would land at ….octet, which loaders that go by the
+    // extension (fal's LTX-2.3 quality takes only .safetensors URLs) refuse.
+    const blob = fileName(name) ? new File([new Uint8Array(data)], fileName(name)!, { type: contentType }) : new Blob([new Uint8Array(data)], { type: contentType });
+    return client.storage.upload(blob);
   },
 
   async submit({ route, input }) {

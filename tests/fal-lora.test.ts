@@ -151,5 +151,43 @@ describe("fal LoRA payloads (generated FieldMap.loras)", () => {
     expect(lorasFit(route("wan-2-2-a14b-cloud", "i2v", "replicate"), two)).toBe(false);
     expect(lorasFit(route("wan-2-2-a14b-cloud", "i2v", "replicate"), [two[0], hf("c.safetensors", { target: "low" })])).toBe(true);
   });
-});
 
+  it("LTX-2.3 extend adds the length picked (at the clip's frame rate); video-to-video follows the clip", async () => {
+    const extend = route("ltx-2-3-22b-cloud", "extend");
+    // 10 s added to a 4 s, 30 fps clip: 300 frames, kept at 8n+1. The clip keeps its own size (no video_size).
+    const a = await submit(extend, { prompt: "go on", video: "https://x/clip.mp4", duration: 10, sourceDuration: 4, sourceFps: 30 });
+    expect(a.url).toBe("https://queue.fal.run/fal-ai/ltx-2.3-22b/extend-video");
+    expect(a.body).toMatchObject({ num_frames: 297, video_url: "https://x/clip.mp4", enable_prompt_expansion: false });
+    expect(a.body.video_size).toBeUndefined();
+    // No frame rate known: fal's 24 fps.
+    expect((await submit(extend, { prompt: "go on", video: "https://x/clip.mp4", duration: 5 })).body.num_frames).toBe(121);
+    const v2v = await submit(route("ltx-2-3-22b-cloud", "v2v"), { prompt: "restyle", video: "https://x/clip.mp4", duration: 10, sourceDuration: 4 });
+    expect(v2v.body.num_frames).toBe(97);
+  });
+
+  it("uploads a mirrored LoRA to fal storage under its own name, so its URL ends in .safetensors", async () => {
+    const { setSetting } = await import("@/server/settings");
+    setSetting("falKey", "id:secret");
+    const real = globalThis.fetch;
+    const calls: { url: string; method: string; body?: unknown }[] = [];
+    globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+      const u = String(url);
+      calls.push({ url: u, method: init?.method ?? "GET", body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
+      if (u.includes("/storage/upload/initiate")) {
+        const name = (calls.at(-1)!.body as { file_name: string }).file_name;
+        return Response.json({ upload_url: `https://upload.example/${name}?sig=1`, file_url: `https://v3b.fal.media/files/b/x/${name}` });
+      }
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const url = await falProvider.prepareFile(Buffer.from("weights"), "application/octet-stream", "civitai-3422541-y2k.safetensors");
+      expect(url).toBe("https://v3b.fal.media/files/b/x/civitai-3422541-y2k.safetensors");
+      expect(calls[0].body).toMatchObject({ file_name: "civitai-3422541-y2k.safetensors", content_type: "application/octet-stream" });
+      // A name that isn't a plain file name falls back to fal's own (time + type).
+      await falProvider.prepareFile(Buffer.from("png"), "image/png", "../../etc/passwd");
+      expect((calls.at(-2)!.body as { file_name: string }).file_name).toMatch(/^\d+\.png$/);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});

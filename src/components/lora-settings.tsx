@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConnectField, type PublicSetting } from "@/components/connect-field";
+import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { saveSettings } from "@/lib/api";
 import { CIVITAI_KEYS_URL } from "@/lib/connections";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,8 @@ interface LibraryLora {
 interface Library {
   asOf: string;
   folder: string | null;
+  /** Why the folder setting can't be read (a file, no permission). */
+  folderProblem?: string;
   civitaiKey: boolean;
   loras: LibraryLora[];
 }
@@ -175,7 +178,12 @@ export function LoraSettings({ folder, civitaiKey }: { folder?: PublicSetting; c
   const [pending, setPending] = useState<string | null>(null);
   const library = useQuery({
     queryKey: ["loras"],
-    queryFn: async () => (await (await fetch("/api/loras")).json()) as Library,
+    queryFn: async () => {
+      const res = await fetch("/api/loras");
+      const body = (await res.json().catch(() => ({}))) as Partial<Library> & { error?: string };
+      if (!res.ok || !Array.isArray(body.loras)) throw new Error(body.error ?? `The server answered ${res.status}`);
+      return body as Library;
+    },
   });
   const download = useMutation({
     mutationFn: async (l: LibraryLora) => {
@@ -195,10 +203,17 @@ export function LoraSettings({ folder, civitaiKey }: { folder?: PublicSetting; c
   const data = library.data;
   const shown = data?.loras.filter((l) => l.group === group) ?? [];
   const inFolder = data?.loras.filter((l) => l.inFolder).length ?? 0;
+  // Downloads go into the folder only when it is one this server can write to.
+  const canDownload = !!data?.folder && !data.folderProblem;
 
   return (
     <>
       <FolderField setting={folder} />
+      {data?.folderProblem && (
+        <p role="alert" className="-mt-2 text-[12px] text-destructive">
+          {data.folderProblem}. Set it to ComfyUI&apos;s models/loras folder on this machine, or clear it.
+        </p>
+      )}
       <ConnectField
         id="civitai"
         name="civitaiKey"
@@ -219,27 +234,34 @@ export function LoraSettings({ folder, civitaiKey }: { folder?: PublicSetting; c
         <button
           type="button"
           aria-expanded={open}
-          aria-controls="lora-library"
+          aria-controls={open ? "lora-library" : undefined}
           onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-accent"
         >
           <span className="min-w-0 flex-1">
             <span className="block text-[13px] font-medium">LoRA library</span>
             <span className="block text-[12px] text-muted-foreground">
-              {data ? `${data.loras.length} LoRAs · ${inFolder} in your folder · licences read ${data.asOf}` : <span className="mt-1 block h-3.5 w-48 animate-pulse rounded bg-muted" />}
+              {data ? (
+                `${data.loras.length} LoRAs · ${inFolder} in your folder · licences read ${data.asOf}`
+              ) : library.isError ? (
+                "Couldn't load the library"
+              ) : (
+                <span className="mt-1 block h-3.5 w-48 animate-pulse rounded bg-muted" />
+              )}
             </span>
           </span>
           <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
         </button>
         {open && (
           <div id="lora-library" className="border-t px-4 pb-2">
-            <div role="radiogroup" aria-label="LoRA kind" className="flex gap-1.5 pt-3">
+            <div role="radiogroup" aria-label="LoRA kind" onKeyDown={radioKeys} className="flex gap-1.5 pt-3">
               {GROUPS.map((g) => (
                 <button
                   key={g.value}
                   type="button"
                   role="radio"
                   aria-checked={group === g.value}
+                  tabIndex={radioTab(group === g.value)}
                   onClick={() => setGroup(g.value)}
                   className={cn(
                     "inline-flex h-7 items-center rounded-full border px-2.5 text-[12px] font-medium transition-colors hover:bg-accent",
@@ -251,15 +273,27 @@ export function LoraSettings({ folder, civitaiKey }: { folder?: PublicSetting; c
                 </button>
               ))}
             </div>
-            {!data?.folder && <p className="pt-2 text-[12px] text-muted-foreground">Set the LoRA folder above to download LoRAs ahead of a run. Runs fetch what they need either way.</p>}
+            {data && !data.folder && (
+              <p className="pt-2 text-[12px] text-muted-foreground">
+                Set the LoRA folder above to download LoRAs ahead of a run. Without it, a ComfyUI run needs each LoRA in ComfyUI&apos;s loras folder already; cloud runs fetch what they need.
+              </p>
+            )}
             <ul className="max-h-96 divide-y overflow-y-auto">
               {shown.map((l) => (
-                <LoraRow key={l.key} l={l} folder={!!data?.folder} busy={pending === l.file} onDownload={() => download.mutate(l)} />
+                <LoraRow key={l.key} l={l} folder={canDownload} busy={pending === l.file} onDownload={() => download.mutate(l)} />
               ))}
             </ul>
           </div>
         )}
       </div>
+      {library.isError && (
+        <p role="alert" className="flex flex-wrap items-center gap-x-2 text-[12px] text-destructive">
+          Couldn&apos;t load the LoRA library: {(library.error as Error).message}.
+          <button type="button" className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => void library.refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
     </>
   );
 }

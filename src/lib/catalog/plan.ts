@@ -196,7 +196,9 @@ export function planGeneration(
     }
   }
 
-  if (req.loras?.length) loras = [...loras, ...req.loras];
+  // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
+  // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
+  if (req.loras?.length) loras = [...req.loras, ...loras];
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
   const shots = params.shots?.filter((s) => s.prompt.trim());

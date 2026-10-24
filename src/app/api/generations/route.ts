@@ -114,7 +114,9 @@ export async function POST(request: Request) {
       return Response.json({ ...p, modelId: model.id, modelName: model.name, engine: model.engine, kind: outputKind(p.op, model), opLabel: OPERATION_LABELS[p.op] ?? p.op });
     }
     const items = createGenerations(parsed.data as Parameters<typeof createGenerations>[0]);
-    return Response.json({ items }, { status: 201 });
+    // What the run leaves out or changes (a LoRA that runs only on a GPU, a length the API rounds).
+    const notes = [...new Set(items.flatMap((g) => g.notes ?? []))];
+    return Response.json({ items, ...(notes.length && { notes }) }, { status: 201 });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 422 });
   }

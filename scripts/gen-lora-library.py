@@ -7,9 +7,17 @@ Source: docs/research/fuobe-originals-recipes-5.json (loraLibrary, presets, moti
 The LoRA files are never committed: src/server/loras.ts downloads them (pinned civitai versions,
 Hugging Face files) into ComfyUI's loras folder, or mirrors them for the cloud engine.
 
+Every file is pinned to exact bytes (scripts/fetch-lora-pins.py reads the pins once): a civitai version id, or
+the Hugging Face commit the URL is rewritten to (resolve/<commit>/…), plus the file's SHA256 and size, which
+the downloader checks instead of trusting what the source serves that day.
+
 Fails (exit 1) when an entry breaks the licence rules of the build plan:
 - a civitai entry without a pinned version id or a permission snapshot, or whose commercial / hostedOk
   flags disagree with its permissions (Image = outputs may be sold, Rent = may run on fal / Replicate);
+- a LoRA a default uses with commercial: false (a Soul look a preset uses, or a motion / effect row whose
+  status makes it a default: add-lora, replace, relight-route, weak-candidate, local-only), or one such a row
+  sends to the cloud with hostedOk: false (only local-only rows keep a LoRA on the user's GPU);
+- a file without a SHA256 pin, or a Hugging Face file without a pinned commit;
 - two entries with the same local file name but different downloads (ComfyUI keys LoRAs on the name), or a
   name many unrelated LoRAs share (pytorch_lora_weights.safetensors, lora_weights_step_02000.safetensors…);
 - a file name that isn't a plain file name.
@@ -29,6 +37,11 @@ SAFE_FILE = re.compile(r"^[\w.\-\[\]() ]+\.safetensors$")
 # Names many unrelated LoRAs share (diffusers' and trainers' defaults): a file already in ComfyUI's folder under such
 # a name may be another LoRA, so the library renames them (research: "file").
 GENERIC_FILE = re.compile(r"^(pytorch_lora_weights|adapter_model|diffusion_pytorch_model|model|lora|lora_weights(_step_\d+)?|v\d+)\.safetensors$", re.I)
+HF_MAIN = re.compile(r"^(https://huggingface\.co/[^/]+/[^/]+/resolve/)main/(.+)$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+COMMIT = re.compile(r"^[0-9a-f]{40}$")
+# Motion / effect statuses whose LoRAs become defaults (build plan O4: gen-oss-loras.py takes these rows).
+DEFAULT_STATUSES = {"add-lora", "replace", "relight-route", "weak-candidate", "local-only"}
 errors = []
 
 
@@ -71,6 +84,24 @@ def entry(raw, key, group, checked=None, spare=False):
     version = re.search(r"civitai\.com/api/download/models/(\d+)", url)
     if version:
         out["version"] = version.group(1)
+    hf = HF_MAIN.match(url)
+    if hf:
+        # Pinned to the commit the hash was read at: a file replaced upstream is never downloaded silently.
+        rev = raw.get("revision") or ""
+        if not COMMIT.match(rev):
+            errors.append(f"{where}: Hugging Face file without a pinned commit (run scripts/fetch-lora-pins.py)")
+        else:
+            out["url"] = f"{hf.group(1)}{rev}/{hf.group(2)}"
+            out["version"] = rev
+    elif out["download"] != "civitai-token" and url.startswith("https://huggingface.co/"):
+        errors.append(f"{where}: Hugging Face URL {url!r} is not a resolve/main/… file URL")
+    sha = (raw.get("sha256") or "").lower()
+    if SHA256.match(sha):
+        out["sha256"] = sha
+        if isinstance(raw.get("sizeBytes"), int):
+            out["sizeBytes"] = raw["sizeBytes"]
+    else:
+        errors.append(f"{where}: no SHA256 pin for {out['file']} (run scripts/fetch-lora-pins.py)")
     model = re.search(r"civitai\.com/models/(\d+)", out["page"])
     if model:
         out["civitaiModel"] = model.group(1)
@@ -127,6 +158,11 @@ def add(e):
 for raw in DATA["loraLibrary"]:
     add(entry(raw, raw["key"], "look", spare=raw["key"] not in used))
 
+# A look a Soul preset uses is a default on both engines: commercial and hostable (licence rules).
+for e in library:
+    if not e.get("spare") and not (e["licence"]["commercial"] and e["licence"]["hostedOk"]):
+        errors.append(f"look {e['key']}: a preset uses it, but commercial={e['licence']['commercial']} hostedOk={e['licence']['hostedOk']}")
+
 motions = []
 for m in DATA["motionsEffects"]:
     keys = []
@@ -134,6 +170,12 @@ for m in DATA["motionsEffects"]:
         e = add(entry(raw, slug(re.sub(r"\.safetensors$", "", raw.get("file") or raw["name"])), m["kind"], checked=raw.get("checked")))
         if e["key"] not in keys:
             keys.append(e["key"])
+        if m["status"] in DEFAULT_STATUSES:
+            where = f"{m['kind']} {', '.join(m['presets'][:3])} ({m['status']}): {e['key']}"
+            if not e["licence"]["commercial"]:
+                errors.append(f"{where} has commercial: false, so it can't be a default (use status licence-hold until the licence is clear)")
+            elif m["status"] != "local-only" and not e["licence"]["hostedOk"]:
+                errors.append(f"{where} has hostedOk: false, so it runs only on the user's GPU: use status local-only")
     row = {"kind": m["kind"], "presets": m["presets"], "status": m["status"], "loras": keys,
            "bothEnginesToday": bool(m.get("bothEnginesToday")), "newSinceMid2026": bool(m.get("newSinceMid2026"))}
     hosted = (m.get("hosted") or {}).get("endpoint")

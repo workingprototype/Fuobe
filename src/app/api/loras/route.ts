@@ -11,12 +11,14 @@ import { getSetting } from "@/server/settings";
 export async function GET() {
   await connection();
   const folder = getSetting("comfyLorasDir");
-  const inFolder = filesInLoraFolder();
+  // A folder setting that can't be read (a file, no permission) is said, not a 500.
+  const { files: inFolder, problem } = filesInLoraFolder();
   const mirrored = new Map<string, string[]>();
   for (const c of listLoraCopies()) if (c.target !== "comfyui") mirrored.set(c.file, [...(mirrored.get(c.file) ?? []), c.target]);
   return Response.json({
     asOf: LORA_LIBRARY_AS_OF,
     folder: folder || null,
+    ...(problem && { folderProblem: problem }),
     civitaiKey: !!getSetting("civitaiKey"),
     loras: LORA_LIBRARY.map((e) => ({
       key: e.key,
