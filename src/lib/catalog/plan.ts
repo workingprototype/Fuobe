@@ -392,7 +392,9 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   const i = req.inputs ?? {};
   if (n.images && (i.images?.length ?? 0) < n.images) return n.msg;
   if (n.video && !i.video) return n.msg;
-  if (n.videos && (i.videos?.length ?? 0) < n.videos) return n.msg;
+  // A join may also be one clip and a still appended after it (an ad and its end card).
+  const clips = (i.videos?.length ?? 0) + (op === "concat" && i.video && i.images?.length ? 2 : 0);
+  if (n.videos && clips < n.videos) return n.msg;
   if (n.audio && !i.audio) return n.msg;
   if (n.audios && (i.audios?.length ?? 0) < n.audios) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;

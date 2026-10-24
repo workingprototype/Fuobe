@@ -1,4 +1,4 @@
-import type { Engine, Generation } from "./types";
+import type { ChainSlot, Engine, Generation, GenerationRequest } from "./types";
 
 /**
  * Marketing Studio, Ads Studio, Ad Multiplier and Click to Ad: the shared catalog (formats,
@@ -582,6 +582,114 @@ export const styleById = (id?: string | null) => AD_STYLES.find((s) => s.id === 
 export const CLICK_TO_AD = { aspect: "9:16", maxSeconds: 12, shots: 3 } as const;
 
 // ---------------------------------------------------------------------------
+// The logo end card a Click to Ad video ends on
+
+/**
+ * The card is drawn in the browser (brand colour, logo, product name, CTA; components/marketing/end-card.ts)
+ * at the ad's 9:16 size, then held for 2–3 s: a gentle push-in on the cloud (fal image-to-video, zoom 1 → 1.05),
+ * a still on the open engine. Without a drawn card the cloud puts the logo on the brand colour itself.
+ */
+export const END_CARD = { seconds: 2.5, minSeconds: 2, maxSeconds: 3, zoomTo: 1.05, fps: 24, size: { w: 720, h: 1280 }, cta: "Shop now" } as const;
+
+export const END_CARD_MODELS = {
+  cloud: { art: "overlay-image", clip: "ken-burns", join: "join-clips" },
+  open: { append: "oss-append-endcard", clip: "oss-still-to-clip", join: "oss-join-sound1" },
+} as const;
+
+export interface EndCardStep {
+  key: string;
+  label: string;
+  request: GenerationRequest;
+  after?: string[];
+  chain?: ChainSlot[];
+}
+
+export interface EndCardInput {
+  engine: Engine;
+  /** The step whose clip the card follows (the finished ad). */
+  ad: string;
+  /** The card the page drew (/api/files/…). */
+  card?: string;
+  /** Cloud, no drawn card: the brand-colour background and the logo overlay-image puts on it. */
+  background?: string;
+  logo?: string;
+  seconds?: number;
+  feature: string;
+  title: string;
+  aspectRatio: string;
+  resolution?: string;
+  /**
+   * Open engine: who encoded the ad. video-append-endcard copies the ad's packets and only takes clips ComfyUI
+   * encoded (every open step does); others get still-to-clip + the join that keeps the first clip's sound.
+   */
+  adEncodedBy?: "comfyui" | "other";
+}
+
+/**
+ * The steps that make the end card and put it after the ad, and the key of the finished video. Cloud:
+ * [overlay-image: the logo on the brand colour →] ken-burns (zoom 1 → 1.05) → merge-videos after the ad.
+ * Open: video-append-endcard (the ad's sound kept, padded with silence under the card), or still-to-clip +
+ * oss-join-sound1 for a clip the open engine didn't make.
+ */
+export function endCardSteps(o: EndCardInput): { steps: EndCardStep[]; final: string } {
+  const seconds = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, o.seconds ?? END_CARD.seconds));
+  const result = { feature: o.feature, title: o.title, batchTitle: o.title };
+  const helper = { feature: `${o.feature}-step` };
+  if (o.engine === "open") {
+    if (!o.card) throw new Error("The open engine needs the end card drawn on the page — turn End card off, or make the ad from Click to Ad");
+    const M = END_CARD_MODELS.open;
+    if ((o.adEncodedBy ?? "comfyui") === "comfyui") {
+      return {
+        final: "endcard",
+        steps: [
+          {
+            key: "endcard",
+            label: "End card",
+            request: { ...result, modelId: M.append, op: "concat", prompt: o.title, inputs: { images: [o.card] }, params: { duration: seconds } },
+            after: [o.ad],
+            chain: [{ slot: "video" }],
+          },
+        ],
+      };
+    }
+    return {
+      final: "endcard",
+      steps: [
+        { key: "endcardClip", label: "End card", request: { ...helper, modelId: M.clip, op: "still-motion", inputs: { images: [o.card] }, params: { duration: seconds, fps: 25, aspectRatio: o.aspectRatio, ...(o.resolution && { resolution: o.resolution }) } } },
+        {
+          key: "endcard",
+          label: "Adding the end card",
+          request: { ...result, modelId: M.join, op: "concat", prompt: o.title, params: { aspectRatio: o.aspectRatio, ...(o.resolution && { resolution: o.resolution }) } },
+          after: [o.ad, "endcardClip"],
+          chain: [{ slot: "videos" }, { slot: "videos" }],
+        },
+      ],
+    };
+  }
+  const M = END_CARD_MODELS.cloud;
+  const steps: EndCardStep[] = [];
+  if (!o.card) {
+    if (!o.background || !o.logo) throw new Error("Add a logo to the brand kit for the end card, or turn End card off");
+    steps.push({ key: "endcardArt", label: "End card", request: { ...helper, modelId: M.art, op: "overlay", inputs: { images: [o.background, o.logo] }, params: { position: { x: 0.5, y: 0.45 }, scale: 1 } } });
+  }
+  const move = { duration: seconds, fps: END_CARD.fps, zoomFrom: 1, zoomTo: END_CARD.zoomTo, panFrom: { x: 0.5, y: 0.5 }, panTo: { x: 0.5, y: 0.5 }, easing: "ease-in-out" as const };
+  steps.push({
+    key: "endcardClip",
+    label: "End card motion",
+    request: { ...helper, modelId: M.clip, op: "still-motion", ...(o.card ? { inputs: { images: [o.card] } } : {}), params: move },
+    ...(o.card ? {} : { after: ["endcardArt"], chain: [{ slot: "images" as const }] }),
+  });
+  steps.push({
+    key: "endcard",
+    label: "Adding the end card",
+    request: { ...result, modelId: M.join, op: "concat", prompt: o.title, params: { aspectRatio: o.aspectRatio } },
+    after: [o.ad, "endcardClip"],
+    chain: [{ slot: "videos" }, { slot: "videos" }],
+  });
+  return { steps, final: "endcard" };
+}
+
+// ---------------------------------------------------------------------------
 // Ads Studio
 
 export const MAX_ADS_PER_PRODUCT = 20;
@@ -913,6 +1021,8 @@ export interface MarketingRunMeta {
   notes?: string[];
   /** What the run was made from, so "Run again" can repeat it. */
   input?: Record<string, unknown>;
+  /** Click to Ad: the logo end card it ends on (the card the page drew; null: the kit's logo on its colour). */
+  endCard?: string | null;
 }
 
 export interface MarketingRun {

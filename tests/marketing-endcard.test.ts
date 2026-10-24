@@ -1,0 +1,190 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { BrandKit, Product } from "@/lib/catalog/marketing";
+import type { Generation, GenInput } from "@/lib/catalog/types";
+import type { ComfyWorkflow, ManifestWorkflow } from "@/lib/comfy";
+import type { MediaInfo } from "@/lib/media-probe";
+
+// Click to Ad's logo end card (r4/marketing-mixed): the plan per engine (cloud ken-burns + merge-videos,
+// open video-append-endcard or still-to-clip + the sound-keeping join), how it hangs off the ad, a demo run,
+// and the two open workflows bound through the ComfyUI provider.
+
+vi.setConfig({ testTimeout: 90_000 });
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-endcard-"));
+process.env.FUOBE_DATA_DIR = dir;
+process.env.COMFYUI_URL = "http://127.0.0.1:9";
+process.env.OLLAMA_URL = "http://127.0.0.1:9";
+
+const { setSetting } = await import("@/server/settings");
+const mk = await import("@/server/marketing");
+const gens = await import("@/server/generations");
+const { saveFile } = await import("@/server/storage");
+const { prepareWorkflow } = await import("@/server/providers/comfyui");
+const { getModel } = await import("@/lib/catalog");
+const { END_CARD, END_CARD_MODELS, endCardSteps } = await import("@/lib/catalog/marketing");
+
+beforeAll(() => setSetting("demoMode", "auto"));
+afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(400, 7)]);
+const upload = (name = "p.png") => saveFile({ data: PNG, contentType: "image/png", name, source: "upload" }).url;
+const product = (): Product => ({ id: "p1", brandId: null, name: "Barrier Cream", sellingPoints: ["Calms red skin overnight"], images: [upload()], createdAt: 0, updatedAt: 0 });
+const kit = (over: Partial<BrandKit> = {}): BrandKit =>
+  ({ id: "b1", name: "Dermaco", colors: ["#c1121f", "#fdf0d5"], fonts: {}, values: [], aesthetics: [], tone: [], sellingPoints: [], competitors: [], socials: [], images: [], details: [], status: "ready", source: "manual", createdAt: 0, updatedAt: 0, ...over }) as BrandKit;
+const SCRIPT = "Okay so this cream fixed my skin in a week and I am not even joking about it at all honestly.";
+
+async function settle(id: string, ms = 80_000): Promise<Generation> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const g = gens.getGeneration(id)!;
+    if (["succeeded", "failed", "canceled"].includes(g.status)) return g;
+    if (Date.now() > end) throw new Error(`timed out: ${g.status} ${g.message}`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+describe("the end card's steps per engine", () => {
+  const base = { ad: "captions", feature: "click-to-ad", title: "Clean Minimal · Barrier Cream", aspectRatio: "9:16", resolution: "480p" };
+
+  it("uses real, hidden models", () => {
+    for (const id of [...Object.values(END_CARD_MODELS.cloud), ...Object.values(END_CARD_MODELS.open)]) expect(getModel(id), id).toBeDefined();
+    for (const id of ["overlay-image", "ken-burns", "oss-append-endcard", "oss-still-to-clip"]) expect(getModel(id)!.hidden, id).toBe(true);
+    expect(getModel("oss-append-endcard")!.routes).toEqual([expect.objectContaining({ op: "concat", provider: "comfyui", endpoint: "video-append-endcard" })]);
+    expect(getModel("oss-still-to-clip")!.routes).toEqual([expect.objectContaining({ op: "still-motion", provider: "comfyui", endpoint: "still-to-clip" })]);
+  });
+
+  it("cloud: the drawn card → a 2.5 s push-in (zoom 1 → 1.05) → merge-videos after the ad", () => {
+    const { steps, final } = endCardSteps({ ...base, engine: "cloud", card: "/api/files/card.png" });
+    expect(final).toBe("endcard");
+    expect(steps.map((s) => s.key)).toEqual(["endcardClip", "endcard"]);
+    expect(steps[0].request).toMatchObject({
+      feature: "click-to-ad-step",
+      modelId: "ken-burns",
+      op: "still-motion",
+      inputs: { images: ["/api/files/card.png"] },
+      params: { duration: 2.5, fps: 24, zoomFrom: 1, zoomTo: 1.05, easing: "ease-in-out" },
+    });
+    expect(steps[1]).toMatchObject({ after: ["captions", "endcardClip"], chain: [{ slot: "videos" }, { slot: "videos" }], request: { feature: "click-to-ad", title: base.title, modelId: "join-clips", op: "concat" } });
+  });
+
+  it("cloud without a drawn card: overlay-image puts the logo on the brand colour first", () => {
+    const { steps } = endCardSteps({ ...base, engine: "cloud", background: "/api/files/bg.png", logo: "/api/files/logo.png", seconds: 9 });
+    expect(steps.map((s) => s.key)).toEqual(["endcardArt", "endcardClip", "endcard"]);
+    expect(steps[0].request).toMatchObject({ modelId: "overlay-image", op: "overlay", inputs: { images: ["/api/files/bg.png", "/api/files/logo.png"] }, params: { position: { x: 0.5, y: 0.45 }, scale: 1 } });
+    expect(steps[1]).toMatchObject({ after: ["endcardArt"], chain: [{ slot: "images" }], request: { params: { duration: 3 } } });
+    expect(steps[1].request.inputs).toBeUndefined();
+    expect(() => endCardSteps({ ...base, engine: "cloud" })).toThrow(/Add a logo to the brand kit/);
+  });
+
+  it("open: the card appended to the ad keeping its sound, or still-to-clip + the join that keeps the first clip's sound", () => {
+    const own = endCardSteps({ ...base, engine: "open", card: "/api/files/card.png", seconds: 1 });
+    expect(own.steps).toHaveLength(1);
+    expect(own.steps[0]).toMatchObject({
+      key: "endcard",
+      after: ["captions"],
+      chain: [{ slot: "video" }],
+      request: { feature: "click-to-ad", title: base.title, modelId: "oss-append-endcard", op: "concat", inputs: { images: ["/api/files/card.png"] }, params: { duration: 2 } },
+    });
+    const foreign = endCardSteps({ ...base, engine: "open", card: "/api/files/card.png", adEncodedBy: "other" });
+    expect(foreign.steps.map((s) => s.request.modelId)).toEqual(["oss-still-to-clip", "oss-join-sound1"]);
+    expect(foreign.steps[0].request.params).toMatchObject({ duration: END_CARD.seconds, fps: 25, aspectRatio: "9:16", resolution: "480p" });
+    expect(foreign.steps[1]).toMatchObject({ after: ["captions", "endcardClip"], request: { feature: "click-to-ad", params: { aspectRatio: "9:16", resolution: "480p" } } });
+    expect(() => endCardSteps({ ...base, engine: "open" })).toThrow(/needs the end card drawn on the page/);
+  });
+});
+
+describe("Click to Ad with an end card", () => {
+  it("ends the product-only ad on the card: captions become a helper, the card's join is the result", () => {
+    const card = upload("card.png");
+    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: { image: card } }, { product: product(), script: SCRIPT });
+    expect(plan.finals).toEqual(["endcard"]);
+    const by = Object.fromEntries(plan.steps.map((s) => [s.key, s]));
+    expect(by.captions.request.feature).toBe("click-to-ad-step");
+    expect(by.captions.request.title).toBeUndefined();
+    expect(by.endcard).toMatchObject({ after: ["captions", "endcardClip"], request: { feature: "click-to-ad", title: plan.title } });
+    expect(plan.meta.endCard).toBe(card);
+    expect(plan.notes).toContain("Ends on your logo card for 2.5 s");
+    // Prices: the card's two fal steps are about free; every step is valid.
+    const est = mk.estimatePlan(plan);
+    expect(est.steps.map((s) => s.key).slice(-2)).toEqual(["endcardClip", "endcard"]);
+  });
+
+  it("no card asked for: the plan is as before", () => {
+    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal" }, { product: product(), script: SCRIPT });
+    expect(plan.finals).toEqual(["captions"]);
+    expect(plan.steps.some((s) => s.key.startsWith("endcard"))).toBe(false);
+  });
+
+  it("cloud, no drawn card: the kit's raster logo on the background; an SVG logo can't be placed", () => {
+    const logo = upload("logo.png");
+    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo }), script: SCRIPT, background: "/api/files/bg.png" });
+    expect(plan.steps.find((s) => s.key === "endcardArt")!.request.inputs).toEqual({ images: ["/api/files/bg.png", logo] });
+    expect(plan.notes.join(" ")).toMatch(/the kit's logo on its main colour/);
+    expect(() => mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo: "/api/files/logo.svg" }), script: SCRIPT, background: "/api/files/bg.png" })).toThrow(
+      /Add a logo to the brand kit for the end card, or turn End card off/,
+    );
+  });
+
+  it("open: appended after the presenter film (ComfyUI-encoded), and needs the drawn card", () => {
+    const card = upload("card.png");
+    const plan = mk.planClickToAd({ engine: "open", productId: "p1", styleId: "simple-ugc", voiceSample: upload("v.png"), endCard: { image: card, seconds: 3 } }, { product: product(), script: SCRIPT });
+    expect(plan.finals).toEqual(["endcard"]);
+    expect(plan.steps.find((s) => s.key === "film")!.request.feature).toBe("click-to-ad-step");
+    expect(plan.steps.at(-1)).toMatchObject({ key: "endcard", after: ["film"], request: { modelId: "oss-append-endcard", inputs: { images: [card] }, params: { duration: 3 } } });
+    mk.estimatePlan(plan);
+    expect(() => mk.planClickToAd({ engine: "open", productId: "p1", styleId: "simple-ugc", voiceSample: upload("v.png"), endCard: {} }, { product: product(), script: SCRIPT })).toThrow(mk.PlanError);
+  });
+
+  it("runs end to end on the demo provider (open: the ad, then the card appended)", async () => {
+    const card = upload("card.png");
+    const plan = mk.planClickToAd({ engine: "open", productId: "p1", styleId: "clean-minimal", voiceSample: upload("v.png"), endCard: { image: card } }, { product: product(), script: SCRIPT });
+    const run = mk.launch(plan);
+    expect(run.finalIds).toHaveLength(1);
+    const final = await settle(run.finalIds[0]);
+    expect(final, final.error ?? "").toMatchObject({ status: "succeeded", modelId: "oss-append-endcard", feature: "click-to-ad", kind: "video" });
+    const captions = mk.getRun(run.id)!.generations.find((g) => g.modelId === "oss-captions-burnin")!;
+    expect(final.request.inputs).toMatchObject({ video: captions.outputs[0].url, images: [card] });
+  });
+});
+
+describe("the open end-card workflows through the ComfyUI provider", () => {
+  async function prepare(id: string, input: GenInput, op: "concat" | "still-motion", media: Record<string, MediaInfo> = {}) {
+    return prepareWorkflow(id, { seed: 7, ...input }, { generationId: "gen1", op, upload: async (_d, _t, name) => `up_${name}`, media: (name) => media[name], serverRam: async () => undefined });
+  }
+  const at = (wf: ComfyWorkflow, m: ManifestWorkflow, key: string) => (m.bindings[key] ?? []).map((t) => wf[t.node].inputs[t.input]);
+  const ad = (hasAudio: boolean): MediaInfo => ({ container: "mp4", hasVideo: true, hasAudio, duration: 12, videoDuration: 12, width: 480, height: 848, fps: 25 });
+
+  it("video-append-endcard: the ad's own size and frame rate, the card's seconds, the ad read twice (picture and sound)", async () => {
+    const { workflow: wf, manifest: m } = await prepare("video-append-endcard", { video: "ad.mp4", images: ["card.png"], duration: 2.5 }, "concat", { "ad.mp4": ad(true) });
+    expect(at(wf, m, "video")).toEqual(["ad.mp4", "ad.mp4"]);
+    expect(at(wf, m, "image")).toEqual(["card.png"]);
+    expect([at(wf, m, "width"), at(wf, m, "height"), at(wf, m, "fps"), at(wf, m, "duration")]).toEqual([[480], [848], [25], [2.5]]);
+    expect(wf["14"].inputs.complete_audio).toEqual(["13", 0]);
+    expect(at(wf, m, "filenamePrefix")).toEqual(["fuobe/gen1"]);
+  });
+
+  it("a silent ad: no LoadAudio, no padding, no complete_audio (the result has no sound track)", async () => {
+    const { workflow: wf } = await prepare("video-append-endcard", { video: "ad.mp4", images: ["card.png"], duration: 2 }, "concat", { "ad.mp4": ad(false) });
+    for (const id of ["2", "12", "13"]) expect(wf[id], id).toBeUndefined();
+    expect(wf["14"].inputs.complete_audio).toBeUndefined();
+    expect(wf["14"].inputs["videos.video0"]).toEqual(["1", 0]);
+    expect(Object.keys(wf).sort()).toEqual(["1", "10", "11", "14", "15", "3", "4", "5", "6", "7", "8", "9"]);
+  });
+
+  it("refuses an ad whose size and frame rate it can't read", async () => {
+    await expect(prepare("video-append-endcard", { video: "ad.mp4", images: ["card.png"] }, "concat")).rejects.toThrow(/Couldn't read the ad's size and frame rate/);
+  });
+
+  it("still-to-clip: the card at the clip size for its seconds", async () => {
+    const { workflow: wf, manifest: m } = await prepare("still-to-clip", { images: ["card.png"], aspectRatio: "9:16", resolution: "480p", duration: 2.5, fps: 25 }, "still-motion");
+    expect(at(wf, m, "image")).toEqual(["card.png"]);
+    expect([at(wf, m, "duration"), at(wf, m, "fps")]).toEqual([[2.5], [25]]);
+    const [w] = at(wf, m, "width") as number[];
+    const [h] = at(wf, m, "height") as number[];
+    expect(w % 2 + (h % 2)).toBe(0);
+    expect(h / w).toBeCloseTo(16 / 9, 1);
+  });
+});
