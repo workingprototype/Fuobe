@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { SeriesCard, SeriesEstimate, SeriesSettings, SeriesView, StyleBrief } from "@/lib/catalog/content-factory";
+import type { ClaudePrompt, SeriesCard, SeriesEstimate, SeriesSettings, SeriesView, StyleBrief } from "@/lib/catalog/content-factory";
 import type { NarratorVoice } from "@/lib/catalog/faceless";
 import type { Engine } from "@/lib/catalog/types";
 import { useDebounced } from "@/components/faceless/hooks";
@@ -62,12 +62,13 @@ export function useSeries(id: string | null) {
   });
 }
 
-/** Put a fresh view in the cache (so the page shows it without a refetch). */
+/** Put a fresh view in the cache (so the page shows it without a refetch); its brief may price differently now. */
 function useSetView() {
   const qc = useQueryClient();
   return (v: SeriesView) => {
     qc.setQueryData(["content-factory", "series", v.id], v);
     void qc.invalidateQueries({ queryKey: ["content-factory", "series"], exact: true });
+    void qc.invalidateQueries({ queryKey: ["content-factory", "estimate"] });
   };
 }
 
@@ -107,11 +108,15 @@ export function useDeleteSeries() {
   });
 }
 
-export function useSeriesEstimate(input: (SeriesAsk & { seriesId?: string; presetId?: string }) | null) {
+/**
+ * The series' price. `rev` names the brief it's priced on (the series' reading state and last change), so a
+ * brief that's read or edited is priced again even when none of the settings changed.
+ */
+export function useSeriesEstimate(input: (SeriesAsk & { seriesId?: string; presetId?: string }) | null, rev?: string) {
   const key = input && JSON.stringify(input);
   const debounced = useDebounced(key, 300);
   const q = useQuery({
-    queryKey: ["content-factory", "estimate", debounced],
+    queryKey: ["content-factory", "estimate", debounced, rev ?? null],
     enabled: !!debounced,
     queryFn: async () => send<SeriesEstimate>("/api/content-factory/estimate", "POST", JSON.parse(debounced!)),
     placeholderData: keepPreviousData,
@@ -121,5 +126,9 @@ export function useSeriesEstimate(input: (SeriesAsk & { seriesId?: string; prese
   return { data: q.data, error: q.error as Error | null, isFetching: q.isFetching || key !== debounced };
 }
 
-export const claudePrompt = (b: SeriesAsk & { seriesId?: string; presetId?: string }) =>
-  send<{ message: string; bytes: number; needsToken: boolean }>("/api/content-factory/claude", "POST", b);
+export const claudePrompt = (b: SeriesAsk & { seriesId?: string; presetId?: string }) => send<ClaudePrompt>("/api/content-factory/claude", "POST", b);
+
+/** Let go of a draft the composer moved away from: its reading stops (and stops billing), and its row goes. */
+export function discardDraft(id: string): void {
+  void fetch(`/api/content-factory/series/${id}?draft=1`, { method: "DELETE" }).catch(() => {});
+}

@@ -196,6 +196,10 @@ function text(v: unknown, max = 400): string {
 const clampNum = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+/** A narrator's pace a brief can carry (words a minute); the brief editor's schema accepts a little more either side. */
+export const MIN_WPM = 80;
+export const MAX_WPM = 260;
+
 /** "2–3 s" → 2.5, "about 4 seconds" → 4, "fast" → 2.5; null when it says nothing about time. */
 export function secondsFrom(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
@@ -349,7 +353,7 @@ export function normalizeBrief(raw: unknown, base: StyleBrief = defaultBrief()):
     const wpm = Number(text(field(voiceRaw, "words_per_minute", "wordsPerMinute", "wpm", "pace", "speed")).match(/\d+/)?.[0] ?? NaN);
     const tone = text([field(voiceRaw, "tone", "style", "delivery"), field(voiceRaw, "voice", "gender", "character")].filter((x) => x !== undefined), 160) || base.voice.tone;
     const language = text(field(voiceRaw, "language", "lang"), 40);
-    voice = { tone, ...(Number.isFinite(wpm) && wpm >= 80 && wpm <= 260 && { wordsPerMinute: Math.round(wpm) }), ...(language && { language }) };
+    voice = { tone, ...(Number.isFinite(wpm) && wpm >= MIN_WPM && wpm <= MAX_WPM && { wordsPerMinute: Math.round(wpm) }), ...(language && { language }) };
   } else voice = { tone: text(voiceRaw, 160) || base.voice.tone };
 
   const musicRaw = field(root, "music", "soundtrack", "background_music", "audio", "sound");
@@ -422,7 +426,9 @@ export function speechRate(cues: TimedText[]): number | null {
 export function offlineBrief(o: { seconds?: number; width?: number; height?: number; cues?: TimedText[]; title?: string } = {}): StyleBrief {
   const aspect: EpisodeAspect = o.width && o.height ? (o.width > o.height ? "16:9" : "9:16") : "9:16";
   const b = defaultBrief({ aspect });
-  const wpm = o.cues ? speechRate(o.cues) : null;
+  // A rap or a sped-up voice reads faster than any narrator speaks: kept within what a brief can say (and save).
+  const rate = o.cues ? speechRate(o.cues) : null;
+  const wpm = rate === null ? null : clampNum(rate, MIN_WPM, MAX_WPM);
   const long = (o.seconds ?? 0) > 90;
   return {
     ...b,
@@ -990,6 +996,30 @@ export function mcpCommand(origin: string, needsToken: boolean): string {
   return `claude mcp add --transport http fuobe ${origin.replace(/\/+$/, "")}/api/mcp${needsToken ? ' --header "Authorization: Bearer fuobe_…"' : ""}`;
 }
 
+export interface ClaudePlan {
+  /** Seconds of narration a scene carries in the message. */
+  sceneSeconds: number;
+  /** What the brief's own pace would give a scene (shorter when the tool's 8 scenes don't cover the episode). */
+  briefSceneSeconds: number;
+  scenes: number;
+  /** faceless_episode calls (separate videos) per episode. */
+  parts: number;
+  perPart: number;
+  partSeconds: number;
+}
+
+/**
+ * How an episode fits faceless_episode, which takes up to 8 scenes a call: scenes are lengthened first (up to
+ * 10 s, the tool's own scene length), then a longer episode is made as parts, one call (one video) each.
+ */
+export function claudePlan(o: { length: number; brief: StyleBrief; animation: AnimationStyleId }): ClaudePlan {
+  const briefSceneSeconds = sceneSecondsFor(animationStyle(o.animation), o.brief.shotSeconds);
+  const sceneSeconds = Math.min(BLOCK_SECONDS, Math.max(briefSceneSeconds, Math.round(o.length / TOOL_MAX_SCENES)));
+  const scenes = Math.max(2, scenesFor(o.length, sceneSeconds));
+  const parts = Math.ceil(scenes / TOOL_MAX_SCENES);
+  return { sceneSeconds, briefSceneSeconds, scenes, parts, perPart: Math.max(2, Math.ceil(scenes / parts)), partSeconds: Math.round(o.length / parts) };
+}
+
 export function claudeMessage(o: {
   prompt: string;
   brief: StyleBrief;
@@ -998,16 +1028,15 @@ export function claudeMessage(o: {
   animation: AnimationStyleId;
   genre: GenreInfo;
   aspect: EpisodeAspect;
+  /** The engine Fuobe's MCP server runs on (Settings → Engine mode), not the composer's switch. */
   engine: Engine;
   voice?: string | null;
+  /** On the open engine: the narrator's recording (a /api/files/ URL), so Claude needn't ask for one. */
+  voiceSample?: string | null;
   reference?: string | null;
 }): string {
   const style = animationStyle(o.animation);
-  // The tool takes up to 8 scenes: longer scenes first (up to 10 s each), then the episode in parts.
-  const sceneSecs = Math.min(BLOCK_SECONDS, Math.max(sceneSecondsFor(style, o.brief.shotSeconds), Math.round(o.length / TOOL_MAX_SCENES)));
-  const scenes = scenesFor(o.length, sceneSecs);
-  const parts = Math.ceil(scenes / TOOL_MAX_SCENES);
-  const perPart = Math.max(2, Math.ceil(scenes / parts));
+  const { sceneSeconds: sceneSecs, briefSceneSeconds, scenes, parts, perPart, partSeconds } = claudePlan(o);
   const styleId = getStyle(o.brief.styleId).id;
   const words = wordsFor(sceneSecs);
   const look = `${getStyle(o.brief.styleId).look}. ${o.brief.look}`;
@@ -1026,14 +1055,23 @@ export function claudeMessage(o: {
     "How to make it:",
     `1. Load the faceless-video skill (load_skill "faceless-video").`,
     n > 1 ? `2. Plan ${n} episode titles that build on each other, and show them to me.` : "2. Pick a specific, clickable title.",
-    `3. For each episode write ${Math.max(2, scenes)} scenes: narration of at most ${words} words each (about ${sceneSecs} s spoken), the first one a hook as the brief says, and a visual for each in the look above. ${style.writer}`,
+    `3. For each episode write ${scenes} scenes: narration of at most ${words} words each (about ${sceneSecs} s spoken), the first one a hook as the brief says, and a visual for each in the look above. ${style.writer}`,
+    sceneSecs > briefSceneSeconds
+      ? `   Scenes run about ${sceneSecs} s here, longer than the brief's cuts (about ${o.brief.shotSeconds} s a shot), so that faceless_episode's ${TOOL_MAX_SCENES} scenes a call cover more of the episode: give every visual a camera move or a change of view so it keeps the brief's pace.`
+      : null,
     parts > 1
-      ? `   faceless_episode takes up to ${TOOL_MAX_SCENES} scenes a call, so make each episode as ${parts} parts of about ${perPart} scenes (“Part 1”, “Part 2”…), one call per part.`
-      : "",
+      ? `   faceless_episode makes one video of up to ${TOOL_MAX_SCENES} scenes a call, so each episode comes out as ${parts} parts of about ${perPart} scenes (about ${formatLength(partSeconds)} each), one call per part, titled “<episode title> — Part 1”, “— Part 2”…. Tell me this before I approve anything, and when they're done list each episode's parts in order: Join clips in Fuobe's Video tools puts them together into one video.`
+      : null,
     `4. Price each ${parts > 1 ? "part" : "episode"} with estimate_job (tool "faceless_episode") and wait for my OK before running anything.`,
-    `5. Run faceless_episode once per ${parts > 1 ? "part" : "episode"} with style_id "${styleId}", style "${look.replace(/"/g, "'").slice(0, 600)}", aspect_ratio "${o.aspect}"${o.voice ? ` and voice "${o.voice}"` : ""}, then follow it with check_generations and give me the links when they're done.`,
-    o.engine === "open" ? "The open-source engine clones the narrator's voice: ask me for a 10–60 s voice sample (voice_sample) before running." : "",
-  ].filter((l, i, all) => l !== "" || (all[i - 1] !== "" && i > 0));
+    `5. Run faceless_episode once per ${parts > 1 ? "part" : "episode"} with style_id "${styleId}", style "${look.replace(/"/g, "'").slice(0, 600)}", aspect_ratio "${o.aspect}"${o.engine === "open" ? (o.voiceSample ? ` and voice_sample "${o.voiceSample}"` : "") : o.voice ? ` and voice "${o.voice}"` : ""}, then follow it with check_generations and give me the links when they're done.`,
+    o.engine === "open"
+      ? o.voiceSample
+        ? "Fuobe runs this on the open-source engine (my ComfyUI): no fees, and the narration clones the voice sample above."
+        : "Fuobe runs this on the open-source engine (my ComfyUI), which clones the narrator's voice: ask me for a 10–60 s voice sample (voice_sample) before running."
+      : null,
+  ]
+    .filter((l): l is string => l !== null)
+    .filter((l, i, all) => l !== "" || (all[i - 1] !== "" && i > 0));
   let out = lines.join("\n");
   // Within Higgsfield's 64 KB cap (a very long prompt is cut, never the instructions).
   while (new TextEncoder().encode(out).length > MAX_CLAUDE_MESSAGE) out = out.replace(/Make a video about: ([\s\S]*?)\n/, (_m, p: string) => `Make a video about: ${p.slice(0, Math.floor(p.length * 0.8))}…\n`);
@@ -1097,6 +1135,8 @@ export interface SeriesView {
   /** The planned episodes (titles), in order. */
   plan: SeriesEpisodePlan[];
   channel: FacelessChannel | null;
+  /** "Generate here" has made it (its channel may since have been deleted in Faceless Studio: then channel is null). */
+  made: boolean;
   episodes: EpisodeCard[];
   createdAt: number;
   updatedAt: number;
@@ -1118,6 +1158,20 @@ export interface SeriesCard {
   updatedAt: number;
 }
 
+/** What the "Generate in Claude" dialog shows (POST /api/content-factory/claude). */
+export interface ClaudePrompt {
+  message: string;
+  bytes: number;
+  needsToken: boolean;
+  /** The engine Claude's runs use: Fuobe's MCP server follows Settings → Engine mode (cloud unless it's "open source only"). */
+  engine: Engine;
+  /** Said in the dialog when that isn't the composer's engine. */
+  engineNote?: string;
+  /** How each episode reaches faceless_episode (8 scenes a call): more than one part means separate videos. */
+  parts: number;
+  partSeconds: number;
+}
+
 export interface SeriesEstimate {
   price: SeriesPrice;
   demo: boolean;
@@ -1128,4 +1182,6 @@ export interface SeriesEstimate {
   notes?: string[];
   /** What reading a 1-minute reference costs on this engine (shown before an upload). */
   analysisPerMinute: number;
+  /** The reference is still being read: priced from its length and shape, and priced again once its brief is in. */
+  briefPending?: boolean;
 }

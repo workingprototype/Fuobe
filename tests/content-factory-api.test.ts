@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { SeriesEstimate, SeriesView } from "@/lib/catalog/content-factory";
+import { offlineBrief, type SeriesEstimate, type SeriesView } from "@/lib/catalog/content-factory";
 
 // Content Factory's server (r4/content-factory): references (an upload, a link through the guard and the
 // SSRF-safe fetch, a preset), reading them into a brief on both engines (demo mode here), prices, "Generate
@@ -101,6 +101,8 @@ describe("reading a clip into a brief", () => {
     const words = getGeneration(v.analysis!.steps.transcript!)!;
     expect(frames.request).toMatchObject({ feature: "content-factory", modelId: "extract-frames", op: "extract-frames" });
     expect(frames.request.params?.frameInterval).toBeGreaterThanOrEqual(1);
+    // JPEG frames: fal's default PNG runs to 3 MB a full-HD frame, past what one Claude request takes.
+    expect(frames.request.params?.extra).toMatchObject({ output_format: "jpg", quality: 80 });
     expect(words.request).toMatchObject({ modelId: "scribe-v2", op: "transcribe" });
     const ready = await readied(v.id);
     expect(ready.analysis).toMatchObject({ status: "ready", offline: true, note: expect.stringMatching(/^Demo brief/) });
@@ -122,6 +124,58 @@ describe("reading a clip into a brief", () => {
     expect(((await again.json()) as SeriesView).analysis).toMatchObject({ engine: "cloud", status: "reading" });
     await readied(v.id);
   }, 90_000);
+
+  it("Claude gets the frames that fit one request: none over 5 MB as base64, all within the budget, still spread over the clip", () => {
+    const f = (bytes: number) => ({ data: Buffer.alloc(bytes) });
+    const total = (l: { data: Buffer }[]) => l.reduce((n, x) => n + x.data.length, 0);
+    // 20 noisy full-HD PNG frames (3.07 MB each, 61 MB in all) would be an 82 MB request.
+    const png = Array.from({ length: 20 }, () => f(3_070_000));
+    const fit = cf.fitFrames(png);
+    expect(total(fit)).toBeLessThanOrEqual(cf.FRAME_BUDGET_BYTES);
+    expect(fit).toHaveLength(4);
+    expect(fit[0]).toBe(png[0]);
+    expect(fit.at(-1)).toBe(png[19]);
+    expect((cf.FRAME_BUDGET_BYTES / 3) * 4).toBeLessThan(32 * 1024 * 1024 * 0.7);
+    expect(Math.ceil(cf.MAX_FRAME_BYTES / 3) * 4).toBeLessThanOrEqual(5_000_000);
+    // JPEG frames all fit; one too big for Claude is left out.
+    expect(cf.fitFrames(Array.from({ length: 20 }, () => f(400_000)))).toHaveLength(20);
+    expect(cf.fitFrames([f(4_500_000), f(300_000)])).toHaveLength(1);
+  });
+
+  it("while the clip is read, the price comes from its length and shape, and says it comes again", async () => {
+    const v: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "upload", url: clip() }, engine: "cloud" }))).json();
+    expect(v.analysis?.status).toBe("reading");
+    const during: SeriesEstimate = await (await estimateRoute.POST(json("POST", { prompt: "x", settings, seriesId: v.id }))).json();
+    expect(during.briefPending).toBe(true);
+    await readied(v.id);
+    const after: SeriesEstimate = await (await estimateRoute.POST(json("POST", { prompt: "x", settings, seriesId: v.id }))).json();
+    expect(after.briefPending).toBeUndefined();
+    expect(after.scenes).toBe(during.scenes);
+  }, 90_000);
+
+  it("a draft the composer leaves is deleted (its reading stops); a made series is never deleted as a draft", async () => {
+    const v: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "upload", url: clip() }, engine: "cloud" }))).json();
+    const del = (id: string, draft: boolean) => oneRoute.DELETE(new Request(`http://x/api${draft ? "?draft=1" : ""}`, { method: "DELETE" }), params({ id }));
+    expect((await del(v.id, true)).status).toBe(204);
+    expect(() => cf.seriesView(v.id)).toThrow(/not found/);
+    const made: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "what-if" }, engine: "cloud" }))).json();
+    await cf.generateSeries(made.id, { prompt: "What if cats ruled the world", settings: { ...settings, episodes: 1 } });
+    expect((await del(made.id, true)).status).toBe(204);
+    expect(view(made.id).made).toBe(true);
+    expect((await del(made.id, false)).status).toBe(204);
+    expect(() => cf.seriesView(made.id)).toThrow(/not found/);
+  }, 90_000);
+
+  it("knows a link's clip by its bytes, and keeps a malformed file name as written", () => {
+    const head = (brand: string) => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from(`ftyp${brand}`), Buffer.alloc(16)]);
+    expect(cf.clipType(head("isom"), "application/octet-stream")).toEqual({ contentType: "video/mp4", name: "reference.mp4" });
+    expect(cf.clipType(head("qt  "), "video/mp4")).toEqual({ contentType: "video/quicktime", name: "reference.mov" });
+    expect(cf.clipType(Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81]), "video/mp4")).toEqual({ contentType: "video/webm", name: "reference.webm" });
+    expect(cf.clipType(Buffer.from("????????"), "video/webm")).toEqual({ contentType: "video/webm", name: "reference.webm" });
+    expect(cf.linkTitle("https://cdn.example.com/clips/my%20clip.mp4")).toBe("my clip.mp4");
+    expect(cf.linkTitle("https://cdn.example.com/clip%E0%A4%A.mp4")).toBe("clip%E0%A4%A.mp4");
+    expect(cf.linkTitle("https://cdn.example.com/")).toBeUndefined();
+  });
 
   it("the frame interval asks for about a frame a second, at most 20 over the clip", () => {
     expect(cf.frameInterval(10, 30)).toBe(30);
@@ -205,6 +259,45 @@ describe("prices, Generate here and Next episode", () => {
     expect((await res.json()).error).toMatch(/reference or pick a preset/);
   });
 
+  it("one Generate at a time: a second one while the first plans gets 409, and only one channel is made", async () => {
+    const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "countdown" }, engine: "cloud" }))).json();
+    const channels = faceless.listChannels().length;
+    const input = { prompt: "Inventions that happened by accident", settings };
+    const both = await Promise.allSettled([cf.generateSeries(s.id, input), cf.generateSeries(s.id, input)]);
+    expect(both.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const refused = both.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason as InstanceType<typeof faceless.FacelessError>;
+    expect(refused.status).toBe(409);
+    expect(faceless.listChannels().length).toBe(channels + 1);
+    expect(view(s.id).episodes).toHaveLength(3);
+    // Next episode twice at once: one runs, and the plan keeps every episode it made.
+    const more = await Promise.allSettled([cf.addEpisodes(s.id, { count: 1 }), cf.addEpisodes(s.id, { count: 1 })]);
+    expect(more.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const v = view(s.id);
+    expect(v.plan).toHaveLength(4);
+    expect(v.episodes.map((e) => e.title)).toEqual(v.plan.map((p) => p.title));
+  });
+
+  it("a brief edited while episodes are planned is kept", async () => {
+    const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "tiny-worlds" }, engine: "cloud" }))).json();
+    const run = cf.generateSeries(s.id, { prompt: "A day in a paper city", settings });
+    cf.updateSeries(s.id, { brief: { ...s.brief!, hook: "Open inside a matchbox" } });
+    const v = await run;
+    expect(v.brief?.hook).toBe("Open inside a matchbox");
+    expect(v.plan).toHaveLength(3);
+  });
+
+  it("a series whose channel was deleted in Faceless Studio says so, and the next new series clears it away", async () => {
+    const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "myth-retold" }, engine: "cloud" }))).json();
+    const made = await cf.generateSeries(s.id, { prompt: "Prometheus steals fire", settings: { ...settings, episodes: 1 } });
+    await faceless.deleteChannel(made.channel!.id);
+    expect(view(s.id)).toMatchObject({ made: true, channel: null });
+    expect(cf.listSeries().some((c) => c.id === s.id)).toBe(false);
+    // Generating it again can't work: it says so instead of making a second channel.
+    await expect(cf.generateSeries(s.id, { prompt: "x", settings })).rejects.toMatchObject({ status: 409 });
+    await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "what-if" }, engine: "cloud" }));
+    expect(() => cf.seriesView(s.id)).toThrow(/not found/);
+  });
+
   it("deletes the series with its channel", async () => {
     const channelId = view(series.id).channel!.id;
     expect((await oneRoute.DELETE(json("DELETE"), params({ id: series.id }))).status).toBe(204);
@@ -226,9 +319,39 @@ describe("Generate in Claude", () => {
     expect((await claudeRoute.POST(json("POST", { prompt: "  ", settings, seriesId: s.id }))).status).toBe(400);
   });
 
+  it("writes the message for the engine Claude's runs use (Settings → Engine mode), and says when that isn't the composer's", async () => {
+    const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "dark-history" }, engine: "cloud" }))).json();
+    const ask = (body: object) => claudeRoute.POST(json("POST", { prompt: "The town that vanished", settings, seriesId: s.id, ...body })).then((r) => r.json());
+    // "Both": Fuobe's MCP server runs on the cloud, whatever the composer's switch says.
+    const open = await ask({ settings: { ...settings, engine: "open" }, voice: { kind: "sample", url: "/api/files/me.wav" } });
+    expect(open).toMatchObject({ engine: "cloud", engineNote: expect.stringMatching(/cloud engine and your paid providers/) });
+    expect(open.message).not.toMatch(/open-source engine|voice_sample "/);
+    expect((await ask({})).engineNote).toBeUndefined();
+    // A 5-minute episode comes out as parts, and the dialog says how many.
+    expect(await ask({ settings: { ...settings, length: 300 } })).toMatchObject({ parts: 4, partSeconds: 75 });
+    setSetting("engineMode", "open");
+    try {
+      const onlyOpen = await ask({ settings: { ...settings, engine: "open" }, voice: { kind: "sample", url: "/api/files/me.wav" } });
+      expect(onlyOpen.engine).toBe("open");
+      expect(onlyOpen.engineNote).toBeUndefined();
+      expect(onlyOpen.message).toContain('voice_sample "/api/files/me.wav"');
+    } finally {
+      setSetting("engineMode", "both");
+    }
+  });
+
   it("edits the brief by hand", async () => {
     const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "what-if" }, engine: "cloud" }))).json();
     const res = await oneRoute.PATCH(json("PATCH", { brief: { ...s.brief!, hook: "Start on the punchline" } }), params({ id: s.id }));
     expect(((await res.json()) as SeriesView).brief?.hook).toBe("Start on the punchline");
+  });
+
+  it("saves an edited offline brief read from a fast talker (its pace within the editor's limits)", async () => {
+    const s: SeriesView = await (await seriesRoute.POST(json("POST", { reference: { kind: "preset", presetId: "what-if" }, engine: "cloud" }))).json();
+    const fast = Array.from({ length: 3 }, (_, i) => ({ start: i * 2, end: i * 2 + 2, text: "one two three four five six seven eight nine ten eleven twelve" }));
+    const brief = { ...offlineBrief({ cues: fast }), hook: "Straight in" };
+    const res = await oneRoute.PATCH(json("PATCH", { brief }), params({ id: s.id }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as SeriesView).brief?.voice.wordsPerMinute).toBe(260);
   });
 });

@@ -8,10 +8,13 @@ import {
   briefLook,
   CF_LENGTH_VALUES,
   claudeMessage,
+  claudePlan,
   defaultBrief,
   episodeTopic,
   MAX_CLAUDE_MESSAGE,
+  MAX_WPM,
   mcpCommand,
+  MIN_WPM,
   noMediaMessage,
   offlineBrief,
   offlineSeries,
@@ -164,6 +167,18 @@ describe("offline brief", () => {
     expect(offlineBrief({ seconds: 200 }).shotSeconds).toBe(5);
     expect(offlineBrief().aspect).toBe("9:16");
     expect(speechRate([{ start: 0, end: 1, text: "hi" }])).toBeNull();
+  });
+
+  it("keeps a rap's or a sped-up voice's pace within what a brief can carry (and the brief editor can save)", () => {
+    const fast = Array.from({ length: 3 }, (_, i) => ({ start: i * 2, end: i * 2 + 2, text: "one two three four five six seven eight nine ten eleven twelve" }));
+    expect(speechRate(fast)).toBe(360);
+    expect(offlineBrief({ cues: fast }).voice).toMatchObject({ wordsPerMinute: MAX_WPM, tone: expect.stringMatching(/fast/i) });
+    const slow = [
+      { start: 0, end: 10, text: "one two three four five six" },
+      { start: 10, end: 20, text: "seven eight nine ten eleven twelve" },
+    ];
+    expect(speechRate(slow)).toBe(36);
+    expect(offlineBrief({ cues: slow }).voice.wordsPerMinute).toBe(MIN_WPM);
   });
 });
 
@@ -365,6 +380,29 @@ describe("Generate in Claude", () => {
     expect(m).toMatch(/as 3 parts of about 6 scenes/);
     expect(m).toContain("Run faceless_episode once per part");
     expect(claudeMessage({ ...base, length: 30 })).not.toContain("parts of");
+  });
+
+  it("says when scenes run longer than the brief's cuts, and that a long episode comes out as parts to join", () => {
+    const dark = PRESETS.find((p) => p.id === "dark-history")!.brief;
+    expect(claudePlan({ length: 300, brief: dark, animation: "frame-by-frame" })).toEqual({ sceneSeconds: 10, briefSceneSeconds: 7, scenes: 30, parts: 4, perPart: 8, partSeconds: 75 });
+    const long = claudeMessage({ ...base, brief: dark, animation: "frame-by-frame", length: 300 });
+    expect(long).toMatch(/Scenes run about 10 s here, longer than the brief's cuts \(about 5 s a shot\)/);
+    expect(long).toMatch(/each episode comes out as 4 parts of about 8 scenes \(about 1:15 each\)/);
+    expect(long).toMatch(/Tell me this before I approve anything[\s\S]*Join clips in Fuobe's Video tools/);
+    expect(long).not.toMatch(/\n$|\n\n\n/);
+    // At the brief's own pace nothing is stretched or split.
+    const short = claudeMessage({ ...base, brief: dark, animation: "frame-by-frame", length: 30 });
+    expect(short).not.toContain("longer than the brief's cuts");
+    expect(short).not.toContain("Join clips");
+    expect(claudePlan({ length: 30, brief: dark, animation: "frame-by-frame" })).toMatchObject({ sceneSeconds: 7, parts: 1 });
+  });
+
+  it("on the open engine passes the narrator's recording instead of asking for one", () => {
+    const m = claudeMessage({ ...base, engine: "open", voice: "JBFqnCBsd6RMkjVDRZzb", voiceSample: "/api/files/narrator.wav" });
+    expect(m).toContain('voice_sample "/api/files/narrator.wav"');
+    expect(m).not.toContain('voice "JBFqnCBsd6RMkjVDRZzb"');
+    expect(m).not.toMatch(/ask me for a 10–60 s voice sample/);
+    expect(m).toContain(ANIMATION_STYLES[0].openCopy);
   });
 
   it("stays within 64 KB however long the prompt is", () => {

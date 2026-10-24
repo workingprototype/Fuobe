@@ -19,10 +19,13 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/content-fa
   });
 }
 
-/** Deletes the series and its channel, stopping what its episodes still render (finished videos stay in the Library). */
-export async function DELETE(_req: Request, ctx: RouteContext<"/api/content-factory/series/[id]">) {
+/**
+ * Deletes the series and its channel, stopping what its episodes still render (finished videos stay in the Library).
+ * `?draft=1` deletes only a draft that was never made (the composer moving on from a clip it was reading).
+ */
+export async function DELETE(request: Request, ctx: RouteContext<"/api/content-factory/series/[id]">) {
   return handle(async () => {
-    await deleteSeries((await ctx.params).id);
+    await deleteSeries((await ctx.params).id, { draftOnly: new URL(request.url).searchParams.get("draft") === "1" });
     return new Response(null, { status: 204 });
   });
 }

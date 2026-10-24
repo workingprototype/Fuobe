@@ -30,7 +30,7 @@ import {
 } from "@/lib/catalog/content-factory";
 import { GENRES, type EpisodeAspect, type FacelessGenre, type NarratorVoice, type PickerData } from "@/lib/catalog/faceless";
 import { cn } from "@/lib/utils";
-import { ApiError, useCreateSeries, useGenerateSeries, useRereadSeries, useSeries, useSeriesEstimate, useSeriesList, useUpdateSeries, type SeriesAsk } from "./hooks";
+import { ApiError, discardDraft, useCreateSeries, useGenerateSeries, useRereadSeries, useSeries, useSeriesEstimate, useSeriesList, useUpdateSeries, type SeriesAsk } from "./hooks";
 import { BriefCard, ClaudeDialog, PresetGrid, ReferenceCard, SeriesPriceLine } from "./parts";
 
 /** The clip being read stays in the composer across reloads (this browser only). */
@@ -90,7 +90,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
   const candidate = picked !== undefined ? picked : hydrated ? readDraft() : null;
   const series = useSeries(candidate);
   // A draft that's gone (or already made) is let go.
-  const gone = !!series.error || !!series.data?.channel;
+  const gone = !!series.error || !!series.data?.made;
   const seriesId = gone ? null : candidate;
   const create = useCreateSeries();
   const generate = useGenerateSeries();
@@ -127,10 +127,17 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
 
   const ask: SeriesAsk = { prompt: prompt.trim(), settings: { engine, length, episodes, animation, genre, aspect }, ...(voice && { voice }) };
   const source = seriesId ? { seriesId } : { presetId };
-  const estimate = useSeriesEstimate({ ...ask, prompt: ask.prompt || "estimate", ...source });
+  // Priced again when the clip's brief comes in or is edited, not only when a setting changes.
+  const estimate = useSeriesEstimate({ ...ask, prompt: ask.prompt || "estimate", ...source }, view ? `${view.analysis?.status ?? "none"}:${view.updatedAt}` : undefined);
   const perMinute = estimate.data?.analysisPerMinute ?? 0;
 
+  /** The draft being left (another clip, a preset, X): reading it stops, so it stops billing, and its row goes. */
+  const leaveDraft = (next?: string) => {
+    if (seriesId && seriesId !== next) discardDraft(seriesId);
+  };
+
   const choosePreset = (id: string) => {
+    leaveDraft();
     setPresetId(id);
     setSeriesId(null);
     writeDraft(null);
@@ -139,6 +146,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
 
   const startSeries = (reference: Parameters<typeof create.mutate>[0]["reference"]) =>
     create.mutateAsync({ reference, engine }).then((v) => {
+      leaveDraft(v.id);
       setSeriesId(v.id);
       writeDraft(v.id);
       setLinkOpen(false);
@@ -169,13 +177,17 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
 
   const blocker = !prompt.trim() ? "Say what the video is about" : reading ? "The reference is still being read — a moment" : !brief ? "Add a reference or pick a preset" : null;
 
+  // One run at a time: a second Enter (or click) before the first request has re-rendered would plan, make and bill it twice.
+  const submitting = useRef(false);
   const submit = async () => {
+    if (submitting.current) return;
     if (blocker) {
       toast(blocker, { id: "cf-blocker" });
       if (!prompt.trim()) promptRef.current?.focus();
       return;
     }
     if (mode === "claude") return setClaudeOpen(true);
+    submitting.current = true;
     try {
       // A preset becomes a series of its own (kept as the draft, so a retry doesn't make another).
       const id = seriesId ?? (await startSeries({ kind: "preset", presetId })).id;
@@ -184,6 +196,8 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
       router.push(`/content-factory/${id}`);
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      submitting.current = false;
     }
   };
 
@@ -405,7 +419,7 @@ export function ContentFactoryHome({ voices }: { voices: PickerData["voices"] })
               {mode === "here" ? (
                 <SeriesPriceLine data={est} loading={estimate.isFetching} engine={engine} className="min-w-0 flex-1 basis-56" />
               ) : (
-                <p className="min-w-0 flex-1 basis-56 text-[12px] text-muted-foreground">Claude prices every episode with your providers and asks before it runs.</p>
+                <p className="min-w-0 flex-1 basis-56 text-[12px] text-muted-foreground">Claude prices every episode and asks before it runs.</p>
               )}
               {mode === "here" && (
                 <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] text-muted-foreground">

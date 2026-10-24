@@ -8,6 +8,7 @@ import {
   briefRequest,
   CF_LENGTH_VALUES,
   claudeMessage,
+  claudePlan,
   episodeTopic,
   getPreset,
   MAX_BRIEF_FRAMES,
@@ -28,6 +29,7 @@ import {
   seriesSettings,
   SERIES_SYSTEM,
   type AnimationStyleId,
+  type ClaudePrompt,
   type ReferencePlatform,
   type SeriesAnalysis,
   type SeriesCard,
@@ -113,14 +115,46 @@ function save(id: string, data: SeriesData, channelId?: string | null): void {
   else db().prepare("UPDATE content_series SET data_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(data), now, id);
 }
 
-/** Change a series' data in place (a re-read, so a brief written meanwhile isn't lost). */
-function patch(id: string, fn: (d: SeriesData) => SeriesData | void): SeriesData | null {
+/** Change a series' data in place (a re-read, so a brief written or edited meanwhile isn't lost). */
+function patch(id: string, fn: (d: SeriesData) => SeriesData | void, channelId?: string | null): SeriesData | null {
   const r = seriesRow(id);
   if (!r) return null;
   const d = dataOf(r);
   const next = fn(d) ?? d;
-  save(id, next);
+  save(id, next, channelId);
   return next;
+}
+
+declare global {
+  var __fuobeContentRuns: Set<string> | undefined;
+}
+/** Series a "Generate here" or "Next episode" is planning or starting right now (this process). */
+const running = () => (globalThis.__fuobeContentRuns ??= new Set<string>());
+
+/**
+ * One run at a time per series, claimed before anything awaits: planning asks the LLM for up to 25 s, and a
+ * second click (or Enter) meanwhile would otherwise make a second channel and bill every episode twice.
+ */
+function claim(id: string, busy: string): () => void {
+  if (running().has(id)) throw new FacelessError(busy, 409);
+  running().add(id);
+  return () => void running().delete(id);
+}
+
+/** Drafts are kept this long (the composer's clip across reloads); "Generate here" makes them series. */
+const DRAFT_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** Old drafts that never ran, and series whose channel was deleted in Faceless Studio (their episodes went with it). */
+function pruneSeries(): void {
+  const drafts = db().prepare("SELECT * FROM content_series WHERE channel_id IS NULL AND updated_at < ?").all(Date.now() - DRAFT_MS) as SeriesRow[];
+  const orphans = db()
+    .prepare("SELECT s.* FROM content_series s LEFT JOIN faceless_channels c ON c.id = s.channel_id WHERE s.channel_id IS NOT NULL AND c.id IS NULL")
+    .all() as SeriesRow[];
+  for (const r of [...drafts, ...orphans]) {
+    if (running().has(r.id)) continue;
+    for (const g of Object.values(dataOf(r).analysis?.steps ?? {})) void cancelGeneration(g).catch(() => {});
+    db().prepare("DELETE FROM content_series WHERE id = ?").run(r.id);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,12 +179,35 @@ async function saveClip(data: Buffer, contentType: string, name: string): Promis
   return { url, seconds: round1(facts.seconds), width: facts.width, height: facts.height, fps: round1(facts.fps) };
 }
 
+/** What a fetched clip really is (its bytes over the server's word): MP4, MOV or WebM, with a file name to match. */
+export function clipType(data: Buffer, said = ""): { contentType: string; name: string } {
+  const head = data.subarray(0, 64);
+  if (head.length >= 4 && head.readUInt32BE(0) === 0x1a45dfa3) return { contentType: "video/webm", name: "reference.webm" };
+  if (head.length >= 12 && head.toString("latin1", 4, 8) === "ftyp" && head.toString("latin1", 8, 12) === "qt  ") return { contentType: "video/quicktime", name: "reference.mov" };
+  if (head.length >= 8 && head.toString("latin1", 4, 8) === "ftyp") return { contentType: "video/mp4", name: "reference.mp4" };
+  if (said === "video/webm") return { contentType: said, name: "reference.webm" };
+  if (said === "video/quicktime") return { contentType: said, name: "reference.mov" };
+  return { contentType: "video/mp4", name: "reference.mp4" };
+}
+
 /** A video behind a link, or null when the answer isn't one. */
-async function fetchClip(url: string): Promise<Buffer | null> {
+async function fetchClip(url: string): Promise<{ data: Buffer; contentType: string; name: string } | null> {
   const res = await fetchRemote(url, { maxBytes: MAX_CLIP_BYTES, timeoutMs: 90_000 });
   const type = res.contentType?.split(";")[0].trim().toLowerCase() ?? "";
-  if (VIDEO_TYPE.test(type) || (type === "application/octet-stream" && clipFacts(res.data).seconds)) return res.data;
+  if (VIDEO_TYPE.test(type) || (type === "application/octet-stream" && clipFacts(res.data).seconds)) return { data: res.data, ...clipType(res.data, type) };
   return null;
+}
+
+/** The file name in a link's path, as a title ("my%20clip.mp4" → "my clip.mp4"); a malformed escape is kept as written. */
+export function linkTitle(url: string): string | undefined {
+  const raw = new URL(url).pathname.split("/").pop() ?? "";
+  let name = raw;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    // "%E0%A4%A" isn't UTF-8: the raw name still says which clip it was.
+  }
+  return name.slice(0, 120) || undefined;
 }
 
 const FETCH_FAILED = "Fuobe couldn't fetch that link. Check it opens in a private window, or upload the clip instead.";
@@ -165,18 +222,22 @@ async function readLink(raw: string): Promise<SeriesReference> {
   const ref: SeriesReference = { kind: "link", link: url, platform };
   try {
     if (platform === "direct") {
+      const title = linkTitle(url);
       const clip = await fetchClip(url);
       if (!clip) throw new NeedsUpload(noMediaMessage(platform));
-      return { ...ref, ...(await saveClip(clip, "video/mp4", "reference.mp4")), title: decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "").slice(0, 120) || undefined };
+      return { ...ref, ...(await saveClip(clip.data, clip.contentType, clip.name)), ...(title && { title }) };
     }
     const page = await fetchRemote(url, { maxBytes: 3 * 1024 * 1024, timeoutMs: 15_000 });
     const type = page.contentType?.split(";")[0].trim().toLowerCase() ?? "";
-    if (VIDEO_TYPE.test(type)) return { ...ref, ...(await saveClip(page.data, type, "reference.mp4")) };
+    if (VIDEO_TYPE.test(type)) {
+      const t = clipType(page.data, type);
+      return { ...ref, ...(await saveClip(page.data, t.contentType, t.name)) };
+    }
     const media = pageMedia(page.data.toString("utf8"), page.url);
     if (!media.video) throw new NeedsUpload(noMediaMessage(platform));
     const clip = await fetchClip(media.video);
     if (!clip) throw new NeedsUpload(noMediaMessage(platform));
-    const saved = await saveClip(clip, "video/mp4", "reference.mp4");
+    const saved = await saveClip(clip.data, clip.contentType, clip.name);
     let thumbnail: string | undefined;
     if (media.image) {
       try {
@@ -261,7 +322,8 @@ function startSteps(ref: SeriesReference, engine: Engine): { steps: SeriesAnalys
   if (engine === "open") {
     run("brief", request(ref, "brief", { modelId: "oss-reference-brief", op: "write", inputs: { video: ref.url }, params: { duration: Math.min(OPEN_REFERENCE_SECONDS, ref.seconds ?? OPEN_REFERENCE_SECONDS) } }));
   } else {
-    run("frames", request(ref, "frames", { modelId: "extract-frames", op: "extract-frames", inputs: { video: ref.url }, params: { frameInterval: frameInterval(ref.seconds, ref.fps) } }));
+    // JPEG, not fal's default PNG: a full-HD PNG frame can weigh 3 MB, and Claude takes 32 MB a request.
+    run("frames", request(ref, "frames", { modelId: "extract-frames", op: "extract-frames", inputs: { video: ref.url }, params: { frameInterval: frameInterval(ref.seconds, ref.fps), extra: { output_format: "jpg", quality: 80 } } }));
     run("transcript", request(ref, "transcript", { modelId: "scribe-v2", op: "transcribe", inputs: { video: ref.url }, params: { ...(ref.seconds && { duration: ref.seconds, sourceDuration: ref.seconds }) } }));
   }
   return { steps, costUsd: engine === "open" ? 0 : Math.round(cost * 1000) / 1000, demo, ...(errors.length && !Object.keys(steps).length && { error: errors[0] }) };
@@ -297,6 +359,22 @@ export function spread<T>(list: T[], n: number): T[] {
 
 const IMAGE_TYPE = /^image\/(jpeg|png|gif|webp)$/;
 
+/** Claude takes images of up to 5 MB each (as base64, 4/3 of the file) in a request of up to 32 MB. */
+export const MAX_FRAME_BYTES = 3_750_000;
+/** All the frames of one request together, as files: about 20 MB as base64, well inside the request limit. */
+export const FRAME_BUDGET_BYTES = 15_000_000;
+
+/** The frames that fit the request: none over the per-image limit, then fewer (still spread over the clip) until they fit the budget. */
+export function fitFrames<T extends { data: Buffer }>(frames: T[], budget = FRAME_BUDGET_BYTES, each = MAX_FRAME_BYTES): T[] {
+  const ok = frames.filter((f) => f.data.length <= each);
+  const total = (list: T[]) => list.reduce((n, f) => n + f.data.length, 0);
+  for (let n = ok.length; n > 0; n--) {
+    const picked = spread(ok, n);
+    if (total(picked) <= budget) return picked;
+  }
+  return [];
+}
+
 async function framesOf(g: Generation | null): Promise<LlmImage[]> {
   if (g?.status !== "succeeded") return [];
   const outs = g.outputs.filter((o) => o.kind === "image" && !o.meta?.demo);
@@ -308,12 +386,12 @@ async function framesOf(g: Generation | null): Promise<LlmImage[]> {
   for (const o of picked) {
     try {
       const f = await readRef(o.url);
-      if (IMAGE_TYPE.test(f.contentType) && f.data.length <= 4.5 * 1024 * 1024) images.push({ data: f.data, contentType: f.contentType });
+      if (IMAGE_TYPE.test(f.contentType)) images.push({ data: f.data, contentType: f.contentType });
     } catch {
       // A frame that can't be read is left out.
     }
   }
-  return images;
+  return fitFrames(images);
 }
 
 async function writeBrief(id: string): Promise<void> {
@@ -424,6 +502,7 @@ function toView(r: SeriesRow, d: SeriesData): SeriesView {
     settings: d.settings,
     plan: d.plan,
     channel,
+    made: !!r.channel_id,
     episodes: channel ? inOrder(listEpisodes({ channelId: channel.id, limit: 200 }), d.episodeIds ?? []) : [],
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -438,6 +517,7 @@ export function seriesView(id: string): SeriesView {
 /** A new series around a reference (reading starts straight away), a preset (its brief is ready), or nothing yet. */
 export async function createSeries(input: { reference: ReferenceInput | null; engine: Engine; prompt?: string }): Promise<SeriesView> {
   checkEngine(input.engine);
+  pruneSeries();
   const reference = input.reference ? await resolveReference(input.reference) : null;
   const id = nanoid(10);
   const now = Date.now();
@@ -495,8 +575,11 @@ export function updateSeries(id: string, p: { brief?: StyleBrief; name?: string 
   return seriesView(id);
 }
 
-export async function deleteSeries(id: string): Promise<void> {
+/** Deletes a series with its channel; `draftOnly` (the composer letting go of a clip) leaves a made series alone. */
+export async function deleteSeries(id: string, o: { draftOnly?: boolean } = {}): Promise<void> {
   const r = mustRow(id);
+  if (running().has(id)) throw new FacelessError("Its episodes are being planned — delete it once they've started", 409);
+  if (o.draftOnly && r.channel_id) return;
   const d = dataOf(r);
   for (const g of Object.values(d.analysis?.steps ?? {})) void cancelGeneration(g).catch(() => {});
   if (r.channel_id && getChannel(r.channel_id)) await deleteChannel(r.channel_id);
@@ -592,11 +675,16 @@ export function estimateSeries(input: SeriesInput & { seriesId?: string; presetI
   const s = input.settings;
   const perMinute = analysisPerMinute(s.engine);
   let brief: StyleBrief;
+  let pending = false;
   try {
     brief = briefFor(input);
   } catch {
-    // No reference yet: price the default look, so the composer always shows a price.
-    brief = getPreset("what-if")!.brief;
+    const row = input.seriesId ? seriesRow(input.seriesId) : undefined;
+    const d = row ? dataOf(row) : null;
+    pending = d?.analysis?.status === "reading";
+    // Still reading: what the clip's length and shape already say (the price comes again with the brief).
+    // No reference yet: the default look, so the composer always shows a price.
+    brief = pending && d?.reference ? offlineBrief({ seconds: d.reference.seconds, width: d.reference.width, height: d.reference.height }) : getPreset("what-if")!.brief;
   }
   const settings = episodeSettings(input, brief);
   const est = estimateEpisode({ kind: "faceless", settings, genre: s.genre });
@@ -608,6 +696,7 @@ export function estimateSeries(input: SeriesInput & { seriesId?: string; presetI
     ...(est.error && { error: est.error }),
     ...(est.notes && { notes: est.notes }),
     analysisPerMinute: perMinute,
+    ...(pending && { briefPending: true }),
   };
 }
 
@@ -644,7 +733,15 @@ function startEpisodes(o: { channelId: string; prompt: string; plan: SeriesEpiso
 export async function generateSeries(id: string, input: SeriesInput & { review?: boolean }): Promise<SeriesView> {
   const r = mustRow(id);
   if (r.channel_id) throw new FacelessError("This series is made — add episodes from its page", 409);
-  const d = dataOf(r);
+  const release = claim(id, "This series is being made — a moment");
+  try {
+    return await generateClaimed(id, input);
+  } finally {
+    release();
+  }
+}
+
+async function generateClaimed(id: string, input: SeriesInput & { review?: boolean }): Promise<SeriesView> {
   checkEngine(input.settings.engine);
   const prompt = input.prompt.trim();
   if (!prompt) throw new FacelessError("Say what the video is about");
@@ -675,16 +772,25 @@ export async function generateSeries(id: string, input: SeriesInput & { review?:
     if (e instanceof FacelessError) throw e;
     throw new FacelessError(COULDNT_PLAN, 500);
   }
-  // Seen as made from here on (a second click gets "This series is made").
-  const next = { ...d, name: plan.name, prompt, settings: { ...input.settings, episodes: count }, plan: plan.episodes };
-  save(id, next, channelId);
+  // Seen as made from here on (a second click gets "This series is made"); a brief edited meanwhile is kept.
+  patch(id, (cur) => ({ ...cur, name: plan.name, prompt, settings: { ...input.settings, episodes: count }, plan: plan.episodes }), channelId);
   const ids = startEpisodes({ channelId, prompt, plan: plan.episodes, earlier: [], settings, review: !!input.review, series: count > 1 });
-  save(id, { ...next, episodeIds: ids });
+  patch(id, (cur) => ({ ...cur, episodeIds: ids }));
   return seriesView(id);
 }
 
 /** "Next episode": plan more after the ones already made, the first one following what the user says happens in it. */
 export async function addEpisodes(id: string, input: { count: number; next?: string; review?: boolean }): Promise<SeriesView> {
+  mustRow(id);
+  const release = claim(id, "Episodes are being added to this series — a moment");
+  try {
+    return await addClaimed(id, input);
+  } finally {
+    release();
+  }
+}
+
+async function addClaimed(id: string, input: { count: number; next?: string; review?: boolean }): Promise<SeriesView> {
   const r = mustRow(id);
   const d = dataOf(r);
   const channel = r.channel_id ? getChannel(r.channel_id) : null;
@@ -699,22 +805,41 @@ export async function addEpisodes(id: string, input: { count: number; next?: str
     throw new FacelessError(COULDNT_PLAN, 500);
   });
   const ids = startEpisodes({ channelId: channel.id, prompt: d.prompt, plan: more.episodes, earlier: previous, settings, review: !!input.review, series: true });
-  save(id, { ...d, plan: [...d.plan, ...more.episodes], settings: { ...d.settings, episodes: d.plan.length + more.episodes.length }, episodeIds: [...(d.episodeIds ?? []), ...ids] });
+  // Read again before writing: a brief edited while the episodes were planned is kept.
+  patch(id, (cur) => {
+    const plan = [...cur.plan, ...more.episodes];
+    return { ...cur, plan, settings: { ...(cur.settings ?? d.settings!), episodes: plan.length }, episodeIds: [...(cur.episodeIds ?? []), ...ids] };
+  });
   return seriesView(id);
 }
 
 // ---------------------------------------------------------------------------
 // "Generate in Claude"
 
-export function claudePrompt(input: SeriesInput & { seriesId?: string; presetId?: string; voiceName?: string }): { message: string; bytes: number; needsToken: boolean } {
+/** The engine Fuobe's MCP tools run on (src/server/mcp.ts: the cloud unless the install is open source only). */
+const mcpEngine = (): Engine => (engineMode() === "open" ? "open" : "cloud");
+
+export function claudePrompt(input: SeriesInput & { seriesId?: string; presetId?: string }): ClaudePrompt {
   const brief = briefFor(input);
   const s = input.settings;
   const d = input.seriesId ? dataOf(mustRow(input.seriesId)) : null;
   const ref = d?.reference;
   const reference = ref && ref.kind !== "preset" ? `${ref.title ? `“${ref.title}”` : "clip"}${ref.platform ? ` (${PLATFORM_LABEL[ref.platform as ReferencePlatform]})` : ""}` : null;
-  const voice = input.voice?.kind === "preset" ? input.voice.id : null;
-  const message = claudeMessage({ prompt: input.prompt, brief, length: s.length, episodes: s.episodes, animation: s.animation as AnimationStyleId, genre: genreInfo(s.genre), aspect: s.aspect, engine: s.engine, voice, reference });
-  return { message, bytes: new TextEncoder().encode(message).length, needsToken: authEnabled() };
+  const engine = mcpEngine();
+  const voice = engine === "cloud" && input.voice?.kind === "preset" ? input.voice.id : null;
+  const voiceSample = engine === "open" && input.voice?.kind === "sample" ? input.voice.url : null;
+  const animation = s.animation as AnimationStyleId;
+  const message = claudeMessage({ prompt: input.prompt, brief, length: s.length, episodes: s.episodes, animation, genre: genreInfo(s.genre), aspect: s.aspect, engine, voice, voiceSample, reference });
+  const plan = claudePlan({ length: s.length, brief, animation });
+  const engineNote =
+    s.engine === engine
+      ? undefined
+      : engine === "open"
+        ? "Claude's runs use the open-source engine (your ComfyUI): this install is set to Open source only."
+        : engineMode() === "both"
+          ? "Claude's runs use the cloud engine and your paid providers, not your GPU: Fuobe's MCP server follows Settings → Engine mode, which is set to both. Set it to Open source only to run them on your ComfyUI, or use Generate here."
+          : "Claude's runs use the cloud engine and your paid providers: this install is set to paid cloud APIs only.";
+  return { message, bytes: new TextEncoder().encode(message).length, needsToken: authEnabled(), engine, ...(engineNote && { engineNote }), parts: plan.parts, partSeconds: plan.partSeconds };
 }
 
 // ---------------------------------------------------------------------------

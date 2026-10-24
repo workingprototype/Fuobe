@@ -48,6 +48,7 @@ export function SeriesView({ id, voices }: { id: string; voices: PickerData["voi
     s && settings && channel
       ? { prompt: s.prompt, settings: { ...settings, engine: channel.settings.engine, episodes: count }, voice: channel.settings.voice, seriesId: s.id, subtitles: channel.settings.subtitles, music: channel.settings.music }
       : null,
+    s ? String(s.updatedAt) : undefined,
   );
 
   const header = (
@@ -60,15 +61,39 @@ export function SeriesView({ id, voices }: { id: string; voices: PickerData["voi
   );
 
   if (error || (s && !channel)) {
+    // Made, but its channel was deleted in Faceless Studio (its episodes went with it): only deleting is left.
+    const orphan = !error && !!s?.made;
+    const removeOrphan = () =>
+      s &&
+      del.mutate(s.id, {
+        onSuccess: () => {
+          toast("Series deleted");
+          router.push("/content-factory");
+        },
+        onError: (e) => toast.error((e as Error).message),
+      });
     return (
       <div className="flex min-h-svh min-w-0 flex-col">
         {header}
         <div className="mx-auto w-full max-w-[640px] px-3 pt-16 text-center sm:px-6">
-          <h1 className="font-heading text-[28px]">{error ? "Series not found" : "This series hasn't been made yet"}</h1>
-          <p className="mt-2 text-[14px] text-muted-foreground">{error ? "It may have been deleted." : "Its reference is in the Content Factory composer: say what it's about and generate it there."}</p>
-          <Button asChild className="mt-6 rounded-full">
-            <Link href="/content-factory">Open Content Factory</Link>
-          </Button>
+          <h1 className="font-heading text-[28px]">{error ? "Series not found" : orphan ? "This series' channel was deleted" : "This series hasn't been made yet"}</h1>
+          <p className="mt-2 text-[14px] text-muted-foreground">
+            {error
+              ? "It may have been deleted."
+              : orphan
+                ? "Its channel and episodes were deleted in Faceless Studio, so nothing more can be made here. Start a new series from the same reference in Content Factory."
+                : "Its reference is in the Content Factory composer: say what it's about and generate it there."}
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {orphan && (
+              <Button variant="secondary" className="rounded-full" onClick={removeOrphan} disabled={del.isPending}>
+                {del.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete series
+              </Button>
+            )}
+            <Button asChild className="rounded-full">
+              <Link href="/content-factory">Open Content Factory</Link>
+            </Button>
+          </div>
         </div>
       </div>
     );

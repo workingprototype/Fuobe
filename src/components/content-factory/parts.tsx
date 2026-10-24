@@ -298,6 +298,7 @@ export function SeriesPriceLine({ data, loading, engine, className }: { data: Se
       <span className="font-mono text-[12px] text-muted-foreground tabular-nums">
         {formatLength(data.seconds)} · {data.scenes} scene{data.scenes === 1 ? "" : "s"} each
       </span>
+      {data.briefPending && <span className="text-[12px] text-muted-foreground">· priced again once the clip is read</span>}
     </span>
   );
 }
@@ -349,8 +350,26 @@ export function ClaudeDialog({ open, onOpenChange, ask }: { open: boolean; onOpe
           </li>
           <li className="min-w-0 space-y-1.5">
             <p className="font-medium">
-              <span className="text-muted-foreground">2.</span> Paste this into a new Claude chat
+              <span className="text-muted-foreground">2.</span> Paste this into Claude Code
             </p>
+            {out?.engineNote && (
+              <p className="flex items-start gap-1.5 rounded-lg bg-warning/10 px-2.5 py-2 text-[12px]">
+                <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                <span className="min-w-0">{out.engineNote}</span>
+              </p>
+            )}
+            {out && out.parts > 1 && (
+              <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+                <Film className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0">
+                  Each episode comes out as {out.parts} videos of about {formatLength(out.partSeconds)}: Fuobe&apos;s faceless_episode tool makes up to 8 scenes a call. Put them together with{" "}
+                  <Link href="/video-tools/join" className="underline underline-offset-2">
+                    Video tools → Join clips
+                  </Link>
+                  .
+                </span>
+              </p>
+            )}
             {error ? (
               <p role="alert" className="flex items-start gap-1.5 text-[12px] text-destructive">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {error}
