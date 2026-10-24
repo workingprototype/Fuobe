@@ -227,7 +227,8 @@ export const TOOL_MODELS: Record<LayerTool, { cloud: string[]; open: string[] }>
   split: { cloud: ["seedream-5-layers", "seedream-5-flash-layers", "qwen-image-layered-cloud"], open: ["oss-qwen-layered", "oss-qwen-layered-control"] },
   regenerate: { cloud: ["nano-banana-pro", "seedream-5-pro", "nano-banana-2"], open: ["oss-qwen-edit", "oss-flux-kontext"] },
   "generate-layer": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-z-image-turbo", "oss-qwen-image"] },
-  // Ideogram also lifts the text off the picture; Florence-2 only reads it, for a tenth of a cent.
+  // Ideogram ($0.09) also lifts the text off the picture, which the editor doesn't use; Florence-2 only
+  // reads it (fal lists $0 per compute second, real cost unverified: the catalog's $0.001 is a placeholder).
   "text-detect": { cloud: ["ideogram-3-text-layers", "florence-2-ocr"], open: ["oss-ocr-lines"] },
   "text-edit": { cloud: ["nano-banana-pro", "seedream-5-pro"], open: ["oss-qwen-edit"] },
   "bg-remove": { cloud: ["birefnet-cloud", "ideogram-remove-bg"], open: ["oss-rmbg"] },

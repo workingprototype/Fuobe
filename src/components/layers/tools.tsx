@@ -227,6 +227,22 @@ function KeepAlpha({ node, value, onChange }: { node?: LayerNode; value: boolean
   );
 }
 
+/**
+ * A layer as a model should read it: a transparent one (a decomposition's text layer) on a backdrop
+ * its content stands out from, since models see no alpha (transparent pixels read as black). The
+ * stored render's URL, or undefined for a layer without transparency (it goes as it is).
+ */
+async function onBackdrop(node: LayerNode, name: string): Promise<string | undefined> {
+  const c = await renderNative(node, 2048);
+  const bg = readableBackdrop(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data);
+  if (!bg) return undefined;
+  const [flat, f] = blankCanvas(c.width, c.height);
+  f.fillStyle = bg;
+  f.fillRect(0, 0, c.width, c.height);
+  f.drawImage(c, 0, 0);
+  return uploadRender(flat, name);
+}
+
 function HowItWorks({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-lg border bg-card px-3 py-2.5">
@@ -462,6 +478,9 @@ function EditTextTool() {
   const editJob = latestJob(jobs, ["text-edit"], scopeId);
   const { modelId, model, setModelId } = useToolModel("text-edit");
   const detector = useToolModel("text-detect");
+  /** Ideogram or Florence-2 on the cloud: the picker stays in reach once rows are listed. */
+  const detectors = TOOL_MODELS["text-detect"][engine].length;
+  const [keepAlpha] = useKeepAlpha(node);
   const { busy, go } = useRun();
   const [rows, setRows] = useState<{ from: string; to: string; box: Box | null }[]>([]);
   const [restored, setRestored] = useState(false);
@@ -502,28 +521,21 @@ function EditTextTool() {
   const [preparing, setPreparing] = useState(false);
   const detecting = !!detect && isRunning(detect);
   const detectCost = costLabel(detector.model, isDemo(detector.model));
+  /** A transparent layer (a decomposition's text) goes on a backdrop its text stands out from, to the detector and the edit model alike. */
+  const readable = async () => {
+    if (!node) return undefined;
+    try {
+      return await onBackdrop(node, `${node.name}-text`);
+    } catch {
+      return undefined; // The layer goes as it is.
+    }
+  };
   const startDetect = async () => {
     setLoadedFor(null);
     setRestored(false);
     setUnreadable(false);
     setPreparing(true);
-    // A transparent layer (a decomposition's text) goes on a backdrop its text stands out from.
-    let image: string | undefined;
-    if (node) {
-      try {
-        const c = await renderNative(node, 2048);
-        const bg = readableBackdrop(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data);
-        if (bg) {
-          const [flat, f] = blankCanvas(c.width, c.height);
-          f.fillStyle = bg;
-          f.fillRect(0, 0, c.width, c.height);
-          f.drawImage(c, 0, 0);
-          image = await uploadRender(flat, `${node.name}-text`);
-        }
-      } catch {
-        // The layer goes as it is.
-      }
-    }
+    const image = await readable();
     setPreparing(false);
     void go({ tool: "text-detect", target, image, modelId: detector.modelId, label: "Detect text" });
   };
@@ -531,8 +543,24 @@ function EditTextTool() {
     setTyping(true);
     setRows([...rows, { from: "", to: "", box: null }]);
   };
-  const generate = () =>
-    void go({ tool: "text-edit", target, modelId, settings: { rows: changes.map(({ from, to }) => ({ from, to })), keepAlpha: !!node && node.z > 0 }, label: textJobTitle(changes) });
+  // A see-through layer gets its cut-out back after the edit (the flattened backdrop goes with it).
+  const generate = async () => {
+    setPreparing(true);
+    const image = await readable();
+    setPreparing(false);
+    void go({ tool: "text-edit", target, image, modelId, settings: { rows: changes.map(({ from, to }) => ({ from, to })), keepAlpha }, label: textJobTitle(changes) });
+  };
+  const detectorPicker = (
+    <>
+      <ModelSelect tool="text-detect" value={detector.modelId} onChange={detector.setModelId} label="Detector" />
+      {detector.model && detectors > 1 && (
+        <p className="text-[11px] text-pretty text-subtle-foreground">
+          {detector.model.tagline}
+          {detector.model.pricing?.note && !isDemo(detector.model) ? ` · The price is an estimate: ${detector.model.pricing.note}.` : ""}
+        </p>
+      )}
+    </>
+  );
   const listed = rows.length > 0 || typing;
   const found = detect?.result?.status === "succeeded" && loadedFor === detect.id;
 
@@ -542,8 +570,7 @@ function EditTextTool() {
       <HowItWorks>Edit text finds the text on your image and lists it here. Change any line, then generate a new image with your wording in the original design.</HowItWorks>
       {!rows.length && (
         <div className="space-y-2">
-          <ModelSelect tool="text-detect" value={detector.modelId} onChange={detector.setModelId} label="Detector" />
-          {detector.model && TOOL_MODELS["text-detect"][engine].length > 1 && <p className="text-[11px] text-pretty text-subtle-foreground">{detector.model.tagline}</p>}
+          {detectorPicker}
           <Button variant="secondary" className="w-full rounded-full" onClick={() => void startDetect()} disabled={busy || preparing || detecting || !detector.model}>
             {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
           </Button>
@@ -601,8 +628,10 @@ function EditTextTool() {
       )}
       {listed && (
         <>
+          {/* Once rows are listed, "Detect again" runs the detector picked here (detected rows can't be removed). */}
+          {rows.length > 0 && detectors > 1 && detectorPicker}
           <ModelSelect tool="text-edit" value={modelId} onChange={setModelId} />
-          <JobState job={editJob} failedTitle="Failed to apply the text changes" onRetry={generate} />
+          <JobState job={editJob} failedTitle="Failed to apply the text changes" onRetry={() => void generate()} />
           <div className="flex items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -615,7 +644,7 @@ function EditTextTool() {
               </TooltipContent>
             </Tooltip>
             <div className="flex-1">
-              <RunRow cost={costLabel(model, isDemo(model))} busy={busy} disabled={!changes.length || (editJob && isRunning(editJob))} onClick={generate}>
+              <RunRow cost={costLabel(model, isDemo(model))} busy={busy || preparing} disabled={!changes.length || (editJob && isRunning(editJob))} onClick={() => void generate()}>
                 <Wand2 /> Generate
               </RunRow>
             </div>
