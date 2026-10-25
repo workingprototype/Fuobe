@@ -5,7 +5,7 @@ import type { Engine } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import type { Box, LayerDoc, LayerJob, LayerJobInput, LayerModelInfo, LayerNode, LayerProject, LayerTool, LayerVersion } from "@/lib/layers";
 
-export type StageMode = "select" | "hand" | "brush" | "eraser" | "region" | "frame";
+export type StageMode = "select" | "hand" | "brush" | "eraser" | "region" | "frame" | "inpaint";
 
 /** The part of the picture a tool works on. */
 export type Target = { kind: "node"; node: LayerNode } | { kind: "whole" } | { kind: "region"; rect: Box };
@@ -18,6 +18,18 @@ export interface MaskEdit {
   canvas: HTMLCanvasElement;
   size: number;
   version: number;
+}
+
+/**
+ * Inpaint's painted area: white strokes on a transparent canvas the size of the picture the tool
+ * sends, over a layer (it follows the layer as it moves) or the whole image.
+ */
+export interface PaintEdit {
+  /** The layer it's painted on; none = the whole image. */
+  nodeId?: string;
+  canvas: HTMLCanvasElement;
+  /** The eraser takes paint away. */
+  erase: boolean;
 }
 
 export interface EditorCtx {
@@ -54,6 +66,14 @@ export interface EditorCtx {
   frame: Box | null;
   setFrame: (r: Box | null) => void;
   mask: MaskEdit | null;
+  /** Inpaint's painted area (the stage paints into it while the mode is "inpaint"). */
+  paint: PaintEdit | null;
+  setPaint: (p: PaintEdit | null) => void;
+  /** Bumped on every stroke into the painted area. */
+  paintVersion: number;
+  /** Brush size in document pixels (masks and Inpaint). */
+  brushSize: number;
+  setBrushSize: (n: number) => void;
   /** A box (doc px) to outline on the canvas (an Edit text row under the pointer). */
   setHighlight: (b: Box | null) => void;
   /** Live previews drawn instead of a layer (colour grading), by node id ("__whole" = an overlay over everything). */
@@ -66,7 +86,7 @@ export interface EditorCtx {
   setSplitTarget: (id: string | null) => void;
 }
 
-export type ToolId = "decompose" | "edit-text" | "remove-bg" | "regional" | "upscale" | "relight" | "angles" | "expand" | "grade";
+export type ToolId = "decompose" | "edit-text" | "remove-bg" | "regional" | "inpaint" | "upscale" | "enhance" | "relight" | "angles" | "expand" | "grade";
 
 /** The tool form that started each kind of job (none: the layer card or the Generate layer dialog). */
 export const TOOL_FOR_JOB: Record<LayerTool, ToolId | null> = {
@@ -82,6 +102,8 @@ export const TOOL_FOR_JOB: Record<LayerTool, ToolId | null> = {
   relight: "relight",
   angles: "angles",
   expand: "expand",
+  inpaint: "inpaint",
+  enhance: "enhance",
 };
 
 /**

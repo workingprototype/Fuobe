@@ -166,6 +166,19 @@ describe("laying out the other tools", () => {
       ["Cut-out", false],
     ]);
   });
+
+  it("lays Inpaint and Enhancer results out like the other edits", () => {
+    const d = doc([node("bg", 0, { w: 400, h: 300 }), node("face", 1, { x: 40, y: 20 })], 400, 300);
+    // On a layer: its next revision, the prompt kept with it.
+    const enh = applyMeasured(d, job("enhance", { nodeId: "face", frame: [40, 20, 100, 50], label: "Skin" }), one("/api/files/skin.png", [200, 100]), opts());
+    expect(enh.doc.nodes[1]).toMatchObject({ src: "/api/files/skin.png", revision: 1, x: 40, y: 20, w: 100, h: 50 });
+    expect(enh.message).toBe("face: skin done");
+    // On the whole picture: a new layer on top, called what it is.
+    const ip = applyMeasured(d, job("inpaint", { label: "Inpaint", settings: { prompt: "a vase" } }), one("/api/files/ip.png", [400, 300]), opts());
+    expect(ip.doc.nodes[2]).toMatchObject({ name: "Inpainted", x: 0, y: 0, w: 400, h: 300 });
+    expect(ip.doc.nodes[2].revisions[0].prompt).toBe("a vase");
+    expect(imagesToMeasure(job("inpaint"))).toEqual([{ url: "/api/files/out.png", alpha: false }]);
+  });
 });
 
 describe("a result landing on a document edited meanwhile", () => {
