@@ -53,6 +53,7 @@ export default function SignatureChips({
   value,
   onChange,
   engine,
+  lockByDefault,
   presetSource,
   styleId,
   onStyleIdTaken,
@@ -60,6 +61,8 @@ export default function SignatureChips({
   value: Signature | undefined;
   onChange: (update: (s: Signature | undefined) => Signature) => void;
   engine: Engine;
+  /** The model locks a picked palette unless it's turned off (Fuobe Soul's HEX on the open engine). */
+  lockByDefault?: boolean;
   /** The model's own preset list (options.presets.source): the Moodboard panel opens on it ("soul-v1" = Soul's styles). */
   presetSource?: string;
   /** A Soul `style_id` in the draft's settings (a reused Soul run): shown and kept as the Moodboard pick. */
@@ -100,6 +103,7 @@ export default function SignatureChips({
           <ColorSignaturePanel
             value={pal}
             engine={engine}
+            lockByDefault={lockByDefault}
             onPick={(p) => {
               onChange((s) => ({ ...s, palette: p }));
               // Toggling the lock keeps the panel open; picking a palette closes it.

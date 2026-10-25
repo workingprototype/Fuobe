@@ -208,3 +208,53 @@ describe("Fuobe Soul through the server", () => {
     setSetting("engineMode", "both");
   });
 });
+
+describe("Soul HEX: a palette on Fuobe Soul", () => {
+  const PAL = { id: "p1", name: "Teal Dusk", colors: ["#102030", "#2A9D8F"], background: "#264653", slug: null };
+  const signed = async (engine: "open" | "cloud", modelId = "fuobe-soul", lock?: boolean) => {
+    const { applySignature } = await import("@/lib/catalog/palettes");
+    const { signatureCaps } = await import("@/server/palettes");
+    // The composer's catalog is the engine's view of each model.
+    const view = (id: string) => {
+      const m = getModel(id);
+      return m && onEngine(m, engine);
+    };
+    return applySignature({ feature: "image", modelId, prompt: "a lighthouse at dusk", presetId: "v1-90s-grain", engine }, { palette: { ...PAL, ...(lock !== undefined && { lock }) } }, { caps: signatureCaps(), getModel: view });
+  };
+
+  it("writes the colours into the prompt on both engines and locks them on the open engine unless turned off", async () => {
+    const open = await signed("open");
+    expect(open.modelId).toBe("fuobe-soul");
+    expect(open.request.presetId).toBe("v1-90s-grain");
+    expect(open.request.signature?.words).toMatch(/^Color palette: use only these colors.*#102030, #2A9D8F; background color #264653\.$/);
+    expect(open.lock).toEqual({ colors: ["#102030", "#2A9D8F", "#264653"] });
+    expect((await signed("open", "fuobe-soul-cinema")).lock).toBeTruthy();
+    expect((await signed("open", "fuobe-soul", false)).lock).toBeUndefined();
+    // fal has no colour-match step: the cloud gets the words only.
+    const cloud = await signed("cloud");
+    expect(cloud.lock).toBeUndefined();
+    expect(cloud.request.signature?.words).toMatch(/Color palette/);
+    // Other open models still lock only when asked.
+    expect((await signed("open", "oss-qwen-image")).lock).toBeUndefined();
+  });
+
+  it("puts the palette's words inside the look's prompt, and the lock keeps the look's strength and engine", async () => {
+    const open = await signed("open");
+    const p = previewGeneration(open.request);
+    expect(p.prompt).toMatch(/a lighthouse at dusk\. Color palette: use only these colors/);
+    const { POST } = await import("@/app/api/palettes/lock/route");
+    const res = await POST(
+      new Request("http://localhost/api/palettes/lock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: { ...open.request, presetStrength: 0.6 }, colors: open.lock!.colors }),
+      }),
+    );
+    expect(res.status).toBe(201);
+    const { items } = (await res.json()) as { items: { modelId: string; engine: string; request: { presetId?: string; presetStrength?: number; engine?: string } }[] };
+    const first = items.find((g) => g.modelId === "fuobe-soul")!;
+    expect(first.request).toMatchObject({ presetId: "v1-90s-grain", presetStrength: 0.6, engine: "open" });
+    expect(first.engine).toBe("open");
+    expect(items.some((g) => g.modelId === "oss-palette-image")).toBe(true);
+  });
+});

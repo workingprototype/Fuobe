@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
 import { dualEngine } from "@/lib/catalog/engines";
+import { locksByDefault } from "@/lib/catalog/palettes";
 import { formatsOf } from "@/lib/av/formats";
 import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
@@ -618,6 +619,7 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.signature}
           onChange={(update) => setDraft((d) => ({ signature: update(d.signature) }))}
           engine={engine}
+          lockByDefault={locksByDefault(model?.id)}
           presetSource={opts.presets?.source}
           styleId={soulStyles ? (p.extra?.[opts.presets!.param] as string | undefined) : undefined}
           onStyleIdTaken={() => setExtra(opts.presets!.param, undefined)}

@@ -382,6 +382,13 @@ export interface SignedRequest {
   lock?: { colors: string[] };
 }
 
+/**
+ * Fuobe Soul's HEX palette (Soul, Soul HD, Soul Cinema): the colours in the prompt on both engines, and on the open
+ * engine the palette lock after it unless it was turned off (research §4.4: the lock is the open engine's HEX; fal has
+ * no colour-match step). Other open models lock only when asked.
+ */
+export const locksByDefault = (modelId: string | undefined): boolean => !!modelId && (Object.values(SOUL_MODEL_IDS) as string[]).includes(modelId);
+
 /** Models a signature can move a request to; studios that offer the chips keep them in their model slice. */
 export const SIGNATURE_MODELS = {
   cloudRefs: "nano-banana-pro",
@@ -564,7 +571,7 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
     } else {
       words.push(palettePrompt(pal));
       r = { ...r, params: { ...r.params, palette: all.slice(0, 16) } };
-      if (model.engine === "open" && pal.lock) {
+      if (model.engine === "open" && (pal.lock ?? locksByDefault(model.id))) {
         lock = { colors: all };
         notes.push(`Then recoloured to “${pal.name}” by a palette-transfer step`);
       }
