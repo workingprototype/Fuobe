@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Writes the generated suites from the research, so the case files can't drift from it:
 //   cases/soul.json  one case per Soul look (139, ids from docs/research/higgsfield-image-studios.json)
+//   cases/soul-cinema.json  Soul Cinema's one look (research soul.soulCinema) on cinematic scenes
+//   cases/soul-hex.json  Soul HEX: Fuobe's own palettes in the prompt, and the open engine's palette lock
 //   cases/dop.json   one case per DoP motion / effect that the research gives a LoRA and the catalog has
 //   cases/case.schema.json  the suite format as JSON Schema (for editors)
 // The prompts are Fuobe's own (never Higgsfield's). Run: node scripts/eval/gen-cases.mjs [--check]
@@ -46,7 +48,7 @@ function soulSuite() {
     $schema: "./case.schema.json",
     suite: "soul",
     title: "Fuobe Soul · the 139 looks",
-    description: `${HEADER} Each look on three subjects with pinned seeds: the research recipe (look template, triggers, LoRAs at their listed strengths) against the same words without LoRAs, half-strength LoRAs, the bare prompt, and the shipped Original once it exists. Style references (your own or licensed images, never Higgsfield previews) go in local/references/soul/<look>/.`,
+    description: `${HEADER} Each look on three subjects with pinned seeds: the research recipe (look template, triggers, LoRAs at their listed strengths) against the same words without LoRAs, half-strength LoRAs, the bare prompt, and the shipped Original (fuobe-soul; Soul HD for a lettering look). The Original's grade and overlay are applied in the browser after generation, so its scores are of the raw picture. Style references (your own or licensed images, never Higgsfield previews) go in local/references/soul/<look>/.`,
     original: ["fuobe-soul", "fuobe-soul-hd"],
     kind: "image",
     recipe: "soul-look",
@@ -69,7 +71,7 @@ function soulSuite() {
       "half-strength": { description: "The recipe with every LoRA at half strength (over-cooking check)", loraScale: 0.5 },
       plain: { description: "The base model with the subject prompt alone", template: false, loras: "none" },
       original: {
-        description: "The shipped Original on the server (O2's fuobe-soul): the look's Fuobe id (v1-general) goes in presetId and the server applies its own recipe",
+        description: "The shipped Original on the server (O2's fuobe-soul, on the engine the run names): the look's Fuobe id (v1-general) goes in presetId and the server applies its own recipe",
         models: { open: ["fuobe-soul"], cloud: ["fuobe-soul"], demo: ["fuobe-soul"] },
         lookParam: "presetId",
       },
@@ -78,10 +80,144 @@ function soulSuite() {
       id: `soul/${l.slug}`,
       title: `Soul ${l.family === "v1" ? "v1" : "2.0"} · ${l.name}`,
       look: l.id,
-      ...(l.recipe.base === "qwen-image-2512" && { models: qwen, extra: { steps: 20 } }),
+      // A lettering look is made for Qwen-Image 2512: the Original that runs it is Fuobe Soul HD.
+      ...(l.recipe.base === "qwen-image-2512" && { models: qwen, variantModels: { original: { open: ["fuobe-soul-hd"], cloud: ["fuobe-soul-hd"], demo: ["fuobe-soul-hd"] } }, extra: { steps: 20 } }),
       prompts: [SOUL_PROMPTS[0], SOUL_PROMPTS[1], thirdPrompt(l.id)],
       references: `local/references/soul/${l.slug}`,
       tags: [l.family, slug(l.category) || "all", slug(l.recipe.coverage), ...(l.recipe.trainOwn ? ["train-own"] : []), ...(l.recipe.needsCivitaiToken ? ["civitai"] : [])],
+    })),
+  };
+}
+
+/** Today's Z-Image Turbo bases with Soul's sampler settings (§4); the Originals apply their own. */
+const SOUL_TARGETS = {
+  open: { models: ["oss-z-image-turbo"], extra: { steps: 8, shift: 3 } },
+  cloud: { models: ["z-image-turbo-cloud"], extra: { num_inference_steps: 8, enable_prompt_expansion: false, output_format: "png" } },
+  demo: { models: ["oss-z-image-turbo"] },
+};
+const everywhere = (id) => ({ open: [id], cloud: [id], demo: [id] });
+
+/** A research library LoRA (loraLibrary[key]) as a case's LoRA, at the recipe's strength. */
+function libraryLora(key, strength) {
+  const l = research().recipes.loraLibrary.find((x) => x.key === key);
+  if (!l) throw new Error(`no LoRA ${key} in the research's loraLibrary`);
+  return {
+    name: l.name,
+    file: l.file,
+    url: l.url,
+    ...(l.hostedUrl && { hostedUrl: l.hostedUrl }),
+    strength,
+    ...(l.trigger && { trigger: l.trigger }),
+    base: l.base,
+    licence: l.licence,
+    commercial: l.commercial !== false,
+    hostedOk: l.hostedOk !== false,
+    download: l.download ?? (/civitai\.com/.test(l.url ?? "") ? "civitai-token" : "direct"),
+  };
+}
+
+/** Cinematic scenes for Soul Cinema (Fuobe's own words), one pinned seed each. */
+const CINEMA_SCENES = [
+  { id: "diner", seed: 4101, text: "a waitress refills a coffee cup for a tired trucker in an empty roadside diner at night" },
+  { id: "platform", seed: 4102, text: "a woman in a trench coat waits alone on a rain-soaked train platform, wide shot" },
+  { id: "rooftop", seed: 4103, text: "two detectives argue on a rooftop above a city at blue hour" },
+  { id: "desert", seed: 4104, text: "a lone rider crosses a desert ridge at sunset, long shadow, wide landscape" },
+  { id: "kitchen", seed: 4105, text: "a family eats breakfast in a sunlit farmhouse kitchen, the youngest spills milk" },
+  { id: "corridor", seed: 4106, text: "a nurse walks down a hospital corridor at 3am under flickering lights" },
+];
+
+function soulCinemaSuite() {
+  const { soul } = research().recipes;
+  const cinema = soul.soulCinema;
+  const tail = soul.template.tails[cinema.tail];
+  if (!tail) throw new Error(`no "${cinema.tail}" tail in the research's soul.template.tails`);
+  const loras = cinema.loras.map((l) => libraryLora(l.key, l.strength));
+  return {
+    $schema: "./case.schema.json",
+    suite: "soul-cinema",
+    title: "Fuobe Soul Cinema · one film look",
+    description: `${HEADER} Soul Cinema has one fixed look (research soul.soulCinema): ${loras.map((l) => `${l.name} at ${l.strength}`).join(" + ")}, the "${cinema.tail}" tail, a ${cinema.grades.join(" or ")} grade after generation (in the browser, so the Original's scores are of the raw picture) and ${cinema.defaultAspect} by default. The recipe on today's base against its words alone, the bare prompt, and the shipped Original (fuobe-soul-cinema). A civitai LoRA without a mirrored copy is left out on the cloud (the runner says so). Style references (your own or licensed film stills) go in local/references/soul-cinema/.`,
+    original: "fuobe-soul-cinema",
+    kind: "image",
+    targets: SOUL_TARGETS,
+    defaults: {
+      seeds: [1001],
+      params: { aspectRatio: cinema.defaultAspect },
+      metrics: ["clip", "aesthetic", "style"],
+      variant: "recipe",
+      timeoutSeconds: 900,
+    },
+    variants: {
+      recipe: { description: "Soul Cinema's research recipe on today's base: its LoRAs with their triggers, then the cine tail", loras, words: tail },
+      "prompt-only": { description: "The cine tail without the LoRAs: do they earn their slots?", loras: "none", words: tail },
+      plain: { description: "The base model with the scene alone", template: false, loras: "none" },
+      original: { description: "The shipped Original (fuobe-soul-cinema): the server adds its LoRAs, tail and grade", models: everywhere("fuobe-soul-cinema"), loras: "none" },
+    },
+    cases: CINEMA_SCENES.map((p) => ({
+      id: `soul-cinema/${p.id}`,
+      title: `Soul Cinema · ${p.id}`,
+      prompts: [p],
+      references: "local/references/soul-cinema",
+      tags: ["cinema"],
+    })),
+  };
+}
+
+/** Fuobe's own palettes for Soul HEX (never Higgsfield's), five colours each, dark to light. */
+const HEX_PALETTES = [
+  { id: "teal-dusk", name: "Teal dusk", colors: ["#0B1D2A", "#1F4E5F", "#2A9D8F", "#E9C46A", "#F4A261"] },
+  { id: "candy-pop", name: "Candy pop", colors: ["#118AB2", "#06D6A0", "#FF5DA2", "#FFD166", "#FDF6EC"] },
+  { id: "green-editorial", name: "Green editorial", colors: ["#1B1B1B", "#0F3D2E", "#2E7D4F", "#A7C957", "#F2E8CF"] },
+];
+
+const HEX_PROMPTS = [
+  { id: "portrait", seed: 5101, text: "a woman in a knitted sweater sits by a window with a cup of tea, half-length portrait" },
+  { id: "still-life", seed: 5102, text: "a still life of fruit, a ceramic jug and a folded cloth on a wooden table" },
+];
+
+/** The palette sentence the composer's Color signature adds (src/lib/catalog/palettes.ts palettePrompt, no background). */
+export const hexWords = (colors) => `Color palette: use only these colors, in roughly this balance: ${colors.map((c) => c.toUpperCase()).join(", ")}.`;
+
+function soulHexSuite() {
+  return {
+    $schema: "./case.schema.json",
+    suite: "soul-hex",
+    title: "Fuobe Soul HEX · palettes",
+    description: `${HEADER} A palette on Fuobe Soul, as the composer's Color signature sends it: the colours in the prompt on both engines, and on the open engine the palette lock after it (oss-palette-image, POST /api/palettes/lock: on by default for Fuobe Soul). Against the same words on today's base, Z-Image Turbo · Palette (the open engine's palette model before the Originals) and Fuobe Soul without the palette. The palette metric scores how closely each picture keeps to the colours (mean ΔE to the nearest one, and how many of them it uses). The palettes are Fuobe's own.`,
+    original: "fuobe-soul",
+    kind: "image",
+    targets: SOUL_TARGETS,
+    defaults: {
+      seeds: [1001],
+      params: { aspectRatio: "3:4" },
+      metrics: ["palette", "clip", "aesthetic"],
+      variant: "words",
+      timeoutSeconds: 900,
+    },
+    variants: {
+      words: { description: "Fuobe Soul (its General look) with the palette in the prompt: the cloud's Soul HEX", models: everywhere("fuobe-soul") },
+      lock: {
+        description: "Fuobe Soul with the palette in the prompt, then the palette lock (strength 0.8): the open engine's Soul HEX",
+        models: { open: ["fuobe-soul"], demo: ["fuobe-soul"] },
+        engines: ["demo", "open"],
+        submit: { route: "/api/palettes/lock", body: { request: "{{request}}", colors: "{{request.params.palette}}" }, estimate: false },
+      },
+      base: { description: "The palette in the prompt on today's base, no look" },
+      "palette-model": {
+        description: "Z-Image Turbo · Palette: the provider writes the colours into the prompt and locks them in one graph (open engine)",
+        models: { open: ["oss-zimage-palette"], demo: ["oss-zimage-palette"] },
+        engines: ["demo", "open"],
+        template: false,
+      },
+      plain: { description: "Fuobe Soul without the palette's words (the control)", models: everywhere("fuobe-soul"), template: false },
+    },
+    cases: HEX_PALETTES.map((p) => ({
+      id: `soul-hex/${p.id}`,
+      title: `Soul HEX · ${p.name}`,
+      words: hexWords(p.colors),
+      params: { palette: p.colors },
+      prompts: HEX_PROMPTS,
+      tags: ["hex"],
     })),
   };
 }
@@ -171,12 +307,12 @@ const write = (name, data, check) => {
 
 export function generated() {
   const dop = dopSuite();
-  return { "soul.json": soulSuite(), "dop.json": dop.suite, "case.schema.json": schemaJson(), later: dop.later };
+  return { "soul.json": soulSuite(), "soul-cinema.json": soulCinemaSuite(), "soul-hex.json": soulHexSuite(), "dop.json": dop.suite, "case.schema.json": schemaJson(), later: dop.later };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const check = process.argv.includes("--check");
   const out = generated();
-  for (const name of ["soul.json", "dop.json", "case.schema.json"]) write(name, out[name], check);
+  for (const name of ["soul.json", "soul-cinema.json", "soul-hex.json", "dop.json", "case.schema.json"]) write(name, out[name], check);
   console.log(`soul: ${out["soul.json"].cases.length} looks · dop: ${out["dop.json"].cases.length} presets${out.later.length ? ` (${out.later.length} research names not in the catalog yet)` : ""}`);
 }
