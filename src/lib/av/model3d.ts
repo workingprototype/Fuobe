@@ -1,41 +1,181 @@
 import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 
 /**
- * Image to 3D / Product spin: which model, and what a finished job gives the viewer — the .glb, a
- * turntable video (TRELLIS.2 renders one; for models that return only a mesh the page records one in
- * the browser), a poster, the source photo — and where "Animate the spin" goes next.
+ * Image to 3D / Product spin: the modes (from an image, from several images, from text, pick an object, a splat),
+ * which model each runs on per engine, and what a finished job gives the viewer — the .glb (or the splat), a
+ * turntable video (TRELLIS.2 and TripoSplat render one; for models that return only a mesh the page records one
+ * in the browser), a poster, the source photo — and where "Animate the spin" and "Rig & animate" go next.
  */
 export const MODEL3D_FEATURE = "image-to-3d";
+/** The helper steps of a chain (the open text-to-3D still): kept out of the page's results and the Library. */
+export const MODEL3D_STEP_FEATURE = "image-to-3d-step";
 
-export const MODELS_3D: Record<Engine, { id: string; note: string }[]> = {
-  cloud: [
-    { id: "hunyuan-3d-3-1-pro", note: "Textured, game-ready · ≈ $0.38" },
-    { id: "hunyuan-3d-3-1-rapid", note: "Faster single view · ≈ $0.23" },
-    { id: "trellis-2", note: "Detailed geometry · ≈ $0.30" },
-    { id: "tripo-h3-1", note: "Clean topology, PBR · ≈ $0.30" },
-    { id: "meshy-7-1", note: "Textured, optional rigging · ≈ $1.20" },
-  ],
-  open: [
-    { id: "oss-trellis2", note: "Textured GLB + turntable video · 16 GB GPU · MIT" },
-    { id: "oss-hunyuan3d-21", note: "Shape only · 10 GB GPU" },
-  ],
+export type Model3dMode = "image" | "multi" | "text" | "objects" | "splat";
+
+export const MODEL3D_MODES: { id: Model3dMode; label: string; hint: string }[] = [
+  { id: "image", label: "From an image", hint: "One clear photo of one object" },
+  { id: "multi", label: "From several images", hint: "2–4 photos of the same object from different sides" },
+  { id: "text", label: "From text", hint: "Describe one object" },
+  { id: "objects", label: "Pick an object", hint: "Name what to take out of a photo" },
+  { id: "splat", label: "Splat", hint: "A Gaussian splat of the subject" },
+];
+
+export interface Model3dChoice {
+  id: string;
+  note: string;
+}
+
+/** The models each mode offers, the default first. Pick an object has no open model (SAM 3D Objects is cloud only). */
+export const MODELS_3D: Record<Model3dMode, Record<Engine, Model3dChoice[]>> = {
+  image: {
+    cloud: [
+      { id: "hunyuan-3d-3-1-pro", note: "Textured, game-ready · ≈ $0.38" },
+      { id: "hunyuan-3d-3-1-rapid", note: "Faster single view · ≈ $0.23" },
+      { id: "trellis-2", note: "Detailed geometry · ≈ $0.30" },
+      { id: "tripo-h3-1", note: "Clean topology, PBR · ≈ $0.30" },
+      { id: "meshy-7-1", note: "Textured, optional rigging · ≈ $1.20" },
+    ],
+    open: [
+      { id: "oss-trellis2", note: "Textured GLB + turntable video · 16 GB GPU · MIT" },
+      { id: "oss-hunyuan3d-21", note: "Shape only · 10 GB GPU" },
+    ],
+  },
+  multi: {
+    cloud: [{ id: "meshy-7-1-multi", note: "Textured, from 2–4 photos · ≈ $1.20" }],
+    open: [{ id: "oss-trellis2-multi", note: "The front plus up to 3 sides · textured GLB + turntable · 16 GB GPU · MIT" }],
+  },
+  text: {
+    cloud: [{ id: "tripo-h3-1-text", note: "A textured model from words · ≈ $0.20" }],
+    open: [{ id: "oss-text-trellis2", note: "Draws the object, then builds it · textured GLB + turntable · 16 GB GPU" }],
+  },
+  objects: {
+    cloud: [{ id: "sam-3d-objects", note: "Rebuilds what you name, as it stands in the photo · ≈ $0.02" }],
+    open: [],
+  },
+  splat: {
+    cloud: [{ id: "triposplat", note: "The subject as a .ply splat · ≈ $0.05" }],
+    open: [{ id: "oss-triposplat", note: "The subject as a .spz splat + an orbit video · 8 GB GPU · MIT" }],
+  },
 };
 
-export function model3dRequest(o: { engine: Engine; photo: string; modelId?: string }): GenerationRequest {
-  const id = o.modelId && MODELS_3D[o.engine].some((m) => m.id === o.modelId) ? o.modelId : MODELS_3D[o.engine][0].id;
-  return { feature: MODEL3D_FEATURE, modelId: id, op: "image-to-3d", inputs: { images: [o.photo] } };
+/** Every model the page offers (⌘K's ?model= links land on its mode). */
+export const ALL_MODELS_3D: Model3dChoice[] = Object.values(MODELS_3D).flatMap((m) => [...m.cloud, ...m.open]);
+
+/** The mode and engine a model belongs to (a ?model= link). */
+export function modeOf(id: string): { mode: Model3dMode; engine: Engine } | null {
+  for (const mode of Object.keys(MODELS_3D) as Model3dMode[]) {
+    for (const engine of ["cloud", "open"] as const) if (MODELS_3D[mode][engine].some((m) => m.id === id)) return { mode, engine };
+  }
+  return null;
+}
+
+/** The sides of an object, in the order the open multi-view graph takes them; the front is needed. */
+export const VIEW_SIDES = ["front", "left", "back", "right"] as const;
+export type ViewSide = (typeof VIEW_SIDES)[number];
+export const SIDE_LABELS: Record<ViewSide, string> = { front: "Front", left: "Left side", back: "Back", right: "Right side" };
+
+/** What the user filled in: the photo (or photos by side), the words. */
+export interface Model3dInput {
+  engine: Engine;
+  mode?: Model3dMode;
+  modelId?: string;
+  /** From an image, Pick an object, Splat. */
+  photo?: string;
+  /** From several images: the photos by side. */
+  views?: Partial<Record<ViewSide, string>>;
+  /** From text: the object; Pick an object: what to take out. */
+  prompt?: string;
+}
+
+/** The model for a mode and engine: the one picked when the mode offers it, else its default (null: none on that engine). */
+export function model3dFor(mode: Model3dMode, engine: Engine, modelId?: string): string | null {
+  const list = MODELS_3D[mode][engine];
+  return (modelId && list.find((m) => m.id === modelId)?.id) || list[0]?.id || null;
+}
+
+export const MAX_3D_PROMPT = 600;
+const NO_OPEN_OBJECTS = "Pick an object runs on SAM 3D Objects, a cloud model";
+
+/** Why the request can't go yet, in the words the button shows (null: ready). */
+export function model3dBlocker(i: Model3dInput): string | null {
+  const mode = i.mode ?? "image";
+  if (!model3dFor(mode, i.engine, i.modelId)) return NO_OPEN_OBJECTS;
+  if (mode === "multi") {
+    if (!i.views?.front) return "Add a photo of the front";
+    return VIEW_SIDES.filter((s) => i.views?.[s]).length < 2 ? "Add at least one more side" : null;
+  }
+  if (mode === "text") return i.prompt?.trim() ? null : "Describe the object";
+  if (!i.photo) return "Add a photo";
+  if (mode === "objects" && !i.prompt?.trim()) return "Name the object to take out";
+  return null;
+}
+
+/**
+ * The generation request for a mode. Several images go in side order (front, left, back, right); the open
+ * graph also gets their sides by name (params.extra.views), since a side may be missing. SAM 3D Objects
+ * always gets the words (its API reads "car" when there are none).
+ */
+export function model3dRequest(i: Model3dInput): GenerationRequest {
+  const mode = i.mode ?? "image";
+  const modelId = model3dFor(mode, i.engine, i.modelId);
+  if (!modelId) throw new Error(NO_OPEN_OBJECTS);
+  const prompt = i.prompt?.trim().slice(0, MAX_3D_PROMPT) ?? "";
+  const base = { feature: MODEL3D_FEATURE, modelId };
+  const images = i.photo ? [i.photo] : [];
+  switch (mode) {
+    case "multi": {
+      const sides = VIEW_SIDES.filter((s) => i.views?.[s]);
+      return {
+        ...base,
+        op: "image-to-3d",
+        inputs: { images: sides.map((s) => i.views![s]!) },
+        ...(i.engine === "open" && { params: { extra: { views: [...sides] } } }),
+      };
+    }
+    case "text":
+      return { ...base, op: "text-to-3d", prompt };
+    case "objects":
+      return { ...base, op: "image-to-3d", prompt, inputs: { images } };
+    case "splat":
+      return { ...base, op: "splat", inputs: { images } };
+    default:
+      return { ...base, op: "image-to-3d", inputs: { images } };
+  }
+}
+
+/** The mode a job was made in (its card goes by it). */
+export function modeOfRequest(r: Pick<GenerationRequest, "op" | "modelId" | "inputs">): Model3dMode {
+  if (r.op === "splat") return "splat";
+  if (r.op === "text-to-3d") return "text";
+  return modeOf(r.modelId)?.mode ?? ((r.inputs?.images?.length ?? 0) > 1 ? "multi" : "image");
+}
+
+/**
+ * The open text-to-3D still: one object, whole, centred on a plain background in soft light, which is
+ * what TRELLIS.2's cut-out and reconstruction want.
+ */
+export function stillPromptFor3d(prompt: string): string {
+  const words = prompt.trim().replace(/[.\s]+$/, "");
+  return `${words}. A single object, whole and centred, seen from the front at eye level, on a plain light grey background, soft even studio light, no other objects, no text`;
 }
 
 export interface Model3dView {
   glb?: string;
-  /** A rendered turntable that came with the model (TRELLIS.2 open, demo). */
+  /** A Gaussian splat (.ply / .spz / .ksplat), which the page doesn't draw: downloaded, with its turntable or preview shown. */
+  splat?: { url: string; format: string };
+  /** A rendered turntable that came with the model (TRELLIS.2, TripoSplat on the open engine, demo). */
   turntable?: string;
   poster?: string;
   /** The product photo it was made from. */
   photo?: string;
-  /** Other formats the provider returned (OBJ, FBX, USDZ…), by extension. */
+  /** Other files the provider returned (OBJ, FBX, USDZ, the splat, the walk and run clips…), by name. */
   formats: Record<string, string>;
+  /** A rigged character; `animated` when it plays an animation preset. */
+  rigged?: boolean;
+  animated?: boolean;
 }
+
+const SPLAT_FORMATS = new Set(["ply", "spz", "ksplat", "splat"]);
 
 export function model3dView(g: Pick<Generation, "outputs" | "request">): Model3dView {
   const mesh = g.outputs.find((o) => o.kind === "model3d");
@@ -46,12 +186,19 @@ export function model3dView(g: Pick<Generation, "outputs" | "request">): Model3d
   const formats: Record<string, string> = {};
   const listed = meta.formats;
   if (listed && typeof listed === "object") for (const [k, v] of Object.entries(listed as Record<string, unknown>)) if (typeof v === "string") formats[k.toLowerCase()] = v;
+  // A splat says so (meta.format), or its file's extension does. The demo's "splat" is a GLB the viewer shows.
+  const ext = mesh?.url.split("?")[0].split(".").pop()?.toLowerCase();
+  const format = str(meta.format)?.toLowerCase() ?? (ext && SPLAT_FORMATS.has(ext) ? ext : undefined);
+  const splat = mesh && format && SPLAT_FORMATS.has(format) ? { url: mesh.url, format } : undefined;
   return {
-    glb: mesh?.url,
+    glb: splat ? undefined : mesh?.url,
+    splat,
     turntable: str(meta.turntable) ?? str(meta.video) ?? video?.url,
     poster: str(meta.preview) ?? str(meta.poster) ?? g.outputs.find((o) => o.kind === "image")?.url,
     photo: g.request.inputs?.images?.[0],
     formats,
+    rigged: meta.rigged === true || undefined,
+    animated: meta.animated === true || undefined,
   };
 }
 
@@ -63,4 +210,99 @@ export function animateSpinHref(v: Model3dView, turntable?: string): string | nu
   if (clip) return `/video-edit?${new URLSearchParams({ video: clip, prompt: "Turn this product turntable into a premium commercial shot: studio lighting, soft reflections, a clean seamless backdrop; keep the product and its rotation exactly" })}`;
   if (v.photo) return `/video?${new URLSearchParams({ image: v.photo, prompt: SPIN_PROMPT })}`;
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Rig & animate (Meshy rigging on fal; cloud only — UniRig's ComfyUI pack isn't verified)
+
+export const RIG_MODEL = "meshy-rigging";
+
+/**
+ * Animation presets from Meshy's library (https://docs.meshy.ai/en/api/animation-library: 656 presets numbered
+ * 0–696, read 2026-10-25): a short list by kind; any other goes by its number.
+ */
+export const ANIMATION_PRESETS: { group: string; items: { id: number; name: string }[] }[] = [
+  {
+    group: "Everyday",
+    items: [
+      { id: 0, name: "Idle" },
+      { id: 28, name: "Wave hello" },
+      { id: 41, name: "Bow" },
+      { id: 25, name: "Nod yes" },
+      { id: 50, name: "Phone call" },
+      { id: 56, name: "Stand and chat" },
+      { id: 32, name: "Sit on a chair" },
+    ],
+  },
+  {
+    group: "Walk and run",
+    items: [
+      { id: 30, name: "Casual walk" },
+      { id: 106, name: "Confident walk" },
+      { id: 117, name: "Red carpet walk" },
+      { id: 118, name: "Skip" },
+      { id: 14, name: "Run" },
+      { id: 16, name: "Sprint" },
+      { id: 112, name: "Monster walk" },
+    ],
+  },
+  {
+    group: "Dance",
+    items: [
+      { id: 22, name: "Funny dance" },
+      { id: 74, name: "Gangnam groove" },
+      { id: 82, name: "Shake it off" },
+      { id: 64, name: "All-night dance" },
+    ],
+  },
+  {
+    group: "Jump and cheer",
+    items: [
+      { id: 466, name: "Jump" },
+      { id: 44, name: "Happy jump" },
+      { id: 452, name: "Backflip" },
+      { id: 59, name: "Victory cheer" },
+      { id: 303, name: "Cheer with both hands" },
+    ],
+  },
+  {
+    group: "Fight",
+    items: [
+      { id: 89, name: "Combat stance" },
+      { id: 87, name: "Boxing" },
+      { id: 96, name: "Kung fu punch" },
+      { id: 207, name: "Roundhouse kick" },
+      { id: 198, name: "Punch combo" },
+    ],
+  },
+  {
+    group: "Workout",
+    items: [
+      { id: 329, name: "Push-ups" },
+      { id: 319, name: "Squats" },
+    ],
+  },
+];
+
+export const ANIMATION_MAX = 696;
+export const ANIMATION_LIBRARY_URL = "https://docs.meshy.ai/en/api/animation-library";
+
+export function animationName(id: number): string {
+  for (const g of ANIMATION_PRESETS) for (const p of g.items) if (p.id === id) return p.name;
+  return `Preset ${id}`;
+}
+
+/** A preset number Meshy takes (a whole number 0–696), else null. */
+export function animationId(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= ANIMATION_MAX ? n : null;
+}
+
+/**
+ * Rig a finished model (a humanoid GLB): the skeleton plus Meshy's walk and run cycles, and with a preset the
+ * animated GLB the viewer plays.
+ */
+export function rigRequest(o: { glb: string; animation?: number | null }): GenerationRequest {
+  const animation = o.animation === undefined || o.animation === null ? null : animationId(o.animation);
+  return { feature: MODEL3D_FEATURE, modelId: RIG_MODEL, op: "rig-3d", inputs: { model3d: o.glb }, ...(animation !== null && { params: { animation } }) };
 }

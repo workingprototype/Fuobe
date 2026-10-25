@@ -2,7 +2,7 @@
  * The slim catalog behind the ⌘K palette (GET /api/search-index): names, categories and where each item
  * opens. Built on the server from the catalog, so the palette never ships prompt templates or routes.
  */
-import { MODELS_3D } from "@/lib/av/model3d";
+import { ALL_MODELS_3D, RIG_MODEL } from "@/lib/av/model3d";
 import { APPS, EFFECTS, MODELS, MOTIONS } from "@/lib/catalog";
 import { OPERATION_LABELS, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
 import type { PaletteIndex, PaletteModel, PalettePreset } from "@/lib/command-search";
@@ -61,8 +61,8 @@ const MODEL_STUDIOS: [string, StudioConfig][] = [
   ["/video-tools/colors", VIDEO_COLOR_MATCH_STUDIO],
 ];
 
-/** Image to 3D picks its model from ?model= too. */
-const IN_3D = new Set([...MODELS_3D.cloud, ...MODELS_3D.open].map((m) => m.id));
+/** Image to 3D picks its model from ?model= too (and rigs its results). */
+const IN_3D = new Set([...ALL_MODELS_3D.map((m) => m.id), RIG_MODEL]);
 /** The Layers editor's tools (cut-out, layers, text detection…): its project list is where they start. */
 const IN_LAYERS = new Set(Object.values(TOOL_MODELS).flatMap((t) => [...t.cloud, ...t.open]));
 /** Tools with their own flow (and their own model choice), by operation. */
