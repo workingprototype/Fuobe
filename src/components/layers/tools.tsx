@@ -554,7 +554,7 @@ function EditTextTool() {
     <>
       <ModelSelect tool="text-detect" value={detector.modelId} onChange={detector.setModelId} label="Detector" />
       {detector.model && detectors > 1 && (
-        <p className="text-[11px] text-pretty text-subtle-foreground">
+        <p className="text-[11px] text-pretty text-muted-foreground">
           {detector.model.tagline}
           {detector.model.pricing?.note && !isDemo(detector.model) ? ` · The price is an estimate: ${detector.model.pricing.note}.` : ""}
         </p>
@@ -1034,13 +1034,13 @@ function InpaintTool() {
         />
       </Field>
       <ModelSelect tool="inpaint" value={modelId} onChange={setModelId} />
-      {model && <p className="-mt-2 text-[11px] text-subtle-foreground">{INPAINT_SEES_TINT.has(model.id) ? `${model.name} has no mask input: it's shown the painted area tinted red.` : `${model.name} takes the painted mask itself.`}</p>}
+      {model && <p className="-mt-2 text-[11px] text-muted-foreground">{INPAINT_SEES_TINT.has(model.id) ? `${model.name} has no mask input: it's shown the painted area tinted red.` : `${model.name} takes the painted mask itself.`}</p>}
       <KeepAlpha node={node} value={keepAlpha} onChange={setKeepAlpha} />
       <JobState job={job} failedTitle="Couldn't inpaint it" onRetry={() => void run()} />
       <RunRow cost={costLabel(model, isDemo(model))} busy={busy || preparing} disabled={!painted || !prompt.trim() || !model || (!!job && isRunning(job))} onClick={() => void run()}>
         <Paintbrush /> Inpaint
       </RunRow>
-      {!painted ? <p className="text-[11px] text-subtle-foreground">Paint the area first{prompt.trim() ? "" : ", then describe it"}.</p> : !prompt.trim() && <p className="text-[11px] text-subtle-foreground">Say what should fill the painted area.</p>}
+      {!painted ? <p className="text-[11px] text-muted-foreground">Paint the area first{prompt.trim() ? "" : ", then describe it"}.</p> : !prompt.trim() && <p className="text-[11px] text-muted-foreground">Say what should fill the painted area.</p>}
     </div>
   );
 }
