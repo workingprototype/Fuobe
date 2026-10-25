@@ -2,42 +2,24 @@
 
 import { KeyRound, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
+import { CuratedCover } from "@/components/moodboards/cards";
+import { curatedLook } from "@/components/moodboards/logic";
 import { DEFAULT_LOOK, lookCard, lookSet, type SoulLookCard } from "@/lib/catalog/soul-cards";
 import { cn } from "@/lib/utils";
 import { Chip, ClearableChip } from "./chip";
+import { ResponsivePanel } from "./responsive-panel";
 
 /**
  * Fuobe Soul's Look picker: Soul's 106 looks and Soul 2.0's 33 (the request's presetId), with the look's
- * strength (presetStrength scales its LoRAs). Covers are drawn (no preview media is copied from anywhere).
- * Loaded as its own chunk, with the look cards.
+ * strength (presetStrength scales its LoRAs). Covers are drawn like the Moodboard panel's curated looks (no
+ * preview media is copied from anywhere). A popover on desktop, a bottom sheet on phones; its own chunk.
  */
 
 const FAMILIES = [
   ["v2", "Soul 2.0"],
   ["v1", "Soul"],
 ] as const;
-
-/** A drawn cover: the look's hue as a soft gradient with its initials. */
-function LookCover({ look, className }: { look: Pick<SoulLookCard, "name" | "hue">; className?: string }) {
-  const initials = look.name
-    .replace(/[^\p{L}\p{N} ]/gu, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join("");
-  return (
-    <span
-      aria-hidden
-      className={cn("grid place-items-center font-heading text-white/90", className)}
-      style={{ background: `linear-gradient(150deg, oklch(0.74 0.12 ${look.hue}), oklch(0.46 0.15 ${(look.hue + 50) % 360}))` }}
-    >
-      {initials}
-    </span>
-  );
-}
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
@@ -68,15 +50,20 @@ export default function LookChip({
   }, [q, set, tab]);
   return (
     <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel="Back to the General look">
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? "General"}`}>
-          {picked && <LookCover look={picked} className="size-4 rounded-full text-[0px]" />}
-          <span className="max-w-32 truncate">{picked?.name ?? "Look"}</span>
-          {value && strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
-        </Chip>
-      </PopoverTrigger>
-      <PopoverContent className="w-[min(92vw,480px)] p-2" align="start" side="top" collisionPadding={12} aria-label="Looks">
+      <ResponsivePanel
+        open={open}
+        onOpenChange={setOpen}
+        title="Look"
+        description="Soul's looks on open weights: words, LoRAs and a grade"
+        className="w-[min(92vw,480px)] p-2"
+        trigger={
+          <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? "General"}`}>
+            {picked && <CuratedCover m={{ name: "", ...curatedLook(picked.id) }} className="size-4 rounded-full" />}
+            <span className="max-w-32 truncate">{picked?.name ?? "Look"}</span>
+            {value && strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
+          </Chip>
+        }
+      >
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <div role="tablist" aria-label="Soul version" className="inline-flex shrink-0 rounded-full bg-muted p-0.5">
             {FAMILIES.map(([f, label]) => (
@@ -142,9 +129,12 @@ export default function LookChip({
               className={cn("group flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", picked?.id === l.id && "ring-2")}
             >
               <span className="relative aspect-[3/4] w-full overflow-hidden rounded-md">
-                <LookCover look={l} className="size-full text-[22px] transition-transform duration-300 group-hover:scale-105" />
+                <CuratedCover m={{ name: "", ...curatedLook(l.id) }} className="size-full transition-transform duration-300 group-hover:scale-105" />
                 {l.civitai && (
-                  <span className="absolute right-1 bottom-1 grid size-4 place-items-center rounded-full bg-black/45 text-white" title="Its LoRA downloads from civitai: add your free civitai key in Settings → LoRAs">
+                  <span
+                    className="absolute right-1 bottom-1 grid size-4 place-items-center rounded-full bg-black/45 text-white"
+                    title="Its LoRA downloads from civitai: add your free civitai key in Settings → LoRAs"
+                  >
                     <KeyRound className="size-2.5" aria-hidden />
                   </span>
                 )}
@@ -168,8 +158,7 @@ export default function LookChip({
             </label>
           </div>
         )}
-      </PopoverContent>
-    </Popover>
+      </ResponsivePanel>
     </ClearableChip>
   );
 }

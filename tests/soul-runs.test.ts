@@ -187,6 +187,16 @@ describe("Fuobe Soul through the server", () => {
     expect(getGeneration(g.id)!.outputs[0].meta?.finished).toBe(true);
   });
 
+  it("takes the engine through the REST API, and the preview says which (what the evaluation harness checks)", async () => {
+    const { POST } = await import("@/app/api/generations/route");
+    const res = await POST(new Request("http://localhost/api/generations?preview=1", { method: "POST", body: JSON.stringify({ feature: "eval", modelId: "fuobe-soul", prompt: "a fox", presetId: "v1-y2k", engine: "cloud" }) }));
+    const p = (await res.json()) as { engine: string; route: { provider: string } };
+    expect(p.engine).toBe("cloud");
+    expect(p.route.provider).toBe("fal");
+    const bad = await POST(new Request("http://localhost/api/generations?preview=1", { method: "POST", body: JSON.stringify({ feature: "eval", modelId: "fuobe-soul", prompt: "a fox", engine: "gpu" }) }));
+    expect(bad.status).toBe(400);
+  });
+
   it("remembers the engine on the row, and the engine mode still holds", () => {
     const [g] = createGenerations({ feature: "image", modelId: "fuobe-soul", prompt: "a fox", engine: "cloud" });
     expect(g.engine).toBe("cloud");
