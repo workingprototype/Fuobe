@@ -1246,6 +1246,46 @@ const open: ModelDef[] = [
     routes: [comfy("image-to-3d", "image-to-3d-hunyuan3d-21")],
     options: { seed: true },
   }),
+  // Round 4 (r4/3d-plus): Image to 3D's other modes on the open engine.
+  o({
+    id: "oss-trellis2-multi",
+    name: "TRELLIS.2 Multi-view",
+    vendor: "Tencent ARC × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "One textured 3D model (.glb) from photos of 2–4 sides of an object, plus a turntable video · 16 GB GPU · MIT",
+    badges: ["new"],
+    // params.extra.views names each photo's side ("front", "left", "back", "right"); the front is needed.
+    routes: [comfy("image-to-3d", "image-to-3d-trellis2-multiview", "Pixal3D multi-view on TRELLIS.2; the front, then any of left, back and right")],
+    options: { seed: true, minImages: 2, maxImages: 4 },
+  }),
+  o({
+    id: "oss-text-trellis2",
+    name: "Z-Image Turbo → TRELLIS.2",
+    vendor: "Alibaba Tongyi × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "Describe one object: Z-Image Turbo draws it on a plain background, then TRELLIS.2 builds the textured 3D model and a turntable · 16 GB GPU · Apache-2.0 + MIT",
+    badges: ["new"],
+    // Built on the server as two steps: a Z-Image Turbo still, then image-to-3d-trellis2 on it (src/server/chains.ts).
+    routes: [{ op: "text-to-3d", provider: "comfyui", endpoint: "image-to-3d-trellis2", chained: true, note: "a Z-Image Turbo still → TRELLIS.2" }],
+    options: { seed: true },
+  }),
+  o({
+    id: "oss-triposplat",
+    name: "TripoSplat",
+    vendor: "Tripo (VAST)",
+    family: "tripo",
+    kind: "model3d",
+    tagline: "A Gaussian splat (.spz) of the subject in one photo, background removed, plus an orbit video · 8 GB GPU · MIT · Built with DINOv3",
+    badges: ["new"],
+    routes: [comfy("splat", "image-to-splat-triposplat", "BiRefNet cut-out → TripoSplat → .spz + a 3 s orbit")],
+    options: {
+      seed: true,
+      maxImages: 1,
+      sliders: [{ param: "numGaussians", label: "Gaussians", min: 32768, max: 1048576, step: 32768, default: 262144 }],
+    },
+  }),
   // Round 4 (r4/cinema-3d): Cinema Studio's "Create 3D scene". The mesh is in the photo's own camera space
   // (glTF axes, metres), so the viewer starts where the photo was taken.
   o({

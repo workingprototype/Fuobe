@@ -1,6 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { getModel, supportsOp } from "@/lib/catalog";
+import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { routesFor } from "@/lib/catalog/plan";
 import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -273,6 +274,49 @@ export function createExtendChain(original: GenerationRequest, model: ModelDef):
     step: { label: "Extended video", index: 2, of: 3 },
   });
   return [film, clip, frame];
+}
+
+/** The still the open text-to-3D route draws first. */
+const STILL_MODEL = "oss-z-image-turbo";
+/** The image-to-3D model that runs a text-to-3D route's workflow. */
+const BUILDERS_3D: Record<string, string> = { "image-to-3d-trellis2": "oss-trellis2" };
+
+/**
+ * Text to 3D on the open engine (a text-to-3d route marked `chained`): Z-Image Turbo draws the object whole on a
+ * plain background (a helper step), then the route's workflow (TRELLIS.2) builds the model from that still.
+ */
+export function createStillTo3d(original: GenerationRequest, model: ModelDef, route: ModelRoute): Generation[] {
+  const prompt = original.prompt?.trim();
+  if (!prompt) throw new Error("Describe the object");
+  const builder = BUILDERS_3D[route.endpoint];
+  if (!builder) throw new Error(`${model.name} has no image-to-3D model for ${route.endpoint}`);
+  assertOneMode([
+    { label: "Drawing the object", modelId: STILL_MODEL, op: "t2i" },
+    { label: model.name, modelId: builder, op: "image-to-3d" },
+  ]);
+  const batchId = nanoid(10);
+  const seed = original.params?.seed;
+  const still = createGenerations(
+    {
+      feature: MODEL3D_STEP_FEATURE,
+      modelId: STILL_MODEL,
+      op: "t2i",
+      prompt: stillPromptFor3d(prompt),
+      params: { aspectRatio: "1:1", resolution: "1K", ...(seed !== undefined && { seed }) },
+      step: { label: "Still", index: 0, of: 2 },
+    },
+    { batchId },
+  )[0];
+  try {
+    const built = createGenerations(
+      { ...original, modelId: builder, op: "image-to-3d", chain: [{ slot: "images", position: "first" }], step: { label: "3D model", index: 1, of: 2 } },
+      { batchId, dependsOn: still.id },
+    )[0];
+    return [built, still];
+  } catch (e) {
+    void cancelGeneration(still.id);
+    throw e;
+  }
 }
 
 /** The model a storyboard film is animated with. */

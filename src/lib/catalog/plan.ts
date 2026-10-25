@@ -512,5 +512,6 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     if (k !== undefined && k > 0) per *= k;
   }
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
+  if (p.animationUsd && params.animation !== undefined && params.animation !== "") per += p.animationUsd;
   return Math.round(per * jobs * 1000) / 1000;
 }

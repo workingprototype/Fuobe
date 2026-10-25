@@ -561,6 +561,8 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */
+  animationUsd?: number;
 }
 
 export interface ModelDef {

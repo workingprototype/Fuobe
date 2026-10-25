@@ -78,8 +78,9 @@ describe("licences", () => {
     const list = buildLicenceList(MODELS, manifest.workflows);
     expect(list.notices.find((n) => n.text === "Built with Llama")?.models).toEqual(["HiDream-I1 Dev"]);
     expect(list.notices.find((n) => n.text === "Built with DINOv3")?.models.length).toBeGreaterThan(0);
-    // No TripoSplat, no DINOv3 notice.
-    const without = buildLicenceList(MODELS, manifest.workflows.filter((w) => !/triposplat/.test(w.id)));
+    // TripoSplat and TRELLIS.2 (single and multi-view) encode with DINOv3; without them, no notice.
+    expect(list.notices.find((n) => n.text === "Built with DINOv3")?.models).toEqual(expect.arrayContaining(["TripoSplat", "TRELLIS.2", "TRELLIS.2 Multi-view"]));
+    const without = buildLicenceList(MODELS, manifest.workflows.filter((w) => !/triposplat|trellis2/.test(w.id)));
     expect(without.notices.some((n) => n.text === "Built with DINOv3")).toBe(false);
   });
 });

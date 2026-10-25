@@ -14283,6 +14283,9 @@ export const CLOUD_MODELS: ModelDef[] = [
           "points": {
             "key": "point_prompts",
             "format": "sam"
+          },
+          "fixed": {
+            "export_textured_glb": true
           }
         }
       }
@@ -14384,7 +14387,8 @@ export const CLOUD_MODELS: ModelDef[] = [
           "default": "triangle"
         }
       ],
-      "maxImages": 4
+      "maxImages": 4,
+      "minImages": 2
     },
     "pricing": {
       "unit": "request",
@@ -14431,7 +14435,8 @@ export const CLOUD_MODELS: ModelDef[] = [
     "pricing": {
       "unit": "request",
       "usd": 0.2,
-      "note": "+$0.12 with an animation preset"
+      "note": "+$0.12 with an animation preset",
+      "animationUsd": 0.12
     }
   },
   {

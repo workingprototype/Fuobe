@@ -31,7 +31,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
+import { createExtendChain, createKeyframeFilm, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
@@ -527,6 +527,9 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
   if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Text to 3D on the open engine: a still first, then the 3D model of it.
+  const stillTo3d = shotModel && original.op === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
+  if (!opts.dependsOn && shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
