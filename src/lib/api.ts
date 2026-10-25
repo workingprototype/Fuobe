@@ -506,16 +506,18 @@ export function useLibraryFacets(opts: { steps?: boolean } = {}) {
 export function useCreateGeneration() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (req: GenerationRequest) =>
-      (
-        await json<{ items: Generation[] }>(
-          await fetch("/api/generations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(req),
-          }),
-        )
-      ).items,
+    mutationFn: async (req: GenerationRequest) => {
+      const { items, notes } = await json<{ items: Generation[]; notes?: string[] }>(
+        await fetch("/api/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(req),
+        }),
+      );
+      // What the run leaves out or changes (a LoRA that runs only on your GPU, a length the API rounds) is said, not dropped silently.
+      if (notes?.length) toast.warning(notes.length > 1 ? "This run changes a few things" : "This run changes one thing", { description: notes.join(". ") });
+      return items;
+    },
     onSuccess: (items) => {
       // Show new cards instantly in the feeds they belong to (newest first, like the server), then let polling take over.
       for (const g of items) applyEvent(qc, { type: "generation", generation: { ...g, deletedAt: null } });

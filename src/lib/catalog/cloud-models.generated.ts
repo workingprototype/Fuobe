@@ -1687,9 +1687,38 @@ export const CLOUD_MODELS: ModelDef[] = [
               "5:4": "landscape_4_3",
               "4:5": "portrait_4_3"
             }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
           }
         },
         "loraEndpoint": "fal-ai/z-image/turbo/lora"
+      },
+      {
+        "op": "t2i",
+        "provider": "replicate",
+        "endpoint": "prunaai/z-image-turbo-lora:29c866f1269ef45b736fbcdff00d6da2a555ecf5f4e575c93ab38c2a2f2693a1",
+        "map": {
+          "seed": "seed",
+          "size": {
+            "width": "width",
+            "height": "height",
+            "multiple": 16,
+            "max": 1440,
+            "base": 1024
+          },
+          "loras": {
+            "shape": "arrays",
+            "weights": "lora_weights",
+            "scales": "lora_scales"
+          }
+        }
       }
     ],
     "options": {
@@ -1716,7 +1745,357 @@ export const CLOUD_MODELS: ModelDef[] = [
     },
     "pricing": {
       "unit": "megapixel",
-      "usd": 0.005
+      "usd": 0.005,
+      "withLoras": 0.0085
+    }
+  },
+  {
+    "id": "qwen-image-2512-cloud",
+    "name": "Qwen-Image 2512 (hosted)",
+    "vendor": "Alibaba Qwen",
+    "family": "qwen-image",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Open-weights Qwen-Image: clean lettering and long prompts",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-2512",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-2512/lora"
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.02,
+      "note": "rounded up to whole megapixels",
+      "withLoras": 0.035
+    }
+  },
+  {
+    "id": "qwen-image-edit-2511-cloud",
+    "name": "Qwen-Image-Edit 2511 (hosted)",
+    "vendor": "Alibaba Qwen",
+    "family": "qwen-image",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Open-weights instruction edits with several references",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-2511",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-edit-2511/lora"
+      },
+      {
+        "op": "edit",
+        "provider": "replicate",
+        "endpoint": "qwen/qwen-image-edit-2511",
+        "map": {
+          "images": "image",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "1:1",
+              "16:9",
+              "9:16",
+              "4:3",
+              "3:4"
+            ]
+          },
+          "loras": {
+            "shape": "single",
+            "weights": "lora_weights",
+            "scale": "lora_scale",
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.03,
+      "withLoras": 0.035
+    }
+  },
+  {
+    "id": "flux-2-klein-4b-cloud",
+    "name": "FLUX.2 [klein] 4B (hosted)",
+    "vendor": "Black Forest Labs",
+    "family": "flux",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "The Apache-2.0 FLUX.2: cheapest drafts and edits",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/4b",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/flux-2/klein/4b/lora"
+      },
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/flux-2/klein/4b/edit",
+        "map": {
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/flux-2/klein/4b/edit/lora"
+      }
+    ],
+    "options": {
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "badges": [
+      "fast"
+    ],
+    "defaults": {
+      "aspectRatio": "1:1"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.005,
+      "withLoras": 0.01
+    }
+  },
+  {
+    "id": "wan-2-2-a14b-image-cloud",
+    "name": "Wan 2.2 A14B Image (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Open-weights Wan 2.2 stills that take Wan LoRAs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-a14b/text-to-image/lora",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "transformer": "high",
+            "weightName": true
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ]
+    },
+    "defaults": {
+      "aspectRatio": "16:9"
+    },
+    "pricing": {
+      "unit": "image",
+      "usd": 0.05
     }
   },
   {
@@ -5589,6 +5968,468 @@ export const CLOUD_MODELS: ModelDef[] = [
     "defaults": {
       "aspectRatio": "16:9",
       "generateAudio": true
+    }
+  },
+  {
+    "id": "wan-2-2-a14b-cloud",
+    "name": "Wan 2.2 A14B (hosted)",
+    "vendor": "Alibaba Wan",
+    "family": "wan",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Open-weights Wan 2.2 that takes camera and effect LoRAs",
+    "routes": [
+      {
+        "op": "t2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-a14b/text-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 17,
+            "max": 161,
+            "step": 4
+          },
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolator_model": "none"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "transformer": "high",
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/wan/v2.2-a14b/text-to-video/lora"
+      },
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-a14b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 17,
+            "max": 161,
+            "step": 4
+          },
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolator_model": "none"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "transformer": "high",
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora"
+      },
+      {
+        "op": "t2v",
+        "provider": "replicate",
+        "endpoint": "wan-video/wan-2.2-t2v-fast",
+        "map": {
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 81,
+            "max": 121,
+            "step": 4
+          },
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "16:9",
+              "9:16"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolate_output": false
+          },
+          "loras": {
+            "shape": "experts",
+            "high": {
+              "weights": "lora_weights_transformer",
+              "scale": "lora_scale_transformer"
+            },
+            "low": {
+              "weights": "lora_weights_transformer_2",
+              "scale": "lora_scale_transformer_2"
+            }
+          }
+        }
+      },
+      {
+        "op": "i2v",
+        "provider": "replicate",
+        "endpoint": "wan-video/wan-2.2-i2v-fast",
+        "map": {
+          "image": "image",
+          "endImage": "last_image",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 81,
+            "max": 121,
+            "step": 4
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
+          "defaults": {
+            "interpolate_output": false
+          },
+          "loras": {
+            "shape": "experts",
+            "high": {
+              "weights": "lora_weights_transformer",
+              "scale": "lora_scale_transformer"
+            },
+            "low": {
+              "weights": "lora_weights_transformer_2",
+              "scale": "lora_scale_transformer_2"
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "auto"
+      ],
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "endFrame": true,
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      },
+      "withLoras": 0.1
+    }
+  },
+  {
+    "id": "ltx-2-3-22b-cloud",
+    "name": "LTX-2.3 22B (hosted)",
+    "vendor": "Lightricks",
+    "family": "ltx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Open-weights LTX-2.3 with sound, camera and motion LoRAs",
+    "routes": [
+      {
+        "op": "t2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/text-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "aspectRatio": {
+            "key": "video_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora"
+      },
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "aspectRatio": {
+            "key": "video_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "endImage": "end_image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8,
+            "fromDuration": true
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora"
+      },
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/video-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "aspectRatio": {
+            "key": "video_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15,
+        20
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "audio": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "endFrame": true,
+      "maxImages": 1
+    },
+    "badges": [
+      "audio"
+    ],
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "generateAudio": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.036,
+      "note": "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)",
+      "withLoras": 0.04
     }
   },
   {

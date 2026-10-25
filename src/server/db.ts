@@ -445,6 +445,20 @@ const MIGRATIONS: string[] = [
   ALTER TABLE generations ADD COLUMN pinned_at INTEGER;
   ALTER TABLE generations ADD COLUMN review TEXT;
   CREATE INDEX IF NOT EXISTS generations_pinned ON generations(pinned_at) WHERE pinned_at IS NOT NULL;`,
+  // originals (o/lora-plumbing): every LoRA copy Fuobe made — a download into ComfyUI's loras folder or a mirror on
+  // fal / Replicate storage — with its pinned source, hash, size and the licence / civitai permissions it was made under.
+  `CREATE TABLE IF NOT EXISTS lora_mirrors (
+    file TEXT NOT NULL,
+    target TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    version TEXT,
+    hosted_url TEXT,
+    sha256 TEXT,
+    size_bytes INTEGER,
+    licence_json TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (file, target)
+  );`,
 ];
 
 declare global {

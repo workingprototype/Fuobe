@@ -11,12 +11,25 @@ const research = ["paid-model-apis.json", "paid-model-apis-2.json", "paid-model-
 );
 const byId = new Map<string, Endpoint>();
 for (const e of research) byId.set(`${e.provider}:${e.endpoint}`, { ...byId.get(`${e.provider}:${e.endpoint}`), ...e });
+// Originals (O1): the hosted open-weight endpoints that take LoRAs, and the plain endpoints of the same models.
+const originals = JSON.parse(fs.readFileSync("docs/research/fuobe-originals-recipes-5.json", "utf8")) as {
+  hostedLoraEndpoints: (Endpoint & { id: string })[];
+  hostedBaseEndpoints: Endpoint[];
+};
+for (const e of originals.hostedLoraEndpoints) if (e.inputs) byId.set(`${e.provider}:${e.id}`, { ...e, endpoint: e.id, verified: true });
+for (const e of originals.hostedBaseEndpoints) byId.set(`${e.provider}:${e.endpoint}`, e);
+/** A Replicate model run by version ("owner/name:<version>") is researched under its name. */
+const researched = (r: ModelRoute, endpoint = r.endpoint) => byId.get(`${r.provider}:${endpoint}`) ?? byId.get(`${r.provider}:${endpoint.split(":")[0]}`);
 
 /** Every provider field a FieldMap names (top-level part of dotted paths). */
 function fieldsOf(map: FieldMap): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(map)) {
-    if (k === "fixed" || k === "defaults" || k === "seedRange" || k === "maskFormat") continue;
+    if (k === "fixed" || k === "defaults" || k === "seedRange" || k === "maskFormat" || k === "loras") continue;
+    if (k === "size") {
+      out.push(map.size!.width, map.size!.height);
+      continue;
+    }
     if (typeof v === "string") out.push(v);
     else if (v && typeof v === "object") {
       const o = v as Record<string, unknown>;
@@ -114,7 +127,7 @@ describe("round-3 cloud models", () => {
     const bad: string[] = [];
     for (const { m, r } of routes) {
       if (r.endpoint.startsWith("chain:")) continue;
-      const e = byId.get(`${r.provider}:${r.endpoint}`);
+      const e = researched(r);
       if (!e) {
         bad.push(`${m.id}: ${r.provider}:${r.endpoint} not in research`);
         continue;
@@ -122,6 +135,19 @@ describe("round-3 cloud models", () => {
       if (ROUND3[m.id] && !e.verified) bad.push(`${m.id}: ${r.endpoint} unverified`);
       const inputs = Object.keys(e.inputs ?? {});
       for (const f of fieldsOf(r.map ?? {})) if (!inputs.includes(f)) bad.push(`${m.id}: ${r.endpoint} has no field ${f}`);
+      // A run with LoRAs sends the same payload to the LoRA endpoint, plus its LoRA fields.
+      if (r.loraEndpoint || r.map?.loras) {
+        const le = researched(r, r.loraEndpoint ?? r.endpoint);
+        if (!le) {
+          bad.push(`${m.id}: LoRA endpoint ${r.loraEndpoint} not in research`);
+          continue;
+        }
+        const loraInputs = Object.keys(le.inputs ?? {});
+        const l = r.map?.loras;
+        const loraFields = !l ? [] : l.shape === "items" ? [l.key] : l.shape === "arrays" ? [l.weights, l.scales] : l.shape === "single" ? [l.weights, l.scale] : [l.high.weights, l.high.scale, l.low.weights, l.low.scale];
+        if (!l) bad.push(`${m.id}: ${r.endpoint} has a LoRA endpoint but no LoRA field`);
+        for (const f of [...fieldsOf(r.map ?? {}), ...loraFields]) if (!loraInputs.includes(f)) bad.push(`${m.id}: ${r.loraEndpoint ?? r.endpoint} has no field ${f}`);
+      }
     }
     expect(bad).toEqual([]);
   });

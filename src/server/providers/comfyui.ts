@@ -15,6 +15,7 @@ import {
   dropVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
+  canTakeLoras,
   injectLoras,
   languageName,
   paletteSentence,
@@ -37,6 +38,7 @@ import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
+import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -930,7 +932,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   } catch (e) {
     throw new ProviderError((e as Error).message);
   }
-  if (input.loras?.length) wf = injectLoras(wf, input.loras);
+  if (input.loras?.length) {
+    // A LoRA a graph can't attach would be dropped without a word: say so instead.
+    if (!canTakeLoras(wf)) throw new ProviderError(`${manifest.title} can't take LoRAs (it has no model loader to attach them to)`);
+    wf = injectLoras(wf, input.loras);
+  }
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
   if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
   if (ctx.op === "remove-object" && !handOff) for (const o of manifest.outputs) if (o.role === "mask") delete wf[o.node];
@@ -1075,7 +1081,10 @@ export const comfyProvider: ProviderAdapter = {
       const where = worker === "isolated" ? "the isolated ComfyUI worker" : "your ComfyUI";
       const missingPack =
         body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
-      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
+      // A LoRA it lacks: point at its model card (a civitai download URL answers 401 without the key) and the LoRA folder setting.
+      const loraModels = (input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: loraByFile(l.file)?.page ?? (l.url && !needsToken(l.url) ? l.url : undefined) }));
+      let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
+      if (detail && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
@@ -1189,6 +1198,16 @@ export const comfyProvider: ProviderAdapter = {
     return { ok: true, detail };
   },
 };
+
+/** The LoRA files the ComfyUI server that runs `route` has (GET /models/loras), or null when it can't say. */
+export async function comfyLoraFiles(route?: ModelRoute): Promise<string[] | null> {
+  try {
+    const res = await comfyFetch("/models/loras", {}, workerFor(route?.endpoint));
+    return res.ok ? ((await res.json()) as string[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Which manifest models are present on the connected ComfyUI server. */
 export async function modelInventory(): Promise<Record<string, string[]> | null> {

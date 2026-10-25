@@ -32,8 +32,13 @@ export const SETTINGS = {
   comfyToken: { key: "comfyui.token", env: "COMFYUI_TOKEN", secret: true },
   /** A second ComfyUI for workflows whose node packs can't share the main install (LatentSync 1.6, ThinkSound; scripts/comfy/README.md). */
   comfyIsolatedUrl: { key: "comfyui.isolatedUrl", env: "COMFYUI_ISOLATED_URL" },
-  /** ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there. */
+  /**
+   * ComfyUI's models/loras folder, when it's on this machine: trained LoRAs are copied there, and a recipe's
+   * LoRAs (looks, motions) are downloaded there before a run needs them (src/server/loras.ts).
+   */
   comfyLorasDir: { key: "comfyui.lorasDir", env: "COMFYUI_LORAS_DIR" },
+  /** civitai API key: downloads the civitai LoRAs of a recipe (civitai answers 401 without one). Never sent to fal or Replicate. */
+  civitaiKey: { key: "civitai.key", env: "CIVITAI_API_KEY", secret: true },
   /** AI-Toolkit UI (ostris/ai-toolkit, port 8675) for open-source character LoRA training. */
   aiToolkitUrl: { key: "aitk.url", env: "AI_TOOLKIT_URL" },
   aiToolkitToken: { key: "aitk.token", env: "AI_TOOLKIT_AUTH", secret: true },
