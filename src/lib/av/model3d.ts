@@ -58,6 +58,12 @@ export const MODELS_3D: Record<Model3dMode, Record<Engine, Model3dChoice[]>> = {
   },
 };
 
+/**
+ * Notices cloud models need beside their results: TripoSplat encodes the photo with DINOv3 (its weights ship
+ * dino_v3_vit_h), on fal too. Open models get theirs from their workflow's licence.
+ */
+export const CLOUD_NOTICES: Record<string, string[]> = { triposplat: ["Built with DINOv3"] };
+
 /** Every model the page offers (⌘K's ?model= links land on its mode). */
 export const ALL_MODELS_3D: Model3dChoice[] = Object.values(MODELS_3D).flatMap((m) => [...m.cloud, ...m.open]);
 

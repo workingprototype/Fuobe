@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Metadata } from "next";
 import { Model3dStudio, type Model3dInfo } from "@/components/model3d/model3d-studio";
-import { ALL_MODELS_3D, RIG_MODEL } from "@/lib/av/model3d";
+import { ALL_MODELS_3D, CLOUD_NOTICES, RIG_MODEL } from "@/lib/av/model3d";
 import { getModel } from "@/lib/catalog";
 import type { Manifest } from "@/lib/comfy";
 import { buildLicenceList, FLAG_LABEL } from "@/lib/licences";
@@ -54,7 +54,10 @@ async function readLicences(): Promise<Record<string, NonNullable<Model3dInfo["l
 export default async function Page() {
   const licences = await readLicences();
   const info: Record<string, Model3dInfo> = Object.fromEntries(
-    [...ALL_MODELS_3D.map((m) => m.id), RIG_MODEL].map((id) => [id, { name: getModel(id)?.name ?? id, ...(licences[id] && { licence: licences[id] }) }]),
+    [...ALL_MODELS_3D.map((m) => m.id), RIG_MODEL].map((id) => [
+      id,
+      { name: getModel(id)?.name ?? id, notices: licences[id]?.notices ?? CLOUD_NOTICES[id] ?? [], ...(licences[id] && { licence: licences[id] }) },
+    ]),
   );
   return <Model3dStudio info={info} />;
 }

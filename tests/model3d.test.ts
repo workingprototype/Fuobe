@@ -67,6 +67,9 @@ describe("modes: which model and operation each runs, per engine", () => {
       }
     }
     expect(getModel(m3d.RIG_MODEL)?.routes[0]).toMatchObject({ op: "rig-3d", provider: "fal", endpoint: "fal-ai/meshy/rigging" });
+    // TripoSplat encodes with DINOv3 on fal too: its results carry the notice.
+    expect(m3d.CLOUD_NOTICES.triposplat).toEqual(["Built with DINOv3"]);
+    expect(Object.keys(m3d.CLOUD_NOTICES).every((id) => getModel(id)?.engine === "cloud")).toBe(true);
   });
 
   it("says what is missing, and that Pick an object is cloud only", () => {

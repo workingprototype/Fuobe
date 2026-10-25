@@ -44,7 +44,8 @@ export function RigDialog({ glb, open, onOpenChange, cloudAllowed }: { glb: stri
         <DialogHeader>
           <DialogTitle>Rig &amp; animate</DialogTitle>
           <DialogDescription>
-            For characters standing upright with two arms and two legs. Meshy adds a skeleton and walk and run cycles; pick an animation to make it move.
+            For characters standing upright with two arms and two legs. Meshy adds a skeleton and walk and run cycles ($0.20); pick an animation to make it move
+            ($0.12 more).
           </DialogDescription>
         </DialogHeader>
         {!cloudAllowed ? (

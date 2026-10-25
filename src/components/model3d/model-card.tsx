@@ -82,7 +82,7 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
   };
   const spin = view.rigged ? null : animateSpinHref(view, recorded?.saved);
   const name = (g.modelName ?? "model").replace(/[^\w .-]+/g, "");
-  const notices = info[g.modelId]?.licence?.notices ?? [];
+  const notices = info[g.modelId]?.notices ?? [];
   // A rigged result rigs its source model again with another animation.
   const rigSource = view.rigged ? (g.request.inputs?.model3d ?? view.glb) : view.glb;
   const splatPicture = view.splat && !(show === "video" && clip);
@@ -215,7 +215,7 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
               </Button>
             )
           )}
-          {rigSource && !view.splat && (
+          {rigSource && !view.splat && g.op !== "splat" && (
             <Button variant="outline" size="sm" className="rounded-full" onClick={() => setRigging(true)}>
               <PersonStanding className="size-3.5" /> {view.rigged ? "Another animation" : "Rig & animate"}
             </Button>
@@ -230,7 +230,7 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
         </div>
         {notices.length > 0 && <p className="text-[11px] text-muted-foreground">{notices.join(" · ")}</p>}
       </div>
-      {rigSource && rigging && <RigDialog glb={rigSource} open={rigging} onOpenChange={setRigging} cloudAllowed={cloudAllowed} />}
+      {rigSource && rigging && g.op !== "splat" && <RigDialog glb={rigSource} open={rigging} onOpenChange={setRigging} cloudAllowed={cloudAllowed} />}
     </article>
   );
 }

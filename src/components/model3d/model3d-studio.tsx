@@ -36,9 +36,13 @@ import { cn } from "@/lib/utils";
 import { priceLine, useRunPreview } from "./hooks";
 import { ModelCard } from "./model-card";
 
-/** A model's name and, for open models, the licence the picker shows (the page reads them from the catalog and the manifest). */
+/**
+ * A model's name, the notices its results carry ("Built with DINOv3") and, for open models, the licence the
+ * picker shows (the page reads them from the catalog and the manifest).
+ */
 export interface Model3dInfo {
   name: string;
+  notices: string[];
   licence?: { name: string; flags: string[]; notices: string[] };
 }
 
@@ -257,6 +261,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
                   </SelectContent>
                 </Select>
                 <p className="text-[12px] text-muted-foreground">{choices.find((m) => m.id === modelId)?.note}</p>
+                {!licence && info[modelId]?.notices.length > 0 && <p className="text-[12px] font-medium">{info[modelId].notices.join(" · ")}</p>}
                 {licence && (
                   <p className="text-[12px] text-muted-foreground">
                     Licence: {[licence.name, ...licence.flags].join(" · ")}

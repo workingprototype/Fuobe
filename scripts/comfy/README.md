@@ -257,6 +257,29 @@ node validate-workflows.mjs <the same ids> --shared
   the manifest carries it with `optional: true` (named with its download when it's missing, not counted as missing on
   the Workflows page). Its URL is the repo's current name, `Comfy-Org/Frame-Interpolation` (the old lowercase one redirects).
 
+### Round-4 Image to 3D extras (r4/3d-plus, 2026-10-25)
+
+One hand-built entry for Image to 3D's "From several images" on the open engine, from the official template
+`3d_pixal3d_multi_views` (2026-09-09; core nodes only):
+
+```bash
+node export-templates.mjs 3d_pixal3d_multi_views          # build/raw/, then the hand-built graph was made from it
+npm run build -- image-to-3d-trellis2-multiview image-to-3d-trellis2
+node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 --shared
+```
+
+| id | capability | what | ran for real here |
+|---|---|---|---|
+| `image-to-3d-trellis2-multiview` | image-to-3d | One upload per side (image = front, image2 = left, image3 = back, image4 = right) → BiRefNet cut-out and crop per side → `Pixal3DMultiViewConditioning` (a fixed orbit rig) → TRELLIS.2 stages on `pixal3d_multiview_int8_convrot` (5.58 GB, MIT) → PBR GLB + the single-view graph's 36-view turntable | no (GPU); /prompt only |
+
+- **What the provider does**: `SLOT_RULES` gives the workflow its sides; each photo goes to the side
+  `params.extra.views` names (in order when unnamed), and a side with no photo is cut out of the graph
+  (`dropBranch` in `src/lib/comfy.ts`: its loader, cut-out and crop go, and the rig loses that input). The front is needed.
+- **Licences**: the TRELLIS.2 graphs (single and multi-view) encode with DINOv3 ViT-L (`dino_v3_L_naf`), so their
+  licence now names the DINOv3 License and its "Built with DINOv3" notice, like TripoSplat's.
+- **Not open**: rigging. UniRig (MIT) has no ComfyUI pack verified against v0.41, so Rig & animate is Meshy on fal only.
+  SAM 3D Objects has no open route either (the core SAM 3D nodes are body only).
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`
