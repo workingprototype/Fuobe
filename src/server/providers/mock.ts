@@ -315,8 +315,9 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
       return [{ url: "sample:demo-model.glb", kind: "model3d", contentType: "model/gltf-binary", meta: { demo: true, format: "glb", rigged: true } }];
     case "ocr":
       return [demoOcr(brief)];
+    // As many frames as were asked for (max_frames), 4 without a count.
     case "extract-frames":
-      return Array.from({ length: 4 }, (_, index) => ({ url: svgUri(demoSvg(`frame ${index + 1}`, ar, index)), kind: "image" as const, contentType: "image/svg+xml", meta: { index, demo: true } }));
+      return Array.from({ length: clamp(Math.round(Number(meta.frames ?? 4)), 1, 500) }, (_, index) => ({ url: svgUri(demoSvg(`frame ${index + 1}`, ar, index)), kind: "image" as const, contentType: "image/svg+xml", meta: { index, demo: true } }));
     case "overlay":
       return [{ url: svgUri(demoSvg(brief || "overlay", ar, 5)), kind: "image", contentType: "image/svg+xml", meta: { demo: true } }];
     // The same tone, as long as the loop was asked to be (or the clips joined end to end).
@@ -391,6 +392,7 @@ export const mockProvider: ProviderAdapter = {
         duration: input.duration,
         format: input.format,
         clips: input.audios?.length,
+        frames: route.op === "extract-frames" ? input.extra?.max_frames : undefined,
         // Remove background: which file the demo stands for (the cut-out or its alpha mask).
         matteOutput: route.op === "bg-remove-video" ? (input.matteOutput ?? model.options.matteOutputs?.[0] ?? "cutout") : undefined,
         // The painted eraser's second output: the window's last tracked mask (video-inpaint-wan-vace-painted), saved

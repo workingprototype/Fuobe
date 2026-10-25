@@ -13,6 +13,7 @@ import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
 import { keepMatte } from "@/lib/catalog/payload";
 import {
+  CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
   type ChainSlot,
@@ -581,6 +582,18 @@ export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | un
 
 const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : s.slot === "mask" ? "mask" : SLOT_KIND[s.slot]);
 
+/**
+ * A planned list (ChainSlot `index` + `of`) that came back too short to read: a frame or two missing at
+ * the end is held (pickOutput takes the last one), more fails the step before it is paid for.
+ */
+export function listShortfall(outputs: OutputFile[], s: ChainSlot): string | null {
+  if (s.index === undefined || s.of === undefined) return null;
+  const made = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]).length;
+  if (made >= s.of - CHAIN_LIST_SLACK) return null;
+  const noun = slotNoun(s);
+  return `made ${made} ${noun}${made === 1 ? "" : "s"} where ${s.of} were planned`;
+}
+
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
   if (kind === "text") return "Placeholder text from an earlier step";
@@ -674,11 +687,63 @@ function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route:
   return {};
 }
 
+/** A waiting row's dependency ids as a json_each source (depends_on is one id, or a JSON list). */
+const DEP_IDS = "json_each(CASE WHEN substr(g.depends_on, 1, 1) = '[' AND json_valid(g.depends_on) THEN g.depends_on ELSE json_array(g.depends_on) END) d";
+
+/**
+ * Waiting steps that can move: none of their dependencies is still queued or running (so they launch), or one
+ * failed, was canceled or is gone (so they fail now, not after the others finish). A per-frame render keeps
+ * hundreds of steps waiting for its lanes, and a plain "oldest 50 waiting" would hold every chain started after
+ * it until its backlog drained. The steps this process is handing to a provider right now are still "queued":
+ * the limit makes room for them.
+ */
+const READY_DEPENDENTS = `SELECT g.* FROM generations g
+  WHERE g.status = 'queued' AND g.external_id IS NULL AND g.depends_on IS NOT NULL
+    AND (
+      NOT EXISTS (SELECT 1 FROM ${DEP_IDS} JOIN generations dep ON dep.id = d.value WHERE dep.status IN ('queued', 'running'))
+      OR EXISTS (SELECT 1 FROM ${DEP_IDS} LEFT JOIN generations dep ON dep.id = d.value WHERE dep.id IS NULL OR dep.status IN ('failed', 'canceled'))
+    )
+  ORDER BY g.created_at ASC LIMIT ?`;
+
+/** The error a waiting step gets when an input failed (framesProgress tells these from a step's own failure). */
+export const waitedOnFailure = (frame?: boolean) => `${frame ? "The previous frame" : "An earlier step"} didn't finish`;
+/** What a step dropped by dropUnused says (canceled, not by anyone: the steps it was for failed). */
+export const DROPPED_UNUSED = "Stopped before it ran: the steps it was for failed";
+
+/** Ids in a depends_on column that name `id` (one id, or a JSON list). */
+const DEPENDENTS_OF = "(depends_on = @id OR (substr(depends_on, 1, 1) = '[' AND instr(depends_on, @quoted) > 0))";
+
+/**
+ * A waiting step marked dropWhenUnused whose every dependent has failed or been canceled can no longer be
+ * used: cancel it (nothing was spent on it) and look again at the steps it waited for. `ids` are the inputs
+ * of a step that just failed. A step being handed to its provider right now is left alone.
+ */
+function dropUnused(ids: string[]): void {
+  const todo = [...ids];
+  // Settled: dropped, or not a waiting dropWhenUnused step. One still used is looked at again when a step using it is dropped.
+  const settled = new Set<string>();
+  const live = db().prepare(`SELECT 1 FROM generations WHERE status IN ('queued', 'running') AND ${DEPENDENTS_OF} LIMIT 1`);
+  while (todo.length) {
+    const id = todo.pop()!;
+    if (settled.has(id) || submitting().has(id)) continue;
+    const r = db().prepare("SELECT status, external_id, depends_on, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "external_id" | "depends_on" | "request_json"> | undefined;
+    if (!r || r.status !== "queued" || r.external_id || !r.depends_on || !(JSON.parse(r.request_json) as GenerationRequest).dropWhenUnused) {
+      settled.add(id);
+      continue;
+    }
+    if (live.get({ id, quoted: JSON.stringify(id) })) continue;
+    settled.add(id);
+    const now = Date.now();
+    db()
+      .prepare("UPDATE generations SET status = 'canceled', error = ?, message = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND external_id IS NULL")
+      .run(DROPPED_UNUSED, now, now, id);
+    todo.push(...depIds(r.depends_on));
+  }
+}
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
-  const rows = db()
-    .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
-    .all() as Row[];
+  const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
     const request = JSON.parse(r.request_json) as GenerationRequest;
@@ -686,19 +751,30 @@ async function advanceDependents(): Promise<void> {
     const slots = slotsFor(request, ids.length);
     const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
     const earlier = request.frame ? "The previous frame" : "An earlier step";
+    const fail = (error: string) => {
+      update(r.id, { status: "failed", error, message: null, completed_at: Date.now() });
+      // Steps waiting only to feed this one (the other lanes of a per-frame render) are dropped before they are paid for.
+      dropUnused(ids);
+    };
     if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
-      update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
+      fail(waitedOnFailure(!!request.frame));
       continue;
     }
     if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const outputs = deps.map((d) => JSON.parse(d!.outputs_json) as OutputFile[]);
+    const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
+    if (short) {
+      fail(`${earlier} ${short}`);
+      continue;
+    }
     submitting().add(r.id);
     let handedOff = false;
     try {
       // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
-      const values = await Promise.all(deps.map((d, i) => chainValue(pickOutput(JSON.parse(d!.outputs_json) as OutputFile[], slots[i]), slots[i], r.op)));
+      const values = await Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op)));
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
-        update(r.id, { status: "failed", error: `${earlier} has no ${slotNoun(slots[missing])} to use`, message: null, completed_at: Date.now() });
+        fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
       // Routing reads cached reachability: make sure it's fresh for local engines.
@@ -723,7 +799,7 @@ async function advanceDependents(): Promise<void> {
       handedOff = true;
       void submit(r.id, p.route, p.providerId, p.plan, p.req, 0);
     } catch (e) {
-      update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
+      fail((e as Error).message);
     } finally {
       if (!handedOff) submitting().delete(r.id);
     }
@@ -1135,6 +1211,8 @@ export async function cancelGeneration(id: string): Promise<void> {
       .catch(() => {});
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
+  // Steps waiting only to feed this one are dropped too (nothing was spent on them).
+  dropUnused(depIds(r.depends_on));
 }
 
 // ---------------------------------------------------------------------------

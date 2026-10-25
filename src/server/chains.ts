@@ -298,6 +298,11 @@ export interface PipelineStep {
 export interface PipelineOptions {
   /** Group the steps (defaults to a new batch id). */
   batchId?: string;
+  /**
+   * Steps made before, by key → generation id (a retry's steps that finished or are still running): steps
+   * may wait for them like for any other step, and they aren't made again.
+   */
+  existing?: Record<string, string>;
 }
 
 export interface Pipeline {
@@ -313,11 +318,16 @@ const asList = (a: string | string[] | undefined) => (a === undefined ? [] : Arr
 /** Chain slots that take an audio output (and so may pick a stem). */
 const AUDIO_SLOTS = new Set<ChainSlot["slot"]>(["audio", "voiceAudio", "audio2"]);
 
-/** Kahn's algorithm: steps in an order where every `after` comes first; throws on a cycle. Linear in steps + edges (a per-frame render has hundreds). */
+/**
+ * Kahn's algorithm: steps in an order where every `after` comes first; throws on a cycle. Linear in steps + edges
+ * (a per-frame render has hundreds). Keys that aren't steps (generations made before) are already done.
+ */
 function topoOrder(steps: PipelineStep[]): PipelineStep[] {
-  const indegree = new Map(steps.map((s) => [s.key, new Set(asList(s.after)).size]));
+  const keys = new Set(steps.map((s) => s.key));
+  const waits = (s: PipelineStep) => new Set(asList(s.after).filter((a) => keys.has(a)));
+  const indegree = new Map(steps.map((s) => [s.key, waits(s).size]));
   const next = new Map<string, PipelineStep[]>();
-  for (const t of steps) for (const a of new Set(asList(t.after))) next.set(a, [...(next.get(a) ?? []), t]);
+  for (const t of steps) for (const a of waits(t)) next.set(a, [...(next.get(a) ?? []), t]);
   const ready = steps.filter((s) => indegree.get(s.key) === 0);
   const out: PipelineStep[] = [];
   for (let i = 0; i < ready.length; i++) {
@@ -370,17 +380,18 @@ function topoOrder(steps: PipelineStep[]): PipelineStep[] {
  */
 export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}): Pipeline {
   if (!steps.length) throw new Error("A pipeline needs at least one step");
+  const existing = opts.existing ?? {};
   const keys = new Set<string>();
   for (const s of steps) {
     if (!s.key?.trim()) throw new Error("Every step needs a key");
-    if (keys.has(s.key)) throw new Error(`Two steps are called “${s.key}”`);
+    if (keys.has(s.key) || Object.hasOwn(existing, s.key)) throw new Error(`Two steps are called “${s.key}”`);
     keys.add(s.key);
   }
   for (const s of steps) {
     const after = asList(s.after);
     for (const a of after) {
       if (a === s.key) throw new Error(`Step “${s.key}” can't wait for itself`);
-      if (!keys.has(a)) throw new Error(`Step “${s.key}” waits for “${a}”, which isn't in the pipeline`);
+      if (!keys.has(a) && !Object.hasOwn(existing, a)) throw new Error(`Step “${s.key}” waits for “${a}”, which isn't in the pipeline`);
     }
     if (new Set(after).size !== after.length) throw new Error(`Step “${s.key}” lists the same step twice`);
     const chain = s.chain ?? s.request.chain;
@@ -389,6 +400,8 @@ export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}
     if (stray) throw new Error(`Step “${s.key}”: a stem (“${stray.stem}”) only goes into an audio slot, not “${stray.slot}”`);
     const badIndex = chain?.find((c) => c.index !== undefined && !(Number.isInteger(c.index) && c.index >= 0));
     if (badIndex) throw new Error(`Step “${s.key}”: an output number must be a whole number from 0 (got ${badIndex.index})`);
+    const badCount = chain?.find((c) => c.of !== undefined && (c.index === undefined || !Number.isInteger(c.of) || c.of <= c.index));
+    if (badCount) throw new Error(`Step “${s.key}”: a list of ${badCount.of} has no output number ${badCount.index ?? "(none given)"}`);
   }
   const ordered = topoOrder(steps);
   const n = steps.length;
@@ -417,7 +430,12 @@ export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}
     return { key: s.key, ...p };
   });
   const demo = previews.find((p) => p.demo);
-  if (demo && previews.some((p) => !p.demo)) {
+  // Steps made before count too: a demo step can't continue what ran for real.
+  const madeForReal = Object.values(existing).some((id) => {
+    const g = getGeneration(id, { includeDeleted: true });
+    return g && g.provider !== "mock";
+  });
+  if (demo && (madeForReal || previews.some((p) => !p.demo))) {
     throw new Error(`Step “${demo.key}” would run as a demo (${demo.model.name} needs ${providerNames(demo.model, demo.op)}) while the others run for real — connect it in Settings, or turn on demo mode to try it all as a demo`);
   }
 
@@ -427,7 +445,7 @@ export function createPipeline(steps: PipelineStep[], opts: PipelineOptions = {}
   try {
     for (const s of ordered) {
       const after = asList(s.after);
-      const made = createGenerations(requests.get(s.key)!, { batchId, ...(after.length && { dependsOn: after.map((a) => byKey[a].id) }) });
+      const made = createGenerations(requests.get(s.key)!, { batchId, ...(after.length && { dependsOn: after.map((a) => byKey[a]?.id ?? existing[a]) }) });
       byKey[s.key] = made[0];
       items.push(...made);
     }
