@@ -12,9 +12,9 @@
  *   palette's slug as `color_palette`; every other model: the hex list written into the prompt. Open
  *   engine: Z-Image Turbo becomes Z-Image Turbo · Palette (hex in the prompt + a ColorTransfer lock to
  *   a swatch); other open models can add a palette-transfer post-step (oss-palette-image, chained).
- * - Moodboard → curated: the Soul preset's `style_id` on a model whose own preset picker is that list
- *   (options.presets.source: Soul 2.0's 33 looks on soul-2, Soul's 106 styles on soul-1), its
- *   description as words on every other model (the open route; Soul Cinema ignores style ids).
+ * - Moodboard → curated: a Fuobe Soul look (Soul 2.0's 33, Soul's 106; src/lib/catalog/soul-cards.ts). On a model
+ *   that takes looks (Fuobe Soul, Soul HD: options.looks) it is the look itself (presetId: its words and its LoRAs);
+ *   on every other model its words. Picks saved with Higgsfield's old style ids still find their look.
  *   Personal: cloud = the board's Recraft style id (Recraft models) or its most representative images
  *   as style references (Nano Banana Pro and other multi-reference models); open = the board's collages
  *   on Qwen-Image-Edit Style Reference (or the style-reference model picked), or its trained style LoRA
@@ -23,6 +23,7 @@
  * `request.prompt`: they ride in `request.signature.words`, which the server adds when it plans the
  * run, so feeds, Library titles and Reuse keep the user's own words.
  */
+import { lookCard, SOUL_MODEL_IDS } from "./soul-cards";
 import type { GenerationRequest, GenParams, ModelDef, Operation } from "./types";
 
 export type RGB = [number, number, number];
@@ -484,16 +485,16 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   if (mb) {
     if (mb.kind === "personal" && mb.status !== "complete") return { request: req, modelId: req.modelId, notes: [], blocker: mb.status === "failed" ? "This moodboard failed to build — retry it on the Moodboards page" : NOT_READY };
     if (mb.kind === "curated") {
-      const source = mb.source ?? "soul-v2";
-      // Native wherever the model's own preset picker is this preset's list (Soul's styles, Soul 2.0's looks).
-      const presets = model.options.presets;
-      if (presets?.source === source) r = setExtra(r, presets.param, mb.id);
+      // A look picked before the Originals carries Higgsfield's old id: it reads as its Fuobe look.
+      const card = lookCard(mb.id);
+      const look = card ? { ...mb, id: card.id, name: card.name, description: card.description } : mb;
+      if (model.options.looks && card) r = { ...r, presetId: card.id };
       else {
-        words.push(styleWords(mb));
+        words.push(styleWords(look));
         notes.push(
-          model.family === "soul" && !presets
-            ? `${model.name} has one fixed look and no presets — ${mb.name} is described in words`
-            : `${mb.name} is a ${source === "soul-v1" ? "Soul" : "Soul 2.0"} preset — described in words on ${model.name}`,
+          model.id === SOUL_MODEL_IDS.cinema
+            ? `${model.name} has one fixed look — ${look.name} is described in words`
+            : `${look.name} is a Fuobe Soul look — described in words on ${model.name} (Fuobe Soul applies it with its LoRAs)`,
         );
       }
       styled = true;

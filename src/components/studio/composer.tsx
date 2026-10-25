@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
-import type { GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
+import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
+import { dualEngine } from "@/lib/catalog/engines";
 import { formatsOf } from "@/lib/av/formats";
 import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
@@ -81,6 +82,11 @@ const PresetChips = dynamic(() => import("./preset-chips"), {
   loading: () => <span aria-hidden className="h-8 w-32 shrink-0 animate-pulse rounded-full bg-secondary" />,
 });
 
+/** Fuobe Soul's Look picker (the look cards): its own chunk. */
+const LookChip = dynamic(() => import("./look-chip"), {
+  loading: () => <span aria-hidden className="h-8 w-28 shrink-0 animate-pulse rounded-full bg-secondary" />,
+});
+
 /** Color signature + Moodboard chips (studios with `signature`): their own chunk too. */
 const SignatureChips = dynamic(() => import("../palettes/signature-chips"), {
   loading: () => <span aria-hidden className="h-8 w-40 shrink-0 animate-pulse rounded-full bg-secondary" />,
@@ -111,6 +117,8 @@ function buildRequest(
   promptSuffix?: string,
   refKind: MediaKind = "image",
   frames?: FramesContext,
+  /** A Fuobe Original (runs on both engines): the engine switched to. */
+  engine?: Engine,
 ): GenerationRequest {
   const s = draft.slots;
   const refs = draft.refs.filter((x) => !!x?.ref).map((x) => x.ref);
@@ -149,7 +157,13 @@ function buildRequest(
     presetOptions: draft.presetOptions,
     ...(draft.presetId && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
     ...(draft.presetId && draft.mix && { mix: draft.mix }),
+    ...(engine && { engine }),
   };
+}
+
+/** Leaving a model that takes looks (Fuobe Soul) for one that doesn't: the look (its presetId) doesn't come along. */
+function lookCleared(from: ModelDef | undefined, to: ModelDef): Partial<Draft> {
+  return from?.options.looks && !to.options.looks ? { presetId: undefined, presetStrength: undefined } : {};
 }
 
 /** Docked and collapsed, the composer hides its tiles: this event asks it to open first. */
@@ -218,12 +232,16 @@ export function Composer({ docked }: { docked: boolean }) {
     return () => el?.removeEventListener(EXPAND_EVENT, expand);
   }, []);
 
-  const preset: Preset | undefined = draft.presetId ? catalog.getPreset(draft.presetId) : config.preset;
-  const lockedModel = preset?.type === "app";
   const pickerOps = config.pickerOps ?? config.ops;
   const models = useMemo(() => filterModels(catalog.models, { kind: config.kind, ops: pickerOps }), [catalog.models, config.kind, pickerOps]);
   const model: ModelDef | undefined = catalog.getModel(draft.modelId);
-  const presetLoading = !!draft.presetId && !preset && !catalog.complete;
+  // Fuobe Soul's presetId is a look (its own chip), not an app, motion or effect.
+  const takesLook = !!model?.options.looks;
+  const preset: Preset | undefined = draft.presetId && !takesLook ? catalog.getPreset(draft.presetId) : config.preset;
+  const lockedModel = preset?.type === "app";
+  const presetLoading = !!draft.presetId && !takesLook && !preset && !catalog.complete;
+  /** The engine a request names: only a model that runs on both (a Fuobe Original) needs it. */
+  const engineFor = (id: string) => (dualEngine(catalog.getModel(id)) ? engine : undefined);
 
   // Presets handed over in the URL, a Mix, or a model outside this studio's slice: fetch the full catalog.
   const needsFull = presetLoading || (!!draft.mix && !catalog.getPreset(draft.mix.presetId)) || (catalog.ready && !model);
@@ -236,7 +254,7 @@ export function Composer({ docked }: { docked: boolean }) {
     if (!model || model.engine === engine) return;
     const next = lockedModel ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId) : config.defaultModels[engine];
     const m = next ? catalog.getModel(next) : undefined;
-    if (m) setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt } }));
+    if (m) setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
   }, [engine, model, lockedModel, preset, config.defaultModels, setDraft, catalog]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
@@ -277,7 +295,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
   const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
-    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx));
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx, engineFor(d.modelId)));
     // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
     const raw = signed.worded;
     const m = catalog.getModel(raw.modelId) ?? model;
@@ -322,7 +340,8 @@ export function Composer({ docked }: { docked: boolean }) {
       });
       const plan = planGeneration({ ...planned, prompt: planned.prompt || (config.promptOptional ? " " : "") }, catalog.getModel, catalog.getPreset);
       op = plan.op;
-      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op);
+      // A run with LoRAs (a Soul look) goes to the route's LoRA endpoint, which has its own price.
+      cost = estimateCost(plan.model, plan.params, plan.jobs, plan.op, plan.loras.length > 0 && routesFor(plan.model, plan.op).some((r) => !!r.loraEndpoint));
     } catch (e) {
       planError = (e as Error).message;
     }
@@ -365,7 +384,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
-    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx));
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, engineFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
     if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
     create.mutate(sent.request, {
@@ -498,7 +517,7 @@ export function Composer({ docked }: { docked: boolean }) {
   }, [step, startRequest, blockedSlot]);
 
   const pickModel = (m: ModelDef) => {
-    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed } }));
+    setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
     if (m.engine !== engine) setEngine(m.engine);
   };
 
@@ -605,12 +624,25 @@ export function Composer({ docked }: { docked: boolean }) {
         />
       )}
       {opts.presets && !soulStyles && <ProviderPresetChip spec={opts.presets} value={p.extra?.[opts.presets.param] as string | undefined} onChange={(id) => setExtra(opts.presets!.param, id)} />}
+      {opts.looks && (
+        <LookChip
+          value={draft.presetId}
+          strength={draft.presetStrength ?? 1}
+          onChange={(id, look) => {
+            // A lettering look runs best on Fuobe Soul HD: move there when it's in this studio.
+            const hd = look?.hd && model?.id !== "fuobe-soul-hd" ? catalog.getModel("fuobe-soul-hd") : undefined;
+            if (hd) toast(`${look!.name} runs on Fuobe Soul HD (cleaner lettering)`);
+            setDraft((d) => ({ presetId: id, presetStrength: id ? d.presetStrength : undefined, ...(hd && { modelId: hd.id }) }));
+          }}
+          onStrength={(v) => setDraft({ presetStrength: v })}
+        />
+      )}
       {opts.controls && <ControlsChip controls={opts.controls} values={p.extra ?? {}} onChange={setExtra} title={config.controlsTitle} />}
     </>
   );
   const hasSecondary =
     !!config.frames ||
-    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls)) ||
+    (!!model && (!!opts.voices?.length || !!opts.voiceClone || !!opts.languages || !!opts.presets || !!opts.controls || !!opts.looks)) ||
     !!config.presetPicker ||
     !!config.signature ||
     preset?.type === "motion" ||

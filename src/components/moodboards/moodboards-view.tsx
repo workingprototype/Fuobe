@@ -22,7 +22,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EngineSwitch } from "@/components/studio/engine-switch";
-import { useEngine, useStatus } from "@/lib/api";
+import { useEngine } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
@@ -149,7 +149,7 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
 export function MoodboardsView() {
   const { data, isLoading } = useMoodboards();
   const { rename, remove } = useMoodboardActions();
-  const [engine, setEngine, mode] = useEngine();
+  const [engine, setEngine] = useEngine();
   const [tab, setTab] = useState<"mine" | "curated">("mine");
   const [cat, setCat] = useState("All presets");
   const [q, setQ] = useState("");
@@ -159,10 +159,8 @@ export function MoodboardsView() {
   const [deleting, setDeleting] = useState<Moodboard | null>(null);
   const needle = q.trim().toLowerCase();
   const mine = useMemo(() => (data?.items ?? []).filter((m) => !needle || m.name.toLowerCase().includes(needle)), [data, needle]);
-  const looks = useCuratedSet("soul-v2", tab === "curated");
-  // Curated looks are Soul 2.0 presets: with Higgsfield connected (cloud), they open on Soul 2.0 itself.
-  const status = useStatus();
-  const onSoul = engine === "cloud" && mode !== "open" && !!status.data?.providers.higgsfield?.configured;
+  const looks = useCuratedSet("soul-v2");
+  // Curated looks are Fuobe Soul's: they open on Fuobe Soul, which applies the whole look on either engine.
   const curated = useMemo(
     () => looks.filter((c) => (needle ? `${c.name} ${c.description}`.toLowerCase().includes(needle) : inCuratedTab(c, cat))),
     [looks, needle, cat],
@@ -266,7 +264,7 @@ export function MoodboardsView() {
             {curated.map((c) => (
               <Link
                 key={c.id}
-                href={`/image?${onSoul ? "model=soul-2&" : ""}moodboard=curated:${c.id}`}
+                href={`/image?model=fuobe-soul&moodboard=curated:${c.id}`}
                 aria-label={`Use ${c.name} in the Image studio${c.description ? ` — ${c.description}` : ""}`}
                 className="group/cur min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
               >
@@ -278,7 +276,7 @@ export function MoodboardsView() {
           </div>
           {!curated.length && <p className="py-16 text-center text-[14px] text-muted-foreground">No presets match “{q}”</p>}
           <p className="mt-6 text-[12.5px] text-muted-foreground">
-            Curated looks are Soul 2.0 presets: Higgsfield Soul 2.0 takes them as its style{onSoul ? " (they open on Soul 2.0)" : ""}; other models, including the open-source ones, get each look as a prompt.
+            Curated looks are Fuobe Soul looks: Fuobe Soul applies each one whole (its LoRAs and words), free on your GPU or in the cloud. Other models get the look in words.
           </p>
         </>
       )}

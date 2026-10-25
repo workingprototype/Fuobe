@@ -18,7 +18,8 @@
  *   (`legacyStyleId`); they are never sent anywhere.
  */
 import { loraEntry, loraRef } from "./loras";
-import { SOUL_CATEGORIES, SOUL_CINEMA, SOUL_CORE_LORAS, SOUL_ORIGINALS, SOUL_SIZES, SOUL_TAILS } from "./soul-originals.generated";
+import { DEFAULT_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
+import { SOUL_CINEMA, SOUL_CORE_LORAS, SOUL_ORIGINALS, SOUL_SIZES, SOUL_TAILS } from "./soul-originals.generated";
 import type { LoraRef, ModelDef } from "./types";
 
 export type SoulTail = "photo" | "phone" | "flash" | "cine" | "art";
@@ -64,11 +65,9 @@ export interface SoulCinemaRecipe {
 }
 
 /** The Soul Originals' model ids. */
-export const SOUL_MODELS = { soul: "fuobe-soul", hd: "fuobe-soul-hd", cinema: "fuobe-soul-cinema" } as const;
+export const SOUL_MODELS = SOUL_MODEL_IDS;
 export type SoulModelId = (typeof SOUL_MODELS)[keyof typeof SOUL_MODELS];
-
-/** The look a Fuobe Soul run uses when none is picked: Soul's own default ("General"). */
-export const DEFAULT_LOOK = "v1-general";
+export { DEFAULT_LOOK };
 
 /** Which Soul a model is (none for other models). */
 export function soulKind(model: Pick<ModelDef, "id"> | string | undefined): "soul" | "hd" | "cinema" | undefined {
@@ -101,49 +100,8 @@ export function soulLook(key: string | undefined | null): SoulLook | undefined {
 /** The looks of one family, in Soul's order. */
 export const soulLooks = (family?: "v1" | "v2"): SoulLook[] => (family ? SOUL_ORIGINALS.filter((l) => l.family === family) : SOUL_ORIGINALS);
 
-/** A look as a picker card: no LoRA detail, just what the tile shows. */
-export interface SoulLookCard {
-  id: string;
-  name: string;
-  family: "v1" | "v2";
-  categories: string[];
-  description: string;
-  hue: number;
-  grade?: string;
-  /** Some of its LoRAs download from civitai (a free civitai key in Settings → LoRAs). */
-  civitai: boolean;
-  /** It runs on Fuobe Soul HD (lettering). */
-  hd: boolean;
-}
-
-/** A stable hue per look for its drawn cover (no preview media is copied from anywhere). */
-export function lookHue(id: string): number {
-  let h = 0;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
-
 /** Does any of this look's LoRAs need the user's civitai key to download? */
 export const needsCivitai = (look: Pick<SoulLook, "loras">): boolean => look.loras.some((l) => loraEntry(l.key)?.download === "civitai-token");
-
-export function lookCard(l: SoulLook): SoulLookCard {
-  return {
-    id: l.id,
-    name: l.name,
-    family: l.family,
-    categories: l.categories,
-    description: l.look,
-    hue: lookHue(l.id),
-    ...(l.grade && { grade: l.grade }),
-    civitai: needsCivitai(l),
-    hd: l.base === "qwen-2512",
-  };
-}
-
-/** The picker's list for a family: cards and its category tabs (All first). */
-export function soulLookList(family: "v1" | "v2"): { items: SoulLookCard[]; categories: string[] } {
-  return { items: soulLooks(family).map(lookCard), categories: SOUL_CATEGORIES[family] };
-}
 
 // ---------------------------------------------------------------------------
 // Sizes

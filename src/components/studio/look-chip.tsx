@@ -1,0 +1,175 @@
+"use client";
+
+import { KeyRound, Search, Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
+import { DEFAULT_LOOK, lookCard, lookSet, type SoulLookCard } from "@/lib/catalog/soul-cards";
+import { cn } from "@/lib/utils";
+import { Chip, ClearableChip } from "./chip";
+
+/**
+ * Fuobe Soul's Look picker: Soul's 106 looks and Soul 2.0's 33 (the request's presetId), with the look's
+ * strength (presetStrength scales its LoRAs). Covers are drawn (no preview media is copied from anywhere).
+ * Loaded as its own chunk, with the look cards.
+ */
+
+const FAMILIES = [
+  ["v2", "Soul 2.0"],
+  ["v1", "Soul"],
+] as const;
+
+/** A drawn cover: the look's hue as a soft gradient with its initials. */
+function LookCover({ look, className }: { look: Pick<SoulLookCard, "name" | "hue">; className?: string }) {
+  const initials = look.name
+    .replace(/[^\p{L}\p{N} ]/gu, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+  return (
+    <span
+      aria-hidden
+      className={cn("grid place-items-center font-heading text-white/90", className)}
+      style={{ background: `linear-gradient(150deg, oklch(0.74 0.12 ${look.hue}), oklch(0.46 0.15 ${(look.hue + 50) % 360}))` }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+export default function LookChip({
+  value,
+  strength,
+  onChange,
+  onStrength,
+}: {
+  /** The look's id (Soul's default look when unset). */
+  value?: string;
+  strength: number;
+  onChange: (id: string | undefined, look?: SoulLookCard) => void;
+  onStrength: (v: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const picked = lookCard(value ?? DEFAULT_LOOK);
+  const [family, setFamily] = useState<"v1" | "v2">(picked?.family ?? "v2");
+  const [tab, setTab] = useState("All presets");
+  const [q, setQ] = useState("");
+  const set = useMemo(() => lookSet(family), [family]);
+  const tabs = ["All presets", ...set.categories];
+  const items = useMemo(() => {
+    const words = q.trim().toLowerCase();
+    // A search looks through both families.
+    const pool = words ? [...lookSet("v2").items, ...lookSet("v1").items] : set.items;
+    return pool.filter((l) => (words ? `${l.name} ${l.description}`.toLowerCase().includes(words) : tab === "All presets" || l.categories.includes(tab)));
+  }, [q, set, tab]);
+  return (
+    <ClearableChip active={!!value} onClear={() => onChange(undefined)} clearLabel="Back to the General look">
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? "General"}`}>
+          {picked && <LookCover look={picked} className="size-4 rounded-full text-[0px]" />}
+          <span className="max-w-32 truncate">{picked?.name ?? "Look"}</span>
+          {value && strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
+        </Chip>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(92vw,480px)] p-2" align="start" side="top" collisionPadding={12} aria-label="Looks">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div role="tablist" aria-label="Soul version" className="inline-flex shrink-0 rounded-full bg-muted p-0.5">
+            {FAMILIES.map(([f, label]) => (
+              <button
+                key={f}
+                type="button"
+                role="tab"
+                aria-selected={family === f}
+                onClick={() => {
+                  setFamily(f);
+                  setTab("All presets");
+                }}
+                className={cn(
+                  "h-7 rounded-full px-3 text-[12px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  family === f ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search looks"
+              aria-label="Search looks"
+              className="h-8 w-full min-w-0 rounded-md border bg-background pr-2 pl-7 text-sm outline-none focus:border-primary"
+            />
+          </label>
+        </div>
+        {!q && (
+          <div role="tablist" aria-label="Look categories" className="scrollbar-none -mx-0.5 mb-2 flex gap-1 overflow-x-auto px-0.5">
+            {tabs.map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  tab === t ? "bg-brand-faint text-brand-text" : "text-muted-foreground hover:bg-accent",
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="grid max-h-80 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
+          {items.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              aria-pressed={picked?.id === l.id}
+              title={l.description}
+              onClick={() => {
+                onChange(l.id === DEFAULT_LOOK ? undefined : l.id, l);
+                setOpen(false);
+              }}
+              className={cn("group flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left ring-primary transition hover:bg-accent", picked?.id === l.id && "ring-2")}
+            >
+              <span className="relative aspect-[3/4] w-full overflow-hidden rounded-md">
+                <LookCover look={l} className="size-full text-[22px] transition-transform duration-300 group-hover:scale-105" />
+                {l.civitai && (
+                  <span className="absolute right-1 bottom-1 grid size-4 place-items-center rounded-full bg-black/45 text-white" title="Its LoRA downloads from civitai: add your free civitai key in Settings → LoRAs">
+                    <KeyRound className="size-2.5" aria-hidden />
+                  </span>
+                )}
+              </span>
+              <span className="truncate px-0.5 text-[12px] font-medium">{l.name}</span>
+            </button>
+          ))}
+          {!items.length && <p className="col-span-full py-8 text-center text-[13px] text-muted-foreground">No looks match “{q}”</p>}
+        </div>
+        {picked && (
+          <div className="mt-2 space-y-2 border-t pt-2">
+            <p className="line-clamp-2 px-0.5 text-[12px] text-muted-foreground">
+              <span className="font-medium text-foreground">{picked.name}.</span> {picked.description}
+              {picked.civitai && " Its LoRA downloads from civitai: add your free civitai key in Settings → LoRAs (without it the look's words still apply)."}
+              {picked.hd && " Made for Fuobe Soul HD (cleaner lettering)."}
+            </p>
+            <label className="flex items-center gap-3 px-0.5">
+              <span className="shrink-0 text-[12px] text-muted-foreground">Strength</span>
+              <Slider value={[Math.round(strength * 100)]} min={0} max={100} step={5} onValueChange={([v]) => onStrength(v / 100)} aria-label="Look strength" className="flex-1" />
+              <span className="w-9 shrink-0 text-right text-[12px] tabular-nums">{pct(strength)}</span>
+            </label>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+    </ClearableChip>
+  );
+}

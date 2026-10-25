@@ -14,6 +14,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OPERATION_LABELS, type Generation } from "@/lib/catalog/types";
 import { useCreateGeneration, useGenerationActions } from "@/lib/api";
+import { useSoulFinish } from "./soul-finish";
 import { elapsed, formatCost, leftLabel, notePace, ratioValue, timeAgo, timeLeft } from "@/lib/format";
 import { downloadHref, downloadName, userTitle } from "@/lib/library";
 import { isLayered, nextSteps, shownOutputs } from "@/lib/output-actions";
@@ -364,6 +365,8 @@ export function Feed({
 }) {
   const [open, setOpen] = useState<{ id: string; index: number } | null>(null);
   const create = useCreateGeneration();
+  // Fuobe Soul results get their look's grade and overlay here, once.
+  useSoulFinish(items);
   // Groups get stable callbacks that read the latest props through refs.
   const createRef = useRef(create);
   const reuseRef = useRef(onReuse);

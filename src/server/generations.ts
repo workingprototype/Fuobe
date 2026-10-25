@@ -14,7 +14,8 @@ import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } f
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
-import { promptWithLoras, soulPostSteps } from "@/lib/catalog/soul";
+import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { finishSteps } from "@/lib/soul-post";
 import {
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
@@ -120,7 +121,8 @@ export function toGeneration(r: Row): Generation {
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
     modelName: model?.name ?? r.model_id,
-    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
@@ -1190,6 +1192,38 @@ export async function cancelGeneration(id: string): Promise<void> {
       .catch(() => {});
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
+}
+
+// ---------------------------------------------------------------------------
+// Fuobe Soul's post steps (the look's grade and overlay), made in the browser when the result arrives.
+
+export class FinishError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Keep the finished picture of a Soul result in place of the raw one: the raw one stays as meta.original (its
+ * file is still the generation's), meta.finished marks it done. The first finished copy wins: another tab's
+ * answer is 409, and an output with nothing left to do is refused.
+ */
+export function finishOutput(id: string, index: number, png: Buffer): Generation {
+  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
+  if (!r) throw new FinishError("Not found", 404);
+  if (r.status !== "succeeded") throw new FinishError("The result isn't ready yet", 409);
+  const outputs = JSON.parse(r.outputs_json) as OutputFile[];
+  const o = outputs[index];
+  if (!o || !Number.isInteger(index)) throw new FinishError("No such output", 404);
+  if (o.meta?.finished) throw new FinishError("Already finished", 409);
+  if (!finishSteps(o)) throw new FinishError("This output has no grade or overlay to apply", 400);
+  const asset = saveFile({ data: png, contentType: "image/png", name: `${id}-${index}-finished.png`, source: "generation", generationId: id });
+  outputs[index] = { ...o, url: asset.url, assetId: asset.id, contentType: "image/png", meta: { ...o.meta, finished: true, original: o.url } };
+  update(id, { outputs_json: JSON.stringify(outputs) });
+  return getGeneration(id, { includeDeleted: true })!;
 }
 
 // ---------------------------------------------------------------------------

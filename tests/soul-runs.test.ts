@@ -171,6 +171,22 @@ describe("Fuobe Soul through the server", () => {
     setSetting("falKey", "");
   });
 
+  it("keeps the finished picture (grade, overlay) in place of the raw one, once", async () => {
+    const { finishOutput, getGeneration } = await import("@/server/generations");
+    const { db } = await import("@/server/db");
+    const [g] = createGenerations({ feature: "image", modelId: "fuobe-soul", prompt: "a fox", engine: "open", presetId: "v1-90s-grain" });
+    expect(g.presetName).toBe("90s Grain");
+    const raw = { url: "/api/files/outputs/raw.png", kind: "image", meta: { look: "v1-90s-grain", grade: "portra" } };
+    db().prepare("UPDATE generations SET status = 'succeeded', outputs_json = ? WHERE id = ?").run(JSON.stringify([raw]), g.id);
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const done = finishOutput(g.id, 0, png);
+    expect(done.outputs[0]).toMatchObject({ kind: "image", meta: { grade: "portra", finished: true, original: raw.url } });
+    expect(done.outputs[0].url).not.toBe(raw.url);
+    expect(() => finishOutput(g.id, 0, png)).toThrow(/Already finished/);
+    expect(() => finishOutput(g.id, 3, png)).toThrow(/No such output/);
+    expect(getGeneration(g.id)!.outputs[0].meta?.finished).toBe(true);
+  });
+
   it("remembers the engine on the row, and the engine mode still holds", () => {
     const [g] = createGenerations({ feature: "image", modelId: "fuobe-soul", prompt: "a fox", engine: "cloud" });
     expect(g.engine).toBe("cloud");
