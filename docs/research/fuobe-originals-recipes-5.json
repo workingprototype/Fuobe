@@ -6778,7 +6778,9 @@
     "solarize (Surreal solarization)"
    ],
    "upscale": "1080p tier and above: SeedVR2 (open: upscale-image-seedvr2; hosted: fal-ai/seedvr/upscale/image at $0.001 per megapixel).",
-   "overlays": "Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic)."
+   "overlays": "Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic).",
+   "overlayIds": "presets[].overlay names the browser overlay a look adds after generation: date-stamp (DigitalCam), cctv (CCTV: camera ID and time), photo-booth (Vintage PhotoBooth: four takes stacked into a 1x4 strip). Added 2026-10-25 (o/soul).",
+   "newGradePresetsApplied": "Invertethereal now carries grade invert and Surreal solarization grade solarize (both were null with the instruction in their notes). Corrected 2026-10-25 (o/soul)."
   },
   "soulId": {
    "what": "Higgsfield's Soul ID trains a reusable character from 1-100 photos (POST /v1/custom-references, model_version v1 | v2 | cinema) and is used as custom_reference_id with a 0-1 strength.",
@@ -6789,7 +6791,27 @@
   },
   "soulCinema": {
    "what": "Soul Cinema: one fixed film look, no style picker.",
-   "recipe": "Fuobe Soul with filmstill 0.7 + moviewide 0.5 (+ the character LoRA), 'cine' tail, grade teal-orange or 16mm, 21:9 crop option."
+   "recipe": "Fuobe Soul with filmstill 0.7 + moviewide 0.5 (+ the character LoRA), 'cine' tail, grade teal-orange or 16mm, 21:9 crop option.",
+   "loras": [
+    {
+     "key": "filmstill",
+     "strength": 0.7
+    },
+    {
+     "key": "moviewide",
+     "strength": 0.5
+    }
+   ],
+   "tail": "cine",
+   "grades": [
+    "teal-orange",
+    "16mm"
+   ],
+   "defaultAspect": "16:9",
+   "cropAspects": [
+    "21:9"
+   ],
+   "structured": "loras, tail, grades, defaultAspect and cropAspects restate the recipe above as data for scripts/gen-soul-originals.py. Added 2026-10-25 (o/soul)."
   }
  },
  "presets": [
@@ -6976,7 +6998,7 @@
    "higgsfieldDescription": "Harsh flash, timestamp corner, and raw textures. Feels like 2007 captured forever",
    "descriptionSource": "higgsfield",
    "base": "z-image-turbo",
-   "template": "{prompt}. 2007 point-and-shoot digital camera, harsh on-camera flash, raw textures, orange date stamp in the corner. Direct on-camera flash, hard shadow behind the subject, natural skin texture, slight grain.",
+   "template": "{prompt}. 2007 point-and-shoot digital camera, harsh on-camera flash, raw textures. Direct on-camera flash, hard shadow behind the subject, natural skin texture, slight grain.",
    "triggers": "retrodigicam, hardflashy",
    "loras": [
     {
@@ -7024,8 +7046,9 @@
    "needsCivitaiToken": true,
    "hostedEndpoint": "fal-ai/z-image/turbo/lora",
    "comfyWorkflow": "z-image-turbo-t2i",
-   "notes": "Burn the date stamp in post (browser text overlay) instead of asking the model to write it.",
-   "checked": "2026-10-23"
+   "notes": "Burn the date stamp in post (browser text overlay) instead of asking the model to write it. Corrected 2026-10-25 (o/soul): the look sentence no longer asks for the date stamp; overlay date-stamp draws it.",
+   "checked": "2026-10-23",
+   "overlay": "date-stamp"
   },
   {
    "id": "3f90dc5b-f474-4259-95c4-d29fbd6be645",
@@ -7377,7 +7400,8 @@
    "hostedEndpoint": "fal-ai/z-image/turbo/lora",
    "comfyWorkflow": "z-image-turbo-t2i",
    "notes": "No cleared CCTV LoRA found. Train fuobe-cctv; add the timestamp and camera-ID overlay in post.",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "overlay": "cctv"
   },
   {
    "id": "524be50a-4388-4ff5-a843-a73d2dd7ef87",
@@ -8771,7 +8795,8 @@
    "hostedEndpoint": "fal-ai/z-image/turbo/lora",
    "comfyWorkflow": "z-image-turbo-t2i",
    "notes": "Make the strip in post: four takes with one seed family, stacked into a 1x4 strip in the browser.",
-   "checked": "2026-10-23"
+   "checked": "2026-10-23",
+   "overlay": "photo-booth"
   },
   {
    "id": "cc4e7248-dcfe-4c93-b264-2ab418a7556b",
@@ -9455,7 +9480,7 @@
      "notes": "Portrait-beauty LoRA: card says it removes Z-Image's skin grain, tames HDR and widens face variety. 680 MB. No strength on the card; 0.5-0.7 is a starting point (unverified)."
     }
    ],
-   "grade": null,
+   "grade": "invert",
    "tail": "photo",
    "coverage": "prompt+core",
    "trainOwn": false,
@@ -13042,7 +13067,7 @@
      "notes": "Portrait-beauty LoRA: card says it removes Z-Image's skin grain, tames HDR and widens face variety. 680 MB. No strength on the card; 0.5-0.7 is a starting point (unverified)."
     }
    ],
-   "grade": null,
+   "grade": "solarize",
    "tail": "photo",
    "coverage": "prompt+core",
    "trainOwn": false,

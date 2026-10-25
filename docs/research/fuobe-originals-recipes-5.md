@@ -210,9 +210,9 @@ fal: `fal-ai/z-image/turbo/lora` with `num_inference_steps` 8 (the schema's maxi
 
 - **Grade:** Optional per preset: a preset id from src/lib/grade.ts (natural, split-tone, soft-skin, old-lens, 16mm, teal-orange, portra, noir, faded, golden-hour, cold-steel, pop). Applied in the browser today; for API jobs it needs a server-side port (a small ComfyUI colour node chain or the same shader in a worker).
 - **Palette lock:** When the user picks a Soul HEX palette: run oss-palette-image (palette-transfer-image, strength 0.8) after generation, as Fuobe already does for open models.
-- **New grade presets needed:** invert (Invertethereal), solarize (Surreal solarization).
+- **New grade presets needed:** invert (Invertethereal), solarize (Surreal solarization). *(Corrected 2026-10-25, o/soul: the two looks now carry these grades in the table and the JSON; they had none.)*
 - **Upscale:** 1080p tier and above: SeedVR2 (open: upscale-image-seedvr2; hosted: fal-ai/seedvr/upscale/image at $0.001 per megapixel).
-- **Overlays:** Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic).
+- **Overlays:** *(Added 2026-10-25, o/soul: `presets[].overlay` in the JSON names it: `date-stamp` DigitalCam, `cctv` CCTV, `photo-booth` Vintage PhotoBooth.)* Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic).
 
 ### 4.5 Soul ID and Soul Cinema
 
@@ -281,7 +281,7 @@ Each row is a Fuobe Soul run: the template is `{prompt}. <look>. <tail>` with th
 | 47 | **Creatures** `b3c8075a` | soul-v1 · Surreal | horroratmo@0.4, awportrait@0.4 | — | **yes** | Creature fusion needs a concept LoRA: train fuobe-creatures. |
 | 48 | **Grunge** `ad9de607` | soul-v1 · All presets | grunge@0.8, amateur90s@0.3 | faded |  |  |
 | 49 | **Glazed doll skin makeup** `a2a42ada` | soul-v1 · All presets | awportrait@0.7 | soft-skin |  | Prompt-only beyond the core LoRA. |
-| 50 | **Invertethereal** `82edba1e` | soul-v1 · Graphic Art | awportrait@0.4 | — |  | Do it in post: an inverted or solarised curve (add an 'Invert' grade preset). No LoRA needed. |
+| 50 | **Invertethereal** `82edba1e` | soul-v1 · Graphic Art | awportrait@0.4 | invert |  | Do it in post: an inverted or solarised curve (add an 'Invert' grade preset). No LoRA needed. |
 | 51 | **Indie sleaze** `5a72fec7` | soul-v1 · All presets | hardflash@0.7, emo@0.4 | — |  |  |
 | 52 | **Mixed Media** `2fcf02e2` | soul-v1 · Graphic Art | montage@0.8 | — |  |  |
 | 53 | **Paper Face** `7fa63380` | soul-v1 · Graphic Art | montage@0.6, paperdiorama@0.3 | — | **yes** | Torn-paper face collage needs its own LoRA: train fuobe-paper-collage. |
@@ -349,7 +349,7 @@ Each row is a Fuobe Soul run: the template is `{prompt}. <look>. <tail>` with th
 | 115 | **Street photography** `95151de0` | soul-v2 · Camera | retrocine@0.5, awportrait@0.4 | natural |  |  |
 | 116 | **Retro BW** `069f5a5f` | soul-v2 · Camera | bwphoto@0.7, grainscape@0.5 | noir |  |  |
 | 117 | **Asian nostalgia** `99716f25` | soul-v2 · Mood | softfuji@0.6, grainscape@0.4 | portra |  |  |
-| 118 | **Surreal solarization** `26bb19d1` | soul-v2 · Mood | awportrait@0.4 | — |  | Do it in post: a solarise curve (add a 'Solarize' grade preset). No LoRA needed. |
+| 118 | **Surreal solarization** `26bb19d1` | soul-v2 · Mood | awportrait@0.4 | solarize |  | Do it in post: a solarise curve (add a 'Solarize' grade preset). No LoRA needed. |
 | 119 | **Subtle flash** `e62e75c2` | soul-v2 · Styles | hardflash@0.4, awportrait@0.5 | natural |  |  |
 | 120 | **Digital camera** `74abc530` | soul-v2 · Camera | digicam@0.8, hardflash@0.4 | — |  |  |
 | 121 | **Siren** `cfd92ced` | soul-v2 · Mood | awportrait@0.5, neonnoir@0.3 | — |  |  |
