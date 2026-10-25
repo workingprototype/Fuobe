@@ -592,7 +592,7 @@ export const CLICK_TO_AD = { aspect: "9:16", maxSeconds: 12, shots: 3 } as const
 export const END_CARD = { seconds: 2.5, minSeconds: 2, maxSeconds: 3, zoomTo: 1.05, fps: 24, size: { w: 720, h: 1280 }, cta: "Shop now" } as const;
 
 export const END_CARD_MODELS = {
-  cloud: { art: "overlay-image", clip: "ken-burns", join: "join-clips" },
+  cloud: { art: "overlay-image", clip: "ken-burns", sound: "merge-audio-video", join: "join-clips" },
   open: { append: "oss-append-endcard", clip: "oss-still-to-clip", join: "oss-join-sound1" },
 } as const;
 
@@ -613,6 +613,11 @@ export interface EndCardInput {
   /** Cloud, no drawn card: the brand-colour background and the logo overlay-image puts on it. */
   background?: string;
   logo?: string;
+  /**
+   * Cloud: a silent WAV as long as the card (the server writes it). The card clip gets it as its sound track, so
+   * both clips merge-videos joins carry sound and the ad's voiceover goes through the join.
+   */
+  silence?: string;
   seconds?: number;
   feature: string;
   title: string;
@@ -627,9 +632,9 @@ export interface EndCardInput {
 
 /**
  * The steps that make the end card and put it after the ad, and the key of the finished video. Cloud:
- * [overlay-image: the logo on the brand colour →] ken-burns (zoom 1 → 1.05) → merge-videos after the ad.
- * Open: video-append-endcard (the ad's sound kept, padded with silence under the card), or still-to-clip +
- * oss-join-sound1 for a clip the open engine didn't make.
+ * [overlay-image: the logo on the brand colour →] ken-burns (zoom 1 → 1.05) → a silent sound track under it
+ * (merge-audio-video) → merge-videos after the ad. Open: video-append-endcard (the ad's sound kept, padded with
+ * silence under the card), or still-to-clip + oss-join-sound1 for a clip the open engine didn't make.
  */
 export function endCardSteps(o: EndCardInput): { steps: EndCardStep[]; final: string } {
   const seconds = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, o.seconds ?? END_CARD.seconds));
@@ -667,6 +672,7 @@ export function endCardSteps(o: EndCardInput): { steps: EndCardStep[]; final: st
     };
   }
   const M = END_CARD_MODELS.cloud;
+  if (!o.silence) throw new Error("The end card needs its silent sound track");
   const steps: EndCardStep[] = [];
   if (!o.card) {
     if (!o.background || !o.logo) throw new Error("Add a logo to the brand kit for the end card, or turn End card off");
@@ -679,11 +685,20 @@ export function endCardSteps(o: EndCardInput): { steps: EndCardStep[]; final: st
     request: { ...helper, modelId: M.clip, op: "still-motion", ...(o.card ? { inputs: { images: [o.card] } } : {}), params: move },
     ...(o.card ? {} : { after: ["endcardArt"], chain: [{ slot: "images" as const }] }),
   });
+  // The card's clip has no sound: give it silence, so merge-videos joins two clips that both have sound (whether it
+  // keeps the first clip's voiceover when the second has no audio stream at all is unknown).
+  steps.push({
+    key: "endcardSound",
+    label: "End card sound",
+    request: { ...helper, modelId: M.sound, op: "mux", inputs: { audio: o.silence } },
+    after: ["endcardClip"],
+    chain: [{ slot: "video" }],
+  });
   steps.push({
     key: "endcard",
     label: "Adding the end card",
     request: { ...result, modelId: M.join, op: "concat", prompt: o.title, params: { aspectRatio: o.aspectRatio } },
-    after: [o.ad, "endcardClip"],
+    after: [o.ad, "endcardSound"],
     chain: [{ slot: "videos" }, { slot: "videos" }],
   });
   return { steps, final: "endcard" };

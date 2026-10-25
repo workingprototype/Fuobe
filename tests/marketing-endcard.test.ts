@@ -21,7 +21,8 @@ process.env.OLLAMA_URL = "http://127.0.0.1:9";
 const { setSetting } = await import("@/server/settings");
 const mk = await import("@/server/marketing");
 const gens = await import("@/server/generations");
-const { saveFile } = await import("@/server/storage");
+const { readRef, saveFile } = await import("@/server/storage");
+const { decodePng } = await import("@/server/png");
 const { prepareWorkflow } = await import("@/server/providers/comfyui");
 const { getModel } = await import("@/lib/catalog");
 const { END_CARD, END_CARD_MODELS, endCardSteps } = await import("@/lib/catalog/marketing");
@@ -58,10 +59,10 @@ describe("the end card's steps per engine", () => {
     expect(getModel("oss-still-to-clip")!.routes).toEqual([expect.objectContaining({ op: "still-motion", provider: "comfyui", endpoint: "still-to-clip" })]);
   });
 
-  it("cloud: the drawn card → a 2.5 s push-in (zoom 1 → 1.05) → merge-videos after the ad", () => {
-    const { steps, final } = endCardSteps({ ...base, engine: "cloud", card: "/api/files/card.png" });
+  it("cloud: the drawn card → a 2.5 s push-in (zoom 1 → 1.05) → a silent track under it → merge-videos after the ad", () => {
+    const { steps, final } = endCardSteps({ ...base, engine: "cloud", card: "/api/files/card.png", silence: "/api/files/silence.wav" });
     expect(final).toBe("endcard");
-    expect(steps.map((s) => s.key)).toEqual(["endcardClip", "endcard"]);
+    expect(steps.map((s) => s.key)).toEqual(["endcardClip", "endcardSound", "endcard"]);
     expect(steps[0].request).toMatchObject({
       feature: "click-to-ad-step",
       modelId: "ken-burns",
@@ -69,16 +70,19 @@ describe("the end card's steps per engine", () => {
       inputs: { images: ["/api/files/card.png"] },
       params: { duration: 2.5, fps: 24, zoomFrom: 1, zoomTo: 1.05, easing: "ease-in-out" },
     });
-    expect(steps[1]).toMatchObject({ after: ["captions", "endcardClip"], chain: [{ slot: "videos" }, { slot: "videos" }], request: { feature: "click-to-ad", title: base.title, modelId: "join-clips", op: "concat" } });
+    // Both clips merge-videos joins carry sound, so the ad's voiceover goes through the join.
+    expect(steps[1]).toMatchObject({ after: ["endcardClip"], chain: [{ slot: "video" }], request: { feature: "click-to-ad-step", modelId: "merge-audio-video", op: "mux", inputs: { audio: "/api/files/silence.wav" } } });
+    expect(steps[2]).toMatchObject({ after: ["captions", "endcardSound"], chain: [{ slot: "videos" }, { slot: "videos" }], request: { feature: "click-to-ad", title: base.title, modelId: "join-clips", op: "concat" } });
+    expect(() => endCardSteps({ ...base, engine: "cloud", card: "/api/files/card.png" })).toThrow(/needs its silent sound track/);
   });
 
   it("cloud without a drawn card: overlay-image puts the logo on the brand colour first", () => {
-    const { steps } = endCardSteps({ ...base, engine: "cloud", background: "/api/files/bg.png", logo: "/api/files/logo.png", seconds: 9 });
-    expect(steps.map((s) => s.key)).toEqual(["endcardArt", "endcardClip", "endcard"]);
+    const { steps } = endCardSteps({ ...base, engine: "cloud", background: "/api/files/bg.png", logo: "/api/files/logo.png", seconds: 9, silence: "/api/files/silence.wav" });
+    expect(steps.map((s) => s.key)).toEqual(["endcardArt", "endcardClip", "endcardSound", "endcard"]);
     expect(steps[0].request).toMatchObject({ modelId: "overlay-image", op: "overlay", inputs: { images: ["/api/files/bg.png", "/api/files/logo.png"] }, params: { position: { x: 0.5, y: 0.45 }, scale: 1 } });
     expect(steps[1]).toMatchObject({ after: ["endcardArt"], chain: [{ slot: "images" }], request: { params: { duration: 3 } } });
     expect(steps[1].request.inputs).toBeUndefined();
-    expect(() => endCardSteps({ ...base, engine: "cloud" })).toThrow(/Add a logo to the brand kit/);
+    expect(() => endCardSteps({ ...base, engine: "cloud", silence: "/api/files/silence.wav" })).toThrow(/Add a logo to the brand kit/);
   });
 
   it("open: the card appended to the ad keeping its sound, or still-to-clip + the join that keeps the first clip's sound", () => {
@@ -101,17 +105,17 @@ describe("the end card's steps per engine", () => {
 describe("Click to Ad with an end card", () => {
   it("ends the product-only ad on the card: captions become a helper, the card's join is the result", () => {
     const card = upload("card.png");
-    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: { image: card } }, { product: product(), script: SCRIPT });
+    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: { image: card } }, { product: product(), script: SCRIPT, silence: "/api/files/silence.wav" });
     expect(plan.finals).toEqual(["endcard"]);
     const by = Object.fromEntries(plan.steps.map((s) => [s.key, s]));
     expect(by.captions.request.feature).toBe("click-to-ad-step");
     expect(by.captions.request.title).toBeUndefined();
-    expect(by.endcard).toMatchObject({ after: ["captions", "endcardClip"], request: { feature: "click-to-ad", title: plan.title } });
+    expect(by.endcard).toMatchObject({ after: ["captions", "endcardSound"], request: { feature: "click-to-ad", title: plan.title } });
     expect(plan.meta.endCard).toBe(card);
     expect(plan.notes).toContain("Ends on your logo card for 2.5 s");
-    // Prices: the card's two fal steps are about free; every step is valid.
+    // Prices: the card's three fal steps are about free; every step is valid.
     const est = mk.estimatePlan(plan);
-    expect(est.steps.map((s) => s.key).slice(-2)).toEqual(["endcardClip", "endcard"]);
+    expect(est.steps.map((s) => s.key).slice(-3)).toEqual(["endcardClip", "endcardSound", "endcard"]);
   });
 
   it("no card asked for: the plan is as before", () => {
@@ -122,12 +126,42 @@ describe("Click to Ad with an end card", () => {
 
   it("cloud, no drawn card: the kit's raster logo on the background; an SVG logo can't be placed", () => {
     const logo = upload("logo.png");
-    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo }), script: SCRIPT, background: "/api/files/bg.png" });
+    const plan = mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo }), script: SCRIPT, background: "/api/files/bg.png", silence: "/api/files/silence.wav" });
     expect(plan.steps.find((s) => s.key === "endcardArt")!.request.inputs).toEqual({ images: ["/api/files/bg.png", logo] });
     expect(plan.notes.join(" ")).toMatch(/the kit's logo on its main colour/);
-    expect(() => mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo: "/api/files/logo.svg" }), script: SCRIPT, background: "/api/files/bg.png" })).toThrow(
+    expect(() => mk.planClickToAd({ engine: "cloud", productId: "p1", styleId: "clean-minimal", endCard: {} }, { product: product(), brand: kit({ logo: "/api/files/logo.svg" }), script: SCRIPT, background: "/api/files/bg.png", silence: "/api/files/silence.wav" })).toThrow(
       /Add a logo to the brand kit for the end card, or turn End card off/,
     );
+  });
+
+  it("cloud, no drawn card: the background is the colour the page's card uses, not the kit's first colour", async () => {
+    // A white first colour under a white logo would hide it; the page's card takes the kit's accent.
+    const url = mk.cardBackground(kit({ colors: ["#ffffff", "#0a7d4f"] }));
+    const png = decodePng((await readRef(url)).data);
+    expect([png.width, png.height]).toEqual([END_CARD.size.w, END_CARD.size.h]);
+    expect([...png.data.subarray(0, 4)]).toEqual([0x0a, 0x7d, 0x4f, 255]);
+    expect(themeFrom({ colors: ["#ffffff", "#0a7d4f"] }).accent).toBe("#0a7d4f");
+  });
+
+  it("cloud: the card's silent sound track is a WAV as long as the card", () => {
+    const wav = mk.silentWav(2.5);
+    expect(wav.subarray(0, 4).toString()).toBe("RIFF");
+    expect(wav.readUInt16LE(22)).toBe(2);
+    expect(wav.readUInt32LE(24)).toBe(44100);
+    expect(wav.readUInt32LE(40) / (44100 * 4)).toBeCloseTo(2.5, 5);
+    expect(wav.subarray(44).every((b) => b === 0)).toBe(true);
+  });
+
+  it("open: reads who encodes the ad from its last step (append for ComfyUI, still-to-clip + join for anything else)", () => {
+    const card = upload("card.png");
+    const plan = mk.planClickToAd({ engine: "open", productId: "p1", styleId: "clean-minimal", voiceSample: upload("v.png"), endCard: { image: card } }, { product: product(), script: SCRIPT });
+    // Every open Click to Ad ends on a ComfyUI step today: the card is appended to it.
+    expect(plan.steps.at(-1)!.request.modelId).toBe("oss-append-endcard");
+    expect(mk.adEncoder({ request: { feature: "t", modelId: "oss-captions-burnin", op: "captions" } })).toBe("comfyui");
+    // A clip made in the browser (or by anything but ComfyUI) can't have its packets copied.
+    expect(mk.adEncoder({ request: { feature: "t", modelId: "local-ad-compose", op: "edit" } })).toBe("other");
+    expect(mk.adEncoder({ request: { feature: "t", modelId: "no-such-model", op: "concat" } })).toBe("other");
+    expect(mk.adEncoder(undefined)).toBe("other");
   });
 
   it("open: appended after the presenter film (ComfyUI-encoded), and needs the drawn card", () => {

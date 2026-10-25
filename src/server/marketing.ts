@@ -43,6 +43,7 @@ import {
 } from "@/lib/catalog/marketing";
 import { routesFor } from "@/lib/catalog/plan";
 import { probeMedia } from "@/lib/media-probe";
+import { themeFrom } from "@/components/ads/layout";
 import type { ChainSlot, Engine, GenerationRequest, ModelDef, Operation } from "@/lib/catalog/types";
 import { getBrand, getProduct } from "./brand";
 import { createPipeline, type PipelineStep } from "./chains";
@@ -657,18 +658,30 @@ export function clickToAdSeconds(engine: Engine, presenter: boolean): { voice: n
 const rasterLogo = (brand?: BrandKit | null) => (brand?.logo && !isSvg(brand.logo) ? brand.logo : undefined);
 
 /**
- * The ad, then its logo end card: the ad's last step becomes a helper and the card's join is the result
- * (endCardSteps: cloud ken-burns + merge-videos, open video-append-endcard).
+ * Who encoded a step's clip: video-append-endcard copies the ad's packets, so it only takes a clip ComfyUI made
+ * (every open Click to Ad final today); anything else gets still-to-clip + the sound-keeping join.
  */
-function withEndCard(plan: RunPlan, input: ClickToAdInput, ctx: { brand?: BrandKit | null; background?: string }): RunPlan {
+export function adEncoder(step: Pick<Step, "request"> | undefined): "comfyui" | "other" {
+  const m = step && getModel(step.request.modelId);
+  const op = step?.request.op;
+  return m && op && routesFor(m, op).length && routesFor(m, op).every((r) => r.provider === "comfyui") ? "comfyui" : "other";
+}
+
+/**
+ * The ad, then its logo end card: the ad's last step becomes a helper and the card's join is the result
+ * (endCardSteps: cloud ken-burns + a silent track + merge-videos, open video-append-endcard).
+ */
+function withEndCard(plan: RunPlan, input: ClickToAdInput, ctx: { brand?: BrandKit | null; background?: string; silence?: string }): RunPlan {
   if (!input.endCard) return plan;
   const ad = plan.finals[0];
   const card = endCardSteps({
     engine: plan.engine,
     ad,
+    adEncodedBy: plan.engine === "open" ? adEncoder(plan.steps.find((s) => s.key === ad)) : undefined,
     card: input.endCard.image,
     background: ctx.background,
     logo: rasterLogo(ctx.brand),
+    silence: ctx.silence,
     seconds: input.endCard.seconds,
     feature: plan.feature,
     title: plan.title,
@@ -686,7 +699,7 @@ function withEndCard(plan: RunPlan, input: ClickToAdInput, ctx: { brand?: BrandK
   return { ...plan, steps: [...steps, ...card.steps], finals: [card.final], meta: { ...plan.meta, endCard: input.endCard.image ?? null }, notes };
 }
 
-export function planClickToAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit | null; script: string; background?: string }): RunPlan {
+export function planClickToAd(input: ClickToAdInput, ctx: { product: Product; brand?: BrandKit | null; script: string; background?: string; silence?: string }): RunPlan {
   try {
     return withEndCard(planAd(input, ctx), input, ctx);
   } catch (e) {
@@ -1072,17 +1085,46 @@ export function estimateClickToAd(input: ClickToAdInput): RunEstimate {
   const ctx = context({ productId: input.productId });
   const presenter = input.presenter ?? styleById(input.styleId)?.presenter ?? false;
   const script = input.script?.trim() || Array(wordBudget(clickToAdSeconds(input.engine, presenter).voice)).fill("word").join(" ");
-  return estimatePlan(planClickToAd(input, { product: ctx.product!, brand: ctx.brand, script, background: "/api/files/placeholder.png" }));
+  return estimatePlan(planClickToAd(input, { product: ctx.product!, brand: ctx.brand, script, background: "/api/files/placeholder.png", silence: "/api/files/placeholder.wav" }));
 }
 
-/** The end card's background when the page drew none: the kit's main colour at the card's size (cloud: the logo goes on it). */
-function cardBackground(brand?: BrandKit | null): string {
-  const hex = brand?.colors.find((c) => /^#[0-9a-f]{6}$/i.test(c)) ?? "#141414";
+/**
+ * The end card's background when the page drew none: the kit's accent at the card's size (cloud: the logo goes on
+ * it), the colour the page's card uses (themeFrom), so a white logo isn't put on a white first colour.
+ */
+export function cardBackground(brand?: BrandKit | null): string {
+  const hex = themeFrom(brand).accent;
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   const { w, h } = END_CARD.size;
   const data = Buffer.alloc(w * h * 4);
   for (let i = 0; i < data.length; i += 4) data.set([r, g, b, 255], i);
   return saveFile({ data: encodePng({ width: w, height: h, data }), contentType: "image/png", source: "generation", name: "end-card-background.png" }).url;
+}
+
+/** A silent 16-bit stereo WAV `seconds` long (44.1 kHz). */
+export function silentWav(seconds: number, rate = 44100): Buffer {
+  const frames = Math.round(seconds * rate);
+  const bytes = frames * 4;
+  const buf = Buffer.alloc(44 + bytes);
+  buf.write("RIFF", 0);
+  buf.writeUInt32LE(36 + bytes, 4);
+  buf.write("WAVEfmt ", 8);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 4, 28);
+  buf.writeUInt16LE(4, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36);
+  buf.writeUInt32LE(bytes, 40);
+  return buf;
+}
+
+/** The cloud end card's sound track: silence as long as the card. */
+function cardSilence(seconds?: number): string {
+  const s = Math.max(END_CARD.minSeconds, Math.min(END_CARD.maxSeconds, seconds ?? END_CARD.seconds));
+  return saveFile({ data: silentWav(s), contentType: "audio/wav", source: "generation", name: "end-card-silence.wav" }).url;
 }
 
 export async function clickToAdScript(input: Pick<ClickToAdInput, "engine" | "productId" | "styleId" | "presenter" | "instructions">): Promise<{ script: string; by: "llm" | "rules"; seconds: number }> {
@@ -1099,10 +1141,17 @@ export async function runClickToAd(input: ClickToAdInput): Promise<{ run: Market
   const presenter = input.presenter ?? styleById(input.styleId)?.presenter ?? false;
   const seconds = clickToAdSeconds(input.engine, presenter).voice;
   const script = input.script?.trim() ? fitScript(input.script, seconds) : (await clickToAdScript(input)).script;
-  // Checked first with a stand-in, so a plan that can't run writes no file.
-  const fallback = input.endCard && !input.endCard.image && input.engine === "cloud";
-  if (fallback) planClickToAd(input, { product: ctx.product, brand: ctx.brand, script, background: "/api/files/placeholder.png" });
-  const plan = planClickToAd(input, { product: ctx.product, brand: ctx.brand, script, background: fallback ? cardBackground(ctx.brand) : undefined });
+  // Checked first with stand-ins, so a plan that can't run writes no file.
+  const cloudCard = !!input.endCard && input.engine === "cloud";
+  const fallback = cloudCard && !input.endCard?.image;
+  if (cloudCard) planClickToAd(input, { product: ctx.product, brand: ctx.brand, script, background: "/api/files/placeholder.png", silence: "/api/files/placeholder.wav" });
+  const plan = planClickToAd(input, {
+    product: ctx.product,
+    brand: ctx.brand,
+    script,
+    background: fallback ? cardBackground(ctx.brand) : undefined,
+    silence: cloudCard ? cardSilence(input.endCard?.seconds) : undefined,
+  });
   estimatePlan(plan);
   return { run: launch(plan, { ...input, script }), script };
 }
