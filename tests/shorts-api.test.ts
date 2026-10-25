@@ -368,21 +368,24 @@ describe("Mixed Media renders", () => {
     expect(await settle(final.id)).toMatchObject({ status: "succeeded", feature: "mixed-media" });
   });
 
-  it("tries a failed render again with the same settings, from its first step", async () => {
+  it("tries a failed render again with the same settings, from the step that failed (the cut is kept)", async () => {
     const { final, items } = await mixed.createMixed(mm({ engine: "cloud", mode: "fast", range: { start: 1, end: 4 } }) as never);
     // The restyle stops: the soundtrack step then fails with the generic "An earlier step didn't finish".
+    await settle(items[0].id);
     await gens.cancelGeneration(items[1].id);
     expect(await settle(final.id)).toMatchObject({ status: "failed", error: "An earlier step didn't finish" });
     const res = await mixedRetryRoute.POST(json("POST", { id: final.id, requestId: "mm-retry-0001" }));
     expect(res.status).toBe(201);
     const again = await res.json();
-    expect(again.items.map((g: Generation) => g.modelId)).toEqual(["trim-video", "ltx-2-3-restyle", "merge-audio-video"]);
+    // The cut finished: it isn't made (or paid for) again.
+    expect(again.items.map((g: Generation) => g.modelId)).toEqual(["ltx-2-3-restyle", "merge-audio-video"]);
     expect(again.final.id).not.toBe(final.id);
     expect(again.final.batchId).not.toBe(final.batchId);
-    // Same settings; the chained inputs are filled again by the new steps.
-    expect(again.items[1].request).toMatchObject({ prompt: items[1].request.prompt, params: items[1].request.params });
-    expect(again.items[1].request.inputs?.video).toBeUndefined();
-    expect(dependsOn(again.final.id)).toEqual([again.items[1].id, again.items[0].id]);
+    // Same settings; the chained inputs are filled again, from the kept cut.
+    expect(again.items[0].request).toMatchObject({ prompt: items[1].request.prompt, params: items[1].request.params });
+    expect(again.items[0].request.inputs?.video).toBeUndefined();
+    expect(dependsOn(again.items[0].id)).toEqual([items[0].id]);
+    expect(dependsOn(again.final.id)).toEqual([again.items[0].id, items[0].id]);
     expect(await settle(again.final.id)).toMatchObject({ status: "succeeded" });
     const gone = await mixedRetryRoute.POST(json("POST", { id: "nope" }));
     expect(gone.status).toBe(404);
@@ -420,9 +423,15 @@ describe("Mixed Media renders", () => {
       // 75 frames × $0.08, plus the cut, the extraction and the assembly (fal compute, about free).
       expect(est.costUsd).toBeGreaterThanOrEqual(6);
       expect(est.costUsd).toBeLessThan(6.01);
-      const big = await mixed.estimateMixed(mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 10 }, fps: 24, resolution: "4K" }) as never);
-      expect(big).toMatchObject({ frames: 240, fps: 24, perFrameUsd: 0.16 });
-      expect(big.costUsd).toBeGreaterThanOrEqual(38.4);
+      const big = await mixed.estimateMixed(mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 5 }, fps: 24, resolution: "4K" }) as never);
+      expect(big).toMatchObject({ frames: 120, fps: 24, perFrameUsd: 0.16 });
+      expect(big.costUsd).toBeGreaterThanOrEqual(19.2);
+      // Over 200 frames the clips are joined at up to 2048 px: 4K frames would be paid for and shrunk, so they are drawn at 2K.
+      const joined = await mixed.estimateMixed(mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 10 }, fps: 24, resolution: "4K" }) as never);
+      expect(joined).toMatchObject({ frames: 240, perFrameUsd: 0.12 });
+      expect(joined.costUsd).toBeGreaterThanOrEqual(28.8);
+      expect(joined.costUsd).toBeLessThan(28.9);
+      expect(joined.notes).toContain("Over 200 frames are made as clips and joined at up to 2048 px, so frames are drawn at 2K");
       const flash = await mixed.estimateMixed(mm({ engine: "cloud", modelId: "seedream-5-flash", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 }, range: { start: 0, end: 5 }, fps: 8 }) as never);
       expect(flash).toMatchObject({ frames: 40, perFrameUsd: 0.027 });
       expect(flash.notes.join(" ")).toMatch(/Seedream 5\.0 Flash takes no seed/);
@@ -435,6 +444,16 @@ describe("Mixed Media renders", () => {
       const res = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", source: { url: "/api/files/placeholder.mp4", duration: 12 } })));
       expect(res.status).toBe(422);
       expect((await res.json()).error).toMatch(/pick Fast/);
+      // A caller from before Per frame that names a Fast model gets Fast, as before; a model of the other mode is refused, not swapped.
+      const legacy = await mixed.estimateMixed(mm({ engine: "cloud", modelId: "ltx-2-3-restyle", source: { url: "/api/files/placeholder.mp4", duration: 12 }, range: { start: 0, end: 5 } }) as never);
+      expect(legacy.mode).toBe("fast");
+      expect(legacy.perFrameUsd).toBeUndefined();
+      const wrong = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", mode: "frames", modelId: "ltx-2-3-restyle", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 } })));
+      expect(wrong.status).toBe(422);
+      expect((await wrong.json()).error).toBe("LTX 2.3 Reference Restyle restyles the clip as video — pick Fast for it, or Nano Banana 2 or Seedream 5.0 Flash to redraw each frame");
+      const still = await mixedEstimateRoute.POST(json("POST", mm({ engine: "cloud", mode: "fast", modelId: "nano-banana-2", source: { url: "/api/files/placeholder.mp4", duration: 12, fps: 24 } })));
+      expect(still.status).toBe(422);
+      expect((await still.json()).error).toMatch(/^Nano Banana 2 redraws single frames — pick Per frame/);
     } finally {
       setSetting("falKey", "");
     }
@@ -464,7 +483,32 @@ describe("Mixed Media renders", () => {
     expect(redo.map((g) => g.request.chainFilled)).toEqual([undefined, undefined, undefined, undefined]);
     expect(await settle(again.final.id)).toMatchObject({ status: "succeeded" });
     expect(gens.getGeneration(redo[3].id)!.request.inputs?.images).toHaveLength(2);
-    expect(mixed.framesProgress(again.final.batchId)).toEqual({ total: 4, done: 4, running: 0 });
+    expect(mixed.framesProgress(again.final.id)).toEqual({ total: 4, done: 4, running: 0 });
+
+    // A frame failed after the others were paid for: Try again redraws that frame and the ones after it in its
+    // lane (they matched it), keeping the rest, the cut and the extraction.
+    const old = gens.listGenerations({ batchId: again.final.batchId, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    const steps = gens.listGenerations({ batchId: again.final.batchId, features: ["mixed-media-step"], limit: 50 });
+    const clipStep = steps.find((g) => g.op === "images-to-video")!;
+    const fail = (id: string, error: string) => db().prepare("UPDATE generations SET status = 'failed', error = ? WHERE id = ?").run(error, id);
+    fail(old[2].id, "Refused by the safety filter");
+    fail(old[3].id, "An earlier step didn't finish");
+    fail(clipStep.id, "An earlier step didn't finish");
+    fail(again.final.id, "An earlier step didn't finish");
+    expect(mixed.framesProgress(again.final.id)).toMatchObject({ total: 4, done: 2, failed: { label: "Frame 3 of 4", error: "Refused by the safety filter" } });
+    const third = await (await mixedRetryRoute.POST(json("POST", { id: again.final.id, requestId: "mm-frames-retry2" }))).json();
+    expect(third.frames).toBe(2);
+    expect(third.items.map((g: Generation) => g.op)).toEqual(["images-to-video", "mux"]);
+    const redrawn = gens.listGenerations({ batchId: third.final.batchId, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    expect(redrawn.map((g) => g.request.step?.label)).toEqual(["Frame 3 of 4", "Frame 4 of 4"]);
+    // Frame 3 waits on the kept extraction and the kept frame 2.
+    expect(dependsOn(redrawn[0].id)).toEqual([...dependsOn(old[2].id).slice(0, 1), old[1].id]);
+    expect(await settle(third.final.id)).toMatchObject({ status: "succeeded" });
+    const rebuilt = gens.getGeneration(third.items[0].id)!.request.inputs?.images;
+    expect(rebuilt?.slice(0, 2)).toEqual([old[0].outputs[0].url, old[1].outputs[0].url]);
+    expect(rebuilt?.slice(2)).toEqual(redrawn.map((g) => gens.getGeneration(g.id)!.outputs[0].url));
+    // Progress follows the render across tries: all four frames.
+    expect(mixed.framesProgress(third.final.id)).toEqual({ total: 4, done: 4, running: 0 });
   });
 
   it("says which frame failed and why, not just that an earlier step didn't finish", async () => {
@@ -472,9 +516,36 @@ describe("Mixed Media renders", () => {
     const edits = gens.listGenerations({ batchId: final.batchId!, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
     await gens.cancelGeneration(edits[1].id);
     expect(await settle(final.id)).toMatchObject({ status: "failed" });
-    const res = await mixedProgressRoute.GET(new Request(`http://x/api/mixed-media/progress?batch=${final.batchId}`));
+    const res = await mixedProgressRoute.GET(new Request(`http://x/api/mixed-media/progress?id=${final.id}`));
     const progress = await res.json();
     expect(progress).toMatchObject({ total: 4, failed: { label: "Frame 2 of 4", error: "Canceled" } });
     expect((await mixedProgressRoute.GET(new Request("http://x/api/mixed-media/progress"))).status).toBe(400);
+    expect((await mixedProgressRoute.GET(new Request("http://x/api/mixed-media/progress?id=nope"))).status).toBe(404);
+  });
+
+  it("stops the frames still waiting when one fails, so the other lanes aren't paid for", async () => {
+    // 4 s at 4 FPS: 16 frames in two lanes (frames 1–12 and 13–16).
+    const { final, frames } = await mixed.createMixed(mm({ engine: "cloud", range: { start: 1, end: 5 }, fps: 4 }) as never);
+    expect(frames).toBe(16);
+    const edits = gens.listGenerations({ batchId: final.batchId!, features: ["mixed-media-frame-step"], limit: 50 }).sort((a, b) => a.request.step!.index - b.request.step!.index);
+    db().prepare("UPDATE generations SET status = 'failed', error = 'Refused by the safety filter', completed_at = ? WHERE id = ?").run(Date.now(), edits[13].id);
+    expect(await settle(final.id)).toMatchObject({ status: "failed" });
+    for (const g of edits) await settle(g.id);
+    const rows = edits.map((g) => db().prepare("SELECT status, error, external_id FROM generations WHERE id = ?").get(g.id) as { status: string; error: string | null; external_id: string | null });
+    // None of the other frames reached a provider: they were waiting for the cut and the extraction.
+    expect(rows.filter((r) => r.external_id)).toEqual([]);
+    expect(rows.filter((r) => r.status === "canceled").every((r) => r.error === gens.DROPPED_UNUSED)).toBe(true);
+    expect(rows.filter((r) => r.status === "canceled")).toHaveLength(14);
+    expect(mixed.framesProgress(final.id)).toMatchObject({ total: 16, done: 0, failed: { label: "Frame 14 of 16", error: "Refused by the safety filter" } });
+  });
+
+  it("names the step that failed when no frame did (the extraction), not frame 1", async () => {
+    const { final, items } = await mixed.createMixed(mm({ engine: "cloud", range: { start: 1, end: 2 }, fps: 4 }) as never);
+    const extract = items.find((g) => g.op === "extract-frames")!;
+    await gens.cancelGeneration(extract.id);
+    expect(await settle(final.id)).toMatchObject({ status: "failed" });
+    const progress = mixed.framesProgress(final.id)!;
+    expect(progress.total).toBe(4);
+    expect(progress.failed).toBeUndefined();
   });
 });

@@ -17,6 +17,7 @@ import {
   clampFps,
   defaultValues,
   fpsChoices,
+  FRAME_LIMITS,
   MIXED,
   MIXED_PRESETS,
   mixedFrames,
@@ -133,6 +134,11 @@ function How({ onStart }: { onStart: () => void }) {
           A render is counted in frames: seconds × frame rate, rounded down (10 s at 8 FPS = 80 frames). On the open engine every frame runs on your GPU for free; on the
           cloud each frame is redrawn by an image model and priced per frame (Nano Banana 2 or Seedream 5.0 Flash). Fast restyles the clip in one video-to-video pass,
           priced by the model. The estimate shows before you generate.
+        </p>
+        <p className="mt-2">
+          To keep a render quick, the cloud redraws frames in runs of {FRAME_LIMITS.lane} side by side: each frame matches the one before it, and each run starts from
+          your preview frame, so the look can shift slightly every {FRAME_LIMITS.lane} frames. If a frame fails, the frames still waiting stop, and Try again redraws only
+          the frames that didn’t finish.
         </p>
       </div>
       <div className="mt-6 text-center">
@@ -663,7 +669,7 @@ function LatestRender({ chain, frames }: { chain: (Generation | undefined)[]; fr
   const steps = chain.some((x) => !x) ? null : chainState(renderSteps(chain));
   const perFrame = frames > 0 && isFrameRender(chain);
   const redrawing = perFrame && steps?.status === "working" && steps.label === "Redrawing the frames";
-  const progress = useFramesProgress(perFrame ? g?.batchId : null, redrawing || steps?.status === "failed").data;
+  const progress = useFramesProgress(perFrame ? g?.id : null, redrawing ? "live" : steps?.status === "failed" ? "once" : null).data;
   let state = steps ?? ({ status: "working", label: "Rendering", progress: 0 } as const);
   if (perFrame && state.status === "working") {
     // The frames are most of the work: the cut and the extraction fill the first tenth of the bar, redrawing the
@@ -672,7 +678,8 @@ function LatestRender({ chain, frames }: { chain: (Generation | undefined)[]; fr
     const p = redrawing ? 0.1 + 0.8 * (progress?.total ? progress.done / progress.total : 0) : state.progress < at ? (state.progress / at) * 0.1 : 0.9 + ((state.progress - at) / (1 - at)) * 0.1;
     state = { ...state, progress: p, ...(redrawing && progress?.total ? { label: `Redrawing frames · ${progress.done} of ${progress.total}` } : {}) };
   }
-  // A frame that failed: say which and why (the steps after it only say an earlier step didn't finish).
+  // A frame that failed on its own: say which and why (the steps after it only say an earlier step didn't finish).
+  // When the cut or the extraction failed, no frame did: that step's own error stands.
   if (state.status === "failed" && progress?.failed) state = { ...state, label: `${progress.failed.label} failed`, error: progress.failed.error };
   const out = g?.status === "succeeded" ? g.outputs.find((o) => o.kind === "video") : undefined;
   return (

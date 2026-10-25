@@ -85,8 +85,8 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
                   <PendingTile g={state.status === "working" ? (chain.find((x) => x.status !== "succeeded") ?? g) : g} ratio={1} />
                 ) : (
                   <div className="flex size-full flex-col justify-center gap-1 border border-dashed p-3">
-                    {g.status !== "canceled" && isFrameRender(chain) && g.batchId ? (
-                      <FrameFailure batchId={g.batchId} heading={heading} reason={reason} />
+                    {g.status !== "canceled" && isFrameRender(chain) ? (
+                      <FrameFailure id={g.id} heading={heading} reason={reason} />
                     ) : (
                       <>
                         <p className="text-[13px] font-medium">{heading}</p>
@@ -124,9 +124,12 @@ export function MixedHistory({ onStart }: { onStart: () => void }) {
   );
 }
 
-/** A per-frame render that failed: the frame that failed and why (the steps after it only say an earlier step didn't finish). */
-function FrameFailure({ batchId, heading, reason }: { batchId: string; heading: string; reason?: string | null }) {
-  const failed = useFramesProgress(batchId, false).data?.failed;
+/**
+ * A per-frame render that failed: the frame that failed and why (the steps after it only say an earlier step didn't
+ * finish). When no frame failed on its own (the cut or the extraction did), the failing step's error stands.
+ */
+function FrameFailure({ id, heading, reason }: { id: string; heading: string; reason?: string | null }) {
+  const failed = useFramesProgress(id, "once").data?.failed;
   const title = failed ? `${failed.label} failed` : heading;
   const why = failed?.error ?? reason;
   return (

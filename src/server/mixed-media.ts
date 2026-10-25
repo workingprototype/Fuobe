@@ -3,13 +3,14 @@ import { getModel } from "@/lib/catalog";
 import {
   clampFps,
   cleanValues,
+  FRAME_LIMITS,
+  frameResolution,
   frameSampling,
   getMixedPreset,
   MIXED_FEATURE,
   MIXED_FRAME_FEATURE,
   MIXED_FRAME_MODELS,
   MIXED_MODELS,
-  MIXED_STEP_FEATURE,
   mixedFrames,
   mixedRangeProblem,
   nearestResolution,
@@ -24,7 +25,7 @@ import { sourceSeconds, takesImage } from "@/lib/catalog/shorts-models";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
-import { getGeneration, previewChained, unfilledRequest } from "./generations";
+import { DROPPED_UNUSED, getGeneration, previewChained, unfilledRequest, waitedOnFailure } from "./generations";
 import { engineMode } from "./settings";
 import { probeSource, ShortsError } from "./shorts";
 
@@ -46,13 +47,30 @@ export interface MixedBody {
   resolution: MixedResolution;
   /** Cloud Fast: the restyle model; cloud Per frame: the frame editor (MIXED_FRAME_MODELS). */
   modelId?: string;
-  /** Cloud: frame by frame (default) or Fast (one video-to-video pass). */
+  /** Cloud: frame by frame or Fast (one video-to-video pass). Without it, Fast for a Fast restyle model, else Per frame. */
   mode?: MixedMode;
   /** Cloud: the approved preview still (anchors the render: Per frame always, Fast when the model takes an image). */
   anchor?: string;
   /** Cloud preview: the frame the browser grabbed at the start of the selection. */
   frameUrl?: string;
   seed?: number;
+}
+
+/**
+ * How a cloud render restyles: the mode asked for, else Fast when the model named is a Fast restyle model (an API
+ * caller from before Per frame), else Per frame. A model that belongs to the other mode is refused, not swapped.
+ */
+function cloudMode(body: Pick<MixedBody, "engine" | "mode" | "modelId">): MixedMode | undefined {
+  if (body.engine !== "cloud") return undefined;
+  const fastModel = !!body.modelId && MIXED_MODELS.cloud.includes(body.modelId);
+  const frameModel = !!body.modelId && (MIXED_FRAME_MODELS as readonly string[]).includes(body.modelId);
+  const mode = body.mode ?? (fastModel ? "fast" : "frames");
+  const name = (id: string) => getModel(id)?.name ?? id;
+  if (mode === "frames" && fastModel) {
+    throw new ShortsError(`${name(body.modelId!)} restyles the clip as video — pick Fast for it, or ${MIXED_FRAME_MODELS.map(name).join(" or ")} to redraw each frame`, 422);
+  }
+  if (mode === "fast" && frameModel) throw new ShortsError(`${name(body.modelId!)} redraws single frames — pick Per frame for it, or a Fast restyle model`, 422);
+  return mode;
 }
 
 const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
@@ -70,7 +88,7 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
   const problem = mixedRangeProblem(body.range, duration, sourceFps);
   if (problem) throw new ShortsError(problem);
   const fps = clampFps(body.fps, sourceFps);
-  const mode: MixedMode | undefined = body.engine === "cloud" ? (body.mode ?? "frames") : undefined;
+  const mode = cloudMode(body);
   const choices: readonly string[] = mode === "frames" ? MIXED_FRAME_MODELS : MIXED_MODELS[body.engine];
   const modelId = body.modelId && choices.includes(body.modelId) ? body.modelId : choices[0];
   const model = getModel(modelId);
@@ -86,6 +104,10 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
     rate = s.fps;
     if (Math.abs(s.fps - fps) > 0.01) notes.push(`Frames are every ${s.interval === 1 ? "" : `${ordinal(s.interval)} `}frame of this ${+sourceFps.toFixed(2)} FPS clip: ${+s.fps.toFixed(2)} FPS, ${frames} frames`);
     if (modelId === "seedream-5-flash") notes.push(`Seedream 5.0 Flash takes no seed, so frames vary a little more than with Nano Banana 2${body.resolution === "4K" ? "; it draws up to 2K" : ""}`);
+    else if (frames > FRAME_LIMITS.perClip && body.resolution !== "1K") {
+      // merge-videos sizes the joined clips 512–2048 px a side.
+      notes.push(`Over ${FRAME_LIMITS.perClip} frames are made as clips and joined at up to ${FRAME_LIMITS.joinMaxPx} px${frameResolution(frames, body.resolution) !== body.resolution ? ", so frames are drawn at 2K" : ""}`);
+    }
   } else if (mode === "fast") {
     // A cut the model won't take is paid for, then refused: say so before anything runs.
     const fits = (id: string) => clipLengthProblem({ name: getModel(id)?.name ?? id, minSeconds: sourceSeconds(id).min, maxSeconds: sourceSeconds(id).max }, len);
@@ -119,6 +141,7 @@ async function planInput(body: MixedBody, opts: { probe: boolean }): Promise<{ i
       modelId,
       mode,
       sourceFps,
+      ...(info.width && info.height ? { sourceSize: { width: info.width, height: info.height } } : {}),
       anchor,
       modelResolution: mode === "fast" ? nearestResolution(model?.options.resolutions, body.resolution) : undefined,
       // LTX follows the clip's outlines, like the open engine's canny ControlNet.
@@ -170,9 +193,9 @@ export async function estimateMixed(body: MixedBody): Promise<MixedEstimate> {
   return { ...full, previewUsd: preview.costUsd, frames, fps, notes, ...(input.mode && { mode: input.mode }), ...(perFrameUsd !== undefined && { perFrameUsd }) };
 }
 
-function run(steps: PlanStep[]): { batchId: string; items: Generation[]; byKey: Record<string, Generation> } {
+function run(steps: PlanStep[], opts: { existing?: Record<string, string> } = {}): { batchId: string; items: Generation[]; byKey: Record<string, Generation> } {
   try {
-    return createPipeline(steps);
+    return createPipeline(steps, opts);
   } catch (e) {
     throw new ShortsError((e as Error).message, 422);
   }
@@ -189,33 +212,81 @@ export async function createMixed(body: MixedBody): Promise<{ final: Generation;
   return { final: p.byKey[plan.final], ...followed(p) };
 }
 
+interface StepRow {
+  id: string;
+  feature: string;
+  status: Generation["status"];
+  error: string | null;
+  depends_on: string | null;
+}
+
+const depList = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
+
 /**
- * Run a render again with the same settings (History's "Try again" after a failed step): its steps
- * are made anew from their stored requests, waiting on each other as before.
+ * A render's steps: its finished video and every step it waits for, across earlier tries (a retry's new steps
+ * wait for the ones that had finished), inputs before the steps that take them. Null when one is gone.
+ */
+function renderSteps(finalId: string): StepRow[] | null {
+  const get = db().prepare("SELECT id, feature, status, error, depends_on FROM generations WHERE id = ?");
+  const rows = new Map<string, StepRow>();
+  const order: StepRow[] = [];
+  let gone = false;
+  // Depth-first: a lane of frames is a dozen deep, so the recursion stays shallow.
+  const visit = (id: string) => {
+    if (rows.has(id) || gone) return;
+    const r = get.get(id) as StepRow | undefined;
+    if (!r) {
+      gone = true;
+      return;
+    }
+    rows.set(id, r);
+    for (const d of depList(r.depends_on)) visit(d);
+    order.push(r);
+  };
+  visit(finalId);
+  return gone ? null : order;
+}
+
+/**
+ * Try a render again (History's "Try again"): the steps that failed or were canceled, and every step after them,
+ * are made anew (in a new batch) from their stored requests; they wait for the steps that finished, or are still
+ * running, which aren't made or paid for again. A render with nothing failed is made again from its first step.
  */
 export function retryMixed(id: string): { final: Generation; items: Generation[]; frames: number } {
   const final = getGeneration(id);
-  if (!final || final.feature !== MIXED_FEATURE || !final.batchId) throw new ShortsError("This render no longer exists", 404);
+  if (!final || final.feature !== MIXED_FEATURE) throw new ShortsError("This render no longer exists", 404);
   const mode = engineMode();
   if (mode !== "both" && mode !== final.engine) {
     throw new ShortsError(mode === "open" ? "This install runs open-source models only (Settings → Engine mode)" : "This install runs cloud models only (Settings → Engine mode)", 422);
   }
-  const rows = db()
-    .prepare("SELECT id, depends_on FROM generations WHERE batch_id = ? AND feature IN (?, ?, ?) ORDER BY created_at ASC, id ASC")
-    .all(final.batchId, MIXED_FEATURE, MIXED_STEP_FEATURE, MIXED_FRAME_FEATURE) as { id: string; depends_on: string | null }[];
-  const deps = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
-  const steps: PlanStep[] = rows.map((r) => {
+  const rows = renderSteps(id);
+  if (!rows) throw new ShortsError("Part of this render was deleted — make it again from the editor", 409);
+  // In input order, so a step is redone when it failed or any step it waits for is redone.
+  const redo = new Set<string>();
+  for (const r of rows) if (r.status === "failed" || r.status === "canceled" || depList(r.depends_on).some((d) => redo.has(d))) redo.add(r.id);
+  const again = redo.size ? rows.filter((r) => redo.has(r.id)) : rows;
+  const existing = Object.fromEntries(rows.filter((r) => redo.size && !redo.has(r.id)).map((r) => [r.id, r.id]));
+  const steps: PlanStep[] = again.map((r) => {
     const g = getGeneration(r.id);
     if (!g) throw new ShortsError("Part of this render was deleted — make it again from the editor", 409);
-    const after = deps(r.depends_on);
-    // Chained inputs were filled in when the step ran: the new run fills them from the new steps.
+    const after = depList(r.depends_on);
+    // Chained inputs were filled in when the step ran: the new run fills them from the new (or kept) steps.
     const { chain, ...request } = unfilledRequest(g.request, after.length);
     const inputs = { ...request.inputs };
     for (const c of chain ?? []) if (c.slot !== "images" && c.slot !== "videos" && c.slot !== "audios" && c.slot !== "prompt") delete inputs[c.slot];
     return { key: r.id, request: { ...request, inputs: Object.keys(inputs).length ? inputs : undefined }, ...(after.length ? { after, chain } : {}) };
   });
-  const p = run(steps);
+  const p = run(steps, { existing });
+  // Old steps that would only fail after the ones they wait for: stop them (nothing was spent on them yet).
+  for (const r of again) if (r.status === "queued" && r.depends_on) cancelWaiting(r.id);
   return { final: p.byKey[id], ...followed(p) };
+}
+
+/** Stop a step still waiting for its inputs (nothing spent yet). */
+function cancelWaiting(id: string): void {
+  db()
+    .prepare("UPDATE generations SET status = 'canceled', message = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL")
+    .run(Date.now(), Date.now(), id);
 }
 
 export interface FramesProgress {
@@ -223,23 +294,29 @@ export interface FramesProgress {
   total: number;
   done: number;
   running: number;
-  /** The first frame that failed or was canceled, with its own error (the steps after it only say an earlier step didn't finish). */
+  /**
+   * The first frame that failed with its own error, or that someone canceled. Unset when the frames only failed
+   * because an earlier step did (the cut, the extraction): that step's own error says why.
+   */
   failed?: { label: string; error: string };
 }
 
-/** A per-frame render's frame edits at a glance (the page follows the main steps, not hundreds of frames). */
-export function framesProgress(batchId: string): FramesProgress {
-  const rows = db().prepare("SELECT status, COUNT(*) AS n FROM generations WHERE batch_id = ? AND feature = ? GROUP BY status").all(batchId, MIXED_FRAME_FEATURE) as { status: string; n: number }[];
-  const count = (...s: string[]) => rows.filter((r) => s.includes(r.status)).reduce((a, r) => a + r.n, 0);
-  const out: FramesProgress = { total: count("queued", "running", "succeeded", "failed", "canceled"), done: count("succeeded"), running: count("running") };
-  if (count("failed", "canceled")) {
-    // The first one to fail, not the frames after it that only waited for it.
-    const bad = db()
-      .prepare("SELECT status, error, request_json FROM generations WHERE batch_id = ? AND feature = ? AND status IN ('failed', 'canceled') ORDER BY (error LIKE '%earlier step%') ASC, created_at ASC LIMIT 1")
-      .get(batchId, MIXED_FRAME_FEATURE) as { status: string; error: string | null; request_json: string };
-    const label = (JSON.parse(bad.request_json) as { step?: { label?: string } }).step?.label ?? "A frame";
-    out.failed = { label, error: bad.status === "canceled" ? "Canceled" : (bad.error ?? "Something went wrong") };
-  }
+/** A per-frame render's frame edits at a glance (the page follows the main steps, not hundreds of frames), by its finished video's id. */
+export function framesProgress(finalId: string): FramesProgress | null {
+  const rows = renderSteps(finalId);
+  if (!rows) return getGeneration(finalId) ? { total: 0, done: 0, running: 0 } : null;
+  const frames = rows.filter((r) => r.feature === MIXED_FRAME_FEATURE);
+  const out: FramesProgress = { total: frames.length, done: frames.filter((r) => r.status === "succeeded").length, running: frames.filter((r) => r.status === "running").length };
+  const waited = new Set([waitedOnFailure(false), waitedOnFailure(true)]);
+  const own = frames.filter((r) => r.status === "failed" && !waited.has(r.error ?? ""));
+  const stopped = frames.filter((r) => r.status === "canceled" && r.error !== DROPPED_UNUSED);
+  const at = (r: StepRow) => {
+    const req = (db().prepare("SELECT request_json FROM generations WHERE id = ?").get(r.id) as { request_json: string }).request_json;
+    return (JSON.parse(req) as Generation["request"]).step;
+  };
+  const first = (list: StepRow[]) => list.map((r) => ({ r, step: at(r) })).sort((a, b) => (a.step?.index ?? 0) - (b.step?.index ?? 0))[0];
+  const bad = first(own) ?? first(stopped);
+  if (bad) out.failed = { label: bad.step?.label ?? "A frame", error: bad.r.status === "canceled" ? "Canceled" : (bad.r.error ?? "Something went wrong") };
   return out;
 }
 

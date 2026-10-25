@@ -55,9 +55,12 @@ export const MIXED_FRAME_MODELS = ["nano-banana-2", "seedream-5-flash"] as const
  * Cloud per-frame limits: fal's extract-nth-frame returns up to 500 frames a call and images-to-video
  * takes up to 200 images. Frames are styled in lanes of `lane`: each frame looks at the one styled before
  * it, and each lane's first frame at the approved preview (else the first styled frame), so lanes run side
- * by side and a 240-frame clip takes the time of about 13 edits, not 240.
+ * by side and a 240-frame clip takes the time of about 13 edits, not 240. The price of that: a lane's first
+ * frame matches the preview, not the frame before it, so a look that drifts within a lane can step back
+ * every `lane` frames (the page's How it works says so). merge-videos sizes its output 512–2048 px
+ * (`joinMaxPx`): clips of more than 200 frames are joined at that size.
  */
-export const FRAME_LIMITS = { perExtract: 500, perClip: 200, lane: 12, maxInterval: 300 } as const;
+export const FRAME_LIMITS = { perExtract: 500, perClip: 200, lane: 12, maxInterval: 300, joinMaxPx: 2048, joinMinPx: 512 } as const;
 /** The seed every frame is redrawn with when the request names none (the same seed keeps frames alike). */
 export const FRAME_SEED = 424242;
 
@@ -521,10 +524,33 @@ export function frameChunks(frames: number, size: number): { from: number; count
   return Array.from({ length: Math.ceil(frames / size) }, (_, i) => ({ from: i * size, count: Math.min(size, frames - i * size) }));
 }
 
-/** What the cloud frame editor is asked for: Nano Banana 2 keeps the frame's shape at 1K/2K/4K, Seedream 5.0 Flash at auto 1K/2K. */
+/**
+ * What the cloud frame editor is asked for: Nano Banana 2 keeps the frame's shape at 1K/2K/4K, Seedream 5.0 Flash
+ * at auto 1K/2K. Frames come back as JPEG (Seedream's default): every one is downloaded, sent on as the next
+ * frame's reference and into images-to-video, and a 4K PNG is ten times the bytes for a frame that is re-encoded anyway.
+ */
 export function frameEditParams(modelId: string, resolution: MixedResolution, seed: number): { aspectRatio?: string; resolution?: string; seed?: number; extra?: Record<string, unknown> } {
   if (modelId === "seedream-5-flash") return { extra: { image_size: resolution === "1K" ? "auto_1K" : "auto_2K" } };
-  return { aspectRatio: "auto", resolution, seed };
+  return { aspectRatio: "auto", resolution, seed, extra: { output_format: "jpeg" } };
+}
+
+/**
+ * The size clips of styled frames are joined at (merge-videos takes 512–2048 px a side): the source's shape with
+ * its long side at 2048, its short side at least 512. Undefined without the source's size (fal then picks the
+ * smallest of the clips).
+ */
+export function frameJoinSize(source?: { width?: number; height?: number }): { width: number; height: number } | undefined {
+  const w = source?.width;
+  const h = source?.height;
+  if (!w || !h) return undefined;
+  const even = (v: number) => Math.max(FRAME_LIMITS.joinMinPx, Math.min(FRAME_LIMITS.joinMaxPx, 2 * Math.round(v / 2)));
+  const k = FRAME_LIMITS.joinMaxPx / Math.max(w, h);
+  return { width: even(w * k), height: even(h * k) };
+}
+
+/** Per frame at 4K with more than one clip: joined at up to 2048 px, so frames are drawn at 2K (same picture, less money). */
+export function frameResolution(frames: number, resolution: MixedResolution): MixedResolution {
+  return frames > FRAME_LIMITS.perClip && resolution === "4K" ? "2K" : resolution;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +571,8 @@ export interface MixedPlanInput {
   mode?: MixedMode;
   /** Cloud Per frame: the clip's own frame rate (frames are every Nth one of it). */
   sourceFps?: number;
+  /** Cloud Per frame: the clip's own size (the clips of styled frames are joined at its shape). */
+  sourceSize?: { width?: number; height?: number };
   /** Cloud: the approved preview still, sent when the model takes an image (LTX: the first frame; Kling, Happy Horse: a style reference). */
   anchor?: string;
   /** Cloud: what to ask the model for (its nearest resolution). */
@@ -656,7 +684,9 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
   const base = { batchTitle: input.title };
   const helper = { ...base, feature: MIXED_STEP_FEATURE };
   const seed = input.seed ?? FRAME_SEED;
-  const edit = frameEditParams(input.modelId, input.resolution, seed);
+  const edit = frameEditParams(input.modelId, frameResolution(n, input.resolution), seed);
+  // Only worth making for the steps after them: dropped before they're paid for once the render can't finish.
+  const feeds = { dropWhenUnused: true };
   // The whole selection: its sound goes back under the result, and with one window its frames come from it.
   add("Cut", { key: "cut", request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: input.range.end } } });
   const secondsPerWindow = (FRAME_LIMITS.perExtract * sampling.interval) / input.sourceFps;
@@ -674,7 +704,8 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
         ...helper,
         modelId: t.frames,
         op: "extract-frames",
-        params: { frameInterval: sampling.interval, extra: { max_frames: w.count } },
+        // JPEG frames: a tenth of the bytes of PNG, and every frame is downloaded and sent on.
+        params: { frameInterval: sampling.interval, extra: { max_frames: w.count, output_format: "jpg", quality: 95 } },
       },
       after: [source],
       chain: [{ slot: "video" }],
@@ -683,13 +714,14 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
   const lane = FRAME_LIMITS.lane;
   for (let i = 0; i < n; i++) {
     const w = Math.floor(i / FRAME_LIMITS.perExtract);
-    const frame = { slot: "images" as const, index: i - w * FRAME_LIMITS.perExtract, position: "first" as const };
+    const frame = { slot: "images" as const, index: i - w * FRAME_LIMITS.perExtract, of: windows[w].count, position: "first" as const };
     // The styled picture it matches: the frame before it in its lane, else the approved preview, else the first styled frame.
     const ref = i % lane ? `f${i - 1}` : input.anchor ? null : i ? "f0" : null;
     add(`Frame ${i + 1} of ${n}`, {
       key: `f${i}`,
       request: {
         ...base,
+        ...feeds,
         feature: MIXED_FRAME_FEATURE,
         modelId: input.modelId,
         op: "edit",
@@ -707,7 +739,7 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
     add(joined ? `Clip ${i + 1} of ${clips.length}` : "Frames to video", {
       key: `clip${i + 1}`,
       request: {
-        ...(last ? { ...base, feature: MIXED_FEATURE, title: input.title } : helper),
+        ...(last ? { ...base, feature: MIXED_FEATURE, title: input.title } : { ...helper, ...feeds }),
         modelId: t.assemble,
         op: "images-to-video",
         params: { fps: sampling.fps },
@@ -719,9 +751,17 @@ export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; fin
   let picture = "clip1";
   if (joined) {
     picture = "film";
+    const size = frameJoinSize(input.sourceSize);
     add("Joining the clips", {
       key: "film",
-      request: { ...(sound ? helper : { ...base, feature: MIXED_FEATURE, title: input.title }), modelId: t.join, op: "concat", prompt: input.title },
+      request: {
+        ...(sound ? { ...helper, ...feeds } : { ...base, feature: MIXED_FEATURE, title: input.title }),
+        modelId: t.join,
+        op: "concat",
+        prompt: input.title,
+        // merge-videos sizes its output 512–2048 px: the frames' shape at that size.
+        ...(size && { params: { extra: { resolution: size } } }),
+      },
       after: clips.map((_, i) => `clip${i + 1}`),
       chain: clips.map(() => ({ slot: "videos" as const })),
     });
@@ -757,6 +797,7 @@ export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }):
   }
   // Per frame: the frame editor itself with the render's settings, so the approved preview is what the first frame looks like.
   const frames = (input.mode ?? "frames") === "frames" && (MIXED_FRAME_MODELS as readonly string[]).includes(input.modelId);
+  const count = frames && input.sourceFps ? frameSampling(input.range.end - input.range.start, input.fps, input.sourceFps).frames : 0;
   return {
     key: "preview",
     request: {
@@ -767,7 +808,7 @@ export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }):
       prompt: prompts.still,
       inputs: { images: input.frameUrl ? [input.frameUrl] : [] },
       ...(frames
-        ? { params: { ...frameEditParams(input.modelId, input.resolution, input.seed ?? FRAME_SEED), numOutputs: 1 } }
+        ? { params: { ...frameEditParams(input.modelId, frameResolution(count, input.resolution), input.seed ?? FRAME_SEED), numOutputs: 1 } }
         : input.seed !== undefined
           ? { params: { seed: input.seed } }
           : {}),

@@ -46,13 +46,18 @@ export interface FramesProgress {
   failed?: { label: string; error: string };
 }
 
-/** A per-frame render's frame edits (counts and the first failure), polled while `live`; read once otherwise. */
-export function useFramesProgress(batchId: string | null | undefined, live: boolean) {
+/**
+ * A per-frame render's frame edits (counts and the first failure), by its finished video's id: polled while "live"
+ * (the frames are being redrawn), read once when "once" (a render that failed: its counts no longer change), not at all when null.
+ */
+export function useFramesProgress(finalId: string | null | undefined, mode: "live" | "once" | null) {
   return useQuery({
-    queryKey: ["mixed-media", "frames", batchId],
-    queryFn: async () => send<FramesProgress>(`/api/mixed-media/progress?batch=${encodeURIComponent(batchId!)}`, "GET"),
-    enabled: !!batchId,
-    refetchInterval: live ? 2000 : false,
+    // The mode is in the key: a render that just failed is read once more, after its last poll.
+    queryKey: ["mixed-media", "frames", finalId, mode],
+    queryFn: async () => send<FramesProgress>(`/api/mixed-media/progress?id=${encodeURIComponent(finalId!)}`, "GET"),
+    enabled: !!finalId && !!mode,
+    refetchInterval: mode === "live" ? 2000 : false,
+    staleTime: mode === "once" ? Infinity : 0,
   });
 }
 
@@ -123,8 +128,8 @@ export function renderSteps(chain: (Generation | undefined)[]): { g?: Generation
   return chain.map((g) => ({ g, label: g ? stepLabel(g) : "A step" }));
 }
 
-/** A per-frame render (its frames were taken by an extract step). */
-export const isFrameRender = (chain: (Generation | undefined)[]) => chain.some((g) => g?.op === "extract-frames");
+/** A per-frame render (its frames go back together in an images-to-video step; a retry may keep the extraction from before). */
+export const isFrameRender = (chain: (Generation | undefined)[]) => chain.some((g) => g?.op === "extract-frames" || g?.op === "images-to-video");
 
 export function useMixedActions() {
   const qc = useQueryClient();

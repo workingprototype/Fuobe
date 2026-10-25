@@ -10,6 +10,8 @@ import {
   FRAME_SEED,
   frameChunks,
   frameEditParams,
+  frameJoinSize,
+  frameResolution,
   frameSampling,
   fpsChoices,
   framesCost,
@@ -226,7 +228,8 @@ describe("Mixed Media per frame on the cloud", () => {
   });
 
   it("asks each editor for the frame's own shape, with a fixed seed where it takes one", () => {
-    expect(frameEditParams("nano-banana-2", "2K", 9)).toEqual({ aspectRatio: "auto", resolution: "2K", seed: 9 });
+    // JPEG back: every frame is downloaded and sent on twice (a 4K PNG is ten times the bytes).
+    expect(frameEditParams("nano-banana-2", "2K", 9)).toEqual({ aspectRatio: "auto", resolution: "2K", seed: 9, extra: { output_format: "jpeg" } });
     expect(frameEditParams("seedream-5-flash", "1K", 9)).toEqual({ extra: { image_size: "auto_1K" } });
     expect(frameEditParams("seedream-5-flash", "4K", 9)).toEqual({ extra: { image_size: "auto_2K" } });
   });
@@ -239,9 +242,11 @@ describe("Mixed Media per frame on the cloud", () => {
     expect(keys).toEqual(["cut", "frames1", ...Array.from({ length: 40 }, (_, i) => `f${i}`), "clip1", "final"]);
     const by = Object.fromEntries(plan.steps.map((s) => [s.key, s]));
     expect(by.cut.request).toMatchObject({ feature: "mixed-media-step", modelId: "trim-video", op: "trim", params: { startTime: 2, endTime: 7 } });
-    expect(by.frames1).toMatchObject({ after: ["cut"], chain: [{ slot: "video" }], request: { modelId: "extract-frames", op: "extract-frames", params: { frameInterval: 3, extra: { max_frames: 40 } } } });
+    expect(by.frames1).toMatchObject({ after: ["cut"], chain: [{ slot: "video" }], request: { modelId: "extract-frames", op: "extract-frames", params: { frameInterval: 3, extra: { max_frames: 40, output_format: "jpg", quality: 95 } } } });
     // Frame 0 alone; then each frame with the one styled before it (lanes of 12: frame 12 looks at frame 0).
-    expect(by.f0).toMatchObject({ after: ["frames1"], chain: [{ slot: "images", index: 0, position: "first" }] });
+    // Each knows how many frames were planned (a list far short of it fails before anything is paid).
+    expect(by.f0.chain).toEqual([{ slot: "images", index: 0, of: 40, position: "first" }]);
+    expect(by.f0).toMatchObject({ after: ["frames1"] });
     expect(by.f0.request).toMatchObject({ feature: "mixed-media-frame-step", modelId: "nano-banana-2", op: "edit", params: { aspectRatio: "auto", resolution: "1K", seed: FRAME_SEED, numOutputs: 1 } });
     expect(by.f0.request.prompt).toMatch(/^Redraw this image as hand-drawn/);
     expect(by.f1).toMatchObject({ after: ["frames1", "f0"], chain: [{ slot: "images", index: 1, position: "first" }, { slot: "images" }] });
@@ -252,6 +257,9 @@ describe("Mixed Media per frame on the cloud", () => {
     expect(by.clip1).toMatchObject({ after: keys.filter((k) => /^f\d/.test(k)), request: { modelId: "images-to-video", op: "images-to-video", params: { fps: 8 } } });
     expect(by.clip1.chain).toHaveLength(40);
     expect(by.final).toMatchObject({ after: ["clip1", "cut"], chain: [{ slot: "video" }, { slot: "audio" }], request: { feature: "mixed-media", title: "Sketch · skate", modelId: "merge-audio-video", op: "mux" } });
+    // The frame edits and the clip only feed what comes after: dropped while waiting once that can't be made.
+    expect(plan.steps.filter((s) => s.request.dropWhenUnused).map((s) => s.key)).toEqual([...keys.filter((k) => /^f\d/.test(k)), "clip1"]);
+    expect(by.final.request.dropWhenUnused).toBeUndefined();
     // Every step knows its place.
     expect(plan.steps.map((s) => s.request.step?.index)).toEqual(plan.steps.map((_, i) => i));
     expect(new Set(plan.steps.map((s) => s.request.step?.of))).toEqual(new Set([plan.steps.length]));
@@ -276,6 +284,29 @@ describe("Mixed Media per frame on the cloud", () => {
     expect(by.film).toMatchObject({ after: ["clip1", "clip2"], chain: [{ slot: "videos" }, { slot: "videos" }], request: { feature: "mixed-media", title: "Sketch · skate", modelId: "join-clips", op: "concat" } });
     expect(plan.final).toBe("film");
     expect(by.final).toBeUndefined();
+    // The result itself is never dropped; the clips are.
+    expect([by.clip1.request.dropWhenUnused, by.clip2.request.dropWhenUnused, by.film.request.dropWhenUnused]).toEqual([true, true, undefined]);
+  });
+
+  it("joins clips of more than 200 frames at merge-videos' 2048 px, and draws 4K frames at 2K then", () => {
+    expect(frameJoinSize({ width: 3840, height: 2160 })).toEqual({ width: 2048, height: 1152 });
+    expect(frameJoinSize({ width: 1080, height: 1920 })).toEqual({ width: 1152, height: 2048 });
+    // A very wide clip keeps its short side at merge-videos' 512.
+    expect(frameJoinSize({ width: 4000, height: 500 })).toEqual({ width: 2048, height: 512 });
+    expect(frameJoinSize({})).toBeUndefined();
+    expect(frameResolution(240, "4K")).toBe("2K");
+    expect(frameResolution(240, "2K")).toBe("2K");
+    expect(frameResolution(200, "4K")).toBe("4K");
+
+    const long = frames({ range: { start: 0, end: 10 }, fps: 24, resolution: "4K", sourceSize: { width: 1920, height: 1080 } });
+    const by = Object.fromEntries(planMixed(long).steps.map((s) => [s.key, s]));
+    expect(by.film.request.params).toEqual({ extra: { resolution: { width: 2048, height: 1152 } } });
+    expect(by.f0.request.params).toMatchObject({ resolution: "2K" });
+    expect(planMixedPreview({ ...long, frameUrl: "/api/files/uploads/frame.png" }).request.params).toMatchObject({ resolution: "2K" });
+    // One clip: 4K as asked, nothing to join.
+    const short = Object.fromEntries(planMixed(frames({ resolution: "4K", sourceSize: { width: 1920, height: 1080 } })).steps.map((s) => [s.key, s]));
+    expect(short.f0.request.params).toMatchObject({ resolution: "4K" });
+    expect(short.film).toBeUndefined();
   });
 
   it("cuts a run of more than 500 frames into windows for the extractor", () => {
@@ -286,7 +317,8 @@ describe("Mixed Media per frame on the cloud", () => {
     expect(by.cut2.request.params).toEqual({ startTime: 21.833, endTime: 26 });
     expect(by.frames2).toMatchObject({ after: ["cut2"], request: { params: { frameInterval: 1, extra: { max_frames: 100 } } } });
     // Frame 503 is the 4th of the second window.
-    expect(by.f503).toMatchObject({ after: ["frames2", "f502"], chain: [{ slot: "images", index: 3, position: "first" }, { slot: "images" }] });
+    expect(by.f503).toMatchObject({ after: ["frames2", "f502"], chain: [{ slot: "images", index: 3, of: 100, position: "first" }, { slot: "images" }] });
+    expect(by.f499.chain?.[0]).toMatchObject({ index: 499, of: 500 });
     expect(by.final.after).toEqual(["film", "cut"]);
   });
 
