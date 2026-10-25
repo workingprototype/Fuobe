@@ -10,6 +10,7 @@ delete process.env.HF_KEY;
 delete process.env.HF_API_KEY;
 
 const { setSetting } = await import("@/server/settings");
+const { db } = await import("@/server/db");
 const gens = await import("@/server/generations");
 const { saveFile } = await import("@/server/storage");
 const route = await import("@/app/api/influencer/route");
@@ -102,6 +103,29 @@ describe("/api/influencer", () => {
     expect(one.items).toHaveLength(1);
     expect(one.items[0].request.step).toBeUndefined();
     expect(retryPhoto(one.items[0].id)[0]).toMatchObject({ feature: "influencer", batchId: one.items[0].batchId });
+  }, 60_000);
+
+  it("retries a face pass that never launched with the sheet chained in again (canceled while it waited)", async () => {
+    const face = upload();
+    const run = await (await post({ engine: "open", state, start: "face", photo: face })).json();
+    const [sheet, pass] = run.items as { id: string }[];
+    await gens.cancelGeneration(pass.id);
+    expect((await settle(sheet.id)).status).toBe("succeeded");
+    const sheetUrl = gens.getGeneration(sheet.id)!.outputs[0].url;
+    expect(gens.getGeneration(pass.id)!.request.inputs?.images).toEqual([face]);
+    // Only the pass runs again: it waits for the finished sheet, then gets it as image 1.
+    const again = retryPhoto(pass.id);
+    expect(again.map((g) => [g.feature, g.modelId, g.batchId])).toEqual([["influencer", "oss-qwen-edit", run.batchId]]);
+    expect(gens.getGeneration(pass.id)).toBeNull();
+    const redone = await settle(again[0].id);
+    expect(redone.status).toBe("succeeded");
+    expect(redone.request.inputs?.images).toEqual([sheetUrl, face]);
+    // A pass that launched (the sheet is in its request) and then failed is retried as it was: no second sheet.
+    db().prepare("UPDATE generations SET status = 'failed' WHERE id = ?").run(redone.id);
+    const once = retryPhoto(redone.id);
+    expect(once).toHaveLength(1);
+    expect(db().prepare("SELECT depends_on FROM generations WHERE id = ?").get(once[0].id)).toEqual({ depends_on: null });
+    expect((await settle(once[0].id)).request.inputs?.images).toEqual([sheetUrl, face]);
   }, 60_000);
 
   it("follows the engine mode", async () => {

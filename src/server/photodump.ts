@@ -21,7 +21,7 @@ import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types"
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { getElement } from "./elements";
-import { createGenerations, getGeneration, previewGeneration } from "./generations";
+import { createGenerations, getGeneration, pickOutput, previewGeneration } from "./generations";
 import { trashGenerations } from "./library";
 import { higgsfieldKey } from "./providers/higgsfield";
 import { engineMode } from "./settings";
@@ -163,6 +163,21 @@ function dependsOn(id: string): string[] {
   return dep ? (dep.startsWith("[") ? (JSON.parse(dep) as string[]) : [dep]) : [];
 }
 
+/**
+ * Whether a chained step got its earlier steps' outputs: the runner writes them into its request when it
+ * launches it, so a step that failed or was canceled while it waited still has only its own inputs.
+ * (A text dependency fills the prompt instead and counts as given.)
+ */
+function gotChainInputs(g: Generation, before: Generation[]): boolean {
+  const given = new Set(Object.values(g.request.inputs ?? {}).flat());
+  return before.every((d, i) => {
+    const slot = g.request.chain?.[i] ?? { slot: "images" as const };
+    if (slot.slot === "prompt") return true;
+    const url = pickOutput(d.outputs, slot)?.url;
+    return !!url && given.has(url);
+  });
+}
+
 /** The features whose photos can be retried from their run's grid (Photodump, Fashion Factory, Character Sheet). */
 const RETRY_FEATURES = new Set(["photodump", "fashion", "character-sheet", "app:app-ai-influencer", "influencer"]);
 
@@ -192,6 +207,13 @@ export function retryPhoto(id: string): Generation[] {
       g.batchId ? { batchId: g.batchId } : {},
     );
     trashGenerations([step.id, id]);
+    return items;
+  }
+  // Its earlier steps finished, but it never launched (it failed or was canceled while it waited): it waits
+  // for them again, so the runner hands it their outputs (the sheet goes in as image 1) and launches it.
+  if (deps.length && !gotChainInputs(g, before as Generation[])) {
+    const items = createGenerations(fitted(g.request), { ...(g.batchId && { batchId: g.batchId }), dependsOn: deps });
+    trashGenerations([id]);
     return items;
   }
   const req = fitted(g.request);
