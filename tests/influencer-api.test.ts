@@ -43,12 +43,13 @@ async function settle(id: string, ms = 40_000) {
 }
 
 describe("/api/influencer", () => {
-  it("prices a cloud sheet on Nano Banana Pro without a key, and Higgsfield's AI Influencer with one", async () => {
+  it("prices a cloud sheet on Nano Banana Pro (Seedream 5.0 Pro when asked), with or without a Higgsfield key", async () => {
     const cloud = await (await post({ engine: "cloud", state, start: "scratch" }, true)).json();
     expect(cloud).toMatchObject({ modelId: "nano-banana-pro", modelName: "Nano Banana Pro", count: 1, steps: 1, demo: true });
+    // Fuobe uses no Higgsfield API: a key changes nothing here.
     setSetting("higgsfieldKey", "key:secret");
-    const hf = await (await post({ engine: "cloud", state, start: "scratch" }, true)).json();
-    expect(hf).toMatchObject({ modelId: "ai-influencer", modelName: "AI Influencer", costUsd: 0.05, demo: false });
+    expect(await (await post({ engine: "cloud", state, start: "scratch" }, true)).json()).toMatchObject({ modelId: "nano-banana-pro", demo: true });
+    expect((await (await post({ engine: "cloud", state, start: "scratch", modelId: "ai-influencer" }, true)).json()).modelId).toBe("nano-banana-pro");
     const seedream = await (await post({ engine: "cloud", state, start: "scratch", modelId: "seedream-5-pro" }, true)).json();
     expect(seedream.modelId).toBe("seedream-5-pro");
   });

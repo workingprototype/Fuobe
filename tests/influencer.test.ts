@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { getModel, getPreset } from "@/lib/catalog";
-import { buildPayload } from "@/lib/catalog/payload";
 import { planGeneration } from "@/lib/catalog/plan";
 import {
   categoriesFor,
@@ -16,7 +15,6 @@ import {
   CREATURE_TYPES,
   describeInfluencer,
   getOption,
-  higgsfieldFields,
   INFLUENCER_CATEGORIES,
   INFLUENCER_START,
   influencerBlocker,
@@ -357,12 +355,6 @@ describe("the prompt compiler", () => {
     expect(compileDressPrompt({ state: s, clothing: 2 })).toContain("clothing shown in images 2 and 3");
   });
 
-  it("sends Higgsfield its own fields", () => {
-    expect(higgsfieldFields(S("cats", { gender: ["male"], hair: ["hair_afro"] }, { species: "pug", bodyColor: "#AABBCC" }))).toEqual({ tier: "cats", selection: { gender: ["male"], hair: ["hair_afro"] }, body_color: "#aabbcc" });
-    expect(higgsfieldFields(S("dogs", { gender: ["male"] }, { species: "pug", bodyColor: "#AABBCC" }))).toEqual({ tier: "dogs", selection: { gender: ["male"] }, pinned_species: "pug", body_color: "#aabbcc" });
-    expect(higgsfieldFields(S("normal", { accessory: ["acc_glasses", "acc_bag"] }))).toEqual({ tier: "normal", selection: { accessory: ["acc_glasses", "acc_bag"] } });
-  });
-
   it("summarises and names", () => {
     const s = S("normal", { gender: ["male"], aesthetic: ["suits"], hair: ["hair_mullet"], accessory: ["acc_glasses", "acc_hat"] });
     expect(summaryRows(s)).toEqual([
@@ -400,61 +392,46 @@ describe("the plan per engine", () => {
   const clothes = ["/api/files/a.png", "/api/files/b.png", "/api/files/c.png"];
   const state = S("freak", { gender: ["female"], hair: ["hs_beehive"], aesthetic: ["goth"] });
   const run = (o: Partial<InfluencerRun>): InfluencerRun => ({ engine: "cloud", state, start: "scratch", ...o });
-  const KEY = { higgsfield: true, has: () => true };
-  const NO_KEY = { higgsfield: false, has: () => true };
+  const ALL = { has: () => true };
   const valid = (p: ReturnType<typeof planInfluencer>) => p.steps.map((s) => planGeneration(s.request, getModel, getPreset));
 
-  it("cloud with a Higgsfield key: AI Influencer with its own fields; the photo is image_url, clothing item_image_urls", () => {
-    const p = planInfluencer(run({ start: "face", photo: face, clothing: clothes.slice(0, 2), direction: "A potter from Porto" }), KEY);
-    expect(p.modelId).toBe("ai-influencer");
-    const r = p.steps[0].request;
-    expect(r).toMatchObject({ feature: "influencer", modelId: "ai-influencer", op: "edit", prompt: "A potter from Porto", inputs: { images: [face, ...clothes.slice(0, 2)] } });
-    expect(r.params?.extra).toEqual({ tier: "freak", selection: state.picks });
-    const [plan] = valid(p);
-    const route = getModel("ai-influencer")!.routes.find((x) => x.op === plan.op)!;
-    expect(buildPayload(route.map!, { prompt: plan.prompt, images: r.inputs!.images, ...plan.params })).toEqual({
-      brief: "A potter from Porto",
-      image_url: face,
-      item_image_urls: clothes.slice(0, 2),
-      tier: "freak",
-      selection: state.picks,
-    });
-    // From scratch with clothing: no image_url, an empty brief is fine.
-    const t2i = planInfluencer(run({ clothing: clothes }), KEY);
-    const [plan2] = valid(t2i);
-    expect(plan2.op).toBe("t2i");
-    const route2 = getModel("ai-influencer")!.routes.find((x) => x.op === "t2i")!;
-    expect(buildPayload(route2.map!, { prompt: plan2.prompt, images: clothes, ...plan2.params })).toEqual({ brief: "", item_image_urls: clothes, tier: "freak", selection: state.picks });
-  });
-
-  it("cloud without a key: Nano Banana Pro (or Seedream 5.0) draws a wide sheet from the compiled prompt", () => {
-    const p = planInfluencer(run({ start: "face", photo: face, clothing: [clothes[0]] }), NO_KEY);
+  it("cloud: Nano Banana Pro draws a wide sheet from the compiled prompt, Seedream 5.0 Pro when asked", () => {
+    const p = planInfluencer(run({ start: "face", photo: face, clothing: [clothes[0]] }), ALL);
     expect(p.modelId).toBe("nano-banana-pro");
     expect(p.notes).toEqual([]);
-    expect(p.steps[0].request).toMatchObject({ op: "edit", inputs: { images: [face, clothes[0]] }, params: { aspectRatio: "16:9", resolution: "2K", numOutputs: 1 } });
+    expect(p.steps).toHaveLength(1);
+    expect(p.steps[0].request).toMatchObject({ feature: "influencer", op: "edit", inputs: { images: [face, clothes[0]] }, params: { aspectRatio: "16:9", resolution: "2K", numOutputs: 1 } });
     expect(p.steps[0].request.prompt).toContain("the face of the person in image 1");
     expect(p.steps[0].request.prompt).toContain("clothing shown in image 2");
     valid(p);
-    const asked = planInfluencer(run({ modelId: "ai-influencer" }), NO_KEY);
-    expect(asked.modelId).toBe("nano-banana-pro");
-    expect(asked.notes).toEqual(["AI Influencer needs a Higgsfield key — Nano Banana Pro draws the sheet from the same choices"]);
-    expect(asked.steps[0].request.op).toBe("t2i");
-    const seedream = planInfluencer(run({ modelId: "seedream-5-pro" }), KEY);
+    const scratch = planInfluencer(run({ direction: "A potter from Porto" }), ALL);
+    expect(scratch.steps[0].request).toMatchObject({ op: "t2i", prompt: compileSheetPrompt({ state, direction: "A potter from Porto" }) });
+    expect(scratch.steps[0].request.inputs).toBeUndefined();
+    valid(scratch);
+    const seedream = planInfluencer(run({ modelId: "seedream-5-pro", clothing: clothes }), ALL);
     expect(seedream.modelId).toBe("seedream-5-pro");
     expect(seedream.steps[0].request.params).toEqual({ numOutputs: 1, aspectRatio: "16:9" });
+    expect(seedream.steps[0].request.inputs?.images).toEqual(clothes);
     valid(seedream);
-    expect(planInfluencer(run({ modelId: "flux-3-max" }), NO_KEY).modelId).toBe("nano-banana-pro");
+    // Nothing else is asked for: not Higgsfield's AI Influencer, not a model the builder doesn't list.
+    for (const modelId of ["ai-influencer", "flux-3-max"]) {
+      const other = planInfluencer(run({ modelId }), ALL);
+      expect(other.modelId).toBe("nano-banana-pro");
+      expect(other.steps[0].request.params?.extra).toBeUndefined();
+    }
+    // Seedream missing from the install: Nano Banana Pro.
+    expect(planInfluencer(run({ modelId: "seedream-5-pro" }), { has: (id) => id !== "seedream-5-pro" }).modelId).toBe("nano-banana-pro");
   });
 
   it("open from scratch: the Soul Cast sheet workflow with the compiled character", () => {
-    const p = planInfluencer(run({ engine: "open", direction: "loves jazz" }), NO_KEY);
+    const p = planInfluencer(run({ engine: "open", direction: "loves jazz" }), ALL);
     expect(p.steps).toHaveLength(1);
     expect(p.steps[0].request).toMatchObject({ feature: "influencer", modelId: "oss-zimage-soul-cast", op: "t2i", prompt: compileCastPrompt({ state, direction: "loves jazz" }) });
     valid(p);
   });
 
   it("open with your face: the sheet, then Qwen-Image-Edit 2511 puts the face (and one clothing reference) on it", () => {
-    const p = planInfluencer(run({ engine: "open", start: "face", photo: face, clothing: clothes }), NO_KEY);
+    const p = planInfluencer(run({ engine: "open", start: "face", photo: face, clothing: clothes }), ALL);
     expect(p.modelId).toBe("oss-qwen-edit");
     expect(p.steps.map((s) => [s.key, s.request.feature, s.request.modelId, s.after])).toEqual([
       ["sheet", "influencer-step", "oss-zimage-soul-cast", undefined],
@@ -465,11 +442,11 @@ describe("the plan per engine", () => {
     expect(p.steps[1].request.prompt).toBe(compileDressPrompt({ state, start: "face", clothing: 1 }));
     expect(p.notes[0]).toBe("Qwen-Image-Edit takes 3 images (the sheet, your photo and clothing) — the first clothing reference is used");
     valid(p);
-    const dressed = planInfluencer(run({ engine: "open", clothing: clothes }), NO_KEY);
+    const dressed = planInfluencer(run({ engine: "open", clothing: clothes }), ALL);
     expect(dressed.steps[1].request.inputs?.images).toEqual(clothes.slice(0, 2));
     expect(dressed.notes).toEqual(["Qwen-Image-Edit takes 3 images (the sheet and clothing) — the first 2 clothing references are used", "Two steps: Z-Image Turbo draws the sheet, then Qwen-Image-Edit 2511 dresses it in your clothing"]);
     // A photo only matters when the run starts from it.
-    expect(planInfluencer(run({ engine: "open", start: "scratch", photo: face }), NO_KEY).steps).toHaveLength(1);
+    expect(planInfluencer(run({ engine: "open", start: "scratch", photo: face }), ALL).steps).toHaveLength(1);
   });
 
   it("says what is missing or too much, in Higgsfield's words where it has them", () => {
@@ -478,6 +455,6 @@ describe("the plan per engine", () => {
     expect(influencerBlocker(run({ clothing: [...clothes, "/api/files/d.png"] }))).toBe("You can add up to three clothing references");
     expect(influencerBlocker(run({ start: "face" }))).toBe("Add your photo first");
     expect(influencerBlocker(run({ start: "reference" }))).toBe("Add a reference image first");
-    expect(() => planInfluencer(run({ state: S("freak", { body_type: ["body_ultra"], proportions: ["pr_longlimbs"] }) }), KEY)).toThrow(CONFLICT_MESSAGES.buildLegs);
+    expect(() => planInfluencer(run({ state: S("freak", { body_type: ["body_ultra"], proportions: ["pr_longlimbs"] }) }), ALL)).toThrow(CONFLICT_MESSAGES.buildLegs);
   });
 });

@@ -228,7 +228,6 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.images && images.length) out[map.images] = images;
   if (map.image && images.length) out[map.image] = images[0];
   if (map.image2 && images.length > 1) out[map.image2] = images[1];
-  if (map.moreImages && images.length > 1) out[map.moreImages] = images.slice(1);
   if (map.endImage && input.endImage) out[map.endImage] = input.endImage;
   if (map.mask && input.mask) out[map.mask] = input.mask;
   if (map.video && input.video) out[map.video] = input.video;

@@ -15,7 +15,7 @@ import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useEngine, useGenerations, useStatus } from "@/lib/api";
+import { useEngine, useGenerations } from "@/lib/api";
 import {
   categoriesFor,
   CREATURE_TYPES,
@@ -46,12 +46,11 @@ const STARTS: [InfluencerStart, string][] = [
   ["face", "Add your face"],
 ];
 
-const CLOUD_MODELS: { id: string; label: string; note: string; higgsfield?: boolean }[] = [
-  { id: "auto", label: "Best available", note: "AI Influencer with a Higgsfield key, else Nano Banana Pro" },
-  { id: "ai-influencer", label: "AI Influencer · Higgsfield", note: "Higgsfield's own character sheet, from your picks", higgsfield: true },
-  { id: "nano-banana-pro", label: "Nano Banana Pro", note: "A wide sheet from the compiled description" },
-  { id: "seedream-5-pro", label: "Seedream 5.0 Pro", note: "Photoreal, from the compiled description" },
+const CLOUD_MODELS: { id: string; label: string; note: string }[] = [
+  { id: "nano-banana-pro", label: "Nano Banana Pro", note: "A wide 2K sheet from your picks, keeps a face and clothing closely" },
+  { id: "seedream-5-pro", label: "Seedream 5.0 Pro", note: "Photoreal, from the same picks" },
 ];
+
 
 type Message = { kind: "conflict" | "note"; text: string } | null;
 
@@ -102,8 +101,6 @@ function RunInfo({ preview, loading, blocker }: { preview?: RunPreview & { steps
  */
 export function InfluencerBuilder() {
   const [engine, setEngine] = useEngine();
-  const status = useStatus().data;
-  const higgsfield = !!status?.providers?.higgsfield?.configured;
   const [state, setState] = useState<InfluencerState>(INFLUENCER_START);
   const [active, setActive] = useState("tier");
   const [message, setMessage] = useState<Message>(null);
@@ -111,7 +108,7 @@ export function InfluencerBuilder() {
   const [photo, setPhoto] = useState<SlotValue | null>(null);
   const [clothing, setClothing] = useState<SlotValue[]>([]);
   const [direction, setDirection] = useState("");
-  const [modelId, setModelId] = useState("auto");
+  const [modelId, setModelId] = useState(CLOUD_MODELS[0].id);
   const [ids, setIds] = useState<string[]>([]);
   const clothingInput = useRef<HTMLInputElement>(null);
   const model = CLOUD_MODELS.find((m) => m.id === modelId) ?? CLOUD_MODELS[0];
@@ -136,7 +133,7 @@ export function InfluencerBuilder() {
     () =>
       uploading
         ? null
-        : { engine, state, direction: direction.trim() || undefined, start, photo: photoRef, clothing: clothing.map((c) => c.ref), modelId: engine === "cloud" && modelId !== "auto" ? modelId : undefined },
+        : { engine, state, direction: direction.trim() || undefined, start, photo: photoRef, clothing: clothing.map((c) => c.ref), modelId: engine === "cloud" ? modelId : undefined },
     [uploading, engine, state, direction, start, photoRef, clothing, modelId],
   );
   const settled = useSettled(body);
@@ -373,7 +370,6 @@ export function InfluencerBuilder() {
                 </Select>
                 <p id="ib-model-note" className="text-[12px] leading-snug text-muted-foreground">
                   {model.note}
-                  {model.higgsfield && !higgsfield && " · needs a Higgsfield key"}
                 </p>
               </div>
             ) : (

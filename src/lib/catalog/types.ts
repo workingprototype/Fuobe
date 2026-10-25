@@ -279,8 +279,6 @@ export interface FieldMap {
   image?: string;
   /** Array of images field, e.g. "image_urls" (receives every reference image). */
   images?: string;
-  /** Array field that receives every image after the first, which goes to `image` (AI Influencer: image_url + item_image_urls). */
-  moreImages?: string;
   endImage?: string;
   mask?: string;
   /** What the mask's paint means to this API: white (default), black or transparent = change. */

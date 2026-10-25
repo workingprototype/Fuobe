@@ -26,9 +26,9 @@ function bodyError(issues: z.core.$ZodIssue[]): string {
 }
 
 /**
- * AI Influencer builder: a character sheet from the builder's picks — Higgsfield's AI Influencer
- * (with a key), Nano Banana Pro or Seedream 5.0 on the cloud, the Soul Cast sheet workflow (plus
- * Qwen-Image-Edit 2511 for a face or clothing) on the open engine. `?preview=1` prices it instead.
+ * AI Influencer builder: a character sheet from the builder's picks — Nano Banana Pro or Seedream 5.0
+ * Pro on the cloud, the Soul Cast sheet workflow (plus Qwen-Image-Edit 2511 for a face, a reference or
+ * clothing) on the open engine. `?preview=1` prices it instead.
  */
 export async function POST(request: Request) {
   const parsed = Body.safeParse(await request.json().catch(() => null));

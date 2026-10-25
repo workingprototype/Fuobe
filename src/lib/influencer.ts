@@ -710,14 +710,6 @@ export function compileDressPrompt({ start = "scratch", clothing = 0 }: CompileI
     .concat(".");
 }
 
-/** Higgsfield AI Influencer's own fields: tier, selection (category → option ids), pinned_species, body_color. */
-export function higgsfieldFields(state: InfluencerState): Record<string, unknown> {
-  const creature = isCreature(state.tier);
-  const selection = Object.fromEntries(Object.entries(state.picks).filter(([k, v]) => k !== "tier" && v.length));
-  const species = creature && creatureOf(state.tier)?.species.some((s) => s.id === state.species) ? state.species : undefined;
-  return { tier: state.tier, selection, ...(species && { pinned_species: species }), ...(creature && state.bodyColor && { body_color: state.bodyColor.toLowerCase() }) };
-}
-
 /** The picks as chips for the summary: [Category label, "Option, Option"]. */
 export function summaryRows(state: InfluencerState): { category: string; label: string; options: string }[] {
   return categoriesFor(state.tier).flatMap((c) => {
@@ -770,8 +762,8 @@ export function cleanState(raw: unknown): { state: InfluencerState; problem: str
 // ---------------------------------------------------------------------------
 // The plan per engine
 
-/** The cloud models that can draw the sheet: Higgsfield's own (with a key), then the two the research names. */
-export const INFLUENCER_CLOUD_MODELS = ["ai-influencer", "nano-banana-pro", "seedream-5-pro"] as const;
+/** The cloud models that draw the sheet from the compiled prompt: Nano Banana Pro (the default), Seedream 5.0 Pro. */
+export const INFLUENCER_CLOUD_MODELS = ["nano-banana-pro", "seedream-5-pro"] as const;
 export const INFLUENCER_OPEN_MODELS = { sheet: "oss-zimage-soul-cast", edit: "oss-qwen-edit" } as const;
 /** Qwen-Image-Edit 2511 takes three images: the sheet, then the photo and clothing. */
 const OPEN_EDIT_IMAGES = 3;
@@ -818,12 +810,12 @@ export function influencerBlocker(run: Pick<InfluencerRun, "state" | "direction"
 }
 
 /**
- * The jobs for a run. Cloud: Higgsfield's AI Influencer with its own fields (a key, and not turned off),
- * else Nano Banana Pro or Seedream 5.0 with the compiled prompt, the photo and clothing as references.
+ * The jobs for a run. Cloud: Nano Banana Pro (or Seedream 5.0 Pro when asked) draws the sheet from the
+ * compiled prompt, with the photo and clothing as references.
  * Open: the Soul Cast sheet workflow (Z-Image Turbo) draws the character; with a photo or clothing,
  * Qwen-Image-Edit 2511 then puts your face and clothes on that sheet, so the sheet keeps its wide shape.
  */
-export function planInfluencer(run: InfluencerRun, caps: PlanCaps): InfluencerPlan {
+export function planInfluencer(run: InfluencerRun, caps: Pick<PlanCaps, "has">): InfluencerPlan {
   const blocker = influencerBlocker(run);
   if (blocker) throw new Error(blocker);
   const { state, start } = run;
@@ -869,31 +861,8 @@ export function planInfluencer(run: InfluencerRun, caps: PlanCaps): InfluencerPl
 
   const has = (id: string) => !caps.has || caps.has(id);
   const asked = run.modelId && (INFLUENCER_CLOUD_MODELS as readonly string[]).includes(run.modelId) ? run.modelId : undefined;
-  const native = caps.higgsfield && has("ai-influencer") && (!asked || asked === "ai-influencer");
-  if (asked === "ai-influencer" && !native) notes.push("AI Influencer needs a Higgsfield key — Nano Banana Pro draws the sheet from the same choices");
   const images = [...(photo ? [photo] : []), ...clothing];
-  if (native) {
-    // Higgsfield builds the character from the picks itself: the Direction is the brief.
-    return {
-      steps: [
-        {
-          key: "sheet",
-          request: {
-            feature: FEATURE,
-            modelId: "ai-influencer",
-            op: photo ? "edit" : "t2i",
-            prompt: direction ?? "",
-            ...(images.length && { inputs: { images } }),
-            params: { numOutputs: 1, extra: higgsfieldFields(state) },
-            title,
-          },
-        },
-      ],
-      modelId: "ai-influencer",
-      notes,
-    };
-  }
-  const modelId = asked && asked !== "ai-influencer" && has(asked) ? asked : "nano-banana-pro";
+  const modelId = asked && has(asked) ? asked : INFLUENCER_CLOUD_MODELS[0];
   return {
     steps: [
       {

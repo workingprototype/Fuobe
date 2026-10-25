@@ -19,7 +19,7 @@ const state: InfluencerState = { tier: "cats", picks: { gender: ["female"], hair
 
 describe("the builder's open engine through the provider", () => {
   it("Soul Cast sheet: the compiled character goes after the graph's own turnaround wording", async () => {
-    const [sheet] = planInfluencer({ engine: "open", state, start: "scratch", direction: "Runs a night bakery" }, { higgsfield: false }).steps;
+    const [sheet] = planInfluencer({ engine: "open", state, start: "scratch", direction: "Runs a night bakery" }, {}).steps;
     const { workflow: wf } = await prepare("soul-cast-sheet-zimage", { prompt: sheet.request.prompt, seed: 11 }, "t2i");
     expect(at(wf, "20", "string_b")).toBe(compileCastPrompt({ state, direction: "Runs a night bakery" }));
     expect(at(wf, "20", "string_b")).toMatch(/^A female anthropomorphic Maine Coon cat with pale pink fur, with a tall beehive updo, wearing an all-black goth outfit\. Anthropomorphic Maine Coon cat/);
@@ -28,7 +28,7 @@ describe("the builder's open engine through the provider", () => {
   });
 
   it("Qwen-Image-Edit 2511: the sheet is image 1, your face image 2, the clothing image 3", async () => {
-    const plan = planInfluencer({ engine: "open", state, start: "face", photo: "face.png", clothing: ["coat.png", "boots.png"] }, { higgsfield: false });
+    const plan = planInfluencer({ engine: "open", state, start: "face", photo: "face.png", clothing: ["coat.png", "boots.png"] }, {});
     const dress = plan.steps[1].request;
     // What the chain hands the step when the sheet is done (position "first").
     const images = ["sheet.png", ...(dress.inputs?.images ?? [])];
@@ -38,7 +38,7 @@ describe("the builder's open engine through the provider", () => {
   });
 
   it("with the face only, the third image slot is left out rather than refused", async () => {
-    const plan = planInfluencer({ engine: "open", state, start: "face", photo: "face.png" }, { higgsfield: false });
+    const plan = planInfluencer({ engine: "open", state, start: "face", photo: "face.png" }, {});
     const dress = plan.steps[1].request;
     const { workflow: wf } = await prepare("qwen-image-edit-2511-multi", { prompt: dress.prompt, images: ["sheet.png", ...(dress.inputs?.images ?? [])] }, "edit");
     expect([at(wf, "41", "image"), at(wf, "83", "image")]).toEqual(["sheet.png", "face.png"]);
