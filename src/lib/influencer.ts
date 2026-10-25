@@ -684,6 +684,10 @@ export interface CompileInput {
 }
 
 const tidy = (s?: string) => s?.trim().replace(/\s+/g, " ").replace(/[.\s]+$/, "");
+
+/** "Add your face" in each prompt: the cloud sheet takes the face as image 1, the open edit as image 2 (after the sheet). */
+const FACE_ON_SHEET = "The character has the face of the person in image 1: keep their identity and facial features exactly";
+const FACE_ON_EDIT = "Give the character in every view the face of the person in image 2: the same identity, facial features and skin tone";
 const imageList = (from: number, n: number) => (n === 1 ? `image ${from}` : `images ${list(Array.from({ length: n }, (_, i) => String(from + i)))}`);
 
 /**
@@ -696,7 +700,7 @@ export function compileSheetPrompt({ state, direction, start = "scratch", clothi
     "Character sheet of an original AI influencer on a pure white background: a close-up portrait of the face, then full-body front, three-quarter, side profile and back views side by side",
     `The character: ${tidy(describeInfluencer(state))}`,
     tierStyle(state),
-    start === "face" && "The character has the face of the person in image 1: keep their identity and facial features exactly",
+    start === "face" && FACE_ON_SHEET,
     start === "reference" && "Base the character on the one in image 1 (face and overall look), changed as described",
     clothing > 0 && `They wear the clothing shown in ${imageList(photo ? 2 : 1, clothing)}`,
     tidy(direction) && `Direction: ${tidy(direction)}`,
@@ -717,7 +721,7 @@ export function compileDressPrompt({ start = "scratch", clothing = 0 }: CompileI
   const photo = start !== "scratch";
   return [
     "Image 1 is a character turnaround sheet",
-    start === "face" && "Give the character in every view the face of the person in image 2: the same identity, facial features and skin tone",
+    start === "face" && FACE_ON_EDIT,
     start === "reference" && "Redraw the character in every view to look like the character in image 2: their face, hair and overall look",
     clothing > 0 && `Dress the character in every view in the clothing shown in ${imageList(photo ? 3 : 2, clothing)}`,
     "Keep the poses, the layout, the number of views and the white background of image 1 unchanged",
@@ -725,6 +729,17 @@ export function compileDressPrompt({ start = "scratch", clothing = 0 }: CompileI
     .filter(Boolean)
     .join(". ")
     .concat(".");
+}
+
+/**
+ * The face an "Add your face" sheet was made with, read back from its finished request (null for From
+ * scratch and From a reference): Save as character keeps it as a reference, whatever the page shows now.
+ * The open engine's edit got the sheet as image 1 when it launched, so the face is image 2 there.
+ */
+export function faceOfRun(request: Pick<GenerationRequest, "prompt" | "inputs">): string | null {
+  const images = request.inputs?.images ?? [];
+  const face = request.prompt?.includes(FACE_ON_SHEET) ? images[0] : request.prompt?.includes(FACE_ON_EDIT) ? images[1] : undefined;
+  return face?.startsWith("/api/files/") ? face : null;
 }
 
 /** The picks as chips for the summary: [Category label, "Option, Option"]. */

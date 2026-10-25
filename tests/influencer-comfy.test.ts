@@ -37,10 +37,10 @@ describe("the builder's open engine through the provider", () => {
     expect(at(wf, "170:151", "prompt")).toBe(compileDressPrompt({ state, start: "face", clothing: 1 }));
   });
 
-  it("with the face only, the third image slot is left out rather than refused", async () => {
+  it("with the face only, image 3 repeats the face (the graph's third slot is always wired)", async () => {
     const plan = planInfluencer({ engine: "open", state, start: "face", photo: "face.png" }, {});
     const dress = plan.steps[1].request;
     const { workflow: wf } = await prepare("qwen-image-edit-2511-multi", { prompt: dress.prompt, images: ["sheet.png", ...(dress.inputs?.images ?? [])] }, "edit");
-    expect([at(wf, "41", "image"), at(wf, "83", "image")]).toEqual(["sheet.png", "face.png"]);
+    expect([at(wf, "41", "image"), at(wf, "83", "image"), at(wf, "1201", "image")]).toEqual(["sheet.png", "face.png", "face.png"]);
   });
 });

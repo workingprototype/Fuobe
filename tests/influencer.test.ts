@@ -14,6 +14,7 @@ import {
   conflictFor,
   CREATURE_TYPES,
   describeInfluencer,
+  faceOfRun,
   getOption,
   INFLUENCER_CATEGORIES,
   INFLUENCER_START,
@@ -402,6 +403,20 @@ describe("the prompt compiler", () => {
       "Image 1 is a character turnaround sheet. Give the character in every view the face of the person in image 2: the same identity, facial features and skin tone. Dress the character in every view in the clothing shown in image 3. Keep the poses, the layout, the number of views and the white background of image 1 unchanged.",
     );
     expect(compileDressPrompt({ state: s, clothing: 2 })).toContain("clothing shown in images 2 and 3");
+  });
+
+  it("reads the face back from a finished run, for Save as character", () => {
+    const s = S("freak", { gender: ["female"] });
+    const me = "/api/files/me.jpg";
+    const coat = "/api/files/coat.png";
+    // Cloud: the face is image 1, the clothing after it.
+    expect(faceOfRun({ prompt: compileSheetPrompt({ state: s, start: "face", clothing: 1 }), inputs: { images: [me, coat] } })).toBe(me);
+    // Open: the sheet went in first when the edit launched.
+    expect(faceOfRun({ prompt: compileDressPrompt({ state: s, start: "face", clothing: 1 }), inputs: { images: ["/api/files/sheet.png", me, coat] } })).toBe(me);
+    // A reference or clothing isn't the character's face.
+    expect(faceOfRun({ prompt: compileSheetPrompt({ state: s, start: "reference" }), inputs: { images: [me] } })).toBeNull();
+    expect(faceOfRun({ prompt: compileDressPrompt({ state: s, clothing: 1 }), inputs: { images: ["/api/files/sheet.png", coat] } })).toBeNull();
+    expect(faceOfRun({ prompt: compileCastPrompt({ state: s }) })).toBeNull();
   });
 
   it("summarises and names", () => {

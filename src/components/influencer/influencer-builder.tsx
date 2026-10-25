@@ -2,7 +2,7 @@
 
 import { Dices, ImagePlus, Loader2, RotateCcw, Sparkles, TriangleAlert, Info, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { SaveCharacter } from "@/components/fashion/character-sheet";
 import { PageHeader, PageShell } from "@/components/page-shell";
@@ -20,6 +20,7 @@ import {
   categoriesFor,
   CREATURE_TYPES,
   describeInfluencer,
+  faceOfRun,
   FEATURE,
   HUMAN_TIERS,
   INFLUENCER_START,
@@ -51,6 +52,19 @@ const CLOUD_MODELS: { id: string; label: string; note: string }[] = [
   { id: "seedream-5-pro", label: "Seedream 5.0 Pro", note: "Photoreal, from the same picks" },
 ];
 
+/** The rail is a column from the lg breakpoint up and a sideways scroller below it: its tablist says which. */
+const WIDE = "(min-width: 1024px)";
+function useWide(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const mql = window.matchMedia(WIDE);
+      mql.addEventListener("change", cb);
+      return () => mql.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(WIDE).matches,
+    () => true,
+  );
+}
 
 type Message = { kind: "conflict" | "note"; text: string } | null;
 
@@ -94,13 +108,14 @@ function RunInfo({ preview, loading, blocker }: { preview?: RunPreview & { steps
 }
 
 /**
- * /influencer: Higgsfield's AI Influencer builder, game-style. Pick a character type (three human
- * tiers, six creature types), then options in 18 categories, or Shuffle; conflicts are refused in
+ * /influencer: the AI Influencer builder, game-style (after Higgsfield's). Pick a character type (three
+ * human tiers, six creature types), then options in 18 categories, or Shuffle; conflicts are refused in
  * Higgsfield's words. A live summary, a Direction, a face or reference photo and up to three
  * clothing references, then one character sheet to save as a character.
  */
 export function InfluencerBuilder() {
   const [engine, setEngine] = useEngine();
+  const wide = useWide();
   const [state, setState] = useState<InfluencerState>(INFLUENCER_START);
   const [active, setActive] = useState("tier");
   const [message, setMessage] = useState<Message>(null);
@@ -175,7 +190,7 @@ export function InfluencerBuilder() {
 
   return (
     <PageShell wide>
-      <PageHeader title="AI Influencer" description="Build an original character, game-style: pick a look in up to 18 categories or Shuffle, then get a character sheet to save as a character.">
+      <PageHeader title="AI Influencer" description="Build an original character, game-style: pick a character type, then a look in up to 18 categories or Shuffle, and get a character sheet to save as a character.">
         <EngineSwitch value={engine} onChange={setEngine} />
       </PageHeader>
 
@@ -184,7 +199,7 @@ export function InfluencerBuilder() {
         <div
           role="tablist"
           aria-label="Categories"
-          aria-orientation="vertical"
+          aria-orientation={wide ? "vertical" : "horizontal"}
           onKeyDown={tabKeys}
           className="scrollbar-none -mx-4 flex min-w-0 gap-1 overflow-x-auto px-4 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0"
         >
@@ -402,7 +417,8 @@ export function InfluencerBuilder() {
               className="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2"
               onRetried={(from, to) => setIds((xs) => (xs.length ? xs.flatMap((id) => (id === from ? to : [id])) : xs))}
             />
-            {latest && <SaveCharacter key={latest.id} item={latest} extra={start === "face" && photo && !photo.uploading ? [photo.ref] : []} defaultName={influencerName(state)} />}
+            {/* The face and the name come from the run that made the sheet, not from what the page shows now. */}
+            {latest && <SaveCharacter key={latest.id} item={latest} extra={[faceOfRun(latest.request)].filter((x): x is string => !!x)} defaultName={latest.request.title ?? influencerName(state)} />}
           </>
         ) : (
           <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed p-6 text-center">

@@ -343,7 +343,7 @@ export function appStudio(preset: Preset): StudioConfig {
 
 /** Apps whose job a studio does in more depth: linked under the hero. */
 const APP_RELATED: Record<string, { href: string; label: string }> = {
-  "app-ai-influencer": { href: "/influencer", label: "Build one game-style: 19 categories, creatures, Shuffle" },
+  "app-ai-influencer": { href: "/influencer", label: "Build one game-style: 18 categories, creatures, Shuffle" },
 };
 
 export const MOTION_CONTROL_STUDIO: StudioConfig = {

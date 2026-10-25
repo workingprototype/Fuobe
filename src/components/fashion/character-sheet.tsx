@@ -280,7 +280,7 @@ export function CharacterSheetView({ fields, defaults }: { fields: CastFieldData
               href="/influencer"
               className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              <Dices className="size-3.5" aria-hidden /> Build one game-style in the AI Influencer builder: 19 categories, creatures, Shuffle
+              <Dices className="size-3.5" aria-hidden /> Build one game-style in the AI Influencer builder: 18 categories, creatures, Shuffle
             </Link>
           )}
 
