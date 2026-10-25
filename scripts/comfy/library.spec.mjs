@@ -83,6 +83,8 @@
 //   slowdown*                             (FPS Boost: slow-motion factor, params.slowdown; the output fps is divided by it)
 //   shortSide*                            (chunked upscalers: the output's shorter edge in px, params.resolution: 1080p -> 1080)
 //   colorSpace*                           (SDR to HDR: CreateVideo color space, "HDR" = BT.2020 HLG, "HDR PQ" = BT.2020 PQ (HDR10): params.format)
+// Keys added with Fuobe Soul (Originals O2):
+//   megapixels*                           (image to image: the picture scaled to about this many megapixels, Soul's tier: 1 = 720p, 2 = 1080p)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
@@ -1978,6 +1980,27 @@ export const SPEC = [
       'One job = generate + lock. The provider writes paletteText from params.palette ("Color palette: #.., #..") and renders paletteImage, a swatch PNG with one band per colour, server-side. ' +
       'strength 0 = prompt only; 0.5-0.8 = lock; 1.0 = full statistics transfer (shifts skin tones). method mkl_lab (default, keeps contrast), reinhard_lab (softer), histogram (strongest). ' +
       'palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too).',
+  },
+
+  // ---- Fuobe Soul (Originals O2): restyle a picture with a look ----------------------
+  {
+    id: 'z-image-turbo-i2i',
+    title: 'Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)',
+    capability: 'edit',
+    handBuilt: 'hand-built/z-image-turbo-i2i.json',
+    bindings: {
+      image: [b('1', 'image')], megapixels: [b('2', 'megapixels')], prompt: [b('14', 'text')], seed: [b('17', 'seed')], steps: [b('17', 'steps')],
+      strength: [b('17', 'denoise')], shift: [b('13', 'shift')],
+    },
+    outputs: [{ node: '19', kind: 'image' }],
+    defaults: { steps: 8, shift: 3, strength: 0.6, megapixels: 1 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 12,
+    license: 'Apache-2.0 (Z-Image Turbo)',
+    notes:
+      'Fuobe Soul\'s edit route (Soul 2.0 image-to-image): the picture scaled to Soul\'s tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler ' +
+      '(8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal\'s z-image/turbo/image-to-image; about 0.17 would be Higgsfield\'s refiner pass, an experiment until the evaluation harness measures it). ' +
+      'The look\'s LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture\'s shape.',
   },
 
   // ---- Shorts Studio / Mixed Media: trim, segment, restyle ------------------------

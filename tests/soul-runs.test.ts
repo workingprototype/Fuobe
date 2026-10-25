@@ -33,7 +33,7 @@ describe("Fuobe Soul on both engines", () => {
   it("is one model with ComfyUI routes and hosted open-weight routes", () => {
     const m = soul();
     expect(m.engines).toEqual(["open", "cloud"]);
-    expect(onEngine(m, "open").routes.map((r) => r.provider)).toEqual(["comfyui"]);
+    expect(onEngine(m, "open").routes.map((r) => [r.op, r.endpoint])).toEqual([["t2i", "z-image-turbo-t2i"], ["edit", "z-image-turbo-i2i"]]);
     expect(new Set(onEngine(m, "cloud").routes.map((r) => r.provider))).toEqual(new Set(["fal", "replicate"]));
     expect(onEngine(m, "cloud")).toBe(onEngine(m, "cloud"));
     // The pickers list it on both engines.
@@ -101,6 +101,31 @@ describe("Fuobe Soul on both engines", () => {
     expect([latent.inputs.width, latent.inputs.height]).toEqual([896, 1152]);
     const sampler = Object.values(wf).find((n) => n.class_type === "KSampler")!;
     expect(sampler.inputs).toMatchObject({ steps: 8, cfg: 1, sampler_name: "res_multistep", scheduler: "simple" });
+  });
+
+  it("restyles a picture with the look on both engines (Soul 2.0's image to image)", async () => {
+    const open = plan("open", { presetId: "v2-y2k-studio", inputs: { images: ["/api/files/uploads/x.png"] }, params: { resolution: "1080p" } });
+    expect(open.op).toBe("edit");
+    expect(routesFor(open.model, "edit")[0].endpoint).toBe("z-image-turbo-i2i");
+    expect(open.params.extra).toMatchObject({ megapixels: 2 });
+    const { workflow } = await prepareWorkflow(
+      "z-image-turbo-i2i",
+      { ...open.params, prompt: open.prompt, images: ["up_x.png"], loras: open.loras, seed: 7 },
+      { generationId: "g", op: "edit", upload: async (_d, _t, name) => `up_${name}`, media: () => undefined, serverRam: async () => undefined },
+    );
+    const wf = workflow as ComfyWorkflow;
+    expect(Object.values(wf).find((n) => n.class_type === "ImageScaleToTotalPixels")!.inputs.megapixels).toBe(2);
+    expect(Object.values(wf).find((n) => n.class_type === "KSampler")!.inputs.denoise).toBe(0.6);
+    expect(Object.values(wf).filter((n) => n.class_type === "LoraLoaderModelOnly").map((n) => n.inputs.lora_name)).toEqual(open.loras.map((l) => l.file));
+
+    const cloud = plan("cloud", { presetId: "v1-general", inputs: { images: ["/api/files/uploads/x.png"] }, params: { extra: { strength: 0.3 } } });
+    const route = routesFor(cloud.model, "edit")[0];
+    expect(route.loraEndpoint).toBe("fal-ai/z-image/turbo/image-to-image/lora");
+    const body = buildPayload(route.map!, { ...cloud.params, prompt: cloud.prompt, images: ["https://fal.media/x.png"], loras: cloud.loras });
+    expect(body).toMatchObject({ image_url: "https://fal.media/x.png", strength: 0.3, enable_prompt_expansion: false });
+    expect(body).not.toHaveProperty("image_size");
+    // A new picture has nothing to change: the edit strength isn't sent.
+    expect(plan("cloud", { params: { extra: { strength: 0.3 } } }).params.extra).toBeUndefined();
   });
 
   it("prices per megapixel of every image: free on the GPU, the /lora price with LoRAs, whole megapixels on Soul HD", () => {

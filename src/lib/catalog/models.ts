@@ -1482,8 +1482,12 @@ const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SO
 const originals: ModelDef[] = [
   original({
     id: "fuobe-soul",
-    open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the look's LoRAs")],
-    options: { ...SOUL_OPTIONS, looks: { label: "Look" } },
+    open: [
+      comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the look's LoRAs"),
+      // Restyle a picture with the look (Soul 2.0's image to image); it keeps the picture's shape.
+      comfy("edit", "z-image-turbo-i2i", "Z-Image Turbo image to image with the look's LoRAs"),
+    ],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, maxImages: 1 },
   }),
   original({
     id: "fuobe-soul-hd",

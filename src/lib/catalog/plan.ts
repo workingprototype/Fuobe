@@ -310,10 +310,18 @@ export function planGeneration(
   const presets = model.options.presets;
   if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
 
-  // Soul's exact sizes on the user's GPU (the cloud routes send them through FieldMap.size); an edit keeps the picture's shape.
+  // Soul's exact sizes on the user's GPU (the cloud routes send them through FieldMap.size); an edit keeps the
+  // picture's shape at the tier's size (about 1 or 2 megapixels).
   if (soul && model.engine === "open" && op === "t2i") {
     const { width, height } = soulSize(params.aspectRatio, params.resolution);
     params = { ...params, extra: { ...params.extra, width, height } };
+  }
+  if (soul && model.engine === "open" && op === "edit") params = { ...params, extra: { ...params.extra, megapixels: params.resolution === "1080p" ? 2 : 1 } };
+  // How much an edit changes the picture (params.extra.strength) means nothing to a new picture.
+  if (soul && op === "t2i" && params.extra && "strength" in params.extra) {
+    const rest = { ...params.extra };
+    delete rest.strength;
+    params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
   }
 
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
