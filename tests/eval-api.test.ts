@@ -119,14 +119,14 @@ describe("the preview says what the route runs", () => {
   const hf = { file: "AWPortrait-Z.safetensors", url: "https://huggingface.co/Shakker-Labs/AWPortrait-Z/resolve/main/AWPortrait-Z.safetensors", strength: 0.6 };
   const local = { file: "civitai-2463391-hardflash.safetensors", strength: 0.7, trigger: "hardflashy" };
 
-  it("routeLoras: ComfyUI loads every file, fal's LoRA endpoint the ones with a URL, other routes none", () => {
+  it("routeLoras: ComfyUI loads every file, a cloud route with a LoRA field the ones with a URL, other routes none", () => {
     expect(routeLoras({ provider: "comfyui" }, [hf, local])).toEqual({ applied: [hf, local], dropped: [] });
     expect(routeLoras({ provider: "fal", loraEndpoint: "fal-ai/z-image/turbo/lora" }, [hf, local])).toEqual({
       applied: [hf],
       dropped: [{ file: local.file, reason: "no URL to send to the LoRA endpoint" }],
     });
     expect(routeLoras({ provider: "fal" }, [hf]).dropped).toEqual([{ file: hf.file, reason: "this route takes no LoRAs" }]);
-    expect(routeLoras({ provider: "replicate", loraEndpoint: "x" }, [hf]).applied).toEqual([]);
+    expect(routeLoras({ provider: "replicate" }, [hf]).applied).toEqual([]);
   });
 
   it("returns the endpoint, the final prompt and the LoRAs on the open engine (demo mode, no ComfyUI here)", async () => {

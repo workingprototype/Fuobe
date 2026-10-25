@@ -561,26 +561,6 @@
       ]
     },
     {
-      "id": "dop/motion-bts",
-      "title": "DoP motion · BTS",
-      "motion": "BTS",
-      "presetId": "motion-bts",
-      "inputs": {
-        "images": [
-          "local/dop/start.png"
-        ]
-      },
-      "demoInputs": {
-        "images": [
-          "fixtures/start-frame.png"
-        ]
-      },
-      "tags": [
-        "motion",
-        "add-lora"
-      ]
-    },
-    {
       "id": "dop/motion-wiggle",
       "title": "DoP motion · Wiggle",
       "motion": "Wiggle",
