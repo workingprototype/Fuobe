@@ -337,8 +337,14 @@ export function appStudio(preset: Preset): StudioConfig {
     defaultModels: { cloud: preset.cloud?.modelId ?? preset.open!.modelId, open: preset.open?.modelId ?? preset.cloud!.modelId },
     promptOptional: preset.userPrompt !== "required",
     hidePrompt: preset.userPrompt === "none",
+    ...(APP_RELATED[preset.id] && { related: APP_RELATED[preset.id] }),
   };
 }
+
+/** Apps whose job a studio does in more depth: linked under the hero. */
+const APP_RELATED: Record<string, { href: string; label: string }> = {
+  "app-ai-influencer": { href: "/influencer", label: "Build one game-style: 18 categories, creatures, Shuffle" },
+};
 
 export const MOTION_CONTROL_STUDIO: StudioConfig = {
   feature: "motion-control",

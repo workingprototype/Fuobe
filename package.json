@@ -16,7 +16,7 @@
     "test:e2e:library": "node tests/e2e/library-flows.mjs",
     "test:e2e:mobile": "node tests/e2e/no-horizontal-scroll.mjs",
     "test:e2e:shell": "node tests/e2e/shell.mjs",
-    "gen:catalog": "python3 scripts/gen-cloud-models.py && python3 scripts/gen-higgsfield-models.py && python3 scripts/gen-higgsfield-presets.py && python3 scripts/gen-oss-loras.py && python3 scripts/gen-lora-library.py && node scripts/gen-icon-map.mjs",
+    "gen:catalog": "python3 scripts/gen-cloud-models.py && python3 scripts/gen-higgsfield-models.py && python3 scripts/gen-higgsfield-presets.py && python3 scripts/gen-oss-loras.py && python3 scripts/gen-lora-library.py && python3 scripts/gen-influencer-options.py && node scripts/gen-icon-map.mjs",
     "typecheck": "tsc --noEmit",
     "eval:run": "node scripts/eval/eval.mjs run",
     "eval:report": "node scripts/eval/eval.mjs report",
