@@ -1,9 +1,11 @@
 /**
  * Mixed Media (Higgsfield's /mixed-media): turn a 1–10 s clip into mixed-media art (sketch, comic,
  * paper, neon…) with per-preset settings. Higgsfield samples frames at 4–24 fps and stylises each
- * one, priced per output frame; the open engine does the same (Z-Image per frame, oss-mixed-media),
- * the cloud route runs a video-to-video restyle model on the trimmed clip, anchored on the preview
- * frame when the model takes one (LTX 2.3 reference restyle).
+ * one, priced per output frame; the open engine does the same (Z-Image per frame, oss-mixed-media).
+ * The cloud engine does it too by default ("Per frame": cut → frames → an image edit per frame, each
+ * looking at the frame styled before it → frames back to video → the cut's own sound); "Fast" runs a
+ * video-to-video restyle model on the trimmed clip instead, anchored on the preview frame when the
+ * model takes one (LTX 2.3 reference restyle).
  *
  * Pure module, shared by the page, src/server/mixed-media.ts and the tests.
  * Research: docs/research/higgsfield-studios.md §3.
@@ -31,6 +33,8 @@ export const MIXED_FEATURE = "mixed-media";
 /** Helper steps (the cut, the render before the soundtrack) and preview frames stay out of History. */
 export const MIXED_STEP_FEATURE = "mixed-media-step";
 export const MIXED_PREVIEW_FEATURE = "mixed-media-preview";
+/** Cloud Per frame: one edit per frame. A helper step too ("-step"), kept apart so History and the render view don't load hundreds of them. */
+export const MIXED_FRAME_FEATURE = "mixed-media-frame-step";
 
 /** Cloud restyle models (the first is the default) and the open per-frame model. */
 export const MIXED_MODELS: Record<Engine, string[]> = {
@@ -38,9 +42,27 @@ export const MIXED_MODELS: Record<Engine, string[]> = {
   open: ["oss-mixed-media"],
 };
 export const MIXED_TOOLS = {
-  cloud: { cut: "trim-video", mux: "merge-audio-video", preview: "nano-banana-2" },
+  cloud: { cut: "trim-video", mux: "merge-audio-video", preview: "nano-banana-2", frames: "extract-frames", assemble: "images-to-video", join: "join-clips" },
   open: { preview: "oss-mixed-media" },
 } as const;
+
+/** How the cloud engine restyles: frame by frame like Higgsfield (the default), or one video-to-video pass. */
+export type MixedMode = "frames" | "fast";
+/** Cloud image editors that redraw each frame (the first is the default): Nano Banana 2 takes a seed, Seedream 5.0 Flash is the cheapest. */
+export const MIXED_FRAME_MODELS = ["nano-banana-2", "seedream-5-flash"] as const;
+
+/**
+ * Cloud per-frame limits: fal's extract-nth-frame returns up to 500 frames a call and images-to-video
+ * takes up to 200 images. Frames are styled in lanes of `lane`: each frame looks at the one styled before
+ * it, and each lane's first frame at the approved preview (else the first styled frame), so lanes run side
+ * by side and a 240-frame clip takes the time of about 13 edits, not 240. The price of that: a lane's first
+ * frame matches the preview, not the frame before it, so a look that drifts within a lane can step back
+ * every `lane` frames (the page's How it works says so). merge-videos sizes its output 512–2048 px
+ * (`joinMaxPx`): clips of more than 200 frames are joined at that size.
+ */
+export const FRAME_LIMITS = { perExtract: 500, perClip: 200, lane: 12, maxInterval: 300, joinMaxPx: 2048, joinMinPx: 512 } as const;
+/** The seed every frame is redrawn with when the request names none (the same seed keeps frames alike). */
+export const FRAME_SEED = 424242;
 
 // ---------------------------------------------------------------------------
 // Settings (Higgsfield's per-preset param_configs: colour pickers, dropdowns with a custom option, text)
@@ -408,13 +430,18 @@ export function mixedLook(p: Pick<MixedPreset, "look" | "settings">, values: Mix
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
-/** Prompts per step: the video restyle (cloud), each frame (open, img2img), and the preview still (cloud edit). */
+/**
+ * Prompts per step: the video restyle (cloud Fast), each frame (open, img2img), the preview still (cloud
+ * edit), and a cloud frame redrawn next to a styled one (the frame before it, or the approved preview).
+ */
 export function mixedPrompts(p: Pick<MixedPreset, "look" | "settings">, values: MixedValues) {
   const look = mixedLook(p, values);
+  const still = `Redraw this image as ${look}. Keep the composition, framing, people and poses exactly.`;
   return {
     video: `Restyle this video as ${look}. Keep the people, poses, motion, timing and camera exactly as they are; change only the look.`,
     frame: `${cap(look)}. Same composition and subject as the source frame, highly detailed mixed-media artwork.`,
-    still: `Redraw this image as ${look}. Keep the composition, framing, people and poses exactly.`,
+    still,
+    framePair: `Redraw the first image as ${look}. Keep its composition, framing, people and poses exactly. The second image is an earlier frame of the same clip already redrawn: match its style, colours, textures and line work exactly so the frames play as one animation.`,
   };
 }
 
@@ -476,6 +503,56 @@ export function nearestResolution(choices: string[] | undefined, want: MixedReso
   return [...choices].filter((c) => c !== "auto").sort((a, b) => Math.abs(rank(a) - t) - Math.abs(rank(b) - t) || rank(b) - rank(a))[0];
 }
 
+/**
+ * Cloud per-frame sampling: the extractor takes every `interval`-th frame of the clip, so the frame rate
+ * is the clip's own divided by a whole number — the one closest to the rate asked for (fewer frames on a
+ * tie), never below 4 FPS. 8 FPS from a 30 FPS clip is every 4th frame, 7.5 FPS; 24 from 25 is every
+ * frame. `frames` counts as Higgsfield does, floor(seconds × fps).
+ */
+export function frameSampling(seconds: number, fps: number, sourceFps: number): { interval: number; fps: number; frames: number } {
+  let interval = 1;
+  for (let k = 2; k <= FRAME_LIMITS.maxInterval && sourceFps / k >= MIXED.manualFps.min - 1e-9; k++) {
+    if (Math.abs(sourceFps / k - fps) <= Math.abs(sourceFps / interval - fps) + 1e-9) interval = k;
+    if (sourceFps / k < fps) break;
+  }
+  const rate = sourceFps / interval;
+  return { interval, fps: Math.round(rate * 1000) / 1000, frames: mixedFrames(seconds, rate) };
+}
+
+/** Consecutive runs of at most `size` frames: the extractor's calls (500) or the clips frames go back into (200). */
+export function frameChunks(frames: number, size: number): { from: number; count: number }[] {
+  return Array.from({ length: Math.ceil(frames / size) }, (_, i) => ({ from: i * size, count: Math.min(size, frames - i * size) }));
+}
+
+/**
+ * What the cloud frame editor is asked for: Nano Banana 2 keeps the frame's shape at 1K/2K/4K, Seedream 5.0 Flash
+ * at auto 1K/2K. Frames come back as JPEG (Seedream's default): every one is downloaded, sent on as the next
+ * frame's reference and into images-to-video, and a 4K PNG is ten times the bytes for a frame that is re-encoded anyway.
+ */
+export function frameEditParams(modelId: string, resolution: MixedResolution, seed: number): { aspectRatio?: string; resolution?: string; seed?: number; extra?: Record<string, unknown> } {
+  if (modelId === "seedream-5-flash") return { extra: { image_size: resolution === "1K" ? "auto_1K" : "auto_2K" } };
+  return { aspectRatio: "auto", resolution, seed, extra: { output_format: "jpeg" } };
+}
+
+/**
+ * The size clips of styled frames are joined at (merge-videos takes 512–2048 px a side): the source's shape with
+ * its long side at 2048, its short side at least 512. Undefined without the source's size (fal then picks the
+ * smallest of the clips).
+ */
+export function frameJoinSize(source?: { width?: number; height?: number }): { width: number; height: number } | undefined {
+  const w = source?.width;
+  const h = source?.height;
+  if (!w || !h) return undefined;
+  const even = (v: number) => Math.max(FRAME_LIMITS.joinMinPx, Math.min(FRAME_LIMITS.joinMaxPx, 2 * Math.round(v / 2)));
+  const k = FRAME_LIMITS.joinMaxPx / Math.max(w, h);
+  return { width: even(w * k), height: even(h * k) };
+}
+
+/** Per frame at 4K with more than one clip: joined at up to 2048 px, so frames are drawn at 2K (same picture, less money). */
+export function frameResolution(frames: number, resolution: MixedResolution): MixedResolution {
+  return frames > FRAME_LIMITS.perClip && resolution === "4K" ? "2K" : resolution;
+}
+
 // ---------------------------------------------------------------------------
 // Pipelines
 
@@ -488,8 +565,14 @@ export interface MixedPlanInput {
   range: { start: number; end: number };
   fps: number;
   resolution: MixedResolution;
-  /** The restyle model (cloud) or oss-mixed-media (open). */
+  /** The restyle model (cloud Fast), the frame editor (cloud Per frame: MIXED_FRAME_MODELS) or oss-mixed-media (open). */
   modelId: string;
+  /** Cloud: frame by frame (default) or one video-to-video pass. */
+  mode?: MixedMode;
+  /** Cloud Per frame: the clip's own frame rate (frames are every Nth one of it). */
+  sourceFps?: number;
+  /** Cloud Per frame: the clip's own size (the clips of styled frames are joined at its shape). */
+  sourceSize?: { width?: number; height?: number };
   /** Cloud: the approved preview still, sent when the model takes an image (LTX: the first frame; Kling, Happy Horse: a style reference). */
   anchor?: string;
   /** Cloud: what to ask the model for (its nearest resolution). */
@@ -499,8 +582,9 @@ export interface MixedPlanInput {
   seed?: number;
 }
 
-/** The full render. Open: one per-frame job. Cloud: cut the selection, restyle it, put its own sound back. */
+/** The full render. Open: one per-frame job. Cloud: cut the selection, restyle it (frame by frame, or Fast), put its own sound back. */
 export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: string } {
+  if (input.engine === "cloud" && (input.mode ?? "frames") === "frames") return planMixedFrames(input);
   const prompts = mixedPrompts(input.preset, input.values);
   const base = { batchTitle: input.title };
   const seed = input.seed !== undefined ? { seed: input.seed } : {};
@@ -575,6 +659,124 @@ export function planMixed(input: MixedPlanInput): { steps: PlanStep[]; final: st
   return { steps, final: "final" };
 }
 
+/**
+ * Cloud, frame by frame (Higgsfield's Mixed Media): cut the selection → take every Nth frame (500 a call;
+ * a longer run is cut into windows) → redraw each frame with the frame editor, a fixed seed and the frame
+ * styled before it as a second picture (lanes of FRAME_LIMITS.lane; a lane starts from the approved preview,
+ * else the first styled frame) → the styled frames back into clips of up to 200 at the sampled frame rate
+ * (joined when there are several) → the cut's own sound.
+ */
+export function planMixedFrames(input: MixedPlanInput): { steps: PlanStep[]; final: string } {
+  const t = MIXED_TOOLS.cloud;
+  const prompts = mixedPrompts(input.preset, input.values);
+  const len = Math.round((input.range.end - input.range.start) * 1000) / 1000;
+  if (!input.sourceFps) throw new Error("Couldn't read this clip's frame rate — pick Fast to restyle it as video");
+  const sampling = frameSampling(len, input.fps, input.sourceFps);
+  const n = sampling.frames;
+  if (n < 1) throw new Error("Select a longer part of the clip");
+  const windows = frameChunks(n, FRAME_LIMITS.perExtract);
+  const clips = frameChunks(n, FRAME_LIMITS.perClip);
+  const sound = !!input.source.hasAudio;
+  const joined = clips.length > 1;
+  const total = 1 + (windows.length > 1 ? windows.length : 0) + windows.length + n + clips.length + (joined ? 1 : 0) + (sound ? 1 : 0);
+  const steps: PlanStep[] = [];
+  const add = (label: string, s: PlanStep) => steps.push({ ...s, request: { ...s.request, step: { label, index: steps.length, of: total } } });
+  const base = { batchTitle: input.title };
+  const helper = { ...base, feature: MIXED_STEP_FEATURE };
+  const seed = input.seed ?? FRAME_SEED;
+  const edit = frameEditParams(input.modelId, frameResolution(n, input.resolution), seed);
+  // Only worth making for the steps after them: dropped before they're paid for once the render can't finish.
+  const feeds = { dropWhenUnused: true };
+  // The whole selection: its sound goes back under the result, and with one window its frames come from it.
+  add("Cut", { key: "cut", request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: input.range.start, endTime: input.range.end } } });
+  const secondsPerWindow = (FRAME_LIMITS.perExtract * sampling.interval) / input.sourceFps;
+  windows.forEach((w, i) => {
+    let source = "cut";
+    if (windows.length > 1) {
+      source = `cut${i + 1}`;
+      const start = Math.round((input.range.start + i * secondsPerWindow) * 1000) / 1000;
+      const end = Math.min(input.range.end, Math.round((start + secondsPerWindow) * 1000) / 1000);
+      add(`Cut ${i + 1} of ${windows.length}`, { key: source, request: { ...helper, modelId: t.cut, op: "trim", inputs: { video: input.source.url }, params: { startTime: start, endTime: end } } });
+    }
+    add(windows.length > 1 ? `Frames ${w.from + 1}–${w.from + w.count}` : `${n} frames`, {
+      key: `frames${i + 1}`,
+      request: {
+        ...helper,
+        modelId: t.frames,
+        op: "extract-frames",
+        // JPEG frames: a tenth of the bytes of PNG, and every frame is downloaded and sent on.
+        params: { frameInterval: sampling.interval, extra: { max_frames: w.count, output_format: "jpg", quality: 95 } },
+      },
+      after: [source],
+      chain: [{ slot: "video" }],
+    });
+  });
+  const lane = FRAME_LIMITS.lane;
+  for (let i = 0; i < n; i++) {
+    const w = Math.floor(i / FRAME_LIMITS.perExtract);
+    const frame = { slot: "images" as const, index: i - w * FRAME_LIMITS.perExtract, of: windows[w].count, position: "first" as const };
+    // The styled picture it matches: the frame before it in its lane, else the approved preview, else the first styled frame.
+    const ref = i % lane ? `f${i - 1}` : input.anchor ? null : i ? "f0" : null;
+    add(`Frame ${i + 1} of ${n}`, {
+      key: `f${i}`,
+      request: {
+        ...base,
+        ...feeds,
+        feature: MIXED_FRAME_FEATURE,
+        modelId: input.modelId,
+        op: "edit",
+        prompt: ref || input.anchor ? prompts.framePair : prompts.still,
+        ...(input.anchor && !ref ? { inputs: { images: [input.anchor] } } : {}),
+        params: { ...edit, numOutputs: 1 },
+      },
+      after: ref ? [`frames${w + 1}`, ref] : [`frames${w + 1}`],
+      chain: ref ? [frame, { slot: "images" }] : [frame],
+    });
+  }
+  clips.forEach((c, i) => {
+    const keys = Array.from({ length: c.count }, (_, j) => `f${c.from + j}`);
+    const last = !joined && !sound;
+    add(joined ? `Clip ${i + 1} of ${clips.length}` : "Frames to video", {
+      key: `clip${i + 1}`,
+      request: {
+        ...(last ? { ...base, feature: MIXED_FEATURE, title: input.title } : { ...helper, ...feeds }),
+        modelId: t.assemble,
+        op: "images-to-video",
+        params: { fps: sampling.fps },
+      },
+      after: keys,
+      chain: keys.map(() => ({ slot: "images" as const })),
+    });
+  });
+  let picture = "clip1";
+  if (joined) {
+    picture = "film";
+    const size = frameJoinSize(input.sourceSize);
+    add("Joining the clips", {
+      key: "film",
+      request: {
+        ...(sound ? { ...helper, ...feeds } : { ...base, feature: MIXED_FEATURE, title: input.title }),
+        modelId: t.join,
+        op: "concat",
+        prompt: input.title,
+        // merge-videos sizes its output 512–2048 px: the frames' shape at that size.
+        ...(size && { params: { extra: { resolution: size } } }),
+      },
+      after: clips.map((_, i) => `clip${i + 1}`),
+      chain: clips.map(() => ({ slot: "videos" as const })),
+    });
+  }
+  if (!sound) return { steps, final: picture };
+  add("Original sound", {
+    key: "final",
+    request: { ...base, feature: MIXED_FEATURE, title: input.title, modelId: t.mux, op: "mux" },
+    after: [picture, "cut"],
+    // The cut is a clip: the mux takes its soundtrack.
+    chain: [{ slot: "video" }, { slot: "audio" }],
+  });
+  return { steps, final: "final" };
+}
+
 /** One frame with the current settings. Open: the per-frame model on one frame; cloud: an image edit of the frame the browser grabbed. */
 export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }): PlanStep {
   const prompts = mixedPrompts(input.preset, input.values);
@@ -593,16 +795,23 @@ export function planMixedPreview(input: MixedPlanInput & { frameUrl?: string }):
       },
     };
   }
+  // Per frame: the frame editor itself with the render's settings, so the approved preview is what the first frame looks like.
+  const frames = (input.mode ?? "frames") === "frames" && (MIXED_FRAME_MODELS as readonly string[]).includes(input.modelId);
+  const count = frames && input.sourceFps ? frameSampling(input.range.end - input.range.start, input.fps, input.sourceFps).frames : 0;
   return {
     key: "preview",
     request: {
       feature: MIXED_PREVIEW_FEATURE,
       title,
-      modelId: MIXED_TOOLS.cloud.preview,
+      modelId: frames ? input.modelId : MIXED_TOOLS.cloud.preview,
       op: "edit",
       prompt: prompts.still,
       inputs: { images: input.frameUrl ? [input.frameUrl] : [] },
-      ...(input.seed !== undefined ? { params: { seed: input.seed } } : {}),
+      ...(frames
+        ? { params: { ...frameEditParams(input.modelId, frameResolution(count, input.resolution), input.seed ?? FRAME_SEED), numOutputs: 1 } }
+        : input.seed !== undefined
+          ? { params: { seed: input.seed } }
+          : {}),
     },
   };
 }

@@ -587,6 +587,32 @@ export function dropVhsAudio(wf: ComfyWorkflow): ComfyWorkflow {
   }
   return out;
 }
+/**
+ * A silent clip read by core LoadAudio (video-append-endcard reads the ad's sound from the same upload): LoadAudio
+ * stops with "No audio stream found in the file". The loaders go, with the sound nodes fed only by them (the card's
+ * silence and the AudioConcat), and the inputs of the picture nodes that took that sound (ConcatenateVideo's
+ * complete_audio), so the result has no sound track. `loaders` are the LoadAudio node ids; `keep` the output nodes.
+ */
+export function dropLoadedSound(wf: ComfyWorkflow, loaders: string[], keep: string[]): ComfyWorkflow {
+  const gone = new Set(loaders.filter((id) => wf[id]?.class_type === "LoadAudio"));
+  if (!gone.size) return wf;
+  const out = cloneWorkflow(wf);
+  const isSound = (cls: string) => /audio/i.test(cls) && !/video/i.test(cls);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [id, n] of Object.entries(out)) {
+      if (gone.has(id) || !isSound(n.class_type)) continue;
+      if (Object.values(n.inputs).some((v) => isLinkValue(v) && gone.has(v[0]))) {
+        gone.add(id);
+        grew = true;
+      }
+    }
+  }
+  for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && gone.has(v[0])) delete n.inputs[k];
+  for (const id of gone) delete out[id];
+  return dropUnused(out, keep);
+}
+
 /** Codes people use that Whisper spells differently. */
 const WHISPER_ALIASES: Record<string, string> = { fil: "tl", jv: "jw", iw: "he", nb: "no", zh_hans: "zh" };
 

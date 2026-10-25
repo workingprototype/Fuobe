@@ -12,6 +12,7 @@ import {
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropLoadedSound,
   dropVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
@@ -749,6 +750,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.width = Math.max(multiple, Math.floor((dims.width * k) / multiple) * multiple);
     values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
   }
+  // An end card appended to an ad (video-append-endcard): the card is encoded at the ad's own size and frame rate,
+  // so the ad's packets are copied as they are. Only the ad's header knows them.
+  if (manifest.id === "video-append-endcard") {
+    if (!clip?.width || !clip.height || !clip.fps) throw new ProviderError("Couldn't read the ad's size and frame rate, so the end card can't be added");
+    Object.assign(values, { width: clip.width, height: clip.height, fps: Math.round(clip.fps * 1000) / 1000 });
+  }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
   // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
   const voiceLength = ctx.op === "lipsync" && b.frames && !span ? ctx.media?.(String(values.audio ?? ""))?.duration : undefined;
@@ -932,7 +939,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
   // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
   wf = tagMetaBatch(wf, ctx.generationId);
-  if (clip && !clip.hasAudio && clip.hasVideo) wf = dropVhsAudio(wf);
+  if (clip && !clip.hasAudio && clip.hasVideo) {
+    wf = dropVhsAudio(wf);
+    // Core LoadAudio reading the clip's own sound (the end card's ad): no sound, no sound track.
+    wf = dropLoadedSound(wf, (b.video ?? []).filter((t) => t.input === "audio").map((t) => t.node), outputIds);
+  }
   if (manifest.expand === "captions") {
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
     try {

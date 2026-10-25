@@ -100,7 +100,8 @@ model("nano-banana-pro", "Nano Banana Pro", "Google", "gemini-image", "image",
 model("nano-banana-2", "Nano Banana 2", "Google", "gemini-image", "image",
       "Newest Gemini image model — sharper detail, 0.5K–4K, up to 14 references",
       [("t2i", "fal-ai/nano-banana-2"), ("edit", "fal-ai/nano-banana-2/edit")],
-      badges=["new", "4k"], pricing=("image", 0.08, "2K 1.5x, 4K 2x"), defaults={"aspectRatio": "1:1", "resolution": "1K"})
+      badges=["new", "4k"], pricing=("image", 0.08, "2K 1.5x, 4K 2x, 0.5K 0.75x", {"byResolution": {"0.5K": 0.06, "1K": 0.08, "2K": 0.12, "4K": 0.16}}),
+      defaults={"aspectRatio": "1:1", "resolution": "1K"})
 model("nano-banana-2-1", "Nano Banana 2.1", "Google", "gemini-image", "image",
       "Gemini 2.1 image with thinking — strongest instruction following",
       [("t2i", "google/nano-banana-2.1"), ("edit", "google/nano-banana-2.1/edit")],
@@ -117,6 +118,10 @@ model("seedream-5-pro", "Seedream 5.0 Pro", "ByteDance", "seedream", "image",
 model("seedream-5-lite", "Seedream 5.0 Lite", "ByteDance", "seedream", "image",
       "Fast, affordable Seedream 5",
       [("t2i", "bytedance/seedream/v5/lite/text-to-image"), ("edit", "bytedance/seedream/v5/lite/edit")],
+      badges=["fast"], defaults={"aspectRatio": "3:4"})
+model("seedream-5-flash", "Seedream 5.0 Flash", "ByteDance", "seedream", "image",
+      "The fastest, cheapest Seedream 5 — quick edits in bulk",
+      [("t2i", "bytedance/seedream/v5/flash/text-to-image"), ("edit", "bytedance/seedream/v5/flash/edit")],
       badges=["fast"], defaults={"aspectRatio": "3:4"})
 model("seedream-4-5", "Seedream 4.5", "ByteDance", "seedream", "image",
       "Photoreal 4K generation and multi-image editing",

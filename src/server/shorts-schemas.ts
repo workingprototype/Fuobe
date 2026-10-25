@@ -51,6 +51,8 @@ export const MixedBodySchema = z.object({
   fps: z.number().finite().min(MIXED.manualFps.min).max(MIXED.manualFps.max).default(MIXED.defaultFps),
   resolution: z.enum(MIXED.resolutions).default("1K"),
   modelId: z.string().max(80).optional(),
+  /** Cloud: "frames" (frame by frame, the default) or "fast" (one video-to-video pass). */
+  mode: z.enum(["frames", "fast"]).optional(),
   anchor: fileUrl.optional(),
   frameUrl: fileUrl.optional(),
   seed: z.number().int().min(0).max(2 ** 48).optional(),

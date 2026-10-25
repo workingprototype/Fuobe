@@ -763,6 +763,14 @@ export interface GenerationRequest {
   chainFrom?: "first" | "last";
   /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
   chain?: ChainSlot[];
+  /** Server-set when the runner filled the chain slots from the earlier steps' outputs (a retry takes them out again: unfilledRequest). */
+  chainFilled?: boolean;
+  /**
+   * A step only worth making for the steps after it (a per-frame render's frame edits and clips): while it still
+   * waits for its inputs (nothing spent yet), the runner cancels it once every step that would use it has failed
+   * or been canceled, so one failed frame doesn't leave the other lanes running up the bill.
+   */
+  dropWhenUnused?: boolean;
   /** Storyboard frame this request makes (shown under the frame). */
   frame?: { scene: string; index: number; of: number };
   /** Part of a multi-step job (a shot of a multi-shot film, a step of an extend): shown on its tile. */
@@ -799,7 +807,24 @@ export interface ChainSlot {
    * accompaniment/instrumental/residual/no_vocals). Without it, the first output of the slot's kind.
    */
   stem?: string;
+  /**
+   * Fan-out from a step that makes a list (extract-frames: one image per frame): take the dependency's
+   * output number `index` of the slot's kind (0-based, by `meta.index` when the outputs carry it). Past
+   * the end it takes the last one, so a provider that returns a frame or two fewer than planned holds the
+   * last frame instead of failing the whole render (`of` bounds how many). One step per index fans a list out; a step with one slot
+   * per index gathers it back in order.
+   */
+  index?: number;
+  /**
+   * With `index`: how many outputs the list was planned to have. A list more than CHAIN_LIST_SLACK short of it
+   * fails the step before it runs (a frame or two lost at the clip's end is held; half a clip of frozen, paid
+   * frames is not).
+   */
+  of?: number;
 }
+
+/** How many outputs a planned list (ChainSlot.of) may be short of before the steps reading it fail. */
+export const CHAIN_LIST_SLACK = 2;
 
 /** Canonical, provider-ready input (asset refs already resolved to provider URLs/filenames). */
 export interface GenInput extends GenParams {
