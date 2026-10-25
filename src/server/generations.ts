@@ -280,6 +280,8 @@ export const ASSET_REFS: AssetRef[] = [
   // Translate & dub sessions and Katana jobs: the source video, the subject picture and each step's files.
   { table: "dub_sessions", cols: ["data_json"], what: "dub", name: "json_extract(data_json, '$.title')" },
   { table: "katana_jobs", cols: ["data_json"], what: "Katana job", name: "json_extract(data_json, '$.title')" },
+  // Content Factory: a series' reference clip and its thumbnail.
+  { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
 ];
 
 /**

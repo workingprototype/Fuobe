@@ -320,7 +320,7 @@ const NAME_SYSTEM = "You name YouTube channels. Reply with the name only: 2–4 
  * A new channel is there straight away with a name taken from the idea; the LLM's name replaces it when
  * it answers (within 15 s, and only while the channel still has the first name), then the avatar is drawn.
  */
-export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean }): Promise<FacelessChannel> {
+export async function createChannel(input: { idea: string; genre: FacelessGenre; engine: Engine; reference?: string; name?: string; avatar?: boolean; settings?: Partial<ChannelSettings> }): Promise<FacelessChannel> {
   const idea = input.idea.trim();
   if (!idea) throw new FacelessError("Describe the channel first");
   const reference = input.reference?.trim() ? await readReference(input.reference) : null;
@@ -334,7 +334,7 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
     avatar_url: null,
     avatar_job: null,
     reference_json: reference ? JSON.stringify(reference) : null,
-    settings_json: JSON.stringify(ChannelDefaults(input.engine, input.genre)),
+    settings_json: JSON.stringify({ ...ChannelDefaults(input.engine, input.genre), ...input.settings }),
     created_at: now,
     updated_at: now,
   };
@@ -348,7 +348,8 @@ export async function createChannel(input: { idea: string; genre: FacelessGenre;
       if (name) db().prepare("UPDATE faceless_channels SET name = ? WHERE id = ? AND name = ?").run(name, row.id, row.name);
     }
     try {
-      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button.
+      // avatar: false (Assist's channel) leaves the initials and the "Draw an avatar" button; Content Factory
+      // series show their reference instead (no picture to pay for).
       if (input.avatar !== false && channelRow(row.id)) makeAvatar(row.id);
     } catch {
       // No picture model can run right now: the channel shows its initials, and "Draw an avatar" is there.
@@ -452,6 +453,8 @@ export interface EpisodeInput {
   saveLook?: boolean;
   /** A script that's written already, with its pictures (Assist): no writer runs; it's ready to review, or renders at once with autoRender. */
   blocks?: Partial<ScriptBlock>[];
+  /** The title before the script names it (a series' planned episode title). */
+  title?: string;
 }
 
 function cleanSettings(s: EpisodeSettings): EpisodeSettings {
@@ -480,7 +483,7 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
   const sources = (input.sources ?? []).slice(0, MAX_SOURCES);
   settings.sourceImages = sources.filter((s): s is Extract<ExplainerSource, { kind: "image" }> => s.kind === "image").map((s) => s.url);
   const now = Date.now();
-  const title = (topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, 80) || "Untitled episode";
+  const title = (input.title?.trim() || topic || pasted || written?.[0]?.narration || "").replace(/\s+/g, " ").slice(0, input.title ? 120 : 80) || "Untitled episode";
   const row: EpisodeRow = {
     id: nanoid(10),
     channel_id: channel?.id ?? null,
@@ -503,7 +506,18 @@ export function createEpisode(input: EpisodeInput): FacelessEpisode {
     .run(row);
   if (channel && (input.saveLook ?? first)) {
     void updateChannel(channel.id, {
-      settings: { engine: settings.engine, styleId: settings.styleId, styleRefs: settings.styleRefs, voice: settings.voice, aspect: settings.aspect, subtitles: settings.subtitles, music: settings.music, animation: settings.animation, length: settings.length },
+      settings: {
+        engine: settings.engine,
+        styleId: settings.styleId,
+        styleRefs: settings.styleRefs,
+        voice: settings.voice,
+        aspect: settings.aspect,
+        subtitles: settings.subtitles,
+        music: settings.music,
+        animation: settings.animation,
+        length: settings.length,
+        ...(settings.brief && { brief: settings.brief }),
+      },
     });
   }
   if (written) {
@@ -554,7 +568,9 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
   const s = ep.settings;
   const style = getStyle(s.styleId);
   const auto = ep.kind === "explainer" && s.auto;
-  const scenes = blockCount(auto ? AUTO_SECONDS : s.length);
+  // A Content Factory brief sets the pace: shorter scenes (more of them) for a reference that cuts fast.
+  const sceneSecs = s.brief?.sceneSeconds ? Math.max(4, Math.min(10, Math.round(s.brief.sceneSeconds))) : 10;
+  const scenes = s.brief?.sceneSeconds && !auto ? Math.max(1, Math.round(s.length / sceneSecs)) : blockCount(auto ? AUTO_SECONDS : s.length);
   const handles = new Set(s.elements.map((h) => h.toLowerCase()));
   const elements = listElements()
     .filter((e) => e.kind !== "voice" && handles.has(e.handle.toLowerCase()))
@@ -578,13 +594,14 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       topic,
       genre: ep.kind === "explainer" ? { ...genre, label: "Explainer", hint: "Explain it clearly to someone new to it", tone: genre.tone } : genre,
       scenes,
-      wordsPerScene: wordsFor(10),
+      wordsPerScene: wordsFor(sceneSecs),
       channel: channel ? `${channel.name} — ${channel.idea}` : undefined,
       styleName: style.name,
       elements,
       reference: channel?.reference ? [channel.reference.title, channel.reference.author && `by ${channel.reference.author}`].filter(Boolean).join(" ") || channel.reference.url : undefined,
       sources: textSources,
       auto,
+      style: s.brief?.script,
     });
     const answer = await askLlm(s.engine, scriptSystem, brief, ask);
     const parsed = answer ? parseScript(answer) : null;
@@ -592,6 +609,8 @@ async function writeScript(id: string, pasted: string, signal: AbortSignal): Pro
       script = { source: "ai", title: parsed.title ?? undefined, blocks: parsed.blocks };
     } else {
       const blocks = offlineScript(topic, ep.kind === "explainer" ? "education" : genre.id, scenes);
+      // The offline beats run about 10 s each: a brief's shorter scenes would overshoot the length, so middle beats go.
+      if (s.brief?.sceneSeconds && !auto) while (blocks.length > 1 && totalSeconds(blocks) > s.length * 1.15) blocks.splice(Math.floor(blocks.length / 2), 1);
       if (elements.length) for (const b of blocks) b.visual = `${b.visual}, with ${elements.map((e) => `@${e.handle}`).join(" and ")}`;
       script = { source: "ai", blocks, offline: true, note: failure ? `${OFFLINE_NOTE} (${failure})` : OFFLINE_NOTE };
     }
@@ -1240,7 +1259,7 @@ export function listEpisodes(o: { channelId?: string; kind?: "faceless" | "expla
 /** What an episode would cost and whether it would run as a demo, before or after the script exists. */
 export function estimateEpisode(input: { kind: "faceless" | "explainer"; settings: EpisodeSettings; blocks?: Partial<ScriptBlock>[]; genre?: FacelessGenre }): EstimateResult {
   const settings = { ...input.settings, styleRefs: input.settings.styleRefs.slice(0, 3) };
-  const blocks = input.blocks?.length ? normalizeBlocks(input.blocks) : placeholderBlocks(settings.auto ? AUTO_SECONDS : settings.length);
+  const blocks = input.blocks?.length ? normalizeBlocks(input.blocks) : placeholderBlocks(settings.auto ? AUTO_SECONDS : settings.length, settings.brief?.sceneSeconds);
   const fake: FacelessEpisode = {
     id: "estimate",
     channelId: null,
@@ -1431,6 +1450,16 @@ export const EngineSchema = z.enum(["cloud", "open"]);
 /** The research's message for a length outside Auto / 15–600 s. */
 export const DURATION_ERROR = "Duration must be Auto or a whole number of seconds between 15 and 600";
 
+/** A Content Factory brief as it reaches an episode (see BriefLook). */
+export const BriefLookSchema = z.object({
+  script: z.array(z.string().max(600)).max(16),
+  look: z.string().max(600).optional(),
+  camera: z.string().max(400).optional(),
+  music: z.string().max(300).optional(),
+  sceneSeconds: z.number().min(3).max(10).optional(),
+  captions: z.object({ position: z.enum(["top", "center", "bottom"]).optional(), words: z.number().int().min(1).max(8).optional() }).optional(),
+});
+
 export const SettingsSchema = z.object({
   engine: EngineSchema,
   length: z.number(DURATION_ERROR).int(DURATION_ERROR).min(EXPLAINER_MIN, DURATION_ERROR).max(EXPLAINER_MAX, DURATION_ERROR),
@@ -1445,6 +1474,7 @@ export const SettingsSchema = z.object({
   videoModel: z.string().max(60).optional(),
   resolution: z.string().max(10).optional(),
   auto: z.boolean().optional(),
+  brief: BriefLookSchema.optional(),
 });
 
 export const BlockSchema = z.object({

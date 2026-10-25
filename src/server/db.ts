@@ -459,6 +459,16 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (file, target)
   );`,
+  // round 4 (r4/content-factory): Content Factory series — the reference clip, its style brief, the planned
+  // episodes and the settings; the episodes themselves are Faceless episodes in the series' channel.
+  `CREATE TABLE IF NOT EXISTS content_series (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS content_series_updated ON content_series(updated_at DESC);`,
 ];
 
 declare global {
