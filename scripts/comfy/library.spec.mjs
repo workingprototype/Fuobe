@@ -197,6 +197,7 @@ export const KNOWN_MODELS = {
   'qwen3.5_4b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_4b_bf16.safetensors' },
   'gemma4_e4b_it_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors' },
   'trellis_2_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors' },
+  'pixal3d_multiview_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors' },
   'trellis_2_shape_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors' },
   'trellis_2_texture_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors' },
   'dino_v3_L_naf_fp32.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors' },
@@ -2330,10 +2331,34 @@ export const SPEC = [
     },
     outputs: [{ node: '322', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
     vramGb: 16,
-    license: 'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)',
+    license:
+      'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
     notes:
       'Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> ' +
       'baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui "3d"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps.',
+  },
+  {
+    id: 'image-to-3d-trellis2-multiview',
+    title: 'Photos of 2-4 sides to textured 3D (Pixal3D multi-view on TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-trellis2-multiview.json',
+    bindings: {
+      image: [b('360', 'image')], image2: [b('361', 'image')], image3: [b('362', 'image')], image4: [b('363', 'image')],
+      seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')], fovX: [b('324', 'fov')],
+    },
+    outputs: [{ node: '372', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    vramGb: 16,
+    license:
+      'MIT (Pixal3D multi-view weights by TencentARC, TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
+    notes:
+      'Template 3d_pixal3d_multi_views (2026-09-09) with the turnaround-sheet loader and its crops replaced by one upload per side: image = front, image2 = left, image3 = back, image4 = right ' +
+      '(Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart; every side but the front is optional and the provider drops the branch of a side with no photo). ' +
+      'Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view ' +
+      '-> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB. The same 36-view turntable as image-to-3d-trellis2. ' +
+      'fovX = the views\' horizontal field of view in degrees as framed (20 for rig renders and most multi-view generators; photos of a real object are usually wider). ' +
+      'Weights: pixal3d_multiview_int8_convrot 5.58 GB + the TRELLIS.2 VAEs, DINOv3-NAF and BiRefNet the single-view graph already uses. VRAM unverified (as the single-view graph: 16 GB). Validated by /prompt only.',
   },
   {
     id: 'image-to-3d-hunyuan3d-21',
