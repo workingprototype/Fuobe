@@ -8,7 +8,7 @@
  */
 import { HUB_MODES, type HubKind } from "./hubs";
 
-export type RecordKind = "cinema" | "canvas" | "assist-project" | "layers" | "shorts" | "brand" | "element" | "channel" | "episode" | "explainer";
+export type RecordKind = "cinema" | "canvas" | "assist-project" | "layers" | "shorts" | "brand" | "element" | "channel" | "episode" | "explainer" | "series";
 
 /** A record a page needs, with its ids in the order the lookup takes them. */
 export interface RecordRef {
@@ -31,6 +31,7 @@ const PAGES: [RegExp, (m: string[]) => RecordRef][] = [
   [new RegExp(`^/faceless/${SEG}/${SEG}$`), ([id, episode]) => ({ kind: "episode", ids: [id, episode] })],
   [new RegExp(`^/faceless/${SEG}$`), ([id]) => ({ kind: "channel", ids: [id] })],
   [new RegExp(`^/explainer/${SEG}$`), ([id]) => ({ kind: "explainer", ids: [id] })],
+  [new RegExp(`^/content-factory/${SEG}$`), ([id]) => ({ kind: "series", ids: [id] })],
 ];
 
 /** Static pages that a record pattern would also match (/ads/multiplier is not a brand). */

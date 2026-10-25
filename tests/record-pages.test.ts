@@ -32,10 +32,11 @@ describe("record pages (real 404s)", () => {
     expect(recordForPath("/faceless/c1/new")).toEqual({ kind: "channel", ids: ["c1"] });
     expect(recordForPath("/faceless/c1/ep1")).toEqual({ kind: "episode", ids: ["c1", "ep1"] });
     expect(recordForPath("/explainer/x1")).toEqual({ kind: "explainer", ids: ["x1"] });
+    expect(recordForPath("/content-factory/s1")).toEqual({ kind: "series", ids: ["s1"] });
   });
 
   it("leaves list pages and fixed sub-pages alone", () => {
-    for (const p of ["/", "/cinema", "/canvas/", "/ads", "/ads/multiplier", "/assist/projects", "/assist/skills", "/faceless", "/explainer", "/library", "/apps/app-face-swap", "/cinema/a/b"]) {
+    for (const p of ["/", "/cinema", "/canvas/", "/ads", "/ads/multiplier", "/assist/projects", "/assist/skills", "/faceless", "/explainer", "/content-factory", "/library", "/apps/app-face-swap", "/cinema/a/b"]) {
       expect(recordForPath(p), p).toBeNull();
     }
   });

@@ -301,7 +301,7 @@ export interface AssetUse {
   trashed?: boolean;
 }
 
-const plural = (what: string) => (/(s|x|ch|sh)$/.test(what) ? `${what}es` : `${what}s`);
+const plural = (what: string) => (/series$/.test(what) ? what : /(s|x|ch|sh)$/.test(what) ? `${what}es` : `${what}s`);
 
 /** "2 results (1 in the Trash), the element “Maya” and 3 canvases": where a file is used, in one line. */
 export function describeUses(uses: AssetUse[]): string {
