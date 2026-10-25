@@ -4,19 +4,22 @@
 Use the same frontier paid models Higgsfield uses (Nano Banana Pro, Seedance 2.5, Kling 3.0, Veo 3.1, Seedream 5, GPT Image 2.5, FLUX.3, Gemini Omni, MiniMax, ElevenLabs…, and Higgsfield's own Soul and Cinema Studio) with your own fal.ai / Replicate / Higgsfield key, **or** run the equivalent open-weight workflows on your own GPU through **ComfyUI**. Same studio, same apps, same camera motions — flip one switch.
 
 - **Assist:** describe the whole job in a chat; the agent picks models, shows the plan and its cost, runs it when you approve, checks the results and chains the next step. Free / Smart / Manual modes, 20 built-in **skills** (SKILL.md playbooks, or upload your own), **projects** with instructions and up to 20 sources (links, files and PDFs, elements, notes), and **memory**. Runs on Claude, a local Ollama model, or an offline planner
-- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs (layers, restyle, dub, faceless episode, ads, captions, Katana; they run as plain pipelines and don't open a studio session yet) and the skills as prompts
-- **Create:** Image · Video (text, image, start/end frame, reference images and clips, multi-shot, draft mode) · Edit · **Layers** (split a flat image into editable layers, edit text, regional edits, cropped or positioned zips) · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · **Canvas** (wire prompts, files and models into node workflows; every template in a cloud and an open-source version) · Apps
+- **MCP:** other agents (Claude Code, Claude Desktop, any MCP client) can drive the studio through `/api/mcp`, including whole studio jobs that open in their studio (a Layers project, a Shorts session, a dub to review, a Faceless episode, an Ads Studio batch, the Captions editor, a Katana edit; Genjutsu and Remove object aren't tools yet) and the skills as prompts. `npx skills add workingprototype/Fuobe` installs the skills in other agents
+- **Command line:** `fuobe` lists models, prices a run, generates, waits and downloads from a terminal, a script or a coding agent; see [`docs/cli.md`](docs/cli.md)
+- **Create:** Image · Video (text, image, start/end frame, **Frames**: up to 10 stills on a timeline, reference images and clips, multi-shot, draft mode) · Edit · **Layers** (split a flat image into editable layers, edit text, regional edits, cropped or positioned zips) · Inpaint & Draw to Edit · Color grading · Camera motions · Effects · Storyboard (and turn it into a film) · **Canvas** (wire prompts, files and models into node workflows; every template in a cloud and an open-source version) · Apps
 - **Studios:**
-  - **Cinema Studio** — projects and scenes, Director's Panel (camera, lens, 50 palettes, lighting rig, Emotion Wheel), 33 camera moves (# in the prompt bar), AI Director, image grids, Soul Cast and Soul Location
+  - **Cinema Studio** — projects and scenes, Director's Panel (camera, lens, 50 palettes, lighting rig, Emotion Wheel), 33 camera moves (# in the prompt bar), AI Director, image grids, Soul Cast and Soul Location, and **3D scenes**: turn a still into a scene you fly through, set the lens and frame, and Capture a re-rendered take from that view
   - **Shorts Studio** — restyle up to 2 minutes of your own footage with 44 looks (or your own references), in segments you can regenerate, stitched back under your sound; **Mixed Media** — 33 looks for 1–10 s clips with per-preset settings and a preview frame
+  - **Genjutsu** — keep a 4–30 s clip's motion, camera and framing and change what is in it: motion transfer, object swap, restyle or insert, with reference images, priced before it runs
   - **Marketing Studio** (84 templates), **Click to Ad**, **Ads Studio** (brand kit from your website, up to 20 ads per product in 1:1 / 4:5 / 9:16) and **Ad Multiplier**
   - **Moodboards**, **Color signature** (Soul HEX palettes), **Photodump / Instadump**, **Fashion Factory**, **Character Sheet**
-  - **Faceless Studio** and **Explainer** — channels, scripts, narrated and subtitled episodes with a timeline editor
-  - **Translate & dub** (your voice, lip-synced, over the original background on the open engine), **Captions** (transcribe, edit, burn in), **Trim**, **Katana** (recreate a reference edit with your subject), **Image to 3D**, Lipsync & avatars, Motion control, Edit / Extend / Reframe video, Video tools (matte, relight, depth, join clips, match colors), Upscale, Audio (speech with voice picker and cloning, dialogue, voice change, sound effects, music, sound for video), and a Virality predictor (a labelled heuristic)
-- **Library:** all your results (images, videos, audio, text, 3D) with layouts, filters, folders, bulk zip download and a Trash with 30-day restore; results arrive live
+  - **Faceless Studio** and **Explainer** — channels, scripts, narrated and subtitled episodes with a timeline editor; "Frame by frame" moves the camera slowly over each still (a Ken Burns move), the music loops to cover long films, and Explainer reads PDF and Word sources
+  - **Translate & dub** (your voice, lip-synced, over the original music and effects on both engines), **Captions** (transcribe, edit, burn in), **Trim**, **Katana** (recreate a reference edit with your subject), **Image to 3D**, Lipsync & avatars, Motion control, Edit / Extend / Reframe video, Video tools (**Remove object**: type it, paint it or, on the cloud, click it, and it's erased from the clip; matte, relight, depth, join clips, match colors), Upscale (images and video, **FPS Boost** and slow motion, **SDR to HDR**, and **Export** to ProRes, H.265 10-bit, FFV1 or EXR frames on the open engine), Audio (speech with voice picker and cloning, dialogue, voice change, sound effects, music, sound for video, transcribe, **loop / extend** and **join**), and a Virality predictor (a labelled heuristic)
+- **Library:** all your results (images, videos, audio, text, 3D) with layouts, filters, nested folders, pins, a review status (In progress, Needs review, Approved, Rejected), Select all, bulk zip download and a Trash with 30-day restore. Helper steps stay hidden until you ask (Show steps), and an upload is deleted only when nothing uses it. Results arrive live, and a browser notification can tell you when a job finishes while Fuobe is in the background
+- **Getting around:** a **Get started** card on Home and Settings (use paid models, use your GPU, or just try the demo); a **⌘K / Ctrl+K palette** that searches pages, settings, apps, motions, effects, models and recent creations; Start on Home runs the job and says first what it costs; **Settings → About & licences** lists every open model's licence
 - **Elements:** save characters, locations, props, styles and voices once, then `@mention` them in any prompt; train a character (Soul ID, a fal LoRA, or AI-Toolkit on your GPU) for a consistent face
-- **Catalog:** 157 cloud models + 73 open-source models (plus 32 hidden ones: chain steps, self-tests, browser tools, and four open models no studio offers yet), 123 apps, 108 camera motions (mix any two), 255 effects
-- **Open-source engine:** 115 API-format ComfyUI workflows (official templates, community packs and hand-built graphs) validated against real ComfyUI node definitions, plus 43 researched LoRAs (camera moves, VFX) attached to 55 motion, effect and app presets
+- **Catalog:** 193 cloud models + 84 open-source models (plus 42 hidden ones: chain steps and studio helpers, self-tests, browser tools, and four that no studio uses yet: Gemma 4 speech translate and the cloud Overlay image, Extract frames and Images to video), 124 apps, 108 camera motions (mix any two), 255 effects
+- **Open-source engine:** 139 API-format ComfyUI workflows (official templates, community packs and hand-built graphs) validated against real ComfyUI node definitions, plus 43 researched LoRAs (camera moves, VFX) attached to 55 motion, effect and app presets
 - **No keys? No GPU?** Demo mode lets you click through everything with clearly-labelled placeholder outputs.
 
 > Project status, what works, what's verified and what's left: **[docs/STATUS.md](docs/STATUS.md)** (also in-app at `/status`).
@@ -44,11 +47,13 @@ The mode can also be set with `FUOBE_ENGINE_MODE=both|open|cloud`. Then connect 
 |---|---|---|
 | A [fal.ai](https://fal.ai/dashboard/keys) key | `fal.ai API key` (or `FAL_KEY`) | Every cloud model and cloud app |
 | A Replicate token | `Replicate API token` (or `REPLICATE_API_TOKEN`) | Fallback route for models Replicate hosts; **Preferred provider** (or `FUOBE_CLOUD_PROVIDER`: `auto`, `fal`, `replicate` or `higgsfield`) picks which one goes first |
-| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1 with live presets, Soul ID training, Genjutsu, Cinema Studio 4.0, Marketing Studio, Ads Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
+| A [Higgsfield API](https://console.higgsfield.ai) key | `Higgsfield API key` as `KEY_ID:KEY_SECRET` (or `HIGGSFIELD_API_KEY`, `HF_KEY`, or `HF_API_KEY` + `HF_API_SECRET`) | Soul 2.0 / Soul Cinema / Soul v1 with live presets, Soul ID training, Genjutsu and Genjutsu Lite, Cinema Studio 4.0, Marketing Studio, Ads Studio, plus extra routes for Seedance, Kling, Wan, MiniMax… |
 | A GPU running ComfyUI | `ComfyUI server URL` (or `COMFYUI_URL`, default `http://127.0.0.1:8188`; `COMFYUI_TOKEN` if it sits behind a proxy) | Every open-source model, app, motion, effect and studio route |
 | An Anthropic key | `Anthropic API key` (or `ANTHROPIC_API_KEY`) | The full **Assist** agent (Smart and Manual modes), text steps (translate, write, scripts, ad copy, brand research), prompt **Enhance** and storyboard splitting with Claude |
 | Ollama | `Prompt enhancement` → Ollama (`OLLAMA_URL`, `OLLAMA_MODEL`, default `qwen3:8b`; `FUOBE_ENHANCE_PROVIDER`) | The same text steps and the Assist agent on a local model (tool calling) |
 | AI-Toolkit (ostris) on your GPU | `AI_TOOLKIT_URL` (+ `AI_TOOLKIT_AUTH`, `AI_TOOLKIT_DATASET_DIR`) and `COMFYUI_LORAS_DIR` | Train character and style LoRAs from an element's photos or a moodboard; the result is copied into ComfyUI and used whenever you @mention it |
+
+Each connection field in Settings has **Save & test**: what you typed is tested before it is saved, and a failure says why. Until something is connected (or you hide it), Home and Settings show a **Get started** card with the three ways in.
 
 Keys are stored in a local SQLite database (`data/fuobe.db`) and never sent to the browser. Generated media is saved under `data/files/`. Fuobe is single-user.
 
@@ -76,32 +81,36 @@ Uploads up to 200 MB work with sign-in on. Inputs given as URLs are fetched only
 
 ### Upgrading from an earlier version
 
-- **Your data upgrades on its own.** The database migrations run once each at start-up, in order, and an existing `data/` folder (or `FUOBE_DATA_DIR`) keeps everything it holds. The list is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#storage-srcserverdbts-storagets-settingsts).
+- **Get the new code and rebuild.** Pull `main`. On Windows, run `start.bat` as usual: it installs packages on every start and rebuilds because the code changed. On Mac or Linux, run `pnpm install`, then `pnpm build` (or just `pnpm dev`). Round 4 adds only one dependency, `@types/three` (for development); round 3 added `@xyflow/react`, `@google/model-viewer`, `three` and `unpdf`. In a checkout without `.next`, run `pnpm exec next typegen` (or a dev or build run) before `pnpm typecheck`.
+- **Your data upgrades on its own.** The database migrations run once each at start-up, in order, and an existing `data/` folder (or `FUOBE_DATA_DIR`) keeps everything it holds. Round 4 adds one migration, for the Library's nested folders, pins and review status (PR #6); PR #7 adds none. The list is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#storage-srcserverdbts-storagets-settingsts).
 - **If you ran one of the round-3 package branches** (`r3/*`, `r3b/*`) before they were merged, start with a fresh data folder. Those branches numbered their migrations differently, so tables can be missing. Move the old folder aside rather than deleting it if it holds results you want.
-- **Install the new dependencies:** `pnpm install` (round 3 adds `@xyflow/react`, `@google/model-viewer`, `three` and `unpdf`), then `npx next typegen` before `pnpm typecheck`.
-- **Password-less installs reached by a domain name** (a reverse proxy, a tunnel, a Tailscale name) now get 403. Set a password, or add the name to `FUOBE_ALLOWED_ORIGINS`.
-- **Inputs from LAN addresses** (an image URL on your NAS, say) are refused unless `FUOBE_ALLOW_PRIVATE_URLS=1`.
-- **ComfyUI:** re-run `scripts/comfy/install-comfyui.sh` for the three node packs round 3 adds (ComfyUI-MelBandRoFormer, ComfyUI-QwenASR, ComfyUI-HunyuanVideo-Foley) at their pinned commits.
+- **Start on Home now runs the job** in Image, Video or Edit instead of only opening the studio. With a saved key for the default model this is a paid run; the line under the box says first what will run and what it costs. **⌘K / Ctrl+K** opens the search palette instead of going Home.
+- **Topaz Video is priced by size:** $0.01/s at 720p, $0.02/s at 1080p and $0.06/s above, doubled at 60 fps (it was a flat $0.02/s at 2×). The default target is 1080p, and a size that wouldn't enlarge the clip moves up, so a 1080p clip now goes to 1440p at $0.06/s. Open-source video upscaling (SeedVR2, Real-ESRGAN) also asks for a size now, 720p to 2160p, instead of 2× or 4×.
+- **Password-less installs reached by a domain name** (a reverse proxy, a tunnel, a Tailscale name) get 403 since round 3. Set a password, or add the name to `FUOBE_ALLOWED_ORIGINS`.
+- **Inputs from LAN addresses** (an image URL on your NAS, say) are refused unless `FUOBE_ALLOW_PRIVATE_URLS=1` (also since round 3).
+- **ComfyUI node packs:** re-run `scripts/comfy/install-comfyui.sh` (it keeps what's installed and pins each pack to the commit Fuobe was validated with). Round 3 added ComfyUI-MelBandRoFormer, ComfyUI-QwenASR and ComfyUI-HunyuanVideo-Foley; round 4 adds ComfyUI-ToSVG for the open Vectorize app. Open-source video upscaling and FPS Boost now also need ComfyUI-VideoHelperSuite (before, core ComfyUI was enough), which the script installs too. If you set up ComfyUI another way (ComfyUI Desktop, for example), install these packs yourself. ComfyUI itself needs no upgrade: the library still targets 0.41.0.
+- **Models for the new tools.** Round 4 adds about 28 GB of model files to the library, all in PR #6 (PR #7 adds none): VOID with its CogVideoX VAE (22.73 GB, Remove object's "Shadows and reflections too"), MoGe 2 (0.66 GB, 3D scenes), and OvisOCR3 and TripoSplat for graphs no studio uses yet. The new tools also use files the library already listed, which you may not have downloaded: Wan 2.1 VACE 14B (34.68 GB) and SAM 3.1 (Remove object; Genjutsu's swap and insert), Wan Animate 2 (Genjutsu's motion transfer), Qwen-Image-Edit 2511 with the Multiple-Angles LoRA (3D scenes) and RIFE 4.26 (FPS Boost). The **Workflows** page lists them with their install commands. GPU memory, from the manifest and not measured: Wan VACE 24 GB, VOID 24–40 GB, SeedVR2 in passes 16 GB.
 
 ### Setting up the open-source engine
 
-1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 14 custom node packs at the commits Fuobe was validated with (`NC_PACKS=1` adds the non-commercial ComfyUI-Whisper).
+1. Install ComfyUI on a machine with a GPU (24 GB VRAM covers almost every workflow; Z-Image Turbo, Wan 2.2 5B and SDXL run in 8–16 GB; VOID, Remove object's "Shadows and reflections too", may need up to 40 GB). `scripts/comfy/install-comfyui.sh` installs ComfyUI and the 15 custom node packs at the commits Fuobe was validated with (`NC_PACKS=1` adds the non-commercial ComfyUI-Whisper).
 2. Open **ComfyUI workflows** in Fuobe. Each workflow lists the model files it needs, which are already installed (✓) and a **Copy install commands** button that produces the exact `wget` / `git clone` lines.
 3. Switch the engine toggle (top-right of every studio) to **Open source**.
 
-LatentSync 1.6 and ThinkSound are optional and run on a separate, isolated ComfyUI (`scripts/comfy/install-isolated-worker.sh`, port 8189); see [`scripts/comfy/README.md`](scripts/comfy/README.md). Their workflows are validated, but they are hidden models that no studio offers yet (the API takes them by `modelId`). Open dubbing, Faceless and UGC narration clone a voice with Chatterbox, so they need a voice sample (record or upload one).
+LatentSync 1.6 and ThinkSound are optional and run on a separate, isolated ComfyUI (`scripts/comfy/install-isolated-worker.sh`, port 8189); see [`scripts/comfy/README.md`](scripts/comfy/README.md). Lipsync offers LatentSync 1.6 and Sound effects offers ThinkSound, marked in the model picker as running on the isolated worker. Set its address as **Isolated worker URL** in Settings (or `COMFYUI_ISOLATED_URL`); without it, those jobs fail with a message naming the setting. Their workflows are validated, but not run with real weights. Open dubbing, Faceless and UGC narration clone a voice with Chatterbox, so they need a voice sample (record or upload one). Open-source translation uses Ollama when it's running, and Qwen3.5 4B on your ComfyUI when it isn't.
 
 To check a ComfyUI connection end to end without downloading any models:
 
 ```bash
 pnpm dev &
 pnpm test:e2e:comfyui http://localhost:3000   # runs the weight-free workflows through the full pipeline (mux, trim, segment, captions, meta-batch), checked with ffprobe when installed
+node tests/e2e/comfyui-faceless-plus.mjs http://localhost:3000   # Ken Burns, the packet-copy join, a crossfaded audio loop and join; needs ffmpeg and ffprobe and demo mode off; on Linux it also samples ComfyUI's memory (found with pgrep, or set COMFYUI_PID)
 ```
 
 ## Development
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (79 files, 1128 tests)
+pnpm typecheck && pnpm lint && pnpm test   # TypeScript, ESLint, Vitest (116 files, 1813 tests)
 pnpm build                                  # production build
 pnpm gen:catalog                            # regenerate cloud models, Higgsfield models and presets, LoRA map and icon map from docs/research/*.json
 pnpm dev:clean                              # clear the Turbopack cache if the dev server gets stuck reloading or serves stale CSS
@@ -112,20 +121,27 @@ Browser checks (the app must be running; demo mode is fine; Playwright and Chrom
 
 ```bash
 pnpm test:e2e:mobile [url] [--light|--dark]    # no route may scroll sideways at 390 px (every route, hub mode and sample id)
-pnpm test:e2e:shell [url]                      # sidebar drawer, collapsed groups, settings deep links, keyboard Show more
+pnpm test:e2e:shell [url]                      # skip link and landmarks, ⌘K palette, phone drawer and Search, full-screen studios, settings deep links, keyboard Show more
+pnpm test:e2e:library [url]                    # helper steps, pins, review status, nested folders, zips, upload delete, phone layout (cleans up after itself; --keep leaves its data)
 pnpm test:e2e:comfyui [url]                    # the open engine against a live ComfyUI
-node tests/e2e/composer-flows.mjs [url]        # first paint, typing before hydration, paste, upload cancel, phone toolbar
+node tests/e2e/composer-flows.mjs [url]        # first paint, typing before hydration, paste, upload cancel, phone toolbar and blocker line
+node tests/e2e/notifications.mjs [url]         # job notifications and the running count in the tab title
+node tests/e2e/clipboard.mjs [url]             # Copy buttons on a plain-http LAN address (no Clipboard API)
 node tests/e2e/layers.mjs [url]                # Layers regressions
+node tests/e2e/cinema-scene.mjs [url]          # 3D scene: ask first, point cloud, fly, Capture → re-render, 390 px
 node tests/e2e/canvas-smoke.mjs [url] --perf=60  # Canvas save, rename, trash → re-run, keystroke timing
-node tests/e2e/cinema-shortcuts.mjs [url]      # Ctrl/Cmd+Enter only from Cinema's prompt bar
+node tests/e2e/cinema-shortcuts.mjs [url]      # Ctrl/Cmd+Enter only from Cinema's prompt bar; new project names, phone Director chip
 node tests/e2e/assist-flows.mjs [url]          # skills, memory, projects, skill upload, modes, phone sheet
 ```
 
+`layers.mjs` and `cinema-scene.mjs` expect their open-engine step to run in demo mode: with a reachable ComfyUI they fail (demo stills are SVG placeholders ComfyUI can't read, and Layers needs the Qwen-Image-Layered weights).
+
 - `docs/ARCHITECTURE.md` — how requests flow from the composer to providers and back, pipelines, live updates, security, each studio's modules
-- `docs/research/` — the research this is built on (Higgsfield inventory, studios, image studios, marketing and agents, API; paid model APIs parts 1–3; ComfyUI equivalents parts 1–3; workflow library; Liner UI language)
+- `docs/cli.md` — the `fuobe` command line: install, sign in, every command, MCP and skills for other agents
+- `docs/research/` — the research this is built on (Higgsfield inventory, studios, image studios, marketing and agents, API, round-4 changes, in-house products; paid model APIs parts 1–4; ComfyUI equivalents parts 1–4; workflow library; the round-4 UX and speed audit; open recipes for Fuobe Originals; Liner UI language); [`docs/research/README.md`](docs/research/README.md) says what each file covers
 - `docs/workers/tribe-v2.md` — the optional, non-commercial TRIBE v2 worker contract for the Virality predictor
 - `scripts/comfy/` — the pipeline that exports and validates the ComfyUI workflow library
-- `skills/` — Assist's built-in skills (`<name>/SKILL.md` with frontmatter: name, title, description, when_to_use, icon, studio, tags, offline hints)
+- `skills/` — Assist's built-in skills (`<name>/SKILL.md` in the Agent Skills format: name, description and compatibility, with Fuobe's own fields under `metadata`: title, when_to_use, icon, studio, tags, offline hints); `.agents/skills/fuobe/` teaches another agent to drive Fuobe through MCP or the CLI
 
 ## Tech
 
@@ -133,4 +149,4 @@ Next.js 16 (App Router, Cache Components) · React 19 · Tailwind CSS v4 · shad
 
 ## License notes
 
-Fuobe's code is open source. Model weights have their own licenses: several open models used here are **non-commercial** (FLUX.1/FLUX.2 [dev], inswapper, MMAudio weights, USO's FLUX.1 base, some LoRAs, ComfyUI-Whisper's node code, TRIBE v2), HunyuanVideo-Foley and Hunyuan3D 2.1 exclude the EU, UK and South Korea, and Stable Audio 3 is free under US$1M revenue (Stability Community licence). The Workflows page and `docs/research/comfyui-oss*.md` list each license. Cloud models are billed by your provider.
+Fuobe's code is open source. Model weights have their own licenses: several open models used here are **non-commercial** (FLUX.1/FLUX.2 [dev], inswapper, MMAudio weights, USO's FLUX.1 base, some LoRAs, ComfyUI-Whisper's node code, TRIBE v2), HunyuanVideo-Foley and Hunyuan3D 2.1 exclude the EU, UK and South Korea, Stable Audio 3 is free under US$1M revenue (Stability Community licence), and VOID (Remove object's "Shadows and reflections too" on the open engine) is built on CogVideoX-5B, whose licence asks you to register before commercial use. The Workflows page, **Settings → About & licences** and `docs/research/comfyui-oss*.md` list each license. Cloud models are billed by your provider.
