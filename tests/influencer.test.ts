@@ -191,6 +191,19 @@ describe("switching the character type", () => {
     expect(r.dropped).toEqual(["Short legs"]);
   });
 
+  it("keeps a tall height that never conflicted: only the leg proportions give way", () => {
+    const s = pickAll(S("normal"), ["body_type", "body_muscular"], ["height", "h_tall"], ["proportions", "pr_shortlegs"]);
+    for (const tier of ["freak", "cats"] as const) {
+      const r = setTier(s, tier);
+      expect(r.state.picks).toEqual({ body_type: ["body_muscular"], height: ["h_tall"] });
+      expect(r.dropped).toEqual(["Short legs"]);
+    }
+    // Heavy with a tall height is refused in every tier, so only a state from outside has it: the height goes.
+    const outside = setTier(S("normal", { body_type: ["body_heavy"], height: ["h_very_tall"], proportions: ["pr_longlimbs"] }), "total");
+    expect(outside.state.picks).toEqual({ body_type: ["body_heavy"] });
+    expect(outside.dropped).toEqual(["Very tall", "Long limbs"]);
+  });
+
   it("drops the species of the old type, and keeps the body colour for creatures", () => {
     const cat = S("cats", { gender: ["male"] }, { species: "persian", bodyColor: "#ff8800" });
     expect(setTier(cat, "dogs").state).toMatchObject({ tier: "dogs", bodyColor: "#ff8800", picks: { gender: ["male"] } });
@@ -246,6 +259,42 @@ describe("Shuffle", () => {
         expect(cleanState(s).state.picks).toEqual(s.picks);
       }
     }
+  });
+
+  it("keeps the build rules whichever side is locked (Keep on Shuffle)", () => {
+    const tall = ["h_tall", "h_very_tall"];
+    const check = (state: InfluencerState) => {
+      const out = runs(state, 400);
+      for (const s of out) {
+        const body = s.picks.body_type?.[0];
+        const props = s.picks.proportions ?? [];
+        // The locked picks stay, and nothing shuffled conflicts with them.
+        for (const k of state.locked) expect(s.picks[k]).toEqual(state.picks[k]);
+        expect(cleanState(s).problem).toBeNull();
+        if (body === "body_heavy") {
+          expect(tall).not.toContain(s.picks.height?.[0]);
+          // Unless the user locked both: their picks are theirs.
+          if (!state.locked.includes("proportions")) expect(props).not.toContain("pr_waist");
+        }
+        if (body === "pr_centaur") expect(props).not.toContain("pr_egg");
+        if (body === "body_ultra") expect(s.picks.freak_neck?.[0]).not.toBe("neck_long");
+      }
+      return out;
+    };
+    const lock = (tier: InfluencerTier, picks: Record<string, string[]>) => S(tier, picks, { locked: Object.keys(picks) });
+    // A locked build: heights, proportions and neck give way.
+    const heavy = check(lock("normal", { body_type: ["body_heavy"] }));
+    const short = categoriesFor("normal").find((c) => c.id === "height")!.options.map((o) => o.id).filter((id) => !tall.includes(id));
+    expect(new Set(heavy.map((s) => s.picks.height?.[0]))).toEqual(new Set(short));
+    check(lock("freak", { body_type: ["body_muscular"] }));
+    check(lock("total", { body_type: ["body_ultra"] }));
+    check(lock("total", { body_type: ["pr_centaur"] }));
+    // A locked height, proportion or neck: the build gives way.
+    for (const s of check(lock("normal", { height: ["h_very_tall"] }))) expect(s.picks.body_type?.[0]).not.toBe("body_heavy");
+    for (const s of check(lock("freak", { proportions: ["pr_shortlegs"] }))) expect(["body_heavy", "body_muscular", "body_ultra"]).not.toContain(s.picks.body_type?.[0]);
+    for (const s of check(lock("total", { freak_neck: ["neck_long"] }))) expect(s.picks.body_type?.[0]).not.toBe("body_ultra");
+    // Two locked picks the rules allow together (Heavy with a Tiny waist) stay, and nothing clashing is added.
+    for (const s of check(lock("normal", { body_type: ["body_heavy"], proportions: ["pr_waist"] }))) expect(tall).not.toContain(s.picks.height?.[0]);
   });
 
   it("gives facial hair only to men and trans men", () => {

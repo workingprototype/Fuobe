@@ -156,11 +156,12 @@ export function setTier(state: InfluencerState, tier: InfluencerTier): { state: 
     });
     if (keep.length) picks[cat] = keep;
   }
-  // Average allowed a big build with Short legs; Bold doesn't: the proportions give way (and a height to Heavy).
-  for (const [cat, ids] of [["height", TALL], ["proportions", LEG_PROPORTIONS]] as const) {
-    if (!conflictIn(tier, picks)) break;
+  // Average allowed a big build with Short legs; Bold doesn't: the leg proportions give way. Only the
+  // picks the conflict is about go (Heavy with a tall height is refused everywhere, so it can only come in from outside).
+  for (let conflict = conflictIn(tier, picks); conflict; conflict = conflictIn(tier, picks)) {
+    const [cat, ids] = conflict === CONFLICT_MESSAGES.heavyTall ? (["height", TALL] as const) : (["proportions", LEG_PROPORTIONS] as const);
     const gone = (picks[cat] ?? []).filter((x) => ids.includes(x));
-    if (!gone.length) continue;
+    if (!gone.length) break;
     dropped.push(...gone.map((x) => getOption(cat, x)?.label ?? x));
     picks[cat] = (picks[cat] ?? []).filter((x) => !ids.includes(x));
     if (!picks[cat].length) delete picks[cat];
@@ -212,16 +213,40 @@ function weighted(options: string[], weights: Record<string, number>, rand: () =
   return options[options.length - 1];
 }
 
-/** Several picks from different Features slots (or just different options), without repeats. */
-function several(c: InfluencerCategory, count: number, rand: () => number): string[] {
+/** Several picks from different Features slots (or just different options), without repeats; `ok` vets each one with those before it. */
+function several(c: InfluencerCategory, count: number, rand: () => number, ok: (ids: string[]) => boolean = () => true): string[] {
   const out: string[] = [];
-  let pool = c.options;
+  let pool = c.options.filter((o) => ok([o.id]));
   while (out.length < count && pool.length) {
     const o = uniform(pool, rand)!;
     out.push(o.id);
-    pool = pool.filter((x) => x.id !== o.id && (!o.slot || x.slot !== o.slot));
+    pool = pool.filter((x) => x.id !== o.id && (!o.slot || x.slot !== o.slot) && ok([...out, x.id]));
   }
   return out;
+}
+
+/**
+ * What Shuffle never puts together: the two conflicts, and the research's build exclusions that pair a
+ * build with another pick (Heavy with a tall height or a Tiny waist, Centaur with an Egg body, Ultra
+ * Muscular with a Long neck). Each rule by name, so a pick can be vetted against the ones already made.
+ */
+const SHUFFLE_RULES: [string, (tier: InfluencerTier, p: Record<string, string[]>) => boolean][] = [
+  ["heavyTall", (_, p) => has(p, "body_type", ["body_heavy"]) && has(p, "height", TALL)],
+  ["buildLegs", (tier, p) => tier !== "normal" && has(p, "body_type", BIG_BUILDS) && has(p, "proportions", LEG_PROPORTIONS)],
+  ["heavyWaist", (_, p) => has(p, "body_type", ["body_heavy"]) && has(p, "proportions", ["pr_waist"])],
+  ["centaurEgg", (_, p) => has(p, "body_type", ["pr_centaur"]) && has(p, "proportions", ["pr_egg"])],
+  ["ultraLongNeck", (_, p) => has(p, "body_type", ["body_ultra"]) && has(p, "freak_neck", ["neck_long"])],
+];
+const clashes = (tier: InfluencerTier, picks: Record<string, string[]>) => SHUFFLE_RULES.filter(([, broken]) => broken(tier, picks)).map(([name]) => name);
+
+/**
+ * Whether Shuffle may give `category` these picks next to the ones it has (kept ones included): no rule
+ * breaks that wasn't already broken. Kept picks are the user's (a locked Heavy with a Tiny waist stays),
+ * but nothing shuffled is added to them that clashes, whichever side was kept.
+ */
+function fits(tier: InfluencerTier, picks: Record<string, string[]>, category: string, ids: string[]): boolean {
+  const before = clashes(tier, picks);
+  return clashes(tier, { ...picks, [category]: ids }).every((name) => before.includes(name));
 }
 
 /** Categories Shuffle fills before others: build reads height, proportions and neck; facial hair reads gender. */
@@ -233,11 +258,14 @@ export interface ShuffleOptions {
   reference?: boolean;
 }
 
+const one = (id: string | undefined): string[] => (id ? [id] : []);
+
 /**
  * Higgsfield's Shuffle: keeps locked picks (and, with a photo, what the photo decides); gender is male 67%,
  * female 33%; style Suits 40%, Retro 20%, else any other; hairstyle Bob 20% where Bob shows; build is never
  * Curvy, never Ultra Muscular in Average, never Heavy with Tall heights or a Tiny waist, never Centaur with
- * an Egg body or Ultra Muscular with a Long neck (nor any pick that would conflict); facial hair is Clean
+ * an Egg body or Ultra Muscular with a Long neck (nor any pick that would conflict). Those pairs hold whichever
+ * side is kept: with a locked Heavy, Shuffle picks no tall height and no Tiny waist. Facial hair is Clean
  * unless the gender is male or trans man. How many multi-pick options it adds is Fuobe's choice (up to 1
  * proportion, 1–2 features, up to 1 distinctive feature, 1 accessory).
  */
@@ -252,49 +280,38 @@ export function shuffleInfluencer(state: InfluencerState, rand: () => number, op
   const W = SHUFFLE_RESEARCH.weights;
   for (const c of ordered) {
     if (keep.has(c.id)) continue;
-    const ids = c.options.map((o) => o.id);
+    const ok = (ids: string[]) => fits(state.tier, picks, c.id, ids);
+    const ids = c.options.map((o) => o.id).filter((id) => ok([id]));
     let pick: string[] = [];
     switch (c.id) {
       case "gender":
-        pick = [weighted(ids.filter((id) => id in W.gender), W.gender, rand) ?? uniform(ids, rand)!];
+        pick = one(weighted(ids.filter((id) => id in W.gender), W.gender, rand) ?? uniform(ids, rand));
         break;
       case "aesthetic":
-        pick = [weighted(ids, W.aesthetic, rand)!];
+        pick = one(weighted(ids, W.aesthetic, rand));
         break;
       case "hair":
-        pick = [weighted(ids, W.hair, rand)!];
+        pick = one(weighted(ids, W.hair, rand));
         break;
-      case "body_type": {
-        const neck = picks.freak_neck?.[0];
-        const allowed = ids.filter(
-          (id) =>
-            id !== "body_curvy" &&
-            !(id === "body_ultra" && state.tier === "normal") &&
-            !(id === "body_heavy" && (has(picks, "height", TALL) || has(picks, "proportions", ["pr_waist"]))) &&
-            !(id === "pr_centaur" && has(picks, "proportions", ["pr_egg"])) &&
-            !(id === "body_ultra" && neck === "neck_long") &&
-            !conflictIn(state.tier, { ...picks, body_type: [id] }),
-        );
-        const one = uniform(allowed, rand);
-        pick = one ? [one] : [];
+      case "body_type":
+        pick = one(uniform(ids.filter((id) => id !== "body_curvy" && !(id === "body_ultra" && state.tier === "normal")), rand));
         break;
-      }
       case "facial_hair": {
         const g = picks.gender?.[0];
-        pick = g === "male" || g === "trans_man" ? [uniform(ids, rand)!] : ids.includes("fh_none") ? ["fh_none"] : [];
+        pick = g === "male" || g === "trans_man" ? one(uniform(ids, rand)) : ids.includes("fh_none") ? ["fh_none"] : [];
         break;
       }
       case "proportions":
-        pick = rand() < 0.5 ? several(c, 1, rand) : [];
+        pick = rand() < 0.5 ? several(c, 1, rand, ok) : [];
         break;
       case "freak_face":
-        pick = several(c, 1 + Math.floor(rand() * 2), rand);
+        pick = several(c, 1 + Math.floor(rand() * 2), rand, ok);
         break;
       case "distinctive":
-        pick = rand() < 0.4 ? several(c, 1, rand) : [];
+        pick = rand() < 0.4 ? several(c, 1, rand, ok) : [];
         break;
       default:
-        pick = [uniform(ids, rand)!];
+        pick = one(uniform(ids, rand));
     }
     if (pick.length) picks[c.id] = pick;
   }
