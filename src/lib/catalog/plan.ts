@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField } from "./loras";
+import { soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -108,6 +109,14 @@ export interface Plan {
   /** Number of separate provider jobs (models that can't batch need several). */
   jobs: number;
   perJobOutputs: number;
+  /** What the plan changed or left out, said before the run (a look's LoRAs that don't fit this base). */
+  notes?: string[];
+  /**
+   * A Fuobe Soul run (src/lib/catalog/soul.ts): the look applied, the user's words inside the prompt (the enhancer
+   * expands them, the look stays), the look's LoRA triggers at the front (in order), and what happens after
+   * generation (the grade, an overlay) that the result's meta carries.
+   */
+  soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay };
 }
 
 /** Operations that work from their inputs alone. */
@@ -150,10 +159,12 @@ export function planGeneration(
   getModel: (id: string) => ModelDef | undefined,
   getPreset: (id: string) => Preset | undefined,
 ): Plan {
-  const preset = req.presetId ? getPreset(req.presetId) : undefined;
-  if (req.presetId && !preset) throw new Error(`Unknown preset ${req.presetId}`);
   const model = getModel(req.modelId);
   if (!model) throw new Error(`Unknown model ${req.modelId}`);
+  // Fuobe Soul takes a look (its presetId is a look id, not an app, motion or effect).
+  const soul = soulKind(model);
+  const preset = req.presetId && !soul ? getPreset(req.presetId) : undefined;
+  if (req.presetId && !soul && !preset) throw new Error(`Unknown preset ${req.presetId}`);
 
   let prompt = req.prompt?.trim() ?? "";
   let params: GenParams = { ...model.defaults, ...req.params };
@@ -199,7 +210,30 @@ export function planGeneration(
 
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
   // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
-  if (req.loras?.length) loras = [...req.loras, ...loras];
+  let soulPlan: Plan["soul"];
+  const notes: string[] = [];
+  if (soul) {
+    const extra = params.extra ?? {};
+    const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
+    const r = soulRecipe(soul, prompt, { look: req.presetId, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
+    prompt = r.prompt;
+    loras = r.loras;
+    notes.push(...r.notes);
+    const own = new Set(req.loras ?? []);
+    soulPlan = {
+      ...(r.look && { look: r.look.id }),
+      words: r.words.trim().replace(/[.\s]+$/, ""),
+      triggers: [...new Set(r.loras.filter((l) => !own.has(l) && l.trigger?.trim()).map((l) => l.trigger!.trim()))],
+      ...(r.grade && { grade: r.grade }),
+      ...(r.overlay && { overlay: r.overlay }),
+    };
+    // characterStrength is Fuobe's setting, not the provider's.
+    if ("characterStrength" in extra) {
+      const rest = { ...extra };
+      delete rest.characterStrength;
+      params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
+    }
+  } else if (req.loras?.length) loras = [...req.loras, ...loras];
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
   // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
@@ -265,6 +299,8 @@ export function planGeneration(
   // makes the one file the picker showed, not both.
   const matteOutputs = model.options.matteOutputs;
   if (op === "bg-remove-video" && !params.matteOutput && matteOutputs && matteOutputs.length > 1) params = { ...params, matteOutput: matteOutputs[0] };
+  // Soul's prompt always carries the look's words: it's the user's own words a new picture needs.
+  if (soulPlan && op === "t2i" && !soulPlan.words) throw new Error("Write a prompt first");
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
@@ -274,11 +310,27 @@ export function planGeneration(
   const presets = model.options.presets;
   if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
 
+  // Soul's exact sizes on the user's GPU (the cloud routes send them through FieldMap.size); an edit keeps the picture's shape.
+  if (soul && model.engine === "open" && op === "t2i") {
+    const { width, height } = soulSize(params.aspectRatio, params.resolution);
+    params = { ...params, extra: { ...params.extra, width, height } };
+  }
+
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
   const maxPerJob = Math.max(1, model.options.maxOutputs ?? 1);
   const perJobOutputs = Math.min(requested, maxPerJob);
   const jobs = Math.ceil(requested / perJobOutputs);
-  return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
+  return {
+    model,
+    op,
+    prompt,
+    params: { ...params, numOutputs: perJobOutputs },
+    loras,
+    jobs,
+    perJobOutputs,
+    ...(notes.length && { notes }),
+    ...(soulPlan && { soul: soulPlan }),
+  };
 }
 
 /**
@@ -501,6 +553,11 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
+  // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP); other models are taken as 1 MP.
+  if (p.unit === "megapixel") {
+    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : 1;
+    per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
+  }
   if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).

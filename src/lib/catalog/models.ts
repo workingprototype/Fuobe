@@ -1,9 +1,10 @@
-import { CLOUD_MODELS } from "./cloud-models.generated";
+import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
-import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
+import { SOUL_ASPECTS, SOUL_TIERS } from "./soul";
+import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
 /*
  * Model catalog.
@@ -1450,6 +1451,52 @@ const cloud: ModelDef[] = [
   ...cloudTools,
 ];
 
+// ---------------------------------------------------------------------------
+// Fuobe Originals: one model on both engines
+
+const ORIGINAL_HALVES = new Map(ORIGINAL_CLOUD.map((m) => [m.id, m]));
+
+/**
+ * A Fuobe Original (build plan O2+): its ComfyUI routes on the user's GPU and its cloud half on hosted open weights
+ * (generated from the research by scripts/gen-cloud-models.py), as one model that runs on both engines. The open
+ * engine is listed first: it's free. The options are the Original's own (the same on both engines).
+ */
+function original(spec: { id: string; open: ModelRoute[]; options: ModelOptions; tagline?: string }): ModelDef {
+  const cloud = ORIGINAL_HALVES.get(spec.id);
+  if (!cloud) throw new Error(`${spec.id} has no cloud half in cloud-models.generated.ts (run pnpm gen:catalog)`);
+  return {
+    ...cloud,
+    engine: "open",
+    engines: ["open", "cloud"],
+    tagline: spec.tagline ?? cloud.tagline,
+    badges: ["new"],
+    routes: [...spec.open, ...cloud.routes],
+    options: spec.options,
+  };
+}
+
+/** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
+const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
+
+/** Fuobe Soul, Soul HD and Soul Cinema (src/lib/catalog/soul.ts applies the look). */
+const originals: ModelDef[] = [
+  original({
+    id: "fuobe-soul",
+    open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the look's LoRAs")],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" } },
+  }),
+  original({
+    id: "fuobe-soul-hd",
+    open: [comfy("t2i", "qwen-image-2512-t2i", "Qwen-Image 2512: the look's words, clean lettering")],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, negativePrompt: true },
+  }),
+  original({
+    id: "fuobe-soul-cinema",
+    open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the film-still LoRAs")],
+    options: SOUL_OPTIONS,
+  }),
+];
+
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
 const local: ModelDef[] = [
   {
@@ -1506,4 +1553,4 @@ const local: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...cloud, ...open, ...local];
+export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, ...local];

@@ -261,12 +261,28 @@ export function soulRecipe(
 
 /**
  * The prompt after some LoRAs were left out (a cloud API's slots, a civitai file without a key): the left-out
- * LoRAs' triggers come off the front, since they mean nothing to the model without the LoRA.
+ * LoRAs' triggers come off the front, since they mean nothing to the model without the LoRA. `triggers` is the
+ * front as the recipe wrote it (Plan.soul.triggers), in order.
  */
-export function promptWithLoras(prompt: string, asked: Pick<LoraRef, "trigger">[], kept: Pick<LoraRef, "trigger">[]): string {
-  const before = triggersOf(asked);
-  const after = triggersOf(kept);
-  if (!before || before === after || !prompt.startsWith(`${before}, `)) return prompt;
+export function promptWithLoras(prompt: string, triggers: string[], kept: Pick<LoraRef, "trigger">[]): string {
+  const before = triggers.join(", ");
+  if (!before || !prompt.startsWith(`${before}, `)) return prompt;
+  const keep = new Set(kept.map((l) => l.trigger?.trim()).filter(Boolean));
+  const after = triggers.filter((t) => keep.has(t)).join(", ");
+  if (after === before) return prompt;
   const rest = prompt.slice(before.length + 2);
   return after ? `${after}, ${rest}` : rest;
+}
+
+/**
+ * What happens to a Soul result after generation, read from its request (the grade preset and the overlay the
+ * browser applies; meta.grade / meta.overlay tell API clients). Undefined for other models.
+ */
+export function soulPostSteps(modelId: string, presetId: string | null | undefined): { look?: string; grade?: string; overlay?: SoulOverlay } | undefined {
+  const kind = soulKind(modelId);
+  if (!kind) return undefined;
+  if (kind === "cinema") return { grade: SOUL_CINEMA.grades[0] };
+  const look = soulLook(presetId ?? DEFAULT_LOOK);
+  if (!look) return undefined;
+  return { look: look.id, ...(look.grade && { grade: look.grade }), ...(look.overlay && { overlay: look.overlay }) };
 }

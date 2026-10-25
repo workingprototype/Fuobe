@@ -113,6 +113,23 @@ export function heuristicEnhance(prompt: string, kind: MediaKind, op: Operation)
   return `${p}. Highly detailed, natural skin and material texture, cinematic lighting, thoughtful composition, shot on a full-frame camera with a 50mm lens, shallow depth of field.`;
 }
 
+/** Fuobe Soul's enhancer (research §4.2): the user's words grown into one scene; the look adds the style itself. */
+const SOUL_SYSTEM =
+  "You expand a short image prompt into one vivid scene of 60 to 120 words for a photographic image model. Keep every word and idea the user wrote. " +
+  "Add only what a photographer would decide: subject, wardrobe, pose, place, light, lens and film stock. Don't name an art style, filter or colour grade, and don't add text, signs or watermarks. " +
+  "Answer with the prompt only: plain sentences, no quotes, no lists, no preamble.";
+
+/**
+ * Soul's words, expanded when an LLM is available (Claude or Ollama); otherwise the user's own words, since the
+ * look already says how the picture should look (the generic offline rewrite would fight it).
+ */
+export async function enhanceSoulWords(words: string): Promise<string> {
+  const w = words.trim();
+  if (!w || w.split(/\s+/).length >= 60) return words;
+  const out = (await llmText(SOUL_SYSTEM, w))?.trim().replace(/^["“]|["”]$/g, "").replace(/[.\s]+$/, "");
+  return out && out.length > w.length ? out : words;
+}
+
 export async function enhancePrompt(prompt: string, kind: MediaKind, op: Operation): Promise<string> {
   return (await llmText(SYSTEM, instruction(prompt, kind, op))) ?? heuristicEnhance(prompt, kind, op);
 }

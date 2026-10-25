@@ -424,7 +424,17 @@ export interface FieldMap {
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
    * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
    */
-  size?: { width: string; height: string; multiple: number; max?: number; base?: number };
+  size?: {
+    width?: string;
+    height?: string;
+    /** One object field that takes {width, height} (fal's image_size) instead of two fields. */
+    key?: string;
+    multiple: number;
+    max?: number;
+    base?: number;
+    /** Exact sizes per resolution tier and aspect ratio (Fuobe Soul's table); the computed size where it has none. */
+    table?: Record<string, Record<string, [number, number]>>;
+  };
   /**
    * Limits the API checks on numeric fields Fuobe fills (round 4: target fps, slow motion, frame interval,
    * overlay position and scale, Ken Burns length…): a value is rounded when the field takes whole numbers
@@ -491,6 +501,11 @@ export interface ModelOptions {
   draft?: boolean;
   /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
   presets?: { source: string; param: string; label: string; required?: boolean };
+  /**
+   * Takes a Fuobe Soul look (src/lib/catalog/soul.ts) as GenerationRequest.presetId, with presetStrength scaling
+   * its LoRAs; `label` names the picker.
+   */
+  looks?: { label: string };
   /** Premade voices the model offers (shown in the voice picker). */
   voices?: { id: string; name: string; hint?: string }[];
   /** Takes a reference recording to clone a voice from. */
@@ -561,6 +576,8 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
+  roundUp?: true;
 }
 
 export interface ModelDef {
@@ -578,6 +595,12 @@ export interface ModelDef {
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
+  /**
+   * A Fuobe Original that runs on both engines: its routes cover ComfyUI and the hosted open weights on fal /
+   * Replicate. `engine` is the one it shows first; a request picks one with GenerationRequest.engine, and
+   * onEngine() (src/lib/catalog/engines.ts) gives the model as it runs there (that engine's routes only).
+   */
+  engines?: Engine[];
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -759,6 +782,11 @@ export interface GenerationRequest {
   mix?: { presetId: string; strength: number };
   /** LoRAs added by @element mentions (trained identities, server-side), or a recipe's LoRAs sent by the evaluation harness. */
   loras?: LoraRef[];
+  /**
+   * The engine a model that runs on both (a Fuobe Original, ModelDef.engines) runs on: the composer's switch.
+   * Unset: the install's engine mode, else the first one connected (your GPU before the cloud).
+   */
+  engine?: Engine;
   /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
   chainFrom?: "first" | "last";
   /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */

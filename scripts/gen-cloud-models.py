@@ -69,7 +69,7 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None):
+          frame_step=None, original=False, sizes=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -82,13 +82,16 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
     turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
     frame_step: video models whose length is a frame count (Wan 2.2: 4n+1, LTX: 8n+1): FieldMap.numFrames.step.
+    original: a Fuobe Original's cloud half (written to ORIGINAL_CLOUD; models.ts joins it to the ComfyUI routes).
+    sizes: {tier: {aspect: [w, h]}}: exact sizes per resolution tier (Fuobe Soul's table): FieldMap.size.table, sent
+    as width / height fields or as one {width, height} object field (fal's image_size); the tiers become the resolutions.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
-                  frame_step=frame_step))
+                  frame_step=frame_step, original=original, sizes=sizes))
 
 
 # ----- Image
@@ -190,6 +193,35 @@ model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs"
 model("wan-2-2-a14b-image-cloud", "Wan 2.2 A14B Image (hosted)", "Alibaba Wan", "wan", "image",
       "Open-weights Wan 2.2 stills that take Wan LoRAs",
       [("t2i", "fal-ai/wan/v2.2-a14b/text-to-image/lora", "fal")], defaults={"aspectRatio": "16:9"})
+# ----- Originals (O2): Fuobe Soul's cloud halves on hosted open weights (docs/research/fuobe-originals-recipes-5.md §4).
+# models.ts joins each to its ComfyUI routes as one model that runs on both engines (ModelDef.engines). Sizes are
+# Soul's table per tier (soul.settings.comfyui.sizes); steps, prompt expansion and format follow the recipe (§4.3).
+SOUL_TIERS = {"720p": "720p tier", "1080p": "1080p tier"}
+SOUL_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in ORIGINALS["soul"]["settings"]["comfyui"]["sizes"].items() if k.startswith(prefix)).items()}
+              for tier, prefix in SOUL_TIERS.items()}
+SOUL_FAL = {"num_inference_steps": ORIGINALS["soul"]["settings"]["fal"]["num_inference_steps"],
+            "enable_prompt_expansion": ORIGINALS["soul"]["settings"]["fal"]["enable_prompt_expansion"],
+            "output_format": ORIGINALS["soul"]["settings"]["fal"]["output_format"]}
+# Replicate's Z-Image LoRA build: the same 8 steps, a PNG (its default is jpg); guidance stays at its Turbo default 0.
+SOUL_REPLICATE = {"num_inference_steps": SOUL_FAL["num_inference_steps"], "output_format": "png"}
+model("fuobe-soul", "Fuobe Soul", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's 139 looks on open weights: Z-Image Turbo with up to three LoRAs",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE}),
+       # Restyle a picture with the look; the result keeps the picture's shape. strength = how much changes.
+       ("edit", "fal-ai/z-image/turbo/image-to-image", "fal",
+        {"loraEndpoint": "fal-ai/z-image/turbo/image-to-image/lora", "keepSize": True, "fixed": {k: v for k, v in SOUL_FAL.items() if k != "num_inference_steps"}})],
+      original=True, sizes=SOUL_SIZES, sliders=[("strength", "Change")], defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-hd", "Fuobe Soul HD", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's looks on Qwen-Image 2512: clean lettering for posters and signs",
+      [("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora", "fixed": {"output_format": "png"}})],
+      original=True, sizes=SOUL_SIZES, pricing=("megapixel", 0.02, "rounded up to whole megapixels", {"roundUp": True}),
+      defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", "image",
+      "One film look: wide cinematic stills with film grain",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
+      original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -1038,7 +1070,7 @@ def map_fields(fmap):
         elif k == "loras":
             out += lora_field_names(v)
         elif k == "size":
-            out += [v["width"], v["height"]]
+            out += [v["key"]] if v.get("key") else [v["width"], v["height"]]
         elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
@@ -1421,6 +1453,23 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["size"] = {"width": kf["width"], "height": kf["height"], "multiple": 16, **({"max": min(mx)} if mx else {}),
                         **({"base": num(w.get("default"))} if num(w.get("default")) else {})}
         opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+    # Exact sizes per tier (Fuobe Soul's table): one {width, height} object field (fal's image_size, whose union takes
+    # an object) or the width / height fields above; the tiers are the model's resolutions.
+    if m.get("sizes") and not ropts.get("keepSize"):
+        spec = inputs.get(kf.get("aspectRatio") or "image_size") or {}
+        takes_object = spec.get("type") == "union" and any((v == "object{width,height}") or (isinstance(v, dict) and v.get("type") == "object") for v in spec.get("variants") or [])
+        if "size" in fmap:
+            fmap["size"]["table"] = m["sizes"]
+        elif takes_object:
+            fmap["size"] = {"key": kf.get("aspectRatio") or "image_size", "multiple": 16, "table": m["sizes"]}
+            kf.pop("aspectRatio", None)
+        else:
+            warn(f"{m['id']}: {ep} takes neither width / height nor an image_size object for its size table")
+        opts["aspectRatios"] = union(opts.get("aspectRatios", []), list(next(iter(m["sizes"].values())).keys()))
+        opts["resolutions"] = union(opts.get("resolutions", []), list(m["sizes"].keys()))
+    elif ropts.get("keepSize"):
+        # The result keeps the input picture's shape (image_size "auto", the API's default).
+        kf.pop("aspectRatio", None)
     part4_slots(op, kf, inputs, m, opts, fmap)
     # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
     if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
@@ -1613,6 +1662,7 @@ def parse_price(e):
 
 
 out = []
+originals = []
 for m in M:
     opts = {}
     routes = []
@@ -1692,12 +1742,14 @@ for m in M:
         d["pricing"] = pricing
     if m["hidden"]:
         d["hidden"] = True
-    out.append(d)
+    (originals if m["original"] else out).append(d)
 
 ts = (
     "// Generated by scripts/gen-cloud-models.py from docs/research/paid-model-apis(-2,-3,-4).json — do not edit by hand.\n"
     'import type { ModelDef } from "./types";\n\n'
-    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n"
+    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n\n"
+    "/** The Fuobe Originals' cloud halves (hosted open weights): models.ts joins each to its ComfyUI routes. */\n"
+    f"export const ORIGINAL_CLOUD: ModelDef[] = {json.dumps(originals, indent=2)};\n"
 )
 (ROOT / "src/lib/catalog/cloud-models.generated.ts").write_text(ts)
-print(f"wrote {len(out)} cloud models")
+print(f"wrote {len(out)} cloud models and {len(originals)} Originals' cloud halves")

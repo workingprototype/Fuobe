@@ -280,7 +280,174 @@
     "acceleration": "string default=\"regular\" enum=[\"none\", \"regular\", \"high\"]",
     "image_size": "anyOf[object {height:integer default=512 maximum=14142; width:integer default=512 maximum=14142}, string enum=[\"square_hd\", \"square\", \"portrait_4_3\", \"portrait_"
    },
-   "pathAccepts": "URL, HuggingFace repo ID (owner/repo) to lora weights."
+   "pathAccepts": "URL, HuggingFace repo ID (owner/repo) to lora weights.",
+   "inputs": {
+    "prompt": {
+     "type": "string",
+     "required": true,
+     "desc": "The prompt to generate an image from.",
+     "examples": [
+      "A young Asian woman with long, vibrant purple hair stands on a sunlit sandy beach, posing confidently with her left hand resting on her hip. She gazes directly at the camera with a neutral expression. A sleek black ribbon bow is tied neatly on the right side of her head, just above her ear. She wears a flowing white cotton dress with a fitted bodice and a flared skirt that reaches mid-calf, slightly lifted by a gentle sea breeze. The beach behind her features fine, pale golden sand with subtle footprints, leading to calm turquoise waves under a clear blue sky with soft, wispy clouds. The lighting is natural daylight, casting soft shadows to her left, indicating late afternoon sun. The horizon line is visible in the background, with a faint silhouette of distant dunes. Her skin tone is fair with a natural glow, and her facial features are delicately defined. The composition is centered on her figure, framed from mid-thigh up, with shallow depth of field blurring the distant waves slightly."
+     ]
+    },
+    "image_size": {
+     "type": "union",
+     "variants": [
+      {
+       "type": "object",
+       "fields": {
+        "width": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The width of the generated image."
+        },
+        "height": {
+         "type": "integer",
+         "required": false,
+         "default": 512,
+         "maximum": 14142,
+         "minimumExclusive": 0,
+         "desc": "The height of the generated image."
+        }
+       },
+       "required": false
+      },
+      {
+       "type": "enum",
+       "values": [
+        "square_hd",
+        "square",
+        "portrait_4_3",
+        "portrait_16_9",
+        "landscape_4_3",
+        "landscape_16_9",
+        "auto"
+       ],
+       "valueType": "string",
+       "required": false
+      }
+     ],
+     "default": "auto",
+     "desc": "The size of the generated image."
+    },
+    "num_inference_steps": {
+     "type": "integer",
+     "required": false,
+     "default": 8,
+     "minimum": 1,
+     "maximum": 8,
+     "desc": "The number of inference steps to perform."
+    },
+    "seed": {
+     "nullable": true,
+     "type": "integer",
+     "required": false,
+     "desc": "\n            The same seed and the same prompt given to the same version of the model\n            will output the same image every time.\n        "
+    },
+    "sync_mode": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "If `True`, the media will be returned as a data URI and the output data won't be available in the request history."
+    },
+    "num_images": {
+     "type": "integer",
+     "required": false,
+     "default": 1,
+     "minimum": 1,
+     "maximum": 4,
+     "desc": "The number of images to generate."
+    },
+    "enable_safety_checker": {
+     "type": "boolean",
+     "required": false,
+     "default": true,
+     "desc": "If set to true, the safety checker will be enabled. Disabling it requires account authorization; unauthorized requests are always checked, and images flagged as unsafe are returned as black images."
+    },
+    "output_format": {
+     "type": "enum",
+     "values": [
+      "jpeg",
+      "png",
+      "webp"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "png",
+     "desc": "The format of the generated image."
+    },
+    "acceleration": {
+     "type": "enum",
+     "values": [
+      "none",
+      "regular",
+      "high"
+     ],
+     "valueType": "string",
+     "required": false,
+     "default": "regular",
+     "desc": "The acceleration level to use."
+    },
+    "enable_prompt_expansion": {
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "desc": "Whether to enable prompt expansion. Note: this will increase the price by 0.0025 credits per request."
+    },
+    "image_url": {
+     "type": "string",
+     "required": true,
+     "desc": "URL of Image for Image-to-Image generation.",
+     "examples": [
+      "https://storage.googleapis.com/falserverless/example_inputs/z-image-turbo-i2i-input.png"
+     ]
+    },
+    "strength": {
+     "type": "number",
+     "required": false,
+     "default": 0.6,
+     "maximum": 1,
+     "minimumExclusive": 0,
+     "desc": "The strength of the image-to-image conditioning."
+    },
+    "loras": {
+     "type": "array",
+     "items": "object",
+     "itemSchema": {
+      "path": {
+       "type": "string",
+       "required": false,
+       "desc": "URL, HuggingFace repo ID (owner/repo) to lora weights."
+      },
+      "scale": {
+       "type": "number",
+       "required": false,
+       "default": 1,
+       "minimum": 0,
+       "maximum": 4,
+       "desc": "Scale factor for LoRA application (0.0 to 4.0)."
+      }
+     },
+     "itemRequired": [
+      "path"
+     ],
+     "required": false,
+     "default": [],
+     "desc": "List of LoRA weights to apply (maximum 3)."
+    }
+   },
+   "keyFields": {
+    "prompt": "prompt",
+    "seed": "seed",
+    "numOutputs": "num_images",
+    "loras": "loras",
+    "image": "image_url"
+   },
+   "output": "video.url",
+   "inputsChecked": "2026-10-25"
   },
   {
    "provider": "fal",

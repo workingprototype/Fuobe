@@ -11,6 +11,7 @@ import {
   soulLook,
   soulLookList,
   soulMegapixels,
+  soulPostSteps,
   soulRecipe,
   soulSize,
   SOUL_ASPECTS,
@@ -158,10 +159,22 @@ describe("Soul recipe (soul.ts)", () => {
 
   it("takes a left-out LoRA's trigger off the front", () => {
     const r = soulRecipe("soul", "x", { look: "v1-indie-sleaze" });
+    const triggers = ["hardflashy", "emoessence"];
     const kept = r.loras.filter((l) => l.trigger !== "hardflashy");
-    expect(promptWithLoras(r.prompt, r.loras, kept).startsWith("emoessence, x. ")).toBe(true);
-    expect(promptWithLoras(r.prompt, r.loras, []).startsWith("x. ")).toBe(true);
-    expect(promptWithLoras("plain", r.loras, [])).toBe("plain");
+    expect(promptWithLoras(r.prompt, triggers, kept).startsWith("emoessence, x. ")).toBe(true);
+    expect(promptWithLoras(r.prompt, triggers, []).startsWith("x. ")).toBe(true);
+    expect(promptWithLoras(r.prompt, triggers, r.loras)).toBe(r.prompt);
+    expect(promptWithLoras("plain", triggers, [])).toBe("plain");
+    // A trigger with commas of its own (Realistic Snapshot's) comes off whole.
+    const phone = soulRecipe("soul", "x", { look: "v1-iphone" });
+    expect(promptWithLoras(phone.prompt, ["amateur digital snapshot, candid, smartphone capture"], []).startsWith("x. ")).toBe(true);
+  });
+
+  it("says what happens after generation: the grade and the overlay", () => {
+    expect(soulPostSteps("fuobe-soul", "v1-digitalcam")).toEqual({ look: "v1-digitalcam", overlay: "date-stamp" });
+    expect(soulPostSteps("fuobe-soul", undefined)).toEqual({ look: "v1-general", grade: "natural" });
+    expect(soulPostSteps("fuobe-soul-cinema", null)).toEqual({ grade: "teal-orange" });
+    expect(soulPostSteps("nano-banana-pro", "v1-general")).toBeUndefined();
   });
 });
 
