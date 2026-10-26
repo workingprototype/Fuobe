@@ -309,7 +309,8 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
   )[0];
   try {
     // The model is built from the still alone (a photo sent with the words has no place in this route).
-    const { images: _ignored, ...inputs } = original.inputs ?? {};
+    const inputs = { ...original.inputs };
+    delete inputs.images;
     const built = createGenerations(
       {
         ...original,
