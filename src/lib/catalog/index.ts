@@ -3,7 +3,7 @@ import { EFFECTS as RAW_EFFECTS, MOTIONS as RAW_MOTIONS } from "./motions";
 import { MODELS } from "./models";
 import { LLM_MODELS } from "./llm-models";
 import { dopPreset, presetLoras } from "./dop";
-import { runsOn } from "./engines";
+import { onEngine, runsOn } from "./engines";
 import { estimateCost } from "./plan";
 import type { Engine, MediaKind, ModelDef, Operation, Preset } from "./types";
 
@@ -78,7 +78,8 @@ export function modelsFor(opts: { kind?: MediaKind; ops?: Operation[]; engine?: 
       !m.hidden &&
       (!opts.kind || m.kind === opts.kind) &&
       (!opts.engine || opts.engine === "all" || runsOn(m, opts.engine)) &&
-      (!opts.ops || m.routes.some((r) => opts.ops!.includes(r.op))),
+      // An Original does on an engine what that engine's routes do (Fuobe DoP films keyframes on the GPU only).
+      (!opts.ops || (opts.engine && opts.engine !== "all" ? onEngine(m, opts.engine) : m).routes.some((r) => opts.ops!.includes(r.op))),
   );
 }
 

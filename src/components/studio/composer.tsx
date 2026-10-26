@@ -292,6 +292,17 @@ export function Composer({ docked }: { docked: boolean }) {
     if (!m) return setDraft({ presetId: id });
     setDraft((d) => ({ presetId: id, modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
   };
+  // A motion handed over in the link (?preset= from the Motions gallery) is known once the presets load: it moves the
+  // studio's untouched default model to its Original, once per preset.
+  const adoptedPreset = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const want = presetModel(preset, engine);
+    if (!preset || !want || !model || adoptedPreset.current === preset.id) return;
+    adoptedPreset.current = preset.id;
+    if (model.id === want || model.id !== config.defaultModels[engine]) return;
+    const m = catalog.getModel(want);
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+  }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
   const studioOp = config.ops.length === 1 && !preset ? config.ops[0] : undefined;
