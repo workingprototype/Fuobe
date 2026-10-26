@@ -492,8 +492,11 @@ export function mediaInfoFor(name: unknown): MediaInfo | undefined {
   return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
 }
 
-/** Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion) runs there. */
-const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b" };
+/**
+ * Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion)
+ * runs there (Fuobe DoP on Wan 2.2 14B, Fuobe Cinema on its Lightning graph).
+ */
+const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b", "wan22-i2v-14b-lightx2v": "wan22-fun-camera-14b" };
 
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {

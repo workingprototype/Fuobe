@@ -647,6 +647,12 @@ Also new and worth a later look: Lightricks LTX-2.5 **Cinemagraph** (2026-09-10,
 - **Hosted:** fal-ai/wan/v2.2-a14b/image-to-video/lora for camera LoRAs ($0.10/s)
 - **Note:** Cinema Studio's 3D scene (Gaussian splat → recomposition) is covered by round-4 cinema-3d work.
 - **Licences:** Wan Apache-2.0; LTX-2.x Community (free under US$10M revenue)
+- **Fuobe Cinema recipe (added 2026-10-26 for O6; JSON: `studios[cinema-studio].original`).** Fuobe's own choices, unmeasured until the evaluation harness runs the `cinema` suite:
+  - Cloud: the LTX-2.3 22B `/lora` endpoints above with `enable_prompt_expansion: false` (the compiled Director prompt is kept), `generate_audio` from the sound toggle, 24 fps, at most 481 frames (20 s); a longer take adds the rest with one `extend-video` call. Sizes are a table in multiples of 32 (as LTX-2 wants; the official templates use 1280×704 at 720p): 480p 864×480, 720p 1280×704, 1080p 1920×1088 at 16:9, and 21:9, 4:3, 1:1, 3:4 and 9:16 in each tier. A prequel is `extend-video` with `extend_direction: backward` (unverified: whether the result also holds the source clip).
+  - Camera moves → `camera_lora` where one of its seven moves fits: Dolly In and Slow Zoom In → `dolly_in`; Dolly Out, Slow Zoom Out and Aerial Pullback → `dolly_out`; Truck and Slider Left / Right → `dolly_left` / `dolly_right`; Crane and Pedestal Up / Down → `jib_up` / `jib_down`; Static → `static`. Pans, tilts and the rest have no fit: with a start frame, a move with a Wan 2.2 LoRA (§7) runs it on `fal-ai/wan/v2.2-a14b/image-to-video/lora` (Fuobe DoP), Rack Focus runs LTX-2.5's `focus_shift`, and anything else runs on its words.
+  - Open: Wan 2.2 14B Lightning with the move's Wan LoRA or a Fun Camera pose (both need a start frame), LTX-2.5 22B as the choice with sound, Wan 2.2 Fun VACE for extend and edit, the palette lock after the clip.
+  - Stills on Fuobe Soul Cinema; Soul Cast on Fuobe Soul with the Realistic look and the 17-field compiler (the Soul Cast sheet graph stays an open alternative); Soul Location on Fuobe Soul with the Movie look, other views by the Multiple-Angles LoRA on both engines. Seedance 2.5, Kling 3.0 and Veo 3.1 stay pickable with the Director in the prompt.
+  - Reference clips: none yet. `fal-ai/ltx-2.3-22b/reference-video-to-video/lora` takes one clip, but its inputs haven't been read, so Seedance 2.5 stays the model for reference clips.
 
 ### upscale
 

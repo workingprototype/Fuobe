@@ -16797,7 +16797,107 @@
     "fal-ai/wan/v2.2-a14b/image-to-video/lora for camera LoRAs ($0.10/s)"
    ],
    "licence": "Wan Apache-2.0; LTX-2.x Community (free under US$10M revenue)",
-   "note": "Cinema Studio's 3D scene (Gaussian splat → recomposition) is covered by round-4 cinema-3d work."
+   "note": "Cinema Studio's 3D scene (Gaussian splat → recomposition) is covered by round-4 cinema-3d work.",
+   "original": {
+    "model": "fuobe-cinema",
+    "added": "2026-10-26 (build plan O6)",
+    "source": "Fuobe's own recipe for Cinema Studio 4.0's Original, from the hosted LTX-2.3 22B LoRA endpoints' schemas above (§3.1) and the official LTX-2 ComfyUI templates (sizes in multiples of 32; 1280x704 at 720p). Unmeasured until the evaluation harness (O8) runs the cinema suite on a GPU and on fal.",
+    "cloud": {
+     "endpoints": {
+      "t2v": "fal-ai/ltx-2.3-22b/text-to-video/lora",
+      "i2v": "fal-ai/ltx-2.3-22b/image-to-video/lora",
+      "flf2v": "fal-ai/ltx-2.3-22b/image-to-video/lora (end_image_url)",
+      "extend": "fal-ai/ltx-2.3-22b/extend-video/lora",
+      "v2v": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+     },
+     "fixed": {
+      "enable_prompt_expansion": false
+     },
+     "fps": 24,
+     "maxFrames": 481,
+     "longerThanMax": "one extend-video call adds the rest (a 30 s take is 20 s + 10 s)",
+     "audio": "generate_audio follows the Director's sound toggle",
+     "prequel": "extend-video with extend_direction backward (unverified: whether the result holds the source clip)",
+     "sizes": {
+      "480p tier (~0.4 MP)": {
+       "21:9": "1120x480",
+       "16:9": "864x480",
+       "4:3": "640x480",
+       "1:1": "480x480",
+       "3:4": "480x640",
+       "9:16": "480x864"
+      },
+      "720p tier (~0.9 MP)": {
+       "21:9": "1504x640",
+       "16:9": "1280x704",
+       "4:3": "1024x768",
+       "1:1": "960x960",
+       "3:4": "768x1024",
+       "9:16": "704x1280"
+      },
+      "1080p tier (~2 MP)": {
+       "21:9": "2240x960",
+       "16:9": "1920x1088",
+       "4:3": "1440x1088",
+       "1:1": "1088x1088",
+       "3:4": "1088x1440",
+       "9:16": "1088x1920"
+      }
+     },
+     "referenceClips": "none yet: fal-ai/ltx-2.3-22b/reference-video-to-video/lora takes one clip, but its inputs are not read here; Seedance 2.5 stays the choice for reference clips"
+    },
+    "open": {
+     "video": "Wan 2.2 14B Lightning (wan22-t2v-14b-lightx2v / wan22-i2v-14b-lightx2v), wan22-flf2v-14b for start and end frame; 3 or 5 s at 16 fps",
+     "moves": "a Wan 2.2 camera LoRA from the motion map (§7), else a Wan 2.2 Fun Camera pose (wan22-fun-camera-14b), else the move's words; both need a start frame",
+     "sound": "LTX-2.5 (ltx25-t2v / ltx25-i2v, gated weights) is the open choice with sound",
+     "extend": "video-extend-wan22-fun-vace",
+     "edit": "first frame by Qwen-Image-Edit 2511, then video-restyle-wan22-fun-vace",
+     "palette": "oss-palette-video after the clip"
+    },
+    "cameraLora": {
+     "note": "Cinema Studio's 33 camera moves → LTX-2.3's built-in camera_lora where one of its 7 moves fits (none = no fit). A zoom is taken as a dolly (the subject grows the same way); pans and tilts have no fit. A move with no fit runs its Wan 2.2 LoRA (fal-ai/wan/v2.2-a14b/image-to-video/lora through Fuobe DoP) when it has one and a start frame is given, Rack Focus runs LTX-2.5's focus_shift (lightricks/ltx-2.5/image-to-video/fast), anything else runs on its words.",
+     "moves": {
+      "snorricam": null,
+      "robot-arm": null,
+      "tilt-up": null,
+      "rack-focus": null,
+      "tilt-down": null,
+      "pov": null,
+      "pan-left": null,
+      "crane-up": "jib_up",
+      "pan-right": null,
+      "crane-down": "jib_down",
+      "side-tracking": null,
+      "pedestal-up": "jib_up",
+      "pedestal-down": "jib_down",
+      "handheld": null,
+      "tracking": null,
+      "drone-orbit": null,
+      "dolly-zoom": null,
+      "aerial-pullback": "dolly_out",
+      "static-shot": "static",
+      "bullet-time": null,
+      "whip-pan": null,
+      "slow-zoom-in": "dolly_in",
+      "arc-left": null,
+      "slow-zoom-out": "dolly_out",
+      "arc-right": null,
+      "truck-right": "dolly_right",
+      "dolly-in": "dolly_in",
+      "truck-left": "dolly_left",
+      "dolly-out": "dolly_out",
+      "slider-right": "dolly_right",
+      "crush-zoom": null,
+      "slider-left": "dolly_left",
+      "helicopter-shot": null
+     }
+    },
+    "stills": "fuobe-soul-cinema (Fuobe Soul Cinema: filmstill 0.7 + moviewide 0.5, cine tail) with the Director's camera and lens words",
+    "soulCast": "fuobe-soul with the Realistic look (v1-realistic) and the 17-field casting compiler; the Soul Cast sheet graph (soul-cast-sheet-zimage) stays an open alternative",
+    "soulLocation": "fuobe-soul with the Movie look (v1-movie), 16:9, no people; other views by the Multiple-Angles LoRA (open: Qwen-Image-Edit 2511 + the LoRA; cloud: fal-ai/qwen-image-edit-2511-multiple-angles)",
+    "partners": "Seedance 2.5, Kling 3.0 and Veo 3.1 stay pickable with the Director compiled into the prompt; Kling O3 edits takes made on a partner model",
+    "licences": "LTX-2.x Community (free under US$10M annual revenue; shown in About & licences), Wan 2.2 Apache-2.0, Z-Image Turbo Apache-2.0, Qwen-Image-Edit 2511 Apache-2.0"
+   }
   },
   {
    "id": "upscale",

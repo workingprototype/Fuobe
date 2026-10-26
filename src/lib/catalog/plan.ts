@@ -596,7 +596,8 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   // A run with LoRAs goes to the LoRA endpoint, which has its own price.
-  const usd = withLoras && p.withLoras !== undefined ? p.withLoras : (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  const at = (table: Record<string, number> | undefined) => (res && table ? (table[res] ?? table[res.toLowerCase()]) : undefined);
+  const usd = withLoras && p.withLoras !== undefined ? (at(p.withLorasByResolution) ?? p.withLoras) : at(p.byResolution) || p.usd;
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
