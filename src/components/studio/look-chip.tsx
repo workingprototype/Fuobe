@@ -8,6 +8,7 @@ import { curatedLook } from "@/components/moodboards/logic";
 import { DEFAULT_LOOK, lookCard, lookSet, type SoulLookCard } from "@/lib/catalog/soul-cards";
 import { cn } from "@/lib/utils";
 import { Chip, ClearableChip } from "./chip";
+import { radioKeys, radioTab } from "./radio-keys";
 import { ResponsivePanel } from "./responsive-panel";
 
 /**
@@ -60,18 +61,20 @@ export default function LookChip({
           <Chip icon={picked ? undefined : Sparkles} active={!!value} aria-label={`Look: ${picked?.name ?? "General"}`}>
             {picked && <CuratedCover m={{ name: "", ...curatedLook(picked.id) }} className="size-4 rounded-full" />}
             <span className="max-w-32 truncate">{picked?.name ?? "Look"}</span>
-            {value && strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
+            {strength < 1 && <span className="text-muted-foreground tabular-nums">{pct(strength)}</span>}
           </Chip>
         }
       >
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <div role="tablist" aria-label="Soul version" className="inline-flex shrink-0 rounded-full bg-muted p-0.5">
+          {/* Filters of the grid below (not tabs with panels): a radio group each, arrow keys move and pick. */}
+          <div role="radiogroup" aria-label="Soul version" onKeyDown={radioKeys} className="inline-flex shrink-0 rounded-full bg-muted p-0.5">
             {FAMILIES.map(([f, label]) => (
               <button
                 key={f}
                 type="button"
-                role="tab"
-                aria-selected={family === f}
+                role="radio"
+                aria-checked={family === f}
+                tabIndex={radioTab(family === f)}
                 onClick={() => {
                   setFamily(f);
                   setTab("All presets");
@@ -97,13 +100,14 @@ export default function LookChip({
           </label>
         </div>
         {!q && (
-          <div role="tablist" aria-label="Look categories" className="scrollbar-none -mx-0.5 mb-2 flex gap-1 overflow-x-auto px-0.5">
+          <div role="radiogroup" aria-label="Look categories" onKeyDown={radioKeys} className="scrollbar-none -mx-0.5 mb-2 flex gap-1 overflow-x-auto px-0.5">
             {tabs.map((t) => (
               <button
                 key={t}
                 type="button"
-                role="tab"
-                aria-selected={tab === t}
+                role="radio"
+                aria-checked={tab === t}
+                tabIndex={radioTab(tab === t)}
                 onClick={() => setTab(t)}
                 className={cn(
                   "h-7 shrink-0 rounded-full px-2.5 text-[12px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -132,6 +136,7 @@ export default function LookChip({
                 <CuratedCover m={{ name: "", ...curatedLook(l.id) }} className="size-full transition-transform duration-300 group-hover:scale-105" />
                 {l.civitai && (
                   <span
+                    aria-hidden
                     className="absolute right-1 bottom-1 grid size-4 place-items-center rounded-full bg-black/45 text-white"
                     title="Its LoRA downloads from civitai: add your free civitai key in Settings → LoRAs"
                   >
@@ -140,6 +145,7 @@ export default function LookChip({
                 )}
               </span>
               <span className="truncate px-0.5 text-[12px] font-medium">{l.name}</span>
+              {l.civitai && <span className="sr-only">: its LoRA downloads from civitai and needs your free civitai key</span>}
             </button>
           ))}
           {!items.length && <p className="col-span-full py-8 text-center text-[13px] text-muted-foreground">No looks match “{q}”</p>}

@@ -673,6 +673,18 @@ const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? null) ==
 const sameAttachment = (a: Attachment | null | undefined, b: Attachment | null | undefined) => (a ?? null) === (b ?? null) || (!!a && !!b && a.id === b.id && a.ref === b.ref);
 
 /**
+ * The draft a hand-off compares with, after the page's own model swap: the engine is read after hydration (or
+ * switched while the page loads), and the composer swaps an untouched draft's studio default for that engine's
+ * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
+ * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
+ */
+export function followEngineDefault<D extends DraftShape>(base: D, current: D, defaults: Partial<Record<Engine, string>>, engine: Engine): D {
+  const own = Object.values(defaults).filter(Boolean);
+  if (current.modelId === base.modelId || !own.includes(base.modelId) || current.modelId !== defaults[engine]) return base;
+  return { ...base, modelId: current.modelId, params: current.params };
+}
+
+/**
  * Apply a draft computed from hand-off params (`next`) to the live draft (`current`) without
  * undoing what the person already did: a field still equal to the draft the composer started
  * with (`base`) takes the hand-off value; a field they changed (typed a prompt before the page

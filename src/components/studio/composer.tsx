@@ -13,6 +13,7 @@ import { estimateCost, planGeneration, routesFor } from "@/lib/catalog/plan";
 import type { Engine, GenerationRequest, MediaKind, ModelDef, Operation, Preset, VideoFormat } from "@/lib/catalog/types";
 import { dualEngine } from "@/lib/catalog/engines";
 import { locksByDefault } from "@/lib/catalog/palettes";
+import { DEFAULT_LOOK, lookCard } from "@/lib/catalog/soul-cards";
 import { formatsOf } from "@/lib/av/formats";
 import { enhance, useClipFacts, useCreateGeneration, useElements, useEngine, useHydrated, useStatus } from "@/lib/api";
 import { applyMentions, type StudioElement } from "@/lib/catalog/elements";
@@ -118,8 +119,11 @@ function buildRequest(
   promptSuffix?: string,
   refKind: MediaKind = "image",
   frames?: FramesContext,
-  /** A Fuobe Original (runs on both engines): the engine switched to. */
-  engine?: Engine,
+  /**
+   * The model's needs: a Fuobe Original (runs on both engines) names the engine switched to; a model that takes
+   * looks (Fuobe Soul) takes the look's strength with its default look too (no presetId).
+   */
+  target: { engine?: Engine; looks?: boolean } = {},
 ): GenerationRequest {
   const s = draft.slots;
   const refs = draft.refs.filter((x) => !!x?.ref).map((x) => x.ref);
@@ -156,9 +160,9 @@ function buildRequest(
     },
     params,
     presetOptions: draft.presetOptions,
-    ...(draft.presetId && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
+    ...((draft.presetId || target.looks) && draft.presetStrength !== undefined && draft.presetStrength < 1 && { presetStrength: draft.presetStrength }),
     ...(draft.presetId && draft.mix && { mix: draft.mix }),
-    ...(engine && { engine }),
+    ...(target.engine && { engine: target.engine }),
   };
 }
 
@@ -241,8 +245,21 @@ export function Composer({ docked }: { docked: boolean }) {
   const preset: Preset | undefined = draft.presetId && !takesLook ? catalog.getPreset(draft.presetId) : config.preset;
   const lockedModel = preset?.type === "app";
   const presetLoading = !!draft.presetId && !takesLook && !preset && !catalog.complete;
-  /** The engine a request names: only a model that runs on both (a Fuobe Original) needs it. */
-  const engineFor = (id: string) => (dualEngine(catalog.getModel(id)) ? engine : undefined);
+  /** What the request names for its model: the engine (only a model that runs on both, a Fuobe Original), and whether it takes looks. */
+  const targetFor = (id: string) => {
+    const m = catalog.getModel(id);
+    return { engine: dualEngine(m) ? engine : undefined, looks: !!m?.options.looks };
+  };
+
+  // A curated moodboard on a model that takes looks is a look: it moves to the Look chip, so the chip shows what
+  // runs (a /moodboards link, or a pick in the Moodboard panel, would otherwise override the chip unseen).
+  const curatedId = draft.signature?.moodboard?.kind === "curated" ? draft.signature.moodboard.id : undefined;
+  useEffect(() => {
+    const card = takesLook && curatedId ? lookCard(curatedId) : undefined;
+    if (!card) return;
+    setDraft((d) => ({ presetId: card.id === DEFAULT_LOOK ? undefined : card.id, signature: { ...d.signature, moodboard: undefined } }));
+    toast(`${card.name} is a Fuobe Soul look: it's on the Look chip`);
+  }, [takesLook, curatedId, setDraft]);
 
   // Presets handed over in the URL, a Mix, or a model outside this studio's slice: fetch the full catalog.
   const needsFull = presetLoading || (!!draft.mix && !catalog.getPreset(draft.mix.presetId)) || (catalog.ready && !model);
@@ -255,7 +272,9 @@ export function Composer({ docked }: { docked: boolean }) {
     if (!model || model.engine === engine) return;
     const next = lockedModel ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId) : config.defaultModels[engine];
     const m = next ? catalog.getModel(next) : undefined;
-    if (m) setDraft((d) => ({ modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+    // Only the model this effect saw: a hand-off applied in the same commit (?model=, a layout effect) already
+    // replaced it, and swapping it for the engine's default would undo the link (it landed on Z-Image Turbo).
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
   }, [engine, model, lockedModel, preset, config.defaultModels, setDraft, catalog]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.
@@ -296,7 +315,7 @@ export function Composer({ docked }: { docked: boolean }) {
   // A picked palette / moodboard routes the request (and can move it to another model) before anything else.
   const signature = useSignature(!!config.signature, draft.signature);
   const prepare = (d: typeof draft) => {
-    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx, engineFor(d.modelId)));
+    const signed = signature.apply(buildRequest(config.feature, d, studioOp, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(d.modelId)));
     // Planned with the signature's sentences in the prompt (as the server runs it); sent with them apart.
     const raw = signed.worded;
     const m = catalog.getModel(raw.modelId) ?? model;
@@ -385,7 +404,7 @@ export function Composer({ docked }: { docked: boolean }) {
     setRecent((r) => pushRecent(r, draft.modelId));
     // The server resolves @mentions and drawings itself; only pin the operation when there are none.
     // No "Queued" toast: the new card (and the "1 generating ↑" pill when it's off-screen) says it.
-    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, engineFor(draft.modelId)));
+    const sent = signature.apply(buildRequest(config.feature, draft, resolvesOnServer ? studioOp : op, config.promptSuffix, config.multiRef?.kind, framesCtx, targetFor(draft.modelId)));
     // Open palette lock: the images are recoloured to the palette by a chained step (POST /api/palettes/lock).
     if (sent.lock) return signature.lock.mutate({ request: sent.request, colors: sent.lock.colors }, { onError: (e) => toast.error((e as Error).message) });
     create.mutate(sent.request, {
@@ -631,10 +650,14 @@ export function Composer({ docked }: { docked: boolean }) {
           value={draft.presetId}
           strength={draft.presetStrength ?? 1}
           onChange={(id, look) => {
-            // A lettering look runs best on Fuobe Soul HD: move there when it's in this studio.
+            // A lettering look runs best on Fuobe Soul HD: move there when it's in this studio and can run what this
+            // run does (Soul HD makes new pictures only: with a picture attached, Fuobe Soul edits it with the look's words).
             const hd = look?.hd && model?.id !== "fuobe-soul-hd" ? catalog.getModel("fuobe-soul-hd") : undefined;
-            if (hd) toast(`${look!.name} runs on Fuobe Soul HD (cleaner lettering)`);
-            setDraft((d) => ({ presetId: id, presetStrength: id ? d.presetStrength : undefined, ...(hd && { modelId: hd.id }) }));
+            const fits = !!hd && routesFor(hd, effectiveOp ?? "t2i").length > 0;
+            if (hd && fits) toast(`${look!.name} runs on Fuobe Soul HD (cleaner lettering)`);
+            else if (hd) toast(`${look!.name} is made for Fuobe Soul HD, which doesn't edit pictures: here it uses its words`);
+            // The strength stays as it was set (it scales whichever look runs, the General look too).
+            setDraft({ presetId: id, ...(hd && fits && { modelId: hd.id }) });
           }}
           onStrength={(v) => setDraft({ presetStrength: v })}
         />
