@@ -311,7 +311,7 @@ model("bria-extract-object", "Bria Extract Object", "Bria", "bria", "image",
 
 # ----- Video
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
-      "Higgsfield's default — multi-shot cinema with native audio, up to 30s",
+      "ByteDance's cinema model — multi-shot with native audio, up to 30s",
       [("t2v", "bytedance/seedance-2.5/text-to-video"), ("i2v", "bytedance/seedance-2.5/image-to-video", "fal", "+flf2v"),
        ("ref2v", "bytedance/seedance-2.5/reference-to-video"),
        ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),

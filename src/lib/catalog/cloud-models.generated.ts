@@ -3434,7 +3434,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "seedance",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Higgsfield's default \u2014 multi-shot cinema with native audio, up to 30s",
+    "tagline": "ByteDance's cinema model \u2014 multi-shot with native audio, up to 30s",
     "routes": [
       {
         "op": "t2v",
