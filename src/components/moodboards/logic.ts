@@ -24,8 +24,8 @@ export interface Moodboard {
   styleId: string | null;
   error: string | null;
   generationId: string | null;
-  /** The style element trained from this board (Z-Image Turbo LoRA). */
-  lora: { elementId: string; handle: string; status: "none" | "training" | "ready" | "failed" } | null;
+  /** The style element trained from this board (a Z-Image Turbo LoRA, its Fuobe look); "demo" = a demo training's stand-in. */
+  lora: { elementId: string; handle: string; status: "none" | "training" | "ready" | "failed" | "demo" } | null;
   createdAt: number;
 }
 

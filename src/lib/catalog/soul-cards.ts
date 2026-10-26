@@ -30,6 +30,12 @@ export const SOUL_MODEL_IDS = { soul: "fuobe-soul", hd: "fuobe-soul-hd", cinema:
 /** The look a Fuobe Soul run uses when none is picked: Soul's own default. */
 export const DEFAULT_LOOK = "v1-general";
 
+/**
+ * A personal moodboard trained as a style LoRA (build plan O3) is the look: its LoRA comes in as the user's own (the
+ * moodboard's style element, @mentioned), with no look words, LoRAs, tail or grade of Soul's around it.
+ */
+export const OWN_LOOK = "own-style";
+
 const BY_ID = new Map(SOUL_LOOK_CARDS.map((c) => [c.id, c]));
 
 /** A look's card by its Fuobe id, or by Higgsfield's old style id (settings saved before the Originals). */

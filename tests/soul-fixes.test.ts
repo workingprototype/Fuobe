@@ -21,7 +21,7 @@ const { onEngine } = await import("@/lib/catalog/engines");
 const { estimateCost, planGeneration } = await import("@/lib/catalog/plan");
 const { applySignature } = await import("@/lib/catalog/palettes");
 const { loraEntry, loraRef } = await import("@/lib/catalog/loras");
-const { soulPostSteps } = await import("@/lib/catalog/soul");
+const { OWN_LOOK, soulPostSteps } = await import("@/lib/catalog/soul");
 const { cropRect, finishSteps } = await import("@/lib/soul-post");
 const { findModels } = await import("@/lib/model-list");
 const { toModelRow } = await import("@/lib/model-rows");
@@ -80,10 +80,16 @@ describe("a look beside a moodboard that moves the run", () => {
       expect(signed.notes.join(" ")).toMatch(/Y2K look is Fuobe Soul's own/);
       expect(() => planGeneration(signed.request, view(engine), getPreset)).not.toThrow();
     }
-    // A trained style moves an open run to Z-Image Turbo: the same.
-    const trained = applySignature({ feature: "image", modelId: "fuobe-soul", prompt: "a lighthouse", presetId: "v1-y2k", engine: "open" }, { moodboard: { ...board, loraHandle: "dusk" } }, { caps: { native: {} }, getModel: view("open") });
-    expect(trained.modelId).toBe("oss-z-image-turbo");
-    expect(trained.request.presetId).toBeUndefined();
+    // A trained style is a Fuobe look (build plan O3): it stays on Fuobe Soul on either engine, the LoRA as the look.
+    for (const engine of ["cloud", "open"] as const) {
+      const trained = applySignature({ feature: "image", modelId: "fuobe-soul", prompt: "a lighthouse", presetId: "v1-y2k", engine }, { moodboard: { ...board, loraHandle: "dusk" } }, { caps: { native: {} }, getModel: view(engine) });
+      expect(trained.modelId).toBe("fuobe-soul");
+      expect(trained.request).toMatchObject({ presetId: OWN_LOOK, engine, signature: { words: "In the style of @dusk." } });
+      expect(() => planGeneration(trained.request, view(engine), getPreset)).not.toThrow();
+    }
+    // Soul Cinema's look is fixed: the board's look moves the run to Fuobe Soul.
+    const cine = applySignature({ feature: "image", modelId: "fuobe-soul-cinema", prompt: "a lighthouse", engine: "cloud" }, { moodboard: { ...board, loraHandle: "dusk" } }, { caps: { native: {} }, getModel: view("cloud") });
+    expect(cine).toMatchObject({ modelId: "fuobe-soul", request: { presetId: OWN_LOOK, engine: "cloud" } });
     // A curated look stays a look on Fuobe Soul.
     const curated = applySignature({ feature: "image", modelId: "fuobe-soul", prompt: "a lighthouse", engine: "cloud" }, { moodboard: { id: "v2-y2k-studio", kind: "curated", name: "Y2K Studio", status: "complete" } }, { caps: { native: {} }, getModel: view("cloud") });
     expect(curated.request.presetId).toBe("v2-y2k-studio");

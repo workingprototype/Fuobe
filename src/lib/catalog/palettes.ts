@@ -23,7 +23,8 @@
  * `request.prompt`: they ride in `request.signature.words`, which the server adds when it plans the
  * run, so feeds, Library titles and Reuse keep the user's own words.
  */
-import { DEFAULT_LOOK, lookCard, SOUL_MODEL_IDS } from "./soul-cards";
+import { DEFAULT_LOOK, lookCard, OWN_LOOK, SOUL_MODEL_IDS } from "./soul-cards";
+import { familyOfModel } from "./training";
 import type { GenerationRequest, GenParams, ModelDef, Operation } from "./types";
 
 export type RGB = [number, number, number];
@@ -397,6 +398,8 @@ export const SIGNATURE_MODELS = {
   openStyle: "oss-style-qwen-edit",
   openPalette: "oss-zimage-palette",
   openTurbo: "oss-z-image-turbo",
+  /** A personal moodboard trained as a style LoRA runs here, the LoRA as its look (both engines). */
+  soul: SOUL_MODEL_IDS.soul,
   paletteLock: "oss-palette-image",
   soul2: "soul-2",
   soul1: "soul-1",
@@ -523,8 +526,20 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
       const collages = mb.collages?.length ? mb.collages : refs.slice(0, 2);
       // A request that already carries the board's images (Run again of an older run): nothing to add.
       const carried = [...refs, ...collages].some((u) => r.inputs?.images?.includes(u));
+      // A board trained as a style LoRA is a Fuobe look (build plan O3): on Fuobe Soul (and plain Z-Image Turbo, whose
+      // family the LoRA is) on either engine, and on the open engine instead of collages for any model but a
+      // style-reference one. A partner model in the cloud keeps the board's images as style references.
+      const zFamily = familyOfModel(model.id) === "z-image-turbo";
+      const asLook = !!mb.loraHandle && (zFamily || (model.engine === "open" && model.family !== "style-reference"));
       if (carried) {
         // Leave the request as it is.
+      } else if (asLook) {
+        // Soul Cinema's film look is fixed: the board's look runs on Fuobe Soul, on the engine the run was on.
+        const engine = r.engine ?? model.engine;
+        if (!zFamily || model.id === SOUL_MODEL_IDS.cinema) move(SIGNATURE_MODELS.soul, `Runs on {model} with the trained “${mb.name}” style as its look`);
+        r = { ...r, engine };
+        if (model.options.looks) r = { ...r, presetId: OWN_LOOK };
+        words.push(`In the style of @${mb.loraHandle}.`);
       } else if (model.engine === "cloud") {
         if (model.family === "recraft" && mb.styleId) {
           move(SIGNATURE_MODELS.recraftSaved, `Runs on {model} with the saved “${mb.name}” Recraft style`);
@@ -547,9 +562,6 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
           r = { ...r, op: "edit", inputs: { ...r.inputs, images: [...(r.inputs?.images ?? []), ...take] } };
           words.push(styleLegend(existing + 1, existing + take.length));
         }
-      } else if (mb.loraHandle && (model.id === SIGNATURE_MODELS.openTurbo || model.family !== "style-reference")) {
-        move(SIGNATURE_MODELS.openTurbo, `Runs on {model} with the trained “${mb.name}” style LoRA`);
-        words.push(`In the style of @${mb.loraHandle}.`);
       } else {
         if (model.family !== "style-reference") move(SIGNATURE_MODELS.openStyle, `Runs on {model} with the “${mb.name}” collages`);
         const max = model.options.maxImages ?? 2;

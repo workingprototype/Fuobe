@@ -11,25 +11,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fileToList, type SlotValue } from "@/components/studio/media-slot";
 import { useElements, useSaveElement } from "@/lib/api";
 import type { StudioElement } from "@/lib/catalog/elements";
+import { SOUL_ID_COPY, SOUL_ID_PHOTOS } from "@/lib/catalog/training";
 import { cn } from "@/lib/utils";
 
-/** What a character brings: a trained Soul ID, a trained LoRA, or just photos. */
+/** What a character brings: a trained Soul ID (Fuobe Soul), an old Higgsfield one to retrain, or just photos. */
 export function identityLabel(el: StudioElement): string {
-  if (el.loras.some((l) => l.referenceId)) return "Soul ID";
-  if (el.loras.length) return "LoRA";
+  if (el.loras.some((l) => !l.referenceId && !l.demo)) return "Soul ID";
+  if (el.loras.some((l) => l.referenceId)) return "Retrain Soul ID";
   return `${el.references.length} photo${el.references.length === 1 ? "" : "s"}`;
 }
 
-/** Higgsfield's character-creation copy (docs/research/higgsfield-image-studios.md §2). */
+/** The character-creation copy (src/lib/catalog/training.ts SOUL_ID_COPY, Higgsfield's rules): saving is the consent. */
 const CREATE_COPY = {
-  more: "Upload 20+ photos for best results",
-  moreTitle: "More Photos, Better Results",
-  avoidTitle: "Avoid These Types of Photos",
-  avoid: "No duplicates, group shots, pets, nudes, filters, face-covering accessories, or masks",
-  consent: "By clicking Save character, I consent to this biometric data processing and confirm these photos are of me or of a person at least 18 years old who gave written permission.",
+  ...SOUL_ID_COPY,
+  consent: `By clicking Save character, ${SOUL_ID_COPY.consent.charAt(0).toLowerCase()}${SOUL_ID_COPY.consent.slice(1)}`,
 } as const;
 
-const MAX_PHOTOS = 20;
+const MAX_PHOTOS = SOUL_ID_PHOTOS.max;
 
 /** Create a character from photos of one person, without leaving the page. */
 export function QuickCharacter({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (el: StudioElement) => void }) {

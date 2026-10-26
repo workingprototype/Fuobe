@@ -27,6 +27,7 @@ import {
   usableOn,
 } from "@/lib/catalog/training";
 import { buildPayload } from "@/lib/catalog/payload";
+import { OWN_LOOK, soulPostSteps, soulRecipe } from "@/lib/catalog/soul";
 import { zip } from "@/server/zip";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -212,6 +213,15 @@ describe("a Soul ID on every model of its family, on both engines", () => {
     const plan = planGeneration({ ...request, params: { extra: { characterStrength: 0.5 } } }, (id) => (id === soul.id ? cloudSoul : getModel(id)), getPreset);
     expect(plan.loras[0]).toMatchObject({ file: "fuobe/maya-abc123.safetensors", strength: 0.8 });
     expect(plan.prompt).toMatch(/myfz Maya on a beach/);
+  });
+
+  it("makes a trained moodboard the look on Fuobe Soul: its LoRA alone, no look words, tail or grade", () => {
+    const style = { file: "fuobe/dusk-a1.safetensors", strength: 1, trigger: "dskfz", own: true as const };
+    const r = soulRecipe("soul", "dskfz Dusk, a lighthouse at night", { look: OWN_LOOK, userLoras: [style] });
+    expect(r.loras).toEqual([style]);
+    expect(r.prompt).toBe("dskfz Dusk, a lighthouse at night.");
+    expect(r.grade).toBeUndefined();
+    expect(soulPostSteps("fuobe-soul", OWN_LOOK)).toBeUndefined();
   });
 
   it("falls back to reference photos when no LoRA runs there", () => {
