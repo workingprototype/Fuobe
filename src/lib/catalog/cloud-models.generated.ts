@@ -17677,6 +17677,10 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
         "480p": 0.018,
         "720p": 0.039,
         "1080p": 0.0905
+      },
+      "videoMegapixel": {
+        "usd": 0.001605,
+        "withLoras": 0.001805
       }
     }
   }

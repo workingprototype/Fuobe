@@ -578,6 +578,12 @@ export interface Pricing {
   withLoras?: number;
   /** withLoras at each resolution, when it differs (Fuobe Cinema's LTX-2.3 bills per megapixel of video). */
   withLorasByResolution?: Record<string, number>;
+  /**
+   * Billed per megapixel of video made, width × height × frames rounded up (fal's LTX-2.3): a per-second model whose
+   * routes carry a size table and a frame count is priced on the clip's real size for its tier and shape and its frame
+   * count, rather than on `usd` / `byResolution` (one shape's per-second rate). `withLoras`: the LoRA endpoint's rate.
+   */
+  videoMegapixel?: { usd: number; withLoras?: number };
   /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
   roundUp?: true;
   /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */

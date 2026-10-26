@@ -179,6 +179,8 @@ export function CameraChip({
   moves,
   onMovesChange,
   required,
+  badges,
+  civitai,
 }: {
   settings: DirectorSettings;
   onChange: Patch;
@@ -186,6 +188,9 @@ export function CameraChip({
   engine: Engine;
   moves: string[];
   onMovesChange: (m: string[]) => void;
+  /** Badge how Fuobe Cinema drives each move (off when the picked model gets the moves in words), as the prompt bar's picker does. */
+  badges?: boolean;
+  civitai?: boolean;
   /** Cinematic stills: camera, lens and focal length must be set. */
   required?: boolean;
 }) {
@@ -237,7 +242,7 @@ export function CameraChip({
             <div className="-mx-1">
               <PanelHeader title="Direct a camera move" subtitle="Adds to the prompt box, or type # there. Several per shot; order matters." />
               <MoveChips moves={moves} onChange={onMovesChange} />
-              <MoveList engine={engine} selected={moves} onPick={(slug) => onMovesChange([...moves, slug])} />
+              <MoveList engine={engine} badges={badges} civitai={civitai} selected={moves} onPick={(slug) => onMovesChange([...moves, slug])} />
             </div>
           )}
         </div>

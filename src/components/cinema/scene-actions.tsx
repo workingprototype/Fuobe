@@ -72,7 +72,7 @@ export function askSceneConfirmAgain() {
 export interface ScenePlanContext {
   engine: Engine;
   settings: DirectorSettings;
-  context: { cloudAllowed: boolean };
+  context: { cloudAllowed: boolean; civitai?: boolean };
   brief: string;
 }
 

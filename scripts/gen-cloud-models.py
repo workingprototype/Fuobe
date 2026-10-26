@@ -479,7 +479,8 @@ model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video
 # studios[cinema-studio].original). Prompt expansion off so the compiled Director prompt is what runs; sound follows the
 # toggle; up to 481 frames at 24 fps (20 s; Cinema adds the rest with one extend); exact sizes per tier in multiples of
 # 32. A camera move LTX-2.3's camera LoRA makes goes as camera_lora (params.extra, set by src/lib/catalog/cinema.ts).
-# An extend or an edit keeps its source clip's size. Priced per second from fal's per-megapixel-of-video price.
+# An extend or an edit keeps its source clip's size. Priced on fal's per-megapixel-of-video price (Pricing.videoMegapixel:
+# the tier and shape's size × the frames, rounded up); the per-second rates are the 16:9 ones, for display.
 CINEMA = next(s for s in ORIGINALS["studios"] if s["id"] == "cinema-studio")["original"]["cloud"]
 CINEMA_TIERS = {"480p": "480p tier", "720p": "720p tier", "1080p": "1080p tier"}
 CINEMA_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in CINEMA["sizes"].items() if k.startswith(prefix)).items()}
@@ -509,7 +510,8 @@ model("fuobe-cinema", "Fuobe Cinema", "Fuobe Original", "fuobe-cinema", "video",
       original=True, sizes=CINEMA_SIZES, badges=["audio"],
       pricing=("second", CINEMA_PER_SECOND["720p"],
                f"${CINEMA_MP} per megapixel of video (width × height × frames): about ${round(CINEMA_PER_SECOND['720p'] * 5, 2)} for 5 s at 720p; ${CINEMA_MP_LORA} with LoRAs",
-               {"byResolution": CINEMA_PER_SECOND, "withLoras": CINEMA_PER_SECOND_LORA["720p"], "withLorasByResolution": CINEMA_PER_SECOND_LORA}),
+               {"byResolution": CINEMA_PER_SECOND, "withLoras": CINEMA_PER_SECOND_LORA["720p"], "withLorasByResolution": CINEMA_PER_SECOND_LORA,
+                "videoMegapixel": {"usd": CINEMA_MP, "withLoras": CINEMA_MP_LORA}}),
       defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],

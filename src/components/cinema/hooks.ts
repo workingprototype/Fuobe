@@ -16,7 +16,7 @@ export interface ProjectView {
   project: CinemaProject;
   folders: CinemaFolder[];
   spentUsd: number;
-  context: { cloudAllowed: boolean };
+  context: { cloudAllowed: boolean; civitai?: boolean };
 }
 
 async function json<T>(res: Response): Promise<T> {

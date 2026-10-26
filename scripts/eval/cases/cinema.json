@@ -112,7 +112,7 @@
       "tags": [
         "director"
       ],
-      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-eval.test.ts checks it against planCinema)."
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
     },
     {
       "id": "cinema/director-epic",
@@ -126,7 +126,7 @@
       "tags": [
         "director"
       ],
-      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-eval.test.ts checks it against planCinema)."
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
     },
     {
       "id": "cinema/director-comedy",
@@ -140,7 +140,7 @@
       "tags": [
         "director"
       ],
-      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-eval.test.ts checks it against planCinema)."
+      "note": "The prompt is what Cinema compiles from the Director's Panel for this scene (tests/cinema-original.test.ts checks it against planCinema)."
     },
     {
       "id": "cinema/move-dolly-in",

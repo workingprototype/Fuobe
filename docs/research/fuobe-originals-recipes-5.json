@@ -16804,12 +16804,14 @@
     "source": "Fuobe's own recipe for Cinema Studio 4.0's Original, from the hosted LTX-2.3 22B LoRA endpoints' schemas above (§3.1) and the official LTX-2 ComfyUI templates (sizes in multiples of 32; 1280x704 at 720p). Unmeasured until the evaluation harness (O8) runs the cinema suite on a GPU and on fal.",
     "cloud": {
      "endpoints": {
-      "t2v": "fal-ai/ltx-2.3-22b/text-to-video/lora",
-      "i2v": "fal-ai/ltx-2.3-22b/image-to-video/lora",
-      "flf2v": "fal-ai/ltx-2.3-22b/image-to-video/lora (end_image_url)",
-      "extend": "fal-ai/ltx-2.3-22b/extend-video/lora",
-      "v2v": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+      "t2v": "fal-ai/ltx-2.3-22b/text-to-video",
+      "i2v": "fal-ai/ltx-2.3-22b/image-to-video",
+      "flf2v": "fal-ai/ltx-2.3-22b/image-to-video (end_image_url)",
+      "extend": "fal-ai/ltx-2.3-22b/extend-video",
+      "v2v": "fal-ai/ltx-2.3-22b/video-to-video"
      },
+     "loraEndpoints": "the /lora variant of each (fal-ai/ltx-2.3-22b/{text-to-video,image-to-video,extend-video,video-to-video}/lora) only when a LoRA rides along: $0.001805 per megapixel of video against the plain endpoints' $0.001605",
+     "price": "per megapixel of video made (width x height x frames, rounded up): Cinema prices a take on its tier and shape's size from the table below and its 24n+1 frames",
      "fixed": {
       "enable_prompt_expansion": false
      },
@@ -16818,6 +16820,8 @@
      "longerThanMax": "one extend-video call adds the rest (a 30 s take is 20 s + 10 s)",
      "audio": "generate_audio follows the Director's sound toggle",
      "prequel": "extend-video with extend_direction backward (unverified: whether the result holds the source clip)",
+     "edit": "video-to-video with the take's own scene and the change in one prompt (the endpoint renders a scene, not an instruction), video_strength 0.5 (fal's default 0.01 all but re-renders the clip; Fuobe's guess, between build plan O13's low and medium change), audio_strength 1 (the take's sound stays); a take longer than 20 s is edited for its first 481 frames (match_video_length false); a take made on Seedance 2.5, Kling 3.0 or Veo 3.1 is edited with Kling O3 instead",
+     "civitai": "a move whose Wan 2.2 LoRA downloads from civitai runs on Fuobe DoP only with the user's civitai key; without one it runs on its words",
      "sizes": {
       "480p tier (~0.4 MP)": {
        "21:9": "1120x480",
@@ -16844,7 +16848,7 @@
        "9:16": "1088x1920"
       }
      },
-     "referenceClips": "none yet: fal-ai/ltx-2.3-22b/reference-video-to-video/lora takes one clip, but its inputs are not read here; Seedance 2.5 stays the choice for reference clips"
+     "referenceClips": "none yet: fal-ai/ltx-2.3-22b/reference-video-to-video/lora takes one clip, but its inputs are not read here, and it is an IC-LoRA control (depth, pose, canny from the clip) rather than a reference; a take with reference clips runs on Seedance 2.5 unless Fuobe Cinema is picked from the menu (then the clips are left out, with a note)"
     },
     "open": {
      "video": "Wan 2.2 14B Lightning (wan22-t2v-14b-lightx2v / wan22-i2v-14b-lightx2v), wan22-flf2v-14b for start and end frame; 3 or 5 s at 16 fps",
@@ -16892,8 +16896,8 @@
       "helicopter-shot": null
      }
     },
-    "stills": "fuobe-soul-cinema (Fuobe Soul Cinema: filmstill 0.7 + moviewide 0.5, cine tail) with the Director's camera and lens words",
-    "soulCast": "fuobe-soul with the Realistic look (v1-realistic) and the 17-field casting compiler; the Soul Cast sheet graph (soul-cast-sheet-zimage) stays an open alternative",
+    "stills": "fuobe-soul-cinema (Fuobe Soul Cinema: filmstill 0.7 + moviewide 0.5, cine tail) with the Director's camera and lens words; Soul Cinema's 21:9 crop and grade, and Soul Location's Movie grade, are applied in the browser by Cinema's feed and builders",
+    "soulCast": "fuobe-soul with the Realistic look (v1-realistic) and the 17-field casting compiler in the cloud; on the GPU the Soul Cast sheet graph (soul-cast-sheet-zimage, the same Z-Image Turbo) with the Realistic look's LoRAs and words, which also cuts the sheet's four views (Fuobe Soul alone when the graph is missing)",
     "soulLocation": "fuobe-soul with the Movie look (v1-movie), 16:9, no people; other views by the Multiple-Angles LoRA (open: Qwen-Image-Edit 2511 + the LoRA; cloud: fal-ai/qwen-image-edit-2511-multiple-angles)",
     "partners": "Seedance 2.5, Kling 3.0 and Veo 3.1 stay pickable with the Director compiled into the prompt; Kling O3 edits takes made on a partner model",
     "licences": "LTX-2.x Community (free under US$10M annual revenue; shown in About & licences), Wan 2.2 Apache-2.0, Z-Image Turbo Apache-2.0, Qwen-Image-Edit 2511 Apache-2.0"

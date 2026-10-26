@@ -9,9 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
+import { useSoulFinish } from "@/components/studio/soul-finish";
 import { useSaveElement, useStatus } from "@/lib/api";
+import { getModel } from "@/lib/catalog";
 import {
   CAST_LOOK,
+  CAST_SHEET_MODEL,
   LOCATION_LOOK,
   LOCATION_VIEWS,
   SOUL_BUILDER_MODEL,
@@ -29,6 +32,7 @@ import {
   type DirectorSettings,
 } from "@/lib/catalog/cinema";
 import { soulLook } from "@/lib/catalog/soul";
+import { finishedUrl } from "@/lib/soul-post";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -41,7 +45,7 @@ interface BuilderProps {
   folderId: string | null;
   engine: Engine;
   settings: DirectorSettings;
-  context: { cloudAllowed: boolean };
+  context: { cloudAllowed: boolean; civitai?: boolean };
   brief: string;
 }
 
@@ -161,9 +165,11 @@ function Results({ items, picked, onPick }: { items: Generation[]; picked: strin
   );
 }
 
-/** "Fuobe Soul · Realistic look": the maker, and the Soul look it uses. */
+/** "Fuobe Soul · Realistic look": the maker, and the Soul look it uses (on the open Soul Cast sheet graph too). */
 function builderLine(model: { id: string; name: string }, look: string): string {
-  return model.id === SOUL_BUILDER_MODEL ? `${model.name} · ${soulLook(look)?.name ?? look} look` : model.name;
+  const name = soulLook(look)?.name ?? look;
+  if (model.id === CAST_SHEET_MODEL) return `${getModel(SOUL_BUILDER_MODEL)?.name ?? "Fuobe Soul"} · ${name} look · the sheet, then its four views as their own pictures`;
+  return model.id === SOUL_BUILDER_MODEL ? `${model.name} · ${name} look` : model.name;
 }
 
 /** "a marble perfume atelier at golden hour, …" → "Marble Perfume Atelier". */
@@ -172,12 +178,18 @@ function locationName(prompt: string): string {
   return words.slice(0, 3).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") || "Location";
 }
 
+const CINEMA_KEY = ["cinema"] as const;
+
 function useBuilderRun(projectId: string) {
   const generate = useCinemaGenerate(projectId);
   const items = useCinemaItems(projectId).data;
   const [ids, setIds] = useState<string[]>([]);
   const results = useMemo(() => ids.map((id) => items?.find((g) => g.id === id)).filter((g): g is NonNullable<typeof g> => !!g), [ids, items]);
-  return { generate, results, setIds };
+  // A Soul look's grade (Soul Location's Movie look) is applied here too, so a saved element holds the finished picture.
+  useSoulFinish(results, CINEMA_KEY);
+  // A variant picked before it was finished: its finished picture.
+  const current = (url: string) => finishedUrl(results, url);
+  return { generate, results, setIds, current };
 }
 
 function CostLabel({ plan, demoModel }: { plan: { costUsd: number | null }; demoModel: { routes: { provider: string }[] } }) {
@@ -231,7 +243,8 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
   const [notes, setNotes] = useState("");
   const [batch, setBatch] = useState(2);
   const [picked, setPicked] = useState<string[]>([]);
-  const { generate, results, setIds } = useBuilderRun(projectId);
+  const { generate, results, setIds, current } = useBuilderRun(projectId);
+  const chosen = picked.map(current);
   const visible = visibleCast(values);
   const input = { engine, mode: "image" as const, action: "cast" as const, prompt: notes, settings: {}, cast: visible, batch };
   const plan = planCinema({ ...input, brief }, context);
@@ -322,8 +335,8 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
       {results.length > 0 && (
         <div className="space-y-3 border-t pt-3">
           <p className="text-[12.5px] font-medium">Select an image variant for your cast</p>
-          <Results items={results} picked={picked} onPick={(u) => setPicked((p) => (p.includes(u) ? p.filter((x) => x !== u) : [u]))} />
-          <SaveElement kind="character" defaultName={castName(visible)} picked={picked} description={castPrompt(visible, notes)} onSaved={() => onOpenChange(false)} />
+          <Results items={results} picked={chosen} onPick={(u) => setPicked((p) => (p.map(current).includes(u) ? [] : [u]))} />
+          <SaveElement kind="character" defaultName={castName(visible)} picked={chosen} description={castPrompt(visible, notes)} onSaved={() => onOpenChange(false)} />
         </div>
       )}
     </>
@@ -343,7 +356,8 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
   const [prompt, setPrompt] = useState("");
   const [batch, setBatch] = useState(2);
   const [picked, setPicked] = useState<string[]>([]);
-  const { generate, results, setIds } = useBuilderRun(projectId);
+  const { generate, results, setIds, current } = useBuilderRun(projectId);
+  const chosen = picked.map(current);
   const input = { engine, mode: "image" as const, action: "location" as const, prompt, settings, batch };
   const plan = planCinema({ ...input, brief }, context);
   const look = directorSummary({ ...settings, genre: undefined, era: undefined, tempo: undefined, lighting: settings.lighting });
@@ -405,18 +419,18 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
       {results.length > 0 && (
         <div className="space-y-3 border-t pt-3">
           <p className="text-[12.5px] font-medium">Pick the views to keep (several views make a stronger location)</p>
-          <Results items={results} picked={picked} onPick={(u) => setPicked((p) => (p.includes(u) ? p.filter((x) => x !== u) : [...p, u]))} />
-          {picked.length > 0 && (
+          <Results items={results} picked={chosen} onPick={(u) => setPicked((p) => (p.map(current).includes(u) ? p.map(current).filter((x) => x !== u) : [...p.map(current), u]))} />
+          {chosen.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[12px] text-muted-foreground">Show the same location from another view:</span>
               {LOCATION_VIEWS.map((v) => (
-                <button key={v.id} type="button" onClick={() => run({ view: v.id, url: picked[0] })} className="h-7 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent">
+                <button key={v.id} type="button" onClick={() => run({ view: v.id, url: chosen[0] })} className="h-7 rounded-full bg-secondary px-2.5 text-[12px] font-medium hover:bg-accent">
                   {v.name}
                 </button>
               ))}
             </div>
           )}
-          <SaveElement kind="location" defaultName={locationName(prompt)} picked={picked} description={prompt} onSaved={() => onOpenChange(false)} />
+          <SaveElement kind="location" defaultName={locationName(prompt)} picked={chosen} description={prompt} onSaved={() => onOpenChange(false)} />
         </div>
       )}
     </>

@@ -23,14 +23,15 @@ function moveScore(value: string, search: string, keywords?: string[]): number {
 }
 
 /** How Fuobe Cinema drives a move on this engine, given a start frame (a small badge in the picker). */
-function routeBadge(m: CameraMove, engine: Engine): string | null {
-  const r = cinemaMoveRoute(m.slug, engine, true);
+function routeBadge(m: CameraMove, engine: Engine, civitai?: boolean): string | null {
+  const r = cinemaMoveRoute(m.slug, engine, true, { civitai });
   return r.via === "camera-lora" ? "Camera LoRA" : r.via === "lora" ? "LoRA" : r.via === "fun-camera" ? "Fun Camera" : r.via === "hosted-move" ? "Focus move" : null;
 }
 
 export function MoveList({
   engine,
   badges = true,
+  civitai,
   selected,
   onPick,
   defaultQuery,
@@ -39,6 +40,8 @@ export function MoveList({
   engine: Engine;
   /** Say how Fuobe Cinema drives each move (off when a partner model gets the moves in words). */
   badges?: boolean;
+  /** A civitai key is set (false: a cloud move whose LoRA downloads from civitai runs on its words, so no badge). */
+  civitai?: boolean;
   selected: string[];
   onPick: (slug: string) => void;
   /** What was typed after "#" in the prompt (the list mounts fresh each time the picker opens). */
@@ -72,7 +75,7 @@ export function MoveList({
         <CommandEmpty>No camera moves match your search</CommandEmpty>
         <CommandGroup>
           {moves.map((m) => {
-            const badge = badges ? routeBadge(m, engine) : null;
+            const badge = badges ? routeBadge(m, engine, civitai) : null;
             const n = selected.indexOf(m.slug);
             return (
               <CommandItem key={m.slug} value={m.name} keywords={[m.slug, m.hint]} onSelect={() => onPick(m.slug)} className="group/move items-start gap-2.5 py-2">
@@ -102,6 +105,7 @@ export function MovePicker({
   onOpenChange,
   engine,
   badges,
+  civitai,
   selected,
   onPick,
   initialQuery,
@@ -110,6 +114,7 @@ export function MovePicker({
   onOpenChange: (o: boolean) => void;
   engine: Engine;
   badges?: boolean;
+  civitai?: boolean;
   selected: string[];
   onPick: (slug: string) => void;
   initialQuery?: string;
@@ -144,6 +149,7 @@ export function MovePicker({
         <MoveList
           engine={engine}
           badges={badges}
+          civitai={civitai}
           selected={selected}
           defaultQuery={initialQuery}
           autoFocus

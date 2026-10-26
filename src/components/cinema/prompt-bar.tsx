@@ -326,7 +326,7 @@ export interface PromptBarProps {
   onSettings: (patch: Partial<DirectorSettings>) => void;
   palettes: { name: string; hex: string[] }[];
   onPalettes: (p: { name: string; hex: string[] }[]) => void;
-  context: { cloudAllowed: boolean };
+  context: { cloudAllowed: boolean; civitai?: boolean };
   brief: string;
   spentUsd: number;
   costCapUsd: number | null;
@@ -442,6 +442,8 @@ export function PromptBar(props: PromptBarProps) {
   // The model picked in the menu (a take may run on another: Fuobe DoP for a move's Wan camera LoRA, a references edit…).
   const chosen = draft.models[modelKey];
   const picked = chosen && modelList.includes(chosen) ? chosen : modelList[0];
+  // The move pickers badge how Fuobe Cinema (or Wan 2.2 on the GPU) drives a move; a partner model gets the moves in words.
+  const moveBadges = picked === CINEMA_MODEL || (engine === "open" && getModel(picked)?.family === "wan");
   const pickable = action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid");
   const placeholder = video
     ? action === "edit"
@@ -544,6 +546,8 @@ export function PromptBar(props: PromptBarProps) {
         moves={draft.moves}
         onMovesChange={(moves) => setDraft({ moves })}
         required={draft.mode === "image" && draft.imageTool === "still"}
+        badges={moveBadges}
+        civitai={context.civitai}
       />
       <PaletteChip settings={settings} onChange={onSettings} engine={engine} saved={props.palettes} onSave={props.onPalettes} />
       <LightingChip settings={settings} onChange={onSettings} />
@@ -799,7 +803,8 @@ export function PromptBar(props: PromptBarProps) {
           </Tooltip>
           {video && (
             <MovePicker
-              badges={picked === CINEMA_MODEL || (engine === "open" && getModel(picked)?.family === "wan")}
+              badges={moveBadges}
+              civitai={context.civitai}
               open={movesOpen}
               onOpenChange={(o) => {
                 setMovesOpen(o);
