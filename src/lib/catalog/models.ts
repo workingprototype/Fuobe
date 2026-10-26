@@ -926,6 +926,19 @@ const open: ModelDef[] = [
     routes: [comfy("trim", "video-trim")],
     options: {},
   }),
+  // Canvas Video Concatenator: each clip cut, framed, retimed to 30 fps and given its sound (or silence) in one
+  // streamed pass, so video-concat-encoded can join the clips packet by packet.
+  o({
+    id: "oss-fit-clip",
+    name: "Fit clip",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Cuts a clip and fits it to one size and frame rate, with its sound or silence · CPU",
+    routes: [comfy("trim", "video-fit-clip", "VHS loader in passes: start, length, frame rate; centre crop; sound, or silence when muted")],
+    options: {},
+    hidden: true,
+  }),
   o({
     id: "oss-segment",
     name: "Cut segment (resampled)",

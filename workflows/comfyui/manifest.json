@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T08:23:46.732Z",
+  "generatedAt": "2026-10-26T09:24:31.157Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -13193,6 +13193,93 @@
       "validated": true,
       "notes": "The Faceless / Explainer \"Frame by frame\" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. The template joins two clips (video, video2); the provider rewrites it per request (expand \"videos\", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI's CreateVideo / SaveVideo made at one size and fps), so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip's settings (still constant memory), and clips of different sizes fail with \"could not be encoded compatibly\". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).",
       "expand": "videos"
+    },
+    {
+      "id": "video-fit-clip",
+      "title": "One clip cut, retimed and framed for a packet-copy join: start/length at a set fps, centre crop, its sound or silence (VHS meta-batch, no model)",
+      "capability": "trim",
+      "file": "video-fit-clip.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-fit-clip.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "startTime": [
+          {
+            "node": "8",
+            "input": "value"
+          }
+        ],
+        "duration": [
+          {
+            "node": "9",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "5",
+            "input": "value"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          }
+        ],
+        "framesPerBatch": [
+          {
+            "node": "2",
+            "input": "frames_per_batch"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "duration": 0,
+        "startTime": 0,
+        "framesPerBatch": 64
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 2
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "n/a (no model; ComfyUI core + VideoHelperSuite GPL-3.0 code)",
+      "validated": true,
+      "notes": "The Canvas Video concatenator (r4/canvas-plus), one job per clip, then video-concat-encoded joins them: every clip comes out at the film's size (width x height, scaled to cover and centre-cropped), at fps (30) and as H.264 + AAC from VHS, so ConcatenateVideo can copy the packets. VHS_LoadVideo resamples to fps and skips round(startTime x fps) frames, keeping round(duration x fps) (duration 0 = to the end); its sound is cut to the same window (VHS lazy audio: start = skipped frames / fps, length = kept frames / fps), so picture and sound stay in sync. framesPerBatch frames per pass (64): memory stays flat however long the clip. Muted clips and clips with no sound: the provider replaces the combine's audio with an EmptyAudio as long as the window (silenceVhsAudio), so every clip of a film has a sound track; when the window's length is unknown (no header, no end) the sound is dropped instead."
     },
     {
       "id": "audio-loop-crossfade",

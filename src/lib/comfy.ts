@@ -588,6 +588,25 @@ export function dropVhsAudio(wf: ComfyWorkflow): ComfyWorkflow {
   return out;
 }
 /**
+ * The sound a VHS loader hands on replaced by `seconds` of stereo silence (the Video concatenator's muted
+ * clips and clips without sound): every input fed by a loader's audio output takes an EmptyAudio instead,
+ * so the clip still has a sound track as long as its picture and a join keeps the clips in step. The
+ * loader's own sound is then never read (a file without one would stop VHS).
+ */
+export function silenceVhsAudio(wf: ComfyWorkflow, seconds: number): ComfyWorkflow {
+  const loaders = new Set(Object.entries(wf).filter(([, n]) => n.class_type === "VHS_LoadVideo").map(([id]) => id));
+  if (!loaders.size) return wf;
+  const out = cloneWorkflow(wf);
+  let id = "silence";
+  for (let k = 2; out[id]; k++) id = `silence${k}`;
+  out[id] = { class_type: "EmptyAudio", inputs: { duration: Math.round(seconds * 1000) / 1000, sample_rate: 44100, channels: 2 }, _meta: { title: "Silence as long as the clip" } };
+  for (const n of Object.values(out)) {
+    const a = n.inputs.audio;
+    if (isLinkValue(a) && loaders.has(a[0]) && a[1] === 2) n.inputs.audio = [id, 0];
+  }
+  return out;
+}
+/**
  * A silent clip read by core LoadAudio (video-append-endcard reads the ad's sound from the same upload): LoadAudio
  * stops with "No audio stream found in the file". The loaders go, with the sound nodes fed only by them (the card's
  * silence and the AudioConcat), and the inputs of the picture nodes that took that sound (ConcatenateVideo's

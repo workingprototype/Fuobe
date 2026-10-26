@@ -3,6 +3,7 @@
 import {
   AtSign,
   AudioLines,
+  AudioWaveform,
   Clapperboard,
   Columns3,
   Combine,
@@ -11,13 +12,16 @@ import {
   Frame,
   GalleryHorizontal,
   ImageIcon,
+  Languages,
   MessageSquareText,
   Mic2,
   MonitorPlay,
   Package,
   Sparkles,
   StickyNote,
+  Table,
   Type,
+  UserRound,
   ZoomIn,
   type LucideIcon,
 } from "lucide-react";
@@ -26,10 +30,12 @@ import {
   describeNode,
   effectiveOp,
   isGenerator,
+  tablesFeeding,
   type CanvasGraph,
   type CanvasNode,
   type CanvasNodeData,
   type CanvasPlan,
+  type ClipSettings,
   type Connection,
   type NodeDescription,
   type PortType,
@@ -57,6 +63,10 @@ export const ICONS: Record<string, LucideIcon> = {
   Package,
   GalleryHorizontal,
   Columns3,
+  AudioWaveform,
+  UserRound,
+  Languages,
+  Table,
 };
 
 /** A node type's or template's icon, by lucide name. */
@@ -72,6 +82,7 @@ export const PORT_COLOR: Record<PortType, string> = {
   video: "var(--chart-4)",
   audio: "var(--chart-3)",
   element: "var(--chart-1)",
+  voice: "var(--chart-3)",
 };
 
 export type NodeState = GenerationStatus | "idle";
@@ -90,7 +101,8 @@ export interface NodeResults {
 
 export const EMPTY_RESULTS: NodeResults = { gens: [], state: "idle", progress: null, message: null, error: null, outputs: [] };
 
-export function foldResults(gens: Generation[]): NodeResults {
+/** A node's latest run folded into one status; `out` (a node made in several steps) is the generation whose outputs it shows. */
+export function foldResults(gens: Generation[], out?: string): NodeResults {
   if (!gens.length) return EMPTY_RESULTS;
   const has = (s: GenerationStatus) => gens.some((g) => g.status === s);
   const state: NodeState = has("running") ? "running" : has("queued") ? "queued" : has("failed") ? "failed" : has("canceled") ? "canceled" : "succeeded";
@@ -102,14 +114,14 @@ export function foldResults(gens: Generation[]): NodeResults {
     progress: progress && progress > 0 ? progress : null,
     message: live[0]?.message ?? null,
     error: gens.find((g) => g.status === "failed")?.error ?? null,
-    outputs: gens.flatMap((g) => (g.status === "succeeded" ? g.outputs.map((o, i) => ({ g, o, i })) : [])),
+    outputs: gens.flatMap((g) => (g.status === "succeeded" && (!out || g.id === out) ? g.outputs.map((o, i) => ({ g, o, i })) : [])),
   };
 }
 
 /** The same results object when the node's generations are the very same objects (memoized nodes skip a render). */
-export function foldResultsKeep(prev: NodeResults | undefined, gens: Generation[]): NodeResults {
+export function foldResultsKeep(prev: NodeResults | undefined, gens: Generation[], out?: string): NodeResults {
   if (prev && prev.gens.length === gens.length && prev.gens.every((g, i) => g === gens[i])) return prev;
-  return foldResults(gens);
+  return foldResults(gens, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +138,10 @@ export interface NodeView {
   counts: Readonly<Record<string, number>>;
   /** What to fix before it can run (pick a model, add an image…). */
   error?: string;
-  /** One run's estimate (null = unknown). */
+  /** One run's estimate (null = unknown); every row's, for a node run per row of a table. */
   costUsd: number | null;
+  /** Runs once per row of a table: how many rows. */
+  rows?: number;
   /** Why Run all would run it; null when its result is reused (or it can't run). */
   step: RunReason | null;
   reused: boolean;
@@ -166,7 +180,7 @@ const sameCounts = (a: Readonly<Record<string, number>>, b: Readonly<Record<stri
 };
 
 const sameView = (a: NodeView, b: NodeView) =>
-  a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
+  a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.rows === b.rows && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
 
 /** What the planner knows about one generator node: its description and the op it runs. */
 export interface NodeInfo {
@@ -196,12 +210,24 @@ export class DescribeCache {
     }
     const next = new Map<string, { key: unknown[]; info: NodeInfo }>();
     const out = new Map<string, NodeInfo>();
+    // Rows reach a node from a table any number of steps up: the table it runs per row of is an input too
+    // (worked out once for the whole board, not per node).
+    const feeds = graph.nodes.some((n) => n.type === "table") ? tablesFeeding(graph) : null;
+    const tableKey = (n: CanvasNode) => {
+      const rows = feeds!(n);
+      return rows && "table" in rows ? rows.table.data : rows?.error;
+    };
     for (const n of graph.nodes) {
       if (!isGenerator(n)) continue;
       const key: unknown[] = [n.type, n.data];
+      if (feeds) key.push(tableKey(n));
       for (const e of into.get(n.id) ?? []) {
         const s = byId.get(e.source);
         key.push(e.source, e.targetHandle, s?.type, s?.data, s?.position.x, s?.position.y);
+        // A Video concatenator takes a clip per row from a node run per row: that node's table is its input too.
+        if (feeds && n.type === "concat" && s) key.push(tableKey(s));
+        // A cloned voice passes on what's wired into it: that is an input of this node too.
+        if (s?.type === "clone-voice") for (const f of into.get(s.id) ?? []) key.push(f.source, byId.get(f.source)?.type, byId.get(f.source)?.data);
       }
       const old = this.entries.get(n.id);
       const entry = old && old.key.length === key.length && old.key.every((k, i) => k === key[i]) ? old : { key, info: { d: describeNode(graph, n, { engineMode: mode }), op: effectiveOp(graph, n) } };
@@ -244,6 +270,7 @@ export function buildViews(
       counts: counts.get(n.id) ?? EMPTY_VIEW.counts,
       error: d?.error,
       costUsd: d?.costUsd ?? null,
+      ...(d?.rows && { rows: d.rows }),
       step: steps.get(n.id) ?? null,
       reused: reused.has(n.id),
       runError: runErrors[n.id],
@@ -288,10 +315,19 @@ export interface EditorActions {
   remove: (id: string) => void;
   duplicate: (id: string) => void;
   run: (targets?: string[], force?: boolean) => void;
+  /** Run a group's nodes (and what they need upstream). */
+  runGroup: (groupId: string) => void;
+  /** Change one clip of a Video concatenator (its cut, its sound, or the facts measured from its file). */
+  patchClip: (nodeId: string, clipId: string, patch: Partial<ClipSettings>) => void;
   cancel: (id: string) => void;
   open: (id: string, index?: number) => void;
   /** Add an input node holding this node's first output, wired nowhere yet. */
   toInput: (id: string) => void;
+  /**
+   * Add an input node holding a file made for this node elsewhere (an open-engine dub), below it; `takeOver` moves
+   * the node's outgoing connections onto it.
+   */
+  addInput: (id: string, file: { url: string; kind: "image" | "video" | "audio"; label?: string }, takeOver?: boolean) => void;
   /** Draw an edge (the keyboard's "Connect output to…"). */
   connect: (c: Connection) => void;
   /** Remove an edge (the keyboard's "Disconnect"). */
