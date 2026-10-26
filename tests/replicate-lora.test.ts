@@ -6,6 +6,7 @@ import { getModel, getPreset, PRESETS } from "@/lib/catalog";
 import { fitLoras, loraEntry, loraRef } from "@/lib/catalog/loras";
 import { planGeneration } from "@/lib/catalog/plan";
 import type { Generation, GenInput, LoraRef, ModelRoute } from "@/lib/catalog/types";
+import { onEngine } from "@/lib/catalog/engines";
 
 // Providers and route choice read keys and preferences from the settings table: a throwaway database.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fuobe-replicate-lora-"));
@@ -137,9 +138,10 @@ describe("Replicate LoRA payloads", () => {
   });
 
   it("puts the user's own LoRA first, so a look's LoRAs give way to it on an API that takes so many", () => {
-    const preset = PRESETS.find((x) => /motion|effect/.test(x.type) && x.open?.modelId === "oss-wan22-14b" && x.open.loras?.length)!;
+    const preset = PRESETS.find((x) => /motion|effect/.test(x.type) && x.open?.modelId === "fuobe-dop" && x.open.loras?.length)!;
     const identity: LoraRef = { file: "", url: "https://v3.fal.media/files/maya.safetensors", strength: 1, trigger: "mya" };
-    const plan = planGeneration({ feature: "motion", presetId: preset.id, modelId: "oss-wan22-14b", prompt: "x", inputs: { images: ["a.png"] }, loras: [identity] }, getModel, getPreset);
+    const open = (id: string) => (id === "fuobe-dop" ? onEngine(getModel(id)!, "open") : getModel(id));
+    const plan = planGeneration({ feature: "motion", presetId: preset.id, modelId: "fuobe-dop", prompt: "x", inputs: { images: ["a.png"] }, loras: [identity] }, open, getPreset);
     expect(plan.loras[0]).toEqual(identity);
     expect(plan.loras.length).toBe(1 + preset.open!.loras!.length);
     // Three look LoRAs and the identity on fal's 3-slot Z-Image: the identity stays, the last look goes.

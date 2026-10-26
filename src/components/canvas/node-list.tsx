@@ -4,15 +4,14 @@ import { AlertCircle, PinOff, Play, RotateCcw, Sparkles, Square, Upload } from "
 import Link from "next/link";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { getModel } from "@/lib/catalog";
-import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, promptPlaceholder, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
+import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, nodeModel, promptPlaceholder, tableRows, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
 import type { MediaKind } from "@/lib/catalog/types";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { cn } from "@/lib/utils";
 import { EMPTY_VIEW, NodeIcon, useEditorActions, useEditorSnapshot } from "./canvas-context";
 import { costLabel, ElementPicker, EngineBadge, LibraryButton, MediaPreview, OutputThumb, Results } from "./nodes";
 
-const KIND: Partial<Record<CanvasNode["type"], MediaKind>> = { "image-input": "image", "video-input": "video", "audio-input": "audio" };
+const KIND: Partial<Record<CanvasNode["type"], MediaKind>> = { "image-input": "image", "video-input": "video", "audio-input": "audio", "clone-voice": "audio" };
 
 const field = "field-sizing-content max-h-40 min-h-12 w-full resize-none rounded-lg bg-muted px-3 py-2 text-[15px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint";
 const pill = "inline-flex h-9 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium";
@@ -55,7 +54,7 @@ export function NodeList({ onQuickStart }: { onQuickStart: () => void }) {
 function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
   const actions = useEditorActions();
   const { graph, views, globals } = useEditorSnapshot();
-  const model = node.data.modelId ? getModel(node.data.modelId) : undefined;
+  const model = nodeModel(node, globals.mode);
   const kind = KIND[node.type];
   const file = useRef<HTMLInputElement>(null);
   const gen = isGenerator(node);
@@ -107,6 +106,14 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
               }}
             />
           </>
+        )}
+        {node.type === "table" && (
+          <p className="text-[13px] text-muted-foreground">
+            {(() => {
+              const rows = tableRows(node);
+              return rows.length ? `${rows.length === 1 ? "1 row" : `${rows.length} rows`}: ${rows.map((r) => r.filter(Boolean).join(", ")).join(" · ")}` : "No rows yet: fill the table on the board.";
+            })()}
+          </p>
         )}
         {node.type === "element" && (
           <div className="flex items-center gap-2">

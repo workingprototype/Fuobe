@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
+import { APPS, EFFECTS, getPreset, MOTIONS } from "@/lib/catalog";
 
 // One measured cover (pnpm eval:covers writes this file), for a preset id the catalog doesn't have.
 vi.mock("@/lib/preset-previews.generated", () => ({
@@ -262,6 +262,15 @@ describe("preset route lines (details popover)", () => {
     ]);
     // Unknown names fall back to the model id.
     expect(presetRouteLines({ cloud: null, open: { modelId: "oss-x", op: "edit" } })[1].model).toBe("oss-x");
+  });
+
+  it("says when a motion's LoRA is open engine only (its licence doesn't allow hosting)", () => {
+    const wiggle = getPreset("motion-wiggle")!;
+    const [cloud, open] = presetRouteLines(wiggle, (id) => ({ "fuobe-dop": "Fuobe DoP", "kling-2-5-turbo": "Kling 2.5 Turbo" })[id]);
+    // The cloud route carries no LoRA it can't host: the move's words, on its partner model until Fuobe DoP's are measured.
+    expect(cloud.model).toBe("Kling 2.5 Turbo · words only, its LoRA is open engine only");
+    expect(open.model).toBe("Fuobe DoP");
+    expect(presetRouteLines(getPreset("motion-overhead")!, () => "Fuobe DoP")[0].model).toBe("Fuobe DoP");
   });
 });
 

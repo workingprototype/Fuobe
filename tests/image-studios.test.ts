@@ -72,7 +72,6 @@ import {
   representativeOrder,
   SOUL_STYLES,
   soulPick,
-  withLive,
 } from "@/components/moodboards/logic";
 
 // The caps GET /api/palettes sends (src/server/palettes.ts signatureCaps, checked against the catalog in image-studios-api.test.ts).
@@ -236,14 +235,19 @@ describe("palettes: routing per model", () => {
 describe("moodboards: routing per model", () => {
   const refs = Array.from({ length: 12 }, (_, i) => `/api/files/uploads/r${i}.png`);
   const board: MoodboardPick = { id: "mb1", kind: "personal", name: "Neon Haze", status: "complete", refs: refs.slice(0, 10), collages: ["/api/files/uploads/c1.jpg", "/api/files/uploads/c2.jpg"] };
-  const curated: MoodboardPick = { id: CURATED_MOODBOARDS[0].id, kind: "curated", name: CURATED_MOODBOARDS[0].name, description: "Soul 2.0's neutral default look", status: "complete" };
+  const curated: MoodboardPick = { id: CURATED_SETS["soul-v2"][0].id, kind: "curated", name: CURATED_SETS["soul-v2"][0].name, description: CURATED_SETS["soul-v2"][0].description, status: "complete" };
   const req = (modelId: string, images?: string[]): GenerationRequest => ({ feature: "image", modelId, prompt: "a rooftop party", inputs: images ? { images } : undefined, params: { numOutputs: 1 } });
 
-  it("curated looks are Soul 2.0's style_id on soul-2, words elsewhere (the open route's prompt template)", () => {
-    const soul = applySignature(req("soul-2"), { moodboard: curated }, ctx);
-    expect(soul.request.params?.extra?.style_id).toBe(curated.id);
+  it("curated looks are Fuobe Soul looks: the look itself on Fuobe Soul, its words elsewhere", () => {
+    const soul = applySignature(req("fuobe-soul"), { moodboard: curated }, ctx);
+    expect(soul.request.presetId).toBe("v2-general");
     expect(soul.request.prompt).toBe("a rooftop party");
     expect(soul.request.signature?.words).toBeUndefined();
+    expect(soul.notes).toEqual([]);
+    // Higgsfield's Soul 2.0 gets the words (never a Fuobe id as its style_id), and a hint where the look runs whole.
+    const higgs = applySignature(req("soul-2"), { moodboard: curated }, ctx);
+    expect(higgs.request.params?.extra?.style_id).toBeUndefined();
+    expect(higgs.notes[0]).toMatch(/General is a Fuobe Soul look — described in words on .*Fuobe Soul applies it with its LoRAs/);
     const open = applySignature(req("oss-z-image-turbo"), { moodboard: curated }, ctx);
     expect(open.modelId).toBe("oss-z-image-turbo");
     expect(open.request.prompt).toBe("a rooftop party");
@@ -292,39 +296,34 @@ describe("moodboards: routing per model", () => {
     expect(said(lora)).toBe("a rooftop party. In the style of @Neon_Haze.");
   });
 
-  it("Soul's 106 styles are curated picks too: style_id on soul-1, words on Soul 2.0 and everything else", () => {
+  it("Soul's 106 looks are curated picks too: the look on Fuobe Soul, words everywhere else", () => {
     expect(SOUL_STYLES).toHaveLength(106);
     expect(CURATED_TABS["soul-v1"]).toEqual(["All presets", "New", "TikTok Core", "Instagram Aesthetics", "Camera Presets", "Beauty", "Mood", "Surreal", "Graphic Art"]);
-    // Soul's presets sit in several categories at once.
+    // Soul's looks sit in several categories at once.
     const sunset = SOUL_STYLES.find((s) => s.name === "Sunset beach")!;
+    expect(sunset.id).toBe("v1-sunset-beach");
     expect(["New", "Camera Presets", "Beauty"].every((c) => inCuratedTab(sunset, c))).toBe(true);
     const pick = curatedPick(sunset);
     expect(pick.source).toBe("soul-v1");
     expect(soulPick(sunset.id)).toEqual(pick);
-    expect(soulPick(CURATED_MOODBOARDS[0].id)?.source).toBeUndefined();
+    // A pick saved with Higgsfield's old style id reads as its Fuobe look.
+    expect(soulPick(CURATED_MOODBOARDS.find((p) => p.name === "General")!.id)?.id).toBe("v2-general");
     expect(soulPick("not-a-preset")).toBeUndefined();
 
+    const soul = applySignature(req("fuobe-soul"), { moodboard: pick }, ctx);
+    expect(soul.request.presetId).toBe("v1-sunset-beach");
     const soul1 = applySignature(req("soul-1"), { moodboard: pick }, ctx);
-    expect(soul1.request.params?.extra?.style_id).toBe(sunset.id);
-    expect(soul1.notes).toEqual([]);
-    const soul2 = applySignature(req("soul-2"), { moodboard: pick }, ctx);
-    expect(soul2.request.params?.extra?.style_id).toBeUndefined();
-    expect(soul2.notes[0]).toBe("Sunset beach is a Soul preset — described in words on Higgsfield Soul 2.0");
+    expect(soul1.request.params?.extra?.style_id).toBeUndefined();
     const turbo = applySignature(req("oss-z-image-turbo"), { moodboard: pick }, ctx);
     expect(said(turbo)).toBe(presetPrompt(sunset, "a rooftop party"));
   });
 
-  it("curated sets come from the built-in list, with Higgsfield's live previews (and newer presets) on top", () => {
-    expect(CURATED_SETS["soul-v2"].map((c) => c.id)).toEqual(CURATED_MOODBOARDS.map((p) => p.id));
+  it("curated sets are Fuobe's own looks: Fuobe ids and words, no Higgsfield description or preview", () => {
     const base = CURATED_SETS["soul-v2"];
-    // No key: the route answers with the built-in list as a fallback — nothing changes.
-    expect(withLive(base, { items: [{ id: base[0].id, name: "General", preview: "https://x/p.jpg" }], fallback: true }, "soul-v2")).toBe(base);
-    const live = withLive(base, { items: [{ id: base[1].id, name: base[1].name, preview: "https://x/1.jpg" }, { id: "new-look", name: "Brand new" }] }, "soul-v2");
-    expect(live).toHaveLength(base.length + 1);
-    expect(live[1].preview).toBe("https://x/1.jpg");
-    expect(live[0].preview).toBeUndefined();
-    expect(live.at(-1)).toMatchObject({ id: "new-look", name: "Brand new", category: "All presets" });
-    expect(curatedPick(withLive(CURATED_SETS["soul-v1"], { items: [{ id: "v1-new", name: "New one" }] }, "soul-v1").at(-1)!).source).toBe("soul-v1");
+    expect(base).toHaveLength(33);
+    expect(base.every((c) => c.id.startsWith("v2-") && !c.preview)).toBe(true);
+    const higgs = new Map(CURATED_MOODBOARDS.map((p) => [p.name, p.description]));
+    expect(base.every((c) => c.description !== higgs.get(c.name))).toBe(true);
   });
 
   it("an older run that kept the sentences in its prompt isn't styled twice; Run again doesn't add the board twice", () => {
@@ -337,22 +336,17 @@ describe("moodboards: routing per model", () => {
     expect(again.request.inputs?.images).toEqual(nano.request.inputs?.images);
   });
 
-  it("Soul presets go native wherever the model's own preset list is theirs; Soul Cinema (no presets) gets words", () => {
+  it("a look goes native on every model that takes looks; Fuobe Soul Cinema (one fixed look) gets words", () => {
     const style = SOUL_STYLES[0];
     const pick = curatedPick(style);
-    const cinema = applySignature(req("soul-cinema"), { moodboard: pick }, ctx);
-    expect(cinema.request.params?.extra?.style_id).toBeUndefined();
-    expect(cinema.notes[0]).toBe(`Higgsfield Soul Cinema has one fixed look and no presets — ${style.name} is described in words`);
+    const cinema = applySignature(req("fuobe-soul-cinema"), { moodboard: pick }, ctx);
+    expect(cinema.request.presetId).toBeUndefined();
+    expect(cinema.notes[0]).toBe(`Fuobe Soul Cinema has one fixed look — ${style.name} is described in words`);
     expect(said(cinema)).toMatch(/In the style of/);
-    // A model whose preset picker is Soul's list takes the style id natively, whatever its id.
-    const soul1 = getModel("soul-1")!;
-    const twin = { ...soul1, id: "soul-twin", options: { ...soul1.options, presets: { ...soul1.options.presets!, param: "style_id" } } };
-    const ctx2 = { caps: CAPS, getModel: (id: string) => (id === "soul-twin" ? twin : getModel(id)) };
-    const native = applySignature(req("soul-twin"), { moodboard: pick }, ctx2);
-    expect(native.request.params?.extra?.style_id).toBe(style.id);
-    expect(native.request.prompt).toBe("a rooftop party");
-    expect(native.request.signature?.words).toBeUndefined();
-    expect(native.notes).toEqual([]);
+    const hd = applySignature(req("fuobe-soul-hd"), { moodboard: pick }, ctx);
+    expect(hd.request.presetId).toBe(style.id);
+    expect(hd.request.signature?.words).toBeUndefined();
+    expect(hd.notes).toEqual([]);
   });
 
   it("Recraft V4 Styles keeps your own images first and fills up to 10 with the board's", () => {
@@ -420,13 +414,13 @@ describe("style signature: the request record and Reuse", () => {
     expect(back.signature.moodboard?.id).toBe("mb1");
 
     const look = curatedPick(CURATED_SETS["soul-v2"][3]);
-    const soul = applySignature(req("soul-2"), { moodboard: look }, ctx);
-    expect(soul.request.params?.extra?.style_id).toBe(look.id);
+    const soul = applySignature(req("fuobe-soul"), { moodboard: look }, ctx);
+    expect(soul.request.presetId).toBe(look.id);
     const soulBack = reuseSignature(soul.request)!;
     expect(soulBack.params.extra).toBeUndefined();
     expect(soulBack.signature.moodboard).toEqual(look);
     // A run without a signature isn't touched.
-    expect(reuseSignature(req("soul-2"))).toBeNull();
+    expect(reuseSignature(req("fuobe-soul"))).toBeNull();
   });
 });
 

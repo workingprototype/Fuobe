@@ -10,6 +10,7 @@ FAMILIES = {
     "temporal": ["drift", "driftMax", "warp"],
     "lipsync": ["lipsync", "lipsyncOffset"],
     "continuity": ["continuity"],
+    "palette": ["paletteFit", "paletteCover"],
 }
 
 METRICS = {
@@ -26,6 +27,8 @@ METRICS = {
     "lipsyncOffset": {"label": "A/V offset", "better": "none", "unit": "frames"},
     "syncnet": {"label": "SyncNet confidence", "better": "higher", "unit": "SyncNet conf"},
     "continuity": {"label": "Shot continuity", "better": "higher", "unit": "cosine between consecutive shots"},
+    "paletteFit": {"label": "Palette distance", "better": "lower", "unit": "mean ΔE76 to the nearest palette colour"},
+    "paletteCover": {"label": "Palette used", "better": "higher", "unit": "share of the palette's colours"},
 }
 
 # Weights, each pinned to a Hugging Face revision. "commercial" says whether the model itself may be used

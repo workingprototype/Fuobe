@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { claimStartToken, handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
@@ -46,9 +46,12 @@ function initialDraft(
   const presetRoute = preset
     ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
     : null;
+  // A camera motion or effect starts on its Original (Fuobe DoP) when the studio has it.
+  const presetOwn = presetModel(preset, engine);
   const modelId =
     (requested && lookup.getModel(requested)?.id) ||
     (preset?.type === "app" ? presetRoute?.modelId : undefined) ||
+    (presetOwn && lookup.getModel(presetOwn)?.id) ||
     config.defaultModels[engine] ||
     config.defaultModels.cloud ||
     // Open-only tools (Match colors) keep their open model under the Cloud switch, like cloud-only ones do under Open.
@@ -395,6 +398,7 @@ function HandoffSync({
   start,
   build,
   adopt,
+  follow,
   ready,
   onNavigate,
   onStart,
@@ -403,6 +407,8 @@ function HandoffSync({
   start: Draft;
   build: React.RefObject<(key: string) => Draft>;
   adopt: React.RefObject<(key: string) => void>;
+  /** The base after the composer's own engine swap (followEngineDefault). */
+  follow: React.RefObject<(base: Draft, current: Draft) => Draft>;
   ready: boolean;
   onNavigate: (key: string) => void;
   onStart: () => void;
@@ -420,7 +426,7 @@ function HandoffSync({
     if (url.key !== a.key || ready !== a.ready) {
       const next = build.current(url.key);
       const base = a.base;
-      setDraft((d) => mergeHandoff(base, d, next));
+      setDraft((d) => mergeHandoff(follow.current(base, d), d, next));
       adopt.current(url.key);
       applied.current = { key: url.key, ready, base: next, seen: true };
     }
@@ -429,7 +435,7 @@ function HandoffSync({
       if (claimStartToken(url.start)) onStart();
       window.history.replaceState(null, "", withoutStart(window.location.href));
     }
-  }, [url, ready, build, adopt, setDraft, onNavigate, onStart]);
+  }, [url, ready, build, adopt, follow, setDraft, onNavigate, onStart]);
   return (
     <Suspense fallback={null}>
       <UrlParams onChange={onParams} />
@@ -471,11 +477,16 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
     const m = id ? catalog.getModel(id) : undefined;
     if (m && m.engine !== engine) setEngine(m.engine);
   };
+  // The composer swaps an untouched default for the engine's own when the engine is read after hydration: a
+  // hand-off still applies over that swap.
+  const follow = (base: Draft, current: Draft) => followEngineDefault(base, current, config.defaultModels, engine);
   const buildRef = useRef(build);
   const adoptRef = useRef(adopt);
+  const followRef = useRef(follow);
   useLayoutEffect(() => {
     buildRef.current = build;
     adoptRef.current = adopt;
+    followRef.current = follow;
   });
   // The draft the composer starts from: the defaults (the URL is unknown in the static shell), or
   // the hand-off params of a client navigation to new ones (a new epoch remounts the provider).
@@ -488,7 +499,7 @@ function StudioDraft({ config, header, tabs, initialRefs, initialPrompt }: Draft
   return (
     <ComposerBridgeCtx.Provider value={bridge}>
       <StudioProvider key={start.epoch} config={config} initial={initial}>
-        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, adopt: adoptRef, ready: catalog.ready, onNavigate }} />
+        <StudioSession header={header} tabs={tabs} sync={{ startKey: start.key, start: initial, build: buildRef, adopt: adoptRef, follow: followRef, ready: catalog.ready, onNavigate }} />
       </StudioProvider>
     </ComposerBridgeCtx.Provider>
   );

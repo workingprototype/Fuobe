@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { getModel, MODELS } from "@/lib/catalog";
+import { onEngine, runsOn } from "@/lib/catalog/engines";
 import { ENGINE_MODELS } from "@/lib/catalog/faceless";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { findModels, MODEL_KINDS, toModelInfo } from "@/lib/model-list";
@@ -57,9 +58,13 @@ export async function GET(request: Request) {
   const op = p.get("op") || undefined;
   if (op && !(op in OPERATION_LABELS)) return Response.json({ error: `Unknown operation ${op}` }, { status: 400 });
   const mode = engineMode();
-  const list = findModels(MODELS, { kind: kind as MediaKind | undefined, engine: engine as Engine | undefined, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" }).filter(
-    (m) => mode === "both" || m.engine === mode,
-  );
+  // A Fuobe Original runs on both engines: on a list for one engine (asked for, or the install's only one) it is
+  // that engine's model (its routes, its price), else it is listed once with both.
+  const only = (engine as Engine | undefined) ?? (mode === "both" ? undefined : mode);
+  // The install's only engine counts as asked for: an Original's operations there are that engine's.
+  const list = findModels(MODELS, { kind: kind as MediaKind | undefined, engine: only, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" })
+    .filter((m) => mode === "both" || runsOn(m, mode))
+    .map((m) => (only ? onEngine(m, only) : m));
   const defaults = Object.fromEntries(
     Object.entries(DEFAULTS).map(([k, ids]) => [k, { ...(mode !== "open" && ids.cloud && { cloud: ids.cloud }), ...(mode !== "cloud" && ids.open && { open: ids.open }) }]),
   );

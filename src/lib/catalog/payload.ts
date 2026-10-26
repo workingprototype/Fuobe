@@ -93,13 +93,19 @@ export function framedLength(f: FieldMap["numFrames"] | undefined, seconds: numb
   return Math.abs(made - seconds) > 0.25 ? made : undefined;
 }
 
-/** Width and height for an aspect ratio on a `base`×`base` pixel budget (FieldMap.size). */
-export function sizeValue(f: NonNullable<FieldMap["size"]>, aspectRatio: string | undefined): { width: number; height: number } {
+/**
+ * Width and height for an aspect ratio (FieldMap.size): the table's size for the tier and shape when it has one
+ * (Fuobe Soul: its first tier when the tier is unknown), else the shape on a `base`×`base` pixel budget; neither
+ * side above `max` (Replicate's Z-Image takes 1440).
+ */
+export function sizeValue(f: NonNullable<FieldMap["size"]>, aspectRatio: string | undefined, resolution?: string): { width: number; height: number } {
   const base = f.base ?? 1024;
   const ratio = (aspectRatio && ratioOf(aspectRatio)) || 1;
   const round = (v: number) => Math.max(f.multiple, Math.round(v / f.multiple) * f.multiple);
-  let width = round(base * Math.sqrt(ratio));
-  let height = round(base / Math.sqrt(ratio));
+  const tier = f.table && (f.table[resolution ?? ""] ?? Object.values(f.table)[0]);
+  const exact = tier && aspectRatio ? tier[aspectRatio] : undefined;
+  let width = exact ? exact[0] : round(base * Math.sqrt(ratio));
+  let height = exact ? exact[1] : round(base / Math.sqrt(ratio));
   if (f.max !== undefined && Math.max(width, height) > f.max) {
     const k = f.max / Math.max(width, height);
     width = Math.min(f.max, round(width * k));
@@ -344,9 +350,10 @@ export function buildPayload(map: FieldMap, input: GenInput): Record<string, unk
   if (map.numLayers && input.numLayers !== undefined) out[map.numLayers] = input.numLayers;
   if (map.palette && input.palette?.length) out[map.palette.key] = paletteValue(map.palette.format, input.palette);
   if (map.size) {
-    const { width, height } = sizeValue(map.size, input.aspectRatio);
-    out[map.size.width] = width;
-    out[map.size.height] = height;
+    const { width, height } = sizeValue(map.size, input.aspectRatio, input.resolution);
+    if (map.size.key) out[map.size.key] = { width, height };
+    if (map.size.width) out[map.size.width] = width;
+    if (map.size.height) out[map.size.height] = height;
   }
   // LoRAs (a look, a motion, a trained identity) in the API's shape; the provider calls the route's LoRA endpoint then.
   if (map.loras && input.loras?.length) Object.assign(out, loraFields(map.loras, input.loras));

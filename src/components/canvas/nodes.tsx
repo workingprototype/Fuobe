@@ -3,6 +3,8 @@
 import { Handle, Position, useUpdateNodeInternals, type Node, type NodeProps } from "@xyflow/react";
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   AudioLines,
   Box,
   Cable,
@@ -26,6 +28,9 @@ import {
   Trash2,
   Unplug,
   Upload,
+  Volume2,
+  VolumeX,
+  Table,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -61,10 +66,19 @@ import { fileToSlot, type SlotValue } from "@/components/studio/media-slot";
 import { ControlsChip } from "@/components/studio/model-controls";
 import { ModelPicker } from "@/components/studio/model-picker";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
-import { useAssets, useElements } from "@/lib/api";
-import { getModel } from "@/lib/catalog";
+import { VoiceRecorder } from "@/components/studio/voice-recorder";
+import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAssets, useClipFacts as useFileFacts, useElements } from "@/lib/api";
+import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import {
   CANVAS_TEXT_MAX,
+  CONCAT_LIMITS,
+  CONCAT_MODELS,
+  CONCAT_RATIOS,
+  CONCAT_SIZE,
+  concatClips,
+  concatRatio,
   connectionError,
   defaultModelFor,
   EMPTY_GRAPH,
@@ -73,8 +87,12 @@ import {
   modelChoices,
   NODE_SPECS,
   nodeLabel,
+  nodeModel,
   nodeOps,
+  OPEN_DUB_HINT,
   OUT,
+  TABLE_LIMITS,
+  tableRows,
   outputType,
   PORT_TYPE_LABEL,
   PREVIEW_IN,
@@ -85,18 +103,23 @@ import {
   type CanvasNode,
   type CanvasNodeData,
   type CanvasNodeType,
+  type ClipSettings,
   type Connection,
   type PortDef,
   type PortType,
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { dubResult, languageStage, type DubSessionView, type DubStage } from "@/lib/av/dub";
+import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { keyCombo } from "@/lib/keys";
 import { cn } from "@/lib/utils";
+import { BOARD_NODE_TYPES, type BoardType } from "./board";
 import { NodeIcon, PORT_COLOR, useEditorActions, useEditorGlobals, useEditorSelector, useNodeResults, useNodeView, type EditorSnapshot, type NodeResults } from "./canvas-context";
 
-export type FlowNode = Node<CanvasNodeData, CanvasNodeType>;
+/** A node on the board: a graph node, or a group, comment pin or drawing (./board.tsx). */
+export type FlowNode = Node<CanvasNodeData, CanvasNodeType | BoardType>;
 
 /** Interactive controls inside a node must not drag the node or zoom the board. */
 const NO_DRAG = "nodrag nopan nowheel";
@@ -641,12 +664,14 @@ function costLabel(isDemo: (m: ModelDef) => boolean, model: ModelDef | undefined
   return cost == null ? "Price unknown" : cost === 0 ? "Free" : `≈ ${formatCost(cost)}`;
 }
 
-const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: NodeProps<FlowNode>) {
+const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, selected }: NodeProps<FlowNode>) {
+  const type = flowType as CanvasNodeType;
   const actions = useEditorActions();
   const g = useEditorGlobals();
   const v = useNodeView(id);
   const node = useMemo(() => asNode(id, type, data), [id, type, data]);
-  const model = data.modelId ? getModel(data.modelId) : undefined;
+  // A Fuobe Original as it runs on this node's engine (its routes and price).
+  const model = useMemo(() => nodeModel(node, g.mode), [node, g.mode]);
   const ports = useMemo(() => inputPorts(node), [node]);
   const out = outputType(EMPTY_GRAPH, node);
   const r = v.results;
@@ -655,7 +680,8 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   // The picker opens on the node's own engine (or the install's only one); its switch browses the other.
   const [browseEngine, setBrowseEngine] = useState<Engine | null>(null);
   const pickerEngine: Engine = g.mode !== "both" ? g.mode : (browseEngine ?? model?.engine ?? g.engine);
-  const choices = useMemo(() => modelChoices(node), [node]);
+  // A Fuobe Original is listed on the engine being browsed (it runs on both).
+  const choices = useMemo(() => modelChoices(node).map((m) => onEngine(m, pickerEngine)), [node, pickerEngine]);
   const error = v.runError ?? v.error;
 
   // Handles change with the model and op: tell React Flow to re-measure them (React Flow measures new nodes itself).
@@ -670,14 +696,16 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
 
   const pickModel = (m: ModelDef) => {
     const keepOp = data.op && m.routes.some((x) => x.op === data.op) ? data.op : undefined;
-    actions.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params) });
+    // A Fuobe Original runs on the engine it was picked on.
+    actions.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params), engine: dualEngine(m) ? m.engine : undefined });
     setBrowseEngine(null);
   };
 
-  // Upscale / Remove background: image or video.
-  const variants = NODE_SPECS[type].ops && NODE_SPECS[type].ops!.length === 2 ? NODE_SPECS[type].ops! : null;
+  // Upscale / Remove background: image or video. Translate: text or video.
+  const spec = NODE_SPECS[type];
+  const variants = spec.ops && spec.variants ? spec.variants : null;
   const setVariant = (kind: MediaKind) => {
-    const op = variants![kind === "video" ? 1 : 0];
+    const op = spec.ops![kind === variants![1] ? 1 : 0];
     const engine = model?.engine ?? g.engine;
     const m = defaultModelFor(op, engine, { hidden: true }) ?? (g.mode === "both" ? defaultModelFor(op, engine === "open" ? "cloud" : "open", { hidden: true }) : undefined);
     actions.update(id, { mediaKind: kind, modelId: m?.id, op: undefined, params: undefined });
@@ -785,21 +813,24 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
       {ports.length > 0 && <div className="border-b py-1">{ports.map((p) => <InPort key={p.id} port={p} count={v.counts[p.id] ?? 0} />)}</div>}
       <div className="space-y-2 p-3">
         {variants && (
-          <div className={cn("inline-grid h-7 grid-cols-2 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label="Image or video">
-            {(["image", "video"] as const).map((k) => (
-              <button key={k} role="radio" aria-checked={(data.mediaKind ?? "image") === k} disabled={g.readOnly} onClick={() => setVariant(k)} className={cn("rounded-full px-2.5 capitalize", (data.mediaKind ?? "image") === k ? "bg-background shadow-soft" : "text-muted-foreground")}>
+          <div className={cn("inline-grid h-7 grid-cols-2 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label={`${variants[0]} or ${variants[1]}`}>
+            {variants.map((k) => (
+              <button key={k} role="radio" aria-checked={(data.mediaKind ?? variants[0]) === k} disabled={g.readOnly} onClick={() => setVariant(k)} className={cn("rounded-full px-2.5 capitalize", (data.mediaKind ?? variants[0]) === k ? "bg-background shadow-soft" : "text-muted-foreground")}>
                 {k}
               </button>
             ))}
           </div>
         )}
+        {type === "concat" ? (
+          <ConcatPanel id={id} data={data} engine={model?.engine} />
+        ) : v.error === OPEN_DUB_HINT ? null : (
         <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", g.readOnly && "pointer-events-none")}>
           {choices.length ? (
             <div className={NO_DRAG}>
               <ModelPicker models={choices} value={model} onChange={pickModel} engine={pickerEngine} onEngineChange={setBrowseEngine} />
             </div>
           ) : (
-            <p className="text-[12px] text-muted-foreground">No model for this yet.</p>
+            <p className="text-[12px] text-muted-foreground">{type === "translate" ? "No open-source dubbing model yet." : "No model for this yet."}</p>
           )}
           {auto && model && (
             <OptionSelect
@@ -811,6 +842,7 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
             />
           )}
         </div>
+        )}
         {promptPort && !showPrompt && !g.readOnly && (
           <button className={chip} onClick={() => setAddWords(true)}>
             <Plus className="size-3" /> Add your own words
@@ -830,7 +862,12 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
             className={cn("field-sizing-content max-h-36 min-h-14 w-full resize-none rounded-lg bg-muted px-2.5 py-2 text-[13px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint", NO_DRAG)}
           />
         )}
-        {model && !g.readOnly && <ModelOptions id={id} model={model} data={data} />}
+        {model && !g.readOnly && type !== "concat" && <ModelOptions id={id} model={model} data={data} />}
+        {v.rows && (
+          <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Table className="size-3.5 shrink-0" /> Runs once per table row: {v.rows === 1 ? "1 run" : `${v.rows} runs`}
+          </p>
+        )}
         <Results id={id} r={r} />
         {error && r.state !== "failed" && (
           <p className={cn("flex items-start gap-1.5 text-[12px] leading-snug", v.runError ? "text-destructive" : "text-warning")}>
@@ -838,10 +875,279 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
             {error}
           </p>
         )}
+        {error === OPEN_DUB_HINT && !g.readOnly && <OpenDub id={id} data={data} />}
       </div>
     </NodeShell>
   );
 }, sameNodeProps);
+
+// ---------------------------------------------------------------------------
+// Translate a video on the open engine: the dub is made step by step in Translate & dub (the translation is
+// reviewed before it's spoken), so the node starts it there with its clip and language.
+
+const OPEN_DUB_LANGUAGES = DUB_LANGUAGES.filter((l) => supportsTarget("open", l));
+
+const selectVideoIn = (s: EditorSnapshot, id: string): string | undefined => {
+  const e = s.graph.edges.find((x) => x.target === id && x.targetHandle === "video");
+  const src = e && s.byId.get(e.source);
+  if (!src) return undefined;
+  return src.type === "video-input" ? src.data.url : s.views.get(src.id)?.results.outputs.find((x) => x.o.kind === "video")?.o.url;
+};
+
+/** Whether an input node on the board already holds this file (the dub brought back once). */
+const selectHasFile = (s: EditorSnapshot, url: string) => !!url && s.graph.nodes.some((n) => n.data.url === url);
+
+const DUB_STAGE: Record<DubStage, string> = {
+  preparing: "Transcribing and translating…",
+  review: "Ready for you to check the translation",
+  voicing: "Speaking the translation…",
+  done: "Dubbed",
+  failed: "The dub failed — open it to retry",
+};
+
+function OpenDub({ id, data }: { id: string; data: CanvasNodeData }) {
+  const actions = useEditorActions();
+  const video = useEditorSelector(selectVideoIn, id);
+  const lang = data.params?.targetLanguage && OPEN_DUB_LANGUAGES.some((l) => l.code === data.params?.targetLanguage) ? data.params.targetLanguage : undefined;
+  const [busy, setBusy] = useState(false);
+  // The dub this node started, while it's still for this clip and language (its result comes back to the board from here).
+  const session = useQuery({
+    queryKey: ["dub", data.dubId],
+    enabled: !!data.dubId,
+    queryFn: async () => {
+      const res = await fetch(`/api/dub/${data.dubId}`);
+      if (!res.ok) throw Object.assign(new Error("gone"), { status: res.status });
+      return (await res.json()) as DubSessionView;
+    },
+    refetchInterval: (q) => {
+      const s = q.state.data;
+      const stage = s && lang ? languageStage(s, lang) : undefined;
+      // Waiting on a step: every 5 s. Waiting on the person (the review, in Translate & dub): now and then.
+      return stage === "preparing" || stage === "voicing" ? 5000 : stage === "review" ? 15_000 : false;
+    },
+    retry: false,
+  }).data;
+  const current = session && lang && session.video === video && session.targets.includes(lang) ? session : undefined;
+  const stage = current && lang ? languageStage(current, lang) : undefined;
+  const result = current && lang ? dubResult(current, lang)?.outputs.find((o) => o.kind === "video") : undefined;
+  const onBoard = useEditorSelector(selectHasFile, result?.url ?? "");
+  const start = async () => {
+    if (!video || !lang) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/dub", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "open", mode: "steps", video, targets: [lang], source: "auto", title: data.label || "Canvas dub" }) });
+      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!res.ok || !body.id) throw new Error(body.error ?? "Couldn't start the dub");
+      actions.update(id, { dubId: body.id });
+      toast.success("Dub started", { description: "Check the translation in Translate & dub, then have it spoken. The dubbed video comes back here." });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={cn("space-y-1.5", NO_DRAG)}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <OptionSelect label="Dub into" value={lang} options={OPEN_DUB_LANGUAGES.map((l) => l.code)} onChange={(v) => actions.update(id, { params: { ...data.params, targetLanguage: v } })} format={(v) => OPEN_DUB_LANGUAGES.find((l) => l.code === v)?.name ?? v} />
+        {current ? (
+          <Link href={`/audio/translate?dub=${current.id}`} className={chip}>
+            {stage === "review" ? "Check the translation" : "Open the dub"}
+          </Link>
+        ) : (
+          <button className={chip} onClick={() => void start()} disabled={!video || !lang || busy} title={!video ? "Connect a video (an upload, or a finished clip)" : !lang ? "Pick the language to dub into" : "Free on your GPU"}>
+            {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />} Start in Translate &amp; dub
+          </button>
+        )}
+        {result && !onBoard && (
+          <button className={chip} onClick={() => actions.addInput(id, { url: result.url, kind: "video", label: `${data.label || "Translate"} · dubbed` }, true)} title="A Video input with the dubbed clip, connected where this node was">
+            <Plus className="size-3" /> Use the dubbed video
+          </button>
+        )}
+      </div>
+      <p className="text-[12px] leading-snug text-muted-foreground" aria-live="polite">
+        {stage === "done" && onBoard ? "Dubbed — it's on the board as a Video input" : stage ? DUB_STAGE[stage] : "When it's dubbed, bring it back here as a Video input."}
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Video concatenator: the film's frame, and each clip's cut and sound in the order they play
+
+interface ClipRow {
+  nodeId: string;
+  label: string;
+  /** The clip's file when it's known now: an uploaded clip, or a finished result upstream. */
+  url?: string;
+  /** A node run once per table row gives a clip per row (each with this cut and sound). */
+  rows?: number;
+}
+
+const sameRows = (a: ClipRow[], b: ClipRow[]) => a.length === b.length && a.every((x, i) => x.nodeId === b[i].nodeId && x.label === b[i].label && x.url === b[i].url && x.rows === b[i].rows);
+
+const selectClipRows = (s: EditorSnapshot, id: string): ClipRow[] => {
+  const n = s.byId.get(id);
+  if (!n) return [];
+  return concatClips(s.graph, n).map(({ nodeId }) => {
+    const src = s.byId.get(nodeId);
+    const url = src?.type === "video-input" ? src.data.url : s.views.get(nodeId)?.results.outputs.find((x) => x.o.kind === "video")?.o.url;
+    const rows = s.views.get(nodeId)?.rows;
+    return { nodeId, label: src ? nodeLabel(src) : "Clip", ...(url && !rows && { url }), ...(rows && { rows }) };
+  });
+};
+
+const seconds = (v: number | undefined) => (v === undefined ? "" : `${Math.round(v * 10) / 10} s`);
+
+/** A clip's length and frame size, read from its file's header in the browser (once per file). */
+function useClipFacts(url: string | undefined, onFacts: (f: Pick<ClipSettings, "length" | "width" | "height">) => void) {
+  const report = useRef(onFacts);
+  useEffect(() => {
+    report.current = onFacts;
+  });
+  useEffect(() => {
+    if (!url) return;
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.muted = true;
+    const done = () => {
+      if (Number.isFinite(v.duration) && v.duration > 0) report.current({ length: Math.round(v.duration * 1000) / 1000, ...(v.videoWidth && { width: v.videoWidth, height: v.videoHeight }) });
+      v.removeAttribute("src");
+      v.load();
+    };
+    v.addEventListener("loadedmetadata", done, { once: true });
+    v.src = url;
+    return () => {
+      v.removeEventListener("loadedmetadata", done);
+      v.removeAttribute("src");
+    };
+  }, [url]);
+}
+
+function TimeField({ label, value, placeholder, max, onChange, disabled }: { label: string; value?: number; placeholder: string; max?: number; onChange: (v: number | undefined) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <label className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+      {label}
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        max={max}
+        step={0.1}
+        value={draft ?? (value === undefined ? "" : String(Math.round(value * 100) / 100))}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft === null) return;
+          const n = draft.trim() === "" ? undefined : Number(draft);
+          setDraft(null);
+          onChange(n === undefined || !Number.isFinite(n) ? undefined : Math.max(0, max ? Math.min(n, max) : n));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          e.stopPropagation();
+        }}
+        aria-label={label}
+        className={cn("h-7 w-16 rounded-md bg-muted px-1.5 font-mono text-[12px] text-foreground outline-none focus:ring-2 focus:ring-brand-faint disabled:opacity-60", NO_DRAG)}
+      />
+    </label>
+  );
+}
+
+function ClipItem({ id, row, index, count, settings, readOnly, onMove }: { id: string; row: ClipRow; index: number; count: number; settings: ClipSettings; readOnly: boolean; onMove: (from: number, to: number) => void }) {
+  const actions = useEditorActions();
+  const set = (patch: Partial<ClipSettings>) => actions.patchClip(id, row.nodeId, patch);
+  // The file's facts (length, size) are what the cuts are checked against.
+  useClipFacts(row.url, (f) => {
+    if (f.length !== settings.length || f.width !== settings.width || f.height !== settings.height) set(f);
+  });
+  // Whether it has sound, from its header on the server (a browser can't tell): a silent clip gets a silent track on
+  // the cloud. Its length too, when this browser couldn't read the file.
+  const header = useFileFacts(row.url).data;
+  useEffect(() => {
+    if (!header) return;
+    const patch: Partial<ClipSettings> = {};
+    if (typeof header.hasAudio === "boolean" && header.hasAudio !== settings.audio) patch.audio = header.hasAudio;
+    if (settings.length === undefined && header.duration) patch.length = Math.round(header.duration * 1000) / 1000;
+    if (Object.keys(patch).length) actions.patchClip(id, row.nodeId, patch);
+  }, [header, settings.audio, settings.length, actions, id, row.nodeId]);
+  const muted = !!settings.mute;
+  return (
+    <li className="rounded-lg bg-muted/60 p-2">
+      <div className="flex items-center gap-1.5">
+        <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background font-mono text-[10px]">{index + 1}</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{row.label}</span>
+        {row.rows && <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title="A clip per table row, in row order">× {row.rows} rows</span>}
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{seconds(settings.length)}</span>
+        {!readOnly && (
+          <>
+            <button onClick={() => set({ mute: !muted })} aria-pressed={muted} aria-label={muted ? `Unmute clip ${index + 1}` : `Mute clip ${index + 1}`} title={muted ? "Muted: plays silent" : "Plays with its sound"} className={cn("grid size-6 place-items-center rounded-md hover:bg-accent", muted ? "text-warning" : "text-muted-foreground", NO_DRAG)}>
+              {muted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+            </button>
+            <button onClick={() => onMove(index, index - 1)} disabled={index === 0} aria-label={`Move clip ${index + 1} earlier`} className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-30", NO_DRAG)}>
+              <ArrowUp className="size-3.5" />
+            </button>
+            <button onClick={() => onMove(index, index + 1)} disabled={index === count - 1} aria-label={`Move clip ${index + 1} later`} className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-30", NO_DRAG)}>
+              <ArrowDown className="size-3.5" />
+            </button>
+          </>
+        )}
+      </div>
+      {!readOnly && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <TimeField label="From" value={settings.start} placeholder="0" max={settings.length} onChange={(v) => set({ start: v })} />
+          <TimeField label="to" value={settings.end} placeholder={settings.length ? String(Math.round(settings.length * 10) / 10) : "end"} max={settings.length} onChange={(v) => set({ end: v })} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** `engine`: the engine of the node's tools (none yet on a node made without them, e.g. through the API). */
+function ConcatPanel({ id, data, engine }: { id: string; data: CanvasNodeData; engine?: Engine }) {
+  const actions = useEditorActions();
+  const g = useEditorGlobals();
+  const rows = useEditorSelector(selectClipRows, id, sameRows);
+  const ratio = concatRatio(data.params?.aspectRatio);
+  const size = CONCAT_SIZE[ratio];
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= rows.length) return;
+    const order = rows.map((r) => r.nodeId);
+    const [x] = order.splice(from, 1);
+    order.splice(to, 0, x);
+    actions.update(id, { order });
+  };
+  return (
+    <div className="space-y-2">
+      <div className={cn("flex flex-wrap items-center gap-1.5", g.readOnly && "pointer-events-none")}>
+        <OptionSelect label="Aspect ratio" value={ratio} options={[...CONCAT_RATIOS]} onChange={(v) => actions.update(id, { params: { ...data.params, aspectRatio: v } })} />
+        {(g.mode === "both" || !engine) && (
+          <div className={cn("inline-flex h-7 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label="Engine">
+            {(g.mode === "both" ? (["cloud", "open"] as const) : [g.mode]).map((e) => (
+              <button key={e} role="radio" aria-checked={engine === e} onClick={() => actions.update(id, { modelId: CONCAT_MODELS[e] })} className={cn("rounded-full px-2.5", engine === e ? "bg-background shadow-soft" : "text-muted-foreground")}>
+                {e === "cloud" ? "Cloud" : "Open source"}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        {size.width}×{size.height} · {CONCAT_LIMITS.fps} fps · up to {CONCAT_LIMITS.clips} clips, 512 MB each
+      </p>
+      {rows.length ? (
+        <ol className="max-h-80 space-y-1.5 overflow-y-auto" aria-label="Clips, in the order they play">
+          {rows.map((row, i) => (
+            <ClipItem key={row.nodeId} id={id} row={row} index={i} count={rows.length} settings={data.clips?.[row.nodeId] ?? {}} readOnly={g.readOnly} onMove={move} />
+          ))}
+        </ol>
+      ) : (
+        <p className="rounded-lg border border-dashed p-2.5 text-[12px] text-muted-foreground">Connect clips to Clips: they play top to bottom, and you can reorder, cut and mute each one here.</p>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -850,7 +1156,7 @@ const PromptNode = memo(function PromptNode({ id, type, data, selected }: NodePr
   const actions = useEditorActions();
   const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out="text" width={280}>
+    <NodeShell id={id} type={type as CanvasNodeType} data={data} selected={!!selected} out="text" width={280}>
       <div className="p-3">
         <textarea
           value={data.text ?? ""}
@@ -942,7 +1248,7 @@ function MediaPreview({ kind, url }: { kind: MediaKind; url: string }) {
 const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }: NodeProps<FlowNode>) {
   const actions = useEditorActions();
   const { readOnly } = useEditorGlobals();
-  const kind = KIND_OF[type]!;
+  const kind = KIND_OF[type as CanvasNodeType]!;
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<SlotValue | null>(null);
   const [over, setOver] = useState(false);
@@ -959,7 +1265,7 @@ const MediaInputNode = memo(function MediaInputNode({ id, type, data, selected }
     );
   const accept = kind === "image" ? "image/png,image/jpeg,image/webp,image/gif" : kind === "video" ? "video/mp4,video/webm,video/quicktime" : "audio/*";
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out={kind} width={260}>
+    <NodeShell id={id} type={type as CanvasNodeType} data={data} selected={!!selected} out={kind} width={260}>
       <div
         className="space-y-2 p-3"
         onDragOver={(e) => {
@@ -1091,7 +1397,7 @@ const ElementNode = memo(function ElementNode({ id, type, data, selected }: Node
   const actions = useEditorActions();
   const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} out="element" width={240}>
+    <NodeShell id={id} type={type as CanvasNodeType} data={data} selected={!!selected} out="element" width={240}>
       <div className="space-y-2 p-3">
         {data.handle ? (
           <div className="flex items-center gap-2.5">
@@ -1108,6 +1414,143 @@ const ElementNode = memo(function ElementNode({ id, type, data, selected }: Node
           <p className="text-[12px] text-muted-foreground">Adds an @character, location, prop or style to the models it connects to.</p>
         )}
         {!readOnly && <ElementPicker data={data} onPick={(patch) => actions.update(id, patch)} />}
+      </div>
+    </NodeShell>
+  );
+}, sameNodeProps);
+
+// ---------------------------------------------------------------------------
+// Clone voice: a sample to speak with (recorded, uploaded, a saved voice, or wired in)
+
+const selectSampleSource = (s: EditorSnapshot, id: string) => {
+  const e = s.graph.edges.find((x) => x.target === id && x.targetHandle === "audio");
+  const n = e && s.byId.get(e.source);
+  return n ? nodeLabel(n) : null;
+};
+
+const CloneVoiceNode = memo(function CloneVoiceNode({ id, data, selected }: NodeProps<FlowNode>) {
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
+  const qc = useQueryClient();
+  const wired = useEditorSelector(selectSampleSource, id);
+  const voices = (useElements().data ?? []).filter((e) => e.kind === "voice" && e.references[0]);
+  const node = useMemo(() => asNode(id, "clone-voice", data), [id, data]);
+  const ports = useMemo(() => inputPorts(node), [node]);
+  const file = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState(false);
+  const [naming, setNaming] = useState<string | null>(null);
+  const take = (f: File) => {
+    if (f.size > 11 * 1024 * 1024) return void toast.error("That sample is over 11 MB — 10–60 s of speech is plenty");
+    setPending(true);
+    void fileToSlot(
+      f,
+      (v) => {
+        if (v?.uploading) return;
+        setPending(false);
+        if (v) actions.update(id, { url: v.ref, name: v.name, elementId: undefined });
+      },
+      "audio",
+    );
+  };
+  const saved = voices.find((e) => e.id === data.elementId || e.references[0] === data.url);
+  const save = async () => {
+    const name = naming?.trim();
+    if (!name || !data.url) return;
+    const res = await fetch("/api/elements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, kind: "voice", references: [data.url] }) });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; name?: string; error?: string };
+    if (!res.ok || !body.id) return void toast.error(body.error ?? "Couldn't save the voice");
+    actions.update(id, { elementId: body.id, name: body.name });
+    setNaming(null);
+    void qc.invalidateQueries({ queryKey: ["elements"] });
+    toast.success(`Saved “${body.name}” to your voices`);
+  };
+  return (
+    <NodeShell id={id} type="clone-voice" data={data} selected={!!selected} out="voice" width={270}>
+      <div className="border-b py-1">
+        {ports.map((p) => (
+          <InPort key={p.id} port={p} count={wired ? 1 : 0} />
+        ))}
+      </div>
+      <div className="space-y-2 p-3">
+        {wired ? (
+          <p className="text-[12px] text-muted-foreground">
+            Speaks with the voice in <span className="font-medium text-foreground">“{wired}”</span>.
+          </p>
+        ) : pending ? (
+          <div className="flex h-12 items-center justify-center gap-2 rounded-lg bg-muted text-[12px] text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> Uploading…
+          </div>
+        ) : data.url ? (
+          <>
+            <MediaPreview kind="audio" url={data.url} />
+            <p className="truncate text-[12px] text-muted-foreground">{saved ? `Your voice “${saved.name}”` : (data.name ?? "Your sample")}</p>
+          </>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">Record or upload 10–60 s of clean speech (MP3 or WAV, up to 11 MB), or pick one of your voices.</p>
+        )}
+        {!readOnly && !wired && (
+          <div className="flex flex-wrap gap-1">
+            <div className={NO_DRAG}>
+              <VoiceRecorder onRecorded={(v) => actions.update(id, { url: v.ref, name: v.name ?? "Recording", elementId: undefined })} className={chip} />
+            </div>
+            <button className={chip} onClick={() => file.current?.click()}>
+              <Upload className="size-3" /> {data.url ? "Replace" : "Upload"}
+            </button>
+            {voices.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className={chip}>
+                    <Library className="size-3" /> My voices
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto">
+                  {voices.map((e) => (
+                    <DropdownMenuItem key={e.id} onSelect={() => actions.update(id, { url: e.references[0], name: e.name, elementId: e.id })}>
+                      <AudioLines className="size-4" /> <span className="truncate">{e.name}</span>
+                      {e.id === saved?.id && <Check className="ml-auto size-3.5" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {data.url && !saved && naming === null && (
+              <button className={chip} onClick={() => setNaming(data.name?.replace(/\.[a-z0-9]+$/i, "") ?? "My voice")}>
+                <Plus className="size-3" /> Save as a voice
+              </button>
+            )}
+          </div>
+        )}
+        {naming !== null && (
+          <div className={cn("flex items-center gap-1", NO_DRAG)}>
+            <input
+              autoFocus
+              value={naming}
+              maxLength={60}
+              onChange={(e) => setNaming(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void save();
+                if (e.key === "Escape") setNaming(null);
+                e.stopPropagation();
+              }}
+              aria-label="Voice name"
+              className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 text-[12px] outline-none focus:border-primary"
+            />
+            <button className={chip} onClick={() => void save()} disabled={!naming.trim()}>
+              Save
+            </button>
+          </div>
+        )}
+        <input
+          ref={file}
+          type="file"
+          accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/webm,audio/*"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) take(f);
+            e.target.value = "";
+          }}
+        />
       </div>
     </NodeShell>
   );
@@ -1140,7 +1583,7 @@ const OutputNode = memo(function OutputNode({ id, type, data, selected }: NodePr
   const w = width ?? (sources.length > 1 ? 560 : 320);
   const menu: MenuItem[] = [{ label: "Run what feeds this", icon: Play, onSelect: () => actions.run([id]) }];
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} menu={menu} width={w}>
+    <NodeShell id={id} type={type as CanvasNodeType} data={data} selected={!!selected} menu={menu} width={w}>
       <div className="relative p-3">
         <Handle type="target" position={Position.Left} id={PREVIEW_IN} className="canvas-handle canvas-handle-any" aria-label="Preview input (any type)" />
         {sources.length === 0 ? (
@@ -1168,7 +1611,7 @@ function SourcePreview({ node }: { node: Source }) {
     if (r.state !== "idle") return <Results id={node.id} r={r} compact />;
     return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-muted-foreground">Not run yet</div>;
   }
-  const kind = KIND_OF[node.type];
+  const kind = node.type === "clone-voice" ? "audio" : KIND_OF[node.type];
   if (kind && node.data.url) return <MediaPreview kind={kind} url={node.data.url} />;
   if (node.type === "prompt") return <p className="line-clamp-6 rounded-lg bg-muted p-2.5 text-[12px] leading-snug">{node.data.text || "Empty text"}</p>;
   return <div className="grid h-20 place-items-center rounded-lg bg-muted text-[11px] text-muted-foreground">Nothing yet</div>;
@@ -1178,7 +1621,7 @@ const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<
   const actions = useEditorActions();
   const { readOnly } = useEditorGlobals();
   return (
-    <NodeShell id={id} type={type} data={data} selected={!!selected} width={240} tone="note">
+    <NodeShell id={id} type={type as CanvasNodeType} data={data} selected={!!selected} width={240} tone="note">
       <div className="p-3">
         <textarea
           value={data.text ?? ""}
@@ -1190,6 +1633,112 @@ const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<
           aria-label="Note"
           className={cn("field-sizing-content max-h-72 min-h-16 w-full resize-none bg-transparent text-[13px] leading-snug outline-none placeholder:text-muted-foreground", NO_DRAG)}
         />
+      </div>
+    </NodeShell>
+  );
+}, sameNodeProps);
+
+// ---------------------------------------------------------------------------
+// Table: rows of words, each row one run of the node it feeds
+
+const TableNode = memo(function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
+  const columns = data.columns?.length ? data.columns : ["Subject"];
+  const rows = data.rows?.length ? data.rows : [[""]];
+  const filled = tableRows({ data: { columns, rows } }).length;
+  const grid = useRef<HTMLTableSectionElement>(null);
+  const setRows = (next: string[][]) => actions.update(id, { columns, rows: next });
+  const setCell = (i: number, j: number, v: string) => setRows(rows.map((r, k) => (k === i ? Array.from({ length: columns.length }, (_, c) => (c === j ? v : (r[c] ?? ""))) : r)));
+  const addRow = (focus = false) => {
+    if (rows.length >= TABLE_LIMITS.rows * 2) return;
+    setRows([...rows, columns.map(() => "")]);
+    if (focus) requestAnimationFrame(() => grid.current?.querySelector<HTMLInputElement>(`tr:last-child input`)?.focus());
+  };
+  const addColumn = () => {
+    if (columns.length >= TABLE_LIMITS.columns) return;
+    actions.update(id, { columns: [...columns, `Column ${columns.length + 1}`], rows: rows.map((r) => [...r, ""]) });
+  };
+  const removeColumn = (j: number) => actions.update(id, { columns: columns.filter((_, c) => c !== j), rows: rows.map((r) => r.filter((_, c) => c !== j)) });
+  const cell = cn("h-7 w-full min-w-0 rounded-md bg-muted px-2 text-[12px] outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint", NO_DRAG);
+  return (
+    <NodeShell id={id} type="table" data={data} selected={!!selected} out="text" width={Math.min(560, 120 + columns.length * 150)}>
+      <div className="space-y-2 p-3">
+        <table className="w-full border-separate border-spacing-1 text-left">
+          <thead>
+            <tr>
+              <th className="w-5" aria-hidden />
+              {columns.map((c, j) => (
+                <th key={j} scope="col" className="font-normal">
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      value={c}
+                      readOnly={readOnly}
+                      maxLength={TABLE_LIMITS.column}
+                      onChange={(e) => actions.update(id, { columns: columns.map((x, k) => (k === j ? e.target.value : x)), rows })}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      aria-label={`Column ${j + 1} name`}
+                      className={cn(cell, "bg-transparent font-mono text-[11px] font-semibold text-muted-foreground")}
+                    />
+                    {!readOnly && columns.length > 1 && (
+                      <button onClick={() => removeColumn(j)} className={cn("grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label={`Remove column ${c || j + 1}`}>
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                </th>
+              ))}
+              <th className="w-5" aria-hidden />
+            </tr>
+          </thead>
+          <tbody ref={grid}>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="text-center font-mono text-[10px] text-muted-foreground">{i + 1}</td>
+                {columns.map((c, j) => (
+                  <td key={j}>
+                    <input
+                      value={r[j] ?? ""}
+                      readOnly={readOnly}
+                      maxLength={TABLE_LIMITS.cell}
+                      onChange={(e) => setCell(i, j, e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter on the last row starts a new one.
+                        if (e.key === "Enter" && i === rows.length - 1 && !readOnly) addRow(true);
+                        e.stopPropagation();
+                      }}
+                      placeholder={i === 0 ? (c ? `${c}…` : "…") : undefined}
+                      aria-label={`Row ${i + 1}, ${c || `column ${j + 1}`}`}
+                      className={cell}
+                    />
+                  </td>
+                ))}
+                <td>
+                  {!readOnly && rows.length > 1 && (
+                    <button onClick={() => setRows(rows.filter((_, k) => k !== i))} className={cn("grid size-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label={`Remove row ${i + 1}`}>
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!readOnly && (
+          <div className="flex flex-wrap gap-1">
+            <button className={chip} onClick={() => addRow(true)} disabled={rows.length >= TABLE_LIMITS.rows * 2}>
+              <Plus className="size-3" /> Row
+            </button>
+            <button className={chip} onClick={addColumn} disabled={columns.length >= TABLE_LIMITS.columns}>
+              <Plus className="size-3" /> Column
+            </button>
+          </div>
+        )}
+        <p className={cn("text-[11px] leading-snug", filled > TABLE_LIMITS.rows ? "text-warning" : "text-muted-foreground")}>
+          {filled > TABLE_LIMITS.rows
+            ? `${filled} rows: up to ${TABLE_LIMITS.rows} run at once`
+            : `${filled === 1 ? "1 filled row" : `${filled} filled rows`}: what this feeds runs once per row. Write {${columns.find((c) => c.trim())?.trim() || "Subject"}} in its prompt to place a cell.`}
+        </p>
       </div>
     </NodeShell>
   );
@@ -1207,8 +1756,14 @@ export const NODE_TYPES = {
   upscale: GeneratorNode,
   "bg-remove": GeneratorNode,
   tts: GeneratorNode,
+  "voice-change": GeneratorNode,
+  "clone-voice": CloneVoiceNode,
+  translate: GeneratorNode,
+  concat: GeneratorNode,
+  table: TableNode,
   output: OutputNode,
   note: NoteNode,
-} satisfies Record<CanvasNodeType, React.ComponentType<NodeProps<FlowNode>>>;
+  ...BOARD_NODE_TYPES,
+} satisfies Record<CanvasNodeType | BoardType, React.ComponentType<NodeProps<FlowNode>>>;
 
 export { MediaPreview, OutputThumb, Results, EngineBadge, costLabel };

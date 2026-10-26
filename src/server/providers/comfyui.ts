@@ -12,8 +12,10 @@ import {
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropBranch,
   dropLoadedSound,
   dropVhsAudio,
+  silenceVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
   canTakeLoras,
@@ -43,6 +45,7 @@ import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
+import { imageSize } from "@/lib/image-size";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
@@ -251,7 +254,18 @@ function kindFor(filename: string, key: string, declared?: MediaKind): MediaKind
   return guessKind(filename, undefined, key === "gifs" || key === "videos" ? "video" : key);
 }
 
-const CONTENT_TYPES: Record<string, string> = { glb: "model/gltf-binary", gltf: "model/gltf+json", txt: "text/plain", srt: "application/x-subrip", vtt: "text/vtt", json: "application/json" };
+const CONTENT_TYPES: Record<string, string> = {
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  // Gaussian splats: ComfyUI's /view serves them as application/octet-stream.
+  ply: "model/ply",
+  spz: "model/x-spz",
+  ksplat: "model/x-ksplat",
+  txt: "text/plain",
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  json: "application/json",
+};
 
 function textsOf(ui: Record<string, unknown> | undefined): string[] {
   return Array.isArray(ui?.text) ? (ui.text as unknown[]).filter((t): t is string => typeof t === "string") : [];
@@ -313,6 +327,8 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
         const meta: Record<string, unknown> = {};
         if (spec?.stem) meta.stem = spec.stem;
         if (spec?.role) meta.role = spec.role;
+        // A splat says what it is (the viewer and the download name go by it): spz, ply or ksplat.
+        if (spec?.role === "splat" && ext) meta.format = ext;
         // Qwen-Image-Layered saves its layers back to front.
         if (spec?.role === "layers") Object.assign(meta, { z: i, name: i === 0 ? "Background" : `Layer ${i}` });
         if (Object.keys(meta).length) o.meta = meta;
@@ -472,13 +488,16 @@ function webmInfo(data: Buffer): MediaInfo | null {
   return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
 }
 
-/** The header facts of a file this server uploaded to ComfyUI (undefined for images and unreadable containers). */
+/** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
 export function mediaInfoFor(name: unknown): MediaInfo | undefined {
   return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
 }
 
+/** Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion) runs there. */
+const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b" };
+
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
-const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string> }> = {
+const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
   "qwen-image-edit-2511-multi": { reuse: true },
   "storyboard-qwen-edit-2509-next-scene": { reuse: true },
@@ -489,7 +508,34 @@ const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?:
   "face-swap-reactor": { hints: { image2: "Add the face to put in" } },
   "video-swap-wan-vace": { hints: { image: "Add a picture of what goes in" } },
   "video-insert-wan-vace": { hints: { image: "Add a picture of what to add", mask: "Paint where it goes on the first frame" } },
+  // Pixal3D multi-view: the front, then any of the other sides.
+  "image-to-3d-trellis2-multiview": { hints: { image: "Add a photo of the front" }, views: { sides: ["front", "left", "back", "right"], into: "Pixal3DMultiViewConditioning" } },
 };
+
+/** Uploads that are sides of one object (image = the first side, image2 the second…), and the node they all go into. */
+interface ViewSlots {
+  sides: string[];
+  into: string;
+}
+
+const IMAGE_SLOTS = ["image", "image2", "image3", "image4"] as const;
+
+/**
+ * Which slot each photo of a multi-view 3D model goes to: params.extra.views names the side of each photo
+ * ("front", "left"…), in the order of the images; without names they are the sides in order.
+ */
+export function viewSlots(views: ViewSlots, images: string[], named: unknown): Partial<Record<(typeof IMAGE_SLOTS)[number], string>> {
+  const sides = Array.isArray(named) ? named.map((v) => String(v).toLowerCase()) : views.sides.slice(0, images.length);
+  if (sides.length !== images.length) throw new ProviderError(`${images.length} photo${images.length === 1 ? "" : "s"} but ${sides.length} side${sides.length === 1 ? "" : "s"} named`);
+  const out: Partial<Record<(typeof IMAGE_SLOTS)[number], string>> = {};
+  sides.forEach((side, i) => {
+    const at = views.sides.indexOf(side);
+    if (at < 0 || at >= IMAGE_SLOTS.length) throw new ProviderError(`A photo's side must be ${views.sides.join(", ")} (got “${side}”)`);
+    if (out[IMAGE_SLOTS[at]]) throw new ProviderError(`Two photos of the ${side}: keep one`);
+    out[IMAGE_SLOTS[at]] = images[i];
+  });
+  return out;
+}
 
 const MEDIA_HINT: Record<string, string> = {
   image: "Add an image",
@@ -656,6 +702,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     const exr = exrWorkflow(ctx.op);
     if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
   }
+  // Fuobe DoP: a camera move Wan 2.2 Fun Camera makes natively (a pose, no LoRA needed) runs on its graph; a LoRA mixed
+  // in is injected on its experts as on the plain image-to-video graph.
+  const posed = CAMERA_POSE_GRAPH[endpoint];
+  if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
@@ -678,6 +728,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     audio: input.audio,
     seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
   };
+  // A multi-view 3D model: each photo goes to its side.
+  if (rules.views) Object.assign(values, { image: undefined, image2: undefined, image3: undefined, image4: undefined }, viewSlots(rules.views, images, extra.views));
+  delete extra.views;
   // Voice workflows: "audio" is the voice to speak with (TTS), speaker A (dialogue) or the speech to convert
   // (voice change, whose target voice is "audio2").
   if (ctx.op === "tts") values.audio = input.voiceAudio ?? input.audio;
@@ -741,7 +794,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     // With motion paths the frame keeps the start image's shape, so the paths need no cropping;
     // "auto" keeps the source clip's shape when its header told us.
     const srcAspect = (extra.motionPaths as MotionPaths | undefined)?.aspect;
-    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (clip?.width && clip.height ? `${clip.width}:${clip.height}` : undefined) : input.aspectRatio;
+    // "auto" keeps the source clip's shape when its header told us, else the start frame's (image-to-video).
+    const still = input.aspectRatio === "auto" && !clip?.width ? ctx.media?.(String(values.image ?? "")) : undefined;
+    const src = clip?.width && clip.height ? clip : still?.width && still.height ? still : undefined;
+    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (src ? `${src.width}:${src.height}` : undefined) : input.aspectRatio;
     const dims = computeDimensions(shape, input.resolution, { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) }, multiple);
     // Respect the workflow's size limits while keeping the aspect ratio.
     const maxW = Number(manifest.limits?.maxWidth ?? Infinity);
@@ -882,6 +938,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   const timeline = manifest.expand === "timeline" ? readTimeline(extra.timeline) : null;
   if (manifest.expand === "timeline" && !timeline) throw new ProviderError("The voice track needs the lines' start times (params.extra.timeline)");
   delete extra.timeline;
+  // A Video concatenator clip muted in the canvas (video-fit-clip): its sound becomes silence below.
+  const muted = manifest.id === "video-fit-clip" && extra.mute === true;
+  delete extra.mute;
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -894,8 +953,19 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
   let graph = workflow;
   const left: string[] = [];
+  // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
+  if (rules.views) {
+    for (const k of IMAGE_SLOTS.slice(1)) {
+      if (values[k] !== undefined || b[k]?.length !== 1) continue;
+      const dropped = dropBranch(graph, b[k]![0].node, rules.views.into, manifest.outputs.map((o) => o.node));
+      if (dropped) {
+        graph = dropped;
+        left.push(k);
+      }
+    }
+  }
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
-    if (!b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
+    if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
     const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
     if (bypassed) {
@@ -939,6 +1009,15 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
   // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
   wf = tagMetaBatch(wf, ctx.generationId);
+  // A concatenator clip that is muted or has no sound: silence exactly as long as its kept frames, so every clip
+  // of the film carries a track (a packet-copy join of clips with and without one would drift). Not knowing how
+  // long the window is (no end, no header), it has no track instead.
+  if (manifest.id === "video-fit-clip" && (muted || (clip && !clip.hasAudio && clip.hasVideo))) {
+    const kept = Number(values.duration) > 0 ? Number(values.duration) : undefined;
+    const rest = clipLength !== undefined ? Math.max(0, clipLength - start) : undefined;
+    const seconds = kept !== undefined && rest !== undefined ? Math.min(kept, rest) : (kept ?? rest);
+    wf = seconds ? silenceVhsAudio(wf, Math.max(1, Math.round(seconds * fps)) / fps) : dropVhsAudio(wf);
+  }
   if (clip && !clip.hasAudio && clip.hasVideo) {
     wf = dropVhsAudio(wf);
     // Core LoadAudio reading the clip's own sound (the end card's ad): no sound, no sound track.
@@ -1037,6 +1116,10 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv)$/i.test(name)) {
     const info = probeMedia(data) ?? webmInfo(data);
     if (info) rememberMedia(uploaded, info);
+  } else if (/^image\//.test(contentType)) {
+    // A start frame's size: "auto" makes an image-to-video clip in the picture's own shape.
+    const size = imageSize(data);
+    if (size) rememberMedia(uploaded, { container: "image", ...size, hasVideo: false, hasAudio: false });
   }
   return uploaded;
 }

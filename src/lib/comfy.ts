@@ -588,6 +588,25 @@ export function dropVhsAudio(wf: ComfyWorkflow): ComfyWorkflow {
   return out;
 }
 /**
+ * The sound a VHS loader hands on replaced by `seconds` of stereo silence (the Video concatenator's muted
+ * clips and clips without sound): every input fed by a loader's audio output takes an EmptyAudio instead,
+ * so the clip still has a sound track as long as its picture and a join keeps the clips in step. The
+ * loader's own sound is then never read (a file without one would stop VHS).
+ */
+export function silenceVhsAudio(wf: ComfyWorkflow, seconds: number): ComfyWorkflow {
+  const loaders = new Set(Object.entries(wf).filter(([, n]) => n.class_type === "VHS_LoadVideo").map(([id]) => id));
+  if (!loaders.size) return wf;
+  const out = cloneWorkflow(wf);
+  let id = "silence";
+  for (let k = 2; out[id]; k++) id = `silence${k}`;
+  out[id] = { class_type: "EmptyAudio", inputs: { duration: Math.round(seconds * 1000) / 1000, sample_rate: 44100, channels: 2 }, _meta: { title: "Silence as long as the clip" } };
+  for (const n of Object.values(out)) {
+    const a = n.inputs.audio;
+    if (isLinkValue(a) && loaders.has(a[0]) && a[1] === 2) n.inputs.audio = [id, 0];
+  }
+  return out;
+}
+/**
  * A silent clip read by core LoadAudio (video-append-endcard reads the ad's sound from the same upload): LoadAudio
  * stops with "No audio stream found in the file". The loaders go, with the sound nodes fed only by them (the card's
  * silence and the AudioConcat), and the inputs of the picture nodes that took that sound (ConcatenateVideo's
@@ -611,6 +630,37 @@ export function dropLoadedSound(wf: ComfyWorkflow, loaders: string[], keep: stri
   for (const n of Object.values(out)) for (const [k, v] of Object.entries(n.inputs)) if (isLinkValue(v) && gone.has(v[0])) delete n.inputs[k];
   for (const id of gone) delete out[id];
   return dropUnused(out, keep);
+}
+
+/**
+ * An optional upload with no file (a side of a multi-view 3D model nobody photographed): the loader goes, with
+ * every node downstream of it, up to the inputs of `into` nodes (Pixal3DMultiViewConditioning's "left"), which
+ * are dropped. Null when its branch doesn't end in such an input, or reaches an output node in `keep` (then the
+ * upload can't simply be left out).
+ */
+export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string, keep: string[] = []): ComfyWorkflow | null {
+  if (!wf[loaderId]) return null;
+  const gone = new Set([loaderId]);
+  const cut: { id: string; input: string }[] = [];
+  for (const queue = [loaderId]; queue.length; ) {
+    const id = queue.shift()!;
+    for (const [cid, n] of Object.entries(wf)) {
+      for (const [input, v] of Object.entries(n.inputs)) {
+        if (!isLinkValue(v) || v[0] !== id) continue;
+        if (n.class_type === into) cut.push({ id: cid, input });
+        else if (keep.includes(cid)) return null;
+        else if (!gone.has(cid)) {
+          gone.add(cid);
+          queue.push(cid);
+        }
+      }
+    }
+  }
+  if (!cut.length) return null;
+  const out = cloneWorkflow(wf);
+  for (const c of cut) delete out[c.id].inputs[c.input];
+  for (const id of gone) delete out[id];
+  return out;
 }
 
 /** Codes people use that Whisper spells differently. */

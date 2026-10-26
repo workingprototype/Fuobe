@@ -21,6 +21,9 @@ export interface Grade {
   splitShadowHue: number;
   splitHighlightHue: number;
   splitAmount: number;
+  /** A negative (0–100: how far towards it) and a solarise curve (0–100: highlights fold back to dark). */
+  invert: number;
+  solarize: number;
 }
 
 export const NEUTRAL: Grade = {
@@ -40,6 +43,8 @@ export const NEUTRAL: Grade = {
   splitShadowHue: 210,
   splitHighlightHue: 35,
   splitAmount: 0,
+  invert: 0,
+  solarize: 0,
 };
 
 export interface GradeControl {
@@ -67,6 +72,8 @@ export const CONTROLS: GradeControl[] = [
   { key: "sharpness", label: "Sharpness", min: 0, max: 100, group: "Effects" },
   { key: "grain", label: "Film grain", min: 0, max: 100, group: "Effects" },
   { key: "vignette", label: "Vignette", min: 0, max: 100, group: "Effects" },
+  { key: "solarize", label: "Solarize", min: 0, max: 100, group: "Effects" },
+  { key: "invert", label: "Invert", min: 0, max: 100, group: "Effects" },
 ];
 
 export interface GradePreset {
@@ -89,6 +96,24 @@ export const PRESETS: GradePreset[] = [
   { id: "golden-hour", name: "Golden Hour", grade: { exposure: 5, temperature: 38, tint: 8, vibrance: 18, highlights: -12, vignette: 20 } },
   { id: "cold-steel", name: "Cold Steel", grade: { contrast: 22, temperature: -40, saturation: -25, shadows: -10, splitAmount: 25, splitShadowHue: 215, splitHighlightHue: 200 } },
   { id: "pop", name: "Pop", grade: { contrast: 25, saturation: 30, vibrance: 25, sharpness: 30 } },
+  // Fuobe Soul's post-only looks (Invertethereal, Surreal solarization): a curve, no LoRA.
+  { id: "invert", name: "Invert", grade: { invert: 100, saturation: -15, fade: 10 } },
+  { id: "solarize", name: "Solarize", grade: { solarize: 100, contrast: 12, saturation: 10 } },
+  // Fuobe DoP's colour-grade effects: a clip animated without a LoRA, then graded (Fuobe's own values).
+  { id: "film-colors", name: "Film Colors", grade: { contrast: -6, highlights: -12, temperature: 10, saturation: 6, fade: 8, grain: 22 } },
+  { id: "black-gloss", name: "Black Gloss", grade: { contrast: 30, highlights: 8, shadows: -30, saturation: -10, sharpness: 25, vignette: 25 } },
+  { id: "candy-pink", name: "Candy Pink", grade: { exposure: 6, temperature: 8, tint: 30, saturation: 10, fade: 15, splitAmount: 40, splitShadowHue: 330, splitHighlightHue: 345 } },
+  { id: "lime-jam", name: "Lime Jam", grade: { contrast: 18, tint: -30, saturation: 20, splitAmount: 35, splitShadowHue: 95, splitHighlightHue: 75 } },
+  { id: "nostalgic-blue", name: "Nostalgic Blue", grade: { temperature: -25, saturation: -15, fade: 25, grain: 20, splitAmount: 30, splitShadowHue: 215, splitHighlightHue: 200 } },
+  { id: "soft-palette", name: "Soft Palette", grade: { contrast: -20, highlights: -10, shadows: 12, saturation: -18, fade: 22 } },
+  { id: "overtime", name: "Overtime", grade: { contrast: 10, shadows: -10, temperature: -10, tint: -18, saturation: -20, grain: 18 } },
+  { id: "crimson-vigil", name: "Crimson Vigil", grade: { contrast: 28, shadows: -15, temperature: 10, saturation: -10, vignette: 40, splitAmount: 55, splitShadowHue: 355, splitHighlightHue: 10 } },
+  { id: "bleach-bypass", name: "Bleach Bypass", grade: { contrast: 40, highlights: 10, shadows: -12, saturation: -55, sharpness: 20, grain: 15 } },
+  { id: "bleached-warm", name: "Bleached Warm", grade: { contrast: 28, temperature: 22, saturation: -40, fade: 8, grain: 12 } },
+  { id: "classic-bw", name: "Classic B&W", grade: { contrast: 20, saturation: -100, grain: 20, vignette: 15 } },
+  { id: "hyper-neon", name: "Hyper Neon", grade: { contrast: 25, shadows: -10, saturation: 45, vibrance: 30, splitAmount: 55, splitShadowHue: 285, splitHighlightHue: 185 } },
+  { id: "naturalistic-clean", name: "Naturalistic Clean", grade: { contrast: 5, highlights: -8, shadows: 6, vibrance: 8, sharpness: 10 } },
+  { id: "sodium-decay", name: "Sodium Decay", grade: { contrast: 18, shadows: -18, temperature: 45, tint: 6, saturation: -20, grain: 25, splitAmount: 35, splitShadowHue: 30, splitHighlightHue: 38 } },
 ];
 
 export function applyPreset(p: GradePreset): Grade {
@@ -116,6 +141,7 @@ uniform vec2 u_texel;
 uniform float u_exposure, u_contrast, u_highlights, u_shadows, u_temperature, u_tint, u_hue, u_saturation, u_vibrance, u_fade, u_sharpness, u_grain, u_vignette, u_seed;
 uniform vec3 u_splitShadow, u_splitHighlight;
 uniform float u_splitAmount;
+uniform float u_invert, u_solarize;
 
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + u_seed) * 43758.5453); }
@@ -161,6 +187,12 @@ void main() {
     vec2 d = v_uv - 0.5;
     c *= 1.0 - u_vignette * smoothstep(0.25, 0.85, length(d) * 1.25);
   }
+  // Sabattier-style solarise (a tent curve: mid-tones brightest, highlights fold back to dark), then a negative.
+  if (u_solarize > 0.0) {
+    vec3 s = clamp(c, 0.0, 1.0);
+    c = mix(c, 1.0 - abs(2.0 * s - 1.0), u_solarize);
+  }
+  if (u_invert > 0.0) c = mix(c, 1.0 - clamp(c, 0.0, 1.0), u_invert);
   if (u_grain > 0.0) c += (hash(v_uv / u_texel) - 0.5) * u_grain * 0.22;
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
@@ -193,6 +225,8 @@ export function uniforms(g: Grade): Record<string, number | [number, number, num
     u_splitAmount: n(g.splitAmount),
     u_splitShadow: hueToRgb(g.splitShadowHue),
     u_splitHighlight: hueToRgb(g.splitHighlightHue),
+    u_invert: n(g.invert),
+    u_solarize: n(g.solarize),
   };
 }
 

@@ -49,15 +49,18 @@ describe("model rows", () => {
   it("keeps only what the table shows", () => {
     const m = MODELS.find((x) => x.engine === "cloud" && x.pricing)!;
     const row = toModelRow(m);
-    expect(Object.keys(row).sort()).toEqual(["badges", "engine", "id", "kind", "name", "ops", "price", "routes", "tagline", "vendor"]);
+    expect(Object.keys(row).sort()).toEqual(["badges", "engine", "engines", "id", "kind", "name", "ops", "price", "routes", "tagline", "vendor"]);
     expect(row.routes.every((r) => /^[a-z]+: /.test(r))).toBe(true);
     expect(row.badges).not.toContain("open");
     expect(JSON.stringify(row)).not.toMatch(/"map"|fieldMap|"defaults"/);
   });
 
   it("prices open models as free and shrinks the payload", () => {
-    const open = MODELS.find((x) => x.engine === "open")!;
+    const open = MODELS.find((x) => x.engine === "open" && !x.engines)!;
     expect(toModelRow(open).price).toBe("Free");
+    // A Fuobe Original is free on the GPU and priced on the cloud.
+    const original = MODELS.find((x) => x.engines?.length === 2)!;
+    expect(toModelRow(original).price).toMatch(/^Free · .+ \/ megapixel$/);
     const full = JSON.stringify(MODELS).length;
     const slim = JSON.stringify(MODELS.map(toModelRow)).length;
     expect(slim / full).toBeLessThan(0.5);

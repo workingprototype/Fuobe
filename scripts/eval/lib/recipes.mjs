@@ -57,12 +57,26 @@ export function motionEntry(name) {
   return research().recipes.motionsEffects.find((m) => m.presets.some((p) => p.toLowerCase() === want)) ?? null;
 }
 
+const HF_MAIN = /^(https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/)main\//;
+
+/**
+ * A LoRA's Hugging Face file at the commit the research pinned it to (loraLibrary[].revision, as the app's LoRA
+ * library downloads it), so a push upstream can't change a baseline. Other links come back as they are.
+ * @param {{ key?: string, file?: string, url?: string, revision?: string }} l
+ */
+export function pinnedLora(l) {
+  const lib = research().recipes.loraLibrary.find((x) => (l.key && x.key === l.key) || (l.file && x.file === l.file));
+  const rev = l.revision ?? lib?.revision;
+  if (!rev || !HF_MAIN.test(l.url ?? "")) return { url: l.url };
+  return { url: l.url.replace(HF_MAIN, `$1${rev}/`), version: rev };
+}
+
 /** Licence flags in one place: civitai "RentCivit"-only or explicit hostedOk:false never leave the user's GPU. */
 const loraRecord = (l) => ({
   ...(l.key && { key: l.key }),
   name: l.name,
   file: l.file,
-  url: l.url,
+  ...pinnedLora(l),
   ...(l.hostedUrl && { hostedUrl: l.hostedUrl }),
   ...(l.version && { version: l.version }),
   ...(l.page && { page: l.page }),
@@ -142,7 +156,9 @@ const MODEL_BASES = [
   [/^(oss-z-image-turbo|z-image-turbo-cloud|fuobe-soul|fuobe-soul-cinema)$/, /^z-image/],
   [/^(oss-qwen-image(-lightning)?|fuobe-soul-hd)$/, /^qwen-image-2512/],
   [/^(oss-wan22-14b(-fast)?|fuobe-dop)$/, /^wan2\.[12]/],
-  [/^(oss-ltx25|fuobe-dop-ltx)$/, /^ltx-2\.[35]/],
+  // LTX-2.3 LoRAs (and LTX-2 19B ones, unverified there) on Fuobe DoP · LTX; LTX-2.5 LoRAs on the open LTX-2.5 graph.
+  [/^fuobe-dop-ltx$/, /^ltx-2(\.3-|-19b)/],
+  [/^oss-ltx25$/, /^ltx-2\.5/],
 ];
 
 /** Can `modelId` load a LoRA trained for `base`? (true when either is unknown) */

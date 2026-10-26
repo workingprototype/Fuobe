@@ -250,6 +250,7 @@ describe("round-4 payloads", () => {
       prompt: "chair, lamp",
       image_url: "room.png",
       point_prompts: [{ x: 10, y: 20, label: 1 }],
+      export_textured_glb: true,
     });
   });
 

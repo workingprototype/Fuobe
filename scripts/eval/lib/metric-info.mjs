@@ -16,6 +16,8 @@ export const METRIC_INFO = {
   lipsyncOffset: { label: "A/V offset", better: "none", unit: "frames", tie: 0, digits: 0 },
   syncnet: { label: "SyncNet confidence", better: "higher", unit: "conf", tie: 0.1, digits: 2 },
   continuity: { label: "Shot continuity", better: "higher", unit: "cosine", tie: 0.005, digits: 3 },
+  paletteFit: { label: "Palette distance", better: "lower", unit: "mean ΔE76", tie: 0.5, digits: 1 },
+  paletteCover: { label: "Palette used", better: "higher", unit: "0–1", tie: 0.05, digits: 2 },
   seconds: { label: "Time", better: "lower", unit: "s (wall clock)", tie: 0.5, digits: 1 },
   costUsd: { label: "Cost", better: "lower", unit: "US$", tie: 0.0005, digits: 4 },
   vramGb: { label: "Peak memory", better: "lower", unit: "GB", tie: 0.1, digits: 2 },

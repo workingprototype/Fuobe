@@ -165,7 +165,13 @@
     "sha256": "7bfa7ebe14aa128a4b9b513e653998c5293ddc9221ca1d668191d27dc52725f6",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:16.834Z"
+    "at": "2026-10-26T00:46:02.904Z"
+  },
+  "image-to-3d-trellis2-multiview": {
+    "sha256": "06ac47b57c4007ed0bb6f96ecde799de1e24285baf590f14357ffde87081b118",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:46:07.467Z"
   },
   "image-to-splat-triposplat": {
     "sha256": "cb65f4660b4d5fef3c0544146ed51b7d3acf059f3190a102dccf8166908f5413",
@@ -256,6 +262,24 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:26.268Z"
+  },
+  "ltx23-flf2v-lora": {
+    "sha256": "7cdc4e07f2560d71f104a40aff59b99577e8d86691d3daaca4e2ce12f227d91c",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:53.847Z"
+  },
+  "ltx23-i2v-lora": {
+    "sha256": "34dcdf439d9f5fccfc48d5376bae9ec8abf1abd69a21ec426442ab52e71c4070",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:50.752Z"
+  },
+  "ltx23-t2v-lora": {
+    "sha256": "1ea883fdcbd76611ab7da834e1d9cf19ef4e3eb940d44f4c0203ef485ee371d4",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T08:23:53.900Z"
   },
   "ltx25-i2v": {
     "sha256": "7a9a34d0b7571d6a44cfd7b7cdb98a2896023700b7a0beba452f15f45d91130a",
@@ -653,6 +677,12 @@
     "error": null,
     "at": "2026-10-16T23:33:13.889Z"
   },
+  "video-fit-clip": {
+    "sha256": "f00ba60d6f7aac8a250bbf757483869be5bfef80727ce8c08d59b606f9bf5b27",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T09:24:35.576Z"
+  },
   "video-inpaint-wan-vace": {
     "sha256": "71aaa43c8ac4bb0a764a9a835d96d1c47b33244f741611c7036ebea8ffcef3a7",
     "validated": true,
@@ -814,6 +844,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-16T20:57:21.746Z"
+  },
+  "z-image-turbo-i2i": {
+    "sha256": "bc702da5141ab4941d1fa0af9eb6cdc94c789f69c2f53c82a4335e1f1df763ea",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:27:46.842Z"
   },
   "z-image-turbo-t2i": {
     "sha256": "dda8f9b795709c31220a732c2db134e130cda20d0672c0cca64905b1f8397a70",

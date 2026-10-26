@@ -12,7 +12,8 @@ import type {
   Pricing,
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
-import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField } from "./loras";
+import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
+import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -99,6 +100,26 @@ export function presetRoute(preset: Preset, engine: Engine): PresetRoute | null 
   return engine === "open" ? preset.open : preset.cloud;
 }
 
+/** Model families a Mix's LoRA may run on instead (said when it can't join the first preset's model). */
+const FAMILY_NAME: Record<string, string> = { "fuobe-dop": "Wan 2.2", "fuobe-dop-ltx": "LTX-2.3", "oss-ltx25": "LTX-2.5" };
+
+/**
+ * A Mix's second preset on the model the first runs on (Fuobe DoP, either engine): its LoRAs scaled by the mix
+ * strength when that model loads them; a LoRA for another base (an LTX-2.3 effect mixed into a Wan move) can't
+ * join, so that preset joins as words only, and the plan says so.
+ */
+export function mixLoras(second: Preset, modelId: string, engine: Engine, strength: number): { loras: LoraRef[]; trigger?: string; note?: string } {
+  const route = presetRoute(second, engine);
+  const loras = route?.loras ?? [];
+  if (!loras.length) return { loras: [] };
+  if (route?.modelId !== modelId) {
+    const on = (route && FAMILY_NAME[route.modelId]) ?? "another model";
+    return { loras: [], note: `${second.name}'s LoRA runs on ${on}, so it joins this mix as words only` };
+  }
+  const k = clamp01(strength);
+  return { loras: loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) })), trigger: triggerOf(loras) };
+}
+
 export interface Plan {
   model: ModelDef;
   op: Operation;
@@ -108,6 +129,14 @@ export interface Plan {
   /** Number of separate provider jobs (models that can't batch need several). */
   jobs: number;
   perJobOutputs: number;
+  /** What the plan changed or left out, said before the run (a look's LoRAs that don't fit this base). */
+  notes?: string[];
+  /**
+   * A Fuobe Soul run (src/lib/catalog/soul.ts): the look applied, the user's words inside the prompt (the enhancer
+   * expands them, the look stays), the look's LoRA triggers at the front (in order), and what happens after
+   * generation (the grade, an overlay) that the result's meta carries.
+   */
+  soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay; crop?: "21:9" };
 }
 
 /** Operations that work from their inputs alone. */
@@ -150,10 +179,12 @@ export function planGeneration(
   getModel: (id: string) => ModelDef | undefined,
   getPreset: (id: string) => Preset | undefined,
 ): Plan {
-  const preset = req.presetId ? getPreset(req.presetId) : undefined;
-  if (req.presetId && !preset) throw new Error(`Unknown preset ${req.presetId}`);
   const model = getModel(req.modelId);
   if (!model) throw new Error(`Unknown model ${req.modelId}`);
+  // Fuobe Soul takes a look (its presetId is a look id, not an app, motion or effect).
+  const soul = soulKind(model);
+  const preset = req.presetId && !soul ? getPreset(req.presetId) : undefined;
+  if (req.presetId && !soul && !preset) throw new Error(`Unknown preset ${req.presetId}`);
 
   let prompt = req.prompt?.trim() ?? "";
   let params: GenParams = { ...model.defaults, ...req.params };
@@ -167,9 +198,10 @@ export function planGeneration(
       // Apps pin their model; motions/effects let the user pick any compatible video model.
       throw new Error(`${preset.name} runs on ${route.modelId}, not ${model.id}`);
     }
-    prompt = composePrompt(route.promptTemplate ?? preset.promptTemplate, req.prompt, preset, req.presetOptions);
-    // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt.
+    // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt (without
+    // a LoRA's trigger word, which means nothing to them).
     const sameModel = route.modelId === model.id;
+    prompt = composePrompt((sameModel || preset.type === "app" ? route.promptTemplate : undefined) ?? preset.promptTemplate, req.prompt, preset, req.presetOptions);
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
     // Option choices that set model settings (Angles: rotate / tilt / zoom); a value the user set wins.
     const chosen = Object.assign({}, ...(preset.options ?? []).map((o) => o.choices.find((c) => c.value === (req.presetOptions?.[o.key] ?? o.default ?? o.choices[0]?.value))?.extra ?? {}));
@@ -178,28 +210,57 @@ export function planGeneration(
     if (sameModel) op = op ?? route.op;
   }
 
+  const notes: string[] = [];
   if (preset && /motion|effect/.test(preset.type)) {
     const k = clamp01(req.presetStrength ?? 1);
     if (k < 1) loras = loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) }));
+    // Fuobe DoP · LTX's built-in camera LoRA follows the preset strength too (camera_lora_scale, 0–1).
+    const camera = params.extra?.camera_lora;
+    if (camera && k < 1 && params.extra?.camera_lora_scale === undefined) params = { ...params, extra: { ...params.extra, camera_lora_scale: round2(k) } };
     if (req.mix) {
       const second = getPreset(req.mix.presetId);
       if (!second || !/motion|effect/.test(second.type)) throw new Error("Pick a camera motion or effect to mix in");
       if (second.id !== preset.id) {
         const m = clamp01(req.mix.strength);
-        // The second preset's own words, without the user's prompt; worded by strength.
-        const words = composePrompt(second.promptTemplate.replace(/\{prompt\}\.?/g, ""), "", second, undefined).replace(/[.\s]+$/, "");
+        // Its LoRAs stack on the same model on either engine (Fuobe DoP), each scaled by the mix strength; a LoRA for
+        // another base (an LTX-2.3 effect mixed into a Wan move) can't, so that preset joins as words only.
+        const mixed = mixLoras(second, model.id, model.engine, m);
+        if (mixed.note) notes.push(mixed.note);
+        // The second preset's own words, without the user's prompt (and with its LoRA's trigger); worded by strength.
+        const own = composePrompt(second.promptTemplate.replace(/\{prompt\}\.?/g, ""), "", second, undefined).replace(/[.\s]+$/, "");
+        const words = mixed.trigger && mixed.loras.length ? `${mixed.trigger}, ${own.charAt(0).toLowerCase()}${own.slice(1)}` : `${own.charAt(0).toLowerCase()}${own.slice(1)}`;
         const lead = m >= 0.75 ? "At the same time" : m >= 0.4 ? "Also, more subtly" : "With a slight hint of this";
-        prompt = `${prompt.replace(/[.\s]+$/, "")}. ${lead}: ${words.charAt(0).toLowerCase()}${words.slice(1)}.`;
-        // Its LoRAs stack on the same open model, scaled by the mix strength.
-        const route = presetRoute(second, model.engine);
-        if (route?.modelId === model.id && route.loras?.length) loras = [...loras, ...route.loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * m) }))];
+        prompt = `${prompt.replace(/[.\s]+$/, "")}. ${lead}: ${words}.`;
+        loras = [...loras, ...mixed.loras.filter((l) => !loras.some((x) => x.file === l.file))];
       }
     }
   }
 
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
   // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
-  if (req.loras?.length) loras = [...req.loras, ...loras];
+  let soulPlan: Plan["soul"];
+  if (soul) {
+    const extra = params.extra ?? {};
+    const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
+    const r = soulRecipe(soul, prompt, { look: req.presetId, strength: req.presetStrength, userLoras: req.loras, characterStrength: charStrength });
+    prompt = r.prompt;
+    loras = r.loras;
+    notes.push(...r.notes);
+    const own = new Set(req.loras ?? []);
+    soulPlan = {
+      ...(r.look && { look: r.look.id }),
+      words: r.words.trim().replace(/[.\s]+$/, ""),
+      triggers: [...new Set(r.loras.filter((l) => !own.has(l) && l.trigger?.trim()).map((l) => l.trigger!.trim()))],
+      ...(r.grade && { grade: r.grade }),
+      ...(r.overlay && { overlay: r.overlay }),
+    };
+    // characterStrength is Fuobe's setting, not the provider's.
+    if ("characterStrength" in extra) {
+      const rest = { ...extra };
+      delete rest.characterStrength;
+      params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
+    }
+  } else if (req.loras?.length) loras = [...req.loras, ...loras];
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
   // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
@@ -265,6 +326,12 @@ export function planGeneration(
   // makes the one file the picker showed, not both.
   const matteOutputs = model.options.matteOutputs;
   if (op === "bg-remove-video" && !params.matteOutput && matteOutputs && matteOutputs.length > 1) params = { ...params, matteOutput: matteOutputs[0] };
+  // Soul's prompt always carries the look's words: it's the user's own words a new picture needs.
+  if (soulPlan && op === "t2i" && !soulPlan.words) throw new Error("Write a prompt first");
+  // Soul HD (and Soul Cinema) make new pictures only: a picture attached isn't used, and the run says so.
+  if (soulPlan && op === "t2i" && req.inputs?.images?.length && !routesFor(model, "edit").length) {
+    notes.push(`${model.name} makes new pictures, so it doesn't use the picture you attached (Fuobe Soul restyles a picture with a look)`);
+  }
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
@@ -274,11 +341,41 @@ export function planGeneration(
   const presets = model.options.presets;
   if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
 
+  // Soul Cinema's 21:9 (research §4.5: a crop option): made at 16:9 on both engines, then cropped to 21:9 with
+  // its grade after generation (meta.crop).
+  if (soulPlan && soul === "cinema" && params.aspectRatio === CINEMA_CROP) {
+    params = { ...params, aspectRatio: "16:9" };
+    soulPlan = { ...soulPlan, crop: CINEMA_CROP };
+  }
+  // Soul's exact sizes on the user's GPU (the cloud routes send them through FieldMap.size); an edit keeps the
+  // picture's shape at the tier's size (about 1 or 2 megapixels).
+  if (soul && model.engine === "open" && op === "t2i") {
+    const { width, height } = soulSize(params.aspectRatio, params.resolution);
+    params = { ...params, extra: { ...params.extra, width, height } };
+  }
+  if (soul && model.engine === "open" && op === "edit") params = { ...params, extra: { ...params.extra, megapixels: params.resolution === "1080p" ? 2 : 1 } };
+  // How much an edit changes the picture (params.extra.strength) means nothing to a new picture.
+  if (soul && op === "t2i" && params.extra && "strength" in params.extra) {
+    const rest = { ...params.extra };
+    delete rest.strength;
+    params = { ...params, extra: Object.keys(rest).length ? rest : undefined };
+  }
+
   const requested = Math.max(1, Math.min(8, params.numOutputs ?? 1));
   const maxPerJob = Math.max(1, model.options.maxOutputs ?? 1);
   const perJobOutputs = Math.min(requested, maxPerJob);
   const jobs = Math.ceil(requested / perJobOutputs);
-  return { model, op, prompt, params: { ...params, numOutputs: perJobOutputs }, loras, jobs, perJobOutputs };
+  return {
+    model,
+    op,
+    prompt,
+    params: { ...params, numOutputs: perJobOutputs },
+    loras,
+    jobs,
+    perJobOutputs,
+    ...(notes.length && { notes }),
+    ...(soulPlan && { soul: soulPlan }),
+  };
 }
 
 /**
@@ -503,6 +600,11 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
+  // Per megapixel of every image made: Soul's sizes are known (about 1 or 2 MP); other models are taken as 1 MP.
+  if (p.unit === "megapixel") {
+    const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : 1;
+    per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
+  }
   if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).
@@ -512,5 +614,6 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     if (k !== undefined && k > 0) per *= k;
   }
   if (params.generateAudio === false && model.options.audio === true && p.note?.includes("audio-off-half")) per /= 2;
+  if (p.animationUsd && params.animation !== undefined && params.animation !== "") per += p.animationUsd;
   return Math.round(per * jobs * 1000) / 1000;
 }

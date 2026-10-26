@@ -42,6 +42,17 @@ def read_jobs(run_dir: pathlib.Path) -> list[dict]:
     return [r for r in rows.values() if r.get("status") == "succeeded" and r.get("outputs")]
 
 
+def palette_of(job: dict) -> np.ndarray:
+    """The palette a job asked for: its request's params.palette, or a palette-lock route's colours."""
+    req = job.get("request") or {}
+    body = req.get("body") or {}
+    inner = body.get("request") if isinstance(body.get("request"), dict) else {}
+    for c in ((req.get("params") or {}).get("palette"), body.get("colors"), (inner.get("params") or {}).get("palette")):
+        if isinstance(c, list) and c:
+            return maths.hex_colors(c)
+    return maths.hex_colors([])
+
+
 def media_outputs(run_dir: pathlib.Path, job: dict) -> list[pathlib.Path]:
     """The job's picture or clip outputs (masks, first frames and other helpers left out)."""
     out = []
@@ -134,6 +145,20 @@ class Scorer:
         if not pics:
             return {"_note": "no picture to score"}
         return {"aesthetic": round(float(np.mean(self.aesthetic().scores(pics))), 3)}
+
+    def m_palette(self, job, outs):
+        colors = palette_of(job)
+        if not len(colors):
+            return {"_note": "no palette in the request"}
+        pics = [p for o in outs for p in images_of(o, frames=4)]
+        if not pics:
+            return {"_note": "no picture to score"}
+        fits = []
+        for p in pics:
+            small = p.convert("RGB")
+            small.thumbnail((160, 160))
+            fits.append(maths.palette_fit(np.asarray(small), colors))
+        return {"paletteFit": round(float(np.mean([f["fit"] for f in fits])), 2), "paletteCover": round(float(np.mean([f["cover"] for f in fits])), 3)}
 
     def reference_pictures(self, job) -> list:
         pics = []

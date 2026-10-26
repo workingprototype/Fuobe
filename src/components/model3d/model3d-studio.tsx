@@ -1,94 +1,325 @@
 "use client";
 
-import { Box, Clapperboard, Download, Loader2, Sparkles, Video } from "lucide-react";
+import { Box, Loader2, PersonStanding } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { createElement, Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { FailedTile, PendingTile } from "@/components/studio/feed";
-import type { SlotValue } from "@/components/studio/media-slot";
+import { MediaSlot, type SlotValue } from "@/components/studio/media-slot";
 import { MediaDrop } from "@/components/av/media-drop";
 import { Panel, ToolHero, ToolShell } from "@/components/av/tool-shell";
-import { uploadFile, useCreateGeneration, useEngine, useGenerations, useHydrated } from "@/lib/api";
-import { animateSpinHref, model3dRequest, model3dView, MODEL3D_FEATURE, MODELS_3D } from "@/lib/av/model3d";
-import type { Generation } from "@/lib/catalog/types";
+import { useCreateGeneration, useEngine, useGenerations } from "@/lib/api";
+import {
+  MAX_3D_PROMPT,
+  MODEL3D_FEATURE,
+  MODEL3D_MODES,
+  MODELS_3D,
+  RIG_MODEL,
+  SIDE_LABELS,
+  SIDES_HINT,
+  VIEW_SIDES,
+  model3dBlocker,
+  model3dFor,
+  model3dRequest,
+  modeOf,
+  type Model3dInput,
+  type Model3dMode,
+  type ViewSide,
+} from "@/lib/av/model3d";
+import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
-import { recordableType, recordTurntable } from "./turntable";
+import { priceLine, useRunPreview } from "./hooks";
+import { ModelCard } from "./model-card";
 
-/** A link's ?model= (from ⌘K) picks that model and its engine. Under its own Suspense: it reads the URL. */
-function UrlModel({ onModel }: { onModel: (engine: "cloud" | "open", id: string) => void }) {
-  const id = useSearchParams().get("model");
+/**
+ * A model's name, the notices its results carry ("Built with DINOv3") and, for open models, the licence the
+ * picker shows (the page reads them from the catalog and the manifest).
+ */
+export interface Model3dInfo {
+  name: string;
+  notices: string[];
+  licence?: { name: string; flags: string[]; notices: string[] };
+}
+
+/** What a mode's input looks like before anything is uploaded (the price is asked for with these). */
+const PLACEHOLDER = "/api/files/placeholder.png";
+
+const HINTS: Record<Model3dMode, string> = {
+  image: "One clear photo → a textured 3D model (.glb) you can spin, download, rig and animate, record as a turntable and turn into a video.",
+  multi: "Photos of the same object from 2–4 sides → one 3D model that's right all the way round.",
+  text: "Describe one object → a textured 3D model of it.",
+  objects: "Name something in a photo → just that object, rebuilt in 3D as it stands.",
+  splat: "One photo → a Gaussian splat of the subject: soft, photo-real detail, the background left out.",
+};
+
+/**
+ * A link's ?model= (from ⌘K) picks that model, its mode and its engine; ?mode= picks a mode; ?model=meshy-rigging
+ * (rigging works on a finished model) says where Rig & animate is. Under its own Suspense: it reads the URL.
+ */
+function UrlModel({ onModel, onMode, onRig }: { onModel: (mode: Model3dMode, engine: Engine, id: string) => void; onMode: (mode: Model3dMode) => void; onRig: () => void }) {
+  const params = useSearchParams();
+  const id = params.get("model");
+  const mode = params.get("mode");
   useEffect(() => {
-    const engine = (["cloud", "open"] as const).find((e) => MODELS_3D[e].some((m) => m.id === id));
-    if (id && engine) onModel(engine, id);
-  }, [id, onModel]);
+    const found = id ? modeOf(id) : null;
+    if (found && id) onModel(found.mode, found.engine, id);
+    else if (id === RIG_MODEL) onRig();
+    else if (MODEL3D_MODES.some((m) => m.id === mode)) onMode(mode as Model3dMode);
+  }, [id, mode, onModel, onMode, onRig]);
   return null;
 }
 
-/** Image to 3D / Product spin: a product photo → a .glb to spin and download, a turntable video, and on to a video. */
-export function Model3dStudio({ names }: { names: Record<string, string> }) {
-  const [engine, setEngine] = useEngine();
+/** The five modes as one row of pills (wrapping on a phone); arrow keys move between them. */
+function ModePicker({ mode, onChange }: { mode: Model3dMode; onChange: (m: Model3dMode) => void }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const move = (from: number, by: number) => {
+    const i = (from + by + MODEL3D_MODES.length) % MODEL3D_MODES.length;
+    onChange(MODEL3D_MODES[i].id);
+    refs.current[i]?.focus();
+  };
+  return (
+    <div role="radiogroup" aria-label="Make a 3D model" className="mx-auto mt-6 flex max-w-full flex-wrap justify-center gap-1.5">
+      {MODEL3D_MODES.map((m, i) => (
+        <button
+          key={m.id}
+          ref={(el) => {
+            refs.current[i] = el;
+          }}
+          type="button"
+          role="radio"
+          aria-checked={mode === m.id}
+          tabIndex={mode === m.id ? 0 : -1}
+          title={m.hint}
+          onClick={() => onChange(m.id)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+              e.preventDefault();
+              move(i, 1);
+            } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+              e.preventDefault();
+              move(i, -1);
+            }
+          }}
+          className={cn(
+            "h-8 rounded-full border px-3.5 text-[13px] font-medium transition-colors",
+            mode === m.id ? "border-foreground bg-foreground text-background" : "bg-background text-muted-foreground hover:border-border-strong hover:text-foreground",
+          )}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Image to 3D: a photo, several photos, words, an object in a photo or a splat → a model to spin, download, rig and animate. */
+export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
+  const [engine, setEngine, engineMode] = useEngine();
   const create = useCreateGeneration();
   const results = useGenerations({ features: [MODEL3D_FEATURE, "app:app-image-to-3d"], limit: 24 });
+  const [mode, setMode] = useState<Model3dMode>("image");
   const [photo, setPhoto] = useState<SlotValue | null>(null);
-  const [picked, setPicked] = useState<Partial<Record<"cloud" | "open", string>>>({});
-  const modelId = picked[engine] ?? MODELS_3D[engine][0].id;
+  const [views, setViews] = useState<Partial<Record<ViewSide, SlotValue | null>>>({});
+  const [text, setText] = useState("");
+  const [object, setObject] = useState("");
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const [rigHint, setRigHint] = useState(false);
+  const showRigHint = useCallback(() => setRigHint(true), []);
   const fromUrl = useCallback(
-    (e: "cloud" | "open", id: string) => {
-      setPicked((p) => ({ ...p, [e]: id }));
+    (m: Model3dMode, e: Engine, id: string) => {
+      setMode(m);
+      setPicked((p) => ({ ...p, [`${m}:${e}`]: id }));
       setEngine(e);
     },
     [setEngine],
   );
-  const blocker = !photo ? "Add a product photo" : photo.uploading ? "Uploading…" : null;
+  const choices = MODELS_3D[mode][engine];
+  const modelId = model3dFor(mode, engine, picked[`${mode}:${engine}`]);
+  const sides = Object.fromEntries(VIEW_SIDES.flatMap((s) => (views[s] ? [[s, views[s]!.ref]] : []))) as Partial<Record<ViewSide, string>>;
+  const input: Model3dInput = { engine, mode, modelId: modelId ?? undefined, photo: photo?.ref, views: sides, prompt: mode === "text" ? text : mode === "objects" ? object : undefined };
+  const uploading = !!photo?.uploading || VIEW_SIDES.some((s) => views[s]?.uploading);
+  const blocker = model3dBlocker(input) ?? (uploading ? "Uploading…" : null);
+  // The price before anything is attached: placeholders stand in for the files and the words.
+  const priced: GenerationRequest | null = modelId
+    ? model3dRequest({ ...input, photo: input.photo ?? PLACEHOLDER, views: { front: PLACEHOLDER, left: PLACEHOLDER, ...sides }, prompt: input.prompt?.trim() || "an object" })
+    : null;
+  const preview = useRunPreview(priced);
+  const price = priceLine(preview.data);
+  const cloudAllowed = engineMode !== "open";
   const go = () => {
     if (blocker) return void toast(blocker, { id: "3d-blocker" });
-    create.mutate(model3dRequest({ engine, photo: photo!.ref, modelId }), {
-      onSuccess: () => toast.success("Building your 3D model"),
+    create.mutate(model3dRequest(input), {
+      onSuccess: () => toast.success(mode === "splat" ? "Making your splat" : mode === "text" && engine === "open" ? "Drawing the object, then building it in 3D" : "Building your 3D model"),
       onError: (e) => toast.error((e as Error).message),
     });
   };
-  const items = results.data ?? [];
+  const licence = modelId ? info[modelId]?.licence : undefined;
+  const items = (results.data ?? []).filter((g) => g.feature !== "image-to-3d-step");
+  const setSide = (s: ViewSide) => (v: SlotValue | null) => setViews((cur) => ({ ...cur, [s]: v }));
   return (
     <ToolShell title="Image to 3D">
       <Suspense fallback={null}>
-        <UrlModel onModel={fromUrl} />
+        <UrlModel onModel={fromUrl} onMode={setMode} onRig={showRigHint} />
       </Suspense>
-      <ToolHero title="Your product, in 3D" subtitle="One clear photo → a textured 3D model (.glb) you can spin, download, record as a turntable and turn into a video." />
-      <div className="mx-auto mt-8 grid max-w-[880px] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <MediaDrop kind="image" value={photo} onChange={setPhoto} title="Add a product photo" hint="One object, plain background, well lit" compact />
-        <Panel title="Model">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="m3d-model" className="sr-only">
-              Model
-            </Label>
-            <Select value={modelId} onValueChange={(v) => setPicked((p) => ({ ...p, [engine]: v }))}>
-              <SelectTrigger id="m3d-model" className="h-9 w-full rounded-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODELS_3D[engine].map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {names[m.id] ?? m.id}
-                  </SelectItem>
+      <ToolHero title="Your product, in 3D" subtitle={HINTS[mode]} />
+      <ModePicker mode={mode} onChange={setMode} />
+      {rigHint && (
+        <p role="status" className="mx-auto mt-4 max-w-[880px] rounded-2xl border bg-brand-faint px-4 py-3 text-[13px] text-brand-text">
+          <PersonStanding className="mr-1.5 inline size-4 align-[-3px]" aria-hidden />
+          Rig &amp; animate works on a finished model: make one here
+          {items.length > 0 && (
+            <>
+              {" "}
+              or pick one under{" "}
+              <a href="#your-3d-models" className="font-medium underline underline-offset-2">
+                Your 3D models
+              </a>
+            </>
+          )}
+          , then press Rig &amp; animate on its card. Rigging runs on Meshy, in the cloud.
+        </p>
+      )}
+      <div className="mx-auto mt-6 grid max-w-[880px] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {mode === "multi" ? (
+          <Panel title="Photos of each side" aside={<span className="text-[12px] text-muted-foreground">{Object.keys(sides).length} of 4</span>}>
+            {/* Four 80 px slots in a row when the panel has room for them (22rem), two by two when it doesn't. */}
+            <div className="@container">
+              <div className="grid grid-cols-2 justify-items-center gap-2 @[22rem]:grid-cols-4">
+                {VIEW_SIDES.map((s) => (
+                  <div key={s} className="flex flex-col items-center gap-1">
+                    <MediaSlot label={SIDE_LABELS[s]} kind="image" value={views[s] ?? null} onChange={setSide(s)} required={s === "front"} size="lg" caption />
+                    <span className="text-[11px] text-muted-foreground">{s === "front" ? "Needed" : "Optional"}</span>
+                  </div>
                 ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[12px] text-muted-foreground">{MODELS_3D[engine].find((m) => m.id === modelId)?.note}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-[12px] text-muted-foreground">
+              The front and at least one more side. Same object, same distance and light in each; a plain background helps.
+              {engine === "open" && ` The open model puts each photo on the side you add it to. ${SIDES_HINT}`}
+            </p>
+          </Panel>
+        ) : mode === "text" ? (
+          <Panel title="Describe the object">
+            <Label htmlFor="m3d-text" className="sr-only">
+              Describe the object
+            </Label>
+            <Textarea
+              id="m3d-text"
+              value={text}
+              onChange={(e) => setText(e.target.value.slice(0, MAX_3D_PROMPT))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go();
+              }}
+              placeholder="A brass ship's lantern with a glass globe and a carry ring"
+              className="min-h-28 rounded-xl"
+            />
+            <p className="mt-2 text-[12px] text-muted-foreground">
+              One object: what it is, its material and colours.{engine === "open" && " Z-Image Turbo draws it on a plain background first; the finished model's card links to that still."}
+            </p>
+          </Panel>
+        ) : (
+          <div className="grid min-w-0 gap-3">
+            <MediaDrop
+              kind="image"
+              value={photo}
+              onChange={setPhoto}
+              title={mode === "objects" ? "Add a photo" : "Add a photo of the object"}
+              hint={mode === "objects" ? "A room, a shelf, a street: anything with the object in it" : "One object, plain background, well lit"}
+              compact
+            />
+            {mode === "objects" && (
+              <Panel title="What to take out">
+                <Label htmlFor="m3d-object" className="sr-only">
+                  What to take out
+                </Label>
+                <Input
+                  id="m3d-object"
+                  value={object}
+                  onChange={(e) => setObject(e.target.value.slice(0, 200))}
+                  onKeyDown={(e) => e.key === "Enter" && go()}
+                  placeholder="the green armchair"
+                  className="h-9 rounded-full"
+                />
+                <p className="mt-2 text-[12px] text-muted-foreground">Name one thing, or several separated by commas. It&apos;s rebuilt where it stands; the rest of the photo is left out.</p>
+              </Panel>
+            )}
           </div>
-          <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
-            {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Box className="size-4" />} Make it 3D
-          </Button>
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            {engine === "open" ? "TRELLIS.2 also renders a turntable video on your GPU." : "Cloud models return the .glb; record a turntable right here in your browser."}
-          </p>
+        )}
+        <Panel title="Model">
+          {!modelId ? (
+            <div className="space-y-3 text-[13px]">
+              <p className="text-muted-foreground">
+                Pick an object runs on SAM 3D Objects, a cloud model; no open model rebuilds one named object yet. On the open engine, crop the photo to the object and use From an image: TRELLIS.2 cuts it out for you.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {cloudAllowed && (
+                  <Button size="sm" className="rounded-full" onClick={() => setEngine("cloud")}>
+                    Use the cloud
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" className="rounded-full" onClick={() => setMode("image")}>
+                  From an image
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="m3d-model" className="sr-only">
+                  Model
+                </Label>
+                <Select value={modelId} onValueChange={(v) => setPicked((p) => ({ ...p, [`${mode}:${engine}`]: v }))}>
+                  <SelectTrigger id="m3d-model" className="h-9 w-full rounded-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {choices.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {info[m.id]?.name ?? m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[12px] text-muted-foreground">{choices.find((m) => m.id === modelId)?.note}</p>
+                {!licence && info[modelId]?.notices.length > 0 && <p className="text-[12px] font-medium">{info[modelId].notices.join(" · ")}</p>}
+                {licence && (
+                  <p className="text-[12px] text-muted-foreground">
+                    Licence: {[licence.name, ...licence.flags].join(" · ")}
+                    {licence.notices.length > 0 && <span className="font-medium text-foreground"> · {licence.notices.join(" · ")}</span>} ·{" "}
+                    <Link href="/settings/about" className="underline underline-offset-2" prefetch={false}>
+                      All licences
+                    </Link>
+                  </p>
+                )}
+              </div>
+              <Button size="lg" className={cn("mt-4 w-full rounded-full", blocker && "bg-muted text-muted-foreground hover:bg-muted")} onClick={go} disabled={create.isPending}>
+                {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Box className="size-4" />} {mode === "splat" ? "Make the splat" : "Make it 3D"}
+              </Button>
+              <p className="mt-2 text-[12px] text-muted-foreground" aria-live="polite">
+                {blocker ? `${blocker} · ` : ""}
+                {preview.isError ? (preview.error as Error).message : (price ?? "Working out the price…")}
+              </p>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {mode === "splat"
+                  ? engine === "open"
+                    ? "TripoSplat cuts the subject out and renders an orbit video of the splat on your GPU."
+                    : "TripoSplat cuts the subject out and returns a .ply splat to download."
+                  : engine === "open"
+                    ? "TRELLIS.2 also renders a turntable video on your GPU."
+                    : "Cloud models return the .glb; record a turntable right here in your browser."}
+              </p>
+            </>
+          )}
         </Panel>
       </div>
-      <section className="mx-auto mt-12 max-w-[880px]" aria-labelledby="models3d">
+      <section id="your-3d-models" className="mx-auto mt-12 max-w-[880px] scroll-mt-6" aria-labelledby="models3d">
         {(results.isLoading || items.length > 0) && (
           <h3 id="models3d" className="mb-3 font-heading text-[22px]">
             Your 3D models
@@ -102,7 +333,7 @@ export function Model3dStudio({ names }: { names: Record<string, string> }) {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {items.map((g) => (
-              <ResultCard key={g.id} g={g} />
+              <ResultCard key={g.id} g={g} info={info} cloudAllowed={cloudAllowed} />
             ))}
           </div>
         )}
@@ -111,146 +342,18 @@ export function Model3dStudio({ names }: { names: Record<string, string> }) {
   );
 }
 
-function ResultCard({ g }: { g: Generation }) {
-  const create = useCreateGeneration();
-  if (g.status === "queued" || g.status === "running") return <PendingTile g={g} ratio={4 / 3} />;
-  if (g.status !== "succeeded") return <FailedTile g={g} ratio={4 / 3} onRetry={() => create.mutate(g.request, { onError: (e) => toast.error((e as Error).message) })} />;
-  return <ModelCard g={g} />;
+/** Retry runs the same request; a step of the open text-to-3D chain starts the chain again from the words. */
+function retryOf(g: Generation): GenerationRequest {
+  const r = g.request;
+  if (r.chain?.length && r.op === "image-to-3d" && !r.inputs?.images?.length && r.prompt?.trim()) {
+    return { feature: r.feature, modelId: "oss-text-trellis2", op: "text-to-3d", prompt: r.prompt, ...(r.params && { params: r.params }) };
+  }
+  return r;
 }
 
-function ModelCard({ g }: { g: Generation }) {
-  const view = model3dView(g);
-  const [viewer, setViewer] = useState<HTMLElement | null>(null);
-  const [ready, setReady] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const [recording, setRecording] = useState<number | null>(null);
-  const [recorded, setRecorded] = useState<{ url: string; saved?: string } | null>(null);
-  const hydrated = useHydrated();
-  const canRecord = hydrated && !!recordableType();
-  useEffect(() => {
-    let live = true;
-    import("@google/model-viewer").then(
-      () => live && setReady(true),
-      () => live && setFailed(true),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  // The recorded clip's blob URL lives until another recording replaces it (saving it doesn't change it).
-  const recordedUrl = recorded?.url;
-  useEffect(() => () => void (recordedUrl && URL.revokeObjectURL(recordedUrl)), [recordedUrl]);
-  // The turntable that came with the model (TRELLIS.2, demo) or the one recorded here, shown in place of the 3D view.
-  const clip = view.turntable ?? recordedUrl;
-  const [show, setShow] = useState<"3d" | "video">("3d");
-  const record = async () => {
-    if (!viewer) return;
-    setRecording(0);
-    try {
-      const blob = await recordTurntable(viewer as Parameters<typeof recordTurntable>[0], { onProgress: setRecording });
-      const url = URL.createObjectURL(blob);
-      setRecorded({ url });
-      // Keep it in the Library (Uploads) so it can go on to Edit video.
-      const asset = await uploadFile(new File([blob], `${g.modelName ?? "model"} turntable.webm`, { type: "video/webm" }));
-      setRecorded({ url, saved: asset.url });
-      toast.success("Turntable recorded — saved to your uploads");
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setRecording(null);
-    }
-  };
-  const spin = animateSpinHref(view, recorded?.saved);
-  const name = (g.modelName ?? "model").replace(/[^\w .-]+/g, "");
-  return (
-    <article className="overflow-hidden rounded-2xl border bg-background shadow-soft">
-      <div className="relative aspect-[4/3] bg-[radial-gradient(circle_at_50%_40%,var(--muted),var(--background))]">
-        {show === "video" && clip ? (
-          <video src={clip} controls loop muted playsInline autoPlay preload="metadata" aria-label={`Turntable of the ${g.modelName ?? "3D"} model`} className="size-full bg-media object-contain" />
-        ) : failed ? (
-          <div className="grid size-full place-items-center p-6 text-center text-[13px] text-muted-foreground">Couldn&apos;t load the 3D viewer — download the .glb to open it.</div>
-        ) : !ready || !view.glb ? (
-          <div className="grid size-full place-items-center text-muted-foreground">
-            <Box className="size-8 animate-pulse" />
-          </div>
-        ) : (
-          createElement("model-viewer", {
-            ref: setViewer,
-            src: view.glb,
-            poster: view.poster,
-            alt: `3D model made with ${g.modelName ?? "a 3D model"}`,
-            "camera-controls": "",
-            "auto-rotate": "",
-            "shadow-intensity": "1",
-            exposure: "1",
-            "touch-action": "pan-y",
-            "interaction-prompt": "none",
-            style: { width: "100%", height: "100%", background: "transparent" },
-          })
-        )}
-        {recording !== null && (
-          <div className="absolute inset-x-3 bottom-3 rounded-full bg-background/90 px-3 py-1.5 text-[12px] font-medium shadow-soft" role="status">
-            Recording the turntable… {Math.round(recording * 100)}%
-          </div>
-        )}
-        {g.provider === "mock" && <span className="absolute top-3 left-3 rounded-full bg-highlight/40 px-2 py-0.5 text-[11px] font-medium">Demo</span>}
-        {clip && recording === null && (
-          <div role="radiogroup" aria-label="Show" className="absolute top-3 right-3 inline-flex rounded-full bg-background/85 p-0.5 shadow-soft backdrop-blur">
-            {(["3d", "video"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                role="radio"
-                aria-checked={show === v}
-                onClick={() => setShow(v)}
-                className={cn("h-6 rounded-full px-2.5 text-[11px] font-medium transition", show === v ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground")}
-              >
-                {v === "3d" ? "3D" : "Turntable"}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="space-y-2 p-3">
-        <p className="truncate text-[13px] text-muted-foreground">{g.modelName}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {view.glb && (
-            <Button asChild variant="outline" size="sm" className="rounded-full">
-              <a href={view.glb} download={`${name}.glb`}>
-                <Download className="size-3.5" /> .glb
-              </a>
-            </Button>
-          )}
-          {Object.entries(view.formats)
-            .filter(([k]) => k !== "glb")
-            .slice(0, 3)
-            .map(([k, url]) => (
-              <Button key={k} asChild variant="ghost" size="sm" className="rounded-full">
-                <a href={url} download>
-                  .{k}
-                </a>
-              </Button>
-            ))}
-          {clip ? (
-            <Button asChild variant="outline" size="sm" className="rounded-full">
-              <a href={clip} download={`${name} turntable.${view.turntable ? "mp4" : "webm"}`} aria-label="Download the turntable video">
-                <Video className="size-3.5" /> Turntable
-              </a>
-            </Button>
-          ) : (
-            <Button variant="outline" size="sm" className="rounded-full" onClick={record} disabled={!ready || !canRecord || recording !== null}>
-              <Clapperboard className="size-3.5" /> Record turntable
-            </Button>
-          )}
-          {spin && (
-            <Button asChild size="sm" className="rounded-full">
-              <Link href={spin} prefetch={false}>
-                <Sparkles className="size-3.5" /> Animate the spin
-              </Link>
-            </Button>
-          )}
-        </div>
-      </div>
-    </article>
-  );
+function ResultCard({ g, info, cloudAllowed }: { g: Generation; info: Record<string, Model3dInfo>; cloudAllowed: boolean }) {
+  const create = useCreateGeneration();
+  if (g.status === "queued" || g.status === "running") return <PendingTile g={g} ratio={4 / 3} />;
+  if (g.status !== "succeeded") return <FailedTile g={g} ratio={4 / 3} onRetry={() => create.mutate(retryOf(g), { onError: (e) => toast.error((e as Error).message) })} />;
+  return <ModelCard g={g} info={info} cloudAllowed={cloudAllowed} />;
 }

@@ -1,0 +1,2284 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 56,
+      "steps": 12,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "108",
+        0
+      ],
+      "positive": [
+        "324",
+        0
+      ],
+      "negative": [
+        "324",
+        1
+      ],
+      "latent_image": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": 43,
+      "steps": 12,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "319",
+        0
+      ],
+      "positive": [
+        "98",
+        0
+      ],
+      "negative": [
+        "98",
+        1
+      ],
+      "latent_image": [
+        "98",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "15": {
+    "inputs": {
+      "clip_name": "dino_v3_L_naf_fp32.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "Load CLIP Vision"
+    }
+  },
+  "18": {
+    "inputs": {
+      "seed": 42,
+      "steps": 20,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "126",
+        0
+      ],
+      "positive": [
+        "91",
+        0
+      ],
+      "negative": [
+        "91",
+        1
+      ],
+      "latent_image": [
+        "91",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "23": {
+    "inputs": {
+      "seed": 42,
+      "steps": 12,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "126",
+        0
+      ],
+      "positive": [
+        "94",
+        0
+      ],
+      "negative": [
+        "94",
+        1
+      ],
+      "latent_image": [
+        "94",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "87": {
+    "inputs": {
+      "batch_size": 1
+    },
+    "class_type": "EmptyTrellis2LatentStructure",
+    "_meta": {
+      "title": "Empty Trellis2 Latent Structure"
+    }
+  },
+  "91": {
+    "inputs": {
+      "positive": [
+        "324",
+        0
+      ],
+      "negative": [
+        "324",
+        1
+      ],
+      "voxel": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "Trellis2ShapeStage",
+    "_meta": {
+      "title": "Trellis2 Shape Stage"
+    }
+  },
+  "92": {
+    "inputs": {
+      "samples": [
+        "23",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "VaeDecodeShapeTrellis",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Shape"
+    }
+  },
+  "93": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "118",
+        0
+      ],
+      "shape_subdivides": [
+        "92",
+        1
+      ]
+    },
+    "class_type": "VaeDecodeTextureTrellis",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Texture"
+    }
+  },
+  "94": {
+    "inputs": {
+      "target_resolution": "1536",
+      "positive": [
+        "91",
+        0
+      ],
+      "negative": [
+        "91",
+        1
+      ],
+      "shape_latent": [
+        "18",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "Trellis2UpsampleStage",
+    "_meta": {
+      "title": "Trellis2 Upsample Stage"
+    }
+  },
+  "98": {
+    "inputs": {
+      "positive": [
+        "94",
+        0
+      ],
+      "negative": [
+        "94",
+        1
+      ],
+      "shape_latent": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "Trellis2TextureStage",
+    "_meta": {
+      "title": "Trellis2 Texture Stage"
+    }
+  },
+  "108": {
+    "inputs": {
+      "shift": 5,
+      "model": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "117": {
+    "inputs": {
+      "vae_name": "trellis_2_shape_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "118": {
+    "inputs": {
+      "vae_name": "trellis_2_texture_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "119": {
+    "inputs": {
+      "resolution": "32",
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "VaeDecodeStructureTrellis2",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Structure"
+    }
+  },
+  "125": {
+    "inputs": {
+      "multiplier": 0.7,
+      "model": [
+        "199",
+        0
+      ]
+    },
+    "class_type": "RescaleCFG",
+    "_meta": {
+      "title": "RescaleCFG"
+    }
+  },
+  "126": {
+    "inputs": {
+      "multiplier": 0.5,
+      "model": [
+        "279",
+        0
+      ]
+    },
+    "class_type": "RescaleCFG",
+    "_meta": {
+      "title": "RescaleCFG"
+    }
+  },
+  "147": {
+    "inputs": {
+      "texture_size": [
+        "288",
+        0
+      ],
+      "mesh": [
+        "196",
+        0
+      ],
+      "voxel_colors": [
+        "93",
+        0
+      ],
+      "reference_mesh": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "BakeTextureFromVoxel",
+    "_meta": {
+      "title": "Bake Texture From Voxel"
+    }
+  },
+  "164": {
+    "inputs": {
+      "images": [
+        "147",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Base Color"
+    }
+  },
+  "186": {
+    "inputs": {
+      "target_face_count": 700000,
+      "placement_mode": "midpoint",
+      "mesh": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "DecimateMesh",
+    "_meta": {
+      "title": "Decimate Mesh"
+    }
+  },
+  "192": {
+    "inputs": {
+      "bg_removal_model": [
+        "193",
+        0
+      ],
+      "image": [
+        "360",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background"
+    }
+  },
+  "193": {
+    "inputs": {
+      "bg_removal_name": "birefnet.safetensors"
+    },
+    "class_type": "LoadBackgroundRemovalModel",
+    "_meta": {
+      "title": "Load Background Removal Model"
+    }
+  },
+  "196": {
+    "inputs": {
+      "segmenter": "pec",
+      "resolution": [
+        "288",
+        0
+      ],
+      "padding": 1,
+      "weld_distance": 0.0002,
+      "mesh": [
+        "238",
+        0
+      ]
+    },
+    "class_type": "UnwrapMesh",
+    "_meta": {
+      "title": "Unwrap Mesh UVs"
+    }
+  },
+  "199": {
+    "inputs": {
+      "cfg": 1,
+      "start_percent": 0.667,
+      "end_percent": 1,
+      "model": [
+        "319",
+        0
+      ]
+    },
+    "class_type": "CFGOverride",
+    "_meta": {
+      "title": "CFG Override"
+    }
+  },
+  "202": {
+    "inputs": {
+      "mesh": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "GetMeshInfo",
+    "_meta": {
+      "title": "Get Mesh Info"
+    }
+  },
+  "207": {
+    "inputs": {
+      "images": [
+        "147",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Metallic"
+    }
+  },
+  "208": {
+    "inputs": {
+      "images": [
+        "147",
+        2
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Roughness"
+    }
+  },
+  "210": {
+    "inputs": {
+      "mesh": [
+        "196",
+        0
+      ],
+      "base_color": [
+        "164",
+        0
+      ],
+      "metallic": [
+        "207",
+        0
+      ],
+      "roughness": [
+        "208",
+        0
+      ],
+      "occlusion": [
+        "235",
+        0
+      ],
+      "normal_map": [
+        "226",
+        0
+      ]
+    },
+    "class_type": "ApplyTextureToMesh",
+    "_meta": {
+      "title": "Apply Texture to Mesh"
+    }
+  },
+  "224": {
+    "inputs": {
+      "resolution": 2048,
+      "cage_distance": 0.05,
+      "ignore_backfaces": true,
+      "low_poly": [
+        "196",
+        0
+      ],
+      "high_poly": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "BakeNormalMapFromMesh",
+    "_meta": {
+      "title": "Bake Normal Map from Mesh"
+    }
+  },
+  "226": {
+    "inputs": {
+      "images": [
+        "224",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Normal"
+    }
+  },
+  "233": {
+    "inputs": {
+      "resolution": 1024,
+      "samples": 64,
+      "max_distance": 0.71,
+      "strength": 1,
+      "bias": 0.01,
+      "low_poly": [
+        "196",
+        0
+      ],
+      "high_poly": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "BakeAmbientOcclusion",
+    "_meta": {
+      "title": "Bake Ambient Occlusion"
+    }
+  },
+  "235": {
+    "inputs": {
+      "images": [
+        "233",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Ambiant Occlusion"
+    }
+  },
+  "238": {
+    "inputs": {
+      "crease_angle": 180,
+      "mesh": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "MeshSmoothNormals",
+    "_meta": {
+      "title": "Smooth Mesh Normals"
+    }
+  },
+  "241": {
+    "inputs": {
+      "resolution": 768,
+      "sign_mode": "udf",
+      "sign_mode.qef": false,
+      "sign_mode.drop_inverted_components": false,
+      "sign_mode.drop_enclosed_components": false,
+      "band": 1,
+      "project_back": 0,
+      "fix_poles": false,
+      "smooth_iters": 20,
+      "drop_small_components": 0.01,
+      "precluster_max_verts": 20000000,
+      "mesh": [
+        "202",
+        0
+      ]
+    },
+    "class_type": "RemeshMesh",
+    "_meta": {
+      "title": "Remesh Mesh (Narrow-Band DC)"
+    }
+  },
+  "260": {
+    "inputs": {
+      "crease_angle": 180,
+      "mesh": [
+        "210",
+        0
+      ]
+    },
+    "class_type": "MeshSmoothNormals",
+    "_meta": {
+      "title": "Smooth Mesh Normals"
+    }
+  },
+  "279": {
+    "inputs": {
+      "cfg": 1,
+      "start_percent": 0.769,
+      "end_percent": 1,
+      "model": [
+        "319",
+        0
+      ]
+    },
+    "class_type": "CFGOverride",
+    "_meta": {
+      "title": "CFG Override"
+    }
+  },
+  "285": {
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ]
+    },
+    "class_type": "MeshToFile3D",
+    "_meta": {
+      "title": "Create 3D File (from Mesh)"
+    }
+  },
+  "288": {
+    "inputs": {
+      "value": 4096
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Texture Resolution"
+    }
+  },
+  "312": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "pad_factor": 1.1,
+      "grow_mask": 0,
+      "background": "#000000",
+      "images": [
+        "360",
+        0
+      ],
+      "masks": [
+        "192",
+        0
+      ]
+    },
+    "class_type": "ImageCropToMask",
+    "_meta": {
+      "title": "Crop Image to Mask"
+    }
+  },
+  "319": {
+    "inputs": {
+      "unet_name": "pixal3d_multiview_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "324": {
+    "inputs": {
+      "fov": [
+        "382",
+        0
+      ],
+      "clip_vision_model": [
+        "15",
+        0
+      ],
+      "front": [
+        "312",
+        0
+      ],
+      "left": [
+        "349",
+        0
+      ],
+      "back": [
+        "350",
+        0
+      ],
+      "right": [
+        "352",
+        0
+      ]
+    },
+    "class_type": "Pixal3DMultiViewConditioning",
+    "_meta": {
+      "title": "Pixal3D Multi-View Conditioning"
+    }
+  },
+  "348": {
+    "inputs": {
+      "bg_removal_model": [
+        "193",
+        0
+      ],
+      "image": [
+        "361",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background"
+    }
+  },
+  "349": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "pad_factor": 1.1,
+      "grow_mask": 0,
+      "background": "#000000",
+      "images": [
+        "361",
+        0
+      ],
+      "masks": [
+        "348",
+        0
+      ]
+    },
+    "class_type": "ImageCropToMask",
+    "_meta": {
+      "title": "Crop Image to Mask"
+    }
+  },
+  "350": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "pad_factor": 1.1,
+      "grow_mask": 0,
+      "background": "#000000",
+      "images": [
+        "362",
+        0
+      ],
+      "masks": [
+        "351",
+        0
+      ]
+    },
+    "class_type": "ImageCropToMask",
+    "_meta": {
+      "title": "Crop Image to Mask"
+    }
+  },
+  "351": {
+    "inputs": {
+      "bg_removal_model": [
+        "193",
+        0
+      ],
+      "image": [
+        "362",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background"
+    }
+  },
+  "352": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "pad_factor": 1.1,
+      "grow_mask": 0,
+      "background": "#000000",
+      "images": [
+        "363",
+        0
+      ],
+      "masks": [
+        "353",
+        0
+      ]
+    },
+    "class_type": "ImageCropToMask",
+    "_meta": {
+      "title": "Crop Image to Mask"
+    }
+  },
+  "353": {
+    "inputs": {
+      "bg_removal_model": [
+        "193",
+        0
+      ],
+      "image": [
+        "363",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background"
+    }
+  },
+  "360": {
+    "inputs": {
+      "image": "front.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load front view"
+    }
+  },
+  "361": {
+    "inputs": {
+      "image": "left.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load left view"
+    }
+  },
+  "362": {
+    "inputs": {
+      "image": "back.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load back view"
+    }
+  },
+  "363": {
+    "inputs": {
+      "image": "right.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load right view"
+    }
+  },
+  "372": {
+    "inputs": {
+      "filename_prefix": "fuobe/image-to-3d-trellis2-multiview",
+      "viewport_state": {
+        "image": "",
+        "mask": "",
+        "normal": "",
+        "camera_info": {
+          "position": {
+            "x": 10,
+            "y": 10,
+            "z": 10.000000000000002
+          },
+          "target": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "zoom": 1,
+          "cameraType": "perspective",
+          "quaternion": {
+            "x": -0.2798481423331213,
+            "y": 0.3647051996310008,
+            "z": 0.11591689595929511,
+            "w": 0.8804762392171493
+          },
+          "fov": 35,
+          "aspect": 1,
+          "near": 0.01,
+          "far": 10000,
+          "frustum": {
+            "left": -5,
+            "right": 5,
+            "top": 5,
+            "bottom": -5
+          }
+        },
+        "recording": "",
+        "model_3d_info": []
+      },
+      "width": 1024,
+      "height": 1024,
+      "model_3d": [
+        "285",
+        0
+      ]
+    },
+    "class_type": "Save3DAdvanced",
+    "_meta": {
+      "title": "Save 3D (Advanced)"
+    }
+  },
+  "380": {
+    "inputs": {
+      "model_name": "moge_2_vitl_normal_fp16.safetensors"
+    },
+    "class_type": "LoadMoGeModel",
+    "_meta": {
+      "title": "Load MoGe Model"
+    }
+  },
+  "381": {
+    "inputs": {
+      "resolution_level": 9,
+      "fov_x_degrees": 0,
+      "batch_size": 4,
+      "force_projection": true,
+      "apply_mask": true,
+      "refine_steps": 3,
+      "moge_model": [
+        "380",
+        0
+      ],
+      "image": [
+        "312",
+        0
+      ]
+    },
+    "class_type": "MoGeInference",
+    "_meta": {
+      "title": "Run MoGe Inference (the front view's field of view)"
+    }
+  },
+  "382": {
+    "inputs": {
+      "axis": "horizontal",
+      "unit": "degrees",
+      "moge_geometry": [
+        "381",
+        0
+      ]
+    },
+    "class_type": "MoGeGeometryToFOV",
+    "_meta": {
+      "title": "Get FoV from MoGe Geometry"
+    }
+  },
+  "500": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 0.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "501": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 10.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "502": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 20.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "503": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 30.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "504": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 40.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "505": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 50.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "506": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 60.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "507": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 70.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "508": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 80.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "509": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 90.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "510": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 100.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "511": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 110.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "512": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 120.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "513": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 130.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "514": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 140.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "515": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 150.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "516": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 160.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "517": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 170.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "518": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 180.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "519": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 190.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "520": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 200.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "521": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 210.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "522": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 220.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "523": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 230.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "524": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 240.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "525": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 250.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "526": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 260.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "527": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 270.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "528": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 280.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "529": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 290.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "530": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 300.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "531": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 310.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "532": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 320.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "533": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 330.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "534": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 340.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "535": {
+    "class_type": "RotateMesh",
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ],
+      "mode": "euler_xyz",
+      "mode.angle_x": 0.0,
+      "mode.angle_y": 350.0,
+      "mode.angle_z": 0.0
+    },
+    "_meta": {
+      "title": "RotateMesh"
+    }
+  },
+  "600": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "500",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "601": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "501",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "602": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "502",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "603": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "503",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "604": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "504",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "605": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "505",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "606": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "506",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "607": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "507",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "608": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "508",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "609": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "509",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "610": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "510",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "611": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "511",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "612": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "512",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "613": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "513",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "614": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "514",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "615": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "515",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "616": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "516",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "617": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "517",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "618": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "518",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "619": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "519",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "620": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "520",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "621": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "521",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "622": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "522",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "623": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "523",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "624": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "524",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "625": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "525",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "626": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "526",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "627": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "527",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "628": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "528",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "629": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "529",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "630": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "530",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "631": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "531",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "632": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "532",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "633": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "533",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "634": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "534",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "635": {
+    "class_type": "RenderMesh",
+    "inputs": {
+      "mesh": [
+        "535",
+        0
+      ],
+      "mode": "auto",
+      "width": 768,
+      "height": 768,
+      "background": "#ffffff"
+    },
+    "_meta": {
+      "title": "RenderMesh"
+    }
+  },
+  "700": {
+    "class_type": "BatchImagesNode",
+    "inputs": {
+      "images.image0": [
+        "600",
+        0
+      ],
+      "images.image1": [
+        "601",
+        0
+      ],
+      "images.image2": [
+        "602",
+        0
+      ],
+      "images.image3": [
+        "603",
+        0
+      ],
+      "images.image4": [
+        "604",
+        0
+      ],
+      "images.image5": [
+        "605",
+        0
+      ],
+      "images.image6": [
+        "606",
+        0
+      ],
+      "images.image7": [
+        "607",
+        0
+      ],
+      "images.image8": [
+        "608",
+        0
+      ],
+      "images.image9": [
+        "609",
+        0
+      ],
+      "images.image10": [
+        "610",
+        0
+      ],
+      "images.image11": [
+        "611",
+        0
+      ],
+      "images.image12": [
+        "612",
+        0
+      ],
+      "images.image13": [
+        "613",
+        0
+      ],
+      "images.image14": [
+        "614",
+        0
+      ],
+      "images.image15": [
+        "615",
+        0
+      ],
+      "images.image16": [
+        "616",
+        0
+      ],
+      "images.image17": [
+        "617",
+        0
+      ],
+      "images.image18": [
+        "618",
+        0
+      ],
+      "images.image19": [
+        "619",
+        0
+      ],
+      "images.image20": [
+        "620",
+        0
+      ],
+      "images.image21": [
+        "621",
+        0
+      ],
+      "images.image22": [
+        "622",
+        0
+      ],
+      "images.image23": [
+        "623",
+        0
+      ],
+      "images.image24": [
+        "624",
+        0
+      ],
+      "images.image25": [
+        "625",
+        0
+      ],
+      "images.image26": [
+        "626",
+        0
+      ],
+      "images.image27": [
+        "627",
+        0
+      ],
+      "images.image28": [
+        "628",
+        0
+      ],
+      "images.image29": [
+        "629",
+        0
+      ],
+      "images.image30": [
+        "630",
+        0
+      ],
+      "images.image31": [
+        "631",
+        0
+      ],
+      "images.image32": [
+        "632",
+        0
+      ],
+      "images.image33": [
+        "633",
+        0
+      ],
+      "images.image34": [
+        "634",
+        0
+      ],
+      "images.image35": [
+        "635",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "BatchImagesNode"
+    }
+  },
+  "701": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "images": [
+        "700",
+        0
+      ],
+      "fps": 12.0,
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none"
+    },
+    "_meta": {
+      "title": "CreateVideo"
+    }
+  },
+  "702": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "701",
+        0
+      ],
+      "filename_prefix": "fuobe/image-to-3d-trellis2-multiview-turntable",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto"
+    },
+    "_meta": {
+      "title": "SaveVideo"
+    }
+  }
+}

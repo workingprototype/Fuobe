@@ -69,7 +69,7 @@ try {
   await page.waitForURL(/\/canvas$/);
   await page.waitForTimeout(800);
   const saved = await api(`/api/canvases/${c.id}`);
-  check("an edit made just before leaving is saved", saved.canvas.graph.nodes.find((n) => n.type === "prompt")?.data.text === "A paper boat on a canal");
+  check("an edit made just before leaving is saved", saved.canvas.pages[0].graph.nodes.find((n) => n.type === "prompt")?.data.text === "A paper boat on a canal");
 
   // 2. Rename, then back.
   await page.goto(`${app}/canvas/${c.id}`, { waitUntil: "load" });

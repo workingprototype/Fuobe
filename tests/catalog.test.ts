@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { PRESET_ICONS } from "@/components/preset-icons";
 import { getModel, MODELS, PRESETS } from "@/lib/catalog";
+import { onEngine } from "@/lib/catalog/engines";
 import type { Manifest } from "@/lib/comfy";
 
 describe("catalog integrity", () => {
@@ -20,9 +21,15 @@ describe("catalog integrity", () => {
       if (d.aspectRatio && m.options.aspectRatios) expect(m.options.aspectRatios, `${m.id} aspect`).toContain(d.aspectRatio);
       if (d.resolution && m.options.resolutions) expect(m.options.resolutions, `${m.id} resolution`).toContain(d.resolution);
       // ComfyUI, browser-only tools and Ollama-only text steps are the open engine; every API provider is cloud.
+      // A Fuobe Original runs on both: each engine it lists has routes, and every route is on one of them.
+      const engines = m.engines ?? [m.engine];
       for (const r of m.routes) {
         const open = r.provider === "comfyui" || r.provider === "local" || (r.provider === "llm" && r.endpoint === "ollama");
-        expect(open ? "open" : "cloud", `${m.id} engine/provider`).toBe(m.engine);
+        expect(engines, `${m.id} engine/provider`).toContain(open ? "open" : "cloud");
+      }
+      if (m.engines) {
+        expect(m.engines, m.id).toContain(m.engine);
+        for (const e of m.engines) expect(onEngine(m, e).routes.length, `${m.id} on ${e}`).toBeGreaterThan(0);
       }
     }
   });

@@ -83,6 +83,8 @@
 //   slowdown*                             (FPS Boost: slow-motion factor, params.slowdown; the output fps is divided by it)
 //   shortSide*                            (chunked upscalers: the output's shorter edge in px, params.resolution: 1080p -> 1080)
 //   colorSpace*                           (SDR to HDR: CreateVideo color space, "HDR" = BT.2020 HLG, "HDR PQ" = BT.2020 PQ (HDR10): params.format)
+// Keys added with Fuobe Soul (Originals O2):
+//   megapixels*                           (image to image: the picture scaled to about this many megapixels, Soul's tier: 1 = 720p, 2 = 1080p)
 // Output fields beyond {node, kind}: stem ("voice" | "background"), role ("cues" | "transcript" | "language" |
 // "sheet" | "tiles" | "layers" | "first-frame" | "turntable" | "lines" | "frame" | "frames" | "scene" | "depth" | "splat" |
 // "brief" | "mask" (a painted eraser's last tracked frame, white = the object) | "cutout" | "matte" (a matte graph's transparent
@@ -124,6 +126,8 @@ export const CUSTOM_NODE_REPOS = {
 // Model download locations for files that the source workflow does not annotate
 // (UI templates usually carry node.properties.models; custom-node examples do not).
 export const KNOWN_MODELS = {
+  'ltx-2.3-22b-distilled-fp8.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors' },
+  'gemma_3_12B_it_fp4_mixed.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors' },
   'RealESRGAN_x4plus.safetensors': { folder: 'upscale_models', url: 'https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors' },
   'birefnet.safetensors': { folder: 'background_removal', url: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors' },
   'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
@@ -197,6 +201,7 @@ export const KNOWN_MODELS = {
   'qwen3.5_4b_bf16.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/Qwen3.5/resolve/main/text_encoders/qwen3.5_4b_bf16.safetensors' },
   'gemma4_e4b_it_fp8_scaled.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors' },
   'trellis_2_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/TRELLIS.2/resolve/main/diffusion_models/trellis_2_int8_convrot.safetensors' },
+  'pixal3d_multiview_int8_convrot.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors' },
   'trellis_2_shape_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors' },
   'trellis_2_texture_vae_bf16.safetensors': { folder: 'vae', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors' },
   'dino_v3_L_naf_fp32.safetensors': { folder: 'clip_vision', url: 'https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors' },
@@ -1980,6 +1985,81 @@ export const SPEC = [
       'palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too).',
   },
 
+  // ---- Fuobe Soul (Originals O2): restyle a picture with a look ----------------------
+  {
+    id: 'z-image-turbo-i2i',
+    title: 'Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)',
+    capability: 'edit',
+    handBuilt: 'hand-built/z-image-turbo-i2i.json',
+    bindings: {
+      image: [b('1', 'image')], megapixels: [b('2', 'megapixels')], prompt: [b('14', 'text')], seed: [b('17', 'seed')], steps: [b('17', 'steps')],
+      strength: [b('17', 'denoise')], shift: [b('13', 'shift')],
+    },
+    outputs: [{ node: '19', kind: 'image' }],
+    defaults: { steps: 8, shift: 3, strength: 0.6, megapixels: 1 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 16 },
+    vramGb: 12,
+    license: 'Apache-2.0 (Z-Image Turbo)',
+    notes:
+      'Fuobe Soul\'s edit route (Soul 2.0 image-to-image): the picture scaled to Soul\'s tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler ' +
+      '(8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal\'s z-image/turbo/image-to-image; about 0.17 would be Higgsfield\'s refiner pass, an experiment until the evaluation harness measures it). ' +
+      'The look\'s LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture\'s shape.',
+  },
+
+  // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------
+  {
+    id: 'ltx23-i2v-lora',
+    title: 'LTX-2.3 22B distilled image to video + LoRAs (Fuobe DoP · LTX)',
+    capability: 'i2v',
+    handBuilt: 'hand-built/ltx23-i2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'From the official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, one pass of 8 manual sigmas, cfg 1, Euler ancestral) without the end-frame guide: the start frame is a ' +
+      'first-frame guide at strength 1 (the template uses 0.7 for both ends), resized and centre-cropped to width x height. A motion\'s LoRAs (FPV, Wind to Face, the transition LoRA) are ' +
+      'injected after the CheckpointLoaderSimple (LoraLoaderModelOnly). Silent like a DoP clip: the audio latent rides through the audio-video sampler but is not decoded. frames = seconds*fps+1 (8n+1), 24 fps.',
+  },
+  {
+    id: 'ltx23-flf2v-lora',
+    title: 'LTX-2.3 22B distilled start and end frame to video + LoRAs (Fuobe DoP · LTX transitions)',
+    capability: 'flf2v',
+    handBuilt: 'hand-built/ltx23-flf2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')], endImage: [b('39', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'The official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, first- and last-frame guides at strength 0.7, 8 manual sigmas, cfg 1) with plain size, frame and fps values ' +
+      'and the joyfox LTX-2.3 Transition LoRA (or any LTX-2.3 LoRA) injected after the CheckpointLoaderSimple. Both frames are resized and centre-cropped to width x height. Silent (the audio is not decoded).',
+  },
+  {
+    id: 'ltx23-t2v-lora',
+    title: 'LTX-2.3 22B distilled text to video + LoRAs',
+    capability: 't2v',
+    handBuilt: 'hand-built/ltx23-t2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'ltx23-i2v-lora without the start frame: the empty latent takes width x height directly. LoRAs injected after the CheckpointLoaderSimple. Silent (the audio is not decoded). ' +
+      'Not used by a catalog model yet (build plan O4 lists it for LTX camera LoRAs without a start frame).',
+  },
+
   // ---- Shorts Studio / Mixed Media: trim, segment, restyle ------------------------
   {
     id: 'video-trim',
@@ -2330,10 +2410,38 @@ export const SPEC = [
     },
     outputs: [{ node: '322', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
     vramGb: 16,
-    license: 'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)',
+    license:
+      'MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
     notes:
       'Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> ' +
       'baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui "3d"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps.',
+  },
+  {
+    id: 'image-to-3d-trellis2-multiview',
+    title: 'Photos of 2-4 sides to textured 3D (Pixal3D multi-view on TRELLIS.2, PBR GLB) + a 36-view turntable video',
+    capability: 'image-to-3d',
+    handBuilt: 'hand-built/image-to-3d-trellis2-multiview.json',
+    bindings: {
+      image: [b('360', 'image')], image2: [b('361', 'image')], image3: [b('362', 'image')], image4: [b('363', 'image')],
+      seed: [b('3', 'seed'), b('12', 'seed'), b('18', 'seed'), b('23', 'seed')], textureSize: [b('288', 'value')], turntableFps: [b('701', 'fps')], fovX: [b('381', 'fov_x_degrees')],
+    },
+    outputs: [{ node: '372', kind: 'model3d' }, { node: '702', kind: 'video', role: 'turntable' }],
+    vramGb: 16,
+    license:
+      'MIT (Pixal3D multi-view weights by TencentARC, TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License ' +
+      '(royalty-free, commercial use allowed; the app must show a "Built with DINOv3" notice)',
+    notes:
+      'Template 3d_pixal3d_multi_views (2026-09-09) with the turnaround-sheet loader and its crops replaced by one upload per side: image = front, image2 = left, image3 = back, image4 = right ' +
+      '(Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart, Z up: the left view is the object\'s own left, the camera at +90 degrees azimuth from the front, i.e. the photographer walks to their right; ' +
+      'every side but the front is optional and the provider drops the branch of a side with no photo). ' +
+      'Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view ' +
+      '-> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB. The same 36-view turntable as image-to-3d-trellis2. ' +
+      'The views\' horizontal field of view as framed (Pixal3DMultiViewConditioning.fov) is measured on the front crop: MoGe 2 (LoadMoGeModel -> MoGeInference -> MoGeGeometryToFOV, horizontal, degrees), ' +
+      'as the node\'s tooltip says for photos and as the official single-view template 3d_pixal3d_trellis2_image_to_model feeds Pixal3DConditioning; the multi-view template keeps the rig value 20, ' +
+      'which suits rendered turnaround sheets but not phone photos, whose crops are usually wider. fovX (degrees, 0 = estimate, the default) fixes MoGe\'s lens instead, ' +
+      'so MoGeGeometryToFOV passes it on (20 for a generated turnaround sheet). ' +
+      'Weights: pixal3d_multiview_int8_convrot 5.58 GB + moge_2_vitl_normal_fp16 0.66 GB + the TRELLIS.2 VAEs, DINOv3-NAF and BiRefNet the single-view graph already uses. VRAM unverified (as the single-view graph: 16 GB). Validated by /prompt only.',
   },
   {
     id: 'image-to-3d-hunyuan3d-21',
@@ -2707,6 +2815,28 @@ export const SPEC = [
       'so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip\'s settings ' +
       '(still constant memory), and clips of different sizes fail with "could not be encoded compatibly". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. ' +
       'Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).',
+  },
+
+  {
+    id: 'video-fit-clip',
+    title: 'One clip cut, retimed and framed for a packet-copy join: start/length at a set fps, centre crop, its sound or silence (VHS meta-batch, no model)',
+    capability: 'trim',
+    handBuilt: 'hand-built/video-fit-clip.json',
+    bindings: {
+      video: [b('1', 'video')], startTime: [b('8', 'value')], duration: [b('9', 'value')], fps: [b('5', 'value')],
+      width: [b('3', 'width')], height: [b('3', 'height')], framesPerBatch: [b('2', 'frames_per_batch')], filenamePrefix: [b('4', 'filename_prefix')],
+    },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { fps: 30, width: 1280, height: 720 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 2 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core + VideoHelperSuite GPL-3.0 code)',
+    notes:
+      'The Canvas Video concatenator (r4/canvas-plus), one job per clip, then video-concat-encoded joins them: every clip comes out at the film\'s size (width x height, scaled to cover and centre-cropped), ' +
+      'at fps (30) and as H.264 + AAC from VHS, so ConcatenateVideo can copy the packets. VHS_LoadVideo resamples to fps and skips round(startTime x fps) frames, keeping round(duration x fps) ' +
+      '(duration 0 = to the end); its sound is cut to the same window (VHS lazy audio: start = skipped frames / fps, length = kept frames / fps), so picture and sound stay in sync. ' +
+      'framesPerBatch frames per pass (64): memory stays flat however long the clip. Muted clips and clips with no sound: the provider replaces the combine\'s audio with an EmptyAudio as long as the window ' +
+      '(silenceVhsAudio), so every clip of a film has a sound track; when the window\'s length is unknown (no header, no end) the sound is dropped instead.',
   },
 
   // ---- Music beds and audio joins --------------------------------------------------------

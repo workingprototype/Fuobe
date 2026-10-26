@@ -90,6 +90,8 @@ const NUMERIC_DEFAULT_KEYS = [
   'filterSpeckle', 'colorPrecision',
   // round 4 (r4/video-finish)
   'every', 'slowdown', 'shortSide',
+  // Fuobe Soul (Originals O2)
+  'megapixels',
 ];
 export const BINDING_KEYS = new Set([
   'prompt', 'negativePrompt', 'image', 'image2', 'image3', 'image4', 'mask', 'endImage', 'video', 'audio',
@@ -118,6 +120,8 @@ export const BINDING_KEYS = new Set([
   'colormap', 'sideBySide',
   // round 4 (r4/video-finish): FPS Boost to exact targets, chunked upscaling, HDR10 (PQ)
   'every', 'slowdown', 'shortSide', 'colorSpace',
+  // Fuobe Soul (Originals O2): image to image at Soul's tier
+  'megapixels',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);

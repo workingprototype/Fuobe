@@ -169,6 +169,8 @@ export interface PaletteModel {
   name: string;
   vendor: string;
   engine: "cloud" | "open";
+  /** Every engine it runs on, when that's both (a Fuobe Original). */
+  engines?: ("cloud" | "open")[];
   /** The studio that runs it (with ?model=), or the Models page. */
   href: string;
   /** What it does ("Text to image, Edit"). */
@@ -188,15 +190,18 @@ export function indexEntries(index: PaletteIndex, mode: "both" | "cloud" | "open
     ...presets(index.motions, "motion", (id) => `/video?preset=${id}`),
     ...presets(index.effects, "effect", (id) => `/video?preset=${id}`),
     ...index.models
-      .filter((m) => mode === "both" || m.engine === mode)
-      .map((m): PaletteEntry => ({
-        key: `model:${m.id}`,
-        kind: "model",
-        label: m.name,
-        // With both engines on, a model on each (TRELLIS.2, Join clips) would show twice under one name.
-        hint: mode === "both" && m.engine === "open" ? `${m.vendor} · Open source` : m.vendor,
-        href: m.href,
-        keywords: `${m.ops} ${m.engine === "open" ? "open source free" : "cloud"}`,
-      })),
+      .filter((m) => mode === "both" || (m.engines ?? [m.engine]).includes(mode))
+      .map((m): PaletteEntry => {
+        const both = (m.engines?.length ?? 0) > 1;
+        return {
+          key: `model:${m.id}`,
+          kind: "model",
+          label: m.name,
+          // With both engines on, a model on each (TRELLIS.2, Join clips) would show twice under one name; a Fuobe Original is one model on both.
+          hint: mode === "both" && both ? `${m.vendor} · Open source + cloud` : mode === "both" && m.engine === "open" ? `${m.vendor} · Open source` : m.vendor,
+          href: m.href,
+          keywords: `${m.ops} ${both ? "open source free cloud" : m.engine === "open" ? "open source free" : "cloud"}`,
+        };
+      }),
   ];
 }

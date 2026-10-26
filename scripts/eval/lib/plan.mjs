@@ -113,8 +113,11 @@ export function expandJobs(suite, opts) {
           else if (missing.length) skip = `missing local input${missing.length > 1 ? "s" : ""} ${missing.join(", ")} (see scripts/eval/README.md → Your own inputs)`;
           if (usedFixtures && !demo) notes.push("ran on the synthetic fixtures (--allow-fixtures), not your own inputs");
 
-          // The request: the case's own words and settings, then the variant's recipe.
-          let prompt = p.text;
+          // The request: the case's own words and settings, then the variant's recipe. Fixed words (a one-look
+          // Original's tail, a HEX palette's sentence) follow the prompt as the server adds a signature's ("{prompt}. {words}").
+          const fixed = variant.template === false ? "" : [variant.words, kase.words].filter(Boolean).join(" ");
+          const text = p.text.trim().replace(/[.\s]+$/, "");
+          let prompt = fixed ? (text ? `${text}. ${fixed}` : fixed) : p.text;
           let loras = [];
           let wanted = 0;
           const usesLook = recipe?.kind === "soul-look";
@@ -134,9 +137,14 @@ export function expandJobs(suite, opts) {
             if (!skip && variant.loras === "recipe" && picked.wanted && !loras.length) skip = `none of the recipe's LoRAs can run on ${engine === "cloud" ? "the cloud" : modelId}: ${picked.notes.join("; ")}`;
             // Triggers lead, joined like a look's ("triggers, prompt": the research's template convention).
             const triggers = triggersOf(loras);
-            if (triggers) prompt = `${triggers}, ${p.text}`.trim();
+            if (triggers) prompt = `${triggers}, ${prompt}`.trim();
           } else if (variant.loras && variant.loras !== "recipe" && variant.loras !== "none") {
-            loras = lorasFor(null, variant, engine).loras;
+            const picked = lorasFor(null, variant, engine, "none", modelId);
+            loras = picked.loras;
+            wanted = picked.wanted ?? 0;
+            notes.push(...picked.notes);
+            const triggers = triggersOf(loras);
+            if (triggers) prompt = `${triggers}, ${prompt}`.trim();
           }
           const presetId = variant.preset === false ? undefined : (p.shot?.presetId ?? kase.presetId);
           const params = {
@@ -152,6 +160,8 @@ export function expandJobs(suite, opts) {
           const request = {
             feature: "eval",
             modelId: modelId ?? candidates[0] ?? "",
+            // The engine it runs on: a Fuobe Original runs on both and takes this one (single-engine models ignore it).
+            ...(engine !== "demo" && { engine }),
             ...((kase.op ?? target?.op) && { op: kase.op ?? target?.op }),
             // A training case's "{character}" becomes the trained element's @handle in the runner.
             ...(prompt && { prompt }),
@@ -159,6 +169,7 @@ export function expandJobs(suite, opts) {
             // The Original applies the look on the server, named by its Fuobe id ("v1-general"): a Higgsfield look id never leaves the harness.
             ...(lookOnServer ? { presetId: recipe.look.slug } : presetId ? { presetId } : {}),
             ...(variant.presetStrength !== undefined && presetId && { presetStrength: variant.presetStrength }),
+            ...(kase.mix && variant.mix !== false && presetId && { mix: kase.mix }),
             ...(loras.length && { loras }),
             params,
             title: `Eval · ${kase.title}${p.shot ? ` · shot ${p.shot.index + 1}` : ""}`,
@@ -185,7 +196,7 @@ export function expandJobs(suite, opts) {
             recipe: recipe && { ...recipe, variant: variantName, sent: { loras, wanted, complete: loras.length === wanted, template: usesLook && !lookOnServer && variant.template !== false, lookOnServer: !!lookOnServer, presetStrength: variant.presetStrength ?? null } },
             ...(p.shot && { shot: p.shot }),
             ...(kase.train && { train: { ...kase.train, photos: resolveInput(kase.train.photos, suiteDir), target: kase.train.targets[engine] ?? null } }),
-            ...(kase.submit && { submit: kase.submit }),
+            ...((kase.submit ?? variant.submit) && { submit: kase.submit ?? variant.submit }),
             timeoutSeconds: suite.defaults.timeoutSeconds,
             notes,
             ...(skip && { skip }),

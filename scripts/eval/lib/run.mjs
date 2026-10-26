@@ -453,6 +453,8 @@ function routeVars(job, inputs, { engine, runId, attempt = 1 }) {
     engine: engine === "demo" ? "open" : engine,
     modelId: job.model.id,
     requestId: requestIdFor(runId, job.id, attempt),
+    // The job's own request, for a route that wraps one (POST /api/palettes/lock).
+    request: { ...job.request, ...(Object.keys(inputs ?? {}).length && { inputs }) },
   };
 }
 
@@ -546,6 +548,7 @@ async function runJob(client, job, ctx) {
     if (job.submit) {
       const vars = routeVars(job, inputs, ctx);
       vars.prompt = mention(vars.prompt);
+      vars.request.prompt = mention(vars.request.prompt);
       const body = fillTemplate(job.submit.body, vars);
       row.request = { route: job.submit.route, body };
       const answer = await client.request("POST", job.submit.route, { json: body });
@@ -590,7 +593,10 @@ async function runJob(client, job, ctx) {
     row.status = bad ? (bad.status === "canceled" ? "canceled" : "failed") : "succeeded";
     if (bad) row.error = bad.error ?? `the generation ${bad.status}`;
     await finish(row, final, t0, ctx);
-    if (row.status === "succeeded") row.outputs = await download(client, final, path.join(ctx.dir, "outputs", safeName(job.id)), ctx.dir);
+    // A chain /api/generations starts itself (Fuobe DoP's relight effects: the relit still, then the clip): the
+    // result is the generations of the suite's kind.
+    const own = final.filter((g) => !job.kind || g.kind === job.kind);
+    if (row.status === "succeeded") row.outputs = await download(client, own.length ? own : final, path.join(ctx.dir, "outputs", safeName(job.id)), ctx.dir);
     return row;
   } catch (e) {
     row.error = row.status === "succeeded" ? `the results didn't download: ${e.message}` : e.message;

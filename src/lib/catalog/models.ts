@@ -1,9 +1,10 @@
-import { CLOUD_MODELS } from "./cloud-models.generated";
+import { CLOUD_MODELS, ORIGINAL_CLOUD } from "./cloud-models.generated";
 import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.generated";
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
-import { LAST_FRAME_CHAIN, type ModelDef, type ModelRoute, type Operation } from "./types";
+import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
+import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
 /*
  * Model catalog.
@@ -925,6 +926,19 @@ const open: ModelDef[] = [
     routes: [comfy("trim", "video-trim")],
     options: {},
   }),
+  // Canvas Video Concatenator: each clip cut, framed, retimed to 30 fps and given its sound (or silence) in one
+  // streamed pass, so video-concat-encoded can join the clips packet by packet.
+  o({
+    id: "oss-fit-clip",
+    name: "Fit clip",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Cuts a clip and fits it to one size and frame rate, with its sound or silence · CPU",
+    routes: [comfy("trim", "video-fit-clip", "VHS loader in passes: start, length, frame rate; centre crop; sound, or silence when muted")],
+    options: {},
+    hidden: true,
+  }),
   o({
     id: "oss-segment",
     name: "Cut segment (resampled)",
@@ -1246,6 +1260,46 @@ const open: ModelDef[] = [
     routes: [comfy("image-to-3d", "image-to-3d-hunyuan3d-21")],
     options: { seed: true },
   }),
+  // Round 4 (r4/3d-plus): Image to 3D's other modes on the open engine.
+  o({
+    id: "oss-trellis2-multi",
+    name: "TRELLIS.2 Multi-view",
+    vendor: "Tencent ARC × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "One textured 3D model (.glb) from photos of 2–4 sides of an object, plus a turntable video · 16 GB GPU · MIT",
+    badges: ["new"],
+    // params.extra.views names each photo's side ("front", "left", "back", "right"); the front is needed.
+    routes: [comfy("image-to-3d", "image-to-3d-trellis2-multiview", "Pixal3D multi-view on TRELLIS.2; the front, then any of left, back and right")],
+    options: { seed: true, minImages: 2, maxImages: 4 },
+  }),
+  o({
+    id: "oss-text-trellis2",
+    name: "Z-Image Turbo → TRELLIS.2",
+    vendor: "Alibaba Tongyi × Microsoft",
+    family: "trellis",
+    kind: "model3d",
+    tagline: "Describe one object: Z-Image Turbo draws it on a plain background, then TRELLIS.2 builds the textured 3D model and a turntable · 16 GB GPU · Apache-2.0 + MIT",
+    badges: ["new"],
+    // Built on the server as two steps: a Z-Image Turbo still, then image-to-3d-trellis2 on it (src/server/chains.ts).
+    routes: [{ op: "text-to-3d", provider: "comfyui", endpoint: "image-to-3d-trellis2", chained: true, note: "a Z-Image Turbo still → TRELLIS.2" }],
+    options: { seed: true },
+  }),
+  o({
+    id: "oss-triposplat",
+    name: "TripoSplat",
+    vendor: "Tripo (VAST)",
+    family: "tripo",
+    kind: "model3d",
+    tagline: "A Gaussian splat (.spz) of the subject in one photo, background removed, plus an orbit video · 8 GB GPU · MIT · Built with DINOv3",
+    badges: ["new"],
+    routes: [comfy("splat", "image-to-splat-triposplat", "BiRefNet cut-out → TripoSplat → .spz + a 3 s orbit")],
+    options: {
+      seed: true,
+      maxImages: 1,
+      sliders: [{ param: "numGaussians", label: "Gaussians", min: 32768, max: 1048576, step: 32768, default: 262144 }],
+    },
+  }),
   // Round 4 (r4/cinema-3d): Cinema Studio's "Create 3D scene". The mesh is in the photo's own camera space
   // (glTF axes, metres), so the viewer starts where the photo was taken.
   o({
@@ -1450,6 +1504,101 @@ const cloud: ModelDef[] = [
   ...cloudTools,
 ];
 
+// ---------------------------------------------------------------------------
+// Fuobe Originals: one model on both engines
+
+const ORIGINAL_HALVES = new Map(ORIGINAL_CLOUD.map((m) => [m.id, m]));
+
+/**
+ * A Fuobe Original (build plan O2+): its ComfyUI routes on the user's GPU and its cloud half on hosted open weights
+ * (generated from the research by scripts/gen-cloud-models.py), as one model that runs on both engines. The open
+ * engine is listed first: it's free. The options are the Original's own (the same on both engines).
+ */
+function original(spec: { id: string; open: ModelRoute[]; options: ModelOptions; tagline?: string }): ModelDef {
+  const cloud = ORIGINAL_HALVES.get(spec.id);
+  if (!cloud) throw new Error(`${spec.id} has no cloud half in cloud-models.generated.ts (run pnpm gen:catalog)`);
+  return {
+    ...cloud,
+    engine: "open",
+    engines: ["open", "cloud"],
+    tagline: spec.tagline ?? cloud.tagline,
+    badges: ["new"],
+    routes: [...spec.open, ...cloud.routes],
+    options: spec.options,
+  };
+}
+
+/** Fuobe DoP on both engines: a start frame (and an end frame for a transition), 3 or 5 s (49 or 81 frames at 16 fps on Wan). */
+const DOP_OPTIONS: ModelOptions = {
+  aspectRatios: ["auto", ...VID_AR],
+  durations: [3, 5],
+  resolutions: ["480p", "720p"],
+  seed: true,
+  negativePrompt: true,
+  endFrame: true,
+  maxImages: 1,
+  requires: { images: 1, msg: "Add a start frame: Fuobe DoP moves the camera through your picture" },
+};
+
+/** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
+const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
+
+/** Fuobe Soul, Soul HD and Soul Cinema (src/lib/catalog/soul.ts applies the look). */
+const originals: ModelDef[] = [
+  original({
+    id: "fuobe-soul",
+    open: [
+      comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the look's LoRAs"),
+      // Restyle a picture with the look (Soul 2.0's image to image); it keeps the picture's shape.
+      comfy("edit", "z-image-turbo-i2i", "Z-Image Turbo image to image with the look's LoRAs"),
+    ],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, maxImages: 1 },
+  }),
+  original({
+    id: "fuobe-soul-hd",
+    open: [comfy("t2i", "qwen-image-2512-t2i", "Qwen-Image 2512: the look's words, clean lettering")],
+    options: { ...SOUL_OPTIONS, looks: { label: "Look" }, negativePrompt: true },
+  }),
+  original({
+    id: "fuobe-soul-cinema",
+    open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the film-still LoRAs")],
+    // 21:9 is a crop of the 16:9 picture, made after generation (research §4.5).
+    options: { ...SOUL_OPTIONS, aspectRatios: [...SOUL_ASPECTS, CINEMA_CROP] },
+  }),
+  // Fuobe DoP (O4): camera motions, Mix and effects (src/lib/catalog/dop.ts maps each preset to its LoRAs). Higgsfield's
+  // DoP makes 3 or 5 s clips from a start frame; "auto" keeps the picture's shape.
+  {
+    ...original({
+      id: "fuobe-dop",
+      open: [
+        // A pose Wan 2.2 Fun Camera makes natively (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead.
+        comfy("i2v", "wan22-i2v-14b", "Wan 2.2 14B with the motion's LoRAs on their experts, or Fun Camera's pose"),
+        comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame with the effect's LoRAs"),
+        // Frames mode: one start/end-frame clip per pair of frames, the motion's LoRAs on each, then joined.
+        KEYFRAME_FILM,
+      ],
+      tagline: "Camera motions and effects with their LoRAs on Wan 2.2 · free on your GPU (24 GB), or hosted on fal",
+      options: DOP_OPTIONS,
+    }),
+    // 480p on the user's GPU (720p takes about three times as long); 720p in the cloud, where a run with LoRAs costs the same.
+    engineDefaults: { open: { resolution: "480p" } },
+  },
+  {
+    ...original({
+      id: "fuobe-dop-ltx",
+      open: [
+        comfy("i2v", "ltx23-i2v-lora", "LTX-2.3 22B distilled with the motion's LoRAs"),
+        comfy("flf2v", "ltx23-flf2v-lora", "LTX-2.3 22B distilled, start and end frame, with the transition LoRA"),
+      ],
+      // The graphs load the 22B fp8 checkpoint (29.5 GB) and the Gemma text encoder: 32 GB of VRAM (the manifest's vramGb).
+      tagline: "FPV, wind and transitions on LTX-2.3 with its camera LoRAs · free on your GPU (32 GB), or hosted on fal",
+      options: { ...DOP_OPTIONS, resolutions: ["720p"], audio: true },
+    }),
+    // Sound in the cloud only (fal's generate_audio): the open LTX-2.3 graphs decode no audio, so no toggle there.
+    engineOptions: { open: { audio: false } },
+  },
+];
+
 /** Tools that run entirely in the browser; recorded in the library like any other result. */
 const local: ModelDef[] = [
   {
@@ -1531,4 +1680,4 @@ const local: ModelDef[] = [
   }),
 ];
 
-export const MODELS: ModelDef[] = [...cloud, ...open, ...local];
+export const MODELS: ModelDef[] = [...originals, ...cloud, ...open, ...local];

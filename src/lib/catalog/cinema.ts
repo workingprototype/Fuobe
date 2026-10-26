@@ -1,5 +1,7 @@
 import { APERTURE, LENS, anglesNote, poseWords, recomposePrompt, type ScenePose } from "@/lib/scene3d";
 import { getModel, getPreset } from "./index";
+import { DOP_MODEL } from "./dop";
+import { triggerOf } from "./loras";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
@@ -989,9 +991,12 @@ export function openCameraRoute(slug: string, hasStartFrame: boolean): { via: "l
   const move = moveBySlug(slug);
   if (!move) return { via: "prompt" };
   const preset = move.motionId ? getPreset(move.motionId) : undefined;
-  const loras = preset?.open?.loras;
-  if (loras?.length && hasStartFrame) return { via: "lora", loras, trigger: loras.find((l) => l.trigger)?.trigger };
-  if (move.funCamera && hasStartFrame) return { via: "fun-camera", pose: move.funCamera };
+  // Fuobe DoP's Wan LoRAs (an LTX-2.3 or LTX-2.5 motion's LoRA can't load on Wan 2.2), else a Fun Camera pose.
+  const wan = preset?.open?.modelId === DOP_MODEL ? preset.open : undefined;
+  const loras = wan?.loras;
+  if (loras?.length && hasStartFrame) return { via: "lora", loras, trigger: triggerOf(loras) };
+  const pose = move.funCamera ?? (typeof wan?.params?.extra?.cameraMotion === "string" ? wan.params.extra.cameraMotion : undefined);
+  if (pose && hasStartFrame) return { via: "fun-camera", pose };
   return { via: "prompt" };
 }
 

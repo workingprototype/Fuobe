@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-24T05:04:42.430Z",
+  "generatedAt": "2026-10-26T09:24:31.157Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -8841,6 +8841,413 @@
       "notes": "One job = generate + lock. The provider writes paletteText from params.palette (\"Color palette: #.., #..\") and renders paletteImage, a swatch PNG with one band per colour, server-side. strength 0 = prompt only; 0.5-0.8 = lock; 1.0 = full statistics transfer (shifts skin tones). method mkl_lab (default, keeps contrast), reinhard_lab (softer), histogram (strongest). palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too)."
     },
     {
+      "id": "z-image-turbo-i2i",
+      "title": "Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)",
+      "capability": "edit",
+      "file": "z-image-turbo-i2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/z-image-turbo-i2i.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "megapixels": [
+          {
+            "node": "2",
+            "input": "megapixels"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "14",
+            "input": "text"
+          }
+        ],
+        "seed": [
+          {
+            "node": "17",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "17",
+            "input": "steps"
+          }
+        ],
+        "strength": [
+          {
+            "node": "17",
+            "input": "denoise"
+          }
+        ],
+        "shift": [
+          {
+            "node": "13",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "19",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "19",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 8,
+        "shift": 3,
+        "strength": 0.6,
+        "megapixels": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "z_image_turbo_bf16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+          "sizeGb": 12.31
+        },
+        {
+          "file": "qwen_3_4b.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+          "sizeGb": 8.04
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 12,
+      "license": "Apache-2.0 (Z-Image Turbo)",
+      "validated": true,
+      "notes": "Fuobe Soul's edit route (Soul 2.0 image-to-image): the picture scaled to Soul's tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler (8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal's z-image/turbo/image-to-image; about 0.17 would be Higgsfield's refiner pass, an experiment until the evaluation harness measures it). The look's LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture's shape.",
+      "buildWarnings": [
+        "model z_image_turbo_bf16.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors -> no size (HTTP 307)",
+        "model qwen_3_4b.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors -> no size (HTTP 307)",
+        "model ae.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors -> no size (HTTP 307)"
+      ]
+    },
+    {
+      "id": "ltx23-i2v-lora",
+      "title": "LTX-2.3 22B distilled image to video + LoRAs (Fuobe DoP · LTX)",
+      "capability": "i2v",
+      "file": "ltx23-i2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-i2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "31",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "From the official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, one pass of 8 manual sigmas, cfg 1, Euler ancestral) without the end-frame guide: the start frame is a first-frame guide at strength 1 (the template uses 0.7 for both ends), resized and centre-cropped to width x height. A motion's LoRAs (FPV, Wind to Face, the transition LoRA) are injected after the CheckpointLoaderSimple (LoraLoaderModelOnly). Silent like a DoP clip: the audio latent rides through the audio-video sampler but is not decoded. frames = seconds*fps+1 (8n+1), 24 fps."
+    },
+    {
+      "id": "ltx23-flf2v-lora",
+      "title": "LTX-2.3 22B distilled start and end frame to video + LoRAs (Fuobe DoP · LTX transitions)",
+      "capability": "flf2v",
+      "file": "ltx23-flf2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-flf2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "31",
+            "input": "image"
+          }
+        ],
+        "endImage": [
+          {
+            "node": "39",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "The official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, first- and last-frame guides at strength 0.7, 8 manual sigmas, cfg 1) with plain size, frame and fps values and the joyfox LTX-2.3 Transition LoRA (or any LTX-2.3 LoRA) injected after the CheckpointLoaderSimple. Both frames are resized and centre-cropped to width x height. Silent (the audio is not decoded)."
+    },
+    {
+      "id": "ltx23-t2v-lora",
+      "title": "LTX-2.3 22B distilled text to video + LoRAs",
+      "capability": "t2v",
+      "file": "ltx23-t2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-t2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "ltx23-i2v-lora without the start frame: the empty latent takes width x height directly. LoRAs injected after the CheckpointLoaderSimple. Silent (the audio is not decoded). Not used by a catalog model yet (build plan O4 lists it for LTX camera LoRAs without a start frame)."
+    },
+    {
       "id": "video-trim",
       "title": "Trim a clip by seconds (core Trim Video, keeps fps and audio)",
       "capability": "trim",
@@ -10739,9 +11146,148 @@
       ],
       "customNodes": [],
       "vramGb": 16,
-      "license": "MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)",
+      "license": "MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License (royalty-free, commercial use allowed; the app must show a \"Built with DINOv3\" notice)",
       "validated": true,
       "notes": "Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui \"3d\"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps."
+    },
+    {
+      "id": "image-to-3d-trellis2-multiview",
+      "title": "Photos of 2-4 sides to textured 3D (Pixal3D multi-view on TRELLIS.2, PBR GLB) + a 36-view turntable video",
+      "capability": "image-to-3d",
+      "file": "image-to-3d-trellis2-multiview.json",
+      "source": "hand-built (scripts/comfy/hand-built/image-to-3d-trellis2-multiview.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "360",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "361",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "362",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "363",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          },
+          {
+            "node": "12",
+            "input": "seed"
+          },
+          {
+            "node": "18",
+            "input": "seed"
+          },
+          {
+            "node": "23",
+            "input": "seed"
+          }
+        ],
+        "textureSize": [
+          {
+            "node": "288",
+            "input": "value"
+          }
+        ],
+        "turntableFps": [
+          {
+            "node": "701",
+            "input": "fps"
+          }
+        ],
+        "fovX": [
+          {
+            "node": "381",
+            "input": "fov_x_degrees"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "372",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "702",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "372",
+          "kind": "model3d"
+        },
+        {
+          "node": "702",
+          "kind": "video",
+          "role": "turntable"
+        }
+      ],
+      "defaults": {
+        "textureSize": 4096,
+        "turntableFps": 12,
+        "fovX": 0
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "dino_v3_L_naf_fp32.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors",
+          "sizeGb": 1.22
+        },
+        {
+          "file": "trellis_2_shape_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors",
+          "sizeGb": 1.1
+        },
+        {
+          "file": "trellis_2_texture_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors",
+          "sizeGb": 0.95
+        },
+        {
+          "file": "birefnet.safetensors",
+          "folder": "background_removal",
+          "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+          "sizeGb": 0.44
+        },
+        {
+          "file": "pixal3d_multiview_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors",
+          "sizeGb": 5.58
+        },
+        {
+          "file": "moge_2_vitl_normal_fp16.safetensors",
+          "folder": "geometry_estimation",
+          "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/main/geometry_estimation/moge_2_vitl_normal_fp16.safetensors",
+          "sizeGb": 0.66
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "MIT (Pixal3D multi-view weights by TencentARC, TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License (royalty-free, commercial use allowed; the app must show a \"Built with DINOv3\" notice)",
+      "validated": true,
+      "notes": "Template 3d_pixal3d_multi_views (2026-09-09) with the turnaround-sheet loader and its crops replaced by one upload per side: image = front, image2 = left, image3 = back, image4 = right (Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart, Z up: the left view is the object's own left, the camera at +90 degrees azimuth from the front, i.e. the photographer walks to their right; every side but the front is optional and the provider drops the branch of a side with no photo). Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view -> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB. The same 36-view turntable as image-to-3d-trellis2. The views' horizontal field of view as framed (Pixal3DMultiViewConditioning.fov) is measured on the front crop: MoGe 2 (LoadMoGeModel -> MoGeInference -> MoGeGeometryToFOV, horizontal, degrees), as the node's tooltip says for photos and as the official single-view template 3d_pixal3d_trellis2_image_to_model feeds Pixal3DConditioning; the multi-view template keeps the rig value 20, which suits rendered turnaround sheets but not phone photos, whose crops are usually wider. fovX (degrees, 0 = estimate, the default) fixes MoGe's lens instead, so MoGeGeometryToFOV passes it on (20 for a generated turnaround sheet). Weights: pixal3d_multiview_int8_convrot 5.58 GB + moge_2_vitl_normal_fp16 0.66 GB + the TRELLIS.2 VAEs, DINOv3-NAF and BiRefNet the single-view graph already uses. VRAM unverified (as the single-view graph: 16 GB). Validated by /prompt only."
     },
     {
       "id": "image-to-3d-hunyuan3d-21",
@@ -12647,6 +13193,93 @@
       "validated": true,
       "notes": "The Faceless / Explainer \"Frame by frame\" join (r4/faceless-plus): the Ken Burns scenes (kenburns-still, and the pieces of scenes over 10 s), and joins of those joins, one after another in input order. The template joins two clips (video, video2); the provider rewrites it per request (expand \"videos\", expandVideoJoinWorkflow): one LoadVideo per inputs.videos entry, wired to ConcatenateVideo videos.video0..N-1 (at most 100). ConcatenateVideo copies the encoded packets when every clip has the same codec, extradata, size, bit depth, colour space and sound layout (clips ComfyUI's CreateVideo / SaveVideo made at one size and fps), so RAM stays flat however long the film is (video-concat-{2,3,4} decode every frame as float32: about 11 MB a frame at 720p, 20 GB for a 60 s film at 30 fps); otherwise it re-encodes one clip at a time to the first clip's settings (still constant memory), and clips of different sizes fail with \"could not be encoded compatibly\". Unlike video-concat-{2,3,4} it neither scales, crops nor retimes: the clips must share one size and frame rate. Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).",
       "expand": "videos"
+    },
+    {
+      "id": "video-fit-clip",
+      "title": "One clip cut, retimed and framed for a packet-copy join: start/length at a set fps, centre crop, its sound or silence (VHS meta-batch, no model)",
+      "capability": "trim",
+      "file": "video-fit-clip.json",
+      "source": "hand-built (scripts/comfy/hand-built/video-fit-clip.json)",
+      "bindings": {
+        "video": [
+          {
+            "node": "1",
+            "input": "video"
+          }
+        ],
+        "startTime": [
+          {
+            "node": "8",
+            "input": "value"
+          }
+        ],
+        "duration": [
+          {
+            "node": "9",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "5",
+            "input": "value"
+          }
+        ],
+        "width": [
+          {
+            "node": "3",
+            "input": "width"
+          }
+        ],
+        "height": [
+          {
+            "node": "3",
+            "input": "height"
+          }
+        ],
+        "framesPerBatch": [
+          {
+            "node": "2",
+            "input": "frames_per_batch"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "4",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "4",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "duration": 0,
+        "startTime": 0,
+        "framesPerBatch": 64
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 2
+      },
+      "models": [],
+      "customNodes": [
+        {
+          "name": "ComfyUI-VideoHelperSuite",
+          "repo": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite"
+        }
+      ],
+      "vramGb": 0,
+      "license": "n/a (no model; ComfyUI core + VideoHelperSuite GPL-3.0 code)",
+      "validated": true,
+      "notes": "The Canvas Video concatenator (r4/canvas-plus), one job per clip, then video-concat-encoded joins them: every clip comes out at the film's size (width x height, scaled to cover and centre-cropped), at fps (30) and as H.264 + AAC from VHS, so ConcatenateVideo can copy the packets. VHS_LoadVideo resamples to fps and skips round(startTime x fps) frames, keeping round(duration x fps) (duration 0 = to the end); its sound is cut to the same window (VHS lazy audio: start = skipped frames / fps, length = kept frames / fps), so picture and sound stay in sync. framesPerBatch frames per pass (64): memory stays flat however long the clip. Muted clips and clips with no sound: the provider replaces the combine's audio with an EmptyAudio as long as the window (silenceVhsAudio), so every clip of a film has a sound track; when the window's length is unknown (no header, no end) the sound is dropped instead."
     },
     {
       "id": "audio-loop-crossfade",

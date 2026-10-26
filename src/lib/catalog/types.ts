@@ -424,7 +424,17 @@ export interface FieldMap {
    * Width and height fields (Replicate's Z-Image LoRA model): the aspect ratio's shape with the area of a
    * `base`×`base` square (1024 when unset), in multiples of `multiple`, neither side above `max`.
    */
-  size?: { width: string; height: string; multiple: number; max?: number; base?: number };
+  size?: {
+    width?: string;
+    height?: string;
+    /** One object field that takes {width, height} (fal's image_size) instead of two fields. */
+    key?: string;
+    multiple: number;
+    max?: number;
+    base?: number;
+    /** Exact sizes per resolution tier and aspect ratio (Fuobe Soul's table); the computed size where it has none. */
+    table?: Record<string, Record<string, [number, number]>>;
+  };
   /**
    * Limits the API checks on numeric fields Fuobe fills (round 4: target fps, slow motion, frame interval,
    * overlay position and scale, Ken Burns length…): a value is rounded when the field takes whole numbers
@@ -491,6 +501,11 @@ export interface ModelOptions {
   draft?: boolean;
   /** A style/template list fetched from the provider (Soul styles, Genjutsu looks, Marketing Studio templates). */
   presets?: { source: string; param: string; label: string; required?: boolean };
+  /**
+   * Takes a Fuobe Soul look (src/lib/catalog/soul.ts) as GenerationRequest.presetId, with presetStrength scaling
+   * its LoRAs; `label` names the picker.
+   */
+  looks?: { label: string };
   /** Premade voices the model offers (shown in the voice picker). */
   voices?: { id: string; name: string; hint?: string }[];
   /** Takes a reference recording to clone a voice from. */
@@ -561,6 +576,10 @@ export interface Pricing {
   factors?: { param: string; values: Record<string, number> }[];
   /** The price per unit when the run carries LoRAs and goes to the route's LoRA endpoint (fal's /lora variants cost more). */
   withLoras?: number;
+  /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
+  roundUp?: true;
+  /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */
+  animationUsd?: number;
 }
 
 export interface ModelDef {
@@ -578,6 +597,22 @@ export interface ModelDef {
   pricing?: Pricing;
   /** Trained identities this model accepts by id (Higgsfield Soul ID). */
   identity?: { provider: "higgsfield"; version: "v1" | "v2" | "cinema" };
+  /**
+   * A Fuobe Original that runs on both engines: its routes cover ComfyUI and the hosted open weights on fal /
+   * Replicate. `engine` is the one it shows first; a request picks one with GenerationRequest.engine, and
+   * onEngine() (src/lib/catalog/engines.ts) gives the model as it runs there (that engine's routes only).
+   */
+  engines?: Engine[];
+  /**
+   * An Original's defaults on one engine, over `defaults` (Fuobe DoP: 480p on the user's GPU, where 720p takes three
+   * times as long; 720p in the cloud, where the LoRA endpoint costs the same at either size).
+   */
+  engineDefaults?: Partial<Record<Engine, ModelDef["defaults"]>>;
+  /**
+   * An Original's options on one engine, over `options` (Fuobe DoP · LTX: no sound toggle on the user's GPU, whose
+   * LTX-2.3 graphs make silent clips).
+   */
+  engineOptions?: Partial<Record<Engine, Partial<ModelOptions>>>;
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -759,6 +794,11 @@ export interface GenerationRequest {
   mix?: { presetId: string; strength: number };
   /** LoRAs added by @element mentions (trained identities, server-side), or a recipe's LoRAs sent by the evaluation harness. */
   loras?: LoraRef[];
+  /**
+   * The engine a model that runs on both (a Fuobe Original, ModelDef.engines) runs on: the composer's switch.
+   * Unset: the install's engine mode, else the first one connected (your GPU before the cloud).
+   */
+  engine?: Engine;
   /** Chained jobs: where the previous job's image goes among `inputs.images` (one dependency). */
   chainFrom?: "first" | "last";
   /** Chained jobs with several dependencies: where each one's first output goes, in dependsOn order. */
@@ -948,6 +988,12 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /**
+   * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
+   * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation
+   * harness promotes Fuobe DoP's words). Picking the preset doesn't move the composer to it; an engine switch does.
+   */
+  partner?: boolean;
 }
 
 export type PresetType = "app" | "motion" | "effect";
@@ -971,6 +1017,25 @@ export interface Preset {
   open: PresetRoute | null;
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
+  /** Fuobe DoP's colour-grade effects: a src/lib/grade.ts preset the browser applies to the finished clip. */
+  grade?: string;
+  /** Fuobe DoP's relight effects: a step that makes the start frame first, on each engine (src/lib/catalog/dop.ts). */
+  prestep?: PresetPrestep;
+}
+
+/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+export interface PresetPrestep {
+  open: PrestepRoute;
+  cloud: PrestepRoute;
+}
+
+export interface PrestepRoute {
+  modelId: string;
+  op: Operation;
+  prompt: string;
+  loras?: LoraRef[];
+  /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
+  usd?: number;
 }
 
 /** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */

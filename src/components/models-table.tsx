@@ -7,7 +7,7 @@ import { useProgressive } from "@/components/use-progressive";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useEngine } from "@/lib/api";
 import type { Engine, MediaKind } from "@/lib/catalog/types";
-import { modelSearchText, type ModelRow } from "@/lib/model-rows";
+import { enginesLabel, modelSearchText, type ModelRow } from "@/lib/model-rows";
 import { cn } from "@/lib/utils";
 
 const KIND_LABEL: Partial<Record<MediaKind, string>> = { image: "Image", video: "Video", audio: "Audio", text: "Text", model3d: "3D" };
@@ -55,7 +55,8 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
     <tr className="align-top hover:bg-accent/50">
       <td className="px-3 py-3 sm:px-4">
         <div className="flex flex-wrap items-center gap-1.5 font-medium">
-          {m.engine === "open" ? <Cpu className="size-3.5 shrink-0 md:hidden" aria-label="Open source" /> : <Cloud className="size-3.5 shrink-0 md:hidden" aria-label="Cloud" />}
+          {m.engines.includes("open") && <Cpu className="size-3.5 shrink-0 md:hidden" aria-label="Open source" />}
+          {m.engines.includes("cloud") && <Cloud className="size-3.5 shrink-0 md:hidden" aria-label="Cloud" />}
           {m.name}
           {m.badges.map((b) => (
             <span
@@ -81,8 +82,9 @@ const Row = memo(function Row({ m }: { m: ModelRow }) {
       </td>
       <td className="hidden px-4 py-3 whitespace-nowrap md:table-cell">
         <span className="inline-flex items-center gap-1">
-          {m.engine === "open" ? <Cpu className="size-3.5" /> : <Cloud className="size-3.5" />}
-          {m.engine === "open" ? "Open source" : "Cloud"}
+          {m.engines.includes("open") && <Cpu className="size-3.5" />}
+          {m.engines.includes("cloud") && <Cloud className="size-3.5" />}
+          {enginesLabel(m.engines)}
         </span>
       </td>
       <td className="hidden px-4 py-3 text-[12px] text-muted-foreground md:table-cell">{m.ops.join(" · ")}</td>
@@ -116,7 +118,7 @@ export function ModelsTable({ models }: { models: ModelRow[] }) {
   const index = useMemo(() => models.map((m) => [m, modelSearchText(m)] as const), [models]);
   const kinds = useMemo(() => [...new Set(models.map((m) => m.kind))], [models]);
   const list = useMemo(
-    () => index.filter(([m, text]) => (engine === "all" || m.engine === engine) && (kind === "all" || m.kind === kind) && (!term || text.includes(term))).map(([m]) => m),
+    () => index.filter(([m, text]) => (engine === "all" || m.engines.includes(engine)) && (kind === "all" || m.kind === kind) && (!term || text.includes(term))).map(([m]) => m),
     [index, engine, kind, term],
   );
   // 40 rows in the page's HTML, the rest as you scroll.

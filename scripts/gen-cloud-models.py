@@ -69,7 +69,7 @@ M = []
 
 def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=None, defaults=None, options=None, fixed=None, hidden=False,
           sliders=None, controls=None, api_defaults=None, formats=None, ranged_durations=False, fit_values=False, fps_targets=None, upscale_tiers=None,
-          frame_step=None):
+          frame_step=None, original=False, sizes=None):
     """sliders / controls: [(field, label)] read from each route's research inputs (dotted = nested field):
     numeric fields with minimum/maximum become sliders, enums become composer controls; both travel as params.extra.
     fixed: fields always sent. api_defaults: fields sent unless the request sets them (FieldMap.defaults).
@@ -82,13 +82,16 @@ def model(id, name, vendor, family, kind, tagline, routes, badges=None, pricing=
     upscale_tiers: resolutions offered to an upscaler that takes a factor ("Original", "1080p", "4K"): FieldMap.upscaleFactor
     turns the tier into target ÷ the clip's shorter edge, within the factor field's limits.
     frame_step: video models whose length is a frame count (Wan 2.2: 4n+1, LTX: 8n+1): FieldMap.numFrames.step.
+    original: a Fuobe Original's cloud half (written to ORIGINAL_CLOUD; models.ts joins it to the ComfyUI routes).
+    sizes: {tier: {aspect: [w, h]}}: exact sizes per resolution tier (Fuobe Soul's table): FieldMap.size.table, sent
+    as width / height fields or as one {width, height} object field (fal's image_size); the tiers become the resolutions.
     A route's options dict may also set max_images (FieldMap.maxImages), note, loraEndpoint (the same model with LoRAs:
     FieldMap.loras comes from its research record) and pin (a Replicate model run by version: the research's version)."""
     M.append(dict(id=id, name=name, vendor=vendor, family=family, kind=kind, tagline=tagline, routes=routes,
                   badges=badges or [], pricing=pricing, defaults=defaults or {}, options=options or {}, fixed=fixed or {}, hidden=hidden,
                   sliders=sliders or [], controls=controls or [], api_defaults=api_defaults or {}, formats=formats or {},
                   ranged_durations=ranged_durations, fit_values=fit_values, fps_targets=fps_targets or [], upscale_tiers=upscale_tiers or [],
-                  frame_step=frame_step))
+                  frame_step=frame_step, original=original, sizes=sizes))
 
 
 # ----- Image
@@ -187,6 +190,11 @@ model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qw
        ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
       # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
       fit_values=True)
+# Qwen-Image-Edit 2509 with its LoRAs (O4): Fuobe DoP's relight effects relight the start frame with the 2509 Relight
+# LoRA before the clip is made. A helper step, not a picker model.
+model("qwen-image-edit-2509-cloud", "Qwen-Image-Edit 2509 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights Qwen-Image-Edit 2509 with its LoRAs (relight, next scene, angles)",
+      [("edit", "fal-ai/qwen-image-edit-plus-lora", "fal")], hidden=True)
 model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs", "flux", "image",
       "The Apache-2.0 FLUX.2: cheapest drafts and edits",
       [("t2i", "fal-ai/flux-2/klein/4b", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/lora"}),
@@ -195,6 +203,35 @@ model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs"
 model("wan-2-2-a14b-image-cloud", "Wan 2.2 A14B Image (hosted)", "Alibaba Wan", "wan", "image",
       "Open-weights Wan 2.2 stills that take Wan LoRAs",
       [("t2i", "fal-ai/wan/v2.2-a14b/text-to-image/lora", "fal")], defaults={"aspectRatio": "16:9"})
+# ----- Originals (O2): Fuobe Soul's cloud halves on hosted open weights (docs/research/fuobe-originals-recipes-5.md §4).
+# models.ts joins each to its ComfyUI routes as one model that runs on both engines (ModelDef.engines). Sizes are
+# Soul's table per tier (soul.settings.comfyui.sizes); steps, prompt expansion and format follow the recipe (§4.3).
+SOUL_TIERS = {"720p": "720p tier", "1080p": "1080p tier"}
+SOUL_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in ORIGINALS["soul"]["settings"]["comfyui"]["sizes"].items() if k.startswith(prefix)).items()}
+              for tier, prefix in SOUL_TIERS.items()}
+SOUL_FAL = {"num_inference_steps": ORIGINALS["soul"]["settings"]["fal"]["num_inference_steps"],
+            "enable_prompt_expansion": ORIGINALS["soul"]["settings"]["fal"]["enable_prompt_expansion"],
+            "output_format": ORIGINALS["soul"]["settings"]["fal"]["output_format"]}
+# Replicate's Z-Image LoRA build: the same 8 steps, a PNG (its default is jpg); guidance stays at its Turbo default 0.
+SOUL_REPLICATE = {"num_inference_steps": SOUL_FAL["num_inference_steps"], "output_format": "png"}
+model("fuobe-soul", "Fuobe Soul", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's 139 looks on open weights: Z-Image Turbo with up to three LoRAs",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE}),
+       # Restyle a picture with the look; the result keeps the picture's shape. strength = how much changes.
+       ("edit", "fal-ai/z-image/turbo/image-to-image", "fal",
+        {"loraEndpoint": "fal-ai/z-image/turbo/image-to-image/lora", "keepSize": True, "fixed": {k: v for k, v in SOUL_FAL.items() if k != "num_inference_steps"}})],
+      original=True, sizes=SOUL_SIZES, sliders=[("strength", "Change")], defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-hd", "Fuobe Soul HD", "Fuobe Original", "fuobe-soul", "image",
+      "Soul's looks on Qwen-Image 2512: clean lettering for posters and signs",
+      [("t2i", "fal-ai/qwen-image-2512", "fal", {"loraEndpoint": "fal-ai/qwen-image-2512/lora", "fixed": {"output_format": "png"}})],
+      original=True, sizes=SOUL_SIZES, pricing=("megapixel", 0.02, "rounded up to whole megapixels", {"roundUp": True}),
+      defaults={"aspectRatio": "3:4", "resolution": "720p"})
+model("fuobe-soul-cinema", "Fuobe Soul Cinema", "Fuobe Original", "fuobe-soul", "image",
+      "One film look: wide cinematic stills with film grain",
+      [("t2i", "fal-ai/z-image/turbo", "fal", {"loraEndpoint": "fal-ai/z-image/turbo/lora", "fixed": SOUL_FAL}),
+       ("t2i", "prunaai/z-image-turbo-lora", "replicate", {"pin": True, "fixed": SOUL_REPLICATE})],
+      original=True, sizes=SOUL_SIZES, defaults={"aspectRatio": "16:9", "resolution": "720p"})
 model("imagen-4", "Imagen 4", "Google", "imagen", "image", "Google's photoreal text-to-image",
       [("t2i", "google/imagen-4", "replicate")], defaults={"aspectRatio": "1:1"})
 
@@ -417,9 +454,38 @@ model("ltx-2-3-22b-cloud", "LTX-2.3 22B (hosted)", "Lightricks", "ltx", "video",
       badges=["audio"], api_defaults={"enable_prompt_expansion": False},
       pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
       defaults={"aspectRatio": "16:9", "duration": 5}, frame_step=8)
+# ----- Originals (O4): Fuobe DoP's cloud halves, camera motions and effects on hosted open weights (research §3.1, §7.5).
+# DoP clips are 49 or 81 frames at 16 fps (3 or 5 s): fal's Wan 2.2 interpolates to 32 fps by default, so
+# interpolator_model none, at 20 steps. Each LoRA goes to its expert (transformer high / low / both per file); a Mix
+# sends both presets' LoRAs. Replicate's fast Wan takes one LoRA per expert (a Mix runs on fal) and makes 81–121 frames.
+DOP_FAL = {"interpolator_model": "none", "frames_per_second": 16, "num_inference_steps": 20}
+model("fuobe-dop", "Fuobe DoP", "Fuobe Original", "fuobe-dop", "video",
+      "Camera motions and effects with their LoRAs on Wan 2.2: 3 or 5 s at 16 fps",
+      [("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "fixed": DOP_FAL, "flf2v": True}),
+       ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate", {"fixed": WAN22_REPLICATE})],
+      original=True,
+      pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+               {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "resolution": "720p"}, frame_step=4, fit_values=True)
+# The LTX-2.3 presets (FPV Drone, Wind to Face, the transitions with an end frame) and LTX-2.3's built-in camera LoRA
+# (camera_lora: dolly, jib, static) for the moves it covers. Prompt expansion off; sound off unless asked.
+model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video",
+      "Camera moves, FPV and transitions on LTX-2.3 with its camera LoRAs: 3 or 5 s at 24 fps",
+      [("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora", "flf2v": True})],
+      original=True, api_defaults={"enable_prompt_expansion": False},
+      pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "generateAudio": False}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
+# Fuobe DoP's Focus Change in the cloud (O4, research §7.3): LTX-2.5's own focus_shift move (camera_motion) on the fast
+# endpoint, open weights hosted with no LoRAs. 720p, the start frame's shape, silent like every DoP clip. A helper
+# the preset runs on, not a picker model.
+model("ltx-2-5-fast", "LTX 2.5 Fast", "Lightricks", "ltx", "video", "LTX-2.5's built-in camera moves (focus shift, dolly, jib) from a start frame",
+      [("i2v", "lightricks/ltx-2.5/image-to-video/fast")],
+      pricing=("second", 0.09, "720p; 1080p $0.13/s, 1440p $0.19/s, 4K $0.30/s; sound included",
+               {"byResolution": {"720p": 0.09, "1080p": 0.13, "1440p": 0.19, "2160p": 0.3}}),
+      defaults={"aspectRatio": "auto", "duration": 6, "resolution": "720p", "generateAudio": False}, hidden=True)
 model("pixverse-v6", "PixVerse V6", "PixVerse", "pixverse", "video", "Stylized social video with transitions",
       [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition"),
        ("extend", "fal-ai/pixverse/v6/extend")],
@@ -803,16 +869,17 @@ model("triposplat", "TripoSplat", "Tripo", "tripo", "model3d", "A Gaussian splat
       [("splat", "tripo3d/triposplat")], badges=["new"], fixed={"output_format": "ply"}, sliders=[("num_gaussians", "Gaussians")])
 # Its prompt defaults to "car" at the API, so Fuobe always asks for one.
 model("sam-3d-objects", "SAM 3D Objects", "Meta", "sam", "model3d", "The objects you name, rebuilt in 3D where they stand in the photo",
+      # export_textured_glb defaults to false (a grey mesh): the viewer shows the textured one.
       [("image-to-3d", "fal-ai/sam-3/3d-objects")], badges=["new"], pricing=("request", 0.02, "per unit; fal does not say what a unit is"),
-      options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
+      fixed={"export_textured_glb": True}, options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
 model("tripo-h3-1-text", "Tripo H3.1 Text to 3D", "Tripo", "tripo", "model3d", "A textured 3D model from a description",
       [("text-to-3d", "tripo3d/h3.1/text-to-3d")], pricing=("request", 0.2, "standard textures; untextured $0.10, HD $0.30"),
       controls=[("texture_quality", "Texture"), ("geometry_quality", "Geometry")])
 model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "One object from up to 4 photos of different sides",
       [("image-to-3d", "meshy/v7.1/multi-image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
-      controls=[("topology", "Topology")])
+      controls=[("topology", "Topology")], options={"minImages": 2})
 model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
-      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset", {"animationUsd": 0.12}))
 # Cinema Studio's "Create 3D scene" on the cloud (part 4 §8): a depth map of the whole frame, which the browser
 # turns into a point cloud with the photo's colours. So scene-3d answers with an image on this model.
 model("marigold-depth", "Marigold V2 Depth", "Marigold", "marigold", "image", "A depth map of the whole frame, for the 3D scene your browser builds",
@@ -1043,7 +1110,7 @@ def map_fields(fmap):
         elif k == "loras":
             out += lora_field_names(v)
         elif k == "size":
-            out += [v["width"], v["height"]]
+            out += [v["key"]] if v.get("key") else [v["width"], v["height"]]
         elif k in ("seedRange", "maskFormat", "ranges", "ignore", "maxImages", "omitEmptyPrompt"):
             continue
         elif isinstance(v, str):
@@ -1426,6 +1493,23 @@ def build_route(op, ep, provider, m, opts, ropts=None):
         fmap["size"] = {"width": kf["width"], "height": kf["height"], "multiple": 16, **({"max": min(mx)} if mx else {}),
                         **({"base": num(w.get("default"))} if num(w.get("default")) else {})}
         opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+    # Exact sizes per tier (Fuobe Soul's table): one {width, height} object field (fal's image_size, whose union takes
+    # an object) or the width / height fields above; the tiers are the model's resolutions.
+    if m.get("sizes") and not ropts.get("keepSize"):
+        spec = inputs.get(kf.get("aspectRatio") or "image_size") or {}
+        takes_object = spec.get("type") == "union" and any((v == "object{width,height}") or (isinstance(v, dict) and v.get("type") == "object") for v in spec.get("variants") or [])
+        if "size" in fmap:
+            fmap["size"]["table"] = m["sizes"]
+        elif takes_object:
+            fmap["size"] = {"key": kf.get("aspectRatio") or "image_size", "multiple": 16, "table": m["sizes"]}
+            kf.pop("aspectRatio", None)
+        else:
+            warn(f"{m['id']}: {ep} takes neither width / height nor an image_size object for its size table")
+        opts["aspectRatios"] = union(opts.get("aspectRatios", []), list(next(iter(m["sizes"].values())).keys()))
+        opts["resolutions"] = union(opts.get("resolutions", []), list(m["sizes"].keys()))
+    elif ropts.get("keepSize"):
+        # The result keeps the input picture's shape (image_size "auto", the API's default).
+        kf.pop("aspectRatio", None)
     part4_slots(op, kf, inputs, m, opts, fmap)
     # Frame rates an upscaler (or FPS Boost) can reach: params.targetFps -> its target_fps field.
     if m.get("fps_targets") and op in ("interpolate", "upscale-video"):
@@ -1487,8 +1571,11 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             # "enum or free string" unions (FLUX Ultra's aspect_ratio): offer the enum.
             enum = [v for var in spec.get("variants") or [] for v in (var.get("values") or [])]
         if key == "image_size" or any("landscape" in str(v) or "square" in str(v) for v in enum):
-            fmap["aspectRatio"] = {"key": key, "values": IMAGE_SIZE_MAP}
-            opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+            # A model that asks for "auto" (Fuobe DoP · LTX: the start frame's shape) keeps it when the API takes it;
+            # otherwise the default fallback below would make every clip square (1:1, the first size listed).
+            auto = "auto" in enum and m["defaults"].get("aspectRatio") == "auto"
+            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}}
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR)
         else:
             fmap["aspectRatio"] = key
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]
@@ -1618,6 +1705,7 @@ def parse_price(e):
 
 
 out = []
+originals = []
 for m in M:
     opts = {}
     routes = []
@@ -1640,7 +1728,8 @@ for m in M:
             if mk:
                 fmt = mask_format(ep)
                 routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
-        if len(r) > 3 and r[3] == "+flf2v" and not ropts:
+        # "+flf2v" (or the route option flf2v: True, beside others): the same endpoint as a start/end-frame route.
+        if (len(r) > 3 and r[3] == "+flf2v" and not ropts) or ropts.get("flf2v"):
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})
             else:
@@ -1697,12 +1786,14 @@ for m in M:
         d["pricing"] = pricing
     if m["hidden"]:
         d["hidden"] = True
-    out.append(d)
+    (originals if m["original"] else out).append(d)
 
 ts = (
     "// Generated by scripts/gen-cloud-models.py from docs/research/paid-model-apis(-2,-3,-4).json — do not edit by hand.\n"
     'import type { ModelDef } from "./types";\n\n'
-    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n"
+    f"export const CLOUD_MODELS: ModelDef[] = {json.dumps(out, indent=2)};\n\n"
+    "/** The Fuobe Originals' cloud halves (hosted open weights): models.ts joins each to its ComfyUI routes. */\n"
+    f"export const ORIGINAL_CLOUD: ModelDef[] = {json.dumps(originals, indent=2)};\n"
 )
 (ROOT / "src/lib/catalog/cloud-models.generated.ts").write_text(ts)
-print(f"wrote {len(out)} cloud models")
+print(f"wrote {len(out)} cloud models and {len(originals)} Originals' cloud halves")

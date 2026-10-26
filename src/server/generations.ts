@@ -10,33 +10,40 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
+import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
+import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { isDop } from "@/lib/catalog/dop";
+import { finishSteps } from "@/lib/soul-post";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
   type ChainSlot,
+  type Engine,
   type Generation,
   type GenerationRequest,
   type MediaKind,
   type GenInput,
   type LoraRef,
+  type ModelDef,
   type ModelRoute,
   type Operation,
   type OutputFile,
+  type Preset,
   type ProviderId,
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
-import { enhancePrompt } from "./enhance";
+import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm, createStillTo3d } from "./chains";
+import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
-import { ensureLorasOnComfy, prepareCloudLoras } from "./loras";
+import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -119,7 +126,8 @@ export function toGeneration(r: Row): Generation {
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
     modelName: model?.name ?? r.model_id,
-    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
@@ -420,15 +428,37 @@ setResolver((ids) =>
 // ---------------------------------------------------------------------------
 // Create
 
+/**
+ * The engine a model runs a request on: a Fuobe Original runs on the engine asked for (the composer's switch), else
+ * the engine mode, else the first one connected; any other model on its own.
+ */
+export function engineFor(m: ModelDef, asked: Engine | undefined): Engine {
+  return dualEngine(m) ? pickEngine(m, asked, engineMode(), (e) => onEngine(m, e).routes.some(routeReady)) : m.engine;
+}
+
+/**
+ * Fuobe DoP's relight effects (Silhouette, Window…) on their own model: the step that relights the start frame on the
+ * engine the clip runs on. None for any other request (the effect on a partner model runs on its words).
+ */
+export function relightStep(req: GenerationRequest, model: ModelDef): { engine: Engine; step: NonNullable<Preset["prestep"]>["open"] } | undefined {
+  const preset = req.presetId ? getPreset(req.presetId) : undefined;
+  if (!preset?.prestep || !req.inputs?.images?.length) return undefined;
+  const engine = engineFor(model, req.engine);
+  if (presetRoute(preset, engine)?.modelId !== model.id) return undefined;
+  return { engine, step: preset.prestep[engine] };
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
   const worded = withSignatureWords(original);
-  const model = getModel(worded.modelId);
-  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
-  let plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
+  const found = getModel(worded.modelId);
+  const model = found && dualEngine(found) ? onEngine(found, engineFor(found, worded.engine)) : found;
+  const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
+  let plan = planGeneration(req, lookup, getPreset);
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
       mode === "open"
@@ -443,11 +473,17 @@ function prepare(original: GenerationRequest) {
   const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
-  // takes at most so many (the plan's notes say which were left out). Open runs carry them all.
+  // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
+  // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
+  // download: the look's words still carry it. Any other run (a motion, whose LoRA is the point) still stops there.
   const asked = plan.loras;
-  const fitted = fitLoras(asked, route);
-  plan = { ...plan, loras: fitted.loras };
-  const notes = [...fitted.notes];
+  const reachable =
+    demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
+  const fitted = fitLoras(reachable.loras, route);
+  // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
+  const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
+  plan = { ...plan, prompt, loras: fitted.loras };
+  const notes = [...(plan.notes ?? []), ...reachable.notes, ...fitted.notes];
   // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
   const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
   if (made !== undefined && route.map?.numFrames) {
@@ -457,15 +493,19 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
-  if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
+  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images; a ComfyUI graph, which makes
+  // one picture a run: Fuobe Soul on the open engine) runs one job per output.
+  if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
-  return { req, plan, route, demo, providerId, notes, asked, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
+  const unreachable = asked.filter((l) => !reachable.loras.includes(l));
+  // Priced for the clip the route makes: Replicate's Wan 2.2 fast makes 5 s when 3 s was asked.
+  const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
@@ -474,8 +514,9 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked } = prepare(req);
-  const loras = routeLoras(route, asked);
+  const { plan, route, demo, providerId, cost, notes, asked, unreachable } = prepare(req);
+  const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
+  const loras = { ...fitted, dropped: [...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped] };
   return {
     model: plan.model,
     op: plan.op,
@@ -484,6 +525,8 @@ export function previewGeneration(req: GenerationRequest) {
     demo,
     providerId,
     costUsd: cost === null ? null : cost * plan.jobs,
+    // The engine it runs on (a Fuobe Original picks one per request).
+    engine: plan.model.engine,
     // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
     route: { provider: route.provider, endpoint: loras.applied.length && route.provider !== "comfyui" && route.loraEndpoint ? route.loraEndpoint : route.endpoint },
     prompt: plan.prompt,
@@ -498,7 +541,7 @@ export function previewChained(req: GenerationRequest, deps: number) {
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
   // Refused before anything starts, as createGenerations refuses it.
-  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name));
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name, p.op));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -516,8 +559,10 @@ export interface CreateOptions {
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
-  // Open models make multi-shot films shot by shot, then join the clips.
-  const shotModel = getModel(original.modelId);
+  // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
+  // on (Fuobe DoP's Frames mode is a GPU chain).
+  const found = getModel(original.modelId);
+  const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
   }
@@ -527,13 +572,20 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
   if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Text to 3D on the open engine: a still first, then the 3D model of it. The operation is read as the planner
+  // reads it (Assist, MCP and API clients usually leave op out).
+  const stillTo3d = !opts.dependsOn && shotModel && inferOperation(shotModel, original) === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
+  if (shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
+  // Fuobe DoP's relight effects: the start frame is relit first, then animated.
+  const relight = !opts.dependsOn && shotModel ? relightStep(original, shotModel) : undefined;
+  if (relight) return createRelitClip(original, relight);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost, notes } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
-  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
@@ -555,7 +607,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
       // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
       prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
-      request_json: JSON.stringify(original),
+      // An Original remembers the engine it ran on, so a retry or a chained step runs there too.
+      request_json: JSON.stringify(dualEngine(plan.model) ? { ...original, engine: plan.model.engine } : original),
       provider_input_json: null,
       external_id: null,
       external_meta_json: null,
@@ -907,7 +960,13 @@ async function submit(
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {
       update(id, { message: "Enhancing prompt" });
-      prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
+      const words = plan.soul?.words;
+      const at = words ? prompt.indexOf(words) : -1;
+      if (words && at >= 0) {
+        // Soul: only the user's words are expanded (60–120 words of subject, wardrobe, place, light); the look stays as it is.
+        const longer = await enhanceSoulWords(words).catch(() => words);
+        prompt = prompt.slice(0, at) + longer + prompt.slice(at + words.length);
+      } else prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
       update(id, { prompt });
     }
     const input: GenInput = {
@@ -1171,6 +1230,13 @@ async function pollOne(r: Row): Promise<void> {
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
+  // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
+  // API clients read it as meta.
+  const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
+  if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
+  // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
+  const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
+  if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
   update(r.id, {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
@@ -1196,37 +1262,64 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
 }
 
 /**
- * Extra files a result carries as links (meta.artifacts: LTX HDR's EXR zip, Higgsfield's fbx / zip) are kept
- * too, so the Library never depends on a provider's expiring URL. Links are streamed to disk (an EXR zip runs
- * to gigabytes); one that can't be fetched stays as it was (the result's actions still offer it).
+ * Extra files a result carries as links are kept too, so the Library never depends on a provider's expiring URL:
+ * meta.artifacts (LTX HDR's EXR zip, Higgsfield's fbx / zip), meta.formats (a 3D model's other formats, a rig's FBX
+ * and its walk and run cycles, SAM 3D's splat) and meta.preview (a 3D model's render, the cut-out a splat was
+ * made from). Links are streamed to disk (an EXR zip runs to gigabytes); one that can't be fetched stays as it
+ * was (the result's actions still offer it). A link to the main file itself (`main`) is left for persistOutput.
  */
-export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
-  const links = meta?.artifacts;
-  if (!links || typeof links !== "object" || Array.isArray(links)) return meta;
-  const kept: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(links as Record<string, unknown>)) {
-    kept[k] = v;
-    if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) continue;
-    try {
-      if (v.startsWith("data:")) {
-        const f = await readRef(v);
-        kept[k] = saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
-        continue;
-      }
-      const dest = path.join(scratchDir(), `${generationId}-${k}-${nanoid(6)}`);
-      const res = await fetchRemoteToFile(v, dest);
-      const name = new URL(res.url).pathname.split("/").pop() || undefined;
-      const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
-      kept[k] = adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
-    } catch (e) {
-      console.warn(`[fuobe] could not keep the ${k} file of ${generationId}: ${(e as Error).message}`);
-    }
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string, main?: string): Promise<Record<string, unknown> | undefined> {
+  if (!meta) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links)) continue;
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(links as Record<string, unknown>)) kept[k] = v === main ? v : await keepLink(v, key === "artifacts" ? k : `${key}-${k}`, generationId);
+    out = { ...out, [key]: kept };
   }
-  return { ...meta, artifacts: kept };
+  for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
+  return out;
+}
+
+/** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
+const LINK_MAPS = ["artifacts", "formats"] as const;
+const LINKS = ["preview"] as const;
+
+/** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
+async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
+  if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) return v;
+  try {
+    if (v.startsWith("data:")) {
+      const f = await readRef(v);
+      return saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+    }
+    const dest = path.join(scratchDir(), `${generationId}-${label}-${nanoid(6)}`);
+    const res = await fetchRemoteToFile(v, dest);
+    const name = new URL(res.url).pathname.split("/").pop() || undefined;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
+  } catch (e) {
+    console.warn(`[fuobe] could not keep the ${label} file of ${generationId}: ${(e as Error).message}`);
+    return v;
+  }
+}
+
+/** The extra links that pointed at the main file point at its stored copy. */
+function relinkMain(meta: Record<string, unknown> | undefined, from: string, to: string): Record<string, unknown> | undefined {
+  if (!meta || !from) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links) || !Object.values(links).includes(from)) continue;
+    out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
+  }
+  for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
+  return out;
 }
 
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
-  const meta = await persistArtifacts(o.meta, generationId);
+  const linked = await persistArtifacts(o.meta, generationId, o.url);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1248,6 +1341,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
+  const meta = relinkMain(linked, o.url, asset.url);
   // A text file's words travel with the generation, so feeds and the next chained step can use them.
   const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
   return {
@@ -1273,6 +1367,47 @@ export async function cancelGeneration(id: string): Promise<void> {
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
   // Steps waiting only to feed this one are dropped too (nothing was spent on them).
   dropUnused(depIds(r.depends_on));
+}
+
+// ---------------------------------------------------------------------------
+// Fuobe Soul's post steps (the look's grade and overlay), made in the browser when the result arrives.
+
+/** The aspect ratio a stored request asked for (Soul Cinema's 21:9 is made at 16:9 and cropped). */
+function requestAspect(json: string): string | undefined {
+  try {
+    return (JSON.parse(json) as GenerationRequest).params?.aspectRatio;
+  } catch {
+    return undefined;
+  }
+}
+
+export class FinishError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Keep the finished picture of a Soul result in place of the raw one: the raw one stays as meta.original (its
+ * file is still the generation's), meta.finished marks it done. The first finished copy wins: another tab's
+ * answer is 409, and an output with nothing left to do is refused.
+ */
+export function finishOutput(id: string, index: number, png: Buffer): Generation {
+  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
+  if (!r) throw new FinishError("Not found", 404);
+  if (r.status !== "succeeded") throw new FinishError("The result isn't ready yet", 409);
+  const outputs = JSON.parse(r.outputs_json) as OutputFile[];
+  const o = outputs[index];
+  if (!o || !Number.isInteger(index)) throw new FinishError("No such output", 404);
+  if (o.meta?.finished) throw new FinishError("Already finished", 409);
+  if (!finishSteps(o)) throw new FinishError("This output has no grade or overlay to apply", 400);
+  const asset = saveFile({ data: png, contentType: "image/png", name: `${id}-${index}-finished.png`, source: "generation", generationId: id });
+  outputs[index] = { ...o, url: asset.url, assetId: asset.id, contentType: "image/png", meta: { ...o.meta, finished: true, original: o.url } };
+  update(id, { outputs_json: JSON.stringify(outputs) });
+  return getGeneration(id, { includeDeleted: true })!;
 }
 
 // ---------------------------------------------------------------------------

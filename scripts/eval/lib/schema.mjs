@@ -5,7 +5,7 @@
 import { z } from "zod";
 
 export const ENGINES = /** @type {const} */ (["demo", "open", "cloud"]);
-export const METRICS = /** @type {const} */ (["clip", "aesthetic", "style", "identity", "temporal", "lipsync", "continuity"]);
+export const METRICS = /** @type {const} */ (["clip", "aesthetic", "style", "identity", "temporal", "lipsync", "continuity", "palette"]);
 
 const Slug = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "lower-case letters, digits and dashes");
 const CaseId = z.string().max(120).regex(/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/, "lower-case words joined by - . _ and /");
@@ -57,6 +57,12 @@ const LoraSpec = z
     commercial: z.boolean().optional(),
     hostedOk: z.boolean().optional(),
     licence: z.string().optional(),
+    name: z.string().max(200).optional(),
+    /** The base it was trained for (a model that can't load it leaves it out). */
+    base: z.string().max(60).optional(),
+    /** "civitai-token": its link needs the user's civitai key, so the cloud leaves it out unless it has a hostedUrl. */
+    download: z.enum(["direct", "civitai-token"]).optional(),
+    hostedUrl: z.string().regex(/^https:\/\//).optional(),
   })
   .strict();
 
@@ -95,11 +101,31 @@ const Target = z
   })
   .strict();
 
+const Submit = z
+  .object({
+    /** A studio route that builds a pipeline (POST), e.g. /api/mixed-media. */
+    route: z.string().regex(/^\/api\/[\w/-]+$/),
+    /**
+     * The body. Filled in: {{inputs.video}}, {{inputs.images.0}}… (uploaded URLs), {{source:inputs.video}} (the clip as
+     * studios take it: url, name, duration, fps, width, height, hasAudio), {{prompt}}, {{seed}}, {{engine}} (open or
+     * cloud; demo runs send open), {{requestId}} and {{request}} (the job's own /api/generations request, e.g. for
+     * POST /api/palettes/lock; {{request.params.palette}} is its palette).
+     */
+    body: Json,
+    /** Which generations of the answer are the result: the final step (default), the last listed, or all. */
+    result: z.enum(["final", "last", "all"]).default("final"),
+    /** Where the same body is priced (default: the route + /estimate; false when the route has none). */
+    estimate: z.union([z.string().regex(/^\/api\/[\w/-]+$/), z.literal(false)]).optional(),
+  })
+  .strict();
+
 const Variant = z
   .object({
     description: z.string().optional(),
-    /** Soul looks: put the look's template and LoRA triggers around the prompt (default true). */
+    /** Soul looks: put the look's template and LoRA triggers around the prompt (default true). False also drops `words`. */
     template: z.boolean().optional(),
+    /** Fixed words after the prompt ("{prompt}. {words}"): a one-look Original's tail (Soul Cinema). */
+    words: z.string().max(2000).optional(),
     /** The recipe's LoRAs from the research ("recipe"), none, or your own list. */
     loras: z.union([z.literal("recipe"), z.literal("none"), z.array(LoraSpec).max(8)]).optional(),
     /** Multiplies every recipe LoRA's strength. */
@@ -108,6 +134,8 @@ const Variant = z
     preset: z.boolean().optional(),
     /** Motions / effects: 0 runs the preset's prompt without its catalog LoRAs. */
     presetStrength: z.number().min(0).max(1).optional(),
+    /** Send the case's Mix (default true when the case has one); false runs its first preset alone. */
+    mix: z.boolean().optional(),
     /** The server's own Original applies the look: send the look's Fuobe id ("v1-general") as presetId and no client recipe. */
     lookParam: z.literal("presetId").optional(),
     /** Other models for this variant (A/B a model against the recipe). A case can name its own (variantModels). */
@@ -116,6 +144,8 @@ const Variant = z
     engines: z.array(z.enum(ENGINES)).min(1).optional(),
     params: Params.optional(),
     extra: Json.optional(),
+    /** Send this variant through a studio route instead of /api/generations (the case's own submit wins). */
+    submit: Submit.optional(),
   })
   .strict();
 
@@ -134,22 +164,6 @@ const Train = z
   })
   .strict();
 
-const Submit = z
-  .object({
-    /** A studio route that builds a pipeline (POST), e.g. /api/mixed-media. */
-    route: z.string().regex(/^\/api\/[\w/-]+$/),
-    /**
-     * The body. Filled in: {{inputs.video}}, {{inputs.images.0}}… (uploaded URLs), {{source:inputs.video}} (the clip as
-     * studios take it: url, name, duration, fps, width, height, hasAudio), {{prompt}}, {{seed}}, {{engine}} (open or
-     * cloud; demo runs send open) and {{requestId}}.
-     */
-    body: Json,
-    /** Which generations of the answer are the result: the final step (default), the last listed, or all. */
-    result: z.enum(["final", "last", "all"]).default("final"),
-    /** Where the same body is priced (default: the route + /estimate; false when the route has none). */
-    estimate: z.union([z.string().regex(/^\/api\/[\w/-]+$/), z.literal(false)]).optional(),
-  })
-  .strict();
 
 export const CaseSchema = z
   .object({
@@ -160,6 +174,10 @@ export const CaseSchema = z
     /** A motion or effect name in the research's motionsEffects map (fuobe-originals-recipes-5.json). */
     motion: z.string().optional(),
     presetId: z.string().optional(),
+    /** Fuobe DoP's Mix: a second motion or effect on the same run, at its strength (0–1). */
+    mix: z.object({ presetId: z.string().min(1), strength: z.number().min(0).max(1) }).strict().optional(),
+    /** The case's fixed words after the prompt and the variant's words (a HEX palette's sentence); a variant with template: false leaves them out. */
+    words: z.string().max(2000).optional(),
     /** Models for this case instead of the suite's targets (a look on another base, a mode with its own model). */
     models: PerEngine(z.array(z.string().min(1)).min(1)).optional(),
     /** A variant's models for this case, over the variant's own (each mode of a studio has its own partner model). */
