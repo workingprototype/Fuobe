@@ -9,7 +9,7 @@
  */
 import { getModel, getPreset, MODELS, supportsOp } from "./index";
 import { chainedWaitMessage, keyframeChain } from "./keyframes";
-import { estimateCost, inferOperation, planGeneration, type Plan } from "./plan";
+import { estimateCost, inferOperation, planGeneration, routesFor, type Plan } from "./plan";
 import {
   OPERATION_LABELS,
   OPERATION_OUTPUT,
@@ -867,8 +867,10 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   if ("error" in built) return { model, costUsd: null, error: built.error };
   try {
     const plan = planGeneration(withPlaceholders(built.request), getModel, getPreset);
-    // A film built clip by clip is planned from its inputs when it starts: it can't wait for another node (said before Run).
-    if (built.deps.length && plan.op === "keyframes" && keyframeChain(plan.model)) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name) };
+    // A film built clip by clip, or the open text-to-3D still and model, is planned from its inputs when it starts:
+    // it can't wait for another node (said before Run).
+    const chained = plan.op === "keyframes" ? !!keyframeChain(plan.model) : routesFor(plan.model, plan.op).some((r) => r.chained);
+    if (built.deps.length && chained) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name, plan.op) };
     return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
   } catch (e) {
     return { ...built, model, costUsd: null, error: (e as Error).message };

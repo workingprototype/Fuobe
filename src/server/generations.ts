@@ -498,7 +498,7 @@ export function previewChained(req: GenerationRequest, deps: number) {
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
   // Refused before anything starts, as createGenerations refuses it.
-  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name));
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name, p.op));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -527,16 +527,17 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
   if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
-  // Text to 3D on the open engine: a still first, then the 3D model of it.
-  const stillTo3d = shotModel && original.op === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
-  if (!opts.dependsOn && shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
+  // Text to 3D on the open engine: a still first, then the 3D model of it. The operation is read as the planner
+  // reads it (Assist, MCP and API clients usually leave op out).
+  const stillTo3d = !opts.dependsOn && shotModel && inferOperation(shotModel, original) === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
+  if (shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost, notes } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
-  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();

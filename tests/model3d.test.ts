@@ -282,6 +282,24 @@ describe("open engine: text to 3D as a Z-Image Turbo still, then TRELLIS.2", () 
     expect(done.request.inputs?.images?.length).toBe(1);
   }, 60_000);
 
+  it("runs as the same two steps when the request leaves op out (Assist, MCP, the API)", () => {
+    const steps = gens.createGenerations({ feature: "image-to-3d", modelId: "oss-text-trellis2", prompt: "a brass lantern" });
+    expect(steps.map((g) => [g.modelId, g.op])).toEqual([
+      ["oss-trellis2", "image-to-3d"],
+      ["oss-z-image-turbo", "t2i"],
+    ]);
+    // A photo sent along has no place in this route: the model is built from the still alone.
+    const [built] = gens.createGenerations({ feature: "image-to-3d", modelId: "oss-text-trellis2", prompt: "a brass lantern", inputs: { images: ["/api/files/p.png"] } });
+    expect(built.request.inputs?.images).toBeUndefined();
+    expect(built.request.chain).toEqual([{ slot: "images", position: "first" }]);
+  });
+
+  it("can't wait for another step's words, and says so in 3D terms", () => {
+    expect(() => gens.createGenerations({ feature: "image-to-3d", modelId: "oss-text-trellis2", op: "text-to-3d", prompt: "{text}", chain: [{ slot: "prompt" }] }, { dependsOn: "x" })).toThrow(
+      /draws the object first, then builds it in 3D/,
+    );
+  });
+
   it("needs the words", () => {
     expect(() => gens.createGenerations({ feature: "image-to-3d", modelId: "oss-text-trellis2", op: "text-to-3d", prompt: " " })).toThrow();
   });

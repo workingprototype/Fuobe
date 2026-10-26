@@ -13,7 +13,7 @@
  *
  * No catalog import (types only), so the composer can use it in the browser.
  */
-import type { Engine, ModelDef, ModelRoute } from "./types";
+import type { Engine, ModelDef, ModelRoute, Operation } from "./types";
 
 /** Kling 4.0 and FLUX 3 Max take up to 10 frames. */
 export const MAX_KEYFRAMES = 10;
@@ -60,9 +60,14 @@ export const FRAMES_MODELS: Record<Engine, { id: string; name: string }> = {
   open: { id: "oss-wan22-14b", name: "Wan 2.2 14B" },
 };
 
-/** Why a chained route can't be a step that waits (a Canvas node fed by another node, a pipeline step): its clips are planned from its inputs when it's created. */
-export const chainedWaitMessage = (name: string) =>
-  `${name} builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output`;
+/**
+ * Why a chained route can't be a step that waits (a Canvas node fed by another node, a pipeline step): its steps
+ * are planned from its inputs when it's created (a film's clips; the open text-to-3D route's still).
+ */
+export const chainedWaitMessage = (name: string, op?: Operation) =>
+  op === "text-to-3d"
+    ? `${name} draws the object first, then builds it in 3D, from words typed in when it starts — give it a typed description, not another step's output`
+    : `${name} builds this film from several clips of the images you add when it starts — give it uploaded images and a typed prompt, not another step's output`;
 
 /** What stops Generate in Frames mode before the planner speaks: no start frame, or a model that can't follow frames. */
 export function framesBlocker(model: Pick<ModelDef, "name" | "engine" | "routes" | "options">, count: number): { message: string; slot?: "frames" } | null {

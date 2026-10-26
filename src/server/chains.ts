@@ -308,8 +308,17 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
     { batchId },
   )[0];
   try {
+    // The model is built from the still alone (a photo sent with the words has no place in this route).
+    const { images: _ignored, ...inputs } = original.inputs ?? {};
     const built = createGenerations(
-      { ...original, modelId: builder, op: "image-to-3d", chain: [{ slot: "images", position: "first" }], step: { label: "3D model", index: 1, of: 2 } },
+      {
+        ...original,
+        modelId: builder,
+        op: "image-to-3d",
+        inputs: Object.keys(inputs).length ? inputs : undefined,
+        chain: [{ slot: "images", position: "first" }],
+        step: { label: "3D model", index: 1, of: 2 },
+      },
       { batchId, dependsOn: still.id },
     )[0];
     return [built, still];
