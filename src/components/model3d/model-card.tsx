@@ -1,12 +1,12 @@
 "use client";
 
-import { Box, Clapperboard, Download, PersonStanding, Sparkles, Video } from "lucide-react";
+import { Box, Clapperboard, Download, ImageIcon, PersonStanding, Sparkles, Video } from "lucide-react";
 import Link from "next/link";
 import { createElement, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { uploadFile, useHydrated } from "@/lib/api";
-import { animateSpinHref, animationName, model3dView, type Model3dView } from "@/lib/av/model3d";
+import { animateSpinHref, animationName, model3dView, stillOf, type Model3dView } from "@/lib/av/model3d";
 import type { Generation } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import type { Model3dInfo } from "./model3d-studio";
@@ -86,6 +86,8 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
   // A rigged result rigs its source model again with another animation.
   const rigSource = view.rigged ? (g.request.inputs?.model3d ?? view.glb) : view.glb;
   const splatPicture = view.splat && !(show === "video" && clip);
+  // From words on the open engine: the Z-Image still the model was built from (a helper step the page hides).
+  const still = stillOf(g);
   return (
     <article className="overflow-hidden rounded-2xl border bg-background shadow-soft">
       <div className="relative aspect-[4/3] bg-[radial-gradient(circle_at_50%_40%,var(--muted),var(--background))]">
@@ -201,6 +203,13 @@ export function ModelCard({ g, info, cloudAllowed }: { g: Generation; info: Reco
                 </a>
               </Button>
             ))}
+          {still && (
+            <Button asChild variant="ghost" size="sm" className="rounded-full">
+              <a href={still} target="_blank" rel="noreferrer" aria-label="Open the still the model was built from">
+                <ImageIcon className="size-3.5" /> Still
+              </a>
+            </Button>
+          )}
           {clip ? (
             <Button asChild variant="outline" size="sm" className="rounded-full">
               <a href={clip} download={`${name} turntable.${view.turntable ? "mp4" : "webm"}`} aria-label="Download the turntable video">

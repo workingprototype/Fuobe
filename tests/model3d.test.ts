@@ -69,7 +69,14 @@ describe("modes: which model and operation each runs, per engine", () => {
     expect(getModel(m3d.RIG_MODEL)?.routes[0]).toMatchObject({ op: "rig-3d", provider: "fal", endpoint: "fal-ai/meshy/rigging" });
     // TripoSplat encodes with DINOv3 on fal too: its results carry the notice.
     expect(m3d.CLOUD_NOTICES.triposplat).toEqual(["Built with DINOv3"]);
+    // TRELLIS.2 encodes with DINOv3 ViT-L on fal too, as on the open engine.
+    expect(m3d.CLOUD_NOTICES["trellis-2"]).toEqual(["Built with DINOv3"]);
     expect(Object.keys(m3d.CLOUD_NOTICES).every((id) => getModel(id)?.engine === "cloud")).toBe(true);
+  });
+
+  it("says which way round the sides go", () => {
+    expect(m3d.SIDES_HINT).toMatch(/object's own/);
+    expect(m3d.SIDES_HINT).toMatch(/your right for its left/);
   });
 
   it("says what is missing, and that Pick an object is cloud only", () => {
@@ -159,6 +166,22 @@ describe("what the cards show", () => {
     expect(v).toMatchObject({ splat: { url: "/api/files/g/s.spz", format: "spz" }, turntable: "/api/files/g/orbit.mp4", glb: undefined });
     // The demo's splat is a GLB the viewer shows.
     expect(m3d.model3dView({ outputs: [{ url: "sample:demo-model.glb", kind: "model3d", meta: { splat: true, format: "glb" } }] as never, request: { feature: "x", modelId: "y", op: "splat" } as never })).toMatchObject({ glb: "sample:demo-model.glb", splat: undefined });
+  });
+
+  it("tells a splat from a GLB by its format or extension (the Library's viewer goes by it too)", () => {
+    expect(m3d.splatFormatOf({ url: "/api/files/outputs/a.spz" })).toBe("spz");
+    expect(m3d.splatFormatOf({ url: "https://fal.test/x.ply?sig=1" })).toBe("ply");
+    expect(m3d.splatFormatOf({ url: "/api/files/outputs/a.bin", meta: { format: "KSPLAT" } })).toBe("ksplat");
+    expect(m3d.splatFormatOf({ url: "/api/files/outputs/a.glb" })).toBeUndefined();
+    expect(m3d.splatFormatOf({ url: "sample:demo-model.glb", meta: { format: "glb", splat: true } })).toBeUndefined();
+    expect(m3d.splatFormatOf(undefined)).toBeUndefined();
+  });
+
+  it("a model made from words links to the still it was built from, once the step ran", () => {
+    const step = { feature: "image-to-3d", modelId: "oss-trellis2", op: "image-to-3d" as const, prompt: "a lantern", chain: [{ slot: "images" as const, position: "first" as const }] };
+    expect(m3d.stillOf({ request: { ...step, inputs: { images: ["/api/files/still.png"] }, chainFilled: true } })).toBe("/api/files/still.png");
+    expect(m3d.stillOf({ request: step })).toBeUndefined();
+    expect(m3d.stillOf({ request: m3d.model3dRequest({ engine: "open", mode: "image", photo }) })).toBeUndefined();
   });
 
   it("SAM 3D Objects: the GLB in the viewer, its splat as a download", () => {
@@ -339,6 +362,8 @@ describe("open engine: text to 3D as a Z-Image Turbo still, then TRELLIS.2", () 
     expect(done.status).toBe("succeeded");
     expect(done.outputs.some((o) => o.kind === "model3d")).toBe(true);
     expect(done.request.inputs?.images?.length).toBe(1);
+    // Its card links to the still.
+    expect(m3d.stillOf(done)).toBe(done.request.inputs?.images?.[0]);
   }, 60_000);
 
   it("runs as the same two steps when the request leaves op out (Assist, MCP, the API)", () => {

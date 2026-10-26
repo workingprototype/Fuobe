@@ -1,8 +1,9 @@
 "use client";
 
-import { AudioLines, Box, FileText, Film, Layers } from "lucide-react";
+import { AudioLines, Box, Download, FileText, Film, Layers } from "lucide-react";
 import { createElement, useEffect, useState } from "react";
 import { FORMAT_INFO } from "@/lib/av/formats";
+import { splatFormatOf } from "@/lib/av/model3d";
 import type { Generation, OutputFile, VideoFormat } from "@/lib/catalog/types";
 import { extensionOf } from "@/lib/library";
 import { cuesOf, cueTime, editOnlyFormat, isLayered, layerInfo, modelPreview, textOf, videoPoster } from "@/lib/output-actions";
@@ -187,11 +188,17 @@ export function LayersStack({ g, className, bare }: { g: Generation; className?:
   );
 }
 
-/** A .glb in an orbitable viewer. @google/model-viewer (with three.js) loads only when one is opened. */
+/**
+ * A .glb in an orbitable viewer. @google/model-viewer (with three.js) loads only when one is opened. A Gaussian
+ * splat (.ply / .spz / .ksplat), which it can't load, shows its orbit video or picture and the file to download.
+ * A rigged character plays its animation instead of turning.
+ */
 export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const splat = splatFormatOf(output);
   useEffect(() => {
+    if (splat) return;
     let live = true;
     import("@google/model-viewer").then(
       () => live && setReady(true),
@@ -200,8 +207,9 @@ export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }
     return () => {
       live = false;
     };
-  }, []);
-  const { poster } = modelPreview(g, output);
+  }, [splat]);
+  const { poster, video } = modelPreview(g, output);
+  if (splat) return <SplatPreview output={output} format={splat} poster={poster} video={video} />;
   if (failed) return <p className="text-[13px] text-white/80">Couldn&apos;t load the 3D viewer. Download the .glb to open it.</p>;
   if (!ready) {
     return (
@@ -216,10 +224,32 @@ export function ModelViewer({ output, g }: { output: OutputFile; g: Generation }
     poster,
     alt: g.request.prompt || "3D model",
     "camera-controls": "",
-    "auto-rotate": "",
+    ...(output.meta?.rigged === true ? { autoplay: "" } : { "auto-rotate": "" }),
     "shadow-intensity": "1",
     exposure: "1",
     "touch-action": "pan-y",
     style: { width: "100%", height: "100%", background: "transparent" },
   });
+}
+
+/** A splat in the full-screen viewer: its orbit video or picture, what Fuobe can't do yet, and the file. */
+function SplatPreview({ output, format, poster, video }: { output: OutputFile; format: string; poster?: string; video?: string }) {
+  return (
+    <div className="flex size-full flex-col items-center justify-center gap-3 p-4 text-center text-white/80">
+      {video ? (
+        <video src={video} controls autoPlay loop muted playsInline aria-label="Orbit video of the splat" className="max-h-[70%] max-w-full" />
+      ) : poster ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={poster} alt="The subject the splat was made from" className="max-h-[70%] max-w-full object-contain" />
+      ) : (
+        <Box className="size-10" aria-hidden />
+      )}
+      <p className="max-w-md text-[13px]">
+        Fuobe doesn&apos;t draw Gaussian splats yet. Download the .{format} and open it in a splat viewer (SuperSplat, for one) to look around it.
+      </p>
+      <a href={output.url} download className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/15 px-4 text-[13px] font-medium text-white hover:bg-white/25">
+        <Download className="size-4" aria-hidden /> .{format}
+      </a>
+    </div>
+  );
 }

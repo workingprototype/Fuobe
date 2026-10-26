@@ -1,4 +1,4 @@
-import type { Engine, Generation, GenerationRequest } from "@/lib/catalog/types";
+import type { Engine, Generation, GenerationRequest, OutputFile } from "@/lib/catalog/types";
 
 /**
  * Image to 3D / Product spin: the modes (from an image, from several images, from text, pick an object, a splat),
@@ -59,10 +59,12 @@ export const MODELS_3D: Record<Model3dMode, Record<Engine, Model3dChoice[]>> = {
 };
 
 /**
- * Notices cloud models need beside their results: TripoSplat encodes the photo with DINOv3 (its weights ship
- * dino_v3_vit_h), on fal too. Open models get theirs from their workflow's licence.
+ * Notices cloud models need beside their results. The rule is the open engine's: a model that encodes the photo
+ * with DINOv3 carries "Built with DINOv3" wherever it runs, fal included. TripoSplat (its weights ship
+ * dino_v3_vit_h) and TRELLIS.2 (a DINOv3 ViT-L encoder, dino_v3_L_naf in Comfy-Org's repackage) do; Hunyuan3D,
+ * Tripo, Meshy and SAM 3D don't. Open models get theirs from their workflow's licence.
  */
-export const CLOUD_NOTICES: Record<string, string[]> = { triposplat: ["Built with DINOv3"] };
+export const CLOUD_NOTICES: Record<string, string[]> = { triposplat: ["Built with DINOv3"], "trellis-2": ["Built with DINOv3"] };
 
 /** Every model the page offers (⌘K's ?model= links land on its mode). */
 export const ALL_MODELS_3D: Model3dChoice[] = Object.values(MODELS_3D).flatMap((m) => [...m.cloud, ...m.open]);
@@ -79,6 +81,11 @@ export function modeOf(id: string): { mode: Model3dMode; engine: Engine } | null
 export const VIEW_SIDES = ["front", "left", "back", "right"] as const;
 export type ViewSide = (typeof VIEW_SIDES)[number];
 export const SIDE_LABELS: Record<ViewSide, string> = { front: "Front", left: "Left side", back: "Back", right: "Right side" };
+/**
+ * Left and right are the object's own, as Pixal3D's rig takes them (the left view's camera is 90° round from the
+ * front, on the side that is on your right as you face the front): said beside the slots.
+ */
+export const SIDES_HINT = "Left and right are the object's own: facing its front, walk round to your right for its left side.";
 
 /** What the user filled in: the photo (or photos by side), the words. */
 export interface Model3dInput {
@@ -183,6 +190,24 @@ export interface Model3dView {
 
 const SPLAT_FORMATS = new Set(["ply", "spz", "ksplat", "splat"]);
 
+/**
+ * A Gaussian splat's format (ply, spz, ksplat), which no glTF viewer loads, else undefined. A splat says so
+ * (meta.format), or its file's extension does; the demo's "splat" is a GLB the viewer shows.
+ */
+export function splatFormatOf(o: Pick<OutputFile, "url" | "meta"> | undefined): string | undefined {
+  if (!o) return undefined;
+  const declared = typeof o.meta?.format === "string" && o.meta.format ? o.meta.format.toLowerCase() : undefined;
+  const ext = o.url.split("?")[0].split(".").pop()?.toLowerCase();
+  const format = declared ?? (ext && SPLAT_FORMATS.has(ext) ? ext : undefined);
+  return format && SPLAT_FORMATS.has(format) ? format : undefined;
+}
+
+/** The still the open text-to-3D route drew and built the model from (the 3D step's chained image), once it ran. */
+export function stillOf(g: Pick<Generation, "request">): string | undefined {
+  const r = g.request;
+  return r.chainFilled && r.op === "image-to-3d" && r.chain?.some((c) => c.slot === "images") ? r.inputs?.images?.[0] : undefined;
+}
+
 export function model3dView(g: Pick<Generation, "outputs" | "request">): Model3dView {
   const mesh = g.outputs.find((o) => o.kind === "model3d");
   const meta = (mesh?.meta ?? {}) as Record<string, unknown>;
@@ -192,10 +217,8 @@ export function model3dView(g: Pick<Generation, "outputs" | "request">): Model3d
   const formats: Record<string, string> = {};
   const listed = meta.formats;
   if (listed && typeof listed === "object") for (const [k, v] of Object.entries(listed as Record<string, unknown>)) if (typeof v === "string") formats[k.toLowerCase()] = v;
-  // A splat says so (meta.format), or its file's extension does. The demo's "splat" is a GLB the viewer shows.
-  const ext = mesh?.url.split("?")[0].split(".").pop()?.toLowerCase();
-  const format = str(meta.format)?.toLowerCase() ?? (ext && SPLAT_FORMATS.has(ext) ? ext : undefined);
-  const splat = mesh && format && SPLAT_FORMATS.has(format) ? { url: mesh.url, format } : undefined;
+  const format = splatFormatOf(mesh);
+  const splat = mesh && format ? { url: mesh.url, format } : undefined;
   return {
     glb: splat ? undefined : mesh?.url,
     splat,

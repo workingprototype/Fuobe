@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Loader2 } from "lucide-react";
+import { Box, Loader2, PersonStanding } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -21,7 +21,9 @@ import {
   MODEL3D_FEATURE,
   MODEL3D_MODES,
   MODELS_3D,
+  RIG_MODEL,
   SIDE_LABELS,
+  SIDES_HINT,
   VIEW_SIDES,
   model3dBlocker,
   model3dFor,
@@ -57,16 +59,20 @@ const HINTS: Record<Model3dMode, string> = {
   splat: "One photo → a Gaussian splat of the subject: soft, photo-real detail, the background left out.",
 };
 
-/** A link's ?model= (from ⌘K) picks that model, its mode and its engine; ?mode= picks a mode. Under its own Suspense: it reads the URL. */
-function UrlModel({ onModel, onMode }: { onModel: (mode: Model3dMode, engine: Engine, id: string) => void; onMode: (mode: Model3dMode) => void }) {
+/**
+ * A link's ?model= (from ⌘K) picks that model, its mode and its engine; ?mode= picks a mode; ?model=meshy-rigging
+ * (rigging works on a finished model) says where Rig & animate is. Under its own Suspense: it reads the URL.
+ */
+function UrlModel({ onModel, onMode, onRig }: { onModel: (mode: Model3dMode, engine: Engine, id: string) => void; onMode: (mode: Model3dMode) => void; onRig: () => void }) {
   const params = useSearchParams();
   const id = params.get("model");
   const mode = params.get("mode");
   useEffect(() => {
     const found = id ? modeOf(id) : null;
     if (found && id) onModel(found.mode, found.engine, id);
+    else if (id === RIG_MODEL) onRig();
     else if (MODEL3D_MODES.some((m) => m.id === mode)) onMode(mode as Model3dMode);
-  }, [id, mode, onModel, onMode]);
+  }, [id, mode, onModel, onMode, onRig]);
   return null;
 }
 
@@ -124,6 +130,8 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
   const [text, setText] = useState("");
   const [object, setObject] = useState("");
   const [picked, setPicked] = useState<Record<string, string>>({});
+  const [rigHint, setRigHint] = useState(false);
+  const showRigHint = useCallback(() => setRigHint(true), []);
   const fromUrl = useCallback(
     (m: Model3dMode, e: Engine, id: string) => {
       setMode(m);
@@ -158,24 +166,43 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
   return (
     <ToolShell title="Image to 3D">
       <Suspense fallback={null}>
-        <UrlModel onModel={fromUrl} onMode={setMode} />
+        <UrlModel onModel={fromUrl} onMode={setMode} onRig={showRigHint} />
       </Suspense>
       <ToolHero title="Your product, in 3D" subtitle={HINTS[mode]} />
       <ModePicker mode={mode} onChange={setMode} />
+      {rigHint && (
+        <p role="status" className="mx-auto mt-4 max-w-[880px] rounded-2xl border bg-brand-faint px-4 py-3 text-[13px] text-brand-text">
+          <PersonStanding className="mr-1.5 inline size-4 align-[-3px]" aria-hidden />
+          Rig &amp; animate works on a finished model: make one here
+          {items.length > 0 && (
+            <>
+              {" "}
+              or pick one under{" "}
+              <a href="#your-3d-models" className="font-medium underline underline-offset-2">
+                Your 3D models
+              </a>
+            </>
+          )}
+          , then press Rig &amp; animate on its card. Rigging runs on Meshy, in the cloud.
+        </p>
+      )}
       <div className="mx-auto mt-6 grid max-w-[880px] gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {mode === "multi" ? (
           <Panel title="Photos of each side" aside={<span className="text-[12px] text-muted-foreground">{Object.keys(sides).length} of 4</span>}>
-            <div className="grid grid-cols-4 gap-2">
-              {VIEW_SIDES.map((s) => (
-                <div key={s} className="flex flex-col items-center gap-1">
-                  <MediaSlot label={SIDE_LABELS[s]} kind="image" value={views[s] ?? null} onChange={setSide(s)} required={s === "front"} size="lg" caption />
-                  <span className="text-[11px] text-muted-foreground">{s === "front" ? "Needed" : "Optional"}</span>
-                </div>
-              ))}
+            {/* Four 80 px slots in a row when the panel has room for them (22rem), two by two when it doesn't. */}
+            <div className="@container">
+              <div className="grid grid-cols-2 justify-items-center gap-2 @[22rem]:grid-cols-4">
+                {VIEW_SIDES.map((s) => (
+                  <div key={s} className="flex flex-col items-center gap-1">
+                    <MediaSlot label={SIDE_LABELS[s]} kind="image" value={views[s] ?? null} onChange={setSide(s)} required={s === "front"} size="lg" caption />
+                    <span className="text-[11px] text-muted-foreground">{s === "front" ? "Needed" : "Optional"}</span>
+                  </div>
+                ))}
+              </div>
             </div>
             <p className="mt-3 text-[12px] text-muted-foreground">
               The front and at least one more side. Same object, same distance and light in each; a plain background helps.
-              {engine === "open" && " The open model puts each photo on the side you add it to."}
+              {engine === "open" && ` The open model puts each photo on the side you add it to. ${SIDES_HINT}`}
             </p>
           </Panel>
         ) : mode === "text" ? (
@@ -194,7 +221,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
               className="min-h-28 rounded-xl"
             />
             <p className="mt-2 text-[12px] text-muted-foreground">
-              One object: what it is, its material and colours.{engine === "open" && " Z-Image Turbo draws it on a plain background first; that still is kept with the model."}
+              One object: what it is, its material and colours.{engine === "open" && " Z-Image Turbo draws it on a plain background first; the finished model's card links to that still."}
             </p>
           </Panel>
         ) : (
@@ -292,7 +319,7 @@ export function Model3dStudio({ info }: { info: Record<string, Model3dInfo> }) {
           )}
         </Panel>
       </div>
-      <section className="mx-auto mt-12 max-w-[880px]" aria-labelledby="models3d">
+      <section id="your-3d-models" className="mx-auto mt-12 max-w-[880px] scroll-mt-6" aria-labelledby="models3d">
         {(results.isLoading || items.length > 0) && (
           <h3 id="models3d" className="mb-3 font-heading text-[22px]">
             Your 3D models
