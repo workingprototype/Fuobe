@@ -56,6 +56,7 @@ export type CanvasNodeType =
   | "clone-voice"
   | "translate"
   | "concat"
+  | "table"
   | "output"
   | "note";
 
@@ -100,6 +101,9 @@ export interface CanvasNodeData {
   clips?: Record<string, ClipSettings>;
   /** Video Concatenator: the clips' order (node ids); clips not listed follow in board order. */
   order?: string[];
+  /** Table: its column names, and its rows of cells (one per column). */
+  columns?: string[];
+  rows?: string[][];
 }
 
 export interface CanvasNode {
@@ -137,6 +141,8 @@ export interface NodeRun {
   at: number;
   /** A node made in several steps (Video Concatenator): the generation holding its result. Default: the first id. */
   out?: string;
+  /** A node run once per row of a table: each row's generation, in row order (what a row of the next node takes). */
+  rows?: string[];
 }
 
 /** The generation a node's result (and what it passes on) is in. */
@@ -223,6 +229,7 @@ export const NODE_SPECS: Record<CanvasNodeType, NodeSpec> = {
   "clone-voice": { type: "clone-voice", label: "Clone voice", group: "Inputs", icon: "UserRound", description: "A voice sample (or one of your saved voices) to speak with" },
   translate: { type: "translate", label: "Translate", group: "Utilities", icon: "Languages", ops: ["translate", "dub"], variants: ["text", "video"], description: "Translate a text, or dub a video into another language" },
   concat: { type: "concat", label: "Video concatenator", group: "Utilities", icon: "Film", ops: ["concat"], description: "Up to 50 clips in one film: trim and mute each, pick the frame" },
+  table: { type: "table", label: "Table", group: "Inputs", icon: "Table", description: "Rows of words: what it feeds runs once per row" },
   output: { type: "output", label: "Output", group: "Output", icon: "MonitorPlay", description: "Preview what's connected, side by side" },
   note: { type: "note", label: "Sticky note", group: "Output", icon: "StickyNote", description: "A note on the board (not run)" },
 };
@@ -264,6 +271,7 @@ export const PALETTE: PaletteItem[] = [
   { ...pick("clone-voice"), id: "clone-voice", keywords: "voice sample clone my voice speaker" },
   { ...pick("translate"), id: "translate", data: { mediaKind: "text" }, keywords: "language translate dub localize subtitles" },
   { ...pick("concat"), id: "concat", keywords: "concatenate join merge stitch edit trim mute film assemble" },
+  { ...pick("table"), id: "table", data: { columns: ["Subject"], rows: [[""], [""], [""]] }, keywords: "rows batch spreadsheet list variations csv grid" },
   { ...pick("output"), id: "output", keywords: "preview compare result" },
   { ...pick("note"), id: "note", keywords: "comment annotation" },
 ];
@@ -555,7 +563,7 @@ const toPortType = (k: MediaKind | undefined): PortType | null => (k === "image"
 
 /** The type of a node's output handle (null = no output handle). */
 export function outputType(_graph: CanvasGraph, n: CanvasNode): PortType | null {
-  if (n.type === "prompt") return "text";
+  if (n.type === "prompt" || n.type === "table") return "text";
   if (n.type === "clone-voice") return "voice";
   if (n.type === "element") return "element";
   if (MEDIA_INPUT_TYPE[n.type]) return MEDIA_INPUT_TYPE[n.type]!;
@@ -679,11 +687,19 @@ export function connectionError(graph: CanvasGraph, c: Connection): string | nul
   if (t.type === "output") {
     if (c.targetHandle && c.targetHandle !== PREVIEW_IN) return "Unknown input";
     if (!acceptsType("preview", type)) return "Elements go into a model's Elements input";
+    if (s.type === "table") return "A table goes into a node's Text input: that node runs once per row";
   } else {
     const port = inputPorts(t).find((p) => p.id === c.targetHandle);
     if (!port) return `${nodeLabel(t)} has no ${c.targetHandle ?? ""} input`;
     if (!acceptsType(port, type)) return type === "voice" ? `A voice goes into a Voice input (Text to speech, Change voice)` : `${PORT_TYPE_LABEL[type]} can't go into ${port.label}`;
     if (t.type === "concat" && graph.edges.filter((e) => e.target === t.id && e.source !== s.id).length >= CONCAT_LIMITS.clips) return `The video concatenator takes up to ${CONCAT_LIMITS.clips} clips`;
+    // Rows from a table: one table per node, and Join clips can't take a clip per row (the concatenator can).
+    if (graph.nodes.some((n) => n.type === "table")) {
+      const withEdge: CanvasGraph = { ...graph, edges: [...graph.edges, { id: "", source: s.id, target: t.id, sourceHandle: OUT, targetHandle: c.targetHandle ?? null }] };
+      const rows = rowsFeeding(withEdge, t);
+      if (rows && "error" in rows) return rows.error;
+      if (rows && t.type === "join") return "Join clips takes one clip per input — the Video concatenator joins a clip per row";
+    }
   }
   if (ancestors(graph, [s.id]).has(t.id)) return "That would make a loop";
   return null;
@@ -767,10 +783,12 @@ export interface NodeRequest {
   deps: string[];
   /** A node made in several steps (Video Concatenator): its jobs in order; the last one holds the result. */
   steps?: NodeStep[];
+  /** A node run once per row of a table: how many rows (its steps are the rows, and every one is a result). */
+  rows?: number;
 }
 
-/** What fills a step's chain slot: an upstream node's result, or an earlier step of the same node. */
-export type StepSource = { node: string } | { step: string };
+/** What fills a step's chain slot: an upstream node's result (one row of it, for a node run per row), or an earlier step of the same node. */
+export type StepSource = { node: string; row?: number } | { step: string };
 
 export interface NodeStep {
   key: string;
@@ -790,6 +808,11 @@ export interface NodeDescription extends Partial<NodeRequest> {
 
 function sourceOf(graph: CanvasGraph, s: CanvasNode): Source | { error: string } {
   if (s.type === "prompt") return { kind: "text", text: (s.data.text ?? "").trim() };
+  // A table is read row by row (rowRequest); read whole, it is its first row.
+  if (s.type === "table") {
+    const first = tableRows(s)[0];
+    return first ? { kind: "text", text: rowText(first) } : { error: `Fill in a row of “${nodeLabel(s)}”` };
+  }
   if (s.type === "clone-voice") {
     // A sample wired in wins over the node's own file (a recording, a generated voice).
     const e = graph.edges.find((x) => x.target === s.id && x.targetHandle === "audio");
@@ -866,7 +889,7 @@ function mentionedIn(text: string): Set<string> {
   return new Set([...text.matchAll(/@([\p{L}\p{N}_-]+)/gu)].map((m) => m[1].toLowerCase()));
 }
 
-function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
+function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef, single = false): NodeRequest | { error: string } {
   const nodes = nodeMap(graph);
   const ports = inputPorts(n);
   const ops = nodeOps(n, model);
@@ -874,6 +897,12 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
   if (n.type !== "model" && op && !supportsOp(model, op)) return { error: `${model.name} can't do ${OPERATION_LABELS[op].toLowerCase()} — pick another model` };
   if ((op === "translate" || op === "dub") && !n.data.params?.targetLanguage) return { error: op === "dub" ? "Pick a language to dub into" : "Pick a language to translate into" };
   if (n.type === "concat") return concatRequest(graph, n, model);
+  if (!single) {
+    const rows = rowsFeeding(graph, n);
+    if (rows && "error" in rows) return rows;
+    if (rows && n.type === "join") return { error: `Join clips takes one clip per input — use the Video concatenator to join every row of “${nodeLabel(rows.table)}”` };
+    if (rows) return rowRequest(graph, n, model, rows);
+  }
 
   const inputs: NonNullable<GenerationRequest["inputs"]> = {};
   const chain: ChainSlot[] = [];
@@ -971,6 +1000,76 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
 }
 
 // ---------------------------------------------------------------------------
+// Tables: the node a table feeds runs once per filled row (and so does every node after it, until a Video
+// concatenator joins the rows into one film). "{Column}" in that node's prompt takes the row's cell; otherwise the
+// row's cells, joined, are its connected text.
+
+export const TABLE_LIMITS = { rows: 50, columns: 8, cell: 2000, column: 40 } as const;
+
+/** A table's filled rows (a row with at least one cell written), each with one cell per column. */
+export function tableRows(t: Pick<CanvasNode, "data">): string[][] {
+  const width = Math.max(1, t.data.columns?.length ?? 1);
+  return (t.data.rows ?? []).filter((r) => r.some((c) => c?.trim())).map((r) => Array.from({ length: width }, (_, j) => (r[j] ?? "").trim()));
+}
+
+const rowText = (cells: string[]) => cells.filter(Boolean).join(", ");
+
+/**
+ * The table a node runs per row of: one wired into it, or one feeding a node it builds on (a Video concatenator
+ * collects the rows instead, so nothing after it runs per row). Null when no table is upstream.
+ */
+export function rowsFeeding(graph: CanvasGraph, n: CanvasNode, seen = new Set<string>()): { table: CanvasNode; rows: string[][] } | { error: string } | null {
+  if (n.type === "table") return { table: n, rows: tableRows(n) };
+  if (!isGenerator(n) || n.type === "concat" || seen.has(n.id)) return null;
+  seen.add(n.id);
+  const nodes = nodeMap(graph);
+  let found: { table: CanvasNode; rows: string[][] } | null = null;
+  for (const e of incoming(graph, n.id)) {
+    const s = nodes.get(e.source);
+    if (!s || (s.type !== "table" && !isGenerator(s))) continue;
+    const r = rowsFeeding(graph, s, seen);
+    if (!r) continue;
+    if ("error" in r) return r;
+    if (found && found.table.id !== r.table.id) return { error: `“${nodeLabel(found.table)}” and “${nodeLabel(r.table)}” both reach “${nodeLabel(n)}” — rows run from one table at a time` };
+    found = r;
+  }
+  return found;
+}
+
+/** One job per row: the table read as that row (its cells in "{Column}", or as connected text), upstream rows matched by number. */
+function rowRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef, b: { table: CanvasNode; rows: string[][] }): NodeRequest | { error: string } {
+  if (!b.rows.length) return { error: `Fill in a row of “${nodeLabel(b.table)}”` };
+  if (b.rows.length > TABLE_LIMITS.rows) return { error: `“${nodeLabel(b.table)}” has ${b.rows.length} rows — up to ${TABLE_LIMITS.rows} run at once` };
+  const nodes = nodeMap(graph);
+  const columns = (b.table.data.columns ?? []).map((c) => c.trim());
+  const own = n.data.prompt ?? "";
+  const direct = graph.edges.some((e) => e.source === b.table.id && e.target === n.id);
+  const named = direct && columns.some((c) => c && own.includes(`{${c}}`));
+  const perRow = (id: string) => {
+    const r = rowsFeeding(graph, nodes.get(id)!);
+    return !!r && !("error" in r);
+  };
+  const steps: NodeStep[] = [];
+  const deps: string[] = [];
+  for (const [i, cells] of b.rows.entries()) {
+    const prompt = named ? columns.reduce((p, c, j) => (c ? p.replaceAll(`{${c}}`, cells[j]) : p), own) : own;
+    const rowGraph: CanvasGraph = {
+      ...graph,
+      nodes: graph.nodes.map((x) => (x.id === b.table.id ? { ...x, type: "prompt" as const, data: { text: named ? "" : rowText(cells) } } : x.id === n.id ? { ...x, data: { ...x.data, prompt } } : x)),
+    };
+    const r = buildRequest(rowGraph, rowGraph.nodes.find((x) => x.id === n.id)!, model, true);
+    if ("error" in r) return { error: `Row ${i + 1}: ${r.error}` };
+    for (const d of r.deps) if (!deps.includes(d)) deps.push(d);
+    steps.push({
+      key: `row:${i}`,
+      request: { ...r.request, step: { label: `${nodeLabel(n)} · row ${i + 1}`, index: i, of: b.rows.length } },
+      from: r.deps.map((d) => (perRow(d) ? { node: d, row: i } : { node: d })),
+    });
+  }
+  return { request: steps[0].request, deps, steps, rows: steps.length };
+}
+
+// ---------------------------------------------------------------------------
 // Video Concatenator: one job per clip step, then the join
 
 /** A Video Concatenator's clips in their order: the order picked in the node, then the others top to bottom. */
@@ -1007,10 +1106,14 @@ function clipCut(c: ClipSettings, i: number): { start: number; end?: number } | 
  */
 function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
   const engine = model.engine;
-  const clips = concatClips(graph, n);
+  const nodes = nodeMap(graph);
+  // A node run once per row of a table gives a clip per row, in row order (each with that node's cut and sound).
+  const clips = concatClips(graph, n).flatMap((c): { nodeId: string; settings: ClipSettings; row?: number }[] => {
+    const rows = rowsFeeding(graph, nodes.get(c.nodeId)!);
+    return rows && !("error" in rows) ? rows.rows.map((_, row) => ({ ...c, row })) : [c];
+  });
   if (!clips.length) return { error: `Connect the clips to join (up to ${CONCAT_LIMITS.clips})` };
   if (clips.length > CONCAT_LIMITS.clips) return { error: `The video concatenator takes up to ${CONCAT_LIMITS.clips} clips — remove ${clips.length - CONCAT_LIMITS.clips}` };
-  const nodes = nodeMap(graph);
   const ratio = concatRatio(n.data.params?.aspectRatio);
   const size = CONCAT_SIZE[ratio];
   const title = nodeLabel(n);
@@ -1039,7 +1142,7 @@ function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): Node
     const cut = clipCut(c.settings, i);
     if ("error" in cut) return cut;
     const label = (what: string) => ({ label: `${title} · ${what} clip ${i + 1}`, index: i, of: clips.length });
-    let at: StepSource | { url: string } = src.kind === "media" ? { url: src.url } : { node: src.nodeId };
+    let at: StepSource | { url: string } = src.kind === "media" ? { url: src.url } : { node: src.nodeId, ...(c.row !== undefined && { row: c.row }) };
     const mute = !!c.settings.mute && c.settings.audio !== false;
     if (engine === "open") {
       at = add(`fit:${i}`, at, {
@@ -1285,7 +1388,10 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     const prev = runs[id];
-    const prevStatus = prev ? status(runOutput(prev)) : undefined;
+    // A node run per row is as fresh as its weakest row: a failed or trashed row makes it run again.
+    const rowStatus = prev?.rows?.map(status);
+    const weakest = rowStatus?.findIndex((x) => !LIVE.has(x)) ?? -1;
+    const prevStatus = rowStatus ? rowStatus[Math.max(0, weakest)] : prev ? status(runOutput(prev)) : undefined;
     if (n.data.pinned) {
       if (prev && LIVE.has(prevStatus)) {
         state.set(id, { kind: "reuse", id: runOutput(prev) });
@@ -1322,7 +1428,7 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     state.set(id, { kind: "run" });
-    steps.push({ nodeId: id, label, request: d.request, deps: d.deps, ...(d.steps && { steps: d.steps }), reason, costUsd: d.costUsd });
+    steps.push({ nodeId: id, label, request: d.request, deps: d.deps, ...(d.steps && { steps: d.steps }), ...(d.rows && { rows: d.rows }), reason, costUsd: d.costUsd });
     if (d.costUsd === null) costUnknown = true;
     else costUsd += d.costUsd;
   }
@@ -1668,6 +1774,26 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
         ["portrait", "avatar", "images"],
         ["voice", "avatar", "audio"],
         ["avatar", "out"],
+      ],
+    ),
+  },
+  {
+    id: "table-film",
+    name: "Table → shots → film",
+    description: "One row per shot: each row makes a still and animates it, then the concatenator joins every row into one film",
+    icon: "Table",
+    hue: 160,
+    build: tpl(
+      [
+        { id: "cast", type: "table", x: 0, y: 40, data: { label: "Shots", columns: ["Animal", "Place"], rows: [["red fox", "a snowy pine forest"], ["barn owl", "an old wooden barn at dusk"], ["sea otter", "a kelp forest at sunrise"]] } },
+        { id: "still", type: "model", x: COL + 140, y: 0, data: { mediaKind: "image", label: "Still", prompt: "A {Animal} in {Place}, wildlife photography, soft natural light", params: { aspectRatio: "16:9" } }, models: { cloud: "nano-banana-pro", open: "oss-z-image-turbo" } },
+        { id: "animate", type: "model", x: COL * 2 + 140, y: 0, data: { mediaKind: "video", label: "Animate", op: "i2v", prompt: "Slow push-in, the animal turns its head", params: { aspectRatio: "16:9", duration: 5 } }, models: { cloud: "kling-2-5-turbo", open: "oss-wan22-14b-fast" } },
+        { id: "film", type: "concat", x: COL * 3 + 140, y: 0, data: { label: "Film", params: { aspectRatio: "16:9" } }, models: { cloud: CONCAT_MODELS.cloud, open: CONCAT_MODELS.open } },
+      ],
+      [
+        ["cast", "still", "prompt"],
+        ["still", "animate", "images"],
+        ["animate", "film", "videos"],
       ],
     ),
   },

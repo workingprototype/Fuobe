@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Circle, Copy, Eraser, Group, Hand, MessageCircle, MousePointer2, MoreHorizontal, Pencil, Plus, Square, StickyNote, Trash2, Type, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Circle, Copy, Eraser, Group, Hand, MessageCircle, MousePointer2, MoreHorizontal, Pencil, Plus, Square, StickyNote, Table, Trash2, Type, type LucideIcon } from "lucide-react";
 import { memo, useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
@@ -11,8 +11,8 @@ import { useModKey } from "@/lib/keys";
 import { cn } from "@/lib/utils";
 import { BOARD_COLOR_VAR, Swatches } from "./board";
 
-/** What a drag or click on the board does (Higgsfield's toolbar: V, H, D, E, N, R, T, C). */
-export type Tool = "select" | "hand" | "draw" | "erase" | "note" | "shape" | "text" | "comment";
+/** What a drag or click on the board does (Higgsfield's toolbar: V, H, D, E, N, ⇧T, R, T, C). */
+export type Tool = "select" | "hand" | "draw" | "erase" | "note" | "table" | "shape" | "text" | "comment";
 export type DragShape = "rect" | "ellipse" | "arrow";
 
 export const TOOL_KEYS: Record<string, Tool> = { v: "select", h: "hand", d: "draw", e: "erase", n: "note", r: "shape", t: "text", c: "comment" };
@@ -23,6 +23,7 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: LucideIcon; hint: s
   { tool: "draw", label: "Draw", key: "D", icon: Pencil, hint: "Draw freehand on the board" },
   { tool: "erase", label: "Eraser", key: "E", icon: Eraser, hint: "Drag over drawings and shapes to erase them" },
   { tool: "note", label: "Sticky note", key: "N", icon: StickyNote, hint: "Click to place a note" },
+  { tool: "table", label: "Table", key: "⇧T", icon: Table, hint: "Click to place a table: what it feeds runs once per row" },
   { tool: "shape", label: "Shapes", key: "R", icon: Square, hint: "Drag to draw a shape" },
   { tool: "text", label: "Text", key: "T", icon: Type, hint: "Click to write on the board" },
   { tool: "comment", label: "Comment", key: "C", icon: MessageCircle, hint: "Click to pin a comment" },
@@ -61,7 +62,7 @@ export const BoardToolbar = memo(function BoardToolbar({
         const active = tool === t.tool;
         return (
           <div key={t.tool} className="flex items-center">
-            {(i === 2 || i === 4 || i === 7) && <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />}
+            {(i === 2 || i === 4 || i === 8) && <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button

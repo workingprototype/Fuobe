@@ -19,6 +19,7 @@ import {
   Package,
   Sparkles,
   StickyNote,
+  Table,
   Type,
   UserRound,
   ZoomIn,
@@ -29,6 +30,7 @@ import {
   describeNode,
   effectiveOp,
   isGenerator,
+  rowsFeeding,
   type CanvasGraph,
   type CanvasNode,
   type CanvasNodeData,
@@ -64,6 +66,7 @@ export const ICONS: Record<string, LucideIcon> = {
   AudioWaveform,
   UserRound,
   Languages,
+  Table,
 };
 
 /** A node type's or template's icon, by lucide name. */
@@ -135,8 +138,10 @@ export interface NodeView {
   counts: Readonly<Record<string, number>>;
   /** What to fix before it can run (pick a model, add an image…). */
   error?: string;
-  /** One run's estimate (null = unknown). */
+  /** One run's estimate (null = unknown); every row's, for a node run per row of a table. */
   costUsd: number | null;
+  /** Runs once per row of a table: how many rows. */
+  rows?: number;
   /** Why Run all would run it; null when its result is reused (or it can't run). */
   step: RunReason | null;
   reused: boolean;
@@ -175,7 +180,7 @@ const sameCounts = (a: Readonly<Record<string, number>>, b: Readonly<Record<stri
 };
 
 const sameView = (a: NodeView, b: NodeView) =>
-  a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
+  a.op === b.op && a.error === b.error && a.costUsd === b.costUsd && a.rows === b.rows && a.step === b.step && a.reused === b.reused && a.runError === b.runError && a.results === b.results && sameCounts(a.counts, b.counts);
 
 /** What the planner knows about one generator node: its description and the op it runs. */
 export interface NodeInfo {
@@ -205,9 +210,15 @@ export class DescribeCache {
     }
     const next = new Map<string, { key: unknown[]; info: NodeInfo }>();
     const out = new Map<string, NodeInfo>();
+    const tables = graph.nodes.some((n) => n.type === "table");
     for (const n of graph.nodes) {
       if (!isGenerator(n)) continue;
       const key: unknown[] = [n.type, n.data];
+      // Rows reach a node from a table any number of steps up: the table it runs per row of is an input too.
+      if (tables) {
+        const rows = rowsFeeding(graph, n);
+        key.push(rows && "table" in rows ? rows.table.data : rows?.error);
+      }
       for (const e of into.get(n.id) ?? []) {
         const s = byId.get(e.source);
         key.push(e.source, e.targetHandle, s?.type, s?.data, s?.position.x, s?.position.y);
@@ -255,6 +266,7 @@ export function buildViews(
       counts: counts.get(n.id) ?? EMPTY_VIEW.counts,
       error: d?.error,
       costUsd: d?.costUsd ?? null,
+      ...(d?.rows && { rows: d.rows }),
       step: steps.get(n.id) ?? null,
       reused: reused.has(n.id),
       runError: runErrors[n.id],

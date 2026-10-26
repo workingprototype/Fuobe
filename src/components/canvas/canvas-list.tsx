@@ -27,6 +27,7 @@ const BOX = { w: 280, h: 150 };
 
 const BOX_COLOR: Partial<Record<CanvasNodeType, string>> = {
   prompt: "var(--chart-2)",
+  table: "var(--chart-2)",
   "image-input": "var(--chart-5)",
   "video-input": "var(--chart-4)",
   "audio-input": "var(--chart-3)",

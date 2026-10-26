@@ -18,6 +18,7 @@ import {
 import {
   CANVAS_TEXT_MAX as TEXT_MAX,
   CONCAT_LIMITS,
+  TABLE_LIMITS,
   cleanGraph,
   concatClips,
   EMPTY_GRAPH,
@@ -93,6 +94,7 @@ const NODE_TYPES = [
   "clone-voice",
   "translate",
   "concat",
+  "table",
   "output",
   "note",
 ] as const satisfies readonly CanvasNodeType[];
@@ -154,6 +156,9 @@ const NodeData = z.object({
     )
     .optional(),
   order: z.array(z.string().max(80)).max(CONCAT_LIMITS.clips * 2).optional(),
+  // Table: column names and rows of cells (a few empty rows past the limit are fine; only filled rows run).
+  columns: z.array(z.string().max(TABLE_LIMITS.column)).min(1).max(TABLE_LIMITS.columns).optional(),
+  rows: z.array(z.array(z.string().max(TABLE_LIMITS.cell)).max(TABLE_LIMITS.columns)).max(TABLE_LIMITS.rows * 2).optional(),
 });
 
 const Num = z.number().finite();
@@ -502,6 +507,8 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
   const nodes = nodeMap(graph);
   const batchId = nanoid(10);
   const made = new Map<string, string>(plan.reused.map((r) => [r.nodeId, r.generationId]));
+  // Nodes run per row of a table: each row's generation (a row of the next node waits for the same row).
+  const madeRows = new Map<string, string[]>(plan.reused.flatMap((r) => (canvas.runs[r.nodeId]?.rows ? [[r.nodeId, canvas.runs[r.nodeId].rows!] as [string, string[]]] : [])));
   const errors = [...plan.errors];
   const items: Generation[] = [];
   const ran: string[] = [];
@@ -520,18 +527,34 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
         const big = oversizedClip(graph, step.nodeId);
         if (big) throw new Error(big);
         // A node made in several steps: one pipeline, waiting on the upstream nodes' results like on its own steps.
-        const existing = Object.fromEntries(step.deps.map((d, k) => [`node:${d}`, depIds[k] as string]));
+        const existing: Record<string, string> = Object.fromEntries(step.deps.map((d, k) => [`node:${d}`, depIds[k] as string]));
+        const at = (f: NonNullable<typeof step.steps>[number]["from"][number]) => {
+          if (!("node" in f)) return f.step;
+          if (f.row === undefined) return `node:${f.node}`;
+          const id = madeRows.get(f.node)?.[f.row];
+          if (!id) throw new Error(`Row ${f.row + 1} of “${nodeLabel(nodes.get(f.node)!)}” has no result yet — run it again`);
+          existing[`node:${f.node}#${f.row}`] = id;
+          return `node:${f.node}#${f.row}`;
+        };
         const pipe = createPipeline(
           step.steps.map((st) => ({
             key: st.key,
             request: { ...st.request, step: { label: st.request.step?.label ?? step.label, index: i, of: n } },
-            after: st.from.map((f) => ("node" in f ? `node:${f.node}` : f.step)),
+            after: st.from.map(at),
           })),
           { batchId, existing },
         );
-        const out = pipe.byKey[step.steps[step.steps.length - 1].key];
-        made.set(step.nodeId, out.id);
-        runs[step.nodeId] = { sig, ids: pipe.items.map((g) => g.id), out: out.id, at: Date.now() };
+        if (step.rows) {
+          // Every row is a result; the next node takes the first one, or its own row.
+          const rows = step.steps.map((st) => pipe.byKey[st.key].id);
+          made.set(step.nodeId, rows[0]);
+          madeRows.set(step.nodeId, rows);
+          runs[step.nodeId] = { sig, ids: pipe.items.map((g) => g.id), rows, at: Date.now() };
+        } else {
+          const out = pipe.byKey[step.steps[step.steps.length - 1].key];
+          made.set(step.nodeId, out.id);
+          runs[step.nodeId] = { sig, ids: pipe.items.map((g) => g.id), out: out.id, at: Date.now() };
+        }
         items.push(...pipe.items);
       } else {
         const created = createGenerations(

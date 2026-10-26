@@ -158,7 +158,7 @@ const typing = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.
 const PAN_MIDDLE = [1];
 
 /** Board tools that turn a drag or click on the board into a drawing, a note or a comment. */
-const GESTURE_TOOLS = new Set<Tool>(["draw", "erase", "note", "shape", "text", "comment"]);
+const GESTURE_TOOLS = new Set<Tool>(["draw", "erase", "note", "table", "shape", "text", "comment"]);
 
 /** Edges whose handles still exist after a model / op change. */
 function pruneEdges(nodes: FlowNode[], edges: Edge[]): Edge[] {
@@ -870,8 +870,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
         placeShape(dragShape(newId("shape"), shapeKind, start, b, ink));
       } else if (tool === "text") {
         placeShape({ id: newId("shape"), kind: "text", x: Math.round(start.x), y: Math.round(start.y - 16), width: 260, height: 40, color: ink, text: "" }, true);
-      } else if (tool === "note") {
-        addNode(palette.find((p) => p.id === "note")!, start);
+      } else if (tool === "note" || tool === "table") {
+        addNode(palette.find((p) => p.id === tool)!, start);
       } else if (tool === "comment") {
         const c = commentNode(start);
         focusOnMount.add(c.id);
@@ -959,14 +959,15 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   );
 
   // ---- keyboard: ⌘↵ runs (the selection, else everything), ⌘D duplicates, ⌘G groups (⇧⌘G ungroups),
-  // and the board tools by letter: V H D E N R T C (Escape goes back to Select)
+  // and the board tools by letter: V H D E N ⇧T R T C (Escape goes back to Select)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) {
         if (e.altKey || isMobile || typing(e.target)) return;
         if (e.key === "Escape") return void setTool("select");
-        const t = TOOL_KEYS[e.key.toLowerCase()];
+        // ⇧T is the table (T alone writes text).
+        const t = e.shiftKey && e.key.toLowerCase() === "t" ? "table" : TOOL_KEYS[e.key.toLowerCase()];
         if (!t || e.repeat) return;
         e.preventDefault();
         // R again cycles rectangle → ellipse → arrow.

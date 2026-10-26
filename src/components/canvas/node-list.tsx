@@ -4,7 +4,7 @@ import { AlertCircle, PinOff, Play, RotateCcw, Sparkles, Square, Upload } from "
 import Link from "next/link";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, nodeModel, promptPlaceholder, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
+import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, nodeModel, promptPlaceholder, tableRows, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
 import type { MediaKind } from "@/lib/catalog/types";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { cn } from "@/lib/utils";
@@ -106,6 +106,14 @@ function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
               }}
             />
           </>
+        )}
+        {node.type === "table" && (
+          <p className="text-[13px] text-muted-foreground">
+            {(() => {
+              const rows = tableRows(node);
+              return rows.length ? `${rows.length === 1 ? "1 row" : `${rows.length} rows`}: ${rows.map((r) => r.filter(Boolean).join(", ")).join(" · ")}` : "No rows yet: fill the table on the board.";
+            })()}
+          </p>
         )}
         {node.type === "element" && (
           <div className="flex items-center gap-2">

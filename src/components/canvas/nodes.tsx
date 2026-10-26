@@ -30,6 +30,7 @@ import {
   Upload,
   Volume2,
   VolumeX,
+  Table,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -90,6 +91,8 @@ import {
   nodeOps,
   OPEN_DUB_HINT,
   OUT,
+  TABLE_LIMITS,
+  tableRows,
   outputType,
   PORT_TYPE_LABEL,
   PREVIEW_IN,
@@ -859,6 +862,11 @@ const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, se
           />
         )}
         {model && !g.readOnly && type !== "concat" && <ModelOptions id={id} model={model} data={data} />}
+        {v.rows && (
+          <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Table className="size-3.5 shrink-0" /> Runs once per table row: {v.rows === 1 ? "1 run" : `${v.rows} runs`}
+          </p>
+        )}
         <Results id={id} r={r} />
         {error && r.state !== "failed" && (
           <p className={cn("flex items-start gap-1.5 text-[12px] leading-snug", v.runError ? "text-destructive" : "text-warning")}>
@@ -930,9 +938,11 @@ interface ClipRow {
   label: string;
   /** The clip's file when it's known now: an uploaded clip, or a finished result upstream. */
   url?: string;
+  /** A node run once per table row gives a clip per row (each with this cut and sound). */
+  rows?: number;
 }
 
-const sameRows = (a: ClipRow[], b: ClipRow[]) => a.length === b.length && a.every((x, i) => x.nodeId === b[i].nodeId && x.label === b[i].label && x.url === b[i].url);
+const sameRows = (a: ClipRow[], b: ClipRow[]) => a.length === b.length && a.every((x, i) => x.nodeId === b[i].nodeId && x.label === b[i].label && x.url === b[i].url && x.rows === b[i].rows);
 
 const selectClipRows = (s: EditorSnapshot, id: string): ClipRow[] => {
   const n = s.byId.get(id);
@@ -940,7 +950,8 @@ const selectClipRows = (s: EditorSnapshot, id: string): ClipRow[] => {
   return concatClips(s.graph, n).map(({ nodeId }) => {
     const src = s.byId.get(nodeId);
     const url = src?.type === "video-input" ? src.data.url : s.views.get(nodeId)?.results.outputs.find((x) => x.o.kind === "video")?.o.url;
-    return { nodeId, label: src ? nodeLabel(src) : "Clip", ...(url && { url }) };
+    const rows = s.views.get(nodeId)?.rows;
+    return { nodeId, label: src ? nodeLabel(src) : "Clip", ...(url && !rows && { url }), ...(rows && { rows }) };
   });
 };
 
@@ -1016,6 +1027,7 @@ function ClipItem({ id, row, index, count, settings, readOnly, onMove }: { id: s
       <div className="flex items-center gap-1.5">
         <span className="grid size-5 shrink-0 place-items-center rounded-full bg-background font-mono text-[10px]">{index + 1}</span>
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{row.label}</span>
+        {row.rows && <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title="A clip per table row, in row order">× {row.rows} rows</span>}
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{seconds(settings.length)}</span>
         {!readOnly && (
           <>
@@ -1574,6 +1586,112 @@ const NoteNode = memo(function NoteNode({ id, type, data, selected }: NodeProps<
   );
 }, sameNodeProps);
 
+// ---------------------------------------------------------------------------
+// Table: rows of words, each row one run of the node it feeds
+
+const TableNode = memo(function TableNode({ id, data, selected }: NodeProps<FlowNode>) {
+  const actions = useEditorActions();
+  const { readOnly } = useEditorGlobals();
+  const columns = data.columns?.length ? data.columns : ["Subject"];
+  const rows = data.rows?.length ? data.rows : [[""]];
+  const filled = tableRows({ data: { columns, rows } }).length;
+  const grid = useRef<HTMLTableSectionElement>(null);
+  const setRows = (next: string[][]) => actions.update(id, { columns, rows: next });
+  const setCell = (i: number, j: number, v: string) => setRows(rows.map((r, k) => (k === i ? Array.from({ length: columns.length }, (_, c) => (c === j ? v : (r[c] ?? ""))) : r)));
+  const addRow = (focus = false) => {
+    if (rows.length >= TABLE_LIMITS.rows * 2) return;
+    setRows([...rows, columns.map(() => "")]);
+    if (focus) requestAnimationFrame(() => grid.current?.querySelector<HTMLInputElement>(`tr:last-child input`)?.focus());
+  };
+  const addColumn = () => {
+    if (columns.length >= TABLE_LIMITS.columns) return;
+    actions.update(id, { columns: [...columns, `Column ${columns.length + 1}`], rows: rows.map((r) => [...r, ""]) });
+  };
+  const removeColumn = (j: number) => actions.update(id, { columns: columns.filter((_, c) => c !== j), rows: rows.map((r) => r.filter((_, c) => c !== j)) });
+  const cell = cn("h-7 w-full min-w-0 rounded-md bg-muted px-2 text-[12px] outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint", NO_DRAG);
+  return (
+    <NodeShell id={id} type="table" data={data} selected={!!selected} out="text" width={Math.min(560, 120 + columns.length * 150)}>
+      <div className="space-y-2 p-3">
+        <table className="w-full border-separate border-spacing-1 text-left">
+          <thead>
+            <tr>
+              <th className="w-5" aria-hidden />
+              {columns.map((c, j) => (
+                <th key={j} scope="col" className="font-normal">
+                  <div className="flex items-center gap-0.5">
+                    <input
+                      value={c}
+                      readOnly={readOnly}
+                      maxLength={TABLE_LIMITS.column}
+                      onChange={(e) => actions.update(id, { columns: columns.map((x, k) => (k === j ? e.target.value : x)), rows })}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      aria-label={`Column ${j + 1} name`}
+                      className={cn(cell, "bg-transparent font-mono text-[11px] font-semibold text-muted-foreground")}
+                    />
+                    {!readOnly && columns.length > 1 && (
+                      <button onClick={() => removeColumn(j)} className={cn("grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label={`Remove column ${c || j + 1}`}>
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </div>
+                </th>
+              ))}
+              <th className="w-5" aria-hidden />
+            </tr>
+          </thead>
+          <tbody ref={grid}>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="text-center font-mono text-[10px] text-muted-foreground">{i + 1}</td>
+                {columns.map((c, j) => (
+                  <td key={j}>
+                    <input
+                      value={r[j] ?? ""}
+                      readOnly={readOnly}
+                      maxLength={TABLE_LIMITS.cell}
+                      onChange={(e) => setCell(i, j, e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter on the last row starts a new one.
+                        if (e.key === "Enter" && i === rows.length - 1 && !readOnly) addRow(true);
+                        e.stopPropagation();
+                      }}
+                      placeholder={i === 0 ? (c ? `${c}…` : "…") : undefined}
+                      aria-label={`Row ${i + 1}, ${c || `column ${j + 1}`}`}
+                      className={cell}
+                    />
+                  </td>
+                ))}
+                <td>
+                  {!readOnly && rows.length > 1 && (
+                    <button onClick={() => setRows(rows.filter((_, k) => k !== i))} className={cn("grid size-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground", NO_DRAG)} aria-label={`Remove row ${i + 1}`}>
+                      <X className="size-3" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!readOnly && (
+          <div className="flex flex-wrap gap-1">
+            <button className={chip} onClick={() => addRow(true)} disabled={rows.length >= TABLE_LIMITS.rows * 2}>
+              <Plus className="size-3" /> Row
+            </button>
+            <button className={chip} onClick={addColumn} disabled={columns.length >= TABLE_LIMITS.columns}>
+              <Plus className="size-3" /> Column
+            </button>
+          </div>
+        )}
+        <p className={cn("text-[11px] leading-snug", filled > TABLE_LIMITS.rows ? "text-warning" : "text-muted-foreground")}>
+          {filled > TABLE_LIMITS.rows
+            ? `${filled} rows: up to ${TABLE_LIMITS.rows} run at once`
+            : `${filled === 1 ? "1 filled row" : `${filled} filled rows`}: what this feeds runs once per row. Write {${columns.find((c) => c.trim())?.trim() || "Subject"}} in its prompt to place a cell.`}
+        </p>
+      </div>
+    </NodeShell>
+  );
+}, sameNodeProps);
+
 export const NODE_TYPES = {
   prompt: PromptNode,
   "image-input": MediaInputNode,
@@ -1590,6 +1708,7 @@ export const NODE_TYPES = {
   "clone-voice": CloneVoiceNode,
   translate: GeneratorNode,
   concat: GeneratorNode,
+  table: TableNode,
   output: OutputNode,
   note: NoteNode,
   ...BOARD_NODE_TYPES,

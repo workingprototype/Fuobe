@@ -335,6 +335,94 @@ describe("board annotations", () => {
   });
 });
 
+describe("tables", () => {
+  const table = (rows: string[][], columns = ["Animal", "Place"]) => node("t", "table", { label: "Cast", columns, rows });
+  const board = (rows: string[][], prompt = "A {Animal} in {Place}, golden hour"): CanvasGraph => ({
+    nodes: [
+      table(rows),
+      node("img", "model", { modelId: "nano-banana-pro", mediaKind: "image", prompt }, 400, 0),
+      node("vid", "model", { modelId: "kling-2-5-turbo", mediaKind: "video", op: "i2v", prompt: "slow push-in" }, 800, 0),
+      node("film", "concat", { modelId: "join-clips" }, 1200, 0),
+      node("solo", "model", { modelId: "nano-banana-pro", mediaKind: "image", prompt: "A lighthouse" }, 400, 600),
+    ],
+    edges: [edge("t", "img", "prompt"), edge("img", "vid", "images"), edge("vid", "film", "videos")],
+  });
+
+  it("a table is text that goes into Text inputs, one table per node, and Join clips can't take its rows", () => {
+    const g = board([["fox", "snow"]]);
+    expect(outputType(g, g.nodes[0])).toBe("text");
+    expect(connectionError(g, { source: "t", target: "solo", targetHandle: "prompt" })).toBeNull();
+    expect(connectionError(g, { source: "t", target: "vid", targetHandle: "images" })).toMatch(/Text can't go into/);
+    g.nodes.push(node("out", "output", {}, 1600, 0), node("t2", "table", { label: "Other", columns: ["X"], rows: [["a"]] }, 0, 300), node("join", "join", { modelId: "join-clips" }, 1200, 400));
+    expect(connectionError(g, { source: "t", target: "out", targetHandle: "in" })).toMatch(/Text input/);
+    expect(connectionError(g, { source: "t2", target: "vid", targetHandle: "prompt" })).toMatch(/“Other” and “Cast” both reach “vid”|“Cast” and “Other” both reach/);
+    expect(connectionError(g, { source: "vid", target: "join", targetHandle: "videos" })).toMatch(/Video concatenator joins a clip per row/);
+    expect(paletteItems("open").find((p) => p.id === "table")!.disabled).toBeUndefined();
+  });
+
+  it("the node it feeds runs once per filled row, cells in {Column}; rows carry down the chain into the concatenator", () => {
+    const g = board([["fox", "snow"], ["", ""], ["owl", "a barn"]]);
+    const img = describeNode(g, g.nodes[1]);
+    expect(img.error).toBeUndefined();
+    expect(img.rows).toBe(2);
+    expect(img.steps!.map((s) => [s.key, s.request.prompt, s.from])).toEqual([
+      ["row:0", "A fox in snow, golden hour", []],
+      ["row:1", "A owl in a barn, golden hour", []],
+    ]);
+    const one = describeNode({ ...g, nodes: [table([["fox", "snow"]]), ...g.nodes.slice(1)] }, g.nodes[1]);
+    expect(img.costUsd).toBeCloseTo(one.costUsd! * 2, 6);
+    // Without a {Column} the row's cells are the connected text.
+    const plain = board([["fox", "snow"]], "Studio photo");
+    expect(describeNode(plain, plain.nodes[1]).steps![0].request.prompt).toBe("Studio photo\n\nfox, snow");
+    // The video after it runs per row too, each row on the image of the same row.
+    const vid = describeNode(g, g.nodes[2]);
+    expect(vid.rows).toBe(2);
+    expect(vid.steps!.map((s) => s.from)).toEqual([[{ node: "img", row: 0 }], [{ node: "img", row: 1 }]]);
+    // The concatenator joins a clip per row (and doesn't run per row itself).
+    const film = describeNode(g, g.nodes[3]);
+    expect(film.rows).toBeUndefined();
+    expect(film.steps!.find((s) => s.key === "join")!.from).toHaveLength(2);
+    expect(film.steps!.filter((s) => s.key.startsWith("fit:")).map((s) => s.from)).toEqual([[{ node: "vid", row: 0 }], [{ node: "vid", row: 1 }]]);
+    // An empty table, and too many rows, say so.
+    const empty = board([["", ""]]);
+    expect(describeNode(empty, empty.nodes[1]).error).toBe("Fill in a row of “Cast”");
+    const big = board(Array.from({ length: 51 }, (_, i) => [`fox ${i}`, "snow"]));
+    expect(describeNode(big, big.nodes[1]).error).toMatch(/51 rows — up to 50/);
+    // Planned as rows; a run's freshness is its weakest row.
+    const plan = planCanvas(g, { targets: ["vid"] });
+    expect(plan.steps.map((s) => [s.nodeId, s.rows])).toEqual([
+      ["img", 2],
+      ["vid", 2],
+    ]);
+    const runs = { img: { sig: "x", ids: ["a", "b"], rows: ["a", "b"], at: 1 } };
+    const fresh = planCanvas(g, { targets: ["img"], runs: { img: { ...runs.img, sig: nodeSignature(img.request!, [], img.steps) } }, status: (id) => (id === "b" ? "failed" : "succeeded") });
+    expect(fresh.steps.map((s) => [s.nodeId, s.reason])).toEqual([["img", "failed"]]);
+  });
+
+  it("runs every row, and the next node's rows wait for the same rows", async () => {
+    const g = board([["fox", "snow"], ["owl", "a barn"]]);
+    let res = await list.POST(req("POST", { name: "Table run", graph: { ...g, nodes: g.nodes.filter((n) => n.id !== "film" && n.id !== "solo") } }));
+    const c = (await res.json()) as Canvas;
+    expect(c.pages[0].graph.nodes.find((n) => n.id === "t")!.data.rows).toEqual([["fox", "snow"], ["owl", "a barn"]]);
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ran: string[]; items: Generation[]; canvas: Canvas };
+    expect(body.ran).toEqual(["img", "vid"]);
+    const img = body.canvas.runs.img;
+    const vid = body.canvas.runs.vid;
+    expect(img.rows).toHaveLength(2);
+    expect(vid.rows).toHaveLength(2);
+    expect(img.out).toBeUndefined();
+    expect(body.items.filter((x) => img.rows!.includes(x.id)).map((x) => x.prompt)).toEqual(["A fox in snow, golden hour", "A owl in a barn, golden hour"]);
+    const deps = (id: string) => (db().prepare("SELECT depends_on FROM generations WHERE id = ?").get(id) as { depends_on: string | null }).depends_on;
+    expect(vid.rows!.map(deps)).toEqual(img.rows);
+    for (const id of vid.rows!) expect((await settle(id)).status).toBe("succeeded");
+    // Fresh now: nothing runs again.
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    expect(((await res.json()) as { ran: string[] }).ran).toEqual([]);
+  }, 60_000);
+});
+
 describe("pages", () => {
   it("an older row's board reads as page 1; a page copy gets new ids everywhere", () => {
     const legacy = { nodes: [node("p", "prompt", { text: "x" })], edges: [], viewport: { x: 1, y: 2, zoom: 1 } };
