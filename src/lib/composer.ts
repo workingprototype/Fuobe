@@ -678,6 +678,24 @@ const sameAttachment = (a: Attachment | null | undefined, b: Attachment | null |
  * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
  * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
  */
+/**
+ * The model a camera motion or effect runs on by default on an engine (Fuobe DoP, or the route its move names: a
+ * camera LoRA in the cloud runs on Fuobe DoP · LTX). Undefined for apps (their model is pinned) and without a preset.
+ */
+export function presetModel(preset: Pick<Preset, "type" | "open" | "cloud"> | undefined, engine: Engine): string | undefined {
+  if (!preset || (preset.type !== "motion" && preset.type !== "effect")) return undefined;
+  return (engine === "open" ? preset.open : preset.cloud)?.modelId;
+}
+
+/**
+ * What a step before the clip adds to its price (Fuobe DoP relights a start frame first), when the run is on the
+ * preset's own model: a partner model runs the effect's words alone.
+ */
+export function prestepCost(preset: Pick<Preset, "type" | "open" | "cloud" | "prestep"> | undefined, modelId: string | undefined, engine: Engine): number {
+  if (!preset?.prestep || !modelId || presetModel(preset, engine) !== modelId) return 0;
+  return preset.prestep[engine].usd ?? 0;
+}
+
 export function followEngineDefault<D extends DraftShape>(base: D, current: D, defaults: Partial<Record<Engine, string>>, engine: Engine): D {
   const own = Object.values(defaults).filter(Boolean);
   if (current.modelId === base.modelId || !own.includes(base.modelId) || current.modelId !== defaults[engine]) return base;

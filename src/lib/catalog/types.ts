@@ -1012,8 +1012,17 @@ export interface Preset {
 
 /** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
 export interface PresetPrestep {
-  open: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] };
-  cloud: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] };
+  open: PrestepRoute;
+  cloud: PrestepRoute;
+}
+
+export interface PrestepRoute {
+  modelId: string;
+  op: Operation;
+  prompt: string;
+  loras?: LoraRef[];
+  /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
+  usd?: number;
 }
 
 /** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */

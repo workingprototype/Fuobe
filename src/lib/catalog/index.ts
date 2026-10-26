@@ -4,6 +4,7 @@ import { MODELS } from "./models";
 import { LLM_MODELS } from "./llm-models";
 import { dopPreset, presetLoras } from "./dop";
 import { runsOn } from "./engines";
+import { estimateCost } from "./plan";
 import type { Engine, MediaKind, ModelDef, Operation, Preset } from "./types";
 
 MODELS.push(...LLM_MODELS.filter((m) => !MODELS.some((x) => x.id === m.id))); // text steps (translate, write) on the configured LLM; once per hot reload
@@ -24,6 +25,16 @@ function withOssLoras(p: Preset): Preset {
     open: { ...p.open, loras, promptTemplate: trigger ? `${trigger}. ${p.open.promptTemplate ?? p.promptTemplate}` : p.open.promptTemplate },
     parity: `Open version adds ${loras.map((l) => l.file).join(" + ")}`,
   };
+}
+
+/** A relight effect's step before the clip, priced on its model (a 1-megapixel picture; free on the user's GPU). */
+function withPrestepPrice(p: Preset): Preset {
+  if (!p.prestep) return p;
+  const price = (s: NonNullable<Preset["prestep"]>["open"]) => {
+    const m = modelIndex.get(s.modelId);
+    return m ? (estimateCost(m, { aspectRatio: "1:1", resolution: "1K", numOutputs: 1 }, 1, s.op, !!s.loras?.length) ?? undefined) : undefined;
+  };
+  return { ...p, prestep: { open: { ...p.prestep.open, usd: 0 }, cloud: { ...p.prestep.cloud, usd: price(p.prestep.cloud) } } };
 }
 
 /** Open-source routes that need a dedicated workflow rather than an edit prompt. */
@@ -49,7 +60,7 @@ export const APPS: Preset[] = RAW_APPS.map((a) =>
   APP_OPEN_OVERRIDES[a.id] ? { ...a, open: APP_OPEN_OVERRIDES[a.id], parity: a.parity ?? APP_OPEN_PARITY[a.id] } : a,
 ).map(withOssLoras);
 export const MOTIONS: Preset[] = RAW_MOTIONS.map(dopPreset);
-export const EFFECTS: Preset[] = RAW_EFFECTS.map(dopPreset);
+export const EFFECTS: Preset[] = RAW_EFFECTS.map(dopPreset).map(withPrestepPrice);
 export const PRESETS: Preset[] = [...APPS, ...MOTIONS, ...EFFECTS];
 const presetIndex = new Map(PRESETS.map((p) => [p.id, p]));
 

@@ -10,31 +10,35 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
 import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { isDop } from "@/lib/catalog/dop";
 import { finishSteps } from "@/lib/soul-post";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
   type ChainSlot,
+  type Engine,
   type Generation,
   type GenerationRequest,
   type MediaKind,
   type GenInput,
   type LoraRef,
+  type ModelDef,
   type ModelRoute,
   type Operation,
   type OutputFile,
+  type Preset,
   type ProviderId,
 } from "@/lib/catalog/types";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
+import { createExtendChain, createKeyframeFilm, createRelitClip, createShotFilm } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
@@ -424,6 +428,26 @@ setResolver((ids) =>
 // ---------------------------------------------------------------------------
 // Create
 
+/**
+ * The engine a model runs a request on: a Fuobe Original runs on the engine asked for (the composer's switch), else
+ * the engine mode, else the first one connected; any other model on its own.
+ */
+export function engineFor(m: ModelDef, asked: Engine | undefined): Engine {
+  return dualEngine(m) ? pickEngine(m, asked, engineMode(), (e) => onEngine(m, e).routes.some(routeReady)) : m.engine;
+}
+
+/**
+ * Fuobe DoP's relight effects (Silhouette, Window…) on their own model: the step that relights the start frame on the
+ * engine the clip runs on. None for any other request (the effect on a partner model runs on its words).
+ */
+export function relightStep(req: GenerationRequest, model: ModelDef): { engine: Engine; step: NonNullable<Preset["prestep"]>["open"] } | undefined {
+  const preset = req.presetId ? getPreset(req.presetId) : undefined;
+  if (!preset?.prestep || !req.inputs?.images?.length) return undefined;
+  const engine = engineFor(model, req.engine);
+  if (presetRoute(preset, engine)?.modelId !== model.id) return undefined;
+  return { engine, step: preset.prestep[engine] };
+}
+
 /** Resolve mentions and drawings, plan, enforce the engine mode and pick a provider route. */
 function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
@@ -431,8 +455,7 @@ function prepare(original: GenerationRequest) {
   const worded = withSignatureWords(original);
   const mode = engineMode();
   const found = getModel(worded.modelId);
-  // A Fuobe Original runs on the engine asked for (the composer's switch), else the engine mode, else the first one connected.
-  const model = found && dualEngine(found) ? onEngine(found, pickEngine(found, worded.engine, mode, (e) => onEngine(found, e).routes.some(routeReady))) : found;
+  const model = found && dualEngine(found) ? onEngine(found, engineFor(found, worded.engine)) : found;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   let plan = planGeneration(req, lookup, getPreset);
@@ -534,8 +557,10 @@ export interface CreateOptions {
 const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (JSON.parse(v) as string[]) : [v]);
 
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
-  // Open models make multi-shot films shot by shot, then join the clips.
-  const shotModel = getModel(original.modelId);
+  // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
+  // on (Fuobe DoP's Frames mode is a GPU chain).
+  const found = getModel(original.modelId);
+  const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
   }
@@ -545,6 +570,9 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
   if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Fuobe DoP's relight effects: the start frame is relit first, then animated.
+  const relight = !opts.dependsOn && shotModel ? relightStep(original, shotModel) : undefined;
+  if (relight) return createRelitClip(original, relight);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
@@ -1200,6 +1228,9 @@ async function pollOne(r: Row): Promise<void> {
   // API clients read it as meta.
   const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
   if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
+  // Fuobe DoP's colour-grade effects: the grade the browser applies to the clip (the result's "Apply the grade" step).
+  const grade = isDop(r.model_id) && r.preset_id ? getPreset(r.preset_id)?.grade : undefined;
+  if (grade) for (const [i, o] of outputs.entries()) if (o.kind === "video") outputs[i] = { ...o, meta: { ...o.meta, grade } };
   update(r.id, {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),

@@ -1521,6 +1521,8 @@ const originals: ModelDef[] = [
         // A pose Wan 2.2 Fun Camera makes natively (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead.
         comfy("i2v", "wan22-i2v-14b", "Wan 2.2 14B with the motion's LoRAs on their experts, or Fun Camera's pose"),
         comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame with the effect's LoRAs"),
+        // Frames mode: one start/end-frame clip per pair of frames, the motion's LoRAs on each, then joined.
+        KEYFRAME_FILM,
       ],
       tagline: "Camera motions and effects with their LoRAs on Wan 2.2 · free on your GPU (24 GB), or hosted on fal",
       options: DOP_OPTIONS,
