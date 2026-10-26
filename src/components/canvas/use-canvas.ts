@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useGenerationStream } from "@/lib/api";
 import type { Canvas, CanvasGraph, CanvasPlan, CanvasSummary } from "@/lib/catalog/canvas";
+import type { CanvasPage } from "@/lib/catalog/canvas-board";
 import type { Engine, Generation } from "@/lib/catalog/types";
 
 /** Client hooks for /api/canvases (kept next to the canvas UI; the shapes live in src/lib/catalog/canvas.ts). */
@@ -75,8 +76,8 @@ export function useCanvasActions() {
   };
 }
 
-/** Save the board (autosave). `keepalive` lets a save started while leaving the page finish. */
-export async function saveCanvas(id: string, patch: { name?: string; graph?: CanvasGraph }, keepalive = false): Promise<Canvas> {
+/** Save the pages (autosave) or the name. `keepalive` lets a save started while leaving the page finish. */
+export async function saveCanvas(id: string, patch: { name?: string; pages?: CanvasPage[] }, keepalive = false): Promise<Canvas> {
   return json<Canvas>(await send(`/api/canvases/${id}`, "PATCH", patch, { keepalive }));
 }
 
@@ -92,7 +93,7 @@ export interface RunResponse {
 export function useRunCanvas(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { targets?: string[]; force?: boolean; graph: CanvasGraph }) => {
+    mutationFn: async (body: { page: string; targets?: string[]; group?: string; force?: boolean; graph: CanvasGraph }) => {
       const res = await send(`/api/canvases/${id}/run`, "POST", body);
       const data = (await res.json().catch(() => ({}))) as Partial<RunResponse> & { error?: string };
       if (!res.ok && !data.errors) throw new Error(data.error ?? `Request failed (${res.status})`);

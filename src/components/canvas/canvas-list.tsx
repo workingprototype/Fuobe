@@ -95,6 +95,7 @@ function CanvasCard({ c, onRename, onDelete }: { c: CanvasSummary; onRename: () 
         <h3 className="mt-2 truncate pr-9 text-[14px] font-medium">{c.name}</h3>
         <p className="text-[12px] text-muted-foreground">
           {c.editedAt ? `Edited ${timeAgo(c.editedAt)}` : "Never edited"} · {c.nodeCount} node{c.nodeCount === 1 ? "" : "s"}
+          {c.pageCount > 1 && ` · ${c.pageCount} pages`}
         </p>
       </Link>
       <DropdownMenu>

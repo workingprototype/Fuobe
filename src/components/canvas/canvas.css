@@ -121,3 +121,65 @@
 .fuobe-canvas .react-flow__pane.dragging {
   cursor: grabbing;
 }
+
+/* Groups, drawings and comment pins (./board.tsx). Our "group" type shares React Flow's built-in class
+   name: drop the built-in look. A group's body lets clicks through to the board (box-select, double-click
+   to add); only its title bar and resize handles take the pointer. */
+.fuobe-canvas .react-flow__node-group {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  text-align: start;
+  pointer-events: none !important;
+}
+.fuobe-canvas .react-flow__node-group.selectable:hover,
+.fuobe-canvas .react-flow__node-group.selectable.selected,
+.fuobe-canvas .react-flow__node-group.selectable:focus,
+.fuobe-canvas .react-flow__node-group.selectable:focus-visible {
+  box-shadow: none;
+}
+.fuobe-canvas .react-flow__node-group .canvas-group-bar,
+.fuobe-canvas .react-flow__node-group .react-flow__resize-control {
+  pointer-events: auto;
+}
+.fuobe-canvas .react-flow__resize-control.handle.canvas-resize-handle {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1.5px solid var(--primary);
+  background: var(--background);
+}
+.fuobe-canvas .react-flow__resize-control.line.canvas-resize-line {
+  border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+}
+.fuobe-canvas .react-flow__node-shape.selected > div {
+  outline: 1.5px dashed color-mix(in oklab, var(--primary) 70%, transparent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Board tools: the pointer says what a click or drag will do. */
+.fuobe-canvas [data-tool="draw"] .react-flow__pane,
+.fuobe-canvas [data-tool="draw"] .react-flow__node,
+.fuobe-canvas [data-tool="shape"] .react-flow__pane,
+.fuobe-canvas [data-tool="shape"] .react-flow__node,
+.fuobe-canvas [data-tool="note"] .react-flow__pane,
+.fuobe-canvas [data-tool="comment"] .react-flow__pane {
+  cursor: crosshair;
+}
+.fuobe-canvas [data-tool="text"] .react-flow__pane {
+  cursor: text;
+}
+.fuobe-canvas [data-tool="erase"] .react-flow__pane,
+.fuobe-canvas [data-tool="erase"] .react-flow__node {
+  cursor: cell;
+}
+.fuobe-canvas [data-tool="hand"] .react-flow__pane {
+  cursor: grab;
+}
+.fuobe-canvas [data-tool="select"] .react-flow__pane.draggable {
+  cursor: default;
+}

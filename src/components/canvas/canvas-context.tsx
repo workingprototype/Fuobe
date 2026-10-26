@@ -3,6 +3,7 @@
 import {
   AtSign,
   AudioLines,
+  AudioWaveform,
   Clapperboard,
   Columns3,
   Combine,
@@ -11,6 +12,7 @@ import {
   Frame,
   GalleryHorizontal,
   ImageIcon,
+  Languages,
   MessageSquareText,
   Mic2,
   MonitorPlay,
@@ -18,6 +20,7 @@ import {
   Sparkles,
   StickyNote,
   Type,
+  UserRound,
   ZoomIn,
   type LucideIcon,
 } from "lucide-react";
@@ -30,6 +33,7 @@ import {
   type CanvasNode,
   type CanvasNodeData,
   type CanvasPlan,
+  type ClipSettings,
   type Connection,
   type NodeDescription,
   type PortType,
@@ -57,6 +61,9 @@ export const ICONS: Record<string, LucideIcon> = {
   Package,
   GalleryHorizontal,
   Columns3,
+  AudioWaveform,
+  UserRound,
+  Languages,
 };
 
 /** A node type's or template's icon, by lucide name. */
@@ -91,7 +98,8 @@ export interface NodeResults {
 
 export const EMPTY_RESULTS: NodeResults = { gens: [], state: "idle", progress: null, message: null, error: null, outputs: [] };
 
-export function foldResults(gens: Generation[]): NodeResults {
+/** A node's latest run folded into one status; `out` (a node made in several steps) is the generation whose outputs it shows. */
+export function foldResults(gens: Generation[], out?: string): NodeResults {
   if (!gens.length) return EMPTY_RESULTS;
   const has = (s: GenerationStatus) => gens.some((g) => g.status === s);
   const state: NodeState = has("running") ? "running" : has("queued") ? "queued" : has("failed") ? "failed" : has("canceled") ? "canceled" : "succeeded";
@@ -103,14 +111,14 @@ export function foldResults(gens: Generation[]): NodeResults {
     progress: progress && progress > 0 ? progress : null,
     message: live[0]?.message ?? null,
     error: gens.find((g) => g.status === "failed")?.error ?? null,
-    outputs: gens.flatMap((g) => (g.status === "succeeded" ? g.outputs.map((o, i) => ({ g, o, i })) : [])),
+    outputs: gens.flatMap((g) => (g.status === "succeeded" && (!out || g.id === out) ? g.outputs.map((o, i) => ({ g, o, i })) : [])),
   };
 }
 
 /** The same results object when the node's generations are the very same objects (memoized nodes skip a render). */
-export function foldResultsKeep(prev: NodeResults | undefined, gens: Generation[]): NodeResults {
+export function foldResultsKeep(prev: NodeResults | undefined, gens: Generation[], out?: string): NodeResults {
   if (prev && prev.gens.length === gens.length && prev.gens.every((g, i) => g === gens[i])) return prev;
-  return foldResults(gens);
+  return foldResults(gens, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +211,8 @@ export class DescribeCache {
       for (const e of into.get(n.id) ?? []) {
         const s = byId.get(e.source);
         key.push(e.source, e.targetHandle, s?.type, s?.data, s?.position.x, s?.position.y);
+        // A cloned voice passes on what's wired into it: that is an input of this node too.
+        if (s?.type === "clone-voice") for (const f of into.get(s.id) ?? []) key.push(f.source, byId.get(f.source)?.type, byId.get(f.source)?.data);
       }
       const old = this.entries.get(n.id);
       const entry = old && old.key.length === key.length && old.key.every((k, i) => k === key[i]) ? old : { key, info: { d: describeNode(graph, n, { engineMode: mode }), op: effectiveOp(graph, n) } };
@@ -289,6 +299,10 @@ export interface EditorActions {
   remove: (id: string) => void;
   duplicate: (id: string) => void;
   run: (targets?: string[], force?: boolean) => void;
+  /** Run a group's nodes (and what they need upstream). */
+  runGroup: (groupId: string) => void;
+  /** Change one clip of a Video concatenator (its cut, its sound, or the facts measured from its file). */
+  patchClip: (nodeId: string, clipId: string, patch: Partial<ClipSettings>) => void;
   cancel: (id: string) => void;
   open: (id: string, index?: number) => void;
   /** Add an input node holding this node's first output, wired nowhere yet. */

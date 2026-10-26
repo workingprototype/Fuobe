@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { EMPTY_VIEW, NodeIcon, useEditorActions, useEditorSnapshot } from "./canvas-context";
 import { costLabel, ElementPicker, EngineBadge, LibraryButton, MediaPreview, OutputThumb, Results } from "./nodes";
 
-const KIND: Partial<Record<CanvasNode["type"], MediaKind>> = { "image-input": "image", "video-input": "video", "audio-input": "audio" };
+const KIND: Partial<Record<CanvasNode["type"], MediaKind>> = { "image-input": "image", "video-input": "video", "audio-input": "audio", "clone-voice": "audio" };
 
 const field = "field-sizing-content max-h-40 min-h-12 w-full resize-none rounded-lg bg-muted px-3 py-2 text-[15px] leading-snug outline-none placeholder:text-subtle-foreground focus:ring-2 focus:ring-brand-faint";
 const pill = "inline-flex h-9 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[13px] font-medium";
