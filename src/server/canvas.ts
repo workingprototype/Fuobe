@@ -93,6 +93,8 @@ const NodeData = z.object({
   handle: Handle.optional(),
   preview: z.string().startsWith("/api/files/").max(2000).optional(),
   modelId: z.string().max(120).optional(),
+  // A Fuobe Original (runs on both engines): the engine the node runs it on.
+  engine: z.enum(["open", "cloud"]).optional(),
   op: z.string().max(40).optional(),
   prompt: clamped(TEXT_MAX).optional(),
   params: Params.optional(),

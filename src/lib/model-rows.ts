@@ -1,5 +1,6 @@
 /** Slim rows for the Models page: what the table shows, computed on the server from the catalog. */
 import { formatCost } from "./format";
+import { enginesOf, providerEngine } from "./catalog/engines";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef } from "./catalog/types";
 
 export interface ModelRow {
@@ -7,7 +8,10 @@ export interface ModelRow {
   name: string;
   vendor: string;
   tagline: string;
+  /** The engine it shows first (a Fuobe Original's is open: it's free there). */
   engine: Engine;
+  /** Every engine it runs on: a Fuobe Original runs on both (ComfyUI on your GPU, hosted open weights in the cloud). */
+  engines: Engine[];
   kind: MediaKind;
   /** Display badges ("New", "Top"…), without the redundant "open". */
   badges: string[];
@@ -36,20 +40,29 @@ const BADGE_LABEL: Record<string, string> = {
 };
 
 export function toModelRow(m: ModelDef): ModelRow {
+  // A Fuobe Original's view on one engine (onEngine) keeps only that engine's routes: it lists that engine alone.
+  const engines = enginesOf(m).filter((e) => e === m.engine || m.routes.some((r) => providerEngine(r.provider) === e));
+  const cloudPrice = m.pricing ? `${formatCost(m.pricing.usd)} / ${m.pricing.unit}` : "—";
   return {
     id: m.id,
     name: m.name,
     vendor: m.vendor,
     tagline: m.tagline,
     engine: m.engine,
+    engines,
     kind: m.kind,
     badges: (m.badges ?? []).filter((b) => b !== "open").map((b) => BADGE_LABEL[b] ?? b),
     ops: [...new Set(m.routes.map((r) => OPERATION_LABELS[r.op] ?? r.op))],
     routes: [...new Set(m.routes.map((r) => `${r.provider}: ${r.endpoint}`))],
-    price: m.engine === "open" ? "Free" : m.pricing ? `${formatCost(m.pricing.usd)} / ${m.pricing.unit}` : "—",
+    // A Fuobe Original is free on your GPU and priced on the cloud.
+    price: engines.length > 1 ? `Free · ${cloudPrice}` : m.engine === "open" ? "Free" : cloudPrice,
     ...(m.worker === "isolated" && { note: ISOLATED_NOTE }),
   };
 }
+
+/** "Open source", "Cloud", or both for a Fuobe Original. */
+export const enginesLabel = (engines: Engine[]): string =>
+  engines.length > 1 ? "Open source + cloud" : engines[0] === "open" ? "Open source" : "Cloud";
 
 /** Lower-cased text the Models search matches against. */
 export const modelSearchText = (r: ModelRow) => `${r.name} ${r.vendor} ${r.tagline} ${r.ops.join(" ")} ${r.id} ${r.note ?? ""}`.toLowerCase();

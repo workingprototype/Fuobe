@@ -4,6 +4,7 @@
  */
 import { MODELS_3D } from "@/lib/av/model3d";
 import { APPS, EFFECTS, MODELS, MOTIONS } from "@/lib/catalog";
+import { enginesOf } from "@/lib/catalog/engines";
 import { OPERATION_LABELS, type ModelDef, type Operation, type Preset } from "@/lib/catalog/types";
 import type { PaletteIndex, PaletteModel, PalettePreset } from "@/lib/command-search";
 import { TOOL_MODELS } from "@/lib/layers";
@@ -98,6 +99,8 @@ const model = (m: ModelDef): PaletteModel => ({
   name: m.name,
   vendor: m.vendor,
   engine: m.engine,
+  // A Fuobe Original runs on both engines.
+  ...(enginesOf(m).length > 1 && { engines: enginesOf(m) }),
   href: modelHref(m),
   ops: [...new Set(m.routes.map((r) => OPERATION_LABELS[r.op] ?? r.op))].join(", "),
 });

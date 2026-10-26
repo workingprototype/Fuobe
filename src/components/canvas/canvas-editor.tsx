@@ -42,6 +42,7 @@ import { Viewer } from "@/components/studio/viewer";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useElements, useEngine, useStatus, type EngineMode } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
+import { onEngine, runsOn } from "@/lib/catalog/engines";
 import {
   acceptsType,
   cleanGraph,
@@ -640,7 +641,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       ? []
       : generators.filter((n) => {
           const m = n.data.modelId ? getModel(n.data.modelId) : undefined;
-          return m && m.engine !== mode;
+          // A Fuobe Original runs on both engines: it's never off the install's engine.
+          return m && !runsOn(m, mode);
         });
   const stuck = offEngine.filter((n) => !counterpart(graph, n, mode as Engine));
   const switchable = offEngine.length - stuck.length;
@@ -777,7 +779,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const entry = viewer ? viewerEntries[viewer.index] : undefined;
   const planDemo = plan.steps.some((s) => {
     const m = getModel(s.request.modelId);
-    return m && isDemo(m);
+    // A Fuobe Original's step names its engine: a demo is about that engine's providers.
+    return m && isDemo(s.request.engine ? onEngine(m, s.request.engine) : m);
   });
   const attention = new Set(plan.errors.map((e) => e.nodeId)).size;
   const summary = [

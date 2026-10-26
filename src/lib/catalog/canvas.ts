@@ -8,6 +8,7 @@
  * the server (POST /api/canvases/:id/run) plan a graph exactly the same way.
  */
 import { getModel, getPreset, MODELS, supportsOp } from "./index";
+import { dualEngine, onEngine, runsOn } from "./engines";
 import { chainedWaitMessage, keyframeChain } from "./keyframes";
 import { estimateCost, inferOperation, planGeneration, type Plan } from "./plan";
 import {
@@ -68,6 +69,8 @@ export interface CanvasNodeData {
   preview?: string;
   /** Generator nodes. `op` undefined = worked out from what's connected. */
   modelId?: string;
+  /** A Fuobe Original (runs on both engines, ModelDef.engines): the engine this node runs it on. */
+  engine?: Engine;
   op?: Operation;
   prompt?: string;
   params?: GenParams;
@@ -323,6 +326,22 @@ export function defaultModelForNode(n: Pick<CanvasNode, "type" | "data">, engine
   }
   const op = nodeOps(n)[0];
   return op ? defaultModelFor(op, engine, { hidden: true }) : undefined;
+}
+
+/**
+ * The engine a node runs its model on: the model's own, or for a Fuobe Original (both engines) the install's only
+ * engine, else the node's pick, else the model's first (the open engine: free).
+ */
+export function nodeEngine(n: Pick<CanvasNode, "data">, m: ModelDef, mode: "both" | Engine = "both"): Engine {
+  if (!dualEngine(m)) return m.engine;
+  if (mode !== "both" && runsOn(m, mode)) return mode;
+  return n.data.engine && runsOn(m, n.data.engine) ? n.data.engine : m.engine;
+}
+
+/** A node's model as it runs: a Fuobe Original keeps its engine's routes and price (onEngine). */
+export function nodeModel(n: Pick<CanvasNode, "data">, mode: "both" | Engine = "both"): ModelDef | undefined {
+  const m = n.data.modelId ? getModel(n.data.modelId) : undefined;
+  return m && onEngine(m, nodeEngine(n, m, mode));
 }
 
 /** Models the node's picker offers. */
@@ -834,6 +853,8 @@ function buildRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeR
   const request: GenerationRequest = {
     feature: "canvas",
     modelId: model.id,
+    // A Fuobe Original runs on the engine the node picked (the server would otherwise take the first one ready).
+    ...(dualEngine(model) && { engine: model.engine }),
     ...(op && { op }),
     ...(prompt && { prompt }),
     ...(Object.keys(inputs).length && { inputs }),
@@ -850,10 +871,11 @@ export interface DescribeContext {
 /** Everything the editor and the planner need about one generator node. */
 export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeContext = {}): NodeDescription {
   if (!isGenerator(n)) return { costUsd: null, error: "Not a generator" };
-  const model = n.data.modelId ? getModel(n.data.modelId) : undefined;
-  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : "Pick a model" };
   const mode = ctx.engineMode ?? "both";
-  if (mode !== "both" && model.engine !== mode) {
+  // A Fuobe Original as it runs on the node's engine (its routes, its price).
+  const model = nodeModel(n, mode);
+  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : "Pick a model" };
+  if (mode !== "both" && !runsOn(model, mode)) {
     return {
       model,
       costUsd: null,
@@ -866,7 +888,7 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   const built = buildRequest(graph, n, model);
   if ("error" in built) return { model, costUsd: null, error: built.error };
   try {
-    const plan = planGeneration(withPlaceholders(built.request), getModel, getPreset);
+    const plan = planGeneration(withPlaceholders(built.request), (id) => (id === model.id ? model : getModel(id)), getPreset);
     // A film built clip by clip is planned from its inputs when it starts: it can't wait for another node (said before Run).
     if (built.deps.length && plan.op === "keyframes" && keyframeChain(plan.model)) return { ...built, model, costUsd: null, error: chainedWaitMessage(plan.model.name) };
     return { ...built, model, plan, costUsd: estimateCost(plan.model, plan.params, plan.jobs, plan.op) };
@@ -1040,7 +1062,8 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
 /** The equivalent model on the other engine for a node, if there is one. */
 export function counterpart(graph: CanvasGraph, n: CanvasNode, engine: Engine): ModelDef | undefined {
   const current = n.data.modelId ? getModel(n.data.modelId) : undefined;
-  if (current?.engine === engine) return current;
+  // A Fuobe Original runs on both: it stays, on the other engine.
+  if (current && runsOn(current, engine)) return current;
   if (n.type !== "model") return defaultModelForNode(n, engine);
   const op = n.data.op ?? effectiveOp(graph, n) ?? (current ? current.routes[0].op : KIND_OP[n.data.mediaKind ?? "image"]);
   const kind = current?.kind ?? n.data.mediaKind;
@@ -1054,7 +1077,12 @@ export function convertEngine(graph: CanvasGraph, engine: Engine): { graph: Canv
   const nodes = graph.nodes.map((n) => {
     if (!isGenerator(n)) return n;
     const current = n.data.modelId ? getModel(n.data.modelId) : undefined;
-    if (current?.engine === engine) return n;
+    if (current && runsOn(current, engine)) {
+      // A Fuobe Original keeps its model and its settings; only the engine it runs on changes.
+      if (!dualEngine(current) || nodeEngine(n, current) === engine) return n;
+      changed++;
+      return { ...n, data: { ...n.data, engine } };
+    }
     const m = counterpart(graph, n, engine);
     if (!m) {
       missing.push(n.id);
@@ -1062,7 +1090,7 @@ export function convertEngine(graph: CanvasGraph, engine: Engine): { graph: Canv
     }
     changed++;
     const keepOp = n.data.op && supportsOp(m, n.data.op) ? n.data.op : undefined;
-    return { ...n, data: { ...n.data, modelId: m.id, op: keepOp, params: sanitizeParams(m, n.data.params) } };
+    return { ...n, data: { ...n.data, modelId: m.id, op: keepOp, params: sanitizeParams(m, n.data.params), engine: dualEngine(m) ? engine : undefined } };
   });
   return { graph: { ...graph, nodes }, changed, missing };
 }
@@ -1086,7 +1114,7 @@ export function graphEngine(graph: CanvasGraph): Engine | null {
   let cloud = 0;
   let open = 0;
   for (const n of graph.nodes) {
-    const m = isGenerator(n) && n.data.modelId ? getModel(n.data.modelId) : undefined;
+    const m = isGenerator(n) ? nodeModel(n) : undefined;
     if (m?.engine === "cloud") cloud++;
     if (m?.engine === "open") open++;
   }
