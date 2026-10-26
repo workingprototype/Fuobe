@@ -1200,37 +1200,64 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
 }
 
 /**
- * Extra files a result carries as links (meta.artifacts: LTX HDR's EXR zip, Higgsfield's fbx / zip) are kept
- * too, so the Library never depends on a provider's expiring URL. Links are streamed to disk (an EXR zip runs
- * to gigabytes); one that can't be fetched stays as it was (the result's actions still offer it).
+ * Extra files a result carries as links are kept too, so the Library never depends on a provider's expiring URL:
+ * meta.artifacts (LTX HDR's EXR zip, Higgsfield's fbx / zip), meta.formats (a 3D model's other formats, a rig's FBX
+ * and its walk and run cycles, SAM 3D's splat) and meta.preview (a 3D model's render, the cut-out a splat was
+ * made from). Links are streamed to disk (an EXR zip runs to gigabytes); one that can't be fetched stays as it
+ * was (the result's actions still offer it). A link to the main file itself (`main`) is left for persistOutput.
  */
-export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
-  const links = meta?.artifacts;
-  if (!links || typeof links !== "object" || Array.isArray(links)) return meta;
-  const kept: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(links as Record<string, unknown>)) {
-    kept[k] = v;
-    if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) continue;
-    try {
-      if (v.startsWith("data:")) {
-        const f = await readRef(v);
-        kept[k] = saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
-        continue;
-      }
-      const dest = path.join(scratchDir(), `${generationId}-${k}-${nanoid(6)}`);
-      const res = await fetchRemoteToFile(v, dest);
-      const name = new URL(res.url).pathname.split("/").pop() || undefined;
-      const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
-      kept[k] = adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
-    } catch (e) {
-      console.warn(`[fuobe] could not keep the ${k} file of ${generationId}: ${(e as Error).message}`);
-    }
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string, main?: string): Promise<Record<string, unknown> | undefined> {
+  if (!meta) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links)) continue;
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(links as Record<string, unknown>)) kept[k] = v === main ? v : await keepLink(v, key === "artifacts" ? k : `${key}-${k}`, generationId);
+    out = { ...out, [key]: kept };
   }
-  return { ...meta, artifacts: kept };
+  for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
+  return out;
+}
+
+/** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
+const LINK_MAPS = ["artifacts", "formats"] as const;
+const LINKS = ["preview"] as const;
+
+/** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
+async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
+  if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) return v;
+  try {
+    if (v.startsWith("data:")) {
+      const f = await readRef(v);
+      return saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+    }
+    const dest = path.join(scratchDir(), `${generationId}-${label}-${nanoid(6)}`);
+    const res = await fetchRemoteToFile(v, dest);
+    const name = new URL(res.url).pathname.split("/").pop() || undefined;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
+  } catch (e) {
+    console.warn(`[fuobe] could not keep the ${label} file of ${generationId}: ${(e as Error).message}`);
+    return v;
+  }
+}
+
+/** The extra links that pointed at the main file point at its stored copy. */
+function relinkMain(meta: Record<string, unknown> | undefined, from: string, to: string): Record<string, unknown> | undefined {
+  if (!meta || !from) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links) || !Object.values(links).includes(from)) continue;
+    out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
+  }
+  for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
+  return out;
 }
 
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
-  const meta = await persistArtifacts(o.meta, generationId);
+  const linked = await persistArtifacts(o.meta, generationId, o.url);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1252,6 +1279,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
+  const meta = relinkMain(linked, o.url, asset.url);
   // A text file's words travel with the generation, so feeds and the next chained step can use them.
   const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
   return {

@@ -185,6 +185,52 @@ describe("what the cards show", () => {
   });
 });
 
+describe("the extra files are kept", () => {
+  it("a rig's walk and run cycles and FBX, SAM 3D's splat and the preview become files of the generation", async () => {
+    const http = await import("node:http");
+    const server = http.createServer((req, res) => {
+      if (req.url === "/gone.glb") return void res.writeHead(404).end();
+      res.setHeader("content-type", "application/octet-stream");
+      res.end(Buffer.from(`file ${req.url}`));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const at = (p: string) => `http://127.0.0.1:${(server.address() as { port: number }).port}${p}`;
+    process.env.FUOBE_ALLOW_PRIVATE_URLS = "1";
+    try {
+      const outs = extractOutputs(
+        {
+          rigged_character_glb: { url: at("/rig.glb") },
+          animation_glb: { url: at("/anim.glb") },
+          animation_fbx: { url: at("/anim.fbx") },
+          basic_animations: { walking_glb: { url: at("/walk.glb") }, running_glb: { url: at("/gone.glb") } },
+        },
+        "rig-3d",
+      );
+      const kept = await gens.persistArtifacts(outs[0].meta, "genrig", outs[0].url);
+      const formats = kept?.formats as Record<string, string>;
+      expect(formats.walking).toMatch(/^\/api\/files\/outputs\/.+\.glb$/);
+      expect(formats.rigged).toMatch(/^\/api\/files\/outputs\/.+\.glb$/);
+      expect(formats.fbx).toMatch(/^\/api\/files\/outputs\/.+\.fbx$/);
+      // Gone at the provider: the link stays.
+      expect(formats.running).toBe(at("/gone.glb"));
+      expect(kept).toMatchObject({ rigged: true, animated: true });
+      const file = path.join(dir, "files", decodeURIComponent(formats.walking.slice("/api/files/".length)));
+      expect(fs.readFileSync(file, "utf8")).toBe("file /walk.glb");
+
+      const sam = extractOutputs({ model_glb: { url: at("/o.glb") }, gaussian_splat: { url: at("/o.ply") }, thumbnail: { url: at("/o.png") } }, "image-to-3d");
+      const samKept = await gens.persistArtifacts(sam[0].meta, "gensam", sam[0].url);
+      expect((samKept?.formats as Record<string, string>).splat).toMatch(/^\/api\/files\/outputs\/.+\.ply$/);
+      expect(samKept?.preview).toMatch(/^\/api\/files\/outputs\//);
+      // A format that is the main file itself is left to persistOutput (it isn't fetched twice).
+      const same = await gens.persistArtifacts({ formats: { glb: at("/o.glb"), obj: at("/o.obj") } }, "gensame", at("/o.glb"));
+      expect(same?.formats).toMatchObject({ glb: at("/o.glb"), obj: expect.stringMatching(/^\/api\/files\//) });
+    } finally {
+      delete process.env.FUOBE_ALLOW_PRIVATE_URLS;
+      server.close();
+    }
+  });
+});
+
 describe("open engine: multi-view TRELLIS.2 (image-to-3d-trellis2-multiview)", () => {
   const manifest = getWorkflow("image-to-3d-trellis2-multiview").manifest;
   const prep = (images: string[], extra?: Record<string, unknown>) =>
