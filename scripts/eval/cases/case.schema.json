@@ -662,6 +662,9 @@
             "minimum": 0,
             "maximum": 1
           },
+          "mix": {
+            "type": "boolean"
+          },
           "lookParam": {
             "type": "string",
             "const": "presetId"
@@ -862,6 +865,25 @@
           },
           "presetId": {
             "type": "string"
+          },
+          "mix": {
+            "type": "object",
+            "properties": {
+              "presetId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "strength": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "presetId",
+              "strength"
+            ],
+            "additionalProperties": false
           },
           "words": {
             "type": "string",

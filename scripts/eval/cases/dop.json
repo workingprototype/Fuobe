@@ -1724,6 +1724,680 @@
         "effect",
         "relight-route"
       ]
+    },
+    {
+      "id": "dop/motion-jib-up",
+      "title": "DoP motion · Jib Up (camera)",
+      "motion": "Jib Up",
+      "presetId": "motion-jib-up",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "alias",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora jib_up"
+    },
+    {
+      "id": "dop/motion-jib-down",
+      "title": "DoP motion · Jib Down (camera)",
+      "motion": "Jib Down",
+      "presetId": "motion-jib-down",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "alias",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora jib_down"
+    },
+    {
+      "id": "dop/motion-epic-scale",
+      "title": "DoP motion · Epic Scale (camera)",
+      "motion": "Epic Scale",
+      "presetId": "motion-epic-scale",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "alias",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora jib_up"
+    },
+    {
+      "id": "dop/motion-dolly-left",
+      "title": "DoP motion · Dolly Left (camera)",
+      "motion": "Dolly Left",
+      "presetId": "motion-dolly-left",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Left\" · cloud: LTX-2.3 camera_lora dolly_left"
+    },
+    {
+      "id": "dop/motion-dolly-right",
+      "title": "DoP motion · Dolly Right (camera)",
+      "motion": "Dolly Right",
+      "presetId": "motion-dolly-right",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Right\" · cloud: LTX-2.3 camera_lora dolly_right"
+    },
+    {
+      "id": "dop/motion-truck-left",
+      "title": "DoP motion · Truck Left (camera)",
+      "motion": "Truck Left",
+      "presetId": "motion-truck-left",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Left\" · cloud: LTX-2.3 camera_lora dolly_left"
+    },
+    {
+      "id": "dop/motion-truck-right",
+      "title": "DoP motion · Truck Right (camera)",
+      "motion": "Truck Right",
+      "presetId": "motion-truck-right",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Right\" · cloud: LTX-2.3 camera_lora dolly_right"
+    },
+    {
+      "id": "dop/motion-super-dolly-out",
+      "title": "DoP motion · Super Dolly Out (camera)",
+      "motion": "Super Dolly Out",
+      "presetId": "motion-super-dolly-out",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Zoom Out\" · cloud: LTX-2.3 camera_lora dolly_out"
+    },
+    {
+      "id": "dop/motion-zoom",
+      "title": "DoP motion · Zoom (camera)",
+      "motion": "Zoom",
+      "presetId": "motion-zoom",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Zoom In\" · cloud: LTX-2.3 camera_lora dolly_in"
+    },
+    {
+      "id": "dop/motion-pan",
+      "title": "DoP motion · Pan (camera)",
+      "motion": "Pan",
+      "presetId": "motion-pan",
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Right\""
+    },
+    {
+      "id": "dop/motion-pedestal-down",
+      "title": "DoP motion · Pedestal Down (camera)",
+      "motion": "Pedestal Down",
+      "presetId": "motion-pedestal-down",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Pan Down\" · cloud: LTX-2.3 camera_lora jib_down"
+    },
+    {
+      "id": "dop/motion-classic-static",
+      "title": "DoP motion · Classic Static (camera)",
+      "motion": "Classic Static",
+      "presetId": "motion-classic-static",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Static\" · cloud: LTX-2.3 camera_lora static"
+    },
+    {
+      "id": "dop/motion-roll-transition",
+      "title": "DoP motion · Roll Transition (camera)",
+      "motion": "Roll Transition",
+      "presetId": "motion-roll-transition",
+      "op": "flf2v",
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ],
+        "endImage": "local/dop/end.png"
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ],
+        "endImage": "fixtures/end-frame.png"
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "transition"
+      ],
+      "note": ""
+    },
+    {
+      "id": "dop/motion-aerial-pullback",
+      "title": "DoP motion · Aerial Pullback (camera)",
+      "motion": "Aerial Pullback",
+      "presetId": "motion-aerial-pullback",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Zoom Out\" · cloud: LTX-2.3 camera_lora dolly_out"
+    },
+    {
+      "id": "dop/motion-dolly-out",
+      "title": "DoP motion · Dolly Out (camera)",
+      "motion": "Dolly Out",
+      "presetId": "motion-dolly-out",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Zoom Out\" · cloud: LTX-2.3 camera_lora dolly_out"
+    },
+    {
+      "id": "dop/motion-static",
+      "title": "DoP motion · Static (camera)",
+      "motion": "Static",
+      "presetId": "motion-static",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "fun-camera",
+        "camera",
+        "fun-camera",
+        "camera-lora"
+      ],
+      "note": "GPU: Wan 2.2 Fun Camera \"Static\" · cloud: LTX-2.3 camera_lora static"
+    },
+    {
+      "id": "dop/motion-focus-change",
+      "title": "DoP motion · Focus Change (camera)",
+      "motion": "Focus Change",
+      "presetId": "motion-focus-change",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "ltx-2-5"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "params": {
+        "duration": 6
+      },
+      "tags": [
+        "motion",
+        "hosted-native",
+        "camera"
+      ],
+      "note": "cloud: LTX-2.5 camera_motion focus_shift"
+    },
+    {
+      "id": "dop/motion-eyes-in",
+      "title": "DoP motion · Eyes In (camera)",
+      "motion": "Eyes In",
+      "presetId": "motion-eyes-in",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "train-own",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora dolly_in"
+    },
+    {
+      "id": "dop/motion-mouth-in",
+      "title": "DoP motion · Mouth In (camera)",
+      "motion": "Mouth In",
+      "presetId": "motion-mouth-in",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "train-own",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora dolly_in"
+    },
+    {
+      "id": "dop/motion-eating-zoom",
+      "title": "DoP motion · Eating Zoom (camera)",
+      "motion": "Eating Zoom",
+      "presetId": "motion-eating-zoom",
+      "models": {
+        "open": [
+          "fuobe-dop"
+        ],
+        "demo": [
+          "fuobe-dop"
+        ],
+        "cloud": [
+          "fuobe-dop-ltx"
+        ]
+      },
+      "inputs": {
+        "images": [
+          "local/dop/start.png"
+        ]
+      },
+      "demoInputs": {
+        "images": [
+          "fixtures/start-frame.png"
+        ]
+      },
+      "tags": [
+        "motion",
+        "train-own",
+        "camera",
+        "camera-lora"
+      ],
+      "note": "cloud: LTX-2.3 camera_lora dolly_in"
     }
   ]
 }

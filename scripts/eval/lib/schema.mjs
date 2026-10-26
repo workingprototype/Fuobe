@@ -134,6 +134,8 @@ const Variant = z
     preset: z.boolean().optional(),
     /** Motions / effects: 0 runs the preset's prompt without its catalog LoRAs. */
     presetStrength: z.number().min(0).max(1).optional(),
+    /** Send the case's Mix (default true when the case has one); false runs its first preset alone. */
+    mix: z.boolean().optional(),
     /** The server's own Original applies the look: send the look's Fuobe id ("v1-general") as presetId and no client recipe. */
     lookParam: z.literal("presetId").optional(),
     /** Other models for this variant (A/B a model against the recipe). A case can name its own (variantModels). */
@@ -172,6 +174,8 @@ export const CaseSchema = z
     /** A motion or effect name in the research's motionsEffects map (fuobe-originals-recipes-5.json). */
     motion: z.string().optional(),
     presetId: z.string().optional(),
+    /** Fuobe DoP's Mix: a second motion or effect on the same run, at its strength (0–1). */
+    mix: z.object({ presetId: z.string().min(1), strength: z.number().min(0).max(1) }).strict().optional(),
     /** The case's fixed words after the prompt and the variant's words (a HEX palette's sentence); a variant with template: false leaves them out. */
     words: z.string().max(2000).optional(),
     /** Models for this case instead of the suite's targets (a look on another base, a mode with its own model). */

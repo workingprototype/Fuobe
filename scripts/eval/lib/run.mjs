@@ -593,7 +593,10 @@ async function runJob(client, job, ctx) {
     row.status = bad ? (bad.status === "canceled" ? "canceled" : "failed") : "succeeded";
     if (bad) row.error = bad.error ?? `the generation ${bad.status}`;
     await finish(row, final, t0, ctx);
-    if (row.status === "succeeded") row.outputs = await download(client, final, path.join(ctx.dir, "outputs", safeName(job.id)), ctx.dir);
+    // A chain /api/generations starts itself (Fuobe DoP's relight effects: the relit still, then the clip): the
+    // result is the generations of the suite's kind.
+    const own = final.filter((g) => !job.kind || g.kind === job.kind);
+    if (row.status === "succeeded") row.outputs = await download(client, own.length ? own : final, path.join(ctx.dir, "outputs", safeName(job.id)), ctx.dir);
     return row;
   } catch (e) {
     row.error = row.status === "succeeded" ? `the results didn't download: ${e.message}` : e.message;

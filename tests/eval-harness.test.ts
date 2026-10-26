@@ -764,6 +764,24 @@ describe("runEval as a library", () => {
     expect(job("dop/effect-thunder-god", "prompt-only").loras?.applied).toEqual([]);
     expect(plan.runnable).toBe(12);
   });
+
+  it("dry-runs Fuobe DoP's Mix: both presets' LoRAs against the first alone, and a camera move's pose", async () => {
+    const mixes = (await runner.runEval({ suite: cases.loadSuite("dop-mix"), engine: "demo", dryRun: true, cases: ["dop-mix/overhead--building-explosion"], variants: ["mix", "first"], root: results }, { client: createClient({ url: base }) })) as {
+      jobs: { variant: string; loras?: { applied: string[] } }[];
+    };
+    const mix = mixes.jobs.find((j) => j.variant === "mix")!;
+    const first = mixes.jobs.find((j) => j.variant === "first")!;
+    // The server's preview of the request the harness sends: the Mix's two pairs, the second at 0.6.
+    expect(mix.loras?.applied).toHaveLength(4);
+    expect(mix.loras?.applied.filter((f) => f.endsWith("@0.6"))).toHaveLength(2);
+    expect(first.loras?.applied).toHaveLength(2);
+    // A pose-only move (Zoom): its prompt-only run would repeat the catalog run on the GPU, so it is skipped there.
+    const zoom = (await runner.runEval({ suite: cases.loadSuite("dop"), engine: "demo", dryRun: true, cases: ["dop/motion-zoom"], variants: ["catalog", "prompt-only"], root: results }, { client: createClient({ url: base }) })) as {
+      jobs: { variant: string; skip?: string }[];
+    };
+    expect(zoom.jobs.find((j) => j.variant === "catalog")).toBeDefined();
+    expect(zoom.jobs.find((j) => j.variant === "prompt-only")!.skip).toMatch(/same request as the catalog variant/);
+  });
 });
 
 /**

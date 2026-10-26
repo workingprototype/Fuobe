@@ -118,14 +118,15 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `soul-cinema` | Soul Cinema's one film look | 6 scenes, pinned seeds | `recipe`, `prompt-only`, `plain`, `original` | clip, aesthetic, style |
 | `soul-hex` | Soul HEX palettes | 3 Fuobe palettes × 2 subjects | `words`, `lock` (open), `base`, `palette-model` (open), `plain` | palette, clip, aesthetic |
 | `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
-| `dop` | DoP motions and effects | the 70 the research gives a LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
+| `dop` | Fuobe DoP motions and effects | the 69 the research gives a LoRA, and the 20 camera moves it gives a Fun Camera pose or an LTX camera LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
+| `dop-mix` | Fuobe DoP's Mix | 5 move + effect pairs | `mix` (the candidate), `first` (the move alone) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
 | `mixed-media` | Mixed Media | 5 looks on one clip (through `/api/mixed-media`) | `studio` | temporal, style |
 | `shorts` | Shorts restyle | 1 | `restyle` | temporal, style, clip |
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
 | `cinema` | Cinema shot lists | 2 films of 3 shots | `original`, `partner` | clip, temporal, continuity |
 
-`soul.json`, `soul-cinema.json`, `soul-hex.json` and `dop.json` are **generated** from the research. They come from
+`soul.json`, `soul-cinema.json`, `soul-hex.json`, `dop.json` and `dop-mix.json` are **generated** from the research. They come from
 `docs/research/higgsfield-image-studios.json` (the look ids) and
 `docs/research/fuobe-originals-recipes-5.json` (recipes, LoRAs, Soul Cinema's recipe, the motion map).
 `soul-hex`'s palettes are Fuobe's own. Run
