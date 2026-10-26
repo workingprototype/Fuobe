@@ -379,7 +379,9 @@ export function PromptBar(props: PromptBarProps) {
   const video = draft.mode === "video";
   const action = input.action;
   const busy = generate.isPending || preparing;
-  const effectiveDuration = plan.steps.find((s) => s.key === "main")?.request.params?.duration;
+  // The take's length: the main clip, plus what an extend adds (Fuobe Cinema past 20 s in the cloud).
+  const stepSeconds = (key: string) => plan.steps.find((s) => s.key === key)?.request.params?.duration;
+  const effectiveDuration = stepSeconds("main") !== undefined ? stepSeconds("main")! + (stepSeconds("more") ?? 0) : undefined;
 
   const submit = async () => {
     if (busy) return;

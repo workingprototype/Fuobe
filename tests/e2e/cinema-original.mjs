@@ -106,6 +106,20 @@ async function session(width, height, scheme) {
   await page.waitForTimeout(500);
   const body = await page.locator("body").innerText();
   check(`${tag}: the bar says the move drives LTX-2.3's camera LoRA`, /Dolly In drives LTX-2\.3's dolly in camera LoRA/.test(body));
+  // 30 s in the cloud: one 20 s take plus an extend, and the duration chip says 30 s (not "the model makes 20 s").
+  const durationChip = page.getByRole("button", { name: /^Duration: / }).locator("visible=true");
+  if (await durationChip.count()) {
+    await durationChip.first().click();
+    await page.getByRole("button", { name: "30s", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
+    const chipText = ((await durationChip.first().textContent()) ?? "").replace(/^Duration:\s*/, "").trim();
+    const notes30 = await page.locator("body").innerText();
+    check(`${tag}: 30 s shows as 30 s, with an extend for the last 10 s`, chipText === "30s" && /an extend adds the last 10s/.test(notes30), chipText);
+    await durationChip.first().click();
+    await page.getByRole("button", { name: "5s", exact: true }).click();
+    await page.keyboard.press("Escape");
+  }
   const generate = page.getByRole("button", { name: /^Generate/ }).first();
   check(`${tag}: the price shows before running`, /Demo|≈ \$|Free/.test(body));
   await shot("cloud-bar");
