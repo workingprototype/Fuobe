@@ -2,11 +2,15 @@ import { z } from "zod";
 import { graphProblem, parseGraph, runCanvas } from "@/server/canvas";
 
 const Body = z.object({
+  /** The page to run (the first one when omitted). */
+  page: z.string().max(40).optional(),
   /** Node ids to run with everything upstream (Run node, Run selected); omit for Run all. */
   targets: z.array(z.string().max(80)).max(300).optional(),
+  /** Run a group's nodes (and what they need). */
+  group: z.string().max(80).optional(),
   /** Re-run the targets even when their result is still fresh. */
   force: z.boolean().optional(),
-  /** The board as the editor shows it (saved first). */
+  /** The page's board as the editor shows it (saved first). */
   graph: z.unknown().optional(),
 });
 
@@ -20,7 +24,7 @@ export async function POST(request: Request, ctx: RouteContext<"/api/canvases/[i
   if (!parsed.success) return Response.json({ error: "Invalid run request" }, { status: 400 });
   const graph = parsed.data.graph === undefined ? undefined : parseGraph(parsed.data.graph);
   if (graph === null) return Response.json({ error: graphProblem(parsed.data.graph) }, { status: 400 });
-  const result = runCanvas(id, { targets: parsed.data.targets, force: parsed.data.force, graph });
+  const result = runCanvas(id, { page: parsed.data.page, targets: parsed.data.targets, group: parsed.data.group, force: parsed.data.force, graph });
   if (!result) return Response.json({ error: "Not found" }, { status: 404 });
   if (!result.ran.length && result.errors.length) {
     const first = result.errors[0].message;

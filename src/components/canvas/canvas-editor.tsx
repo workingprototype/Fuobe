@@ -181,8 +181,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const runM = useRunCanvas(id);
   const runMutate = runM.mutate;
 
-  const [nodes, setNodes] = useState<FlowNode[]>(() => initial.graph.nodes.map(toFlowNode));
-  const [edges, setEdges] = useState<Edge[]>(() => initial.graph.edges.map(toFlowEdge));
+  const [nodes, setNodes] = useState<FlowNode[]>(() => initial.pages[0].graph.nodes.map(toFlowNode));
+  const [edges, setEdges] = useState<Edge[]>(() => initial.pages[0].graph.edges.map(toFlowEdge));
   const [name, setName] = useState(initial.name);
   const [tab, setTab] = useState<"board" | "list">("board");
   const [paletteOpen, setPaletteOpen] = useState(true);
@@ -194,7 +194,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const [saveRefused, setSaveRefused] = useState(false);
   const [rev, setRev] = useState(0);
   const wrapper = useRef<HTMLDivElement>(null);
-  const viewport = useRef<Viewport | undefined>(initial.graph.viewport);
+  const viewport = useRef<Viewport | undefined>(initial.pages[0].graph.viewport);
   const savedRev = useRef(0);
   const savedName = useRef(initial.name);
 
@@ -275,7 +275,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   );
   const fitOptions = useMemo(() => fitFor(paletteOpen), [fitFor, paletteOpen]);
   // Phones always start fitted (a viewport saved on a big screen would show an empty board).
-  const savedViewport = isMobile ? undefined : initial.graph.viewport;
+  const savedViewport = isMobile ? undefined : initial.pages[0].graph.viewport;
   // The first fit, once every node has its size: a big board may zoom further out than later fits,
   // and when it would be too small to read beside the palette, the palette folds away instead.
   const initialized = useNodesInitialized();

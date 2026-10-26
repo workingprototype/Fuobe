@@ -72,6 +72,7 @@ export const PORT_COLOR: Record<PortType, string> = {
   video: "var(--chart-4)",
   audio: "var(--chart-3)",
   element: "var(--chart-1)",
+  voice: "var(--chart-3)",
 };
 
 export type NodeState = GenerationStatus | "idle";

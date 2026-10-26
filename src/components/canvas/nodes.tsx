@@ -1211,6 +1211,10 @@ export const NODE_TYPES = {
   upscale: GeneratorNode,
   "bg-remove": GeneratorNode,
   tts: GeneratorNode,
+  "voice-change": GeneratorNode,
+  "clone-voice": MediaInputNode,
+  translate: GeneratorNode,
+  concat: GeneratorNode,
   output: OutputNode,
   note: NoteNode,
 } satisfies Record<CanvasNodeType, React.ComponentType<NodeProps<FlowNode>>>;
