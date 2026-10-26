@@ -28,16 +28,28 @@ function instruction(prompt: string, kind: MediaKind, op: Operation): string {
   return `Rewrite this as ${what}:\n\n${prompt}`;
 }
 
-async function viaClaude(system: string, user: string): Promise<string | null> {
+/** A picture for a model that can see (Content Factory's reference frames): JPEG, PNG, GIF or WebP. */
+export interface LlmImage {
+  data: Buffer;
+  contentType: string;
+}
+
+async function viaClaude(system: string, user: string, images: LlmImage[] = []): Promise<string | null> {
   const client = new Anthropic({ apiKey: getSetting("anthropicKey") });
+  const content = images.length
+    ? [
+        ...images.map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.contentType as "image/jpeg", data: i.data.toString("base64") } })),
+        { type: "text" as const, text: user },
+      ]
+    : user;
   const res = await client.beta.messages.create({
     model: "claude-opus-5-5",
-    max_tokens: 1024,
+    max_tokens: images.length ? 4096 : 1024,
     output_config: { effort: "low" },
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     system,
-    messages: [{ role: "user", content: user }],
+    messages: [{ role: "user", content }],
   } as Parameters<typeof client.beta.messages.create>[0] & { fallbacks: string });
   if (!("content" in res) || res.stop_reason === "refusal") return null;
   const text = res.content
@@ -48,7 +60,7 @@ async function viaClaude(system: string, user: string): Promise<string | null> {
   return text || null;
 }
 
-async function viaOllama(system: string, user: string): Promise<string | null> {
+async function viaOllama(system: string, user: string, images: LlmImage[] = []): Promise<string | null> {
   const res = await fetch(`${getSetting("ollamaUrl").replace(/\/+$/, "")}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -58,26 +70,34 @@ async function viaOllama(system: string, user: string): Promise<string | null> {
       think: false,
       messages: [
         { role: "system", content: system },
-        { role: "user", content: user },
+        // A vision model (qwen3-vl, gemma3…) reads the pictures; a text-only one answers from the words.
+        { role: "user", content: user, ...(images.length && { images: images.map((i) => i.data.toString("base64")) }) },
       ],
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(images.length ? 180_000 : 60_000),
   });
   if (!res.ok) throw new Error(`ollama ${res.status}`);
   const j = (await res.json()) as { message?: { content?: string } };
   return j.message?.content?.replace(/<think>[\s\S]*?<\/think>/g, "").trim() || null;
 }
 
+/** Which LLM llmText would ask right now (Claude is the one that costs money). */
+export function llmTextBackend(): "claude" | "ollama" | null {
+  const choice = getSetting("enhanceProvider");
+  if (choice === "none") return null;
+  if (choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"))) return "claude";
+  return choice === "ollama" || choice === "auto" ? "ollama" : null;
+}
+
 /**
  * One-shot text from whichever LLM this install allows: Claude (when a key is set, and never
  * on "open source only" installs unless picked explicitly), else a local Ollama. Null when none.
+ * `images` go along for a model that can see them (Content Factory's reference frames).
  */
-export async function llmText(system: string, user: string): Promise<string | null> {
-  const choice = getSetting("enhanceProvider");
-  if (choice === "none") return null;
-  const useClaude = choice === "anthropic" || (choice === "auto" && engineMode() !== "open" && !!getSetting("anthropicKey"));
-  if (useClaude) return viaClaude(system, user).catch(() => null);
-  if (choice === "ollama" || choice === "auto") return viaOllama(system, user).catch(() => null);
+export async function llmText(system: string, user: string, images: LlmImage[] = []): Promise<string | null> {
+  const backend = llmTextBackend();
+  if (backend === "claude") return viaClaude(system, user, images).catch(() => null);
+  if (backend === "ollama") return viaOllama(system, user, images).catch(() => null);
   return null;
 }
 

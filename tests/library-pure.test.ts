@@ -383,7 +383,7 @@ describe("round 4: helper steps, pins, review, nested folders, where a file is u
   const ev = (g: Generation) => ({ type: "generation" as const, generation: g });
 
   it("knows every helper feature the studios create, and nothing else", () => {
-    for (const f of ["shorts-step", "mixed-media-step", "marketing-step", "click-to-ad-step", "ad-multiplier-step", "mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard"]) {
+    for (const f of ["shorts-step", "mixed-media-step", "marketing-step", "click-to-ad-step", "ad-multiplier-step", "mixed-media-preview", "faceless-avatar", "faceless-voice", "moodboard", "eval"]) {
       expect(isHelperFeature(f), f).toBe(true);
     }
     for (const f of ["image", "shorts", "mixed-media", "marketing", "click-to-ad", "ad-multiplier", "dub", "katana", "faceless", "explainer", "storyboard", "storyboard-film", "upload", "app:app-step-up"]) {

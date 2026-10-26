@@ -4,12 +4,15 @@ import {
   ArrowLeft,
   Crop,
   Layers,
+  Eraser,
   Loader2,
+  Paintbrush,
   Plus,
   RefreshCw,
   Rotate3d,
   Scissors,
   SlidersHorizontal,
+  Sparkles,
   SquareDashedMousePointer,
   Sun,
   TriangleAlert,
@@ -34,26 +37,37 @@ import {
   addNodes,
   addRevision,
   ANGLES,
+  bboxFromAlpha,
   clampLayers,
   DECOMPOSE_COPY,
   decomposeCost,
   defaultLayers,
+  ENHANCE_LOOKS,
+  enhanceModels,
   expandPads,
   getNode,
+  INPAINT_SEES_TINT,
+  INPAINT_TINT,
   jobStatusText,
   LAYER_PRICES,
   layersModelFor,
   minLayers,
+  nativeSize,
+  needsDetectedSize,
+  placeTextBlocks,
+  readableBackdrop,
   reframeDoc,
   RELIGHT_DIRECTIONS,
   RELIGHT_LIGHTS,
   replaceNodes,
+  scaledSize,
   STALL_MS,
   textBlocksFrom,
   textChanges,
   textJobTitle,
   TOOL_MODELS,
   type Box,
+  type EnhanceLook,
   type LayerJob,
   type LayerJobInput,
   type LayerNode,
@@ -65,6 +79,7 @@ import { cn } from "@/lib/utils";
 import { Field, Segmented } from "./bits";
 import { costLabel, isFailed, isRunning, latestJob, modelsFor, useEditor, type Target, type ToolId } from "./editor-context";
 import { LayerGrader } from "./grade-gl";
+import { useKeepAlpha } from "./keep-alpha";
 import { LayerThumb } from "./layers-panel";
 import { loadImage, ratioOf, renderDoc, renderNative, sizeOf, uploadRender } from "./render";
 
@@ -73,7 +88,9 @@ export const TOOLS: { id: ToolId; label: string; icon: typeof Layers; isNew?: bo
   { id: "edit-text", label: "Edit text", icon: Type, isNew: true, hint: "Rewrite the words, keep the design" },
   { id: "remove-bg", label: "Remove background", icon: Scissors, hint: "Keep the subject on transparency" },
   { id: "regional", label: "Regional editing", icon: SquareDashedMousePointer, hint: "Draw a box and describe the change" },
+  { id: "inpaint", label: "Inpaint", icon: Paintbrush, isNew: true, hint: "Paint an area, say what goes there" },
   { id: "upscale", label: "Upscale", icon: ZoomIn, hint: "More pixels, sharper detail" },
+  { id: "enhance", label: "Enhancer", icon: Sparkles, isNew: true, hint: "Retouch skin, sharpen, restore detail" },
   { id: "relight", label: "Relight", icon: Sun, hint: "New light on a layer or the picture" },
   { id: "angles", label: "Angles", icon: Rotate3d, hint: "See it from another camera angle" },
   { id: "expand", label: "Expand & Crop", icon: Crop, isNew: true, hint: "Resize the canvas, fill it with AI" },
@@ -107,14 +124,14 @@ function Scope({ node }: { node?: LayerNode }) {
   );
 }
 
-function ModelSelect({ tool, value, onChange }: { tool: LayerTool; value?: string; onChange: (id: string) => void }) {
+function ModelSelect({ tool, ids, value, onChange, label = "Model" }: { tool: LayerTool; ids?: string[]; value?: string; onChange: (id: string) => void; label?: string }) {
   const { engine, models } = useEditor();
-  const options = modelsFor(models, TOOL_MODELS[tool][engine]);
-  if (options.length < 2) return options[0] ? <p className="text-[12px] text-muted-foreground">Model · {options[0].name}</p> : null;
+  const options = modelsFor(models, ids ?? TOOL_MODELS[tool][engine]);
+  if (options.length < 2) return options[0] ? <p className="text-[12px] text-muted-foreground">{label} · {options[0].name}</p> : null;
   return (
-    <Field label="Model">
+    <Field label={label}>
       <Select value={value ?? options[0].id} onValueChange={onChange}>
-        <SelectTrigger className="h-9 w-full rounded-lg" aria-label="Model">
+        <SelectTrigger className="h-9 w-full rounded-lg" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -130,10 +147,10 @@ function ModelSelect({ tool, value, onChange }: { tool: LayerTool; value?: strin
 }
 
 /** The model the tool will run (picked, or the engine's default); `picked` is what the user chose, if anything. */
-function useToolModel(tool: LayerTool) {
+function useToolModel(tool: LayerTool, ids?: string[]) {
   const { engine, models } = useEditor();
   const [picked, setPicked] = useState<string | undefined>();
-  const options = TOOL_MODELS[tool][engine];
+  const options = ids ?? TOOL_MODELS[tool][engine];
   const chosen = picked && options.includes(picked) ? picked : undefined;
   const id = chosen ?? options[0];
   return { modelId: id, model: id ? models[id] : undefined, setModelId: setPicked, picked: chosen };
@@ -210,6 +227,22 @@ function KeepAlpha({ node, value, onChange }: { node?: LayerNode; value: boolean
   );
 }
 
+/**
+ * A layer as a model should read it: a transparent one (a decomposition's text layer) on a backdrop
+ * its content stands out from, since models see no alpha (transparent pixels read as black). The
+ * stored render's URL, or undefined for a layer without transparency (it goes as it is).
+ */
+async function onBackdrop(node: LayerNode, name: string): Promise<string | undefined> {
+  const c = await renderNative(node, 2048);
+  const bg = readableBackdrop(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data);
+  if (!bg) return undefined;
+  const [flat, f] = blankCanvas(c.width, c.height);
+  f.fillStyle = bg;
+  f.fillRect(0, 0, c.width, c.height);
+  f.drawImage(c, 0, 0);
+  return uploadRender(flat, name);
+}
+
 function HowItWorks({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-lg border bg-card px-3 py-2.5">
@@ -234,6 +267,14 @@ function useRun() {
       }
     },
   };
+}
+
+/** A blank canvas of a size. */
+function blankCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext("2d")!];
 }
 
 // ---------------------------------------------------------------------------
@@ -430,32 +471,42 @@ function DecomposeTool() {
 // Edit text
 
 function EditTextTool() {
-  const { engine, models, isDemo, jobs, setHighlight, endJob } = useEditor();
+  const { isDemo, jobs, setHighlight, endJob, engine } = useEditor();
   const { target, node } = useTarget();
   const scopeId = node?.id ?? null;
   const detect = latestJob(jobs, ["text-detect"], scopeId);
   const editJob = latestJob(jobs, ["text-edit"], scopeId);
   const { modelId, model, setModelId } = useToolModel("text-edit");
-  const detectModel = models[TOOL_MODELS["text-detect"].cloud[0]];
+  const detector = useToolModel("text-detect");
+  /** Ideogram or Florence-2 on the cloud: the picker stays in reach once rows are listed. */
+  const detectors = TOOL_MODELS["text-detect"][engine].length;
+  const [keepAlpha] = useKeepAlpha(node);
   const { busy, go } = useRun();
   const [rows, setRows] = useState<{ from: string; to: string; box: Box | null }[]>([]);
   const [restored, setRestored] = useState(false);
+  /** The detector answered, but not with lines (shown as a failure to read). */
+  const [unreadable, setUnreadable] = useState(false);
+  /** Lines typed by hand: the fallback when detection can't run or misses one. */
+  const [typing, setTyping] = useState(false);
   /** The detection whose rows are in the list (set once they've loaded). */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
-  // Rows from the newest finished detection (boxes measured on its image, placed in its frame). A
-  // refetch (or React's strict-mode re-run) mid-load just loads it again.
+  // Rows from the newest finished detection, laid out in the frame it read. Pixel boxes are measured
+  // against what was read: Ideogram's returned background, else (an OCR answer without a size) the
+  // picture that was sent. A refetch (or React's strict-mode re-run) mid-load just loads it again.
   useEffect(() => {
     if (!detect || detect.result?.status !== "succeeded" || loadedFor === detect.id) return;
     const out = detect.result.outputs[0];
+    const sent = typeof detect.settings?.image === "string" ? detect.settings.image : undefined;
+    const measure = out?.kind === "image" ? out.url : needsDetectedSize(out?.meta) ? sent : undefined;
     let gone = false;
-    void (out ? loadImage(out.url).then((img) => sizeOf(img)) : Promise.reject(new Error("no output")))
+    void (measure ? loadImage(measure).then((img) => sizeOf(img)) : Promise.resolve(undefined))
       .catch(() => undefined)
       .then((natural) => {
         if (gone) return;
         const blocks: TextBlock[] = out ? textBlocksFrom(out.meta, natural) : [];
-        const f = detect.frame;
-        setRows(blocks.map((b) => ({ from: b.text, to: b.text, box: b.box ? [f[0] + b.box[0] * f[2], f[1] + b.box[1] * f[3], b.box[2] * f[2], b.box[3] * f[3]] : null })));
+        setRows(placeTextBlocks(blocks, detect.frame));
+        setUnreadable(!!out?.meta?.unreadable);
         setRestored(detect.state === "applied");
         setLoadedFor(detect.id);
         if (detect.state === "pending") endJob(detect.id, "applied");
@@ -467,41 +518,86 @@ function EditTextTool() {
   useEffect(() => () => setHighlight(null), [setHighlight]);
 
   const changes = textChanges(rows);
-  const detecting = detect && isRunning(detect);
-  const startDetect = () => {
+  const [preparing, setPreparing] = useState(false);
+  const detecting = !!detect && isRunning(detect);
+  const detectCost = costLabel(detector.model, isDemo(detector.model));
+  /** A transparent layer (a decomposition's text) goes on a backdrop its text stands out from, to the detector and the edit model alike. */
+  const readable = async () => {
+    if (!node) return undefined;
+    try {
+      return await onBackdrop(node, `${node.name}-text`);
+    } catch {
+      return undefined; // The layer goes as it is.
+    }
+  };
+  const startDetect = async () => {
     setLoadedFor(null);
     setRestored(false);
-    void go({ tool: "text-detect", target, label: "Detect text" });
+    setUnreadable(false);
+    setPreparing(true);
+    const image = await readable();
+    setPreparing(false);
+    void go({ tool: "text-detect", target, image, modelId: detector.modelId, label: "Detect text" });
   };
-  const generate = () =>
-    void go({ tool: "text-edit", target, modelId, settings: { rows: changes.map(({ from, to }) => ({ from, to })), keepAlpha: !!node && node.z > 0 }, label: textJobTitle(changes) });
+  const addLine = () => {
+    setTyping(true);
+    setRows([...rows, { from: "", to: "", box: null }]);
+  };
+  // A see-through layer gets its cut-out back after the edit (the flattened backdrop goes with it).
+  const generate = async () => {
+    setPreparing(true);
+    const image = await readable();
+    setPreparing(false);
+    void go({ tool: "text-edit", target, image, modelId, settings: { rows: changes.map(({ from, to }) => ({ from, to })), keepAlpha }, label: textJobTitle(changes) });
+  };
+  const detectorPicker = (
+    <>
+      <ModelSelect tool="text-detect" value={detector.modelId} onChange={detector.setModelId} label="Detector" />
+      {detector.model && detectors > 1 && (
+        <p className="text-[11px] text-pretty text-muted-foreground">
+          {detector.model.tagline}
+          {detector.model.pricing?.note && !isDemo(detector.model) ? ` · The price is an estimate: ${detector.model.pricing.note}.` : ""}
+        </p>
+      )}
+    </>
+  );
+  const listed = rows.length > 0 || typing;
+  const found = detect?.result?.status === "succeeded" && loadedFor === detect.id;
 
   return (
     <div className="space-y-4">
       <Scope node={node} />
       <HowItWorks>Edit text finds the text on your image and lists it here. Change any line, then generate a new image with your wording in the original design.</HowItWorks>
-      {engine === "cloud" ? (
-        !rows.length && (
-          <div className="space-y-2">
-            <Button variant="secondary" className="w-full rounded-full" onClick={startDetect} disabled={busy || !!detecting}>
-              {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
-            </Button>
-            <p className="text-center font-mono text-[11px] text-muted-foreground">{costLabel(detectModel, isDemo(detectModel))}</p>
-            {detect?.result?.status === "succeeded" && loadedFor === detect.id && !rows.length && <p className="text-center text-[12px] text-muted-foreground">No text was found on this image.</p>}
-            {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={startDetect} />}
-          </div>
-        )
-      ) : (
-        <p className="rounded-lg bg-muted/70 px-3 py-2 text-[12px] text-muted-foreground">Text detection runs on the cloud engine (Ideogram). On open source, type each line you want to change.</p>
+      {!rows.length && (
+        <div className="space-y-2">
+          {detectorPicker}
+          <Button variant="secondary" className="w-full rounded-full" onClick={() => void startDetect()} disabled={busy || preparing || detecting || !detector.model}>
+            {detecting ? <Loader2 className="animate-spin" /> : <Type />} {detecting ? "Reading the text…" : "Detect text"}
+          </Button>
+          <p className="text-center font-mono text-[11px] text-muted-foreground">{detectCost}</p>
+          {detector.model?.engine === "open" && !detecting && <p className="text-center text-[11px] text-pretty text-muted-foreground">Reads the lines on your ComfyUI: seconds on a GPU, a few minutes on a CPU.</p>}
+          {detecting && <JobState job={detect} />}
+          {found && !rows.length && (
+            <p className="text-center text-[12px] text-muted-foreground" role="status">
+              {unreadable ? "Could not read the text on this image." : "No text was found on this image."}
+            </p>
+          )}
+          {detect && isFailed(detect) && <JobState job={detect} failedTitle="Could not read the text on this image." onRetry={() => void startDetect()} />}
+          {!typing && (
+            <button type="button" className="mx-auto block text-[12px] font-medium text-brand-text hover:underline" onClick={addLine}>
+              Type the lines instead
+            </button>
+          )}
+        </div>
       )}
       {restored && rows.length > 0 && <p className="text-[11px] text-muted-foreground">Restored from your last detection — the image may have changed since. Re-detect if the regions look off.</p>}
-      {(rows.length > 0 || engine === "open") && (
+      {listed && (
         <ol className="space-y-2" aria-label="Text on the image">
           {rows.map((r, i) => (
             <li key={i} className="flex items-start gap-2" onPointerEnter={() => setHighlight(r.box)} onPointerLeave={() => setHighlight(null)} onFocus={() => setHighlight(r.box)} onBlur={() => setHighlight(null)}>
               <span className="mt-2 w-4 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{i + 1}</span>
               <div className="min-w-0 flex-1 space-y-1">
-                {engine === "open" && !r.box ? (
+                {!r.box ? (
                   <Input value={r.from} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} placeholder="Text on the image now" aria-label={`Text region ${i + 1}: current text`} className="h-8 text-[13px]" />
                 ) : (
                   <p className="truncate text-[11px] text-muted-foreground" title={r.from}>
@@ -516,39 +612,39 @@ function EditTextTool() {
                   className={cn("h-8 text-[13px]", r.to.trim() !== r.from.trim() && "border-primary")}
                 />
               </div>
-              {engine === "open" && (
+              {!r.box && (
                 <Button size="icon-xs" variant="ghost" className="mt-1" aria-label={`Remove row ${i + 1}`} onClick={() => setRows(rows.filter((_, j) => j !== i))}>
                   <X />
                 </Button>
               )}
             </li>
           ))}
-          {engine === "open" && (
-            <li>
-              <Button size="sm" variant="ghost" className="rounded-full" onClick={() => setRows([...rows, { from: "", to: "", box: null }])}>
-                <Plus /> Add a line
-              </Button>
-            </li>
-          )}
+          <li>
+            <Button size="sm" variant="ghost" className="rounded-full" onClick={addLine}>
+              <Plus /> Add a line
+            </Button>
+          </li>
         </ol>
       )}
-      {(rows.length > 0 || engine === "open") && (
+      {listed && (
         <>
+          {/* Once rows are listed, "Detect again" runs the detector picked here (detected rows can't be removed). */}
+          {rows.length > 0 && detectors > 1 && detectorPicker}
           <ModelSelect tool="text-edit" value={modelId} onChange={setModelId} />
-          <JobState job={editJob} failedTitle="Failed to apply the text changes" onRetry={generate} />
+          <JobState job={editJob} failedTitle="Failed to apply the text changes" onRetry={() => void generate()} />
           <div className="flex items-center gap-2">
-            {engine === "cloud" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Detect text again" onClick={startDetect} disabled={busy || !!detecting}>
-                    <RefreshCw />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Detect again · {costLabel(detectModel, isDemo(detectModel))}</TooltipContent>
-              </Tooltip>
-            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label={found ? "Detect text again" : "Detect text"} onClick={() => void startDetect()} disabled={busy || preparing || detecting || !detector.model}>
+                  {detecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {found ? "Detect again" : "Detect text"} · {detectCost}
+              </TooltipContent>
+            </Tooltip>
             <div className="flex-1">
-              <RunRow cost={costLabel(model, isDemo(model))} busy={busy} disabled={!changes.length || (editJob && isRunning(editJob))} onClick={generate}>
+              <RunRow cost={costLabel(model, isDemo(model))} busy={busy || preparing} disabled={!changes.length || (editJob && isRunning(editJob))} onClick={() => void generate()}>
                 <Wand2 /> Generate
               </RunRow>
             </div>
@@ -608,9 +704,9 @@ function RelightTool() {
   const [light, setLight] = useState(RELIGHT_LIGHTS[0][0]);
   const [direction, setDirection] = useState(RELIGHT_DIRECTIONS[0][0]);
   const [extra, setExtra] = useState("");
-  const [keepAlpha, setKeepAlpha] = useState(!!selected && selected.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(selected);
   return (
-    <SimpleTool tool="relight" verb="Relight" failedTitle="Couldn't relight it" settings={{ light, direction, keepAlpha: !!selected && keepAlpha }} prompt={extra.trim() || undefined}>
+    <SimpleTool tool="relight" verb="Relight" failedTitle="Couldn't relight it" settings={{ light, direction, keepAlpha }} prompt={extra.trim() || undefined}>
       <Field label="Lighting">
         <Chips label="Lighting" value={light} options={RELIGHT_LIGHTS.map(([l]) => l)} onChange={setLight} />
       </Field>
@@ -633,11 +729,10 @@ function AnglesTool() {
   const [tilt, setTilt] = useState(0);
   const [zoom, setZoom] = useState(5);
   const [angle, setAngle] = useState(ANGLES[0][0]);
-  const [keepAlpha, setKeepAlpha] = useState(!!selected && selected.z > 0);
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(selected);
   const sliders = picker.modelId === "qwen-multiple-angles";
-  const keep = !!selected && keepAlpha;
   return (
-    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" picker={picker} settings={sliders ? { rotate, tilt, zoom, keepAlpha: keep } : { angle, keepAlpha: keep }}>
+    <SimpleTool tool="angles" verb="New angle" failedTitle="Couldn't make the new angle" picker={picker} settings={sliders ? { rotate, tilt, zoom, keepAlpha } : { angle, keepAlpha }}>
       {sliders ? (
         <>
           <Field label="Rotate" hint={`${rotate}°`}>
@@ -814,6 +909,175 @@ function RegionalTool() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inpaint (brush an area, say what goes there)
+
+function InpaintTool() {
+  const { doc, isDemo, jobs, setMode, mode, paint, setPaint, paintVersion, brushSize, setBrushSize } = useEditor();
+  const { target, node } = useTarget();
+  const { modelId, model, setModelId } = useToolModel("inpaint");
+  const [prompt, setPrompt] = useState("");
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
+  const [painted, setPainted] = useState<Box | null>(null);
+  const { busy, go } = useRun();
+  const [preparing, setPreparing] = useState(false);
+  const job = latestJob(jobs, ["inpaint"], node?.id ?? null);
+  // The painted area matches the picture the tool sends: the layer at its own detail, or the composite (≤ 2048 px).
+  const [pw, ph] = node ? nativeSize(node, 2048) : scaledSize(doc.width, doc.height, Math.min(1, 2048 / Math.max(doc.width, doc.height)));
+  const surface = `${node ? `${node.id}|${node.src}|${node.crop?.join(",")}` : "whole"}|${pw}x${ph}`;
+
+  useEffect(() => {
+    setMode("inpaint");
+    return () => {
+      setMode("select");
+      setPaint(null);
+    };
+  }, [setMode, setPaint]);
+  // A fresh area for each layer (or the whole image) it's painted on.
+  const nodeId = node?.id;
+  useEffect(() => {
+    // (The measuring below then finds it empty.) `surface` names the picture: a new revision starts afresh too.
+    setPaint({ nodeId, canvas: blankCanvas(pw, ph)[0], erase: false });
+  }, [surface, nodeId, pw, ph, setPaint]);
+  // What's painted, measured once the strokes pause.
+  useEffect(() => {
+    if (!paint) return;
+    const t = setTimeout(() => {
+      const c = paint.canvas;
+      setPainted(bboxFromAlpha(c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data, c.width, c.height, 8));
+    }, 150);
+    return () => clearTimeout(t);
+  }, [paint, paintVersion]);
+
+  // A fresh canvas, not the old one wiped: the stage keeps its red copy per canvas and stroke count.
+  const clear = () => {
+    if (!paint) return;
+    setPaint({ ...paint, canvas: blankCanvas(paint.canvas.width, paint.canvas.height)[0] });
+    setPainted(null);
+  };
+
+  const run = async () => {
+    if (!paint || !painted) return;
+    setPreparing(true);
+    try {
+      // The picture, its mask (white = change) and, for models without a mask input, the picture tinted where painted.
+      const picture = node ? await renderNative(node, 2048) : await renderDoc(doc, { scale: paint.canvas.width / doc.width });
+      const { width: W, height: H } = picture;
+      const [mask, m] = blankCanvas(W, H);
+      m.fillStyle = "#000";
+      m.fillRect(0, 0, W, H);
+      m.drawImage(paint.canvas, 0, 0, W, H);
+      const [tint, t] = blankCanvas(W, H);
+      t.drawImage(paint.canvas, 0, 0, W, H);
+      t.globalCompositeOperation = "source-in";
+      t.fillStyle = INPAINT_TINT;
+      t.fillRect(0, 0, W, H);
+      const [sketch, sk] = blankCanvas(W, H);
+      sk.drawImage(picture, 0, 0);
+      sk.drawImage(tint, 0, 0);
+      const name = node?.name ?? "image";
+      const [image, maskUrl, sketchUrl] = await Promise.all([uploadRender(picture, `inpaint-${name}`), uploadRender(mask, `inpaint-mask-${name}`), uploadRender(sketch, `inpaint-marked-${name}`)]);
+      await go({ tool: "inpaint", target, image, mask: maskUrl, sketch: sketchUrl, modelId, prompt: prompt.trim(), settings: { keepAlpha }, label: "Inpaint" });
+    } catch (e) {
+      toast.error((e as Error).message || "Couldn't prepare the painted area");
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const erase = !!paint?.erase;
+  return (
+    <div className="space-y-4">
+      <Scope node={node} />
+      <HowItWorks>Paint over what you want to change, then say what goes there. Only the painted area changes; the rest stays as it is.</HowItWorks>
+      <Field label="Brush" hint={`${brushSize} px`}>
+        <div className="space-y-2.5">
+          <Segmented
+            label="Brush"
+            value={mode === "inpaint" && erase ? "erase" : "paint"}
+            onChange={(v) => {
+              if (paint) setPaint({ ...paint, erase: v === "erase" });
+              setMode("inpaint");
+            }}
+            options={[
+              ["paint", "Paint"],
+              ["erase", "Erase"],
+            ]}
+          />
+          <Slider aria-label="Brush size" min={4} max={Math.max(64, Math.round(Math.max(doc.width, doc.height) / 6))} step={1} value={[brushSize]} onValueChange={([v]) => setBrushSize(v)} />
+        </div>
+      </Field>
+      <p className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground" role="status">
+        {painted ? <span>Painted area {Math.round((painted[2] * (node?.w ?? doc.width)) / (paint?.canvas.width || 1))} × {Math.round((painted[3] * (node?.h ?? doc.height)) / (paint?.canvas.height || 1))}</span> : <span>Paint on the canvas — the area shows in red.</span>}
+        {painted && (
+          <button type="button" className="shrink-0 hover:text-foreground hover:underline" onClick={clear}>
+            <Eraser className="mr-1 inline size-3" />
+            Clear
+          </button>
+        )}
+      </p>
+      <Field label="What goes there" htmlFor="inpaint-prompt">
+        <Textarea
+          id="inpaint-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          maxLength={2000}
+          placeholder="e.g. “a vase of white tulips”, or “remove it, fill in the background”"
+          className="min-h-16 text-[13px]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && painted && prompt.trim()) void run();
+          }}
+        />
+      </Field>
+      <ModelSelect tool="inpaint" value={modelId} onChange={setModelId} />
+      {model && <p className="-mt-2 text-[11px] text-muted-foreground">{INPAINT_SEES_TINT.has(model.id) ? `${model.name} has no mask input: it's shown the painted area tinted red.` : `${model.name} takes the painted mask itself.`}</p>}
+      <KeepAlpha node={node} value={keepAlpha} onChange={setKeepAlpha} />
+      <JobState job={job} failedTitle="Couldn't inpaint it" onRetry={() => void run()} />
+      <RunRow cost={costLabel(model, isDemo(model))} busy={busy || preparing} disabled={!painted || !prompt.trim() || !model || (!!job && isRunning(job))} onClick={() => void run()}>
+        <Paintbrush /> Inpaint
+      </RunRow>
+      {!painted ? <p className="text-[11px] text-muted-foreground">Paint the area first{prompt.trim() ? "" : ", then describe it"}.</p> : !prompt.trim() && <p className="text-[11px] text-muted-foreground">Say what should fill the painted area.</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Enhancer (retouch, sharpen, detail)
+
+function EnhanceTool() {
+  const { engine, isDemo, jobs } = useEditor();
+  const { target, node } = useTarget();
+  const [look, setLook] = useState<EnhanceLook>("skin");
+  const info = ENHANCE_LOOKS.find((l) => l.id === look)!;
+  const { modelId, model, setModelId } = useToolModel("enhance", enhanceModels(look, engine));
+  const [extra, setExtra] = useState("");
+  const [keepAlpha, setKeepAlpha] = useKeepAlpha(node);
+  const { busy, go } = useRun();
+  const job = latestJob(jobs, ["enhance"], node?.id ?? null);
+  const detail = look === "detail";
+  const run = () => void go({ tool: "enhance", target, modelId, prompt: detail ? undefined : extra.trim() || undefined, settings: { look, keepAlpha: !detail && keepAlpha }, label: info.verb });
+  return (
+    <div className="space-y-4">
+      <Scope node={node} />
+      <Field label="Enhance">
+        <Chips label="Enhance" value={look} options={ENHANCE_LOOKS.map((l) => l.id)} names={(id) => ENHANCE_LOOKS.find((l) => l.id === id)!.label} onChange={setLook} />
+      </Field>
+      <p className="-mt-2 text-[12px] text-pretty text-muted-foreground">{info.hint}.</p>
+      {!detail && (
+        <Field label="Anything else (optional)" htmlFor="enhance-extra">
+          <Input id="enhance-extra" value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={300} placeholder="e.g. “keep the freckles”" className="h-9" />
+        </Field>
+      )}
+      <ModelSelect tool="enhance" ids={enhanceModels(look, engine)} value={modelId} onChange={setModelId} />
+      {!detail && <KeepAlpha node={node} value={keepAlpha} onChange={setKeepAlpha} />}
+      <JobState job={job} failedTitle="Couldn't enhance it" onRetry={run} />
+      <RunRow cost={costLabel(model, isDemo(model))} busy={busy} disabled={!model || (!!job && isRunning(job))} onClick={run}>
+        <Sparkles /> {info.verb}
+      </RunRow>
     </div>
   );
 }
@@ -1094,11 +1358,14 @@ export function ToolRail() {
                 </SimpleTool>
               )}
               {tool === "regional" && <RegionalTool />}
+              {/* Its painted area belongs to one layer (or the whole image): picking another starts afresh. */}
+              {tool === "inpaint" && <InpaintTool key={selected?.id ?? "whole"} />}
               {tool === "upscale" && (
                 <SimpleTool tool="upscale" verb="Upscale" failedTitle="Couldn't upscale it">
                   <p className="text-[12px] text-muted-foreground">{selected ? "The layer gets more pixels in the same place on the canvas; switch back any time in its versions." : "The upscaled picture arrives as a new layer on top."}</p>
                 </SimpleTool>
               )}
+              {tool === "enhance" && <EnhanceTool key={selected?.id ?? "whole"} />}
               {tool === "relight" && <RelightTool />}
               {tool === "angles" && <AnglesTool />}
               {tool === "expand" && <ExpandTool />}

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectField, useSettings } from "@/components/connect-field";
 import { GetStarted } from "@/components/get-started";
+import { LoraSettings } from "@/components/lora-settings";
 import { useStatus, type StatusInfo } from "@/lib/api";
 import { connectionSummary, ENGINE_MODE_LABEL, FAL_KEYS_URL, showFirstRun } from "@/lib/connections";
 import { cn } from "@/lib/utils";
@@ -347,6 +348,14 @@ export function SettingsForm({ prices }: { prices?: string }) {
           placeholder="http://127.0.0.1:8189"
           hint="A second ComfyUI for LatentSync 1.6 and ThinkSound, whose node packs can't share the main install. scripts/comfy/README.md shows how to start one."
         />
+      </Section>
+
+      <Section
+        id="loras"
+        title="LoRAs · looks, motions and effects"
+        description="Looks, camera moves and effects add LoRA files to open models, on your GPU and in the cloud. Fuobe fetches the pinned version a run needs and follows each file's licence: one that may only run on your GPU is never sent to a cloud API."
+      >
+        <LoraSettings folder={get("comfyLorasDir")} civitaiKey={get("civitaiKey")} />
       </Section>
 
       <Section

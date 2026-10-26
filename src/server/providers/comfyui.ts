@@ -12,9 +12,11 @@ import {
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropLoadedSound,
   dropVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
+  canTakeLoras,
   injectLoras,
   languageName,
   paletteSentence,
@@ -37,10 +39,12 @@ import { expandAudioJoinWorkflow, expandVideoJoinWorkflow } from "@/lib/av/joins
 import { expandTimelineWorkflow, readTimeline } from "@/lib/av/timeline";
 import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSide, wholeClipProblem, wholeClipTool } from "@/lib/av/video-finish";
 import { guessKind } from "@/lib/catalog/payload";
+import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
+import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
 import { probeWebm } from "../webm-probe";
@@ -269,17 +273,27 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
     .filter((o) => o.role === "language")
     .map((o) => textsOf(outputs[o.node])[0]?.trim())
     .find(Boolean);
+  // OCR: the size the model saw (a PreviewAny "frame") goes with the lines it read.
+  const frame = declared
+    .filter((o) => o.role === "frame")
+    .map((o) => parseOcrFrame(textsOf(outputs[o.node]).join("\n")))
+    .find(Boolean);
   const files: ComfyOutput[] = [];
   const pick = (type: string) => {
     for (const nodeId of order) {
       const spec: ManifestOutput | undefined = declared.find((o) => o.node === nodeId);
-      if (spec?.role === "language") continue;
+      if (spec?.role === "language" || spec?.role === "frame") continue;
       const ui = outputs[nodeId] ?? {};
       const texts = textsOf(ui);
       const found: { key: string; f: HistoryFile }[] = [];
       for (const [key, val] of Object.entries(ui)) {
         if (!Array.isArray(val)) continue;
         for (const f of val) if (isFile(f) && f.type === type) found.push({ key, f });
+      }
+      // OCR lines (SaveText .json): the model's answer, read into lines with boxes.
+      if (spec?.role === "lines" && texts.length) {
+        if (type === "output") files.push(ocrOutput(texts.join("\n"), frame));
+        continue;
       }
       // A text output with no file (PreviewAny): keep the words.
       if (!found.length && type === "output" && spec?.kind === "text" && texts.length) {
@@ -320,6 +334,18 @@ function textOutput(o: ComfyOutput, text: string | undefined, spec: ManifestOutp
   }
   if (language) meta.language = language;
   return { ...o, kind: "text", ...(text !== undefined ? { text } : {}), ...(Object.keys(meta).length ? { meta } : {}) };
+}
+
+/**
+ * An OCR answer as Fuobe's OCR output (the shape Florence-2's cloud route gives): the lines as plain
+ * text, `meta.lines` [{text, bbox: [x, y, w, h] 0–1}] and `meta.size`, the picture the model read. An
+ * answer with no list in it keeps its words, with no lines and `meta.unreadable`.
+ */
+function ocrOutput(answer: string, frame: OcrFrame | undefined): ComfyOutput {
+  const { lines, ok } = parseOcrLines(answer, frame);
+  const text = ok ? ocrText(lines) : answer.trim();
+  const size = frame?.width && frame.height ? [frame.width, frame.height] : undefined;
+  return { url: dataUrl(Buffer.from(text), "text/plain"), kind: "text", contentType: "text/plain", text, meta: { lines, ...(size ? { size } : {}), ...(ok ? {} : { unreadable: true }) } };
 }
 
 /** Layers: download each RGBA layer once, add its bounding box (from alpha) and hand the bytes on as a data URL. */
@@ -724,6 +750,12 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     values.width = Math.max(multiple, Math.floor((dims.width * k) / multiple) * multiple);
     values.height = Math.max(multiple, Math.floor((dims.height * k) / multiple) * multiple);
   }
+  // An end card appended to an ad (video-append-endcard): the card is encoded at the ad's own size and frame rate,
+  // so the ad's packets are copied as they are. Only the ad's header knows them.
+  if (manifest.id === "video-append-endcard") {
+    if (!clip?.width || !clip.height || !clip.fps) throw new ProviderError("Couldn't read the ad's size and frame rate, so the end card can't be added");
+    Object.assign(values, { width: clip.width, height: clip.height, fps: Math.round(clip.fps * 1000) / 1000 });
+  }
   if (b.frames && span) values.frames = computeFrames(span, fps, Number(d.frameStep ?? 4), manifest.limits?.maxFrames);
   // Lip re-sync runs as long as the new voice; a voice past the frame cap is refused, not cut.
   const voiceLength = ctx.op === "lipsync" && b.frames && !span ? ctx.media?.(String(values.audio ?? ""))?.duration : undefined;
@@ -907,7 +939,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
   // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
   wf = tagMetaBatch(wf, ctx.generationId);
-  if (clip && !clip.hasAudio && clip.hasVideo) wf = dropVhsAudio(wf);
+  if (clip && !clip.hasAudio && clip.hasVideo) {
+    wf = dropVhsAudio(wf);
+    // Core LoadAudio reading the clip's own sound (the end card's ad): no sound, no sound track.
+    wf = dropLoadedSound(wf, (b.video ?? []).filter((t) => t.input === "audio").map((t) => t.node), outputIds);
+  }
   if (manifest.expand === "captions") {
     if (!cues.length) throw new ProviderError("No timed captions to burn in. Transcribe the clip first, or write lines like “0.00-2.40: Hello there”");
     try {
@@ -930,7 +966,11 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   } catch (e) {
     throw new ProviderError((e as Error).message);
   }
-  if (input.loras?.length) wf = injectLoras(wf, input.loras);
+  if (input.loras?.length) {
+    // A LoRA a graph can't attach would be dropped without a word: say so instead.
+    if (!canTakeLoras(wf)) throw new ProviderError(`${manifest.title} can't take LoRAs (it has no model loader to attach them to)`);
+    wf = injectLoras(wf, input.loras);
+  }
   // The output not asked for isn't saved (nor encoded: ComfyUI runs only what an output node needs).
   if (keepRole && manifest.outputs.some((o) => o.role === keepRole)) for (const o of manifest.outputs) if (o.role && o.role !== keepRole) delete wf[o.node];
   if (ctx.op === "remove-object" && !handOff) for (const o of manifest.outputs) if (o.role === "mask") delete wf[o.node];
@@ -1075,7 +1115,10 @@ export const comfyProvider: ProviderAdapter = {
       const where = worker === "isolated" ? "the isolated ComfyUI worker" : "your ComfyUI";
       const missingPack =
         body.error?.type === "missing_node_type" && packs.length ? `This workflow needs the ${packs.join(" + ")} node pack${packs.length > 1 ? "s" : ""} on ${where} (see scripts/comfy/README.md)` : undefined;
-      const detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...(input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: l.url }))] }) : (missingPack ?? body.error?.message);
+      // A LoRA it lacks: point at its model card (a civitai download URL answers 401 without the key) and the LoRA folder setting.
+      const loraModels = (input.loras ?? []).map((l) => ({ file: l.file, folder: "loras", url: loraByFile(l.file)?.page ?? (l.url && !needsToken(l.url) ? l.url : undefined) }));
+      let detail = body.node_errors && Object.keys(body.node_errors as object).length ? explainComfyError(body.node_errors, { ...manifest, models: [...manifest.models, ...loraModels] }) : (missingPack ?? body.error?.message);
+      if (detail && loraModels.some((l) => detail!.includes(`"${l.file}"`))) detail = `${detail}\nSet the LoRA folder in Settings → LoRAs and Fuobe downloads LoRAs before a run`;
       if (!detail && !res.ok && worker === "isolated") throw isolatedAnswer("the prompt", res.status);
       throw new ProviderError(detail ?? `ComfyUI /prompt failed (${res.status})`, res.status);
     }
@@ -1189,6 +1232,16 @@ export const comfyProvider: ProviderAdapter = {
     return { ok: true, detail };
   },
 };
+
+/** The LoRA files the ComfyUI server that runs `route` has (GET /models/loras), or null when it can't say. */
+export async function comfyLoraFiles(route?: ModelRoute): Promise<string[] | null> {
+  try {
+    const res = await comfyFetch("/models/loras", {}, workerFor(route?.endpoint));
+    return res.ok ? ((await res.json()) as string[]) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Which manifest models are present on the connected ComfyUI server. */
 export async function modelInventory(): Promise<Record<string, string[]> | null> {

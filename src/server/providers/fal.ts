@@ -1,5 +1,6 @@
 import "server-only";
 import { createFalClient } from "@fal-ai/client";
+import { loraEndpointFor, routeLoraField } from "@/lib/catalog/loras";
 import { buildPayload, extractOutputs, noOutputsError } from "@/lib/catalog/payload";
 import { getSetting } from "../settings";
 import { ProviderError, type ProviderAdapter } from "./types";
@@ -47,22 +48,37 @@ function describeError(body: unknown): string {
   return typeof d === "string" ? d : JSON.stringify(d).slice(0, 500);
 }
 
+/** A plain file name with an extension to upload under ("x.safetensors", "dataset.zip"), or undefined. */
+function fileName(name: string | undefined): string | undefined {
+  const base = name?.split(/[\\/]/).pop()?.trim();
+  return base && /^[\w.\-()[\] ]{1,200}\.[A-Za-z0-9]{1,12}$/.test(base) && !base.startsWith(".") ? base : undefined;
+}
+
 export const falProvider: ProviderAdapter = {
   id: "fal",
   label: "fal.ai",
   isConfigured: () => !!key(),
 
-  async prepareFile(data, contentType) {
+  async prepareFile(data, contentType, name) {
     const client = createFalClient({ credentials: key() });
-    return client.storage.upload(new Blob([new Uint8Array(data)], { type: contentType }));
+    // The file keeps its name (and so its extension): an unnamed blob is stored as "<time>.<subtype>", and
+    // a LoRA mirrored as application/octet-stream would land at ….octet, which loaders that go by the
+    // extension (fal's LTX-2.3 quality takes only .safetensors URLs) refuse.
+    const blob = fileName(name) ? new File([new Uint8Array(data)], fileName(name)!, { type: contentType }) : new Blob([new Uint8Array(data)], { type: contentType });
+    return client.storage.upload(blob);
   },
 
   async submit({ route, input }) {
-    const payload = buildPayload(route.map ?? {}, input);
-    // Trained identities (fal LoRA URLs) switch to the model's LoRA endpoint.
-    const loras = (input.loras ?? []).filter((l) => l.url);
-    const endpoint = loras.length && route.loraEndpoint ? route.loraEndpoint : route.endpoint;
-    if (endpoint !== route.endpoint) payload.loras = loras.map((l) => ({ path: l.url, scale: l.strength ?? 1 }));
+    // LoRAs (trained identities, a recipe's looks and motions) go in the route's LoRA field (FieldMap.loras:
+    // `transformer` per file on Wan 2.2, `weight_name`, at most the API's maximum) and switch to its LoRA endpoint.
+    const map = { ...route.map, loras: routeLoraField(route) };
+    const payload = buildPayload(map, input);
+    let endpoint: string;
+    try {
+      endpoint = loraEndpointFor({ ...route, map }, input.loras);
+    } catch (e) {
+      throw new ProviderError((e as Error).message);
+    }
     const res = (await falFetch(`${QUEUE}/${endpoint}`, {
       method: "POST",
       body: JSON.stringify(payload),

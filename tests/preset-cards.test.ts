@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { APPS, EFFECTS, MOTIONS } from "@/lib/catalog";
+
+// One measured cover (pnpm eval:covers writes this file), for a preset id the catalog doesn't have.
+vi.mock("@/lib/preset-previews.generated", () => ({
+  PRESET_PREVIEWS: { "effect-measured-cover": { poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4", run: "r", engine: "open", model: "oss-wan22-14b", variant: "research" } },
+}));
 import {
   appFx,
   CAMERA_MOVES,
@@ -280,5 +285,15 @@ describe("preset how-to line", () => {
   it("handles presets without inputs", () => {
     expect(presetHowTo({ type: "app", userPrompt: "required", inputs: [] })).toBe("Describe what you want, then Generate.");
     expect(presetHowTo({ type: "app", userPrompt: "none", inputs: [] })).toBe("Press Generate — no inputs needed.");
+  });
+});
+
+describe("real covers", () => {
+  it("a preset with a measured cover shows that clip and its poster instead of the procedural preview", () => {
+    const measured = previewFor({ id: "effect-measured-cover", type: "effect", name: "Measured", category: "Elements" });
+    expect(measured).toMatchObject({ poster: "/previews/dop/effect-measured-cover.jpg", video: "/previews/dop/effect-measured-cover.mp4" });
+    expect(measured.fx).toBeUndefined();
+    // The others keep their procedural preview.
+    expect(previewFor({ id: "effect-other", type: "effect", name: "Other", category: "Elements" }).video).toBeUndefined();
   });
 });

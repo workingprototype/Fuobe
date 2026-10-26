@@ -302,9 +302,10 @@ function oneCall(input: GenjutsuPlanInput): string | undefined {
 const unrunnable = (s: PlanStep) => !providersOf(s).some((id) => provider(id).isConfigured());
 
 /** What the steps cost together (null when a price is unknown) and whether they would run as a demo. */
-function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number | null; demo: boolean } {
+function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number | null; demo: boolean; providers: ProviderId[] } {
   let cost: number | null = 0;
   const modes: StepMode[] = [];
+  const providers = new Set<ProviderId>();
   let cannot = false;
   for (const s of steps) {
     let p: ReturnType<typeof previewChained>;
@@ -320,6 +321,7 @@ function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number |
       throw new ShortsError((e as Error).message, 422);
     }
     modes.push({ step: s, demo: p.demo });
+    providers.add(p.providerId);
     // Genjutsu's tiers and Kling O3's edit price aren't in the catalog per resolution: the planner's table.
     const own = p.demo ? null : makerStepUsd(s.request.modelId, s.request.params);
     const usd = own ?? p.costUsd;
@@ -327,12 +329,14 @@ function price(steps: PlanStep[], input: GenjutsuPlanInput): { costUsd: number |
   }
   const problem = mixProblem(modes, cannot, input);
   if (problem) throw new ShortsError(problem, 422);
-  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo: modes.some((x) => x.demo) };
+  return { costUsd: cost === null ? null : Math.round(cost * 10000) / 10000, demo: modes.some((x) => x.demo), providers: [...providers] };
 }
 
 export interface GenjutsuEstimate {
   costUsd: number | null;
   demo: boolean;
+  /** Where the steps run ("mock" for demo steps): the evaluation harness refuses a route through Higgsfield's API. */
+  providers: ProviderId[];
   /** The model that runs (the default, or the one picked) and its tier. */
   modelId: string;
   modelName: string;

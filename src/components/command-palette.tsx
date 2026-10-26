@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, KeyRound, LayoutGrid, Loader2, Plus, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Plus, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { NAV } from "@/components/nav-items";
@@ -50,6 +50,7 @@ const SETTINGS: { id: string; label: string; icon: LucideIcon; keywords: string 
   { id: "cloud", label: "API keys", icon: KeyRound, keywords: "fal replicate higgsfield paid cloud connect" },
   { id: "comfyui", label: "ComfyUI server", icon: Server, keywords: "open source gpu url connect local" },
   { id: "engine", label: "Engine mode", icon: Cpu, keywords: "open source cloud both" },
+  { id: "loras", label: "LoRAs", icon: Layers, keywords: "lora folder civitai key looks motions effects download licence" },
   { id: "text-ai", label: "Prompt enhancement", icon: Sparkles, keywords: "claude ollama enhancer llm" },
   { id: "notifications", label: "Notifications", icon: Bell, keywords: "browser done alerts" },
   { id: "security", label: "Password and API tokens", icon: ShieldCheck, keywords: "security sign in mcp token" },

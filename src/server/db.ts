@@ -445,6 +445,30 @@ const MIGRATIONS: string[] = [
   ALTER TABLE generations ADD COLUMN pinned_at INTEGER;
   ALTER TABLE generations ADD COLUMN review TEXT;
   CREATE INDEX IF NOT EXISTS generations_pinned ON generations(pinned_at) WHERE pinned_at IS NOT NULL;`,
+  // originals (o/lora-plumbing): every LoRA copy Fuobe made — a download into ComfyUI's loras folder or a mirror on
+  // fal / Replicate storage — with its pinned source, hash, size and the licence / civitai permissions it was made under.
+  `CREATE TABLE IF NOT EXISTS lora_mirrors (
+    file TEXT NOT NULL,
+    target TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    version TEXT,
+    hosted_url TEXT,
+    sha256 TEXT,
+    size_bytes INTEGER,
+    licence_json TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (file, target)
+  );`,
+  // round 4 (r4/content-factory): Content Factory series — the reference clip, its style brief, the planned
+  // episodes and the settings; the episodes themselves are Faceless episodes in the series' channel.
+  `CREATE TABLE IF NOT EXISTS content_series (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT,
+    data_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS content_series_updated ON content_series(updated_at DESC);`,
 ];
 
 declare global {

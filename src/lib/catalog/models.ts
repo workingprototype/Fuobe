@@ -234,6 +234,17 @@ const open: ModelDef[] = [
     },
   }),
   o({
+    // Layers' Edit text on the open engine (Florence-2 / Ideogram on the cloud): the lines and their boxes.
+    id: "oss-ocr-lines",
+    name: "OvisOCR3",
+    vendor: "ATH-MaaS",
+    family: "qwen-llm",
+    kind: "text",
+    tagline: "Every line of text in an image, with its box · 3 GB GPU · Apache-2.0",
+    routes: [comfy("ocr", "ocr-lines-qwen35", "OvisOCR3 0.8B (a Qwen3.5 OCR fine-tune) on core TextGenerate; boxes come back 0–1000")],
+    options: { promptless: true, maxImages: 1 },
+  }),
+  o({
     id: "oss-seedvr2-image",
     name: "SeedVR2 (image)",
     vendor: "ByteDance Seed",
@@ -1105,6 +1116,18 @@ const open: ModelDef[] = [
     options: { seed: true },
     hidden: true,
   }),
+  // Content Factory "Use as reference": the clip's frames and its sound in one Gemma 4 call → a JSON style brief.
+  o({
+    id: "oss-reference-brief",
+    name: "Reference brief (Gemma 4)",
+    vendor: "Google",
+    family: "gemma",
+    kind: "text",
+    tagline: "Watches a reference clip (a frame a second and its sound) and writes its style brief as JSON · 12 GB GPU · Apache-2.0",
+    routes: [comfy("write", "reference-brief-gemma4", "first 30 s at 24 fps (every 24th frame read, 384 px wide) with the soundtrack; startTime skips ahead")],
+    options: { seed: true, promptless: true },
+    hidden: true,
+  }),
   o({
     id: "oss-infinitetalk-v2v",
     name: "InfiniteTalk Lip Re-sync",
@@ -1467,6 +1490,31 @@ const local: ModelDef[] = [
     routes: [comfy("concat", "video-concat-sound1-{n}", "VHS loader at 25 fps; clip 1's sound from the start")],
     options: { aspectRatios: ["auto", ...VID_AR], resolutions: ["480p", "720p", "1080p"] },
     defaults: { aspectRatio: "9:16", resolution: "480p" },
+    hidden: true,
+  }),
+  // Click to Ad's logo end card (r4/marketing-mixed): core nodes, no model, CPU.
+  o({
+    id: "oss-append-endcard",
+    name: "Append end card",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Ends an ad on a still (its logo card) and keeps the ad's sound; the ad's picture is copied, not re-encoded · CPU",
+    routes: [comfy("concat", "video-append-endcard", "the ad (inputs.video) + the card (images[0]) at the ad's own size and frame rate; only for clips the open engine made")],
+    options: { maxImages: 1, promptless: true },
+    defaults: { duration: 2.5 },
+    hidden: true,
+  }),
+  o({
+    id: "oss-still-to-clip",
+    name: "Still to clip",
+    vendor: "ComfyUI",
+    family: "utility",
+    kind: "video",
+    tagline: "Holds a still (an end card) for a few seconds, with a silent sound track · no model, CPU",
+    routes: [comfy("still-motion", "still-to-clip", "centre-cropped to the clip size; joined after clips the open engine didn't make")],
+    options: { aspectRatios: VID_AR, resolutions: ["480p", "720p", "1080p"], maxImages: 1, promptless: true },
+    defaults: { aspectRatio: "9:16", resolution: "480p", duration: 2.5 },
     hidden: true,
   }),
   o({

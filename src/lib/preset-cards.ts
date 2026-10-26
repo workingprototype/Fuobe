@@ -3,11 +3,12 @@
  *
  * Gallery pages are server components: they map the full catalog `Preset` (prompt templates,
  * routes, LoRA URLs, parity notes) to `PresetCardData` here, so only what a card shows reaches
- * the browser. Until real preview clips exist, every card gets a procedural preview: a camera
- * move over a bundled layered still for motions, a per-category animated treatment for effects
- * and apps. Pure module, safe on both sides.
+ * the browser. A preset with a real cover (a measured render, see preset-previews.generated.ts) shows
+ * it; the others get a procedural preview: a camera move over a bundled layered still for motions, a
+ * per-category animated treatment for effects and apps. Pure module, safe on both sides.
  */
 import type { Preset } from "./catalog/types";
+import { PRESET_PREVIEWS } from "./preset-previews.generated";
 
 /** Bundled sample stills (public/samples/previews, see scripts/gen-preview-scenes.mjs). */
 export type PreviewScene = "landscape" | "portrait" | "city" | "product";
@@ -381,6 +382,9 @@ export function previewScene(p: Pick<Preset, "type" | "name" | "category"> & { i
 
 export function previewFor(p: Pick<Preset, "id" | "type" | "name" | "category">): PresetPreview {
   const scene = previewScene(p);
+  // A real cover, rendered and measured by the evaluation harness (pnpm eval:covers), replaces the procedural one.
+  const real = PRESET_PREVIEWS[p.id];
+  if (real) return { poster: real.poster, ...(real.video && { video: real.video }), scene };
   return {
     poster: scenePoster(scene),
     scene,

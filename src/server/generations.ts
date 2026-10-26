@@ -10,9 +10,11 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, routesFor } from "@/lib/catalog/plan";
-import { keepMatte } from "@/lib/catalog/payload";
+import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } from "@/lib/catalog/plan";
+import { framedLength, keepMatte } from "@/lib/catalog/payload";
+import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import {
+  CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
   OPERATION_OUTPUT,
   type ChainSlot,
@@ -20,7 +22,9 @@ import {
   type GenerationRequest,
   type MediaKind,
   type GenInput,
+  type LoraRef,
   type ModelRoute,
+  type Operation,
   type OutputFile,
   type ProviderId,
 } from "@/lib/catalog/types";
@@ -31,7 +35,8 @@ import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains"
 import { enhancePrompt } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
-import { probeComfy } from "./providers/comfyui";
+import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
+import { ensureLorasOnComfy, prepareCloudLoras } from "./loras";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -276,6 +281,8 @@ export const ASSET_REFS: AssetRef[] = [
   // Translate & dub sessions and Katana jobs: the source video, the subject picture and each step's files.
   { table: "dub_sessions", cols: ["data_json"], what: "dub", name: "json_extract(data_json, '$.title')" },
   { table: "katana_jobs", cols: ["data_json"], what: "Katana job", name: "json_extract(data_json, '$.title')" },
+  // Content Factory: a series' reference clip and its thumbnail.
+  { table: "content_series", cols: ["data_json"], what: "Content Factory series", name: "COALESCE(json_extract(data_json, '$.name'), json_extract(data_json, '$.reference.title'))" },
 ];
 
 /**
@@ -298,6 +305,9 @@ export const ASSET_FREE: Record<string, string> = {
   "assist_thread_state.skills_json": "skill names",
   "skills.meta_json": "SKILL.md front matter",
   "skills.files_json": "a skill's own text files, stored inline",
+  "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
+  "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
+  "lora_mirrors.licence_json": "the licence and civitai permissions a LoRA copy was made under",
 };
 
 /** The query that finds the rows of one ASSET_REFS table naming a file (@id), except the purged generation's own (@g). */
@@ -357,15 +367,22 @@ export function deleteGeneration(id: string): void {
  * Pick the provider for a run: a configured real provider, else the demo provider (unless demo is off).
  * `images` is how many images the run sends: a route whose list takes fewer (FieldMap.maxImages: Grok
  * Imagine Image takes 5 on fal, 10 on Higgsfield) gives way to one that takes them all, or says so.
+ * `loras` and `seconds` (the clip length asked for) prefer a route that carries every LoRA and makes that
+ * length (Replicate's Wan 2.2 fast renders only 81–121 frames, fal's 17–161).
  */
-export function chooseRoute(candidates: ModelRoute[], images = 0): { route: ModelRoute; demo: boolean } {
+export function chooseRoute(candidates: ModelRoute[], images = 0, loras: LoraRef[] = [], seconds?: number): { route: ModelRoute; demo: boolean } {
   // Honour the preferred cloud aggregator (Settings → API configuration) when a model is on several.
   const preferred = getSetting("cloudProvider");
   const routes = preferred === "auto" ? candidates : [...candidates].sort((a, b) => Number(b.provider === preferred) - Number(a.provider === preferred));
   const demo = getSetting("demoMode");
   if (demo === "on") return { route: routes[0], demo: true };
   const takes = (r: ModelRoute) => !r.map?.maxImages || images <= r.map.maxImages;
-  const real = routes.find((r) => routeReady(r) && takes(r));
+  // A route that carries every LoRA wins (Replicate's Wan 2.2 takes one per expert, fal's takes a Mix), then one
+  // that makes the length asked; otherwise the first ready one runs and the plan's notes say what it changes.
+  const ok = (r: ModelRoute) => routeReady(r) && takes(r);
+  const long = (r: ModelRoute) => framedLength(r.map?.numFrames, seconds) === undefined;
+  const real =
+    routes.find((r) => ok(r) && lorasFit(r, loras) && long(r)) ?? routes.find((r) => ok(r) && lorasFit(r, loras)) ?? routes.find((r) => ok(r) && long(r)) ?? routes.find(ok);
   if (real) return { route: real, demo: false };
   const short = routes.find(routeReady);
   if (short) {
@@ -422,7 +439,24 @@ function prepare(original: GenerationRequest) {
   // Checks planGeneration can't make without knowing the model's kind or the text ops' needs.
   if (plan.op === "color-match" && plan.model.kind === "video" && !req.inputs?.video) throw new Error("Add the video and a reference image");
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0);
+  // The length asked of a clip that is made (not one that follows its input video's length).
+  const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
+  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
+  // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
+  // takes at most so many (the plan's notes say which were left out). Open runs carry them all.
+  const asked = plan.loras;
+  const fitted = fitLoras(asked, route);
+  plan = { ...plan, loras: fitted.loras };
+  const notes = [...fitted.notes];
+  // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
+  const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
+  if (made !== undefined && route.map?.numFrames) {
+    const f = route.map.numFrames;
+    const fps = plan.params.fps && plan.params.fps > 0 ? plan.params.fps : f.fps;
+    const half = (x: number) => Math.round(x * 2) / 2;
+    const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
+    notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
+  }
   // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
   if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
@@ -430,14 +464,32 @@ function prepare(original: GenerationRequest) {
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
-  return { req, plan, route, demo, providerId, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op) };
+  const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
+  return { req, plan, route, demo, providerId, notes, asked, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
 }
+
+/** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
+const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "extend", "keyframes"]);
 
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, demo, providerId, cost } = prepare(req);
-  return { model: plan.model, op: plan.op, jobs: plan.jobs, outputs: plan.jobs * plan.perJobOutputs, demo, providerId, costUsd: cost === null ? null : cost * plan.jobs };
+  const { plan, route, demo, providerId, cost, notes, asked } = prepare(req);
+  const loras = routeLoras(route, asked);
+  return {
+    model: plan.model,
+    op: plan.op,
+    jobs: plan.jobs,
+    outputs: plan.jobs * plan.perJobOutputs,
+    demo,
+    providerId,
+    costUsd: cost === null ? null : cost * plan.jobs,
+    // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
+    route: { provider: route.provider, endpoint: loras.applied.length && route.provider !== "comfyui" && route.loraEndpoint ? route.loraEndpoint : route.endpoint },
+    prompt: plan.prompt,
+    loras,
+    ...(notes.length && { notes }),
+  };
 }
 
 /** Preview a step that will wait for `deps` earlier steps: validated with placeholders in its chain slots, as createGenerations does. */
@@ -479,7 +531,7 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
-  const { req, plan, route, demo, providerId, cost } = p;
+  const { req, plan, route, demo, providerId, cost, notes } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
   if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
   const jobs = waits ? 1 : plan.jobs;
@@ -523,7 +575,9 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
           .join(", ")})`,
       )
       .run(row);
-    created.push(toGeneration(row));
+    // What the run leaves out or changes (LoRAs a cloud run can't carry, a length the API rounds) goes back
+    // with it, so the composer and API clients can say so; it isn't stored.
+    created.push(notes.length ? { ...toGeneration(row), notes } : toGeneration(row));
     if (!waits) void submit(id, route, providerId, plan, req, i);
   }
   ensureRunner();
@@ -568,12 +622,30 @@ export function pickOutput(outputs: OutputFile[], s: ChainSlot): OutputFile | un
   // A mask: the output made as one (meta.role "mask": a painted window's last tracked frame), else a mask video, else a still.
   if (s.slot === "mask") return outputs.find((o) => o.meta?.role === "mask") ?? outputs.find((o) => o.kind === "video") ?? outputs.find((o) => o.kind === "image");
   const ofKind = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]);
+  if (s.index !== undefined) {
+    if (!ofKind.length) return undefined;
+    const at = (o: OutputFile, i: number) => (typeof o.meta?.index === "number" ? o.meta.index : i);
+    const ordered = ofKind.map((o, i) => ({ o, i: at(o, i) })).sort((a, b) => a.i - b.i);
+    return (ordered.find((x) => x.i === s.index) ?? ordered[Math.min(s.index, ordered.length - 1)]).o;
+  }
   if (!s.stem) return ofKind[0] ?? (SOUNDTRACK_SLOTS.has(s.slot) ? outputs.find((o) => o.kind === "video") : undefined);
   const want = STEM_ALIASES[s.stem.toLowerCase()] ?? [s.stem.toLowerCase()];
   return ofKind.find((o) => typeof o.meta?.stem === "string" && want.includes(o.meta.stem.toLowerCase()));
 }
 
 const slotNoun = (s: ChainSlot) => (s.stem ? `${s.stem} stem` : s.slot === "mask" ? "mask" : SLOT_KIND[s.slot]);
+
+/**
+ * A planned list (ChainSlot `index` + `of`) that came back too short to read: a frame or two missing at
+ * the end is held (pickOutput takes the last one), more fails the step before it is paid for.
+ */
+export function listShortfall(outputs: OutputFile[], s: ChainSlot): string | null {
+  if (s.index === undefined || s.of === undefined) return null;
+  const made = outputs.filter((o) => o.kind === SLOT_KIND[s.slot]).length;
+  if (made >= s.of - CHAIN_LIST_SLACK) return null;
+  const noun = slotNoun(s);
+  return `made ${made} ${noun}${made === 1 ? "" : "s"} where ${s.of} were planned`;
+}
 
 function placeholderFor(s: ChainSlot): string {
   const kind = SLOT_KIND[s.slot];
@@ -622,6 +694,28 @@ export function withChainInputs(req: GenerationRequest, urls: string[]): Generat
   return { ...req, prompt, inputs };
 }
 
+/**
+ * A stored step as it was before the runner filled its chain slots (`chainFilled`): the chained list
+ * items come out from the front ("first") and the back ("last"), single slots are emptied, and the
+ * step's own items stay. A retry rebuilds the step from new dependencies this way. Text that filled a
+ * "prompt" slot can't be told from the prompt, so it stays.
+ */
+export function unfilledRequest(req: GenerationRequest, deps: number): GenerationRequest {
+  const { chainFilled, ...rest } = req;
+  if (!chainFilled) return rest;
+  const slots = slotsFor(rest, deps);
+  const inputs = { ...rest.inputs };
+  for (const k of ["images", "videos", "audios"] as const) {
+    const count = (pos: "first" | "last") => slots.filter((s) => s.slot === k && (s.position ?? "last") === pos).length;
+    const list = inputs[k] ?? [];
+    const own = list.slice(count("first"), list.length - count("last"));
+    if (own.length) inputs[k] = own;
+    else delete inputs[k];
+  }
+  for (const s of slots) if (s.slot !== "images" && s.slot !== "videos" && s.slot !== "audios" && s.slot !== "prompt") delete inputs[s.slot];
+  return { ...rest, inputs: Object.keys(inputs).length ? inputs : undefined };
+}
+
 /** Generations this process is handing to a provider right now (shared across hot reloads and bundles). */
 declare global {
   var __fuobeSubmitting: Set<string> | undefined;
@@ -646,11 +740,63 @@ function chainMode(p: { demo: boolean; plan: { model: { name: string } }; route:
   return {};
 }
 
+/** A waiting row's dependency ids as a json_each source (depends_on is one id, or a JSON list). */
+const DEP_IDS = "json_each(CASE WHEN substr(g.depends_on, 1, 1) = '[' AND json_valid(g.depends_on) THEN g.depends_on ELSE json_array(g.depends_on) END) d";
+
+/**
+ * Waiting steps that can move: none of their dependencies is still queued or running (so they launch), or one
+ * failed, was canceled or is gone (so they fail now, not after the others finish). A per-frame render keeps
+ * hundreds of steps waiting for its lanes, and a plain "oldest 50 waiting" would hold every chain started after
+ * it until its backlog drained. The steps this process is handing to a provider right now are still "queued":
+ * the limit makes room for them.
+ */
+const READY_DEPENDENTS = `SELECT g.* FROM generations g
+  WHERE g.status = 'queued' AND g.external_id IS NULL AND g.depends_on IS NOT NULL
+    AND (
+      NOT EXISTS (SELECT 1 FROM ${DEP_IDS} JOIN generations dep ON dep.id = d.value WHERE dep.status IN ('queued', 'running'))
+      OR EXISTS (SELECT 1 FROM ${DEP_IDS} LEFT JOIN generations dep ON dep.id = d.value WHERE dep.id IS NULL OR dep.status IN ('failed', 'canceled'))
+    )
+  ORDER BY g.created_at ASC LIMIT ?`;
+
+/** The error a waiting step gets when an input failed (framesProgress tells these from a step's own failure). */
+export const waitedOnFailure = (frame?: boolean) => `${frame ? "The previous frame" : "An earlier step"} didn't finish`;
+/** What a step dropped by dropUnused says (canceled, not by anyone: the steps it was for failed). */
+export const DROPPED_UNUSED = "Stopped before it ran: the steps it was for failed";
+
+/** Ids in a depends_on column that name `id` (one id, or a JSON list). */
+const DEPENDENTS_OF = "(depends_on = @id OR (substr(depends_on, 1, 1) = '[' AND instr(depends_on, @quoted) > 0))";
+
+/**
+ * A waiting step marked dropWhenUnused whose every dependent has failed or been canceled can no longer be
+ * used: cancel it (nothing was spent on it) and look again at the steps it waited for. `ids` are the inputs
+ * of a step that just failed. A step being handed to its provider right now is left alone.
+ */
+function dropUnused(ids: string[]): void {
+  const todo = [...ids];
+  // Settled: dropped, or not a waiting dropWhenUnused step. One still used is looked at again when a step using it is dropped.
+  const settled = new Set<string>();
+  const live = db().prepare(`SELECT 1 FROM generations WHERE status IN ('queued', 'running') AND ${DEPENDENTS_OF} LIMIT 1`);
+  while (todo.length) {
+    const id = todo.pop()!;
+    if (settled.has(id) || submitting().has(id)) continue;
+    const r = db().prepare("SELECT status, external_id, depends_on, request_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "external_id" | "depends_on" | "request_json"> | undefined;
+    if (!r || r.status !== "queued" || r.external_id || !r.depends_on || !(JSON.parse(r.request_json) as GenerationRequest).dropWhenUnused) {
+      settled.add(id);
+      continue;
+    }
+    if (live.get({ id, quoted: JSON.stringify(id) })) continue;
+    settled.add(id);
+    const now = Date.now();
+    db()
+      .prepare("UPDATE generations SET status = 'canceled', error = ?, message = NULL, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'queued' AND external_id IS NULL")
+      .run(DROPPED_UNUSED, now, now, id);
+    todo.push(...depIds(r.depends_on));
+  }
+}
+
 /** Launch dependent jobs whose inputs finished; fail the ones whose inputs failed. Never waits for an upload. */
 async function advanceDependents(): Promise<void> {
-  const rows = db()
-    .prepare("SELECT * FROM generations WHERE status = 'queued' AND external_id IS NULL AND depends_on IS NOT NULL ORDER BY created_at ASC LIMIT 50")
-    .all() as Row[];
+  const rows = db().prepare(READY_DEPENDENTS).all(50 + submitting().size) as Row[];
   for (const r of rows) {
     if (submitting().has(r.id)) continue;
     const request = JSON.parse(r.request_json) as GenerationRequest;
@@ -658,26 +804,37 @@ async function advanceDependents(): Promise<void> {
     const slots = slotsFor(request, ids.length);
     const deps = ids.map((id) => db().prepare("SELECT status, provider, outputs_json FROM generations WHERE id = ?").get(id) as Pick<Row, "status" | "provider" | "outputs_json"> | undefined);
     const earlier = request.frame ? "The previous frame" : "An earlier step";
+    const fail = (error: string) => {
+      update(r.id, { status: "failed", error, message: null, completed_at: Date.now() });
+      // Steps waiting only to feed this one (the other lanes of a per-frame render) are dropped before they are paid for.
+      dropUnused(ids);
+    };
     if (deps.some((d) => !d || d.status === "failed" || d.status === "canceled")) {
-      update(r.id, { status: "failed", error: `${earlier} didn't finish`, message: null, completed_at: Date.now() });
+      fail(waitedOnFailure(!!request.frame));
       continue;
     }
     if (deps.some((d) => d!.status !== "succeeded")) continue;
+    const outputs = deps.map((d) => JSON.parse(d!.outputs_json) as OutputFile[]);
+    const short = slots.map((s, i) => listShortfall(outputs[i], s)).find(Boolean);
+    if (short) {
+      fail(`${earlier} ${short}`);
+      continue;
+    }
     submitting().add(r.id);
     let handedOff = false;
     try {
       // The planned op (r.op), not request.op: a translate whose op was inferred still gets the cue list.
-      const values = await Promise.all(deps.map((d, i) => chainValue(pickOutput(JSON.parse(d!.outputs_json) as OutputFile[], slots[i]), slots[i], r.op)));
+      const values = await Promise.all(outputs.map((o, i) => chainValue(pickOutput(o, slots[i]), slots[i], r.op)));
       const missing = values.findIndex((u) => !u);
       if (missing >= 0) {
-        update(r.id, { status: "failed", error: `${earlier} has no ${slotNoun(slots[missing])} to use`, message: null, completed_at: Date.now() });
+        fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
       // Routing reads cached reachability: make sure it's fresh for local engines.
       const model = getModel(request.modelId);
       if (model?.routes.some((x) => x.provider === "comfyui")) await probeComfy();
       if (model?.routes.some((x) => x.provider === "llm")) await probeOllama();
-      const original = withChainInputs(request, values as string[]);
+      const original: GenerationRequest = { ...withChainInputs(request, values as string[]), chainFilled: true };
       const prepared = prepare(original);
       const mode = chainMode(prepared, deps as Pick<Row, "provider">[]);
       if (mode.error) throw new Error(mode.error);
@@ -695,7 +852,7 @@ async function advanceDependents(): Promise<void> {
       handedOff = true;
       void submit(r.id, p.route, p.providerId, p.plan, p.req, 0);
     } catch (e) {
-      update(r.id, { status: "failed", error: (e as Error).message, message: null, completed_at: Date.now() });
+      fail((e as Error).message);
     } finally {
       if (!handedOff) submitting().delete(r.id);
     }
@@ -783,6 +940,13 @@ async function submit(
         input.resolution = tier.resolution;
         if (providerId !== "mock" && plan.model.engine !== "open") update(id, { cost_usd: estimateCost(plan.model, { ...plan.params, resolution: tier.resolution }, 1, plan.op) });
       }
+    }
+    // LoRA files: ComfyUI gets the ones it lacks downloaded into its loras folder; a cloud run gets a civitai
+    // file mirrored once to the provider's storage (the civitai key never leaves this server).
+    if (input.loras?.length && (providerId === "fal" || providerId === "replicate")) {
+      input.loras = await prepareCloudLoras(input.loras, providerId, (data, name) => adapter.prepareFile(data, "application/octet-stream", name, route), (message) => update(id, { message }));
+    } else if (input.loras?.length && providerId === "comfyui") {
+      await ensureLorasOnComfy(input.loras, await comfyLoraFiles(route), (message) => update(id, { message }));
     }
     const res = await adapter.submit({ generationId: id, model: plan.model, route, input });
     const now = Date.now();
@@ -1107,6 +1271,8 @@ export async function cancelGeneration(id: string): Promise<void> {
       .catch(() => {});
   }
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
+  // Steps waiting only to feed this one are dropped too (nothing was spent on them).
+  dropUnused(depIds(r.depends_on));
 }
 
 // ---------------------------------------------------------------------------

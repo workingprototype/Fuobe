@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Generation } from "@/lib/catalog/types";
-import { initialDoc, nodesFromOutputs, placeOutput, type LayerDoc, type LayerJob, type LayerJobInput, type LayerProject, type LayerProjectView } from "@/lib/layers";
+import { elementDraft, initialDoc, nodesFromOutputs, placeOutput, placeTextBlocks, textBlocksFrom, type LayerDoc, type LayerJob, type LayerJobInput, type LayerProject, type LayerProjectView } from "@/lib/layers";
 
 // Route handlers are called directly, outside a Next request: connection() has nothing to wait for.
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
@@ -129,7 +129,7 @@ describe("job steps", () => {
     expect(r[0].request).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/mug.png"] } });
   });
 
-  it("edits text with the fixed instruction on both engines; detection is cloud only", () => {
+  it("edits text with the fixed instruction on both engines; detection reads the lines on either", () => {
     const rows = [{ from: "SALE", to: "OPEN" }];
     expect(steps({ tool: "text-edit", settings: { rows } })[0].request).toMatchObject({
       modelId: "nano-banana-pro",
@@ -138,8 +138,55 @@ describe("job steps", () => {
     });
     expect(steps({ tool: "text-edit", engine: "open", settings: { rows } })[0].request.modelId).toBe("oss-qwen-edit");
     expect(() => steps({ tool: "text-edit", settings: { rows: [{ from: "SALE", to: "SALE" }] } })).toThrow(/Change a line/);
-    expect(steps({ tool: "text-detect" })[0].request).toMatchObject({ modelId: "ideogram-3-text-layers", op: "text-layers" });
-    expect(() => steps({ tool: "text-detect", engine: "open" })).toThrow(/cloud engine/);
+    expect(steps({ tool: "text-detect", settings: { aspect: "16:9" } })[0].request).toMatchObject({ modelId: "ideogram-3-text-layers", op: "text-layers", params: { aspectRatio: "16:9" } });
+    // OCR models read the lines (no shape to send): Florence-2 on the cloud, OvisOCR3 on ComfyUI.
+    const florence = steps({ tool: "text-detect", modelId: "florence-2-ocr", settings: { aspect: "16:9" } })[0].request;
+    expect(florence).toMatchObject({ modelId: "florence-2-ocr", op: "ocr", inputs: { images: ["/api/files/a.png"] } });
+    expect(florence.params).toBeUndefined();
+    expect(steps({ tool: "text-detect", engine: "open" })[0].request).toMatchObject({ modelId: "oss-ocr-lines", op: "ocr" });
+    expect(() => steps({ tool: "text-detect", engine: "open", modelId: "ideogram-3-text-layers" })).toThrow(/can't run this tool/);
+  });
+
+  it("inpaints the painted area: the mask for mask models, the red-tinted copy for edit models", () => {
+    const paint = { tool: "inpaint" as const, prompt: "a vase of tulips", mask: "/api/files/m.png", sketch: "/api/files/s.png" };
+    const cloud = steps(paint)[0].request;
+    expect(cloud).toMatchObject({
+      modelId: "nano-banana-pro",
+      op: "inpaint",
+      prompt: "a vase of tulips. Blend it into the surroundings with matching light, perspective and grain.",
+      inputs: { images: ["/api/files/a.png"], mask: "/api/files/m.png", sketch: "/api/files/s.png" },
+    });
+    expect(steps({ ...paint, modelId: "flux-fill-pro" })[0].request).toMatchObject({ modelId: "flux-fill-pro", op: "inpaint" });
+    const open = steps({ ...paint, engine: "open", settings: { keepAlpha: true } });
+    expect(open.map((x) => [x.key, x.request.modelId, x.request.op])).toEqual([
+      ["inpaint", "oss-flux-fill", "inpaint"],
+      ["cutout", "oss-rmbg", "bg-remove"],
+    ]);
+    // Only the painted area changes: no plain-background ask, the cut-out restores the transparency.
+    expect(open[0].request.prompt).toBe("a vase of tulips. Blend it into the surroundings with matching light, perspective and grain.");
+    expect(open[1]).toMatchObject({ after: "inpaint", chain: [{ slot: "images" }] });
+    expect(() => steps({ ...paint, mask: undefined })).toThrow(/Paint over the area/);
+    expect(() => steps({ ...paint, prompt: " " })).toThrow(/fill the painted area/);
+  });
+
+  it("enhances with a retouch instruction, or restores detail with an upscaler", () => {
+    const skin = steps({ tool: "enhance", settings: { look: "skin" } })[0].request;
+    expect(skin).toMatchObject({ modelId: "nano-banana-pro", op: "edit", inputs: { images: ["/api/files/a.png"] } });
+    expect(skin.prompt).toMatch(/^Give the portrait a subtle natural retouch.*Keep the face shape, identity/);
+    expect(steps({ tool: "enhance", engine: "open", settings: { look: "sharpen" } })[0].request).toMatchObject({ modelId: "oss-qwen-edit", op: "edit" });
+    expect(steps({ tool: "enhance", engine: "open", settings: { look: "sharpen" } })[0].request.prompt).toMatch(/^Sharpen the image.*colours and lighting exactly the same\.$/);
+    expect(steps({ tool: "enhance", prompt: "keep the freckles", settings: { look: "glow" } })[0].request.prompt).toMatch(/keep the freckles$/);
+    // Detail: the Upscale tool's models (Topaz first, with its face pass), no instruction.
+    const detail = steps({ tool: "enhance", settings: { look: "detail" } })[0].request;
+    expect(detail).toMatchObject({ modelId: "topaz-image", op: "upscale-image" });
+    expect(detail.prompt).toBeUndefined();
+    // 2× on every engine: Topaz and SeedVR are 2× as listed, the open graphs (4× by default) get a scale.
+    expect(detail.params?.extra).toBeUndefined();
+    expect(steps({ tool: "enhance", engine: "open", settings: { look: "detail" } })[0].request).toMatchObject({ modelId: "oss-seedvr2-image", params: { extra: { scale: 2 } } });
+    expect(steps({ tool: "enhance", engine: "open", modelId: "oss-upscale-image", settings: { look: "detail" } })[0].request.params).toMatchObject({ extra: { scale: 0.5 } });
+    expect(() => steps({ tool: "enhance", modelId: "topaz-image", settings: { look: "skin" } })).toThrow(/can't run this tool/);
+    // A transparent layer gets its cut-out back after a retouch.
+    expect(steps({ tool: "enhance", settings: { look: "skin", keepAlpha: true } }).map((x) => x.key)).toEqual(["enhance", "cutout"]);
   });
 
   it("hands layers to the existing upscale, relight, angles, background and expand models", () => {
@@ -237,6 +284,49 @@ describe("layers API", () => {
     res = await jobs.POST(req("POST", { tool: "decompose", engine: "cloud", image: source, frame: [0, 0, 1920, 1080] }), ctx({ id }));
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toMatch(/can only be decomposed once/);
+  });
+
+  it("reads the text on the open engine and inpaints with either kind of model, in demo mode", async () => {
+    const frame = [0, 0, 1920, 1080];
+    let res = await jobs.POST(req("POST", { tool: "text-detect", engine: "open", image: source, frame, label: "Detect text" }), ctx({ id }));
+    expect(res.status).toBe(201);
+    const detect = (await res.json()) as LayerJob;
+    const g = await settle(detect.generationIds[0]);
+    expect(g).toMatchObject({ modelId: "oss-ocr-lines", op: "ocr", status: "succeeded" });
+    // What Edit text lists: the lines with their boxes, laid out in the frame the detector read.
+    const rows = placeTextBlocks(textBlocksFrom(g.outputs[0].meta), detect.frame);
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[0].box).toEqual([expect.closeTo(153.6, 1), expect.closeTo(108, 1), expect.closeTo(998.4, 1), expect.closeTo(97.2, 1)]);
+
+    // Inpaint: Nano Banana Pro is shown the painted area tinted red; FLUX Fill [pro] takes the mask itself.
+    const mask = upload();
+    const sketch = upload();
+    const paint = { tool: "inpaint", engine: "cloud", image: source, mask, sketch, prompt: "a vase of tulips", frame, settings: { aspect: "16:9" } };
+    res = await jobs.POST(req("POST", paint), ctx({ id }));
+    expect(res.status).toBe(201);
+    const nano = gens.getGeneration(((await res.json()) as LayerJob).generationIds[0])!;
+    expect(nano).toMatchObject({ modelId: "nano-banana-pro", op: "edit" });
+    expect(nano.request.inputs).toMatchObject({ images: [source], sketch });
+    expect(nano.prompt).toMatch(/Only change the region tinted red in image 2/);
+    res = await jobs.POST(req("POST", { ...paint, modelId: "flux-fill-pro" }), ctx({ id }));
+    const fill = gens.getGeneration(((await res.json()) as LayerJob).generationIds[0])!;
+    expect(fill).toMatchObject({ modelId: "flux-fill-pro", op: "inpaint" });
+    expect(fill.request.inputs).toMatchObject({ images: [source], mask });
+    // Only stored files can be painted with.
+    res = await jobs.POST(req("POST", { ...paint, mask: "http://evil.example/m.png" }), ctx({ id }));
+    expect(res.status).toBe(400);
+  });
+
+  it("saves a layer's PNG as an element", async () => {
+    const elements = await import("@/app/api/elements/route");
+    const png = upload();
+    const draft = elementDraft({ name: "Woman in red coat · part 1", z: 2 });
+    const res = await elements.POST(new Request("http://localhost/api/elements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...draft, references: [png] }) }));
+    expect(res.status).toBe(201);
+    const el = (await res.json()) as { id: string; handle: string; kind: string; references: string[] };
+    expect(el).toMatchObject({ handle: "Woman_in_red_coat", kind: "character", references: [png] });
+    // The element keeps its PNG: the file counts as in use.
+    expect(gens.assetInUse(png.split("/").pop()!.replace(/\.png$/, ""))).toBeTruthy();
   });
 
   it("autosaves into the head version and refuses stale or foreign documents", async () => {

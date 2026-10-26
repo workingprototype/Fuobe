@@ -12,6 +12,7 @@ import type {
   Pricing,
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
+import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField } from "./loras";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -196,7 +197,20 @@ export function planGeneration(
     }
   }
 
-  if (req.loras?.length) loras = [...loras, ...req.loras];
+  // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
+  // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
+  if (req.loras?.length) loras = [...req.loras, ...loras];
+  // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
+  const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
+  // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
+  // effect. …", see withOssLoras), which means nothing to the model without the LoRA.
+  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
+  for (const l of loras) {
+    if ((l.strength ?? 1) !== 0 || !l.trigger || keptTriggers.has(l.trigger)) continue;
+    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
+    if (lead) prompt = prompt.slice(lead.length);
+  }
+  loras = kept;
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
   const shots = params.shots?.filter((s) => s.prompt.trim());
@@ -392,7 +406,9 @@ export function missingInputs(op: Operation, req: Pick<GenerationRequest, "input
   const i = req.inputs ?? {};
   if (n.images && (i.images?.length ?? 0) < n.images) return n.msg;
   if (n.video && !i.video) return n.msg;
-  if (n.videos && (i.videos?.length ?? 0) < n.videos) return n.msg;
+  // A join may also be one clip and a still appended after it (an ad and its end card).
+  const clips = (i.videos?.length ?? 0) + (op === "concat" && i.video && i.images?.length ? 2 : 0);
+  if (n.videos && clips < n.videos) return n.msg;
   if (n.audio && !i.audio) return n.msg;
   if (n.audios && (i.audios?.length ?? 0) < n.audios) return n.msg;
   if (n.endImage && !i.endImage) return n.msg;
@@ -457,13 +473,33 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
  */
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
+/**
+ * Which of a plan's LoRAs a route really applies, and why the others are left out: ComfyUI loads every file
+ * (injectLoras); a cloud route carries the ones fitLoras keeps (the licence allows hosting, there is a URL to
+ * send, the API takes LoRAs and so many). The preview reports it, so a caller (the evaluation harness) records
+ * the recipe that ran, not the one it asked for.
+ */
+export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEndpoint">, loras: LoraRef[]): { applied: LoraRef[]; dropped: { file: string; reason: string }[] } {
+  const applied = fitLoras(loras, route).loras;
+  const field = routeLoraField(route);
+  const why = (l: LoraRef) => {
+    if (localOnly(l)) return "its licence doesn't allow hosting, so it runs only on your GPU";
+    if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
+    if (!cloudPath(l) && !needsToken(l.url)) return "no URL to send to the LoRA endpoint";
+    if (!field) return "this route takes no LoRAs";
+    return field.shape === "experts" ? "this API takes one LoRA per expert" : `this API takes up to ${loraCapacity(field)} LoRAs`;
+  };
+  return { applied, dropped: loras.filter((l) => !applied.includes(l)).map((l) => ({ file: l.file, reason: why(l) })) };
+}
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
-export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation): number | null {
+export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
   const p = model.pricing;
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
-  const usd = (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  // A run with LoRAs goes to the LoRA endpoint, which has its own price.
+  const usd = withLoras && p.withLoras !== undefined ? p.withLoras : (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;

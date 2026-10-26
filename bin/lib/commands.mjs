@@ -740,8 +740,23 @@ async function mcp(ctx) {
  * @property {Record<string, OptionSpec>} [options]
  * @property {string[]} [examples]
  * @property {true} [ownConfig] reads the saved config itself (login, logout), so a broken one doesn't stop it
+ * @property {true} [passthrough] takes its arguments as they are (eval hands them to the harness's own parser)
  * @property {(ctx: any) => Promise<number | void>} run
  */
+
+// ---------------------------------------------------------------------------
+// eval
+
+/** The evaluation harness (scripts/eval), which lives in the Fuobe checkout next to this CLI. */
+async function evalHarness(ctx) {
+  const entry = new URL("../../scripts/eval/eval.mjs", import.meta.url);
+  if (!fs.existsSync(entry)) throw new ApiError("fuobe eval runs from a Fuobe checkout: scripts/eval isn't next to this CLI (clone the repo and run it there).");
+  const { main: harness } = await import(entry.href);
+  // The harness finds its server the way this CLI does (--url / --token, FUOBE_URL / FUOBE_TOKEN, then the
+  // saved config, from the same home), so the saved token still rides only to the server it was saved for.
+  // Handing it over as FUOBE_TOKEN would send it to whatever server a later --url names.
+  return harness(ctx.positionals, { stdout: ctx.io.stdout, stderr: ctx.io.stderr, env: ctx.io.env, home: ctx.io.home, fetch: ctx.io.fetch });
+}
 
 /** @type {Record<string, Command>} */
 export const COMMANDS = {
@@ -871,6 +886,13 @@ export const COMMANDS = {
     usage: "fuobe mcp",
     examples: ["fuobe mcp", "fuobe mcp --json"],
     run: mcp,
+  },
+  eval: {
+    summary: "Measure Fuobe Originals: run a suite, score, review blind, compare runs",
+    usage: "fuobe eval <run|report|review|compare|promote|covers|history|validate|setup|trash> [options]   (from a Fuobe checkout)",
+    examples: ["fuobe eval run --suite selftest --engine demo", "fuobe eval run --suite soul --engine open --looks v1-general --variants recipe,prompt-only", "fuobe eval compare latest~1 latest --fail-on clip --threshold 1"],
+    passthrough: true,
+    run: evalHarness,
   },
 };
 

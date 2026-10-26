@@ -1,0 +1,1325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "suite": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "original": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "image",
+        "video",
+        "audio"
+      ]
+    },
+    "recipe": {
+      "default": "none",
+      "type": "string",
+      "enum": [
+        "soul-look",
+        "motion",
+        "none"
+      ]
+    },
+    "targets": {
+      "type": "object",
+      "properties": {
+        "demo": {
+          "type": "object",
+          "properties": {
+            "models": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "op": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "aspectRatio": {
+                  "type": "string"
+                },
+                "resolution": {
+                  "type": "string"
+                },
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "numOutputs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "generateAudio": {
+                  "type": "boolean"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "palette": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "styleId": {
+                  "type": "string"
+                },
+                "voice": {
+                  "type": "string"
+                },
+                "targetLanguage": {
+                  "type": "string"
+                },
+                "startTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "endTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "shots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "prompt": {
+                        "type": "string"
+                      },
+                      "duration": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "prompt",
+                      "duration"
+                    ]
+                  }
+                },
+                "matteOutput": {
+                  "type": "string",
+                  "enum": [
+                    "cutout",
+                    "matte"
+                  ]
+                }
+              },
+              "additionalProperties": {}
+            },
+            "extra": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "models"
+          ],
+          "additionalProperties": false
+        },
+        "open": {
+          "type": "object",
+          "properties": {
+            "models": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "op": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "aspectRatio": {
+                  "type": "string"
+                },
+                "resolution": {
+                  "type": "string"
+                },
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "numOutputs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "generateAudio": {
+                  "type": "boolean"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "palette": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "styleId": {
+                  "type": "string"
+                },
+                "voice": {
+                  "type": "string"
+                },
+                "targetLanguage": {
+                  "type": "string"
+                },
+                "startTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "endTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "shots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "prompt": {
+                        "type": "string"
+                      },
+                      "duration": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "prompt",
+                      "duration"
+                    ]
+                  }
+                },
+                "matteOutput": {
+                  "type": "string",
+                  "enum": [
+                    "cutout",
+                    "matte"
+                  ]
+                }
+              },
+              "additionalProperties": {}
+            },
+            "extra": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "models"
+          ],
+          "additionalProperties": false
+        },
+        "cloud": {
+          "type": "object",
+          "properties": {
+            "models": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "op": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "aspectRatio": {
+                  "type": "string"
+                },
+                "resolution": {
+                  "type": "string"
+                },
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "numOutputs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "generateAudio": {
+                  "type": "boolean"
+                },
+                "fps": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "palette": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "styleId": {
+                  "type": "string"
+                },
+                "voice": {
+                  "type": "string"
+                },
+                "targetLanguage": {
+                  "type": "string"
+                },
+                "startTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "endTime": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "shots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "prompt": {
+                        "type": "string"
+                      },
+                      "duration": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "required": [
+                      "prompt",
+                      "duration"
+                    ]
+                  }
+                },
+                "matteOutput": {
+                  "type": "string",
+                  "enum": [
+                    "cutout",
+                    "matte"
+                  ]
+                }
+              },
+              "additionalProperties": {}
+            },
+            "extra": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "models"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "defaults": {
+      "default": {
+        "seeds": [
+          1001
+        ],
+        "metrics": [
+          "clip"
+        ],
+        "timeoutSeconds": 1800
+      },
+      "type": "object",
+      "properties": {
+        "seeds": {
+          "default": [
+            1001
+          ],
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "prompts": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$"
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483647
+                  },
+                  "negative": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "aspectRatio": {
+              "type": "string"
+            },
+            "resolution": {
+              "type": "string"
+            },
+            "duration": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "numOutputs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "generateAudio": {
+              "type": "boolean"
+            },
+            "fps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "palette": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "styleId": {
+              "type": "string"
+            },
+            "voice": {
+              "type": "string"
+            },
+            "targetLanguage": {
+              "type": "string"
+            },
+            "startTime": {
+              "type": "number",
+              "minimum": 0
+            },
+            "endTime": {
+              "type": "number",
+              "minimum": 0
+            },
+            "shots": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "duration": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "prompt",
+                  "duration"
+                ]
+              }
+            },
+            "matteOutput": {
+              "type": "string",
+              "enum": [
+                "cutout",
+                "matte"
+              ]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "extra": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "metrics": {
+          "default": [
+            "clip"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "clip",
+              "aesthetic",
+              "style",
+              "identity",
+              "temporal",
+              "lipsync",
+              "continuity"
+            ]
+          }
+        },
+        "variant": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "candidate": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "timeoutSeconds": {
+          "default": 1800,
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "variants": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "template": {
+            "type": "boolean"
+          },
+          "loras": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "recipe"
+              },
+              {
+                "type": "string",
+                "const": "none"
+              },
+              {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "file": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^https:\\/\\/"
+                    },
+                    "strength": {
+                      "type": "number",
+                      "minimum": -4,
+                      "maximum": 4
+                    },
+                    "trigger": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "target": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "low",
+                        "both"
+                      ]
+                    },
+                    "commercial": {
+                      "type": "boolean"
+                    },
+                    "hostedOk": {
+                      "type": "boolean"
+                    },
+                    "licence": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            ]
+          },
+          "loraScale": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 4
+          },
+          "preset": {
+            "type": "boolean"
+          },
+          "presetStrength": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "lookParam": {
+            "type": "string",
+            "const": "presetId"
+          },
+          "models": {
+            "type": "object",
+            "properties": {
+              "demo": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "open": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "cloud": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "engines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "demo",
+                "open",
+                "cloud"
+              ]
+            }
+          },
+          "params": {
+            "type": "object",
+            "properties": {
+              "aspectRatio": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              },
+              "duration": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "numOutputs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              "generateAudio": {
+                "type": "boolean"
+              },
+              "fps": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "palette": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "styleId": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              },
+              "targetLanguage": {
+                "type": "string"
+              },
+              "startTime": {
+                "type": "number",
+                "minimum": 0
+              },
+              "endTime": {
+                "type": "number",
+                "minimum": 0
+              },
+              "shots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "duration": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "prompt",
+                    "duration"
+                  ]
+                }
+              },
+              "matteOutput": {
+                "type": "string",
+                "enum": [
+                  "cutout",
+                  "matte"
+                ]
+              }
+            },
+            "additionalProperties": {}
+          },
+          "extra": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cases": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 120,
+            "pattern": "^[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._-]*)*$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "look": {
+            "type": "string"
+          },
+          "motion": {
+            "type": "string"
+          },
+          "presetId": {
+            "type": "string"
+          },
+          "models": {
+            "type": "object",
+            "properties": {
+              "demo": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "open": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "cloud": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "variantModels": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "demo": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "open": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "cloud": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "op": {
+            "type": "string"
+          },
+          "prompts": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4000
+                    },
+                    "seed": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2147483647
+                    },
+                    "negative": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "shots": {
+            "minItems": 1,
+            "maxItems": 24,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                },
+                "prompt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 60
+                },
+                "presetId": {
+                  "type": "string"
+                },
+                "seed": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "prompt"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "images": {
+                "maxItems": 14,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "endImage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "mask": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "video": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "videos": {
+                "maxItems": 24,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "audio": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "audio2": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "audios": {
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "voiceAudio": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "additionalProperties": false
+          },
+          "demoInputs": {
+            "type": "object",
+            "properties": {
+              "images": {
+                "maxItems": 14,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "endImage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "mask": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "video": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "videos": {
+                "maxItems": 24,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "audio": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "audio2": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "audios": {
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              },
+              "voiceAudio": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "additionalProperties": false
+          },
+          "params": {
+            "type": "object",
+            "properties": {
+              "aspectRatio": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              },
+              "duration": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "numOutputs": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              },
+              "generateAudio": {
+                "type": "boolean"
+              },
+              "fps": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "palette": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "styleId": {
+                "type": "string"
+              },
+              "voice": {
+                "type": "string"
+              },
+              "targetLanguage": {
+                "type": "string"
+              },
+              "startTime": {
+                "type": "number",
+                "minimum": 0
+              },
+              "endTime": {
+                "type": "number",
+                "minimum": 0
+              },
+              "shots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "prompt": {
+                      "type": "string"
+                    },
+                    "duration": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "prompt",
+                    "duration"
+                  ]
+                }
+              },
+              "matteOutput": {
+                "type": "string",
+                "enum": [
+                  "cutout",
+                  "matte"
+                ]
+              }
+            },
+            "additionalProperties": {}
+          },
+          "extra": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "references": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              }
+            ]
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "clip",
+                "aesthetic",
+                "style",
+                "identity",
+                "temporal",
+                "lipsync",
+                "continuity"
+              ]
+            }
+          },
+          "train": {
+            "type": "object",
+            "properties": {
+              "photos": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "targets": {
+                "type": "object",
+                "properties": {
+                  "demo": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "open": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cloud": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "minPhotos": {
+                "default": 5,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "consent": {
+                "default": false,
+                "type": "boolean"
+              },
+              "element": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "photos",
+              "targets"
+            ],
+            "additionalProperties": false
+          },
+          "submit": {
+            "type": "object",
+            "properties": {
+              "route": {
+                "type": "string",
+                "pattern": "^\\/api\\/[\\w/-]+$"
+              },
+              "body": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "result": {
+                "default": "final",
+                "type": "string",
+                "enum": [
+                  "final",
+                  "last",
+                  "all"
+                ]
+              },
+              "estimate": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\/api\\/[\\w/-]+$"
+                  },
+                  {
+                    "type": "boolean",
+                    "const": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "route",
+              "body"
+            ],
+            "additionalProperties": false
+          },
+          "engines": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "demo",
+                "open",
+                "cloud"
+              ]
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "suite",
+    "title",
+    "description",
+    "original",
+    "kind",
+    "targets",
+    "cases"
+  ],
+  "additionalProperties": false
+}
