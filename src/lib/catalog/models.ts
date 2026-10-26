@@ -1475,6 +1475,18 @@ function original(spec: { id: string; open: ModelRoute[]; options: ModelOptions;
   };
 }
 
+/** Fuobe DoP on both engines: a start frame (and an end frame for a transition), 3 or 5 s (49 or 81 frames at 16 fps on Wan). */
+const DOP_OPTIONS: ModelOptions = {
+  aspectRatios: ["auto", ...VID_AR],
+  durations: [3, 5],
+  resolutions: ["480p", "720p"],
+  seed: true,
+  negativePrompt: true,
+  endFrame: true,
+  maxImages: 1,
+  requires: { images: 1, msg: "Add a start frame: Fuobe DoP moves the camera through your picture" },
+};
+
 /** Soul's options on both engines (research §4.3): 7 shapes, a 720p (about 1 MP) and a 1080p (about 2 MP) tier, 1–4 images. */
 const SOUL_OPTIONS: ModelOptions = { aspectRatios: SOUL_ASPECTS, resolutions: SOUL_TIERS, seed: true, maxOutputs: 4 };
 
@@ -1499,6 +1511,31 @@ const originals: ModelDef[] = [
     open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the film-still LoRAs")],
     // 21:9 is a crop of the 16:9 picture, made after generation (research §4.5).
     options: { ...SOUL_OPTIONS, aspectRatios: [...SOUL_ASPECTS, CINEMA_CROP] },
+  }),
+  // Fuobe DoP (O4): camera motions, Mix and effects (src/lib/catalog/dop.ts maps each preset to its LoRAs). Higgsfield's
+  // DoP makes 3 or 5 s clips from a start frame; "auto" keeps the picture's shape.
+  {
+    ...original({
+      id: "fuobe-dop",
+      open: [
+        // A pose Wan 2.2 Fun Camera makes natively (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead.
+        comfy("i2v", "wan22-i2v-14b", "Wan 2.2 14B with the motion's LoRAs on their experts, or Fun Camera's pose"),
+        comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame with the effect's LoRAs"),
+      ],
+      tagline: "Camera motions and effects with their LoRAs on Wan 2.2 · free on your GPU (24 GB), or hosted on fal",
+      options: DOP_OPTIONS,
+    }),
+    // 480p on the user's GPU (720p takes about three times as long); 720p in the cloud, where a run with LoRAs costs the same.
+    engineDefaults: { open: { resolution: "480p" } },
+  },
+  original({
+    id: "fuobe-dop-ltx",
+    open: [
+      comfy("i2v", "ltx23-i2v-lora", "LTX-2.3 22B distilled with the motion's LoRAs"),
+      comfy("flf2v", "ltx23-flf2v-lora", "LTX-2.3 22B distilled, start and end frame, with the transition LoRA"),
+    ],
+    tagline: "FPV, wind and transitions on LTX-2.3 with its camera LoRAs · free on your GPU (24 GB), or hosted on fal",
+    options: { ...DOP_OPTIONS, resolutions: ["720p"], audio: true },
   }),
 ];
 

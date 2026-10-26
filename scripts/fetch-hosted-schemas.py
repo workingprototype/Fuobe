@@ -33,6 +33,8 @@ LTX = {"prompt": "prompt", "negativePrompt": "negative_prompt", "aspectRatio": "
 KLEIN = {k: v for k, v in T2I.items() if k != "negativePrompt"}
 LORA = {
     "fal-ai/qwen-image-edit-2511/lora": EDIT,
+    # Qwen-Image-Edit 2509 with its LoRAs: Fuobe DoP relights a start frame with the 2509 Relight LoRA (o/dop).
+    "fal-ai/qwen-image-edit-plus-lora": EDIT,
     "fal-ai/flux-2/klein/4b/lora": KLEIN,
     "fal-ai/flux-2/klein/4b/edit/lora": {**KLEIN, "images": "image_urls"},
     "fal-ai/ltx-2.3-22b/image-to-video/lora": {**LTX, "image": "image_url", "endImage": "end_image_url"},

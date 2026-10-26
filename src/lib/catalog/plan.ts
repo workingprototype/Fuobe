@@ -100,6 +100,26 @@ export function presetRoute(preset: Preset, engine: Engine): PresetRoute | null 
   return engine === "open" ? preset.open : preset.cloud;
 }
 
+/** Model families a Mix's LoRA may run on instead (said when it can't join the first preset's model). */
+const FAMILY_NAME: Record<string, string> = { "fuobe-dop": "Wan 2.2", "fuobe-dop-ltx": "LTX-2.3", "oss-ltx25": "LTX-2.5" };
+
+/**
+ * A Mix's second preset on the model the first runs on (Fuobe DoP, either engine): its LoRAs scaled by the mix
+ * strength when that model loads them; a LoRA for another base (an LTX-2.3 effect mixed into a Wan move) can't
+ * join, so that preset joins as words only, and the plan says so.
+ */
+export function mixLoras(second: Preset, modelId: string, engine: Engine, strength: number): { loras: LoraRef[]; trigger?: string; note?: string } {
+  const route = presetRoute(second, engine);
+  const loras = route?.loras ?? [];
+  if (!loras.length) return { loras: [] };
+  if (route?.modelId !== modelId) {
+    const on = (route && FAMILY_NAME[route.modelId]) ?? "another model";
+    return { loras: [], note: `${second.name}'s LoRA runs on ${on}, so it joins this mix as words only` };
+  }
+  const k = clamp01(strength);
+  return { loras: loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) })), trigger: loras.find((l) => l.trigger?.trim())?.trigger?.trim() };
+}
+
 export interface Plan {
   model: ModelDef;
   op: Operation;
@@ -117,6 +137,8 @@ export interface Plan {
    * generation (the grade, an overlay) that the result's meta carries.
    */
   soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay; crop?: "21:9" };
+  /** A Fuobe DoP colour-grade effect: the grade the browser applies to the finished clip (meta.grade). */
+  dop?: { grade: string };
 }
 
 /** Operations that work from their inputs alone. */
@@ -178,9 +200,10 @@ export function planGeneration(
       // Apps pin their model; motions/effects let the user pick any compatible video model.
       throw new Error(`${preset.name} runs on ${route.modelId}, not ${model.id}`);
     }
-    prompt = composePrompt(route.promptTemplate ?? preset.promptTemplate, req.prompt, preset, req.presetOptions);
-    // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt.
+    // Preset params/LoRAs are tuned for the preset's own model; other compatible models only get the prompt (without
+    // a LoRA's trigger word, which means nothing to them).
     const sameModel = route.modelId === model.id;
+    prompt = composePrompt((sameModel || preset.type === "app" ? route.promptTemplate : undefined) ?? preset.promptTemplate, req.prompt, preset, req.presetOptions);
     params = { ...model.defaults, ...(sameModel ? route.params : {}), ...req.params };
     // Option choices that set model settings (Angles: rotate / tilt / zoom); a value the user set wins.
     const chosen = Object.assign({}, ...(preset.options ?? []).map((o) => o.choices.find((c) => c.value === (req.presetOptions?.[o.key] ?? o.default ?? o.choices[0]?.value))?.extra ?? {}));
@@ -189,29 +212,38 @@ export function planGeneration(
     if (sameModel) op = op ?? route.op;
   }
 
+  const notes: string[] = [];
+  let dopPlan: Plan["dop"];
   if (preset && /motion|effect/.test(preset.type)) {
     const k = clamp01(req.presetStrength ?? 1);
     if (k < 1) loras = loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) }));
+    // Fuobe DoP · LTX's built-in camera LoRA follows the preset strength too (camera_lora_scale, 0–1).
+    const camera = params.extra?.camera_lora;
+    if (camera && k < 1 && params.extra?.camera_lora_scale === undefined) params = { ...params, extra: { ...params.extra, camera_lora_scale: round2(k) } };
     if (req.mix) {
       const second = getPreset(req.mix.presetId);
       if (!second || !/motion|effect/.test(second.type)) throw new Error("Pick a camera motion or effect to mix in");
       if (second.id !== preset.id) {
         const m = clamp01(req.mix.strength);
-        // The second preset's own words, without the user's prompt; worded by strength.
-        const words = composePrompt(second.promptTemplate.replace(/\{prompt\}\.?/g, ""), "", second, undefined).replace(/[.\s]+$/, "");
+        // Its LoRAs stack on the same model on either engine (Fuobe DoP), each scaled by the mix strength; a LoRA for
+        // another base (an LTX-2.3 effect mixed into a Wan move) can't, so that preset joins as words only.
+        const mixed = mixLoras(second, model.id, model.engine, m);
+        if (mixed.note) notes.push(mixed.note);
+        // The second preset's own words, without the user's prompt (and with its LoRA's trigger); worded by strength.
+        const own = composePrompt(second.promptTemplate.replace(/\{prompt\}\.?/g, ""), "", second, undefined).replace(/[.\s]+$/, "");
+        const words = mixed.trigger && mixed.loras.length ? `${mixed.trigger}, ${own.charAt(0).toLowerCase()}${own.slice(1)}` : `${own.charAt(0).toLowerCase()}${own.slice(1)}`;
         const lead = m >= 0.75 ? "At the same time" : m >= 0.4 ? "Also, more subtly" : "With a slight hint of this";
-        prompt = `${prompt.replace(/[.\s]+$/, "")}. ${lead}: ${words.charAt(0).toLowerCase()}${words.slice(1)}.`;
-        // Its LoRAs stack on the same open model, scaled by the mix strength.
-        const route = presetRoute(second, model.engine);
-        if (route?.modelId === model.id && route.loras?.length) loras = [...loras, ...route.loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * m) }))];
+        prompt = `${prompt.replace(/[.\s]+$/, "")}. ${lead}: ${words}.`;
+        loras = [...loras, ...mixed.loras.filter((l) => !loras.some((x) => x.file === l.file))];
       }
     }
+    // A colour-grade effect: the clip is graded in the browser when it arrives (meta.grade), on the preset's own model.
+    if (preset.grade && presetRoute(preset, model.engine)?.modelId === model.id) dopPlan = { grade: preset.grade };
   }
 
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
   // ones win, so a look's or motion's LoRAs give way to them (fitLoras).
   let soulPlan: Plan["soul"];
-  const notes: string[] = [];
   if (soul) {
     const extra = params.extra ?? {};
     const charStrength = typeof extra.characterStrength === "number" ? extra.characterStrength : undefined;
@@ -348,6 +380,7 @@ export function planGeneration(
     perJobOutputs,
     ...(notes.length && { notes }),
     ...(soulPlan && { soul: soulPlan }),
+    ...(dopPlan && { dop: dopPlan }),
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getModel, getPreset, PRESETS } from "@/lib/catalog";
+import { onEngine } from "@/lib/catalog/engines";
 import { composePrompt, estimateCost, inferOperation, missingInputs, planGeneration } from "@/lib/catalog/plan";
 
 describe("inferOperation", () => {
@@ -75,11 +76,14 @@ describe("motion mix", () => {
   });
 
   it("stacks LoRAs on the open model, scaled by each strength", () => {
-    const withLora = PRESETS.filter((p) => /motion|effect/.test(p.type) && p.open?.modelId === "oss-wan22-14b" && p.open.loras?.length);
-    const [a, b] = withLora;
+    const withLora = PRESETS.filter((p) => /motion|effect/.test(p.type) && p.open?.modelId === "fuobe-dop" && p.open.loras?.length);
+    const a = withLora[0];
+    // A second preset with other files (presets that share a LoRA, like Handheld and Documentary Snap, stack it once).
+    const b = withLora.find((p) => p.open!.loras!.every((l) => !a.open!.loras!.some((x) => x.file === l.file)))!;
+    const open = (id: string) => (id === "fuobe-dop" ? onEngine(getModel(id)!, "open") : getModel(id));
     const plan = planGeneration(
-      { feature: "motion", presetId: a.id, modelId: "oss-wan22-14b", prompt: "x", inputs: { images: ["a.png"] }, presetStrength: 0.5, mix: { presetId: b.id, strength: 0.5 } },
-      getModel,
+      { feature: "motion", presetId: a.id, modelId: "fuobe-dop", prompt: "x", inputs: { images: ["a.png"] }, presetStrength: 0.5, mix: { presetId: b.id, strength: 0.5 } },
+      open,
       getPreset,
     );
     expect(plan.loras).toHaveLength(a.open!.loras!.length + b.open!.loras!.length);

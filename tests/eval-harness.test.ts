@@ -751,15 +751,18 @@ describe("runEval as a library", () => {
     const plan = (await runner.runEval({ suite, engine: "demo", dryRun: true, cases: ["dop/motion-overhead", "dop/effect-thunder-god"], variants: ["catalog", "prompt-only", "research"], root: results }, { client: createClient({ url: base }) })) as { jobs: { case: string; variant: string; skip?: string; loras?: { applied: string[] } }[]; runnable: number };
     expect(seen.filter((s) => s === "POST /api/uploads").length).toBe(before);
     const job = (c: string, v: string) => plan.jobs.find((j) => j.case === c && j.variant === v)!;
-    // Overhead has no LoRA in today's catalog: its prompt-only run would repeat the catalog run, so it's skipped.
-    expect(job("dop/motion-overhead", "catalog").loras?.applied).toEqual([]);
-    expect(job("dop/motion-overhead", "prompt-only").skip).toBe("the same request as the catalog variant (same model, route, prompt, LoRAs and settings)");
-    expect(job("dop/motion-overhead", "research").loras?.applied.length).toBeGreaterThan(0);
-    // Thunder God has one: catalog, prompt-only and research all run (2 seeds each).
-    expect(job("dop/effect-thunder-god", "catalog").loras?.applied).toEqual(["electrify_50_epochs.safetensors@1"]);
+    // Fuobe DoP ships the research's map v2 (O4): the catalog run carries the LoRAs, the prompt-only run none, and the
+    // research run the same files sent by the harness at the research's strengths (what O8 tunes).
+    const overhead = job("dop/motion-overhead", "catalog").loras?.applied ?? [];
+    expect(overhead).toHaveLength(2);
+    expect(overhead.every((f) => /camera-tilt-up-overhead\.safetensors@1$/.test(f))).toBe(true);
+    expect(job("dop/motion-overhead", "prompt-only").loras?.applied).toEqual([]);
+    expect(job("dop/motion-overhead", "prompt-only").skip).toBeUndefined();
+    expect(job("dop/motion-overhead", "research").loras?.applied).toEqual(overhead);
+    // Thunder God's research row replaces round 1's Electrify with ThunderHero (high and low experts).
+    expect(job("dop/effect-thunder-god", "catalog").loras?.applied.every((f) => /thunderhero-redmond/.test(f))).toBe(true);
     expect(job("dop/effect-thunder-god", "prompt-only").loras?.applied).toEqual([]);
-    expect(job("dop/effect-thunder-god", "prompt-only").skip).toBeUndefined();
-    expect(plan.runnable).toBe(10);
+    expect(plan.runnable).toBe(12);
   });
 });
 

@@ -99,6 +99,21 @@ export const PRESETS: GradePreset[] = [
   // Fuobe Soul's post-only looks (Invertethereal, Surreal solarization): a curve, no LoRA.
   { id: "invert", name: "Invert", grade: { invert: 100, saturation: -15, fade: 10 } },
   { id: "solarize", name: "Solarize", grade: { solarize: 100, contrast: 12, saturation: 10 } },
+  // Fuobe DoP's colour-grade effects: a clip animated without a LoRA, then graded (Fuobe's own values).
+  { id: "film-colors", name: "Film Colors", grade: { contrast: -6, highlights: -12, temperature: 10, saturation: 6, fade: 8, grain: 22 } },
+  { id: "black-gloss", name: "Black Gloss", grade: { contrast: 30, highlights: 8, shadows: -30, saturation: -10, sharpness: 25, vignette: 25 } },
+  { id: "candy-pink", name: "Candy Pink", grade: { exposure: 6, temperature: 8, tint: 30, saturation: 10, fade: 15, splitAmount: 40, splitShadowHue: 330, splitHighlightHue: 345 } },
+  { id: "lime-jam", name: "Lime Jam", grade: { contrast: 18, tint: -30, saturation: 20, splitAmount: 35, splitShadowHue: 95, splitHighlightHue: 75 } },
+  { id: "nostalgic-blue", name: "Nostalgic Blue", grade: { temperature: -25, saturation: -15, fade: 25, grain: 20, splitAmount: 30, splitShadowHue: 215, splitHighlightHue: 200 } },
+  { id: "soft-palette", name: "Soft Palette", grade: { contrast: -20, highlights: -10, shadows: 12, saturation: -18, fade: 22 } },
+  { id: "overtime", name: "Overtime", grade: { contrast: 10, shadows: -10, temperature: -10, tint: -18, saturation: -20, grain: 18 } },
+  { id: "crimson-vigil", name: "Crimson Vigil", grade: { contrast: 28, shadows: -15, temperature: 10, saturation: -10, vignette: 40, splitAmount: 55, splitShadowHue: 355, splitHighlightHue: 10 } },
+  { id: "bleach-bypass", name: "Bleach Bypass", grade: { contrast: 40, highlights: 10, shadows: -12, saturation: -55, sharpness: 20, grain: 15 } },
+  { id: "bleached-warm", name: "Bleached Warm", grade: { contrast: 28, temperature: 22, saturation: -40, fade: 8, grain: 12 } },
+  { id: "classic-bw", name: "Classic B&W", grade: { contrast: 20, saturation: -100, grain: 20, vignette: 15 } },
+  { id: "hyper-neon", name: "Hyper Neon", grade: { contrast: 25, shadows: -10, saturation: 45, vibrance: 30, splitAmount: 55, splitShadowHue: 285, splitHighlightHue: 185 } },
+  { id: "naturalistic-clean", name: "Naturalistic Clean", grade: { contrast: 5, highlights: -8, shadows: 6, vibrance: 8, sharpness: 10 } },
+  { id: "sodium-decay", name: "Sodium Decay", grade: { contrast: 18, shadows: -18, temperature: 45, tint: 6, saturation: -20, grain: 25, splitAmount: 35, splitShadowHue: 30, splitHighlightHue: 38 } },
 ];
 
 export function applyPreset(p: GradePreset): Grade {

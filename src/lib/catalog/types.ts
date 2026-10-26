@@ -601,6 +601,11 @@ export interface ModelDef {
    * onEngine() (src/lib/catalog/engines.ts) gives the model as it runs there (that engine's routes only).
    */
   engines?: Engine[];
+  /**
+   * An Original's defaults on one engine, over `defaults` (Fuobe DoP: 480p on the user's GPU, where 720p takes three
+   * times as long; 720p in the cloud, where the LoRA endpoint costs the same at either size).
+   */
+  engineDefaults?: Partial<Record<Engine, ModelDef["defaults"]>>;
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -999,6 +1004,16 @@ export interface Preset {
   open: PresetRoute | null;
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
+  /** Fuobe DoP's colour-grade effects: a src/lib/grade.ts preset the browser applies to the finished clip. */
+  grade?: string;
+  /** Fuobe DoP's relight effects: a step that makes the start frame first, on each engine (src/lib/catalog/dop.ts). */
+  prestep?: PresetPrestep;
+}
+
+/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+export interface PresetPrestep {
+  open: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] };
+  cloud: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] };
 }
 
 /** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */

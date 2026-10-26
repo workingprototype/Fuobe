@@ -4,8 +4,11 @@
  * the bytes in memory; anything else (WebM, MKV, Ogg…) is "unknown" (null) and callers fall back to safe defaults.
  */
 export interface MediaInfo {
-  /** "webm": read by the server's WebM / Matroska reader (src/server/webm-probe.ts), for the ComfyUI uploads. */
-  container: "mp4" | "wav" | "flac" | "mp3" | "webm";
+  /**
+   * "webm": read by the server's WebM / Matroska reader (src/server/webm-probe.ts), for the ComfyUI uploads;
+   * "image": a still's size (src/lib/image-size.ts), so "auto" can follow a start frame's shape.
+   */
+  container: "mp4" | "wav" | "flac" | "mp3" | "webm" | "image";
   /** Seconds (the longest track). */
   duration?: number;
   /** Seconds of picture (the video track alone). */

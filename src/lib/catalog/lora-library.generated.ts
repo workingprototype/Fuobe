@@ -3325,7 +3325,20 @@ export const MOTION_EFFECT_LORAS: MotionEffectLoras[] = [
     "bothEnginesToday": false,
     "newSinceMid2026": false,
     "hostedEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora",
-    "notes": "Add to FUN_CAMERA_POSE in src/lib/catalog/index.ts: Zoom→Zoom In, Pan→Pan Right, Pedestal Down→Pan Down, Classic Static→Static, Roll Transition→ClockWise (CW), Aerial Pullback→Zoom Out."
+    "notes": "Add to FUN_CAMERA_POSE in src/lib/catalog/index.ts: Zoom→Zoom In, Pan→Pan Right, Pedestal Down→Pan Down, Classic Static→Static, Roll Transition→ClockWise (CW), Aerial Pullback→Zoom Out. Added 2026-10-26 (o/dop): camera_lora per preset: Zoom dolly_in, Classic Static static, Aerial Pullback dolly_out, Pedestal Down jib_down (a straight vertical move); Pan and Roll Transition have no LTX camera LoRA and stay prompt-only in the cloud. Roll Transition is a start + end frame preset, which the Fun Camera graph can't take, so it stays a Wan start/end-frame clip on the open engine."
+  },
+  {
+    "kind": "motion",
+    "presets": [
+      "Dolly Out",
+      "Static"
+    ],
+    "status": "fun-camera",
+    "loras": [],
+    "bothEnginesToday": false,
+    "newSinceMid2026": false,
+    "hostedEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora",
+    "notes": "Added 2026-10-26 (o/dop): already on Wan 2.2 Fun Camera on the open engine (Zoom Out, Static); LTX-2.3's built-in camera_lora (dolly_out, static) in the cloud, as for the moves above."
   },
   {
     "kind": "motion",

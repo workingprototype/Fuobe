@@ -235,6 +235,18 @@ function catalogPresetNames() {
 /** Research statuses with a LoRA to A/B (§7.2); prompt-only presets have nothing to compare yet. */
 const LORA_STATUSES = new Set(["add-lora", "alias", "replace", "weak-candidate", "local-only", "relight-route"]);
 
+/**
+ * The models a DoP preset runs on when it isn't Fuobe DoP's Wan (src/lib/catalog/dop.ts): an LTX-2.3 LoRA runs on Fuobe
+ * DoP · LTX on both engines; an LTX-2.5 LoRA on the open LTX-2.5 graph only (the cloud runs the words on Fuobe DoP).
+ */
+function dopModels(m) {
+  const bases = (m.loras ?? []).map((l) => l.base ?? "");
+  if (m.status === "relight-route" || bases.some((b) => /^wan2\.[12]/.test(b))) return undefined;
+  if (bases.some((b) => /^ltx-2(\.3-|-19b)/.test(b))) return everywhere("fuobe-dop-ltx");
+  if (bases.some((b) => /^ltx-2\.5/.test(b))) return { open: ["oss-ltx25"], demo: ["oss-ltx25"], cloud: ["fuobe-dop"] };
+  return undefined;
+}
+
 function dopSuite() {
   const catalog = catalogPresetNames();
   const cases = [];
@@ -247,12 +259,14 @@ function dopSuite() {
         continue;
       }
       const transition = catalog.endFrames.has(name);
+      const models = dopModels(m);
       cases.push({
         id: `dop/${m.kind}-${slug(name)}`,
         title: `DoP ${m.kind} · ${name}`,
         motion: name,
         presetId: `${m.kind}-${slug(name)}`,
         ...(transition && { op: "flf2v" }),
+        ...(models && { models }),
         inputs: { images: ["local/dop/start.png"], ...(transition && { endImage: "local/dop/end.png" }) },
         demoInputs: { images: ["fixtures/start-frame.png"], ...(transition && { endImage: "fixtures/end-frame.png" }) },
         ...(m.status === "local-only" && { engines: ["demo", "open"], note: "local-only LoRAs (civitai RentCivit): open engine only" }),
@@ -265,14 +279,14 @@ function dopSuite() {
       $schema: "./case.schema.json",
       suite: "dop",
       title: "Fuobe DoP · camera motions and effects with LoRAs",
-      description: `${HEADER} Every motion and effect the research gives a LoRA (§7.2) and the catalog already has, on your start frame (local/dop/start.png, plus local/dop/end.png for transitions; a photo of a person on a bridge matches the prompt). Variants: the catalog preset as it ships, its prompt without LoRAs (preset strength 0), and the research's LoRA map v2 on the same prompt. The cloud Original (fuobe-dop on fal's Wan 2.2 LoRA endpoint) arrives with O4; the partner variant runs the preset's words on Kling 2.5 Turbo. Not in the catalog yet: ${later.length ? later.join(", ") : "none"}.`,
+      description: `${HEADER} Every motion and effect the research gives a LoRA (§7.2), on your start frame (local/dop/start.png, plus local/dop/end.png for transitions; a photo of a person on a bridge matches the prompt), on the Original that runs it: Fuobe DoP (Wan 2.2 on your GPU, fal's Wan 2.2 LoRA endpoint in the cloud), Fuobe DoP · LTX for the LTX-2.3 LoRAs, the open LTX-2.5 graph for the LTX-2.5 ones. Variants: the catalog preset as it ships (the map v2), its prompt without LoRAs (preset strength 0), the research's LoRAs at their listed strengths sent by the harness (the same request as the catalog's until the strengths are tuned), and the preset's words on a partner model (Kling 2.5 Turbo). Not in the catalog yet: ${later.length ? later.join(", ") : "none"}.`,
       original: ["fuobe-dop", "fuobe-dop-ltx"],
       kind: "video",
       recipe: "motion",
       targets: {
-        open: { models: ["oss-wan22-14b"], params: { duration: 5 } },
+        open: { models: ["fuobe-dop"], params: { duration: 5 } },
         cloud: { models: ["fuobe-dop"], params: { duration: 5 } },
-        demo: { models: ["oss-wan22-14b"], params: { duration: 5 } },
+        demo: { models: ["fuobe-dop"], params: { duration: 5 } },
       },
       defaults: {
         seeds: [1001, 2002],
@@ -283,7 +297,7 @@ function dopSuite() {
         timeoutSeconds: 2700,
       },
       variants: {
-        catalog: { description: "The catalog preset as it ships (prompt template + today's LoRA map)" },
+        catalog: { description: "The catalog preset as it ships on Fuobe DoP (prompt template + the LoRA map v2)" },
         "prompt-only": { description: "The preset's prompt without LoRAs (preset strength 0)", presetStrength: 0 },
         research: { description: "The research's LoRA map v2 at the listed strengths on the preset's prompt", presetStrength: 0, loras: "recipe" },
         partner: { description: "The preset's words on a partner model (Kling 2.5 Turbo), for reference", models: { cloud: ["kling-2-5-turbo"] }, engines: ["cloud"] },

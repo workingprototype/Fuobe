@@ -190,6 +190,11 @@ model("qwen-image-edit-2511-cloud", "Qwen-Image-Edit 2511 (hosted)", "Alibaba Qw
        ("edit", "qwen/qwen-image-edit-2511", "replicate", {"keys": {"images": "image"}, "drop": ["image"]})], defaults={"aspectRatio": "1:1"},
       # Replicate's aspect_ratio has no 21:9, 3:2, 2:3, 5:4 or 4:5: each route lists what it takes (fit_values).
       fit_values=True)
+# Qwen-Image-Edit 2509 with its LoRAs (O4): Fuobe DoP's relight effects relight the start frame with the 2509 Relight
+# LoRA before the clip is made. A helper step, not a picker model.
+model("qwen-image-edit-2509-cloud", "Qwen-Image-Edit 2509 (hosted)", "Alibaba Qwen", "qwen-image", "image",
+      "Open-weights Qwen-Image-Edit 2509 with its LoRAs (relight, next scene, angles)",
+      [("edit", "fal-ai/qwen-image-edit-plus-lora", "fal")], hidden=True)
 model("flux-2-klein-4b-cloud", "FLUX.2 [klein] 4B (hosted)", "Black Forest Labs", "flux", "image",
       "The Apache-2.0 FLUX.2: cheapest drafts and edits",
       [("t2i", "fal-ai/flux-2/klein/4b", "fal", {"loraEndpoint": "fal-ai/flux-2/klein/4b/lora"}),
@@ -449,6 +454,27 @@ model("ltx-2-3-22b-cloud", "LTX-2.3 22B (hosted)", "Lightricks", "ltx", "video",
       badges=["audio"], api_defaults={"enable_prompt_expansion": False},
       pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
       defaults={"aspectRatio": "16:9", "duration": 5}, frame_step=8)
+# ----- Originals (O4): Fuobe DoP's cloud halves, camera motions and effects on hosted open weights (research §3.1, §7.5).
+# DoP clips are 49 or 81 frames at 16 fps (3 or 5 s): fal's Wan 2.2 interpolates to 32 fps by default, so
+# interpolator_model none, at 20 steps. Each LoRA goes to its expert (transformer high / low / both per file); a Mix
+# sends both presets' LoRAs. Replicate's fast Wan takes one LoRA per expert (a Mix runs on fal) and makes 81–121 frames.
+DOP_FAL = {"interpolator_model": "none", "frames_per_second": 16, "num_inference_steps": 20}
+model("fuobe-dop", "Fuobe DoP", "Fuobe Original", "fuobe-dop", "video",
+      "Camera motions and effects with their LoRAs on Wan 2.2: 3 or 5 s at 16 fps",
+      [("i2v", "fal-ai/wan/v2.2-a14b/image-to-video", "fal", {"loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora", "fixed": DOP_FAL, "flf2v": True}),
+       ("i2v", "wan-video/wan-2.2-i2v-fast", "replicate", {"fixed": WAN22_REPLICATE})],
+      original=True,
+      pricing=("second", 0.08, "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+               {"byResolution": {"720p": 0.08, "580p": 0.06, "480p": 0.04}, "withLoras": 0.1}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "resolution": "720p"}, frame_step=4, fit_values=True)
+# The LTX-2.3 presets (FPV Drone, Wind to Face, the transitions with an end frame) and LTX-2.3's built-in camera LoRA
+# (camera_lora: dolly, jib, static) for the moves it covers. Prompt expansion off; sound off unless asked.
+model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video",
+      "Camera moves, FPV and transitions on LTX-2.3 with its camera LoRAs: 3 or 5 s at 24 fps",
+      [("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora", "flf2v": True})],
+      original=True, api_defaults={"enable_prompt_expansion": False},
+      pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
+      options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "generateAudio": False}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
@@ -1690,7 +1716,8 @@ for m in M:
             if mk:
                 fmt = mask_format(ep)
                 routes.append({**route, "op": "inpaint", "map": {**route["map"], "mask": mk, **({"maskFormat": fmt} if fmt else {})}})
-        if len(r) > 3 and r[3] == "+flf2v" and not ropts:
+        # "+flf2v" (or the route option flf2v: True, beside others): the same endpoint as a start/end-frame route.
+        if (len(r) > 3 and r[3] == "+flf2v" and not ropts) or ropts.get("flf2v"):
             if "endImage" in route["map"]:
                 routes.append({**route, "op": "flf2v"})
             else:
