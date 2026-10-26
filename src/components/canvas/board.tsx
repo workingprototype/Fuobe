@@ -5,9 +5,10 @@ import { Check, MoreHorizontal, Pencil, Play, RotateCcw, Trash2, Ungroup } from 
 import { memo, useEffect, useRef, useState } from "react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { newId, type CanvasGraph } from "@/lib/catalog/canvas";
+import { getModel } from "@/lib/catalog";
+import { ancestors, newId, type CanvasGraph } from "@/lib/catalog/canvas";
 import { BOARD_COLOR_LABEL, BOARD_COLORS, BOARD_LIMITS, COMMENT_AUTHOR, groupMembers, strokePath, type BoardColor, type CanvasComment, type CanvasGroup, type CanvasShape } from "@/lib/catalog/canvas-board";
-import { timeAgo } from "@/lib/format";
+import { formatCost, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useEditorActions, useEditorGlobals, useEditorSelector, type EditorSnapshot } from "./canvas-context";
 import type { FlowNode } from "./nodes";
@@ -155,6 +156,46 @@ const selectGroupCount = (s: EditorSnapshot, id: string) => {
   return g ? groupMembers(s.graph, g).length : 0;
 };
 
+/** What Run group would start: the group's nodes that need to run, and what they need upstream. */
+interface GroupPlan {
+  steps: number;
+  usd: number;
+  unknown: boolean;
+  /** The models the steps run (a demo run is free whatever they cost). */
+  models: string;
+}
+const sameGroupPlan = (a: GroupPlan, b: GroupPlan) => a.steps === b.steps && a.usd === b.usd && a.unknown === b.unknown && a.models === b.models;
+const selectGroupPlan = (s: EditorSnapshot, id: string): GroupPlan => {
+  const g = s.graph.groups?.find((x) => x.id === id);
+  if (!g) return { steps: 0, usd: 0, unknown: false, models: "" };
+  const members = groupMembers(s.graph, g).map((n) => n.id);
+  const scope = new Set([...members, ...ancestors(s.graph, members)]);
+  const steps = s.plan.steps.filter((st) => scope.has(st.nodeId));
+  return {
+    steps: steps.length,
+    usd: Math.round(steps.reduce((n, st) => n + (st.costUsd ?? 0), 0) * 1000) / 1000,
+    unknown: steps.some((st) => st.costUsd === null),
+    models: [...new Set(steps.map((st) => st.request.modelId))].join(" "),
+  };
+};
+
+/** Mounted only while the Run group tooltip is open: the price is worked out then, not on every keystroke. */
+function GroupPrice({ id }: { id: string }) {
+  const p = useEditorSelector(selectGroupPlan, id, sameGroupPlan);
+  const { isDemo } = useEditorGlobals();
+  if (!p.steps) return <>Everything in this group is up to date</>;
+  const demo = p.models.split(" ").every((mid) => {
+    const m = getModel(mid);
+    return !!m && isDemo(m);
+  });
+  const price = demo ? "demo, free" : p.unknown ? "price unknown" : p.usd === 0 ? "free" : `≈ ${formatCost(p.usd)}`;
+  return (
+    <>
+      Runs {p.steps === 1 ? "1 node" : `${p.steps} nodes`} (with what they need) · {price}
+    </>
+  );
+}
+
 const GroupNode = memo(function GroupNode({ id, data, selected }: NodeProps<FlowNode>) {
   const actions = useEditorActions();
   const { readOnly, running } = useEditorGlobals();
@@ -207,7 +248,9 @@ const GroupNode = memo(function GroupNode({ id, data, selected }: NodeProps<Flow
                   <Play className="size-3" /> Run group
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Runs the nodes in this group, and what they need</TooltipContent>
+              <TooltipContent>
+                <GroupPrice id={id} />
+              </TooltipContent>
             </Tooltip>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

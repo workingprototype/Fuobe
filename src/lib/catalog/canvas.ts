@@ -1101,7 +1101,7 @@ function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): Node
 }
 
 /** A Translate node set to video with no cloud model allowed: where the open engine dubs. */
-export const OPEN_DUB_HINT = "Dubbing a video here runs on the cloud (ElevenLabs Dubbing, HeyGen). On the open engine, dub it in Dub, where you check the translation before it's spoken";
+export const OPEN_DUB_HINT = "Dubbing a video on a canvas runs on the cloud (ElevenLabs Dubbing, HeyGen). On the open engine it's made in Translate & dub, where you check the translation before it's spoken: start it from here";
 
 export interface DescribeContext {
   engineMode?: "both" | "open" | "cloud";

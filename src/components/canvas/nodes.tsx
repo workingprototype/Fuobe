@@ -107,6 +107,7 @@ import {
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { keyCombo } from "@/lib/keys";
 import { cn } from "@/lib/utils";
@@ -818,7 +819,7 @@ const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, se
         )}
         {type === "concat" ? (
           <ConcatPanel id={id} data={data} engine={model?.engine ?? g.engine} />
-        ) : (
+        ) : v.error === OPEN_DUB_HINT ? null : (
         <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", g.readOnly && "pointer-events-none")}>
           {choices.length ? (
             <div className={NO_DRAG}>
@@ -865,15 +866,61 @@ const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, se
             {error}
           </p>
         )}
-        {error === OPEN_DUB_HINT && (
-          <Link href="/audio/translate" className={cn(chip, "w-fit")}>
-            Open Translate &amp; dub
-          </Link>
-        )}
+        {error === OPEN_DUB_HINT && !g.readOnly && <OpenDub id={id} data={data} />}
       </div>
     </NodeShell>
   );
 }, sameNodeProps);
+
+// ---------------------------------------------------------------------------
+// Translate a video on the open engine: the dub is made step by step in Translate & dub (the translation is
+// reviewed before it's spoken), so the node starts it there with its clip and language.
+
+const OPEN_DUB_LANGUAGES = DUB_LANGUAGES.filter((l) => supportsTarget("open", l));
+
+const selectVideoIn = (s: EditorSnapshot, id: string): string | undefined => {
+  const e = s.graph.edges.find((x) => x.target === id && x.targetHandle === "video");
+  const src = e && s.byId.get(e.source);
+  if (!src) return undefined;
+  return src.type === "video-input" ? src.data.url : s.views.get(src.id)?.results.outputs.find((x) => x.o.kind === "video")?.o.url;
+};
+
+function OpenDub({ id, data }: { id: string; data: CanvasNodeData }) {
+  const actions = useEditorActions();
+  const video = useEditorSelector(selectVideoIn, id);
+  const lang = data.params?.targetLanguage && OPEN_DUB_LANGUAGES.some((l) => l.code === data.params?.targetLanguage) ? data.params.targetLanguage : undefined;
+  const [started, setStarted] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const start = async () => {
+    if (!video || !lang) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/dub", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "open", mode: "steps", video, targets: [lang], source: "auto", title: data.label || "Canvas dub" }) });
+      const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
+      if (!res.ok || !body.id) throw new Error(body.error ?? "Couldn't start the dub");
+      setStarted(body.id);
+      toast.success("Dub started", { description: "Check the translation in Translate & dub, then have it spoken" });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1.5", NO_DRAG)}>
+      <OptionSelect label="Dub into" value={lang} options={OPEN_DUB_LANGUAGES.map((l) => l.code)} onChange={(v) => actions.update(id, { params: { ...data.params, targetLanguage: v } })} format={(v) => OPEN_DUB_LANGUAGES.find((l) => l.code === v)?.name ?? v} />
+      {started ? (
+        <Link href={`/audio/translate?dub=${started}`} className={chip}>
+          Review the dub
+        </Link>
+      ) : (
+        <button className={chip} onClick={() => void start()} disabled={!video || !lang || busy} title={!video ? "Connect a video (an upload, or a finished clip)" : !lang ? "Pick the language to dub into" : "Free on your GPU"}>
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />} Start in Translate &amp; dub
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Video concatenator: the film's frame, and each clip's cut and sound in the order they play
