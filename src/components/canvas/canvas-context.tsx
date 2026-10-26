@@ -30,7 +30,7 @@ import {
   describeNode,
   effectiveOp,
   isGenerator,
-  rowsFeeding,
+  tablesFeeding,
   type CanvasGraph,
   type CanvasNode,
   type CanvasNodeData,
@@ -210,18 +210,22 @@ export class DescribeCache {
     }
     const next = new Map<string, { key: unknown[]; info: NodeInfo }>();
     const out = new Map<string, NodeInfo>();
-    const tables = graph.nodes.some((n) => n.type === "table");
+    // Rows reach a node from a table any number of steps up: the table it runs per row of is an input too
+    // (worked out once for the whole board, not per node).
+    const feeds = graph.nodes.some((n) => n.type === "table") ? tablesFeeding(graph) : null;
+    const tableKey = (n: CanvasNode) => {
+      const rows = feeds!(n);
+      return rows && "table" in rows ? rows.table.data : rows?.error;
+    };
     for (const n of graph.nodes) {
       if (!isGenerator(n)) continue;
       const key: unknown[] = [n.type, n.data];
-      // Rows reach a node from a table any number of steps up: the table it runs per row of is an input too.
-      if (tables) {
-        const rows = rowsFeeding(graph, n);
-        key.push(rows && "table" in rows ? rows.table.data : rows?.error);
-      }
+      if (feeds) key.push(tableKey(n));
       for (const e of into.get(n.id) ?? []) {
         const s = byId.get(e.source);
         key.push(e.source, e.targetHandle, s?.type, s?.data, s?.position.x, s?.position.y);
+        // A Video concatenator takes a clip per row from a node run per row: that node's table is its input too.
+        if (feeds && n.type === "concat" && s) key.push(tableKey(s));
         // A cloned voice passes on what's wired into it: that is an input of this node too.
         if (s?.type === "clone-voice") for (const f of into.get(s.id) ?? []) key.push(f.source, byId.get(f.source)?.type, byId.get(f.source)?.data);
       }
@@ -319,6 +323,11 @@ export interface EditorActions {
   open: (id: string, index?: number) => void;
   /** Add an input node holding this node's first output, wired nowhere yet. */
   toInput: (id: string) => void;
+  /**
+   * Add an input node holding a file made for this node elsewhere (an open-engine dub), below it; `takeOver` moves
+   * the node's outgoing connections onto it.
+   */
+  addInput: (id: string, file: { url: string; kind: "image" | "video" | "audio"; label?: string }, takeOver?: boolean) => void;
   /** Draw an edge (the keyboard's "Connect output to…"). */
   connect: (c: Connection) => void;
   /** Remove an edge (the keyboard's "Disconnect"). */

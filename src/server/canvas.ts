@@ -21,14 +21,18 @@ import {
   TABLE_LIMITS,
   cleanGraph,
   concatClips,
+  depIdentity,
   EMPTY_GRAPH,
   getTemplate,
+  keptRow,
   NODE_SPECS,
   nodeLabel,
   nodeMap,
   nodeSignature,
   outline,
   planCanvas,
+  rowSignature,
+  silenceSeconds,
   withCurrentElements,
   type Canvas,
   type CanvasGraph,
@@ -36,14 +40,16 @@ import {
   type CanvasPlan,
   type CanvasRuns,
   type CanvasSummary,
+  type StepSource,
 } from "@/lib/catalog/canvas";
-import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
+import type { Engine, Generation, GenerationRequest, MediaKind } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { listElements } from "./elements";
 import { createGenerations, getGeneration } from "./generations";
+import { silentWav } from "./marketing";
 import { engineMode } from "./settings";
-import { absolutePath } from "./storage";
+import { absolutePath, saveFile } from "./storage";
 
 /**
  * Canvas boards (Higgsfield Canvas): the pages the user edits (each a graph, with its groups, comments and
@@ -159,6 +165,8 @@ const NodeData = z.object({
   // Table: column names and rows of cells (a few empty rows past the limit are fine; only filled rows run).
   columns: z.array(z.string().max(TABLE_LIMITS.column)).min(1).max(TABLE_LIMITS.columns).optional(),
   rows: z.array(z.array(z.string().max(TABLE_LIMITS.cell)).max(TABLE_LIMITS.columns)).max(TABLE_LIMITS.rows * 2).optional(),
+  // Translate (video) on the open engine: the dub it started in Translate & dub.
+  dubId: z.string().max(40).optional(),
 });
 
 const Num = z.number().finite();
@@ -249,6 +257,13 @@ export function graphProblem(input: unknown): string {
   }
   if (list === "nodes") return "This board has too many nodes to save (300 at most)";
   if (list === "edges") return "This board has too many connections to save (1,200 at most)";
+  // One drawing, group or comment that doesn't fit (not too many of them): say which kind, and what to do.
+  if (list === "shapes" && typeof index === "number") {
+    const kind = (input as { shapes?: { kind?: string }[] }).shapes?.[index]?.kind;
+    return rest[0] === "points" ? "A drawing has too many points to save — erase it and draw it again in shorter strokes" : `A ${kind === "text" ? "text" : "drawing"} on this board couldn't be saved — erase it and make it again`;
+  }
+  if (list === "groups" && typeof index === "number") return "A group on this board couldn't be saved — ungroup it and group the nodes again";
+  if (list === "comments" && typeof index === "number") return "A comment on this board couldn't be saved — delete it and pin it again";
   if (list === "groups") return `This board has too many groups to save (${BOARD_LIMITS.groups} at most)`;
   if (list === "comments") return `This board has too many comments to save (${BOARD_LIMITS.comments} at most)`;
   if (list === "shapes") return `This board has too many drawings to save (${BOARD_LIMITS.shapes} at most) — erase a few`;
@@ -388,7 +403,16 @@ export interface CanvasPatch {
   page?: string;
 }
 
-/** Save a new name, pages and/or one page's graph. Moving a viewport alone doesn't count as an edit. */
+/** A change the canvas can't take as it is now (a 409: the editor shows the message). */
+export class CanvasConflict extends Error {
+  readonly status = 409;
+}
+
+/**
+ * Save a new name, pages and/or one page's graph. Moving a viewport alone doesn't count as an edit. A graph for a
+ * page the canvas doesn't have yet (one the editor added, run before its autosave) adds that page; with no room for
+ * it, the save is refused (CanvasConflict) rather than written over another page.
+ */
 export function updateCanvas(id: string, patch: CanvasPatch): Canvas | null {
   const current = getCanvas(id);
   if (!current) return null;
@@ -397,10 +421,13 @@ export function updateCanvas(id: string, patch: CanvasPatch): Canvas | null {
   let pages = current.pages;
   if (patch.pages?.length) pages = patch.pages.map((p) => ({ ...p, graph: cleanGraph(p.graph) }));
   if (patch.graph) {
-    const graph = cleanGraph(patch.graph);
-    // A page the editor added and hasn't saved yet (a run sent before the autosave): added, never written over page 1.
-    if (patch.page && !pages.some((p) => p.id === patch.page) && pages.length < BOARD_LIMITS.pages) pages = [...pages, { id: patch.page, name: nextPageName(pages), graph }];
-    else pages = withPageGraph(pages, patch.page, graph);
+    const known = !patch.page || pages.some((p) => p.id === patch.page);
+    if (!known && pages.length >= BOARD_LIMITS.pages) throw new CanvasConflict(`This canvas already holds ${BOARD_LIMITS.pages} pages, so the new one couldn't be saved — reload the canvas`);
+    const target = patch.page ?? pages[0].id;
+    // Results are kept by node id, so two pages can't share one: a node another page holds stays there (as parsePages does).
+    const elsewhere = new Set(pages.filter((p) => p.id !== target).flatMap((p) => p.graph.nodes.map((n) => n.id)));
+    const graph = cleanGraph({ ...patch.graph, nodes: patch.graph.nodes.filter((n) => !elsewhere.has(n.id)) });
+    pages = known ? withPageGraph(pages, target, graph) : [...pages, { id: target, name: nextPageName(pages), graph }];
   }
   const edited = pageContent(pages) !== pageContent(current.pages) ? now : current.editedAt;
   db().prepare("UPDATE canvases SET name = ?, graph_json = ?, updated_at = ?, edited_at = ? WHERE id = ?").run(name, JSON.stringify({ pages }), now, edited, id);
@@ -452,6 +479,8 @@ export function canvasView(id: string): { canvas: Canvas; generations: Generatio
 export interface RunOptions {
   /** The page to run (the first one when omitted). */
   page?: string;
+  /** Every page as the editor has them (saved first, like an autosave): the run saves the whole canvas. */
+  pages?: CanvasPage[];
   /** Nodes to run with their upstream; omit for Run all (of the page). */
   targets?: string[];
   /** Run a group: its nodes and what they need. */
@@ -495,10 +524,31 @@ function oversizedClip(graph: CanvasGraph, nodeId: string): string | null {
   return null;
 }
 
+/**
+ * The silent tracks a run's steps name (silenceRef: a muted or soundless clip of the cloud concatenator), written
+ * as WAV files when the run starts; one file per length.
+ */
+function silenceWriter(): (req: GenerationRequest) => GenerationRequest {
+  const files = new Map<number, string>();
+  return (req) => {
+    const seconds = silenceSeconds(req.inputs?.audio);
+    if (seconds === null) return req;
+    let url = files.get(seconds);
+    if (!url) {
+      url = saveFile({ data: silentWav(seconds), contentType: "audio/wav", source: "generation", name: "canvas-silence.wav" }).url;
+      files.set(seconds, url);
+    }
+    return { ...req, inputs: { ...req.inputs, audio: url } };
+  };
+}
+
 export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
   let canvas = getCanvas(id);
   if (!canvas) return null;
+  if (opts.pages?.length) canvas = updateCanvas(id, { pages: opts.pages })!;
   if (opts.graph) canvas = updateCanvas(id, { graph: opts.graph, page: opts.page })!;
+  // A page named is run, never another one in its place.
+  if (opts.page && !canvas.pages.some((p) => p.id === opts.page)) throw new CanvasConflict("That page isn't on this canvas any more — reload it");
   // An element renamed since the board was saved: its node mentions the new @handle.
   const graph = withCurrentElements(pageOf(canvas.pages, opts.page).graph, listElements());
   const targets = opts.group ? groupTargets(graph, opts.group) : opts.targets;
@@ -510,9 +560,12 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
   // Nodes run per row of a table: each row's generation (a row of the next node waits for the same row).
   const madeRows = new Map<string, string[]>(plan.reused.flatMap((r) => (canvas.runs[r.nodeId]?.rows ? [[r.nodeId, canvas.runs[r.nodeId].rows!] as [string, string[]]] : [])));
   const errors = [...plan.errors];
+  const withSilence = silenceWriter();
   const items: Generation[] = [];
   const ran: string[] = [];
   const runs: CanvasRuns = {};
+  /** What each started node costs (a node run per row: only the rows that run again). */
+  const spent = new Map<string, number>();
   const n = plan.steps.length;
   plan.steps.forEach((step, i) => {
     const depIds = step.deps.map((d) => made.get(d));
@@ -522,13 +575,13 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
       return;
     }
     try {
-      const sig = nodeSignature(step.request, depIds as string[], step.steps);
+      const sig = nodeSignature(step.request, step.deps.map((d, k) => depIdentity({ rows: madeRows.get(d) }, depIds[k] as string)), step.steps);
       if (step.steps) {
         const big = oversizedClip(graph, step.nodeId);
         if (big) throw new Error(big);
         // A node made in several steps: one pipeline, waiting on the upstream nodes' results like on its own steps.
         const existing: Record<string, string> = Object.fromEntries(step.deps.map((d, k) => [`node:${d}`, depIds[k] as string]));
-        const at = (f: NonNullable<typeof step.steps>[number]["from"][number]) => {
+        const at = (f: StepSource) => {
           if (!("node" in f)) return f.step;
           if (f.row === undefined) return `node:${f.node}`;
           const id = madeRows.get(f.node)?.[f.row];
@@ -536,25 +589,38 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
           existing[`node:${f.node}#${f.row}`] = id;
           return `node:${f.node}#${f.row}`;
         };
-        const pipe = createPipeline(
-          step.steps.map((st) => ({
-            key: st.key,
-            request: { ...st.request, step: { label: st.request.step?.label ?? step.label, index: i, of: n } },
-            after: st.from.map(at),
-          })),
-          { batchId, existing },
-        );
+        // A node run per row keeps the rows whose result is live and whose inputs didn't change: one failed row
+        // (or a row added to the table) runs, and is paid for, on its own.
+        const source = (f: StepSource) => ("node" in f ? (f.row === undefined ? made.get(f.node) : madeRows.get(f.node)?.[f.row]) : undefined);
+        const rowSigs = step.rows ? step.steps.map((st) => rowSignature(st.request, st.from.map(source))) : undefined;
+        const prev = canvas.runs[step.nodeId];
+        const kept = step.steps.map((_, r) => (rowSigs && step.reason !== "forced" ? keptRow(prev, r, rowSigs[r], sig, statusOf) : undefined));
+        const todo = step.steps.filter((_, r) => !kept[r]);
+        const pipe = todo.length
+          ? createPipeline(
+              todo.map((st) => ({
+                key: st.key,
+                request: withSilence({ ...st.request, step: { label: st.request.step?.label ?? step.label, index: i, of: n } }),
+                after: st.from.map(at),
+              })),
+              { batchId, existing },
+            )
+          : null;
         if (step.rows) {
           // Every row is a result; the next node takes the first one, or its own row.
-          const rows = step.steps.map((st) => pipe.byKey[st.key].id);
+          const rows = step.steps.map((st, r) => kept[r] ?? pipe!.byKey[st.key].id);
           made.set(step.nodeId, rows[0]);
           madeRows.set(step.nodeId, rows);
-          runs[step.nodeId] = { sig, ids: pipe.items.map((g) => g.id), rows, at: Date.now() };
+          const ids = [...rows, ...(pipe?.items.map((g) => g.id).filter((g) => !rows.includes(g)) ?? [])];
+          runs[step.nodeId] = { sig, ids, rows, rowSigs, at: Date.now() };
+          spent.set(step.nodeId, (step.rowCostUsd ?? 0) * todo.length);
         } else {
-          const out = pipe.byKey[step.steps[step.steps.length - 1].key];
+          const out = pipe!.byKey[step.steps[step.steps.length - 1].key];
           made.set(step.nodeId, out.id);
-          runs[step.nodeId] = { sig, ids: pipe.items.map((g) => g.id), out: out.id, at: Date.now() };
+          runs[step.nodeId] = { sig, ids: pipe!.items.map((g) => g.id), out: out.id, at: Date.now() };
+          spent.set(step.nodeId, step.costUsd ?? 0);
         }
+        if (!pipe) return;
         items.push(...pipe.items);
       } else {
         const created = createGenerations(
@@ -563,6 +629,7 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
         );
         made.set(step.nodeId, created[0].id);
         runs[step.nodeId] = { sig, ids: created.map((g) => g.id), at: Date.now() };
+        spent.set(step.nodeId, step.costUsd ?? 0);
         items.push(...created);
       }
       ran.push(step.nodeId);
@@ -570,7 +637,7 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
       errors.push({ nodeId: step.nodeId, message: (e as Error).message });
     }
   });
-  if (ran.length) {
+  if (Object.keys(runs).length) {
     // Merge into the latest runs (another run may have finished writing meanwhile).
     db().transaction(() => {
       const row = db().prepare("SELECT runs_json FROM canvases WHERE id = ?").get(id) as { runs_json: string } | undefined;
@@ -584,6 +651,6 @@ export function runCanvas(id: string, opts: RunOptions = {}): RunResult | null {
     ran,
     reused: plan.reused,
     errors,
-    costUsd: plan.steps.filter((s) => ran.includes(s.nodeId)).reduce((sum, s) => sum + (s.costUsd ?? 0), 0),
+    costUsd: Math.round([...spent.values()].reduce((sum, c) => sum + c, 0) * 10000) / 10000,
   };
 }

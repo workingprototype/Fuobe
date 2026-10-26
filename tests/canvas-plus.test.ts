@@ -16,6 +16,9 @@ const {
   CONCAT_SIZE,
   MUTE_LEVEL,
   OPEN_DUB_HINT,
+  silenceRef,
+  silenceSeconds,
+  rowSignature,
   cleanGraph,
   concatClips,
   connectionError,
@@ -202,25 +205,41 @@ describe("plans for the new nodes", () => {
     const d = describeNode(g, g.nodes[2], { engineMode: "cloud" });
     expect(d.error).toBeUndefined();
     expect(d.deps).toEqual(["gen"]);
+    // The muted clip plays 3 s: its sound becomes 3 s of silence (whether it had sound or not).
     expect(d.steps!.map((s) => [s.key, s.request.modelId, s.request.op, s.from])).toEqual([
       ["trim:0", "trim-video", "trim", []],
       ["fit:0", "scale-video", "reframe", [{ step: "trim:0" }]],
-      ["sound:0", "extract-soundtrack", "separate-audio", [{ step: "fit:0" }]],
-      ["quiet:0", "ffmpeg-loudnorm", "level", [{ step: "sound:0" }]],
-      ["mute:0", "merge-audio-video", "mux", [{ step: "fit:0" }, { step: "quiet:0" }]],
+      ["quiet:0", "merge-audio-video", "mux", [{ step: "fit:0" }]],
       ["fit:1", "scale-video", "reframe", [{ node: "gen" }]],
-      ["join", "join-clips", "concat", [{ step: "mute:0" }, { step: "fit:1" }]],
+      ["join", "join-clips", "concat", [{ step: "quiet:0" }, { step: "fit:1" }]],
     ]);
     const step = (k: string) => d.steps!.find((s) => s.key === k)!.request;
     expect(step("trim:0")).toMatchObject({ inputs: { video: "/api/files/u/a.mp4" }, params: { startTime: 1, endTime: 4 } });
     expect(step("fit:0")).toMatchObject({ params: { aspectRatio: "9:16", extra: CONCAT_SIZE["9:16"] }, chain: [{ slot: "video" }] });
-    expect(step("quiet:0").params!.extra).toEqual(MUTE_LEVEL);
-    expect(step("mute:0").chain).toEqual([{ slot: "video" }, { slot: "audio" }]);
+    expect(step("quiet:0")).toMatchObject({ inputs: { audio: silenceRef(3) }, chain: [{ slot: "video" }] });
+    expect(silenceSeconds(step("quiet:0").inputs!.audio)).toBe(3);
     expect(step("join")).toMatchObject({ feature: "canvas", params: { extra: { target_fps: 30 } }, chain: [{ slot: "videos" }, { slot: "videos" }] });
     // The in-between jobs are helper steps (the Library hides them); the film is the node's request.
     expect(d.steps!.filter((s) => s.key !== "join").every((s) => s.request.feature === "canvas-step")).toBe(true);
     expect(d.request).toBe(step("join"));
     expect(d.costUsd).toBeGreaterThan(0);
+
+    // A muted clip whose length isn't known yet (made upstream in this run): its own sound, lowered to −70 dB.
+    g.nodes[2].data.clips = { gen: { mute: true } };
+    const quiet = describeNode(g, g.nodes[2]).steps!;
+    expect(quiet.filter((s) => s.key.endsWith(":1")).map((s) => [s.key, s.request.modelId, s.from])).toEqual([
+      ["fit:1", "scale-video", [{ node: "gen" }]],
+      ["sound:1", "extract-soundtrack", [{ step: "fit:1" }]],
+      ["quiet:1", "ffmpeg-loudnorm", [{ step: "sound:1" }]],
+      ["mute:1", "merge-audio-video", [{ step: "fit:1" }, { step: "quiet:1" }]],
+    ]);
+    expect(quiet.find((s) => s.key === "quiet:1")!.request.params!.extra).toEqual(MUTE_LEVEL);
+    // A clip with no sound of its own (read from its file) gets silence as long as it plays, so every clip reaches
+    // merge-videos with a sound track; one with sound is left as it is.
+    g.nodes[2].data.clips = { a: { audio: false, length: 6.5, start: 2 }, gen: { audio: true, length: 5 } };
+    const silent = describeNode(g, g.nodes[2]).steps!;
+    expect(silent.find((s) => s.key === "quiet:0")!.request.inputs!.audio).toBe(silenceRef(4.5));
+    expect(silent.some((s) => s.key === "quiet:1" || s.key === "sound:1")).toBe(false);
 
     // A clip cut at its start with no end: the cloud cut needs both, so it asks (or uses the measured length).
     g.nodes[2].data.clips = { a: { start: 2 } };
@@ -542,7 +561,8 @@ describe("pages", () => {
     expect(body.ran).toEqual(["shot", "film"]);
     const film = body.canvas.runs.film;
     const shotId = body.canvas.runs.shot.ids[0];
-    expect(film.ids).toHaveLength(7);
+    // The cut clip: trim, frame, its silence (muted); the shot: frame; then the join.
+    expect(film.ids).toHaveLength(5);
     const out = gens.getGeneration(film.out!)!;
     expect(out).toMatchObject({ modelId: "join-clips", op: "concat", feature: "canvas" });
     expect(body.items.filter((g) => film.ids.includes(g.id) && g.id !== film.out).every((g) => g.feature === "canvas-step")).toBe(true);
@@ -563,4 +583,205 @@ describe("pages", () => {
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: string }).error).toBe("This group has no nodes in it yet");
   }, 90_000);
+});
+
+describe("review fixes", () => {
+  it("a long stroke is thinned within the saved limit whatever its length, and a refused drawing is named", async () => {
+    for (let n = 2; n <= 2400; n++) {
+      const s = board.penShape("s", Array.from({ length: n }, (_, i) => ({ x: i * 3, y: (i % 7) * 3 })), "ink")!;
+      expect(s.points!.length, `${n} points`).toBeLessThanOrEqual(board.BOARD_LIMITS.penPoints);
+      // The stroke still ends where it was drawn to.
+      expect(s.points!.at(-1)![0]).toBe(1);
+    }
+    const { graphProblem } = await import("@/server/canvas");
+    const pen = (points: number) => ({ id: "s", kind: "pen", x: 0, y: 0, width: 10, height: 10, color: "ink", points: Array.from({ length: points }, () => [0, 0]) });
+    expect(graphProblem({ nodes: [], edges: [], shapes: [pen(401)] })).toMatch(/^A drawing has too many points to save/);
+    expect(graphProblem({ nodes: [], edges: [], shapes: Array.from({ length: 501 }, () => pen(2)) })).toMatch(/too many drawings to save \(500 at most\)/);
+  });
+
+  it("a page copy keeps the concatenator's cuts, sound and order on the new clip ids", () => {
+    const g: CanvasGraph = {
+      nodes: [node("a", "video-input", { url: "/api/files/u/a.mp4" }), node("b", "video-input", { url: "/api/files/u/b.mp4" }, 0, 300), node("film", "concat", { modelId: "join-clips", order: ["b", "a"], clips: { a: { start: 1, end: 3, mute: true }, b: { start: 2, end: 4 } } }, 400)],
+      edges: [edge("a", "film", "videos"), edge("b", "film", "videos")],
+    };
+    const before = concatClips(g, g.nodes[2]).map((c) => c.settings);
+    let k = 0;
+    const copy = board.copyPage({ id: "page-1", name: "Page 1", graph: g }, "page-2", "Copy", (p) => `${p}-${++k}`);
+    const film = copy.graph.nodes.find((n) => n.type === "concat")!;
+    const clips = concatClips(copy.graph, film);
+    expect(clips.map((c) => c.settings)).toEqual(before);
+    expect(clips.map((c) => c.nodeId)).toEqual(film.data.order);
+    expect(clips.map((c) => c.nodeId)).not.toContain("a");
+    // Ids the map doesn't know stay as they are.
+    expect(board.remapNodeData({ order: ["x"], clips: { x: { mute: true } } }, new Map())).toEqual({ order: ["x"], clips: { x: { mute: true } } });
+  });
+
+  it("a graph for a page the canvas doesn't have is added, or refused when the canvas is full — never written over page 1", async () => {
+    const pages = Array.from({ length: board.BOARD_LIMITS.pages }, (_, i) => ({ id: `p${i}`, name: `Page ${i + 1}`, graph: { nodes: [node(`n${i}`, "prompt", { text: `text ${i}` })], edges: [] } }));
+    let res = await list.POST(req("POST", { name: "Full", pages }));
+    const c = (await res.json()) as Canvas;
+    expect(c.pages).toHaveLength(20);
+    const fresh = { nodes: [node("fresh", "prompt", { text: "new" })], edges: [] };
+    res = await one.PATCH(req("PATCH", { page: "page-new", graph: fresh }), ctx(c.id));
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/already holds 20 pages/);
+    res = await run.POST(req("POST", { page: "page-new", graph: fresh }), ctx(c.id));
+    expect(res.status).toBe(409);
+    // A page that isn't there isn't run in another page's place either.
+    expect((await run.POST(req("POST", { page: "nope" }), ctx(c.id))).status).toBe(409);
+    const view = (await (await one.GET(req("GET"), ctx(c.id))).json()) as { canvas: Canvas };
+    expect(view.canvas.pages[0].graph.nodes.map((n) => n.id)).toEqual(["n0"]);
+    expect(view.canvas.pages).toHaveLength(20);
+    // A graph saved for one page can't take a node id another page holds (results are kept by node id).
+    res = await one.PATCH(req("PATCH", { page: "p1", graph: { nodes: [node("n0", "prompt", { text: "stolen" }), node("mine", "prompt", { text: "ok" })], edges: [] } }), ctx(c.id));
+    const saved = (await res.json()) as Canvas;
+    expect(saved.pages[1].graph.nodes.map((n) => n.id)).toEqual(["mine"]);
+    expect(saved.pages[0].graph.nodes[0].data.text).toBe("text 0");
+  });
+
+  it("a run sends every page: a rename, a new page and another page's edit are saved with it", async () => {
+    let res = await list.POST(req("POST", { name: "Run saves all", graph: { nodes: [node("p", "prompt", { text: "A heron" }), node("img", "model", { modelId: "nano-banana-pro" }, 400)], edges: [edge("p", "img", "prompt")] } }));
+    const c = (await res.json()) as Canvas;
+    const pages = [
+      { ...c.pages[0], name: "Birds" },
+      { id: "page-x", name: "Later", graph: { nodes: [node("q", "prompt", { text: "A crane" })], edges: [] } },
+    ];
+    res = await run.POST(req("POST", { page: "page-1", pages }), ctx(c.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { ran: string[]; canvas: Canvas };
+    expect(body.ran).toEqual(["img"]);
+    expect(body.canvas.pages.map((p) => [p.id, p.name])).toEqual([
+      ["page-1", "Birds"],
+      ["page-x", "Later"],
+    ]);
+    // Bad pages are refused like the autosave refuses them.
+    res = await run.POST(req("POST", { page: "page-1", pages: [] }), ctx(c.id));
+    expect(res.status).toBe(400);
+  }, 30_000);
+
+  it("the board's cached plan of a concatenator follows the table its clips are made from", async () => {
+    const { DescribeCache } = await import("@/components/canvas/canvas-context");
+    const { getTemplate } = await import("@/lib/catalog/canvas");
+    for (const mode of ["cloud", "open"] as const) {
+      const cache = new DescribeCache();
+      const three = getTemplate("table-film")!.build(mode);
+      const at = (g: CanvasGraph) => g.nodes.findIndex((n) => n.type === "concat");
+      const film = (g: CanvasGraph) => describeNode(g, g.nodes[at(g)], { engineMode: mode });
+      expect(film(three).error).toBeUndefined();
+      expect(cache.run(three, mode).get("film")!.d.steps).toEqual(film(three).steps);
+      // Two rows more: the table changed, not the concatenator or the node wired into it.
+      const t = three.nodes.findIndex((n) => n.type === "table");
+      const five = { ...three, nodes: three.nodes.map((n, i) => (i === t ? { ...n, data: { ...n.data, rows: [...n.data.rows!, ["wolf", "a ridge"], ["hare", "a meadow"]] } } : n)) };
+      expect(film(five).steps!.length).toBeGreaterThan(film(three).steps!.length);
+      const cached = cache.run(five, mode).get("film")!.d;
+      expect(cached.steps).toEqual(film(five).steps);
+      expect(cached.costUsd).toBe(film(five).costUsd);
+    }
+  });
+
+  it("a failed row runs again on its own, with the same row after it; the others are kept and not paid for again", async () => {
+    const g: CanvasGraph = {
+      nodes: [
+        node("t", "table", { label: "Cast", columns: ["Animal"], rows: [["fox"], ["owl"], ["bear"]] }),
+        node("img", "model", { modelId: "nano-banana-pro", mediaKind: "image", prompt: "A {Animal}" }, 400),
+        node("vid", "model", { modelId: "kling-2-5-turbo", mediaKind: "video", op: "i2v", prompt: "slow push-in" }, 800),
+      ],
+      edges: [edge("t", "img", "prompt"), edge("img", "vid", "images")],
+    };
+    let res = await list.POST(req("POST", { name: "Rows", graph: g }));
+    const c = (await res.json()) as Canvas;
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    const first = (await res.json()) as { canvas: Canvas; costUsd: number };
+    const img = first.canvas.runs.img;
+    const vid = first.canvas.runs.vid;
+    expect(img.rowSigs).toHaveLength(3);
+    for (const id of [...img.rows!, ...vid.rows!]) await settle(id);
+
+    // Row 2's image fails: only that image runs again, and only row 2's video after it.
+    db().prepare("UPDATE generations SET status = 'failed' WHERE id = ?").run(img.rows![1]);
+    const plan = planCanvas(g, { runs: first.canvas.runs, status: (id) => gens.getGeneration(id)?.status });
+    const imgStep = plan.steps.find((s) => s.nodeId === "img")!;
+    expect(imgStep.reason).toBe("failed");
+    expect(imgStep.costUsd).toBeCloseTo(imgStep.rowCostUsd!, 6);
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    const again = (await res.json()) as { ran: string[]; items: Generation[]; canvas: Canvas; costUsd: number };
+    expect(again.ran).toEqual(["img", "vid"]);
+    expect(again.items).toHaveLength(2);
+    const img2 = again.canvas.runs.img;
+    const vid2 = again.canvas.runs.vid;
+    expect([img2.rows![0], img2.rows![2]]).toEqual([img.rows![0], img.rows![2]]);
+    expect(img2.rows![1]).not.toBe(img.rows![1]);
+    expect([vid2.rows![0], vid2.rows![2]]).toEqual([vid.rows![0], vid.rows![2]]);
+    expect(vid2.rows![1]).not.toBe(vid.rows![1]);
+    expect(again.items.find((x) => x.id === vid2.rows![1])!.prompt).toBe("slow push-in");
+    const deps = (id: string) => (db().prepare("SELECT depends_on FROM generations WHERE id = ?").get(id) as { depends_on: string | null }).depends_on;
+    expect(deps(vid2.rows![1])).toBe(img2.rows![1]);
+    // The node shows every row's result, in row order.
+    expect(img2.ids.slice(0, 3)).toEqual(img2.rows);
+    for (const id of [img2.rows![1], vid2.rows![1]]) await settle(id);
+
+    // A row added to the table runs on its own too.
+    const view = (await (await one.GET(req("GET"), ctx(c.id))).json()) as { canvas: Canvas };
+    const page = view.canvas.pages[0].graph;
+    page.nodes[0].data.rows = [["fox"], ["owl"], ["bear"], ["hare"]];
+    res = await run.POST(req("POST", { page: "page-1", graph: page }), ctx(c.id));
+    const more = (await res.json()) as { ran: string[]; items: Generation[]; canvas: Canvas };
+    expect(more.ran).toEqual(["img", "vid"]);
+    expect(more.items.map((x) => x.prompt)).toEqual(["A hare", "slow push-in"]);
+    expect(more.canvas.runs.img.rows!.slice(0, 3)).toEqual(img2.rows);
+    // A row's own signature names its inputs: the same request on another image is another row.
+    expect(rowSignature({ feature: "canvas", modelId: "m" }, ["g1"])).not.toBe(rowSignature({ feature: "canvas", modelId: "m" }, ["g2"]));
+  }, 90_000);
+
+  it("a film joined from a node's rows is stale once any of its rows is made again", async () => {
+    const g: CanvasGraph = {
+      nodes: [
+        node("t", "table", { label: "Cast", columns: ["Animal"], rows: [["fox"], ["owl"]] }),
+        node("img", "model", { modelId: "nano-banana-pro", mediaKind: "image", prompt: "A {Animal}" }, 400),
+        node("vid", "model", { modelId: "kling-2-5-turbo", mediaKind: "video", op: "i2v", prompt: "slow push-in" }, 800),
+        node("film", "concat", { modelId: "join-clips" }, 1200),
+      ],
+      edges: [edge("t", "img", "prompt"), edge("img", "vid", "images"), edge("vid", "film", "videos")],
+    };
+    let res = await list.POST(req("POST", { name: "Rows film", graph: g }));
+    const c = (await res.json()) as Canvas;
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    const first = (await res.json()) as { ran: string[]; canvas: Canvas };
+    expect(first.ran).toEqual(["img", "vid", "film"]);
+    expect((await settle(first.canvas.runs.film.out!)).status).toBe("succeeded");
+    const status = (id: string) => gens.getGeneration(id)?.status;
+    expect(planCanvas(g, { runs: first.canvas.runs, status }).steps).toEqual([]);
+    // Row 2's clip fails and is made again on its own (the film isn't run): the first row is the same as before…
+    db().prepare("UPDATE generations SET status = 'failed' WHERE id = ?").run(first.canvas.runs.vid.rows![1]);
+    res = await run.POST(req("POST", { targets: ["vid"] }), ctx(c.id));
+    const redo = (await res.json()) as { ran: string[]; items: Generation[]; canvas: Canvas };
+    expect(redo.ran).toEqual(["vid"]);
+    expect(redo.items).toHaveLength(1);
+    expect(redo.canvas.runs.vid.rows![0]).toBe(first.canvas.runs.vid.rows![0]);
+    // …but the film was joined from the old second clip: it runs again.
+    const plan = planCanvas(g, { runs: redo.canvas.runs, status });
+    expect(plan.steps.map((s) => [s.nodeId, s.reason])).toEqual([["film", "changed"]]);
+  }, 90_000);
+
+  it("a muted cloud clip's silence is written when the run starts", async () => {
+    const graph: CanvasGraph = {
+      nodes: [node("a", "video-input", { url: "/api/files/u/quiet.mp4" }), node("b", "video-input", { url: "/api/files/u/quiet.mp4" }, 0, 300), node("film", "concat", { modelId: "join-clips", clips: { a: { end: 1.5, mute: true } } }, 400)],
+      edges: [edge("a", "film", "videos"), edge("b", "film", "videos")],
+    };
+    fs.mkdirSync(path.join(dir, "files", "u"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "files", "u", "quiet.mp4"), Buffer.alloc(256));
+    let res = await list.POST(req("POST", { name: "Silence", graph }));
+    const c = (await res.json()) as Canvas;
+    res = await run.POST(req("POST", {}), ctx(c.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { items: Generation[] };
+    const mux = body.items.find((x) => x.modelId === "merge-audio-video")!;
+    const audio = mux.request.inputs!.audio!;
+    expect(audio).toMatch(/^\/api\/files\//);
+    const { absolutePath } = await import("@/server/storage");
+    const wav = fs.readFileSync(absolutePath(decodeURIComponent(audio.slice("/api/files/".length))));
+    expect(wav.toString("ascii", 0, 4)).toBe("RIFF");
+    // 1.5 s of 16-bit stereo at 44.1 kHz.
+    expect(wav.length).toBe(44 + Math.round(1.5 * 44100) * 4);
+  }, 30_000);
 });

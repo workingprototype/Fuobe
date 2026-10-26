@@ -65,7 +65,7 @@ export interface ClipSettings {
   start?: number;
   end?: number;
   mute?: boolean;
-  /** The clip's own length, size and whether it has sound (measured in the browser; undefined = not known yet). */
+  /** The clip's own length, size and whether it has sound (read from its file; undefined = not known yet). */
   length?: number;
   width?: number;
   height?: number;
@@ -104,6 +104,8 @@ export interface CanvasNodeData {
   /** Table: its column names, and its rows of cells (one per column). */
   columns?: string[];
   rows?: string[][];
+  /** Translate (video) on the open engine: the Translate & dub session it started (its result comes back from there). */
+  dubId?: string;
 }
 
 export interface CanvasNode {
@@ -143,6 +145,8 @@ export interface NodeRun {
   out?: string;
   /** A node run once per row of a table: each row's generation, in row order (what a row of the next node takes). */
   rows?: string[];
+  /** Each row's own signature (rowSignature): a row whose inputs didn't change and whose result is live is kept. */
+  rowSigs?: string[];
 }
 
 /** The generation a node's result (and what it passes on) is in. */
@@ -1014,26 +1018,60 @@ export function tableRows(t: Pick<CanvasNode, "data">): string[][] {
 
 const rowText = (cells: string[]) => cells.filter(Boolean).join(", ");
 
+/** The table a node runs per row of (with its filled rows), why it can't, or null when no table is upstream. */
+export type RowsFeed = { table: CanvasNode; rows: string[][] } | { error: string } | null;
+
+/**
+ * The table every node of a graph runs per row of, worked out once per node however many nodes ask (the
+ * editor asks for each generator on every keystroke). See rowsFeeding.
+ */
+export function tablesFeeding(graph: CanvasGraph): (n: Pick<CanvasNode, "id" | "type" | "data">) => RowsFeed {
+  const nodes = nodeMap(graph);
+  const into = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    const list = into.get(e.target);
+    if (list) list.push(e.source);
+    else into.set(e.target, [e.source]);
+  }
+  const memo = new Map<string, RowsFeed>();
+  const visiting = new Set<string>();
+  const feed = (n: Pick<CanvasNode, "id" | "type" | "data">): RowsFeed => {
+    if (n.type === "table") return { table: n as CanvasNode, rows: tableRows(n) };
+    if (!isGenerator(n) || n.type === "concat" || visiting.has(n.id)) return null;
+    const known = memo.get(n.id);
+    if (known !== undefined) return known;
+    visiting.add(n.id);
+    let found: { table: CanvasNode; rows: string[][] } | null = null;
+    let out: RowsFeed | undefined;
+    for (const sid of into.get(n.id) ?? []) {
+      const s = nodes.get(sid);
+      if (!s || (s.type !== "table" && !isGenerator(s))) continue;
+      const r = feed(s);
+      if (!r) continue;
+      if ("error" in r) {
+        out = r;
+        break;
+      }
+      if (found && found.table.id !== r.table.id) {
+        out = { error: `“${nodeLabel(found.table)}” and “${nodeLabel(r.table)}” both reach “${nodeLabel(n)}” — rows run from one table at a time` };
+        break;
+      }
+      found = r;
+    }
+    visiting.delete(n.id);
+    const result = out ?? found;
+    memo.set(n.id, result);
+    return result;
+  };
+  return feed;
+}
+
 /**
  * The table a node runs per row of: one wired into it, or one feeding a node it builds on (a Video concatenator
  * collects the rows instead, so nothing after it runs per row). Null when no table is upstream.
  */
-export function rowsFeeding(graph: CanvasGraph, n: CanvasNode, seen = new Set<string>()): { table: CanvasNode; rows: string[][] } | { error: string } | null {
-  if (n.type === "table") return { table: n, rows: tableRows(n) };
-  if (!isGenerator(n) || n.type === "concat" || seen.has(n.id)) return null;
-  seen.add(n.id);
-  const nodes = nodeMap(graph);
-  let found: { table: CanvasNode; rows: string[][] } | null = null;
-  for (const e of incoming(graph, n.id)) {
-    const s = nodes.get(e.source);
-    if (!s || (s.type !== "table" && !isGenerator(s))) continue;
-    const r = rowsFeeding(graph, s, seen);
-    if (!r) continue;
-    if ("error" in r) return r;
-    if (found && found.table.id !== r.table.id) return { error: `“${nodeLabel(found.table)}” and “${nodeLabel(r.table)}” both reach “${nodeLabel(n)}” — rows run from one table at a time` };
-    found = r;
-  }
-  return found;
+export function rowsFeeding(graph: CanvasGraph, n: CanvasNode): RowsFeed {
+  return tablesFeeding(graph)(n);
 }
 
 /** One job per row: the table read as that row (its cells in "{Column}", or as connected text), upstream rows matched by number. */
@@ -1045,8 +1083,9 @@ function rowRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef, b: { tab
   const own = n.data.prompt ?? "";
   const direct = graph.edges.some((e) => e.source === b.table.id && e.target === n.id);
   const named = direct && columns.some((c) => c && own.includes(`{${c}}`));
+  const feeds = tablesFeeding(graph);
   const perRow = (id: string) => {
-    const r = rowsFeeding(graph, nodes.get(id)!);
+    const r = feeds(nodes.get(id)!);
     return !!r && !("error" in r);
   };
   const steps: NodeStep[] = [];
@@ -1089,6 +1128,19 @@ export const concatRatio = (r: string | undefined): ConcatRatio => ((CONCAT_RATI
 /** loudnorm in linear mode at its lowest target: the clip's sound −70 dB (silent), with no measuring (see linearGain in av/dub.ts). */
 export const MUTE_LEVEL = { linear: true, integrated_loudness: -70, measured_i: 0, measured_tp: -12, measured_lra: 1, measured_thresh: -80, loudness_range: 7 } as const;
 
+/**
+ * A silent sound track `seconds` long, as a concatenator step names it: the server writes the WAV when the run
+ * starts (silenceSeconds reads the length back). A clip muted, or with no sound of its own, gets one, so every clip
+ * reaches merge-videos with sound (whether it keeps the others' sound when one clip has no audio stream is unknown).
+ */
+export const SILENCE_REF = "silence:";
+export const silenceRef = (seconds: number) => `${SILENCE_REF}${Math.round(seconds * 1000) / 1000}`;
+export function silenceSeconds(ref: string | undefined): number | null {
+  if (!ref?.startsWith(SILENCE_REF)) return null;
+  const s = Number(ref.slice(SILENCE_REF.length));
+  return Number.isFinite(s) && s > 0 && s <= 36_000 ? s : null;
+}
+
 /** One clip's cut, in seconds, checked against its length when known. */
 function clipCut(c: ClipSettings, i: number): { start: number; end?: number } | { error: string } {
   const start = Math.max(0, c.start ?? 0);
@@ -1099,17 +1151,19 @@ function clipCut(c: ClipSettings, i: number): { start: number; end?: number } | 
 }
 
 /**
- * The Video Concatenator's jobs. Cloud, per clip: trim-video (when cut), scale-video (into the film's frame),
- * and for a muted clip with sound its soundtrack, lowered −70 dB, muxed back; then merge-videos at 30 fps,
- * folded in joins of 24. Open, per clip: video-fit-clip (cut, frame, 30 fps and the sound or silence in one
+ * The Video Concatenator's jobs. Cloud, per clip: trim-video (when cut), scale-video (into the film's frame), and
+ * for a muted clip or one with no sound of its own, silence as long as it plays muxed in (merge-audio-video with a
+ * WAV the server writes); a muted clip whose length isn't known yet gets its own soundtrack lowered −70 dB instead.
+ * Then merge-videos at 30 fps, folded in joins of 24. Open, per clip: video-fit-clip (cut, frame, 30 fps and the sound or silence in one
  * CPU pass), then video-concat-encoded (packet copy: the clips now share one size, rate and sound layout).
  */
 function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): NodeRequest | { error: string } {
   const engine = model.engine;
   const nodes = nodeMap(graph);
   // A node run once per row of a table gives a clip per row, in row order (each with that node's cut and sound).
+  const feeds = tablesFeeding(graph);
   const clips = concatClips(graph, n).flatMap((c): { nodeId: string; settings: ClipSettings; row?: number }[] => {
-    const rows = rowsFeeding(graph, nodes.get(c.nodeId)!);
+    const rows = feeds(nodes.get(c.nodeId)!);
     return rows && !("error" in rows) ? rows.rows.map((_, row) => ({ ...c, row })) : [c];
   });
   if (!clips.length) return { error: `Connect the clips to join (up to ${CONCAT_LIMITS.clips})` };
@@ -1139,11 +1193,13 @@ function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): Node
     if ("error" in src) return src;
     if (src.kind !== "media" && src.kind !== "node") return { error: `${nodeLabel(s)} can't go into Clips` };
     if (src.kind === "node" && !deps.includes(src.nodeId)) deps.push(src.nodeId);
-    const cut = clipCut(c.settings, i);
+    // A clip per table row: the facts measured from one row's file (length, sound) don't hold for the others.
+    const facts: ClipSettings = c.row === undefined ? c.settings : { start: c.settings.start, end: c.settings.end, mute: c.settings.mute };
+    const cut = clipCut(facts, i);
     if ("error" in cut) return cut;
     const label = (what: string) => ({ label: `${title} · ${what} clip ${i + 1}`, index: i, of: clips.length });
     let at: StepSource | { url: string } = src.kind === "media" ? { url: src.url } : { node: src.nodeId, ...(c.row !== undefined && { row: c.row }) };
-    const mute = !!c.settings.mute && c.settings.audio !== false;
+    const mute = !!facts.mute;
     if (engine === "open") {
       at = add(`fit:${i}`, at, {
         modelId: CONCAT_TOOLS.open.fit,
@@ -1154,12 +1210,18 @@ function concatRequest(graph: CanvasGraph, n: CanvasNode, model: ModelDef): Node
     } else {
       if (cut.start > 0 || cut.end !== undefined) {
         // fal's trim-video defaults to 1 s → 3 s when an end is missing: always send both.
-        const end = cut.end ?? c.settings.length;
+        const end = cut.end ?? facts.length;
         if (end === undefined) return { error: `Clip ${i + 1}: set where it ends too — the cloud cut needs both ends (or run the clip first, so its length is known)` };
         at = add(`trim:${i}`, at, { modelId: CONCAT_TOOLS.cloud.trim, op: "trim", params: { startTime: cut.start, endTime: end }, step: label("Trim") });
       }
       at = add(`fit:${i}`, at, { modelId: CONCAT_TOOLS.cloud.fit, op: "reframe", params: { aspectRatio: ratio, extra: { ...size } }, step: label("Frame") });
-      if (mute) {
+      // How long the clip plays: its cut, else its measured length from the start of the cut.
+      const plays = cut.end !== undefined ? cut.end - cut.start : facts.length !== undefined ? facts.length - cut.start : undefined;
+      if ((mute || facts.audio === false) && plays !== undefined && plays > 0) {
+        // Muted, or silent to begin with: its sound becomes silence exactly as long as the clip.
+        at = add(`quiet:${i}`, at, { modelId: CONCAT_TOOLS.cloud.mux, op: "mux", inputs: { audio: silenceRef(plays) }, step: label("Mute") });
+      } else if (mute) {
+        // Its length isn't known yet (a clip made upstream in this run): its own sound, lowered to −70 dB.
         const sound = add(`sound:${i}`, at, { modelId: CONCAT_TOOLS.cloud.sound, op: "separate-audio", step: label("Sound of") });
         steps.push({ key: `quiet:${i}`, request: { ...base, modelId: CONCAT_TOOLS.cloud.level, op: "level", params: { extra: { ...MUTE_LEVEL } }, chain: [{ slot: "audio" }], step: label("Mute") }, from: [sound] });
         at = add(`mute:${i}`, at, { modelId: CONCAT_TOOLS.cloud.mux, op: "mux", step: label("Mute") }, [{ slot: { slot: "audio" }, from: { step: `quiet:${i}` } }]);
@@ -1311,6 +1373,29 @@ export function nodeSignature(req: GenerationRequest, depIds: string[], steps?: 
   return hash(stable({ ...unlabeled(req), deps: depIds }));
 }
 
+/**
+ * What a node builds on, for its signature: the generation of the node it takes, or for a node run per table row
+ * every row's (a row run again on its own leaves the first one as it was, and what joins the rows is stale all the same).
+ */
+export const depIdentity = (run: Pick<NodeRun, "rows"> | undefined, generationId: string): string => run?.rows?.join(",") ?? generationId;
+
+/** One row of a node run per table row: its request (minus labels) and the generations its slots take. */
+export function rowSignature(req: GenerationRequest, sources: (string | undefined)[]): string {
+  return hash(stable({ ...unlabeled(req), from: sources }));
+}
+
+const LIVE = new Set<GenerationStatus | undefined>(["queued", "running", "succeeded"]);
+
+/**
+ * The generation a row of a node run per table row keeps from its last run: the row's result when it's still live
+ * and the row's inputs are unchanged (its own signature; for a run saved before rows had one, the node's).
+ */
+export function keptRow(prev: NodeRun | undefined, row: number, rowSig: string, sig: string, status: (generationId: string) => GenerationStatus | undefined): string | undefined {
+  const old = prev?.rows?.[row];
+  if (!old || !LIVE.has(status(old))) return undefined;
+  return (prev!.rowSigs ? prev!.rowSigs[row] === rowSig : prev!.sig === sig) ? old : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Planning a run
 
@@ -1320,7 +1405,10 @@ export interface PlannedStep extends NodeRequest {
   nodeId: string;
   label: string;
   reason: RunReason;
+  /** What this run costs (a node run per row: the rows it runs again, when the planner can tell). */
   costUsd: number | null;
+  /** A node run per row: one row's price. */
+  rowCostUsd?: number | null;
 }
 
 export interface CanvasPlan {
@@ -1348,8 +1436,6 @@ export interface PlanOptions extends DescribeContext {
   /** describeNode, when the caller keeps its own cache of it (the editor re-plans on every keystroke). */
   describe?: (n: CanvasNode) => NodeDescription;
 }
-
-const LIVE = new Set<GenerationStatus | undefined>(["queued", "running", "succeeded"]);
 
 export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPlan {
   const nodes = nodeMap(graph);
@@ -1388,7 +1474,7 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     const prev = runs[id];
-    // A node run per row is as fresh as its weakest row: a failed or trashed row makes it run again.
+    // A node run per row is as fresh as its weakest row: a failed or trashed row makes it run again (that row only).
     const rowStatus = prev?.rows?.map(status);
     const weakest = rowStatus?.findIndex((x) => !LIVE.has(x)) ?? -1;
     const prevStatus = rowStatus ? rowStatus[Math.max(0, weakest)] : prev ? status(runOutput(prev)) : undefined;
@@ -1416,11 +1502,18 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     let reason: RunReason | null;
+    let cost = d.costUsd;
     if (upstream.some((u) => u.s!.kind === "run")) reason = prev ? "upstream" : "new";
     else {
-      const sig = nodeSignature(d.request, upstream.map((u) => (u.s as { id: string }).id), d.steps);
+      const sig = nodeSignature(d.request, upstream.map((u) => depIdentity(runs[u.dep], (u.s as { id: string }).id)), d.steps);
       const fresh = !!prev && prev.sig === sig && LIVE.has(prevStatus);
       reason = opts.force && targets.has(id) ? "forced" : fresh ? null : !prev || prevStatus === undefined ? "new" : prev.sig !== sig ? "changed" : "failed";
+      // Rows that are live and unchanged are kept (the server does the same): only the others are paid for.
+      if (reason && reason !== "forced" && d.rows && d.steps && prev?.rows && cost !== null) {
+        const from = (f: StepSource) => ("node" in f ? (f.row === undefined ? (state.get(f.node) as { id: string }).id : runs[f.node]?.rows?.[f.row]) : undefined);
+        const redo = d.steps.filter((st, r) => !keptRow(prev, r, rowSignature(st.request, st.from.map(from)), sig, status)).length;
+        cost = Math.round(((cost * redo) / d.steps.length) * 10000) / 10000;
+      }
     }
     if (!reason) {
       state.set(id, { kind: "reuse", id: runOutput(prev!) });
@@ -1428,9 +1521,18 @@ export function planCanvas(graph: CanvasGraph, opts: PlanOptions = {}): CanvasPl
       continue;
     }
     state.set(id, { kind: "run" });
-    steps.push({ nodeId: id, label, request: d.request, deps: d.deps, ...(d.steps && { steps: d.steps }), ...(d.rows && { rows: d.rows }), reason, costUsd: d.costUsd });
-    if (d.costUsd === null) costUnknown = true;
-    else costUsd += d.costUsd;
+    steps.push({
+      nodeId: id,
+      label,
+      request: d.request,
+      deps: d.deps,
+      ...(d.steps && { steps: d.steps }),
+      ...(d.rows && { rows: d.rows, rowCostUsd: d.costUsd === null ? null : d.costUsd / d.rows }),
+      reason,
+      costUsd: cost,
+    });
+    if (cost === null) costUnknown = true;
+    else costUsd += cost;
   }
   return { order: inScope, steps, reused, errors, costUsd: Math.round(costUsd * 1000) / 1000, costUnknown };
 }

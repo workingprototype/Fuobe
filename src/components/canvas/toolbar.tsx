@@ -18,15 +18,15 @@ export type DragShape = "rect" | "ellipse" | "arrow";
 export const TOOL_KEYS: Record<string, Tool> = { v: "select", h: "hand", d: "draw", e: "erase", n: "note", r: "shape", t: "text", c: "comment" };
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: LucideIcon; hint: string }[] = [
-  { tool: "select", label: "Select", key: "V", icon: MousePointer2, hint: "Drag to select · hold Space to pan" },
+  { tool: "select", label: "Select", key: "V", icon: MousePointer2, hint: "Drag to select · scroll or hold Space to pan · pinch or ⌘-scroll to zoom" },
   { tool: "hand", label: "Pan", key: "H", icon: Hand, hint: "Drag to move around the board" },
   { tool: "draw", label: "Draw", key: "D", icon: Pencil, hint: "Draw freehand on the board" },
   { tool: "erase", label: "Eraser", key: "E", icon: Eraser, hint: "Drag over drawings and shapes to erase them" },
-  { tool: "note", label: "Sticky note", key: "N", icon: StickyNote, hint: "Click to place a note" },
+  { tool: "note", label: "Sticky note", key: "N", icon: StickyNote, hint: "Click to place a note (Enter: in the middle)" },
   { tool: "table", label: "Table", key: "⇧T", icon: Table, hint: "Click to place a table: what it feeds runs once per row" },
-  { tool: "shape", label: "Shapes", key: "R", icon: Square, hint: "Drag to draw a shape" },
-  { tool: "text", label: "Text", key: "T", icon: Type, hint: "Click to write on the board" },
-  { tool: "comment", label: "Comment", key: "C", icon: MessageCircle, hint: "Click to pin a comment" },
+  { tool: "shape", label: "Shapes", key: "R", icon: Square, hint: "Drag to draw a shape (Enter: in the middle)" },
+  { tool: "text", label: "Text", key: "T", icon: Type, hint: "Click to write on the board (Enter: in the middle)" },
+  { tool: "comment", label: "Comment", key: "C", icon: MessageCircle, hint: "Click to pin a comment (Enter: in the middle)" },
 ];
 
 const SHAPE_ICON: Record<DragShape, LucideIcon> = { rect: Square, ellipse: Circle, arrow: ArrowUpRight };
@@ -150,13 +150,29 @@ export interface PageOps {
   remove: (id: string) => void;
 }
 
-/** The canvas's pages as tabs: each its own board. Double-click a tab to rename it. */
+/** The id of a page's tab (the board is the tabpanel it labels). */
+export const pageTabId = (id: string) => `canvas-page-tab-${id}`;
+export const PAGE_PANEL_ID = "canvas-page-panel";
+
+/**
+ * The canvas's pages as tabs: each its own board. Double-click a tab to rename it. One tab is in the Tab order
+ * (the open page); the arrow keys, Home and End move between tabs and open them.
+ */
 export const PageTabs = memo(function PageTabs({ pages, active, ops, readOnly }: { pages: { id: string; name: string }[]; active: string; ops: PageOps; readOnly: boolean }) {
   const [editing, setEditing] = useState<string | null>(null);
   const full = pages.length >= BOARD_LIMITS.pages;
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const at = pages.findIndex((p) => p.id === active);
+    const to = e.key === "ArrowRight" ? at + 1 : e.key === "ArrowLeft" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? pages.length - 1 : null;
+    if (to === null || at < 0 || !(e.target as HTMLElement).matches("[role='tab']")) return;
+    e.preventDefault();
+    const next = pages[(to + pages.length) % pages.length];
+    ops.switchTo(next.id);
+    requestAnimationFrame(() => document.getElementById(pageTabId(next.id))?.focus());
+  };
   return (
     <div className="flex max-w-full items-center gap-0.5 rounded-full border bg-popover p-1 shadow-normal" data-board-ui>
-      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Pages">
+      <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Pages" onKeyDown={onKeyDown}>
         {pages.map((p) =>
           editing === p.id ? (
             <input
@@ -181,8 +197,11 @@ export const PageTabs = memo(function PageTabs({ pages, active, ops, readOnly }:
           ) : (
             <button
               key={p.id}
+              id={pageTabId(p.id)}
               role="tab"
               aria-selected={p.id === active}
+              aria-controls={PAGE_PANEL_ID}
+              tabIndex={p.id === active ? 0 : -1}
               onClick={() => ops.switchTo(p.id)}
               onDoubleClick={() => !readOnly && setEditing(p.id)}
               title={readOnly ? p.name : `${p.name} · double-click to rename`}

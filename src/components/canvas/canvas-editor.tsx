@@ -50,8 +50,10 @@ import {
   copyPage,
   dragShape,
   groupAround,
+  groupMembers,
   nextPageName,
   penShape,
+  remapNodeData,
   shapeHit,
   withPageGraph,
   type BoardColor,
@@ -73,6 +75,7 @@ import {
   isGenerator,
   newId,
   nodeLabel,
+  OPEN_DUB_HINT,
   OUT,
   outputType,
   paletteItems,
@@ -109,7 +112,7 @@ import { BOARD_COLOR_VAR, boardToFlow, commentNode, flowToBoard, focusOnMount, g
 import { NodeList } from "./node-list";
 import { NODE_TYPES, type FlowNode } from "./nodes";
 import { AddMenu, DRAG_TYPE, Palette, PaletteToggle } from "./palette";
-import { BoardToolbar, PageTabs, TOOL_KEYS, type DragShape, type PageOps, type Tool } from "./toolbar";
+import { BoardToolbar, PAGE_PANEL_ID, PageTabs, pageTabId, TOOL_KEYS, type DragShape, type PageOps, type Tool } from "./toolbar";
 import { saveCanvas, useCanvasView, useRunCanvas, type CanvasView } from "./use-canvas";
 
 const GRID: [number, number] = [16, 16];
@@ -159,6 +162,8 @@ const PAN_MIDDLE = [1];
 
 /** Board tools that turn a drag or click on the board into a drawing, a note or a comment. */
 const GESTURE_TOOLS = new Set<Tool>(["draw", "erase", "note", "table", "shape", "text", "comment"]);
+/** Tools that place one thing: Enter places it in the middle of the view too. */
+const PLACE_TOOLS = new Set<Tool>(["note", "table", "shape", "text", "comment"]);
 
 /** Edges whose handles still exist after a model / op change. */
 function pruneEdges(nodes: FlowNode[], edges: Edge[]): Edge[] {
@@ -170,6 +175,18 @@ function pruneEdges(nodes: FlowNode[], edges: Edge[]): Edge[] {
 const typeOfNode = (n: Pick<FlowNode, "id" | "type" | "data">): PortType | null => outputType(EMPTY_GRAPH, { id: n.id, type: n.type as CanvasNode["type"], data: n.data, position: { x: 0, y: 0 } });
 
 const KIND_INPUT: Record<string, CanvasNode["type"]> = { image: "image-input", video: "video-input", audio: "audio-input" };
+
+/** What a delete took from a board: the nodes, and the edges into or out of them. */
+const goneWith = (before: { nodes: FlowNode[]; edges: Edge[] }, ids: ReadonlySet<string>) => ({
+  nodes: before.nodes.filter((n) => ids.has(n.id)),
+  edges: before.edges.filter((e) => ids.has(e.source) || ids.has(e.target)),
+});
+
+/** What a group frames on the board: everything whose top-left corner sits inside it (it moves and copies with it). */
+function framed(g: FlowNode, nodes: FlowNode[]): FlowNode[] {
+  const box = { x: g.position.x, y: g.position.y, w: g.width ?? g.measured?.width ?? 0, h: g.height ?? g.measured?.height ?? 0 };
+  return nodes.filter((n) => n.id !== g.id && n.position.x >= box.x && n.position.y >= box.y && n.position.x <= box.x + box.w && n.position.y <= box.y + box.h);
+}
 
 // ---------------------------------------------------------------------------
 
@@ -466,21 +483,60 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     touch();
   }, [elements, touch]);
 
-  /** Deleted nodes come back with their edges from the toast's Undo. */
+  /**
+   * Change one page's board, whether it's on screen or not: an Undo clicked after switching pages lands on the page
+   * it belongs to. False when that page is gone.
+   */
+  const editPage = useCallback(
+    (pid: string, f: (nodes: FlowNode[], edges: Edge[]) => { nodes: FlowNode[]; edges: Edge[] }) => {
+      const now = latest.current;
+      if (now.pageId === pid) {
+        const r = f(now.nodes, now.edges);
+        setNodes(r.nodes);
+        setEdges(r.edges);
+      } else {
+        const page = now.pages.find((p) => p.id === pid);
+        if (!page) return false;
+        const r = f(toFlowNodes(page.graph), page.graph.edges.map(toFlowEdge));
+        setPages((ps) => ps.map((p) => (p.id === pid ? { ...p, graph: toGraph(r.nodes, r.edges, p.graph.viewport) } : p)));
+      }
+      touch();
+      return true;
+    },
+    [touch],
+  );
+
+  /** Put back what a delete took (nodes and their edges) on its page; whatever changed since stays as it is. */
+  const restore = useCallback(
+    (pid: string, gone: { nodes: FlowNode[]; edges: Edge[] }) =>
+      editPage(pid, (ns, es) => {
+        const have = new Set(ns.map((n) => n.id));
+        const back = gone.nodes.filter((n) => !have.has(n.id)).map((n) => ({ ...n, selected: false }));
+        const nodes = [...back.filter(isBoardNode), ...ns, ...back.filter((n) => !isBoardNode(n))];
+        const ids = new Set(nodes.map((n) => n.id));
+        const edges = [...es];
+        for (const e of gone.edges) {
+          if (edges.some((x) => x.id === e.id) || !ids.has(e.source) || !ids.has(e.target)) continue;
+          // A single input wired to something else since keeps that connection.
+          const taken = edges.some((x) => x.target === e.target && x.targetHandle === e.targetHandle);
+          if (taken && singleInput(toGraph(nodes, edges), e.target, e.targetHandle)) continue;
+          edges.push({ ...e, selected: false });
+        }
+        return { nodes, edges };
+      }),
+    [editPage],
+  );
+
+  /** Deleted nodes come back with their edges from the toast's Undo (on the page they were deleted from). */
   const offerUndo = useCallback(
-    (count: number, before: { nodes: FlowNode[]; edges: Edge[] }, what = "node") =>
+    (count: number, gone: { nodes: FlowNode[]; edges: Edge[] }, what = "node") => {
+      const pid = latest.current.pageId;
       toast(count === 1 ? `${what[0].toUpperCase()}${what.slice(1)} deleted` : `${count} ${what}s deleted`, {
         duration: 5000,
-        action: {
-          label: "Undo",
-          onClick: () => {
-            setNodes(before.nodes);
-            setEdges(before.edges);
-            touch();
-          },
-        },
-      }),
-    [touch],
+        action: { label: "Undo", onClick: () => void restore(pid, gone) },
+      });
+    },
+    [restore],
   );
 
   const remove = useCallback(
@@ -490,27 +546,29 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       setNodes((ns) => ns.filter((n) => n.id !== nodeId));
       setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
       touch();
-      // Ungrouping keeps the nodes: no undo needed for a frame. An empty comment closing goes quietly.
-      if (type === "group") return void toast("Ungrouped — the nodes stay where they are", { duration: 2500, action: { label: "Undo", onClick: () => (setNodes(before.nodes), touch()) } });
+      const gone = goneWith(before, new Set([nodeId]));
+      // Ungrouping keeps the nodes: the frame alone comes back. An empty comment closing goes quietly.
+      if (type === "group") {
+        const pid = before.pageId;
+        return void toast("Ungrouped — the nodes stay where they are", { duration: 2500, action: { label: "Undo", onClick: () => void restore(pid, gone) } });
+      }
       const n = before.nodes.find((x) => x.id === nodeId);
       if (type === "comment" && !String(n?.data.text ?? "").trim()) return;
-      offerUndo(1, before, type === "comment" ? "comment" : type === "shape" ? "drawing" : "node");
+      offerUndo(1, gone, type === "comment" ? "comment" : type === "shape" ? "drawing" : "node");
     },
-    [touch, offerUndo],
+    [touch, offerUndo, restore],
   );
 
-  /** Copies of the nodes, wired to each other the way the originals are. */
+  /** Copies of the nodes (a group with what's inside it), wired to each other the way the originals are. */
   const duplicate = useCallback(
     (ids: string | string[]) => {
+      const now = latest.current.nodes;
       const list = new Set(Array.isArray(ids) ? ids : [ids]);
-      const map = new Map<string, string>();
-      const copies = latest.current.nodes
-        .filter((n) => list.has(n.id))
-        .map((n) => {
-          const nid = newId(n.type ?? "node");
-          map.set(n.id, nid);
-          return { ...n, id: nid, position: { x: n.position.x + 48, y: n.position.y + 48 }, data: { ...n.data, pinned: undefined }, selected: true };
-        });
+      for (const g of now) if (list.has(g.id) && g.type === "group") for (const m of framed(g, now)) list.add(m.id);
+      const picked = now.filter((n) => list.has(n.id));
+      const map = new Map(picked.map((n) => [n.id, newId(n.type ?? "node")]));
+      // A Video concatenator copied with its clips keeps each clip's cut, sound and place in the order.
+      const copies = picked.map((n) => ({ ...n, id: map.get(n.id)!, position: { x: n.position.x + 48, y: n.position.y + 48 }, data: { ...remapNodeData(n.data, map), pinned: undefined }, selected: true }));
       if (!copies.length) return;
       const wires = latest.current.edges
         .filter((e) => map.has(e.source) && map.has(e.target))
@@ -556,8 +614,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     const moving = new Set(dragged.map((n) => n.id));
     for (const g of dragged) {
       if (g.type !== "group") continue;
-      const box = { x: g.position.x, y: g.position.y, w: g.width ?? g.measured?.width ?? 0, h: g.height ?? g.measured?.height ?? 0 };
-      const members = latest.current.nodes.filter((n) => !moving.has(n.id) && n.position.x >= box.x && n.position.y >= box.y && n.position.x <= box.x + box.w && n.position.y <= box.y + box.h);
+      const members = framed(g, latest.current.nodes).filter((n) => !moving.has(n.id));
       groupDrag.current.set(g.id, { origin: { ...g.position }, members: new Map(members.map((m) => [m.id, { ...m.position }])) });
     }
   }, []);
@@ -579,7 +636,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       if (changes.some((c) => c.type === "remove" || c.type === "add" || c.type === "replace" || (c.type === "position" && !c.dragging) || (c.type === "dimensions" && c.resizing === false))) touch();
       if (removed.length) {
         const kinds = new Set(removed.map((c) => before.nodes.find((n) => n.id === c.id)?.type));
-        offerUndo(removed.length, before, kinds.size === 1 && kinds.has("comment") ? "comment" : kinds.size === 1 && kinds.has("shape") ? "drawing" : kinds.size === 1 && kinds.has("group") ? "group" : "node");
+        const gone = goneWith(before, new Set(removed.map((c) => c.id)));
+        offerUndo(removed.length, gone, kinds.size === 1 && kinds.has("comment") ? "comment" : kinds.size === 1 && kinds.has("shape") ? "drawing" : kinds.size === 1 && kinds.has("group") ? "group" : "node");
       }
     },
     [touch, offerUndo],
@@ -658,15 +716,19 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       const go = (t?: string[], f?: boolean) => {
         const at = latest.current.rev;
         runMutate(
-          { page: latest.current.pageId, targets: t, group, force: f, graph: toGraph(latest.current.nodes, latest.current.edges, viewport.current) },
+          // Every page goes with the run (saved first, like the autosave): a page renamed, added or deleted, or another
+          // page's edit still in the autosave's debounce, is saved by it too.
+          { page: latest.current.pageId, targets: t, group, force: f, pages: docOf() },
           {
             onSuccess: (r) => {
-              // The run saved the board too.
+              // The run saved the whole canvas as it was at `at`.
               savedRev.current = Math.max(savedRev.current, at);
               if (latest.current.rev === savedRev.current) setSaveState("saved");
               setRunErrors(Object.fromEntries((r.errors ?? []).map((e) => [e.nodeId, e.message])));
               if (!r.ok) return void toast.error(r.error ?? "Couldn't run this");
-              const issues = r.errors?.length ? `${r.errors.length} node${r.errors.length > 1 ? "s" : ""} need${r.errors.length > 1 ? "" : "s"} attention` : undefined;
+              // A Translate (video) dubbing in Translate & dub isn't something to fix here.
+              const fix = (r.errors ?? []).filter((e) => e.message !== OPEN_DUB_HINT).length;
+              const issues = fix ? `${fix} node${fix > 1 ? "s" : ""} need${fix > 1 ? "" : "s"} attention` : undefined;
               if (!r.ran.length) toast("Everything's up to date", { description: issues, action: { label: "Run again", onClick: () => go(t, true) } });
               else toast.success(r.ran.length === 1 ? "Running 1 node" : `Running ${r.ran.length} nodes`, { description: issues, duration: 1800 });
             },
@@ -676,7 +738,29 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       };
       go(targets, force);
     },
-    [runMutate],
+    [runMutate, docOf],
+  );
+
+  /**
+   * ⌘↵ and Run selected: the selected nodes, and what's inside selected groups (a group alone runs as Run group).
+   * Drawings, comments and notes aren't run: with nothing runnable selected, everything runs.
+   */
+  const runSelection = useCallback(
+    (force?: boolean) => {
+      const sel = latest.current.nodes.filter((n) => n.selected);
+      const groups = sel.filter((n) => n.type === "group");
+      const picked = sel.filter((n) => !isBoardNode(n));
+      if (groups.length === 1 && !picked.length) return run(undefined, force, groups[0].id);
+      const g = toGraph(latest.current.nodes, latest.current.edges);
+      const targets = new Set(picked.map((n) => n.id));
+      for (const fr of groups) {
+        const box = g.groups?.find((x) => x.id === fr.id);
+        if (box) for (const m of groupMembers(g, box)) targets.add(m.id);
+      }
+      if (!targets.size && groups.length) return void toast("Nothing to run in these groups yet — put nodes inside them");
+      run(targets.size ? [...targets] : undefined, force);
+    },
+    [run],
   );
 
   const cancel = useCallback(
@@ -691,17 +775,24 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     [runs, gens, qc, id],
   );
 
-  const toInput = (nodeId: string) => {
+  /** An input node holding `file`, below the node it came from; `takeOver` moves that node's outgoing connections onto it. */
+  const addInput = (nodeId: string, file: { url: string; kind: string; label?: string }, takeOver = false) => {
     const src = latest.current.nodes.find((n) => n.id === nodeId);
-    const out = results.get(nodeId)?.outputs.find((x) => KIND_INPUT[x.o.kind]);
-    if (!src || !out) return;
+    const type = KIND_INPUT[file.kind];
+    if (!src || !type) return;
     const nid = newId("input");
     setNodes((ns) => [
       ...ns.map((n) => ({ ...n, selected: false })),
-      { id: nid, type: KIND_INPUT[out.o.kind], position: snap({ x: src.position.x, y: src.position.y + (src.measured?.height ?? 360) + 48 }), data: { url: out.o.url, label: `From ${nodeLabel(toGraph([src], []).nodes[0])}` }, selected: true },
+      { id: nid, type, position: snap({ x: src.position.x, y: src.position.y + (src.measured?.height ?? 360) + 48 }), data: { url: file.url, label: file.label ?? `From ${nodeLabel(toGraph([src], []).nodes[0])}` }, selected: true },
     ]);
+    const moved = takeOver ? latest.current.edges.filter((e) => e.source === nodeId).length : 0;
+    if (moved) setEdges((es) => es.map((e) => (e.source === nodeId ? { ...e, id: newId("e"), source: nid, sourceHandle: OUT } : e)));
     touch();
-    toast("Added as an input — connect it anywhere");
+    toast(moved ? `Added as an input, connected where “${nodeLabel(toGraph([src], []).nodes[0])}” was` : "Added as an input — connect it anywhere");
+  };
+  const toInput = (nodeId: string) => {
+    const out = results.get(nodeId)?.outputs.find((x) => KIND_INPUT[x.o.kind]);
+    if (out) addInput(nodeId, { url: out.o.url, kind: out.o.kind });
   };
 
   /** One clip of a Video concatenator: merged into what the node holds now (several clips report their lengths at once). */
@@ -735,11 +826,12 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
   const ungroupSelection = useCallback(() => {
     const ids = latest.current.nodes.filter((n) => n.selected && n.type === "group").map((n) => n.id);
     if (!ids.length) return;
-    const before = latest.current.nodes;
+    const gone = goneWith(latest.current, new Set(ids));
+    const pid = latest.current.pageId;
     setNodes((ns) => ns.filter((n) => !ids.includes(n.id)));
     touch();
-    toast(ids.length === 1 ? "Ungrouped" : `${ids.length} groups ungrouped`, { duration: 2500, action: { label: "Undo", onClick: () => (setNodes(before), touch()) } });
-  }, [touch]);
+    toast(ids.length === 1 ? "Ungrouped" : `${ids.length} groups ungrouped`, { duration: 2500, action: { label: "Undo", onClick: () => void restore(pid, gone) } });
+  }, [touch, restore]);
 
   // ---- pages
   /** Show another page: the board's page is put back into `pages` first, so nothing on it is lost. */
@@ -789,16 +881,24 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
         if (doc.length < 2) return;
         const was = latest.current.pageId;
         const at = doc.findIndex((p) => p.id === pid);
+        const page = doc[at];
         const next = doc.filter((p) => p.id !== pid);
-        showPage(next, pid === was ? next[Math.max(0, at - 1)].id : was);
+        if (pid === was) showPage(next, next[Math.max(0, at - 1)].id);
+        else setPages(next);
         touch();
-        toast(`Deleted “${doc[at].name}”`, {
+        toast(`Deleted “${page.name}”`, {
           description: "Its results stay in your library",
           duration: 6000,
           action: {
             label: "Undo",
+            // The page comes back where it was; edits made meanwhile on the other pages stay.
             onClick: () => {
-              showPage(doc, was);
+              const now = docOf();
+              if (now.some((p) => p.id === pid)) return;
+              if (now.length >= BOARD_LIMITS.pages) return void toast(`A canvas holds up to ${BOARD_LIMITS.pages} pages — delete one to bring “${page.name}” back`);
+              const back = [...now.slice(0, at), page, ...now.slice(at)];
+              if (pid === was) showPage(back, pid);
+              else setPages(back);
               touch();
             },
           },
@@ -829,13 +929,13 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     const start = flowAt(e.clientX, e.clientY);
     const screen = [{ x: e.clientX - rect.left, y: e.clientY - rect.top }];
     const points = [start];
-    const before = latest.current;
-    let erased = 0;
+    const erased: FlowNode[] = [];
     const erase = (p: { x: number; y: number }) => {
       const tol = 8 / rf.getZoom();
-      const hit = new Set(latest.current.nodes.filter((n) => n.type === "shape").filter((n) => { const sh = asShape(n); return sh && shapeHit(sh, p, tol); }).map((n) => n.id));
+      const hits = latest.current.nodes.filter((n) => n.type === "shape").filter((n) => { const sh = asShape(n); return sh && shapeHit(sh, p, tol); });
+      const hit = new Set(hits.map((n) => n.id));
       if (!hit.size) return;
-      erased += hit.size;
+      erased.push(...hits);
       latest.current = { ...latest.current, nodes: latest.current.nodes.filter((n) => !hit.has(n.id)) };
       setNodes((ns) => ns.filter((n) => !hit.has(n.id)));
     };
@@ -854,9 +954,9 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       const end = flowAt(ev.clientX, ev.clientY);
       const dragged = Math.hypot(ev.clientX - rect.left - screen[0].x, ev.clientY - rect.top - screen[0].y) > 6;
       if (tool === "erase") {
-        if (erased) {
+        if (erased.length) {
           touch();
-          offerUndo(erased, before, "drawing");
+          offerUndo(erased.length, { nodes: erased, edges: [] }, "drawing");
         }
         return;
       }
@@ -865,24 +965,36 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
         if (s) placeShape(s);
         return;
       }
-      if (tool === "shape") {
-        const b = dragged ? end : { x: start.x + 160, y: start.y + (shapeKind === "arrow" ? 0 : 100) };
-        placeShape(dragShape(newId("shape"), shapeKind, start, b, ink));
-      } else if (tool === "text") {
-        placeShape({ id: newId("shape"), kind: "text", x: Math.round(start.x), y: Math.round(start.y - 16), width: 260, height: 40, color: ink, text: "" }, true);
-      } else if (tool === "note" || tool === "table") {
-        addNode(palette.find((p) => p.id === tool)!, start);
-      } else if (tool === "comment") {
-        const c = commentNode(start);
-        focusOnMount.add(c.id);
-        setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), c]);
-        touch();
-      }
-      // Placing is one-off: back to Select (drawing and erasing stay on until switched off).
-      setTool("select");
+      place(tool, start, dragged ? end : undefined);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+  };
+  /** A placing tool's one thing at `at` (a shape spans to `to` when dragged); then back to Select. */
+  const place = (t: Tool, at: { x: number; y: number }, to?: { x: number; y: number }) => {
+    if (t === "shape") {
+      const b = to ?? { x: at.x + 160, y: at.y + (shapeKind === "arrow" ? 0 : 100) };
+      placeShape(dragShape(newId("shape"), shapeKind, at, b, ink));
+    } else if (t === "text") {
+      placeShape({ id: newId("shape"), kind: "text", x: Math.round(at.x), y: Math.round(at.y - 16), width: 260, height: 40, color: ink, text: "" }, true);
+    } else if (t === "note" || t === "table") {
+      addNode(palette.find((p) => p.id === t)!, at);
+    } else if (t === "comment") {
+      const c = commentNode(at);
+      focusOnMount.add(c.id);
+      setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), c]);
+      touch();
+    }
+    // Placing is one-off: back to Select (drawing and erasing stay on until switched off).
+    setTool("select");
+  };
+  /** Enter with a placing tool: in the middle of the view (a shape or note centred there). */
+  const placeAtCentre = (t: Tool) => {
+    const rect = wrapper.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mid = rf.screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    const half = t === "shape" ? { x: 80, y: shapeKind === "arrow" ? 0 : 50 } : t === "note" || t === "table" ? { x: 140, y: 80 } : t === "text" ? { x: 130, y: 0 } : { x: 0, y: 0 };
+    place(t, { x: mid.x - half.x, y: mid.y - half.y });
   };
 
   // ---- engine
@@ -894,18 +1006,24 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     if (changed) {
       const byNode = new Map(next.nodes.map((n) => [n.id, n]));
       const after = before.nodes.map((n) => ({ ...n, data: byNode.get(n.id)?.data ?? n.data }));
+      const kept = pruneEdges(after, before.edges);
       setNodes(after);
-      setEdges((es) => pruneEdges(after, es));
+      setEdges(kept);
       touch();
+      const pid = before.pageId;
+      const was = new Map(before.nodes.filter((n) => byNode.get(n.id) && byNode.get(n.id)!.data !== n.data).map((n) => [n.id, n.data]));
+      const dropped = before.edges.filter((x) => !kept.includes(x));
       toast.success(`Switched ${changed} node${changed > 1 ? "s" : ""} to ${e === "open" ? "open-source" : "cloud"} models`, {
         action: {
           label: "Undo",
-          onClick: () => {
-            // The switch may have dropped edges into inputs the new models don't have: they come back too.
-            setNodes(before.nodes);
-            setEdges(before.edges);
-            touch();
-          },
+          // The nodes get their models back on their page, and the edges the switch dropped (inputs the new models
+          // don't have) come back too.
+          onClick: () =>
+            void editPage(pid, (ns, es) => {
+              const nodes = ns.map((n) => (was.has(n.id) ? { ...n, data: was.get(n.id)! } : n));
+              const ids = new Set(nodes.map((n) => n.id));
+              return { nodes, edges: [...es, ...dropped.filter((x) => ids.has(x.source) && ids.has(x.target) && !es.some((y) => y.id === x.id))] };
+            }),
         },
       });
     }
@@ -935,6 +1053,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       cancel: (nid) => void cancel(nid),
       open: (nid, index = 0) => setViewer({ nodeId: nid, index }),
       toInput,
+      addInput,
       connect: (c) => onConnect({ source: c.source, target: c.target, sourceHandle: c.sourceHandle ?? OUT, targetHandle: c.targetHandle ?? null }),
       disconnect,
       getGraph: () => toGraph(latest.current.nodes, latest.current.edges),
@@ -951,12 +1070,19 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       cancel: (...a) => handlers.current!.cancel(...a),
       open: (...a) => handlers.current!.open(...a),
       toInput: (...a) => handlers.current!.toInput(...a),
+      addInput: (...a) => handlers.current!.addInput(...a),
       connect: (...a) => handlers.current!.connect(...a),
       disconnect: (...a) => handlers.current!.disconnect(...a),
       getGraph: () => handlers.current!.getGraph(),
     }),
     [],
   );
+
+  // What the keys call, as they are now (the listener below is added once).
+  const keyHandlers = useRef({ runSelection, placeAtCentre });
+  useLayoutEffect(() => {
+    keyHandlers.current = { runSelection, placeAtCentre };
+  });
 
   // ---- keyboard: ⌘↵ runs (the selection, else everything), ⌘D duplicates, ⌘G groups (⇧⌘G ungroups),
   // and the board tools by letter: V H D E N ⇧T R T C (Escape goes back to Select)
@@ -966,6 +1092,15 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       if (!mod) {
         if (e.altKey || isMobile || typing(e.target)) return;
         if (e.key === "Escape") return void setTool("select");
+        // Enter with a tool that places something (a comment, a note, text…) places it in the middle of the view:
+        // the keyboard's way to do what a click on the board does. On another button or a link Enter keeps its
+        // meaning; on the chosen tool's own toolbar button, pressed again, it places.
+        const el = e.target as HTMLElement | null;
+        const ownTool = !!el?.closest?.("[role='toolbar'] button[aria-pressed='true']");
+        if (e.key === "Enter" && PLACE_TOOLS.has(toolNow.current) && (ownTool || !el?.closest?.("button, a, [role='tab']"))) {
+          e.preventDefault();
+          return void keyHandlers.current.placeAtCentre(toolNow.current);
+        }
         // ⇧T is the table (T alone writes text).
         const t = e.shiftKey && e.key.toLowerCase() === "t" ? "table" : TOOL_KEYS[e.key.toLowerCase()];
         if (!t || e.repeat) return;
@@ -983,8 +1118,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        const sel = latest.current.nodes.filter((n) => n.selected).map((n) => n.id);
-        actions.run(sel.length ? sel : undefined, e.shiftKey);
+        keyHandlers.current.runSelection(e.shiftKey);
       } else if (e.key.toLowerCase() === "d" && !(e.target as HTMLElement)?.closest("input,textarea,[contenteditable]")) {
         const sel = latest.current.nodes.filter((n) => n.selected).map((n) => n.id);
         if (!sel.length) return;
@@ -994,7 +1128,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [actions, duplicate, isMobile, groupSelection, ungroupSelection]);
+  }, [duplicate, isMobile, groupSelection, ungroupSelection]);
 
   // ---- drop from the palette, or files from the desktop
   const onDragOver = (e: React.DragEvent) => {
@@ -1081,7 +1215,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     // A Fuobe Original's step names its engine: a demo is about that engine's providers.
     return m && isDemo(s.request.engine ? onEngine(m, s.request.engine) : m);
   });
-  const attention = new Set(plan.errors.map((e) => e.nodeId)).size;
+  // A Translate (video) on an open-only install dubs in Translate & dub: nothing to fix on the board.
+  const attention = new Set(plan.errors.filter((e) => e.message !== OPEN_DUB_HINT).map((e) => e.nodeId)).size;
   const summary = [
     plan.steps.length
       ? `${plan.steps.length} to run · ${planDemo ? "Demo · free" : plan.costUnknown ? "price unknown" : plan.costUsd === 0 ? "Free" : `≈ ${formatCost(plan.costUsd)}`}`
@@ -1094,14 +1229,20 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     .join(" · ");
 
   // ---- what the header and the palette call: stable, so they skip the re-render a keystroke causes
-  const uiHandlers = useRef<{ run: typeof run; switchEngine: typeof switchEngine; rename: typeof rename; addAtCenter: typeof addAtCenter } | null>(null);
+  const uiHandlers = useRef<{
+    run: typeof run;
+    runSelection: typeof runSelection;
+    switchEngine: typeof switchEngine;
+    rename: typeof rename;
+    addAtCenter: typeof addAtCenter;
+  } | null>(null);
   useLayoutEffect(() => {
-    uiHandlers.current = { run, switchEngine, rename, addAtCenter };
+    uiHandlers.current = { run, runSelection, switchEngine, rename, addAtCenter };
   });
   const ui = useMemo<HeaderUi>(
     () => ({
       run: (targets, force) => uiHandlers.current!.run(targets, force),
-      runSelected: (force) => uiHandlers.current!.run(latest.current.nodes.filter((n) => n.selected).map((n) => n.id), force),
+      runSelected: (force) => uiHandlers.current!.runSelection(force),
       switchEngine: (e) => uiHandlers.current!.switchEngine(e),
       rename: (v) => void uiHandlers.current!.rename(v),
       addAtCenter: (p) => uiHandlers.current!.addAtCenter(p),
@@ -1188,6 +1329,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
             <div
               ref={wrapper}
               className="relative min-h-0 flex-1"
+              // The page tabs' panel (desktop): the board of the open page.
+              {...(!isMobile && { id: PAGE_PANEL_ID, role: "tabpanel", "aria-labelledby": pageTabId(pageId) })}
               data-tool={isMobile ? undefined : tool}
               onPointerDownCapture={onToolPointerDown}
               onDragOver={onDragOver}
@@ -1228,9 +1371,11 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
                 zoomOnDoubleClick={false}
                 deleteKeyCode={isMobile ? null : ["Backspace", "Delete"]}
                 multiSelectionKeyCode={["Meta", "Shift", "Control"]}
-                // Select (V): a drag on the board draws a selection box, Space or the middle button pans. Pan (H): a
+                // Select (V): a drag on the board draws a selection box; scrolling, Space-drag or the middle button pans. Pan (H): a
                 // drag moves the board. The drawing tools take the pointer themselves (onToolPointerDown).
                 panOnDrag={isMobile || tool === "hand" ? true : tool === "select" ? PAN_MIDDLE : false}
+                // Scrolling (two fingers on a trackpad) pans; pinch or ⌘/Ctrl-scroll zooms.
+                panOnScroll={!isMobile}
                 selectionOnDrag={!isMobile && tool === "select"}
                 selectionMode={SelectionMode.Partial}
                 elementsSelectable={isMobile || tool !== "hand"}

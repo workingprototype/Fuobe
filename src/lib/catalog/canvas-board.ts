@@ -9,7 +9,7 @@
  * Groups don't own their nodes: a node belongs to the group its top-left corner sits in, so the planner
  * and the server agree on membership without parent links (positions stay absolute).
  */
-import type { CanvasGraph, CanvasNode } from "./canvas";
+import type { CanvasGraph, CanvasNode, CanvasNodeData } from "./canvas";
 
 // ---------------------------------------------------------------------------
 // Annotations
@@ -94,7 +94,9 @@ export function penShape(id: string, raw: { x: number; y: number }[], color: Boa
     if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= PEN_STEP) pts.push(p);
   }
   if (pts.length < 2) return null;
-  const every = Math.ceil(pts.length / BOARD_LIMITS.penPoints);
+  // Every n-th point plus the last one: n leaves room for that last point within the limit.
+  const max = BOARD_LIMITS.penPoints;
+  const every = pts.length > max ? Math.ceil(pts.length / (max - 1)) : 1;
   const kept = every > 1 ? pts.filter((_, i) => i % every === 0 || i === pts.length - 1) : pts;
   const box = boundsOf(kept);
   const w = Math.max(1, box.width);
@@ -282,6 +284,20 @@ export function nextPageName(pages: readonly CanvasPage[]): string {
 }
 
 /**
+ * A node's data with the node ids it refers to renamed by `map` (a Video concatenator keys each clip's cut and
+ * sound, and the clips' order, by the clip's node id). Ids not in the map stay as they are.
+ */
+export function remapNodeData(data: CanvasNodeData, map: ReadonlyMap<string, string>): CanvasNodeData {
+  if (!data.clips && !data.order) return data;
+  const to = (id: string) => map.get(id) ?? id;
+  return {
+    ...data,
+    ...(data.clips && { clips: Object.fromEntries(Object.entries(data.clips).map(([k, v]) => [to(k), v])) }),
+    ...(data.order && { order: data.order.map(to) }),
+  };
+}
+
+/**
  * A copy of a page with new ids for its nodes, edges, groups, comments and shapes (node ids are unique
  * across a canvas, since results are kept by node id). `newId` makes the ids.
  */
@@ -293,7 +309,7 @@ export function copyPage(page: CanvasPage, id: string, name: string, newId: (pre
     name,
     graph: {
       ...g,
-      nodes: g.nodes.map((n) => ({ ...n, id: map.get(n.id)!, data: { ...n.data, pinned: undefined } })),
+      nodes: g.nodes.map((n) => ({ ...n, id: map.get(n.id)!, data: { ...remapNodeData(n.data, map), pinned: undefined } })),
       edges: g.edges.flatMap((e) => (map.has(e.source) && map.has(e.target) ? [{ ...e, id: newId("e"), source: map.get(e.source)!, target: map.get(e.target)! }] : [])),
       ...(g.groups && { groups: g.groups.map((x) => ({ ...x, id: newId("group") })) }),
       ...(g.comments && { comments: g.comments.map((x) => ({ ...x, id: newId("comment") })) }),

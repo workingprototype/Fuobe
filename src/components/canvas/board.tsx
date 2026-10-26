@@ -379,7 +379,17 @@ const CommentNode = memo(function CommentNode({ id, data, selected }: NodeProps<
   };
   const count = (text.trim() ? 1 : 0) + replies.length;
   return (
-    <div className="relative" data-testid={`canvas-comment-${id}`} onKeyDown={(e) => open && e.key === "Escape" && (e.stopPropagation(), close())}>
+    <div
+      className="relative"
+      data-testid={`canvas-comment-${id}`}
+      onKeyDown={(e) => open && e.key === "Escape" && (e.stopPropagation(), close())}
+      // Focus leaving the comment (a click on the board, another comment) closes it, and an empty one goes away. A
+      // click on the card's own padding focuses React Flow's node wrapper: still inside. Switching apps isn't leaving.
+      onBlur={(e) => {
+        const inside = e.currentTarget.closest(".react-flow__node") ?? e.currentTarget;
+        if (open && !inside.contains(e.relatedTarget as Node | null) && document.hasFocus()) close();
+      }}
+    >
       <button
         onClick={() => (open ? close() : setOpen(true))}
         className={cn(

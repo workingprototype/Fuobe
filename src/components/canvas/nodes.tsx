@@ -68,8 +68,8 @@ import { ModelPicker } from "@/components/studio/model-picker";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
-import { useAssets, useElements } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAssets, useClipFacts as useFileFacts, useElements } from "@/lib/api";
 import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import {
   CANVAS_TEXT_MAX,
@@ -110,6 +110,7 @@ import {
 } from "@/lib/catalog/canvas";
 import { OPERATION_LABELS, type Engine, type MediaKind, type ModelDef, type OutputFile } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
+import { dubResult, languageStage, type DubSessionView, type DubStage } from "@/lib/av/dub";
 import { DUB_LANGUAGES, supportsTarget } from "@/lib/av/languages";
 import { matchSpokenLanguage, spokenLanguageName, spokenLanguageOptions } from "@/lib/speech-languages";
 import { keyCombo } from "@/lib/keys";
@@ -893,12 +894,43 @@ const selectVideoIn = (s: EditorSnapshot, id: string): string | undefined => {
   return src.type === "video-input" ? src.data.url : s.views.get(src.id)?.results.outputs.find((x) => x.o.kind === "video")?.o.url;
 };
 
+/** Whether an input node on the board already holds this file (the dub brought back once). */
+const selectHasFile = (s: EditorSnapshot, url: string) => !!url && s.graph.nodes.some((n) => n.data.url === url);
+
+const DUB_STAGE: Record<DubStage, string> = {
+  preparing: "Transcribing and translating…",
+  review: "Ready for you to check the translation",
+  voicing: "Speaking the translation…",
+  done: "Dubbed",
+  failed: "The dub failed — open it to retry",
+};
+
 function OpenDub({ id, data }: { id: string; data: CanvasNodeData }) {
   const actions = useEditorActions();
   const video = useEditorSelector(selectVideoIn, id);
   const lang = data.params?.targetLanguage && OPEN_DUB_LANGUAGES.some((l) => l.code === data.params?.targetLanguage) ? data.params.targetLanguage : undefined;
-  const [started, setStarted] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The dub this node started, while it's still for this clip and language (its result comes back to the board from here).
+  const session = useQuery({
+    queryKey: ["dub", data.dubId],
+    enabled: !!data.dubId,
+    queryFn: async () => {
+      const res = await fetch(`/api/dub/${data.dubId}`);
+      if (!res.ok) throw Object.assign(new Error("gone"), { status: res.status });
+      return (await res.json()) as DubSessionView;
+    },
+    refetchInterval: (q) => {
+      const s = q.state.data;
+      const stage = s && lang ? languageStage(s, lang) : undefined;
+      // Waiting on a step: every 5 s. Waiting on the person (the review, in Translate & dub): now and then.
+      return stage === "preparing" || stage === "voicing" ? 5000 : stage === "review" ? 15_000 : false;
+    },
+    retry: false,
+  }).data;
+  const current = session && lang && session.video === video && session.targets.includes(lang) ? session : undefined;
+  const stage = current && lang ? languageStage(current, lang) : undefined;
+  const result = current && lang ? dubResult(current, lang)?.outputs.find((o) => o.kind === "video") : undefined;
+  const onBoard = useEditorSelector(selectHasFile, result?.url ?? "");
   const start = async () => {
     if (!video || !lang) return;
     setBusy(true);
@@ -906,8 +938,8 @@ function OpenDub({ id, data }: { id: string; data: CanvasNodeData }) {
       const res = await fetch("/api/dub", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engine: "open", mode: "steps", video, targets: [lang], source: "auto", title: data.label || "Canvas dub" }) });
       const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!res.ok || !body.id) throw new Error(body.error ?? "Couldn't start the dub");
-      setStarted(body.id);
-      toast.success("Dub started", { description: "Check the translation in Translate & dub, then have it spoken" });
+      actions.update(id, { dubId: body.id });
+      toast.success("Dub started", { description: "Check the translation in Translate & dub, then have it spoken. The dubbed video comes back here." });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -915,17 +947,27 @@ function OpenDub({ id, data }: { id: string; data: CanvasNodeData }) {
     }
   };
   return (
-    <div className={cn("flex flex-wrap items-center gap-1.5", NO_DRAG)}>
-      <OptionSelect label="Dub into" value={lang} options={OPEN_DUB_LANGUAGES.map((l) => l.code)} onChange={(v) => actions.update(id, { params: { ...data.params, targetLanguage: v } })} format={(v) => OPEN_DUB_LANGUAGES.find((l) => l.code === v)?.name ?? v} />
-      {started ? (
-        <Link href={`/audio/translate?dub=${started}`} className={chip}>
-          Review the dub
-        </Link>
-      ) : (
-        <button className={chip} onClick={() => void start()} disabled={!video || !lang || busy} title={!video ? "Connect a video (an upload, or a finished clip)" : !lang ? "Pick the language to dub into" : "Free on your GPU"}>
-          {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />} Start in Translate &amp; dub
-        </button>
-      )}
+    <div className={cn("space-y-1.5", NO_DRAG)}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <OptionSelect label="Dub into" value={lang} options={OPEN_DUB_LANGUAGES.map((l) => l.code)} onChange={(v) => actions.update(id, { params: { ...data.params, targetLanguage: v } })} format={(v) => OPEN_DUB_LANGUAGES.find((l) => l.code === v)?.name ?? v} />
+        {current ? (
+          <Link href={`/audio/translate?dub=${current.id}`} className={chip}>
+            {stage === "review" ? "Check the translation" : "Open the dub"}
+          </Link>
+        ) : (
+          <button className={chip} onClick={() => void start()} disabled={!video || !lang || busy} title={!video ? "Connect a video (an upload, or a finished clip)" : !lang ? "Pick the language to dub into" : "Free on your GPU"}>
+            {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />} Start in Translate &amp; dub
+          </button>
+        )}
+        {result && !onBoard && (
+          <button className={chip} onClick={() => actions.addInput(id, { url: result.url, kind: "video", label: `${data.label || "Translate"} · dubbed` }, true)} title="A Video input with the dubbed clip, connected where this node was">
+            <Plus className="size-3" /> Use the dubbed video
+          </button>
+        )}
+      </div>
+      <p className="text-[12px] leading-snug text-muted-foreground" aria-live="polite">
+        {stage === "done" && onBoard ? "Dubbed — it's on the board as a Video input" : stage ? DUB_STAGE[stage] : "When it's dubbed, bring it back here as a Video input."}
+      </p>
     </div>
   );
 }
@@ -1021,6 +1063,16 @@ function ClipItem({ id, row, index, count, settings, readOnly, onMove }: { id: s
   useClipFacts(row.url, (f) => {
     if (f.length !== settings.length || f.width !== settings.width || f.height !== settings.height) set(f);
   });
+  // Whether it has sound, from its header on the server (a browser can't tell): a silent clip gets a silent track on
+  // the cloud. Its length too, when this browser couldn't read the file.
+  const header = useFileFacts(row.url).data;
+  useEffect(() => {
+    if (!header) return;
+    const patch: Partial<ClipSettings> = {};
+    if (typeof header.hasAudio === "boolean" && header.hasAudio !== settings.audio) patch.audio = header.hasAudio;
+    if (settings.length === undefined && header.duration) patch.length = Math.round(header.duration * 1000) / 1000;
+    if (Object.keys(patch).length) actions.patchClip(id, row.nodeId, patch);
+  }, [header, settings.audio, settings.length, actions, id, row.nodeId]);
   const muted = !!settings.mute;
   return (
     <li className="rounded-lg bg-muted/60 p-2">

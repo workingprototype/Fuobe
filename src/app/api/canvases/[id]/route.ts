@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 import { z } from "zod";
-import { canvasView, deleteCanvas, graphProblem, pagesProblem, parseGraph, parsePages, updateCanvas } from "@/server/canvas";
+import { CanvasConflict, canvasView, deleteCanvas, graphProblem, pagesProblem, parseGraph, parsePages, updateCanvas } from "@/server/canvas";
 
 const Patch = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -28,8 +28,13 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/canvases/[
   if (pages === null) return Response.json({ error: pagesProblem(parsed.data.pages) }, { status: 400 });
   const graph = parsed.data.graph === undefined ? undefined : parseGraph(parsed.data.graph);
   if (graph === null) return Response.json({ error: graphProblem(parsed.data.graph) }, { status: 400 });
-  const c = updateCanvas(id, { name: parsed.data.name, pages, graph, page: parsed.data.page });
-  return c ? Response.json(c) : Response.json({ error: "Not found" }, { status: 404 });
+  try {
+    const c = updateCanvas(id, { name: parsed.data.name, pages, graph, page: parsed.data.page });
+    return c ? Response.json(c) : Response.json({ error: "Not found" }, { status: 404 });
+  } catch (e) {
+    if (e instanceof CanvasConflict) return Response.json({ error: e.message }, { status: e.status });
+    throw e;
+  }
 }
 
 export async function DELETE(_req: Request, ctx: RouteContext<"/api/canvases/[id]">) {

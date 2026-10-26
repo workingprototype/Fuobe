@@ -93,7 +93,7 @@ export interface RunResponse {
 export function useRunCanvas(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { page: string; targets?: string[]; group?: string; force?: boolean; graph: CanvasGraph }) => {
+    mutationFn: async (body: { page: string; targets?: string[]; group?: string; force?: boolean; pages: CanvasPage[] }) => {
       const res = await send(`/api/canvases/${id}/run`, "POST", body);
       const data = (await res.json().catch(() => ({}))) as Partial<RunResponse> & { error?: string };
       if (!res.ok && !data.errors) throw new Error(data.error ?? `Request failed (${res.status})`);
