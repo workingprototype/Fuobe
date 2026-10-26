@@ -100,7 +100,7 @@ describe("open engine: the recomposition on Qwen-Image-Edit 2511 (qwen-image-edi
         source: { url: "/api/files/uploads/still.png", kind: "image" },
         capture: { url: "/api/files/uploads/capture.png", lens: 50, aperture: 2.8, pose: { horizontal: 300, vertical: 0, zoom: 5 } },
       },
-      { higgsfield: false },
+      { cloudAllowed: true },
     );
     const req = plan.steps[0].request;
     const route = getModel(req.modelId!)!.routes[0];

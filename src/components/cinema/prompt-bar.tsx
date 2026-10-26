@@ -16,7 +16,6 @@ import {
   ImageIcon,
   ImagePlus,
   Loader2,
-  Lock,
   MapPin,
   Maximize,
   Plus,
@@ -47,16 +46,18 @@ import { uploadFile, useAssets, useStatus } from "@/lib/api";
 import { getModel } from "@/lib/catalog";
 import {
   BATCH,
+  CINEMA_MODEL,
   CINEMA_MODELS,
   DURATION,
   GRID_SIZES,
   GRID_TYPES,
-  HIGGSFIELD_ONLY,
   IMAGE_ASPECTS,
   IMAGE_RESOLUTIONS,
+  ORIGINAL_LINES,
   VIDEO_ASPECTS,
   VIDEO_RESOLUTIONS,
   checkReferences,
+  modelLine,
   planCinema,
   type DirectorSettings,
 } from "@/lib/catalog/cinema";
@@ -325,7 +326,7 @@ export interface PromptBarProps {
   onSettings: (patch: Partial<DirectorSettings>) => void;
   palettes: { name: string; hex: string[] }[];
   onPalettes: (p: { name: string; hex: string[] }[]) => void;
-  context: { higgsfield: boolean; cloudAllowed: boolean };
+  context: { cloudAllowed: boolean };
   brief: string;
   spentUsd: number;
   costCapUsd: number | null;
@@ -436,6 +437,9 @@ export function PromptBar(props: PromptBarProps) {
 
   const modelKey = `${draft.mode}:${engine}` as const;
   const modelList = CINEMA_MODELS[draft.mode][engine];
+  // The model picked in the menu (a take may run on another: Fuobe DoP for a move's Wan camera LoRA, a references edit…).
+  const chosen = draft.models[modelKey];
+  const picked = chosen && modelList.includes(chosen) ? chosen : modelList[0];
   const pickable = action === "generate" && !(draft.mode === "image" && draft.imageTool === "grid");
   const placeholder = video
     ? action === "edit"
@@ -753,23 +757,27 @@ export function PromptBar(props: PromptBarProps) {
               {modelList.map((id) => {
                 const m = getModel(id);
                 if (!m) return null;
-                const locked = HIGGSFIELD_ONLY.has(id) && !context.higgsfield;
-                const sel = model.id === id;
+                const sel = modelList.includes(model.id) ? model.id === id : picked === id;
                 return (
-                  <DropdownMenuItem key={id} disabled={locked} onClick={() => setDraft((d) => ({ models: { ...d.models, [modelKey]: id } }))} className="items-start">
+                  <DropdownMenuItem key={id} onClick={() => setDraft((d) => ({ models: { ...d.models, [modelKey]: id } }))} className="items-start">
                     <span className="mt-0.5 w-4">{sel && <Check className="size-3.5" />}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1 text-[13px] font-medium">
-                        {m.name} {locked && <Lock className="size-3" />}
+                      <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium">
+                        {m.name}
+                        {ORIGINAL_LINES[id] && <span className="rounded-full bg-brand-faint px-1.5 py-px text-[10.5px] font-medium text-brand-text">Original</span>}
                       </span>
-                      <span className="block text-[11.5px] leading-snug text-muted-foreground">{locked ? "Needs a Higgsfield key (Settings)" : m.tagline}</span>
+                      <span className="block text-[11.5px] leading-snug text-muted-foreground">{modelLine(m, engine)}</span>
                     </span>
                   </DropdownMenuItem>
                 );
               })}
               <DropdownMenuSeparator />
               <p className="px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
-                {engine === "open" ? "The Director is written into the prompt; camera moves use camera LoRAs or Wan Fun Camera where they exist." : "Cinema Studio 4.0 reads the Director natively; the others get it written into the prompt."}
+                {video
+                  ? engine === "open"
+                    ? "The Director is written into the prompt; a camera move uses its camera LoRA or a Fun Camera pose when you add a start frame."
+                    : "The Director is written into every model's prompt; Fuobe Cinema also drives camera moves with LTX-2.3's camera LoRAs."
+                  : "The Director's camera and lens are written into the prompt; Fuobe Soul Cinema adds its film look."}
               </p>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -789,6 +797,7 @@ export function PromptBar(props: PromptBarProps) {
           </Tooltip>
           {video && (
             <MovePicker
+              badges={picked === CINEMA_MODEL || (engine === "open" && getModel(picked)?.family === "wan")}
               open={movesOpen}
               onOpenChange={(o) => {
                 setMovesOpen(o);

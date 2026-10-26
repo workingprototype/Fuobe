@@ -72,7 +72,7 @@ export function askSceneConfirmAgain() {
 export interface ScenePlanContext {
   engine: Engine;
   settings: DirectorSettings;
-  context: { higgsfield: boolean; cloudAllowed: boolean };
+  context: { cloudAllowed: boolean };
   brief: string;
 }
 

@@ -16,13 +16,12 @@ import type { Generation, GenerationRequest } from "@/lib/catalog/types";
 import { CinemaError, folderExists, getProject, recordTakes, spentUsd } from "./cinema";
 import { createGenerations, previewGeneration } from "./generations";
 import { encodePng } from "./png";
-import { provider } from "./providers";
 import { engineMode } from "./settings";
 import { saveFile } from "./storage";
 
-/** What this install can run right now (decides Cinema Studio 4.0 vs Seedance, frame fallbacks). */
+/** What this install can run right now (cloud fallbacks such as reading a take's first frame, the workflows it has). */
 export function cinemaContext(): CinemaContext {
-  return { higgsfield: provider("higgsfield").isConfigured(), cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id) };
+  return { cloudAllowed: engineMode() !== "open", has: (id) => !!getModel(id) };
 }
 
 declare global {

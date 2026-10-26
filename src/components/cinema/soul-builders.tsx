@@ -11,7 +11,10 @@ import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { useSaveElement, useStatus } from "@/lib/api";
 import {
+  CAST_LOOK,
+  LOCATION_LOOK,
   LOCATION_VIEWS,
+  SOUL_BUILDER_MODEL,
   SOUL_CAST_FIELDS,
   SOUL_CAST_TABS,
   castDefaults,
@@ -25,6 +28,7 @@ import {
   type CastValues,
   type DirectorSettings,
 } from "@/lib/catalog/cinema";
+import { soulLook } from "@/lib/catalog/soul";
 import type { Engine, Generation } from "@/lib/catalog/types";
 import { formatCost } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -37,7 +41,7 @@ interface BuilderProps {
   folderId: string | null;
   engine: Engine;
   settings: DirectorSettings;
-  context: { higgsfield: boolean; cloudAllowed: boolean };
+  context: { cloudAllowed: boolean };
   brief: string;
 }
 
@@ -155,6 +159,11 @@ function Results({ items, picked, onPick }: { items: Generation[]; picked: strin
       )}
     </div>
   );
+}
+
+/** "Fuobe Soul · Realistic look": the maker, and the Soul look it uses. */
+function builderLine(model: { id: string; name: string }, look: string): string {
+  return model.id === SOUL_BUILDER_MODEL ? `${model.name} · ${soulLook(look)?.name ?? look} look` : model.name;
 }
 
 /** "a marble perfume atelier at golden hour, …" → "Marble Perfume Atelier". */
@@ -308,7 +317,7 @@ function SoulCast({ projectId, folderId, engine, context, brief, onOpenChange }:
         </div>
       </div>
       <p className="-mt-1 text-[11.5px] text-muted-foreground">
-        {plan.model.name} · a turnaround sheet (front, three-quarter, profile, back and a close-up){engine === "open" ? " · open source" : ""}
+        {builderLine(plan.model, CAST_LOOK)} · a turnaround sheet (front, three-quarter, profile, back and a close-up){engine === "open" ? " · on your GPU" : ""}
       </p>
       {results.length > 0 && (
         <div className="space-y-3 border-t pt-3">
@@ -376,7 +385,9 @@ function SoulLocation({ projectId, folderId, engine, settings, context, brief, o
           placeholder="e.g. “a rain-soaked rooftop bar in Tokyo, neon signs, wet tiles, a single string of bulbs”"
           autoFocus
         />
-        <p className="text-[11.5px] text-muted-foreground">{look.length ? `Uses the Director's ${look.join(", ")}.` : "Set a camera, lens and palette in the Director's Panel to shape the look."} 16:9, no people.</p>
+        <p className="text-[11.5px] text-muted-foreground">
+          {look.length ? `Uses the Director's ${look.join(", ")}.` : "Set a camera, lens and palette in the Director's Panel to shape the look."} {builderLine(plan.model, LOCATION_LOOK)} · 16:9, no people.
+        </p>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <div className="inline-flex h-8 rounded-full bg-muted p-0.5" role="radiogroup" aria-label="Variants">

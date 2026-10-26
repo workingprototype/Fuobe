@@ -109,8 +109,8 @@ describe("Cinema API", () => {
     const res = await generateRoute.POST(json("POST", { input: { ...VIDEO, settings: { genre: "noir", focal: "50mm" } }, folderId: folder.id }), params({ id: p.id }));
     expect(res.status).toBe(201);
     const { items, plan } = await res.json();
-    // No Higgsfield key: Seedance 2.5 with the Director compiled into the prompt.
-    expect(plan.modelId).toBe("seedance-2-5");
+    // Fuobe Cinema (LTX-2.3 in the cloud) with the Director compiled into the prompt; no Higgsfield anywhere.
+    expect(plan.modelId).toBe("fuobe-cinema");
     expect(items).toHaveLength(1);
     const g = gens.getGeneration(items[0].id)!;
     expect(g.prompt).toMatch(/^Project brief: Rain, neon, regret\. A detective lights a match in the rain\. Noir film/);
@@ -128,7 +128,9 @@ describe("Cinema API", () => {
   it("open engine: a palette-lock step waits for each take and gets the palette swatch", async () => {
     const p = cinema.createProject({ name: "Open run" });
     const { items } = generateInProject(p.id, { ...VIDEO, engine: "open", batch: 2, settings: { palette: { kind: "preset", slug: "the-circus" } } });
-    expect(items.map((g) => g.modelId)).toEqual(["oss-wan22-14b-fast", "oss-wan22-14b-fast", "oss-palette-video", "oss-palette-video"]);
+    expect(items.map((g) => g.modelId)).toEqual(["fuobe-cinema", "fuobe-cinema", "oss-palette-video", "oss-palette-video"]);
+    // The Original runs on the engine asked for: Wan 2.2 Lightning on the user's GPU (a demo here).
+    expect(items[0].request.engine).toBe("open");
     const lock = items[2];
     expect(lock.request.inputs?.images?.[0]).toBe(swatchUrl(["#090a0b", "#900304", "#1d5768", "#58554a", "#8e5917", "#627163", "#979d7e", "#7daca6", "#7f907d", "#add3c0", "#ccebd8", "#b70204"]));
     const done = await settle(lock.id, 50_000);
@@ -142,7 +144,8 @@ describe("Cinema API", () => {
     // Demo mode runs are free, so the guard only bites on real (paid) routes; previewing with a fake key shows the message.
     setSetting("falKey", "test-key");
     try {
-      expect(() => generateInProject(p.id, { ...VIDEO, duration: 10 })).toThrow(/past its \$0\.50 limit/);
+      // 20 s on Fuobe Cinema at 720p is about $0.69 ($0.0347/s).
+      expect(() => generateInProject(p.id, { ...VIDEO, duration: 20 })).toThrow(/past its \$0\.50 limit/);
     } finally {
       setSetting("falKey", "");
     }
@@ -152,7 +155,12 @@ describe("Cinema API", () => {
     const p = cinema.createProject({ name: "Prequel" });
     const src = gens.createGenerations({ feature: "cinema", modelId: "seedance-2-5", prompt: "source take", params: { duration: 5 } })[0];
     const take = await settle(src.id);
-    const { items } = generateInProject(p.id, { ...VIDEO, action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
+    // Fuobe Cinema extends the take backward in one LTX-2.3 call.
+    const one = generateInProject(p.id, { ...VIDEO, action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
+    expect(one.items.map((g) => [g.modelId, g.op])).toEqual([["fuobe-cinema", "extend"]]);
+    expect(one.items[0].request.params?.extra).toMatchObject({ extend_direction: "backward" });
+    // A partner model's prequel is the three-step chain.
+    const { items } = generateInProject(p.id, { ...VIDEO, modelId: "seedance-2-5", action: "extend-backward", prompt: "he walks up to the door", source: { url: take.outputs[0].url, kind: "video" } });
     expect(items.map((g) => g.op)).toEqual(["frame", "edit", "flf2v"]);
     const film = await settle(items[2].id, 60_000);
     expect(film.status).toBe("succeeded");

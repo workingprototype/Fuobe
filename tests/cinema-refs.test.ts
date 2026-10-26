@@ -6,10 +6,12 @@ import type { ModelRoute } from "@/lib/catalog/types";
 
 // Reference clips (video, audio) reach the cloud models whose field maps take them, and every other
 // route says plainly that they're left out. The maps come from the cloud catalog: the tests give the
-// Cinema Studio 4.0 / Seedance routes the fields the catalog adds (video_urls, audio_urls) and put them back.
+// Seedance / Kling routes the fields the catalog adds (video_urls, audio_urls) and put them back.
+// Fuobe Cinema takes none yet (LTX-2.3's reference-video endpoint isn't read in the research).
 
 const VIDEO: CinemaGenerateInput = { engine: "cloud", mode: "video", action: "generate", prompt: "A lighthouse keeper climbs the stairs", settings: {}, duration: 5, batch: 1 };
 const CLIPS = { videos: ["/api/files/ref.mp4"], audios: ["/api/files/ref.mp3"] };
+const ctx = { cloudAllowed: true };
 
 const saved: [ModelRoute, ModelRoute["map"]][] = [];
 function giveClipFields(modelId: string, op: ModelRoute["op"]) {
@@ -24,50 +26,54 @@ afterEach(() => {
 
 describe("reference clips", () => {
   it("are sent to reference-to-video when the model's routes take them", () => {
-    giveClipFields("cinema-studio-4", "ref2v");
-    expect(takesClips(getModel("cinema-studio-4")!, "ref2v", "videos")).toBe(true);
-    const plan = planCinema({ ...VIDEO, ...CLIPS, images: ["/api/files/a.png"] }, { higgsfield: true });
-    expect(plan.model.id).toBe("cinema-studio-4");
+    giveClipFields("seedance-2-5", "ref2v");
+    expect(takesClips(getModel("seedance-2-5")!, "ref2v", "videos")).toBe(true);
+    const plan = planCinema({ ...VIDEO, ...CLIPS, modelId: "seedance-2-5", images: ["/api/files/a.png"] }, ctx);
+    expect(plan.model.id).toBe("seedance-2-5");
     expect(plan.blocker).toBeUndefined();
     const req = plan.steps[0].request;
     expect(req.op).toBe("ref2v");
     expect(req.inputs).toMatchObject({ images: ["/api/files/a.png"], ...CLIPS });
     expect(plan.notes.join(" ")).toMatch(/image is a reference rather than the start frame/);
     // Clips are references, not a scene: the prompt is still needed.
-    expect(planCinema({ ...VIDEO, ...CLIPS, prompt: "" }, { higgsfield: true }).blocker).toBe("Describe your scene first");
+    expect(planCinema({ ...VIDEO, ...CLIPS, modelId: "seedance-2-5", prompt: "" }, ctx).blocker).toBe("Describe your scene first");
   });
 
   it("are left out with a note naming the models that would take them", () => {
-    giveClipFields("cinema-studio-4", "ref2v");
-    const plan = planCinema({ ...VIDEO, ...CLIPS, modelId: "kling-3" }, { higgsfield: true });
+    giveClipFields("seedance-2-5", "ref2v");
+    const plan = planCinema({ ...VIDEO, ...CLIPS, modelId: "kling-3" }, ctx);
     expect(plan.model.id).toBe("kling-3");
     expect(plan.steps[0].request.inputs).toBeUndefined();
-    // (Seedance 2.5 is named too once the cloud catalog maps its clip fields.)
-    expect(plan.notes.join(" ")).toMatch(/Kling 3\.0 doesn't take reference videos and reference audio — Cinema Studio 4\.0( or Seedance 2\.5 do| does)/);
-    // Without a Higgsfield key Cinema Studio isn't offered: Seedance is named when it takes them, else the note says plainly they're left out.
-    const none = planCinema({ ...VIDEO, videos: CLIPS.videos, modelId: "kling-3" }, { higgsfield: false });
-    expect(none.notes.join(" ")).toMatch(/Kling 3\.0 doesn't take reference videos — Seedance 2\.5 does|Reference videos aren't sent to Kling 3\.0 — only image references are used/);
-    expect(none.notes.join(" ")).not.toMatch(/Cinema Studio/);
+    expect(plan.notes.join(" ")).toMatch(/Kling 3\.0 doesn't take reference videos and reference audio — Seedance 2\.5 does/);
+    // Fuobe Cinema (the default) takes none yet: Seedance 2.5 is named.
+    const original = planCinema({ ...VIDEO, ...CLIPS }, ctx);
+    expect(original.model.id).toBe("fuobe-cinema");
+    expect(original.steps[0].request.op).toBeUndefined();
+    expect(original.notes.join(" ")).toMatch(/Fuobe Cinema doesn't take reference videos and reference audio — Seedance 2\.5 does/);
+    expect(original.notes.join(" ")).not.toMatch(/Cinema Studio/);
     // Open models and stills never take them.
-    expect(planCinema({ ...VIDEO, ...CLIPS, engine: "open" }, { higgsfield: false }).notes.join(" ")).toMatch(/aren't sent to Wan 2\.2/);
-    expect(planCinema({ ...VIDEO, ...CLIPS, mode: "image", settings: { camera: "modern", lens: "clean-sharp", focal: "50mm" } }, { higgsfield: false }).notes).toContain(
+    expect(planCinema({ ...VIDEO, ...CLIPS, engine: "open" }, ctx).notes.join(" ")).toMatch(/aren't sent to Fuobe Cinema/);
+    expect(planCinema({ ...VIDEO, ...CLIPS, mode: "image", settings: { camera: "modern", lens: "clean-sharp", focal: "50mm" } }, ctx).notes).toContain(
       "Stills use image references — reference videos and audio are left out",
     );
   });
 
   it("ride along on Edit and Extend when those routes take them", () => {
-    giveClipFields("seedance-2-5", "v2v");
+    giveClipFields("kling-o3", "v2v");
     giveClipFields("seedance-2-5", "extend");
     const source = { url: "/api/files/take.mp4", kind: "video" as const };
-    const edit = planCinema({ ...VIDEO, ...CLIPS, action: "edit", prompt: "make it snow", source }, { higgsfield: true });
-    expect(edit.model.id).toBe("seedance-2-5");
+    // A partner's take is edited with Kling O3, which (here) takes clips.
+    const edit = planCinema({ ...VIDEO, ...CLIPS, modelId: "seedance-2-5", action: "edit", prompt: "make it snow", source }, ctx);
+    expect(edit.model.id).toBe("kling-o3");
     expect(edit.steps[0].request.inputs).toMatchObject({ video: source.url, ...CLIPS });
-    const ext = planCinema({ ...VIDEO, ...CLIPS, action: "extend-forward", source }, { higgsfield: false });
+    const ext = planCinema({ ...VIDEO, ...CLIPS, modelId: "seedance-2-5", action: "extend-forward", source }, ctx);
+    expect(ext.model.id).toBe("seedance-2-5");
     expect(ext.steps[0].request.inputs).toMatchObject({ video: source.url, ...CLIPS });
-    const kling = planCinema({ ...VIDEO, ...CLIPS, action: "edit", prompt: "make it snow", source }, { higgsfield: false });
-    expect(kling.model.id).toBe("kling-o3");
-    expect(kling.steps[0].request.inputs).toEqual({ video: source.url });
-    expect(kling.notes.join(" ")).toMatch(/aren't sent to Kling O3/);
+    // Fuobe Cinema's edit (LTX-2.3 video to video) takes only the take.
+    const original = planCinema({ ...VIDEO, ...CLIPS, action: "edit", prompt: "make it snow", source }, ctx);
+    expect(original.model.id).toBe("fuobe-cinema");
+    expect(original.steps[0].request.inputs).toEqual({ video: source.url });
+    expect(original.notes.join(" ")).toMatch(/aren't sent to Fuobe Cinema/);
   });
 });
 

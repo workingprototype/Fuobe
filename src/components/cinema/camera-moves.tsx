@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CAMERA_MOVES, moveBySlug, openCameraRoute, type CameraMove } from "@/lib/catalog/cinema";
+import { CAMERA_MOVES, cinemaMoveRoute, moveBySlug, type CameraMove } from "@/lib/catalog/cinema";
 import type { Engine } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 
@@ -22,21 +22,23 @@ function moveScore(value: string, search: string, keywords?: string[]): number {
   return hint.includes(q) ? 0.2 : 0;
 }
 
-/** How the open engine drives a move (shown as a small badge in the picker). */
+/** How Fuobe Cinema drives a move on this engine, given a start frame (a small badge in the picker). */
 function routeBadge(m: CameraMove, engine: Engine): string | null {
-  if (engine !== "open") return null;
-  const r = openCameraRoute(m.slug, true);
-  return r.via === "lora" ? "LoRA" : r.via === "fun-camera" ? "Fun Camera" : null;
+  const r = cinemaMoveRoute(m.slug, engine, true);
+  return r.via === "camera-lora" ? "Camera LoRA" : r.via === "lora" ? "LoRA" : r.via === "fun-camera" ? "Fun Camera" : r.via === "hosted-move" ? "Focus move" : null;
 }
 
 export function MoveList({
   engine,
+  badges = true,
   selected,
   onPick,
   defaultQuery,
   autoFocus,
 }: {
   engine: Engine;
+  /** Say how Fuobe Cinema drives each move (off when a partner model gets the moves in words). */
+  badges?: boolean;
   selected: string[];
   onPick: (slug: string) => void;
   /** What was typed after "#" in the prompt (the list mounts fresh each time the picker opens). */
@@ -70,7 +72,7 @@ export function MoveList({
         <CommandEmpty>No camera moves match your search</CommandEmpty>
         <CommandGroup>
           {moves.map((m) => {
-            const badge = routeBadge(m, engine);
+            const badge = badges ? routeBadge(m, engine) : null;
             const n = selected.indexOf(m.slug);
             return (
               <CommandItem key={m.slug} value={m.name} keywords={[m.slug, m.hint]} onSelect={() => onPick(m.slug)} className="group/move items-start gap-2.5 py-2">
@@ -99,6 +101,7 @@ export function MovePicker({
   open,
   onOpenChange,
   engine,
+  badges,
   selected,
   onPick,
   initialQuery,
@@ -106,6 +109,7 @@ export function MovePicker({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   engine: Engine;
+  badges?: boolean;
   selected: string[];
   onPick: (slug: string) => void;
   initialQuery?: string;
@@ -139,6 +143,7 @@ export function MovePicker({
         </div>
         <MoveList
           engine={engine}
+          badges={badges}
           selected={selected}
           defaultQuery={initialQuery}
           autoFocus
