@@ -53,7 +53,7 @@
         {
           "name": "artificialguybr Cinematic Film Still Redmond",
           "file": "[ZImage.Turbo]FilmStill_Redmond.safetensors",
-          "url": "https://huggingface.co/artificialguybr/CINEMATIC-FILMSTILL-REDMOND-ZIMAGE/resolve/main/%5BZImage.Turbo%5DFilmStill_Redmond.safetensors",
+          "url": "https://huggingface.co/artificialguybr/CINEMATIC-FILMSTILL-REDMOND-ZIMAGE/resolve/805caa6a1da5f76860491b91d6c643d4032e7db0/%5BZImage.Turbo%5DFilmStill_Redmond.safetensors",
           "strength": 0.7,
           "trigger": "CINEMATIC, FILM STILL",
           "base": "z-image-turbo",

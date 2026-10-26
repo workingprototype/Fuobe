@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { CASES_DIR, REPO_DIR } from "./lib/paths.mjs";
-import { research, slug, soulLooks } from "./lib/recipes.mjs";
+import { pinnedLora, research, slug, soulLooks } from "./lib/recipes.mjs";
 import { schemaJson } from "./lib/schema.mjs";
 
 /** Subjects every look is tried on; the first two go to every look (so looks compare on the same scenes and seeds). */
@@ -104,7 +104,8 @@ function libraryLora(key, strength) {
   return {
     name: l.name,
     file: l.file,
-    url: l.url,
+    // Pinned to the research's commit, as the app's LoRA library downloads it.
+    url: pinnedLora(l).url,
     ...(l.hostedUrl && { hostedUrl: l.hostedUrl }),
     strength,
     ...(l.trigger && { trigger: l.trigger }),
