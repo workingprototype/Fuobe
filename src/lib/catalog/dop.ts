@@ -8,13 +8,17 @@
  * - LTX-2.3 LoRAs (FPV Drone, Wind to Face, the transitions) and LTX-2.3's built-in camera LoRA (dolly, jib, static)
  *   → Fuobe DoP · LTX. A camera move Wan 2.2 Fun Camera makes natively takes its pose on the user's GPU.
  * - LTX-2.5 LoRAs (Slow Motion, Car Jump) run on the user's GPU only: fal has no LTX-2.5 LoRA endpoint, so the
- *   cloud runs the preset's words. Focus Change is LTX-2.5's own focus_shift move, hosted.
+ *   cloud runs the preset's words. Focus Change is LTX-2.5's own focus_shift move, hosted (LTX-2.5 Fast).
  * - Effects that are a grade (15) animate without a LoRA, then the grade is applied in the browser; the relight
  *   effects (6) relight the start frame first (Qwen-Image-Edit 2509 + its Relight LoRA), then animate it.
- * - A LoRA whose licence doesn't allow hosting (civitai "RentCivit") stays on the user's GPU: fitLoras leaves it out
- *   of a cloud run and says so.
+ * - A LoRA whose licence doesn't allow hosting (civitai "RentCivit") stays on the user's GPU: the cloud route leaves
+ *   it out (and fitLoras would too, saying so).
+ * - A preset with nothing of the Original's own in the cloud (no hostable LoRA, camera LoRA, hosted move, grade or
+ *   relight) keeps its partner route there, Kling 2.5 Turbo on the preset's words: Fuobe DoP on the words alone
+ *   becomes its cloud default only when the evaluation harness (scripts/eval, O8) promotes it. On the user's GPU it
+ *   is Fuobe DoP (Wan 2.2 on the words, as before).
  */
-import { libraryEntry, loraName, loraRef } from "./loras";
+import { libraryEntry, localOnly, loraName, loraRef, triggerOf } from "./loras";
 import { DOP_RECIPES, OSS_LORAS, type DopRecipe, type OssLora } from "./oss-loras.generated";
 import type { LoraRef, Operation, Preset, PresetRoute } from "./types";
 
@@ -22,8 +26,8 @@ export const DOP_MODEL = "fuobe-dop";
 export const DOP_LTX_MODEL = "fuobe-dop-ltx";
 /** LTX-2.5 LoRAs: the open LTX-2.5 graph (fal has no LTX-2.5 LoRA endpoint). */
 const LTX25_OPEN = "oss-ltx25";
-/** LTX-2.5's camera_motion on fal (Focus Change's focus_shift): open weights, hosted, no LoRAs. */
-const LTX25_HOSTED = "ltx-2-5";
+/** LTX-2.5's camera_motion on fal's fast endpoint (Focus Change's focus_shift): open weights, hosted, no LoRAs. */
+export const LTX25_HOSTED = "ltx-2-5-fast";
 /** The relight step before the clip: Qwen-Image-Edit 2509 + the Relight LoRA (the open graph has it built in). */
 export const RELIGHT_OPEN = "oss-qwen-relight";
 export const RELIGHT_CLOUD = "qwen-image-edit-2509-cloud";
@@ -116,7 +120,7 @@ export function presetLoras(presetId: string): { ref: LoraRef; base: string; fam
 export const dopRecipe = (presetId: string): DopRecipe | undefined => DOP_RECIPES[presetId];
 
 const withTrigger = (template: string, loras: LoraRef[]) => {
-  const trigger = loras.find((l) => l.trigger?.trim())?.trigger?.trim();
+  const trigger = triggerOf(loras);
   return trigger ? `${trigger}. ${template}` : undefined;
 };
 
@@ -169,26 +173,7 @@ export function dopPreset(p: Preset): Preset {
     openSays = "Wan 2.2 on the preset's words";
   }
 
-  // In the cloud: LTX-2.5's own move, LTX-2.3's camera LoRA, the Wan or LTX LoRAs, else the words on Wan.
-  let cloud: PresetRoute;
-  let cloudSays: string;
-  if (recipe?.cameraMotion) {
-    cloud = { modelId: LTX25_HOSTED, op: "i2v", params: { duration: 6, generateAudio: false, extra: { camera_motion: recipe.cameraMotion } } };
-    cloudSays = `LTX-2.5's ${recipe.cameraMotion.replace(/_/g, " ")} camera move`;
-  } else if (recipe?.cameraLora) {
-    cloud = route(DOP_LTX_MODEL, ltx, { extra: { camera_lora: recipe.cameraLora } });
-    cloudSays = `LTX-2.3's ${recipe.cameraLora.replace(/_/g, " ")} camera LoRA${ltx.length ? ` with ${names(ltx)}` : ""}`;
-  } else if (wan.length) {
-    cloud = route(DOP_MODEL, wan);
-    cloudSays = `Wan 2.2 with ${names(wan)}`;
-  } else if (ltx.length) {
-    cloud = route(DOP_LTX_MODEL, ltx);
-    cloudSays = `LTX-2.3 with ${names(ltx)}`;
-  } else {
-    cloud = route(DOP_MODEL, []);
-    cloudSays = ltx25.length ? "Wan 2.2 on the preset's words (fal has no LTX-2.5 LoRA endpoint)" : "Wan 2.2 on the preset's words";
-  }
-
+  // What the effect adds around the clip: a grade the browser applies after it, or a relight of the start frame first.
   const extras: Pick<Preset, "grade" | "prestep"> = {};
   const grade = DOP_GRADES[p.id];
   if (grade) extras.grade = grade;
@@ -201,7 +186,35 @@ export function dopPreset(p: Preset): Preset {
     };
   }
 
-  const local = [...wan, ...ltx].filter((l) => l.licence?.hostedOk === false);
+  // In the cloud: LTX-2.5's own move, LTX-2.3's camera LoRA, the Wan or LTX LoRAs a host may run, a grade or a relight
+  // on Wan. A LoRA whose licence keeps it on the GPU never reaches the cloud route (its trigger stays out too).
+  // Anything else keeps its partner route on the preset's words until the evaluation harness promotes Fuobe DoP's.
+  const wanHosted = wan.filter((l) => !localOnly(l));
+  const ltxHosted = ltx.filter((l) => !localOnly(l));
+  let cloud: PresetRoute;
+  let cloudSays: string;
+  if (recipe?.cameraMotion) {
+    // The fast endpoint at 720p in the start frame's shape, silent like every DoP clip (its defaults say so too).
+    cloud = { modelId: LTX25_HOSTED, op: "i2v", params: { duration: 6, resolution: "720p", aspectRatio: "auto", generateAudio: false, extra: { camera_motion: recipe.cameraMotion } } };
+    cloudSays = `LTX-2.5's ${recipe.cameraMotion.replace(/_/g, " ")} camera move`;
+  } else if (recipe?.cameraLora) {
+    cloud = route(DOP_LTX_MODEL, ltxHosted, { extra: { camera_lora: recipe.cameraLora } });
+    cloudSays = `LTX-2.3's ${recipe.cameraLora.replace(/_/g, " ")} camera LoRA${ltxHosted.length ? ` with ${names(ltxHosted)}` : ""}`;
+  } else if (wanHosted.length) {
+    cloud = route(DOP_MODEL, wanHosted);
+    cloudSays = `Wan 2.2 with ${names(wanHosted)}`;
+  } else if (ltxHosted.length) {
+    cloud = route(DOP_LTX_MODEL, ltxHosted);
+    cloudSays = `LTX-2.3 with ${names(ltxHosted)}`;
+  } else if (extras.grade || extras.prestep || !p.cloud) {
+    cloud = route(DOP_MODEL, []);
+    cloudSays = "Wan 2.2 on the preset's words";
+  } else {
+    cloud = { ...p.cloud, partner: true };
+    cloudSays = `the preset's words on a partner model until the evaluation harness measures Fuobe DoP on them${ltx25.length ? " (fal has no LTX-2.5 LoRA endpoint)" : ""}`;
+  }
+
+  const local = [...wan, ...ltx].filter(localOnly);
   let parity: string;
   if (grade) parity = "Fuobe DoP animates your still without a LoRA, then your browser grades the clip";
   else if (extras.prestep) parity = "Fuobe DoP relights your still first (Qwen-Image-Edit 2509 + its Relight LoRA), then animates it";

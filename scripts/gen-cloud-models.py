@@ -478,6 +478,14 @@ model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})
+# Fuobe DoP's Focus Change in the cloud (O4, research §7.3): LTX-2.5's own focus_shift move (camera_motion) on the fast
+# endpoint, open weights hosted with no LoRAs. 720p, the start frame's shape, silent like every DoP clip. A helper
+# the preset runs on, not a picker model.
+model("ltx-2-5-fast", "LTX 2.5 Fast", "Lightricks", "ltx", "video", "LTX-2.5's built-in camera moves (focus shift, dolly, jib) from a start frame",
+      [("i2v", "lightricks/ltx-2.5/image-to-video/fast")],
+      pricing=("second", 0.09, "720p; 1080p $0.13/s, 1440p $0.19/s, 4K $0.30/s; sound included",
+               {"byResolution": {"720p": 0.09, "1080p": 0.13, "1440p": 0.19, "2160p": 0.3}}),
+      defaults={"aspectRatio": "auto", "duration": 6, "resolution": "720p", "generateAudio": False}, hidden=True)
 model("pixverse-v6", "PixVerse V6", "PixVerse", "pixverse", "video", "Stylized social video with transitions",
       [("t2v", "fal-ai/pixverse/v6/text-to-video"), ("i2v", "fal-ai/pixverse/v6/image-to-video"), ("flf2v", "fal-ai/pixverse/v6/transition"),
        ("extend", "fal-ai/pixverse/v6/extend")],
@@ -1562,8 +1570,11 @@ def build_route(op, ep, provider, m, opts, ropts=None):
             # "enum or free string" unions (FLUX Ultra's aspect_ratio): offer the enum.
             enum = [v for var in spec.get("variants") or [] for v in (var.get("values") or [])]
         if key == "image_size" or any("landscape" in str(v) or "square" in str(v) for v in enum):
-            fmap["aspectRatio"] = {"key": key, "values": IMAGE_SIZE_MAP}
-            opts["aspectRatios"] = union(opts.get("aspectRatios", []), IMG_AR)
+            # A model that asks for "auto" (Fuobe DoP · LTX: the start frame's shape) keeps it when the API takes it;
+            # otherwise the default fallback below would make every clip square (1:1, the first size listed).
+            auto = "auto" in enum and m["defaults"].get("aspectRatio") == "auto"
+            fmap["aspectRatio"] = {"key": key, "values": {**({"auto": "auto"} if auto else {}), **IMAGE_SIZE_MAP}}
+            opts["aspectRatios"] = union(opts.get("aspectRatios", []), (["auto"] if auto else []) + IMG_AR)
         else:
             fmap["aspectRatio"] = key
             ratios = [v for v in enum if RATIO.match(str(v)) or v == "auto"]

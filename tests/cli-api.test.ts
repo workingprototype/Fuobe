@@ -121,7 +121,16 @@ describe("GET /api/models", () => {
     expect(findModels(MODELS, { q: "wan zzqx" })).toEqual([]);
     const open = findModels(MODELS, { q: "wan 2.2", engine: "open", kind: "video" });
     expect(open.length).toBeGreaterThan(0);
-    expect(open.every((m) => m.engine === "open" && /wan/i.test(`${m.name} ${m.id}`))).toBe(true);
+    // The words match the name, id or description: Fuobe DoP is an Original on Wan 2.2 and says so.
+    expect(open.every((m) => m.engine === "open" && /wan/i.test(`${m.name} ${m.id} ${m.tagline}`))).toBe(true);
+    expect(open.map((m) => m.id)).toContain("fuobe-dop");
+  });
+
+  it("lists an Original for an operation only on the engines whose routes run it", async () => {
+    // Fuobe DoP films keyframes on the GPU only: the cloud list for keyframes leaves it out.
+    expect(findModels(MODELS, { engine: "cloud", op: "keyframes" }).map((m) => m.id)).not.toContain("fuobe-dop");
+    expect(findModels(MODELS, { engine: "open", op: "keyframes" }).map((m) => m.id)).toContain("fuobe-dop");
+    expect((await models("?engine=cloud&op=keyframes")).body.items.map((m) => m.id)).not.toContain("fuobe-dop");
   });
 });
 

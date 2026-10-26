@@ -503,7 +503,9 @@ function prepare(original: GenerationRequest) {
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
   const unreachable = asked.filter((l) => !reachable.loras.includes(l));
-  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
+  // Priced for the clip the route makes: Replicate's Wan 2.2 fast makes 5 s when 3 s was asked.
+  const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */

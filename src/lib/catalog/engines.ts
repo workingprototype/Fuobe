@@ -22,19 +22,21 @@ export const providerEngine = (p: ProviderId): Engine => (p === "comfyui" || p =
 const views = new WeakMap<ModelDef, Partial<Record<Engine, ModelDef>>>();
 
 /**
- * The model as it runs on `engine`: an Original keeps that engine's routes only, with its defaults there (the same
- * object every time, so React memos and caches stay put). Any other model comes back as it is.
+ * The model as it runs on `engine`: an Original keeps that engine's routes only, with its defaults and options there
+ * (the same object every time, so React memos and caches stay put). Any other model comes back as it is.
  */
 export function onEngine(m: ModelDef, engine: Engine): ModelDef {
   if (!dualEngine(m) || !runsOn(m, engine)) return m;
   let cached = views.get(m);
   if (!cached) views.set(m, (cached = {}));
   const own = m.engineDefaults?.[engine];
+  const options = m.engineOptions?.[engine];
   return (cached[engine] ??= {
     ...m,
     engine,
     routes: m.routes.filter((r: ModelRoute) => providerEngine(r.provider) === engine),
     ...(own && { defaults: { ...m.defaults, ...own } }),
+    ...(options && { options: { ...m.options, ...options } }),
   });
 }
 

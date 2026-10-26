@@ -606,6 +606,11 @@ export interface ModelDef {
    * times as long; 720p in the cloud, where the LoRA endpoint costs the same at either size).
    */
   engineDefaults?: Partial<Record<Engine, ModelDef["defaults"]>>;
+  /**
+   * An Original's options on one engine, over `options` (Fuobe DoP · LTX: no sound toggle on the user's GPU, whose
+   * LTX-2.3 graphs make silent clips).
+   */
+  engineOptions?: Partial<Record<Engine, Partial<ModelOptions>>>;
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -981,6 +986,12 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /**
+   * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
+   * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation
+   * harness promotes Fuobe DoP's words). Picking the preset doesn't move the composer to it; an engine switch does.
+   */
+  partner?: boolean;
 }
 
 export type PresetType = "app" | "motion" | "effect";

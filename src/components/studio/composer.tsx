@@ -39,9 +39,11 @@ import {
   clipBlocker,
   clipOutcome,
   costLabel,
+  engineSwitchModel,
   enterFrames,
   filterModels,
   firstMissingSlot,
+  followEngineParams,
   framesRequest,
   framesShape,
   framesSlots,
@@ -52,6 +54,8 @@ import {
   onImageChange,
   PLACEHOLDER,
   presetModel,
+  presetOriginal,
+  presetParams,
   prestepCost,
   pushRecent,
   settingsShape,
@@ -270,38 +274,55 @@ export function Composer({ docked }: { docked: boolean }) {
   }, [needsFull]);
 
   // Keep the selected model in sync with the engine switch. A camera motion or effect keeps its Original (Fuobe DoP),
-  // moving to the model its move names on this engine (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud).
+  // moving to the model its move names on this engine (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud) when
+  // the engine changes; the same Original on the other engine takes that engine's defaults (480p on the GPU, 720p in the
+  // cloud) for the settings the person left alone.
+  const seen = useRef<{ engine: Engine; model?: ModelDef }>({ engine, model });
   useEffect(() => {
+    const before = seen.current;
+    seen.current = { engine, model };
     if (!model) return;
-    const want = presetModel(preset, engine);
-    const follows = !!want && want !== model.id && model.id === presetModel(preset, engine === "open" ? "cloud" : "open");
-    if (model.engine === engine && !follows) return;
-    const next = lockedModel ? (engine === "open" ? preset?.open?.modelId : preset?.cloud?.modelId) : (want ?? config.defaultModels[engine]);
+    const next = engineSwitchModel({ model, preset, engine, from: before.engine, defaults: config.defaultModels });
     const m = next ? catalog.getModel(next) : undefined;
+    if (!m) {
+      if (before.engine === engine || before.model?.id !== model.id || before.model === model) return;
+      const from = before.model.defaults ?? {};
+      const to = model.defaults ?? {};
+      setDraft((d) => {
+        const params = d.modelId === model.id ? followEngineParams(d.params, from, to) : undefined;
+        return params ? { params } : {};
+      });
+      return;
+    }
     // Only the model this effect saw: a hand-off applied in the same commit (?model=, a layout effect) already
     // replaced it, and swapping it for the engine's default would undo the link (it landed on Z-Image Turbo).
-    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
-  }, [engine, model, lockedModel, preset, config.defaultModels, setDraft, catalog]);
+    const route = m.id === presetModel(preset, engine) ? presetParams(preset, engine) : {};
+    setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
+  }, [engine, model, preset, config.defaultModels, setDraft, catalog]);
 
-  // A camera motion or effect runs on its Original on this engine (Fuobe DoP): picking one moves the composer there.
-  // Another video model can be picked after it; it takes the move's words.
+  // A camera motion or effect runs on its Original on this engine (Fuobe DoP): picking one moves the composer there,
+  // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
+  // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
   const pickPreset = (id?: string) => {
     if (!id) return setDraft({ presetId: undefined, mix: undefined, presetStrength: undefined });
-    const want = presetModel(catalog.getPreset(id), engine);
+    const picked = catalog.getPreset(id);
+    const want = presetOriginal(picked, engine);
     const m = want && want !== model?.id ? catalog.getModel(want) : undefined;
     if (!m) return setDraft({ presetId: id });
-    setDraft((d) => ({ presetId: id, modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+    const route = presetParams(picked, engine);
+    setDraft((d) => ({ presetId: id, modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
   };
   // A motion handed over in the link (?preset= from the Motions gallery) is known once the presets load: it moves the
   // studio's untouched default model to its Original, once per preset.
   const adoptedPreset = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const want = presetModel(preset, engine);
+    const want = presetOriginal(preset, engine);
     if (!preset || !want || !model || adoptedPreset.current === preset.id) return;
     adoptedPreset.current = preset.id;
     if (model.id === want || model.id !== config.defaultModels[engine]) return;
     const m = catalog.getModel(want);
-    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
+    const route = presetParams(preset, engine);
+    if (m) setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt, seed: d.params.seed }, ...lookCleared(model, m) }));
   }, [preset, engine, model, config.defaultModels, catalog, setDraft]);
 
   // Single-purpose studios (Extend, Reframe, Edit video…) pin their operation.

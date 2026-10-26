@@ -16,10 +16,10 @@ const { setSetting } = await import("@/server/settings");
 const { createGenerations, previewGeneration } = await import("@/server/generations");
 const { prepareWorkflow } = await import("@/server/providers/comfyui");
 const { falProvider } = await import("@/server/providers/fal");
-const { getModel, getPreset, modelsFor } = await import("@/lib/catalog");
+const { EFFECTS, getModel, getPreset, modelsFor, MOTIONS } = await import("@/lib/catalog");
 const { onEngine } = await import("@/lib/catalog/engines");
 const { estimateCost, planGeneration, routesFor } = await import("@/lib/catalog/plan");
-const { presetModel, prestepCost } = await import("@/lib/composer");
+const { engineSwitchModel, followEngineParams, presetModel, presetOriginal, presetParams, prestepCost } = await import("@/lib/composer");
 const { gradeOf, nextSteps } = await import("@/lib/output-actions");
 const { lorasFit } = await import("@/lib/catalog/loras");
 
@@ -49,9 +49,9 @@ async function submit(model: ModelDef, route: ModelRoute, input: GenInput): Prom
   return seen!;
 }
 
-const ctx = (media: (n: unknown) => unknown = () => undefined) => ({
+const ctx = (media: (n: unknown) => unknown = () => undefined, op: "i2v" | "flf2v" = "i2v") => ({
   generationId: "g",
-  op: "i2v" as const,
+  op,
   upload: async (_d: Buffer, _t: string, name: string) => `up_${name}`,
   media: media as never,
   serverRam: async () => undefined,
@@ -84,8 +84,8 @@ describe("Fuobe DoP on both engines", () => {
       expect(body).toMatchObject({ num_frames: frames, frames_per_second: 16, interpolator_model: "none", num_inference_steps: 20, resolution: "720p" });
       expect((body.loras as { transformer: string }[]).map((l) => l.transformer)).toEqual(["high", "low"]);
     }
-    // Without a LoRA (a move on its words) the plain endpoint, at the same frame rate.
-    const words = plan("cloud", { presetId: "motion-whip-pan" });
+    // Without a LoRA (a move on its words, Fuobe DoP picked) the plain endpoint, at the same frame rate.
+    const words = plan("cloud", { presetId: "motion-whip-pan" }, "fuobe-dop");
     const plain = await submit(m, falRoute(m), { ...words.params, prompt: words.prompt, images: ["https://fal.media/a.png"] });
     expect(plain.url).toMatch(/fal-ai\/wan\/v2\.2-a14b\/image-to-video$/);
     expect(plain.body).toMatchObject({ num_frames: 81, frames_per_second: 16, interpolator_model: "none" });
@@ -193,19 +193,22 @@ describe("Fuobe DoP on the GPU", () => {
 
   it("runs an LTX-2.5 LoRA on the open LTX-2.5 graph, and its words in the cloud", () => {
     expect(plan("open", { presetId: "motion-slow-motion" }).model.id).toBe("oss-ltx25");
+    // fal has no LTX-2.5 LoRA endpoint: the words, on the partner model until the harness measures Fuobe DoP on them.
     const cloud = plan("cloud", { presetId: "motion-slow-motion" });
-    expect(cloud.model.id).toBe("fuobe-dop");
+    expect(cloud.model.id).toBe("kling-2-5-turbo");
     expect(cloud.loras).toEqual([]);
+    const dop = plan("cloud", { presetId: "motion-slow-motion" }, "fuobe-dop");
+    expect(dop.loras).toEqual([]);
   });
 });
 
 describe("effects as steps", () => {
   it("grades a colour-grade effect in the browser: the clip carries the grade, its next step applies it", () => {
-    const p = plan("cloud", { presetId: "effect-candy-pink" });
-    expect(p.dop).toEqual({ grade: "candy-pink" });
-    expect(p.loras).toEqual([]);
-    // A partner model runs the words, nothing to grade.
-    expect(planGeneration({ feature: "motion", modelId: "kling-2-5-turbo", presetId: "effect-candy-pink", prompt: "x", inputs: { images: ["/a.png"] } }, getModel, getPreset).dop).toBeUndefined();
+    const pink = getPreset("effect-candy-pink")!;
+    expect(pink.grade).toBe("candy-pink");
+    // The grade is Fuobe DoP's step: the effect runs on it on both engines, without a LoRA.
+    for (const engine of ["open", "cloud"] as const) expect(presetModel(pink, engine)).toBe("fuobe-dop");
+    expect(plan("cloud", { presetId: "effect-candy-pink" }).loras).toEqual([]);
     const g = {
       id: "gen123",
       status: "succeeded",
@@ -244,5 +247,158 @@ describe("effects as steps", () => {
     const open = previewGeneration({ feature: "motion", modelId: "fuobe-dop", presetId: "motion-overhead", prompt: "x", inputs: { images: ["/a.png"] }, engine: "open" });
     expect(open).toMatchObject({ engine: "open", costUsd: 0, route: { provider: "comfyui", endpoint: "wan22-i2v-14b" } });
     expect(open.loras.applied.map((l) => l.file)).toHaveLength(2);
+  });
+});
+
+describe("review fixes", () => {
+  it("keeps the start frame's shape on Fuobe DoP · LTX: \"auto\" on both engines, never a square by default", async () => {
+    for (const engine of ["open", "cloud"] as const) expect(view("fuobe-dop-ltx", engine).defaults?.aspectRatio).toBe("auto");
+    // Jib Up from the gallery: the composer sends the model's defaults, and fal gets video_size "auto".
+    const m = view("fuobe-dop-ltx", "cloud");
+    const p = plan("cloud", { presetId: "motion-jib-up", params: { ...m.defaults } });
+    const { body } = await submit(m, falRoute(m), { ...p.params, prompt: p.prompt, images: ["https://fal.media/a.png"] });
+    expect(body.video_size).toBe("auto");
+    expect(body.camera_lora).toBe("jib_up");
+    // A shape picked on purpose still maps to fal's size names.
+    const wide = await submit(m, falRoute(m), { ...p.params, aspectRatio: "16:9", prompt: p.prompt, images: ["https://fal.media/a.png"] });
+    expect(wide.body.video_size).toBe("landscape_16_9");
+    // On the GPU, FPV Drone from a 1920x1080 still with the model's defaults is a landscape clip, not a 960x960 crop.
+    const open = view("fuobe-dop-ltx", "open");
+    const fpv = plan("open", { presetId: "motion-fpv-drone", params: { ...open.defaults } });
+    const { workflow } = await prepareWorkflow(
+      "ltx23-i2v-lora",
+      { ...fpv.params, prompt: fpv.prompt, images: ["up_wide.png"], loras: fpv.loras, seed: 1 },
+      ctx((n) => (n === "up_wide.png" ? { container: "image", width: 1920, height: 1080, hasVideo: false, hasAudio: false } : undefined)),
+    );
+    const wf = workflow as ComfyWorkflow;
+    const [w, h] = [wf["113"].inputs.value as number, wf["98"].inputs.value as number];
+    expect(w).toBeGreaterThan(h);
+    expect(w / h).toBeCloseTo(16 / 9, 1);
+  });
+
+  it("binds both frames of an LTX-2.3 transition on the GPU", async () => {
+    const p = plan("open", { presetId: "effect-melt-transition", inputs: { images: ["/a.png"], endImage: "/b.png" } });
+    expect(routesFor(p.model, "flf2v")[0].endpoint).toBe("ltx23-flf2v-lora");
+    const { manifest, workflow } = await prepareWorkflow(
+      "ltx23-flf2v-lora",
+      { ...p.params, prompt: p.prompt, images: ["up_a.png"], endImage: "up_b.png", loras: p.loras, seed: 2 },
+      ctx(() => undefined, "flf2v"),
+    );
+    expect(manifest.id).toBe("ltx23-flf2v-lora");
+    const wf = workflow as ComfyWorkflow;
+    expect(wf["31"].inputs.image).toBe("up_a.png");
+    expect(wf["39"].inputs.image).toBe("up_b.png");
+    const lora = Object.values(wf).find((n) => n.class_type === "LoraLoaderModelOnly")!;
+    expect(lora.inputs.lora_name).toBe(p.loras[0].file);
+  });
+
+  it("offers sound on Fuobe DoP · LTX in the cloud only, and says it needs 32 GB on the GPU", () => {
+    expect(view("fuobe-dop-ltx", "cloud").options.audio).toBe(true);
+    expect(view("fuobe-dop-ltx", "open").options.audio).toBe(false);
+    expect(getModel("fuobe-dop-ltx")!.tagline).toMatch(/32 GB/);
+    // The open engine's other options stay the Original's.
+    expect(view("fuobe-dop-ltx", "open").options.aspectRatios).toEqual(view("fuobe-dop-ltx", "cloud").options.aspectRatios);
+  });
+
+  it("runs Focus Change on LTX-2.5's fast endpoint: 720p, the start frame's shape, silent, about $0.54", async () => {
+    const focus = getPreset("motion-focus-change")!;
+    expect(presetModel(focus, "cloud")).toBe("ltx-2-5-fast");
+    const m = getModel("ltx-2-5-fast")!;
+    expect(m.hidden).toBe(true);
+    // As the composer sends it: the model's defaults, then the move's own settings over them.
+    const p = plan("cloud", { presetId: "motion-focus-change", params: { ...m.defaults, ...presetParams(focus, "cloud") } });
+    expect(p.params).toMatchObject({ duration: 6, resolution: "720p", aspectRatio: "auto", generateAudio: false, extra: { camera_motion: "focus_shift" } });
+    expect(estimateCost(m, p.params, 1, "i2v")).toBeCloseTo(0.54);
+    const { url, body } = await submit(m, m.routes[0], { ...p.params, prompt: p.prompt, images: ["https://fal.media/a.png"] });
+    expect(url).toContain("lightricks/ltx-2.5/image-to-video/fast");
+    expect(body).toMatchObject({ camera_motion: "focus_shift", generate_audio: false, aspect_ratio: "auto", resolution: "720p", duration: "6" });
+  });
+
+  it("keeps a move's partner model in the cloud when Fuobe DoP has nothing of its own there yet", () => {
+    const whip = getPreset("motion-whip-pan")!;
+    expect(whip.open).toMatchObject({ modelId: "fuobe-dop" });
+    expect(whip.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });
+    expect(whip.parity).toMatch(/partner model until the evaluation harness measures Fuobe DoP/);
+    // Every cloud route on Fuobe DoP brings something of its own: a LoRA, a camera LoRA or move, a grade or a relight.
+    for (const p of [...MOTIONS, ...EFFECTS]) {
+      if (!p.cloud || p.cloud.partner) continue;
+      expect(!!(p.cloud.loras?.length || p.cloud.params?.extra || p.grade || p.prestep), p.id).toBe(true);
+    }
+    // Fuobe DoP on the words is still a pick away.
+    expect(plan("cloud", { presetId: "motion-whip-pan" }, "fuobe-dop").model.id).toBe("fuobe-dop");
+  });
+
+  it("never puts a local-only LoRA (or its trigger) on a cloud route, and prices Wiggle as what runs", () => {
+    for (const p of [...MOTIONS, ...EFFECTS]) for (const l of p.cloud?.loras ?? []) expect(l.licence?.hostedOk, `${p.id} ${l.file}`).not.toBe(false);
+    const wiggle = getPreset("motion-wiggle")!;
+    expect(wiggle.open!.loras!.every((l) => l.licence?.hostedOk === false)).toBe(true);
+    expect(wiggle.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });
+    // Picked on Fuobe DoP in the cloud: the words without the trigger, at the plain endpoint's price.
+    const p = plan("cloud", { presetId: "motion-wiggle" }, "fuobe-dop");
+    expect(p.loras).toEqual([]);
+    expect(p.prompt.startsWith("Wiggle. ")).toBe(false);
+    expect(estimateCost(view("fuobe-dop", "cloud"), p.params, 1, "i2v", false)).toBeCloseTo(0.4);
+  });
+
+  it("leads with a LoRA's trigger once, without its full stop or brackets", () => {
+    expect(getPreset("motion-overhead")!.open!.promptTemplate).toMatch(/^过顶升摇\. \{prompt\}/);
+    expect(getPreset("motion-incline")!.open!.promptTemplate).toMatch(/^弧降仰底\. \{prompt\}/);
+    expect(getPreset("effect-outfit-switch")!.open!.promptTemplate).toMatch(/^8r1d3 bride effect\. \{prompt\}/);
+    for (const p of [...MOTIONS, ...EFFECTS]) for (const r of [p.open, p.cloud]) expect(r?.promptTemplate ?? "", p.id).not.toMatch(/\.\.|^\(/);
+    // In a Mix too.
+    const mix = plan("open", { presetId: "effect-building-explosion", mix: { presetId: "motion-overhead", strength: 0.8 } });
+    expect(mix.prompt).toMatch(/At the same time: 过顶升摇, /);
+  });
+
+  it("prices a clip at the length the route makes (Replicate's Wan 2.2 fast makes 5 s when 3 s is asked)", () => {
+    setSetting("replicateToken", "r8_test");
+    try {
+      const req = { feature: "motion", modelId: "fuobe-dop", presetId: "motion-whip-pan", prompt: "x", inputs: { images: ["/a.png"] }, params: { duration: 3, resolution: "720p" }, engine: "cloud" as const };
+      const p = previewGeneration(req);
+      expect(p.route).toMatchObject({ provider: "replicate" });
+      expect(p.notes?.join(" ")).toMatch(/about 5 s, not 3 s/);
+      expect(p.costUsd).toBeCloseTo(0.4);
+    } finally {
+      setSetting("replicateToken", "");
+    }
+  });
+});
+
+describe("the composer follows the engine, not a person's pick", () => {
+  const jib = getPreset("motion-jib-up")!;
+  const defaults = { open: "oss-wan22-14b", cloud: "kling-2-5-turbo" };
+  it("moves a move to its model on the new engine when the engine changes", () => {
+    expect(presetModel(jib, "open")).toBe("fuobe-dop");
+    expect(presetModel(jib, "cloud")).toBe("fuobe-dop-ltx");
+    // GPU → cloud on Fuobe DoP: Jib Up follows to Fuobe DoP · LTX.
+    expect(engineSwitchModel({ model: view("fuobe-dop", "cloud"), preset: jib, engine: "cloud", from: "open", defaults })).toBe("fuobe-dop-ltx");
+    // A partner model left behind on the other engine gives way to the move's model here.
+    expect(engineSwitchModel({ model: getModel("kling-2-5-turbo")!, preset: jib, engine: "open", from: "cloud", defaults })).toBe("fuobe-dop");
+  });
+
+  it("keeps the sibling Original picked on purpose on the same engine", () => {
+    // In the cloud, Fuobe DoP (Wan) picked for Jib Up stays: the engine didn't change.
+    expect(engineSwitchModel({ model: view("fuobe-dop", "cloud"), preset: jib, engine: "cloud", from: "cloud", defaults })).toBeUndefined();
+    // On the GPU, Fuobe DoP · LTX picked for Jib Up stays too.
+    expect(engineSwitchModel({ model: view("fuobe-dop-ltx", "open"), preset: jib, engine: "open", from: "open", defaults })).toBeUndefined();
+    // Focus Change: Fuobe DoP picked in the cloud doesn't snap back to LTX 2.5 Fast.
+    expect(engineSwitchModel({ model: view("fuobe-dop", "cloud"), preset: getPreset("motion-focus-change")!, engine: "cloud", from: "cloud", defaults })).toBeUndefined();
+  });
+
+  it("moves to a picked or linked move's Original, never to a partner route", () => {
+    expect(presetOriginal(jib, "cloud")).toBe("fuobe-dop-ltx");
+    expect(presetOriginal(getPreset("motion-whip-pan")!, "cloud")).toBeUndefined();
+    expect(presetOriginal(getPreset("motion-whip-pan")!, "open")).toBe("fuobe-dop");
+    expect(presetOriginal(getPreset("app-face-swap") ?? undefined, "cloud")).toBeUndefined();
+    // The move's own settings start the composer, its extra (a camera LoRA) stays the preset's.
+    expect(presetParams(jib, "cloud")).toEqual({ duration: 5 });
+  });
+
+  it("takes the other engine's defaults for the settings left alone when the same Original changes engine", () => {
+    const [open, cloud] = [view("fuobe-dop", "open").defaults!, view("fuobe-dop", "cloud").defaults!];
+    expect(followEngineParams({ ...open, numOutputs: 1 }, open, cloud)).toEqual({ ...open, numOutputs: 1, resolution: "720p" });
+    expect(followEngineParams({ ...cloud }, cloud, open)).toMatchObject({ resolution: "480p" });
+    // 720p picked on the GPU on purpose: it stays in the cloud (nothing moves).
+    expect(followEngineParams({ ...open, resolution: "720p" }, open, cloud)).toBeUndefined();
   });
 });

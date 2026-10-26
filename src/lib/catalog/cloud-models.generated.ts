@@ -6663,6 +6663,74 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "ltx-2-5-fast",
+    "name": "LTX 2.5 Fast",
+    "vendor": "Lightricks",
+    "family": "ltx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "LTX-2.5's built-in camera moves (focus shift, dolly, jib) from a start frame",
+    "routes": [
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "lightricks/ltx-2.5/image-to-video/fast",
+        "map": {
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          }
+        }
+      }
+    ],
+    "options": {
+      "endFrame": true,
+      "audio": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "9:16"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p",
+        "1440p",
+        "2160p"
+      ],
+      "durations": [
+        6,
+        8,
+        10,
+        12,
+        20
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "auto",
+      "duration": 6,
+      "resolution": "720p",
+      "generateAudio": false
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.09,
+      "note": "720p; 1080p $0.13/s, 1440p $0.19/s, 4K $0.30/s; sound included",
+      "byResolution": {
+        "720p": 0.09,
+        "1080p": 0.13,
+        "1440p": 0.19,
+        "2160p": 0.3
+      }
+    },
+    "hidden": true
+  },
+  {
     "id": "pixverse-v6",
     "name": "PixVerse V6",
     "vendor": "PixVerse",
@@ -17004,6 +17072,7 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
           "aspectRatio": {
             "key": "video_size",
             "values": {
+              "auto": "auto",
               "1:1": "square_hd",
               "4:3": "landscape_4_3",
               "3:4": "portrait_4_3",
@@ -17053,6 +17122,7 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
           "aspectRatio": {
             "key": "video_size",
             "values": {
+              "auto": "auto",
               "1:1": "square_hd",
               "4:3": "landscape_4_3",
               "3:4": "portrait_4_3",
@@ -17092,6 +17162,7 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "endFrame": true,
       "audio": true,
       "aspectRatios": [
+        "auto",
         "1:1",
         "4:3",
         "3:4",
@@ -17106,7 +17177,7 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "maxImages": 1
     },
     "defaults": {
-      "aspectRatio": "1:1",
+      "aspectRatio": "auto",
       "duration": 5,
       "generateAudio": false
     },

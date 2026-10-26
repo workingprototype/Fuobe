@@ -238,7 +238,8 @@ const LORA_STATUSES = new Set(["add-lora", "alias", "replace", "weak-candidate",
 
 /**
  * The models a DoP preset runs on when it isn't Fuobe DoP's Wan (src/lib/catalog/dop.ts): an LTX-2.3 LoRA runs on Fuobe
- * DoP · LTX on both engines; an LTX-2.5 LoRA on the open LTX-2.5 graph only (the cloud runs the words on Fuobe DoP).
+ * DoP · LTX on both engines; an LTX-2.5 LoRA on the open LTX-2.5 graph only. In the cloud the harness measures Fuobe
+ * DoP on its words, against the partner model the catalog keeps there until a run promotes it.
  */
 function dopModels(m) {
   const bases = (m.loras ?? []).map((l) => l.base ?? "");
@@ -287,7 +288,7 @@ function dopSuite() {
       if ((!lora && !move && !pose) || ids.has(id) || !catalog[m.kind].has(name)) continue;
       ids.add(id);
       const transition = catalog.endFrames.has(name);
-      const cloud = move ? "ltx-2-5" : lora ? "fuobe-dop-ltx" : "fuobe-dop";
+      const cloud = move ? "ltx-2-5-fast" : lora ? "fuobe-dop-ltx" : "fuobe-dop";
       cases.push({
         id,
         title: `DoP ${m.kind} · ${name} (camera)`,

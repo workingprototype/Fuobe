@@ -12,7 +12,7 @@ import type {
   Pricing,
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
-import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField } from "./loras";
+import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
 import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
@@ -117,7 +117,7 @@ export function mixLoras(second: Preset, modelId: string, engine: Engine, streng
     return { loras: [], note: `${second.name}'s LoRA runs on ${on}, so it joins this mix as words only` };
   }
   const k = clamp01(strength);
-  return { loras: loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) })), trigger: loras.find((l) => l.trigger?.trim())?.trigger?.trim() };
+  return { loras: loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) })), trigger: triggerOf(loras) };
 }
 
 export interface Plan {
@@ -137,8 +137,6 @@ export interface Plan {
    * generation (the grade, an overlay) that the result's meta carries.
    */
   soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay; crop?: "21:9" };
-  /** A Fuobe DoP colour-grade effect: the grade the browser applies to the finished clip (meta.grade). */
-  dop?: { grade: string };
 }
 
 /** Operations that work from their inputs alone. */
@@ -213,7 +211,6 @@ export function planGeneration(
   }
 
   const notes: string[] = [];
-  let dopPlan: Plan["dop"];
   if (preset && /motion|effect/.test(preset.type)) {
     const k = clamp01(req.presetStrength ?? 1);
     if (k < 1) loras = loras.map((l) => ({ ...l, strength: round2((l.strength ?? 1) * k) }));
@@ -237,8 +234,6 @@ export function planGeneration(
         loras = [...loras, ...mixed.loras.filter((l) => !loras.some((x) => x.file === l.file))];
       }
     }
-    // A colour-grade effect: the clip is graded in the browser when it arrives (meta.grade), on the preset's own model.
-    if (preset.grade && presetRoute(preset, model.engine)?.modelId === model.id) dopPlan = { grade: preset.grade };
   }
 
   // The user's own LoRAs (an @character's trained identity) go first: on an API that takes so many, the first
@@ -380,7 +375,6 @@ export function planGeneration(
     perJobOutputs,
     ...(notes.length && { notes }),
     ...(soulPlan && { soul: soulPlan }),
-    ...(dopPlan && { dop: dopPlan }),
   };
 }
 

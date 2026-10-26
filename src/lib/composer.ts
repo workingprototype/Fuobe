@@ -672,19 +672,72 @@ export interface DraftShape {
 const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const sameAttachment = (a: Attachment | null | undefined, b: Attachment | null | undefined) => (a ?? null) === (b ?? null) || (!!a && !!b && a.id === b.id && a.ref === b.ref);
 
-/**
- * The draft a hand-off compares with, after the page's own model swap: the engine is read after hydration (or
- * switched while the page loads), and the composer swaps an untouched draft's studio default for that engine's
- * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
- * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
- */
+type PresetRoutes = Pick<Preset, "type" | "open" | "cloud">;
+
 /**
  * The model a camera motion or effect runs on by default on an engine (Fuobe DoP, or the route its move names: a
- * camera LoRA in the cloud runs on Fuobe DoP · LTX). Undefined for apps (their model is pinned) and without a preset.
+ * camera LoRA in the cloud runs on Fuobe DoP · LTX; a move with nothing of the Original's own in the cloud keeps its
+ * partner model there). Undefined for apps (their model is pinned) and without a preset.
  */
-export function presetModel(preset: Pick<Preset, "type" | "open" | "cloud"> | undefined, engine: Engine): string | undefined {
+export function presetModel(preset: PresetRoutes | undefined, engine: Engine): string | undefined {
   if (!preset || (preset.type !== "motion" && preset.type !== "effect")) return undefined;
   return (engine === "open" ? preset.open : preset.cloud)?.modelId;
+}
+
+/**
+ * The Original a camera motion or effect moves the composer to when it is picked or linked (Fuobe DoP on this engine).
+ * Never a partner route (a move Fuobe DoP has nothing of its own for in the cloud): the person's model stays.
+ */
+export function presetOriginal(preset: PresetRoutes | undefined, engine: Engine): string | undefined {
+  const route = preset && presetModel(preset, engine) ? (engine === "open" ? preset.open : preset.cloud) : undefined;
+  return route && !route.partner ? route.modelId : undefined;
+}
+
+/**
+ * The settings a preset's route starts the composer with on its model (Focus Change: 6 s, 720p, silent), over the
+ * model's defaults. Only plain values the composer shows: the route's extra (a camera LoRA, a pose) stays the
+ * preset's, so the next preset picked on the same model doesn't inherit it.
+ */
+export function presetParams(preset: PresetRoutes | undefined, engine: Engine): GenParams {
+  const route = preset && presetModel(preset, engine) ? (engine === "open" ? preset.open : preset.cloud) : undefined;
+  const plain: GenParams = { ...route?.params };
+  delete plain.extra;
+  return plain;
+}
+
+/**
+ * What the engine switch (or a model change) does to the composer's model: the model id to move to, or undefined to
+ * keep it. A model that doesn't run on the engine gives way to the preset's model there (an app's pinned route), else
+ * the studio's default. A camera motion or effect on its model for the other engine follows its move to this one's
+ * (Jib Up: Fuobe DoP on the GPU, Fuobe DoP · LTX in the cloud), but only when the engine has just changed: the sibling
+ * model picked on purpose on the same engine stays.
+ */
+export function engineSwitchModel(o: {
+  model: Pick<ModelDef, "id" | "engine">;
+  preset: PresetRoutes | undefined;
+  engine: Engine;
+  /** The engine the composer was on before (the same one when only the model changed). */
+  from: Engine;
+  defaults: Partial<Record<Engine, string>>;
+}): string | undefined {
+  const { model, preset, engine } = o;
+  const want = presetModel(preset, engine);
+  const other = presetModel(preset, engine === "open" ? "cloud" : "open");
+  const follows = o.from !== engine && !!want && want !== model.id && model.id === other;
+  if (model.engine === engine && !follows) return undefined;
+  if (preset?.type === "app") return engine === "open" ? preset.open?.modelId : preset.cloud?.modelId;
+  return want ?? o.defaults[engine];
+}
+
+/**
+ * The settings an Original takes on another engine (Fuobe DoP: 480p on the GPU, 720p in the cloud): each one whose
+ * default differs there moves to the new default when the person left it at the old one. Undefined when nothing moves.
+ */
+export function followEngineParams(params: GenParams, from: GenParams, to: GenParams): GenParams | undefined {
+  const keys = (Object.keys({ ...from, ...to }) as (keyof GenParams)[]).filter((k) => k !== "extra" && !same(from[k], to[k]));
+  const moved = keys.filter((k) => params[k] === undefined || same(params[k], from[k]));
+  if (!moved.length) return undefined;
+  return { ...params, ...Object.fromEntries(moved.map((k) => [k, to[k]])) };
 }
 
 /**
@@ -696,6 +749,12 @@ export function prestepCost(preset: Pick<Preset, "type" | "open" | "cloud" | "pr
   return preset.prestep[engine].usd ?? 0;
 }
 
+/**
+ * The draft a hand-off compares with, after the page's own model swap: the engine is read after hydration (or
+ * switched while the page loads), and the composer swaps an untouched draft's studio default for that engine's
+ * default. That swap isn't the person's pick, so the base follows it and the hand-off's model (?model=) still
+ * applies; without this, a link opened on the open engine kept the open default (Z-Image Turbo).
+ */
 export function followEngineDefault<D extends DraftShape>(base: D, current: D, defaults: Partial<Record<Engine, string>>, engine: Engine): D {
   const own = Object.values(defaults).filter(Boolean);
   if (current.modelId === base.modelId || !own.includes(base.modelId) || current.modelId !== defaults[engine]) return base;

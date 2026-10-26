@@ -266,8 +266,9 @@ describe("preset route lines (details popover)", () => {
 
   it("says when a motion's LoRA is open engine only (its licence doesn't allow hosting)", () => {
     const wiggle = getPreset("motion-wiggle")!;
-    const [cloud, open] = presetRouteLines(wiggle, (id) => (id === "fuobe-dop" ? "Fuobe DoP" : undefined));
-    expect(cloud.model).toBe("Fuobe DoP · words only, its LoRA is open engine only");
+    const [cloud, open] = presetRouteLines(wiggle, (id) => ({ "fuobe-dop": "Fuobe DoP", "kling-2-5-turbo": "Kling 2.5 Turbo" })[id]);
+    // The cloud route carries no LoRA it can't host: the move's words, on its partner model until Fuobe DoP's are measured.
+    expect(cloud.model).toBe("Kling 2.5 Turbo · words only, its LoRA is open engine only");
     expect(open.model).toBe("Fuobe DoP");
     expect(presetRouteLines(getPreset("motion-overhead")!, () => "Fuobe DoP")[0].model).toBe("Fuobe DoP");
   });

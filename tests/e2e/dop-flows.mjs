@@ -2,13 +2,18 @@
 // the price says Free on the open engine and the hosted price in the cloud, a move whose cloud route is LTX-2.3's
 // camera LoRA follows the engine switch, a colour-grade effect's clip offers its grade, and Color grading opens with
 // it picked. Then the pages it changes fit a 390 px phone in light and dark mode.
-// Usage: node tests/e2e/dop-flows.mjs [appUrl]   (the app runs in demo mode, no GPU; a fal key, any string, adds the
-// cloud price checks, and nothing is sent to fal)
+// Usage: node tests/e2e/dop-flows.mjs [appUrl] [--shots=dir]   (the app runs in demo mode, no GPU; a fal key, any
+// string, adds the cloud price checks, and nothing is sent to fal; --shots saves screenshots there)
 import fs from "node:fs";
 import path from "node:path";
 import { DESKTOP, launch, openRoute, PHONE, root } from "./_browser.mjs";
 
-const app = (process.argv[2] ?? "http://localhost:3000").replace(/\/$/, "");
+const args = process.argv.slice(2);
+const app = (args.find((a) => !a.startsWith("--")) ?? "http://localhost:3000").replace(/\/$/, "");
+const shots = args.find((a) => a.startsWith("--shots="))?.slice(8);
+if (shots) fs.mkdirSync(shots, { recursive: true });
+/** Save a screenshot when --shots names a folder. */
+const shoot = (page, name) => (shots ? page.screenshot({ path: path.join(shots, name) }) : undefined);
 const results = [];
 const check = (name, ok, detail = "") => {
   results.push({ name, ok });
@@ -51,7 +56,7 @@ const composerText = (page) => page.locator("[data-composer]").innerText();
   const text = await composerText(page);
   check("a motion opens on Fuobe DoP (open engine)", /Fuobe DoP/.test(text), text.replace(/\s+/g, " ").slice(0, 160));
   check("its price on the open engine is free", /free/i.test(text), (text.match(/(Demo · )?[Ff]ree/) ?? ["no price"])[0]);
-  await page.screenshot({ path: "/tmp/claude-0/o-dop-shots/motion-open-1440.png" });
+  await shoot(page, "motion-open-1440.png");
   await ctx.close();
 }
 {
@@ -60,7 +65,7 @@ const composerText = (page) => page.locator("[data-composer]").innerText();
   const text = await composerText(page);
   check("in the cloud it runs on Fuobe DoP", /Fuobe DoP/.test(text), text.replace(/\s+/g, " ").slice(0, 160));
   if (fal) check("in the cloud it shows the hosted price before the run ($0.10/s with LoRAs)", /\$0\.50/.test(text), (text.match(/\$\d+\.\d+/) ?? ["no price"])[0]);
-  await page.screenshot({ path: "/tmp/claude-0/o-dop-shots/motion-cloud-1440.png" });
+  await shoot(page, "motion-cloud-1440.png");
   await ctx.close();
 }
 
@@ -69,6 +74,39 @@ const composerText = (page) => page.locator("[data-composer]").innerText();
   const { page, ctx } = await studio("cloud", `preset=motion-jib-up&image=${encodeURIComponent(start)}`);
   await page.waitForFunction(() => /Fuobe DoP · LTX/.test(document.querySelector("[data-composer]")?.textContent ?? ""), null, { timeout: 20_000 }).catch(() => {});
   check("a camera-LoRA move runs on Fuobe DoP · LTX in the cloud", /Fuobe DoP · LTX/.test(await composerText(page)));
+  // Fuobe DoP (Wan) picked on purpose for the move stays picked: the engine didn't change.
+  await page.getByRole("button", { name: /^Model: .*Change model$/ }).first().click();
+  await page.getByPlaceholder(/Search (all )?models/).fill("Fuobe DoP");
+  await page.locator('[cmdk-item][data-value$=":fuobe-dop"]').first().click();
+  await page.waitForTimeout(2000);
+  const chip = await page.getByRole("button", { name: /^Model: .*Change model$/ }).first().getAttribute("aria-label");
+  check("the sibling Original picked for the move stays picked", chip === "Model: Fuobe DoP. Change model", chip ?? "no model chip");
+  await ctx.close();
+}
+
+// 2b. A move Fuobe DoP has nothing of its own for in the cloud (Whip Pan: no LoRA, no camera LoRA) leaves the studio's
+// model as it is there; on the GPU it lands on Fuobe DoP.
+{
+  const { page, ctx } = await studio("cloud", `preset=motion-whip-pan&image=${encodeURIComponent(start)}`);
+  await page.waitForTimeout(2500);
+  const chip = await page.getByRole("button", { name: /^Model: .*Change model$/ }).first().getAttribute("aria-label");
+  check("a words-only move keeps the studio's model in the cloud", !!chip && !/Fuobe DoP/.test(chip), chip ?? "no model chip");
+  await ctx.close();
+}
+
+// 2c. The same Original across the engine switch takes the new engine's default size (480p on the GPU, 720p in the cloud).
+{
+  const { page, ctx } = await studio("open", `preset=motion-overhead&image=${encodeURIComponent(start)}`);
+  await page.waitForFunction(() => /Fuobe DoP/.test(document.querySelector("[data-composer]")?.textContent ?? ""), null, { timeout: 20_000 }).catch(() => {});
+  const before = await composerText(page);
+  await page.getByRole("button", { name: /^Model: .*Change model$/ }).first().click();
+  await page.getByRole("radio", { name: "Cloud" }).first().click();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(2000);
+  const after = await composerText(page);
+  const chip = await page.getByRole("button", { name: /^Model: .*Change model$/ }).first().getAttribute("aria-label");
+  check("switching engines keeps Fuobe DoP", chip === "Model: Fuobe DoP. Change model", chip ?? "no model chip");
+  check("480p on the GPU becomes 720p in the cloud", /480p/.test(before) && /720p/.test(after) && !/480p/.test(after), `${(before.match(/\d{3}p/) ?? ["?"])[0]} → ${(after.match(/\d{3}p/) ?? ["?"])[0]}`);
   await ctx.close();
 }
 
@@ -110,7 +148,7 @@ if (fal) {
     await page.waitForTimeout(1500);
     const pressed = await page.locator('[aria-pressed="true"]').allInnerTexts();
     check("Color grading opens with the grade picked", pressed.some((t) => /Candy Pink/.test(t)), pressed.join(" | ").slice(0, 120));
-    await page.screenshot({ path: "/tmp/claude-0/o-dop-shots/grade-1440.png" });
+    await shoot(page, "grade-1440.png");
   }
   await ctx.close();
 }
@@ -137,7 +175,7 @@ for (const scheme of ["light", "dark"]) {
     });
     check(`${route.split("&")[0]} fits 390 px (${scheme})`, w.scroll <= w.client, `page ${w.scroll} px, window ${w.client} px`);
     const name = `${route.replace(/[^a-z0-9]+/gi, "-").slice(1, 40)}-${scheme}-390.png`;
-    await page.screenshot({ path: `/tmp/claude-0/o-dop-shots/${name}` });
+    await shoot(page, name);
     await ctx.close();
   }
 }

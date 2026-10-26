@@ -92,12 +92,13 @@ describe("aliases, Fun Camera poses and camera LoRAs (§7.3)", () => {
     const roll = getPreset("motion-roll-transition")!;
     expect(roll.open).toMatchObject({ modelId: DOP_MODEL, op: "flf2v" });
     expect(roll.open!.params?.extra).toBeUndefined();
-    // Pan has no LTX camera LoRA: the cloud runs its words on Wan.
-    expect(getPreset("motion-pan")!.cloud).toMatchObject({ modelId: DOP_MODEL });
+    // Pan has no LTX camera LoRA: in the cloud its words keep their partner model until the harness measures Fuobe DoP's.
+    expect(getPreset("motion-pan")!.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });
   });
 
-  it("runs Focus Change as LTX-2.5's own focus shift in the cloud", () => {
-    expect(getPreset("motion-focus-change")!.cloud).toMatchObject({ modelId: "ltx-2-5", op: "i2v", params: { extra: { camera_motion: "focus_shift" } } });
+  it("runs Focus Change as LTX-2.5's own focus shift in the cloud, on the fast endpoint", () => {
+    expect(getPreset("motion-focus-change")!.cloud).toMatchObject({ modelId: "ltx-2-5-fast", op: "i2v", params: { generateAudio: false, extra: { camera_motion: "focus_shift" } } });
+    expect(getModel("ltx-2-5-fast")!.routes[0].endpoint).toBe("lightricks/ltx-2.5/image-to-video/fast");
   });
 });
 
@@ -140,9 +141,13 @@ describe("every motion and effect on Fuobe DoP", () => {
   it("keeps a local-only LoRA on the user's GPU: a cloud run leaves it out and says so", () => {
     const wiggle = getPreset("motion-wiggle")!;
     expect(wiggle.open!.loras).toHaveLength(2);
-    expect(wiggle.cloud!.modelId).toBe(DOP_MODEL);
+    // The cloud route carries neither the LoRA nor its trigger: the words, on the partner model.
+    expect(wiggle.cloud).toMatchObject({ modelId: "kling-2-5-turbo", partner: true });
+    expect(wiggle.cloud!.loras).toBeUndefined();
+    expect(wiggle.cloud!.promptTemplate).toBeUndefined();
+    // Sent to fal anyway (a Mix, a hand-made request), fitLoras still leaves it out and says so.
     const fal = getModel(DOP_MODEL)!.routes.find((r) => r.provider === "fal" && r.op === "i2v")!;
-    const fitted = fitLoras(wiggle.cloud!.loras ?? [], fal);
+    const fitted = fitLoras(wiggle.open!.loras ?? [], fal);
     expect(fitted.loras).toEqual([]);
     expect(fitted.notes.join(" ")).toMatch(/only on your GPU/);
     expect(wiggle.parity).toMatch(/your GPU only/);

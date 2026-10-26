@@ -1530,15 +1530,20 @@ const originals: ModelDef[] = [
     // 480p on the user's GPU (720p takes about three times as long); 720p in the cloud, where a run with LoRAs costs the same.
     engineDefaults: { open: { resolution: "480p" } },
   },
-  original({
-    id: "fuobe-dop-ltx",
-    open: [
-      comfy("i2v", "ltx23-i2v-lora", "LTX-2.3 22B distilled with the motion's LoRAs"),
-      comfy("flf2v", "ltx23-flf2v-lora", "LTX-2.3 22B distilled, start and end frame, with the transition LoRA"),
-    ],
-    tagline: "FPV, wind and transitions on LTX-2.3 with its camera LoRAs · free on your GPU (24 GB), or hosted on fal",
-    options: { ...DOP_OPTIONS, resolutions: ["720p"], audio: true },
-  }),
+  {
+    ...original({
+      id: "fuobe-dop-ltx",
+      open: [
+        comfy("i2v", "ltx23-i2v-lora", "LTX-2.3 22B distilled with the motion's LoRAs"),
+        comfy("flf2v", "ltx23-flf2v-lora", "LTX-2.3 22B distilled, start and end frame, with the transition LoRA"),
+      ],
+      // The graphs load the 22B fp8 checkpoint (29.5 GB) and the Gemma text encoder: 32 GB of VRAM (the manifest's vramGb).
+      tagline: "FPV, wind and transitions on LTX-2.3 with its camera LoRAs · free on your GPU (32 GB), or hosted on fal",
+      options: { ...DOP_OPTIONS, resolutions: ["720p"], audio: true },
+    }),
+    // Sound in the cloud only (fal's generate_audio): the open LTX-2.3 graphs decode no audio, so no toggle there.
+    engineOptions: { open: { audio: false } },
+  },
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */

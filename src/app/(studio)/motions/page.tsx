@@ -11,7 +11,7 @@ export default function Page() {
     <PageShell>
       <PageHeader
         title="Camera motions"
-        description="Director-grade camera moves for any image. Pick a move, drop in a start frame: Fuobe DoP runs it with its camera LoRA, free on your GPU or hosted in the cloud. Any other video model takes the move's words."
+        description="Director-grade camera moves for any image. Pick a move, drop in a start frame: Fuobe DoP runs it with its camera LoRA, free on your GPU or hosted in the cloud. A move with no LoRA of its own runs its words on any video model."
       />
       <PresetGallery presets={MOTIONS.map(toPresetCard)} href="/video?preset={id}" noun="moves" />
     </PageShell>
