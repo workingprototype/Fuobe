@@ -60,7 +60,7 @@ export interface ShareInfo {
 export interface ShareListItem extends ShareInfo {
   count: number;
   /** The cover as the owner's own file URL (/api/files/…), for the list. */
-  thumb: { url: string; kind: MediaKind } | null;
+  thumb: { url: string; kind: MediaKind; poster?: string } | null;
   /** The result, folder or project was deleted: the link answers 404. */
   gone: boolean;
 }

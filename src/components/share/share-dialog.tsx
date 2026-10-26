@@ -111,12 +111,12 @@ export function PromptsSwitch({ value, onChange }: { value: boolean; onChange: (
   );
 }
 
-/** Never / 1 day / 7 days / 30 days, as a segmented radio row. */
+/** Always / 1 day / 7 days / 30 days, as a segmented radio row. */
 export function ExpiryPicker({ value, onChange }: { value: number | null; onChange: (days: number | null) => void }) {
   return (
     <div className="grid gap-1.5">
       <p id="share-expiry" className="text-sm leading-none font-medium">
-        Link stops working
+        Link works for
       </p>
       <div role="radiogroup" aria-labelledby="share-expiry" onKeyDown={radioKeys} className="flex flex-wrap gap-1 rounded-xl bg-muted p-1">
         {EXPIRY_CHOICES.map((c) => {
@@ -134,7 +134,7 @@ export function ExpiryPicker({ value, onChange }: { value: number | null; onChan
                 on ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {c.days === null ? "Never" : `After ${c.label}`}
+              {c.days === null ? "Always" : c.label}
             </button>
           );
         })}

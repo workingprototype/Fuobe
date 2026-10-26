@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 import { cache, Suspense } from "react";
 import { SharePage, ShareSkeleton } from "@/components/share/share-page";
 import { authEnabled, SESSION_COOKIE, validSession } from "@/server/auth";
@@ -22,6 +23,8 @@ const PRIVATE: Metadata = {
 
 export async function generateMetadata({ params }: PageProps<"/s/[token]">): Promise<Metadata> {
   const { token } = await params;
+  // A link opens per request (it may expire or be revoked any minute): never prerendered.
+  await connection();
   const s = load(token);
   if (!s) return { ...PRIVATE, title: { absolute: "Link unavailable · Fuobe" } };
   return {
@@ -34,6 +37,7 @@ export async function generateMetadata({ params }: PageProps<"/s/[token]">): Pro
 
 async function Content({ params }: { params: PageProps<"/s/[token]">["params"] }) {
   const { token } = await params;
+  await connection();
   const s = load(token);
   if (!s) notFound();
   // Views count visitors, not the owner checking their own link.

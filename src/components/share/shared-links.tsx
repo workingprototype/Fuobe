@@ -125,7 +125,7 @@ function Row({ s, token, now }: { s: ShareListItem; token?: string; now: number 
   return (
     <li className={cn("flex min-w-0 items-center gap-3 rounded-xl border bg-card p-2.5", dead && "opacity-75")}>
       <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted">
-        {s.thumb ? <MediaThumb output={{ url: s.thumb.url, kind: s.thumb.kind }} className="size-full" /> : s.kind === "publish" ? <Globe className="size-5 text-muted-foreground" /> : <Link2 className="size-5 text-muted-foreground" />}
+        {s.thumb ? <MediaThumb output={{ url: s.thumb.url, kind: s.thumb.kind, ...(s.thumb.poster && { meta: { poster: s.thumb.poster } }) }} className="size-full" /> : s.kind === "publish" ? <Globe className="size-5 text-muted-foreground" /> : <Link2 className="size-5 text-muted-foreground" />}
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-medium">{s.title}</p>

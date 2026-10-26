@@ -147,16 +147,18 @@ export function buildPublicShare(row: ShareRow, token: string): { page: PublicSh
   const items: PublicItem[] = [];
   for (const [n, g] of sc.list.entries()) {
     const key = String(n + 1);
-    const title = itemTitle(g, share.showPrompts);
+    const prompt = share.showPrompts ? promptOf(g) : undefined;
+    const named = itemTitle(g, share.showPrompts);
+    // The prompt shows under the title, so a title that is only the prompt again says what was made instead.
+    const title = prompt && prompt.startsWith(named) ? itemTitle(g, false) : named;
     // A 3D result shows its turntable (a video output) with the model as a download.
     const shown = g.kind === "model3d" ? g.outputs.map((_, i) => i) : shownOutputs(g);
-    const list = shown.map((i) => ({ i, m: media(g.outputs[i], i, title) })).filter((x): x is { i: number; m: PublicMedia } => !!x.m);
+    const list = shown.map((i) => ({ i, m: media(g.outputs[i], i, named) })).filter((x): x is { i: number; m: PublicMedia } => !!x.m);
     if (!list.length) continue;
     if (share.cover?.generationId === g.id) {
       cover = (list.find((x) => x.i === share.cover!.index) ?? list[0]).m;
       coverKey = key;
     }
-    const prompt = share.showPrompts ? promptOf(g) : undefined;
     items.push({
       key,
       title,
@@ -196,7 +198,10 @@ export function buildPublicShare(row: ShareRow, token: string): { page: PublicSh
   };
 }
 
-/** Whether a share may serve this stored file: only one its page shows. */
+/**
+ * Whether a share may serve this stored file: only one its page shows now. Worked out per request
+ * (no cache), so a result taken to the Trash or out of a folder stops opening at once.
+ */
 export function shareServesFile(row: ShareRow, token: string, rel: string): boolean {
   return buildPublicShare(row, token)?.files.has(rel) ?? false;
 }
@@ -295,10 +300,21 @@ export function listShares(): ShareListItem[] {
   return rows.map((r) => {
     const sc = scope(r);
     const info = toShareInfo(r);
-    const coverGen = (info.cover && sc?.list.find((g) => g.id === info.cover!.generationId)) || sc?.list.find((g) => g.outputs.some((o) => (o.kind === "image" || o.kind === "video") && storedPath(o.url)));
-    const out = coverGen?.outputs[coverGen.id === info.cover?.generationId ? info.cover.index : coverGen.outputs.findIndex((o) => (o.kind === "image" || o.kind === "video") && storedPath(o.url))];
-    return { ...info, count: sc?.list.length ?? 0, thumb: out && storedPath(out.url) ? { url: out.url, kind: out.kind } : null, gone: !sc };
+    return { ...info, count: sc?.list.length ?? 0, thumb: sc ? thumbOf(sc.list, info.cover) : null, gone: !sc };
   });
+}
+
+/** The list's thumbnail: the cover, else the first picture, else the first clip (with its poster). */
+function thumbOf(list: Generation[], cover: ShareInfo["cover"]): ShareListItem["thumb"] {
+  const stored = (o: OutputFile | undefined, kinds: string[]) => !!o && kinds.includes(o.kind) && !!storedPath(o.url);
+  const covered = cover && list.find((g) => g.id === cover.generationId)?.outputs[cover.index];
+  const out =
+    (stored(covered ?? undefined, ["image", "video"]) ? covered : undefined) ??
+    list.flatMap((g) => g.outputs).find((o) => stored(o, ["image"])) ??
+    list.flatMap((g) => g.outputs).find((o) => stored(o, ["video"]));
+  if (!out) return null;
+  const poster = ["poster", "thumbnail"].map((k) => out.meta?.[k]).find((v): v is string => typeof v === "string" && !!storedPath(v));
+  return { url: out.url, kind: out.kind, ...(poster && { poster }) };
 }
 
 /** Change a link (its words, prompts on or off, a new expiry from now), or give it a new token. */

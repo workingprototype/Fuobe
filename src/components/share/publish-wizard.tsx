@@ -48,7 +48,8 @@ export function PublishWizard({ items, onClose, onPublished }: { items: Generati
   const actions = useShareActions();
   const at = STEPS.indexOf(step);
   const blocker = !title.trim() ? "Give the page a title" : !order.length ? "Keep at least one result" : null;
-  const coverOf = cover && order.some((g) => g.id === cover.generationId) ? cover : null;
+  // Without a pick, the first piece (as the Cover step shows it), whatever it is.
+  const coverOf = cover && order.some((g) => g.id === cover.generationId) ? cover : order[0] ? { generationId: order[0].id, index: firstShown(order[0]) } : null;
 
   const publish = async () => {
     setBusy(true);

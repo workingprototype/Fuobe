@@ -267,6 +267,9 @@ describe("prompts", () => {
     const shown = shares.createShare({ kind: "result", targetId: g.id, showPrompts: true });
     const page2 = shares.buildPublicShare(access.findShare(shown.token)!, shown.token)!.page;
     expect(page2.items[0].prompt).toBe("a secret prompt about violet tigers");
+    // The caption doesn't say the prompt twice: the title names what was made, the prompt sits under it.
+    expect(page2.items[0].title).not.toMatch(/violet tigers/);
+    expect(page2.items[0].media[0].download).toMatch(/^a-secret-prompt-about-violet-tigers/);
     const html2 = renderToStaticMarkup(createElement(SharePage, { share: page2 }));
     expect(html2).toMatch(/violet tigers/);
     expect(html2).toMatch(/Recreate in your Fuobe/);
