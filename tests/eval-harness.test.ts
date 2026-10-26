@@ -283,6 +283,31 @@ describe("the runner on the demo provider", () => {
     }
   });
 
+  it("runs Fuobe Cinema's Director and camera-move cases, and plans its cloud variants", async () => {
+    const r = await cli(["run", "--suite", "cinema", "--engine", "demo", "--cases", "cinema/director-noir,cinema/move-dolly-in", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.caseId, x.status]).sort()).toEqual([
+      ["cinema/director-noir", "succeeded"],
+      ["cinema/move-dolly-in", "succeeded"],
+    ]);
+    expect(rows.every((x) => (x.request as { modelId: string }).modelId === "fuobe-cinema")).toBe(true);
+    type Plan = { jobs: { case: string; variant: string; model: string; skip?: string }[] };
+    setSetting("falKey", "fal-test-key");
+    try {
+      const plan = JSON.parse((await cli(["run", "--suite", "cinema", "--engine", "cloud", "--cases", "cinema/move-dolly-in", "--variants", "original,words,expansion,wan", "--dry-run", "--json"])).stdout) as Plan;
+      const by = Object.fromEntries(plan.jobs.map((j) => [j.variant, j]));
+      expect(by.original).toMatchObject({ model: "fuobe-cinema" });
+      expect([by.original.skip, by.words.skip, by.expansion.skip, by.wan.skip]).toEqual([undefined, undefined, undefined, undefined]);
+      expect(by.wan).toMatchObject({ model: "wan-2-2-a14b-cloud" });
+      // The camera-move cases run in the cloud only: on the GPU the move is a Wan LoRA or a pose (the dop suite measures those).
+      const open = JSON.parse((await cli(["run", "--suite", "cinema", "--engine", "open", "--cases", "cinema/move-dolly-in", "--dry-run", "--json"])).stdout) as Plan;
+      expect(open.jobs.every((j) => !!j.skip)).toBe(true);
+    } finally {
+      setSetting("falKey", "");
+    }
+  });
+
   it("refuses an engine the server can't run, and skips jobs that would run as a demo on a real engine", async () => {
     const dry = await cli(["run", "--suite", "soul", "--engine", "cloud", "--looks", "v1-general", "--dry-run"]);
     expect(dry.code, dry.stderr).toBe(0);

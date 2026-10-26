@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ComfyWorkflow } from "@/lib/comfy";
 import type { GenInput, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
+import type { DirectorSettings } from "@/lib/catalog/cinema";
 
 // Fuobe Cinema as a run (build plan O6): one model on both engines. In the cloud the payload fal receives (LTX-2.3 22B,
 // prompt expansion off, camera_lora, exact sizes, frames at 24 fps, the plain endpoint unless a LoRA rides along) and its
@@ -170,3 +171,50 @@ describe("Fuobe Cinema on the GPU", () => {
     for (const f of l.loras!.map((x) => x.file)) expect(injected).toContain(f);
   });
 });
+
+describe("the cinema evaluation suite measures what Cinema sends", () => {
+  // The Director behind each case (scripts/eval/cases/cinema.json carries only the compiled words and camera_lora).
+  const DIRECTOR: Record<string, { prompt: string; settings: DirectorSettings; moves: string[] }> = {
+    "cinema/director-noir": {
+      prompt: "A detective lights a match in the rain under a flickering streetlight",
+      settings: { genre: "noir", era: "1980s", camera: "35mm-film", lens: "anamorphic", focal: "50mm", lighting: { kind: "preset", slug: "window" }, palette: { kind: "preset", slug: "neon-rain-at-midnight" } },
+      moves: [],
+    },
+    "cinema/director-epic": {
+      prompt: "A lone rider crosses a vast salt flat at sunrise, dust trailing behind the horse",
+      settings: { genre: "epic", era: "2020s", camera: "modern", lens: "clean-sharp", focal: "24mm", aperture: "f11-deep-focus", lighting: { kind: "preset", slug: "contre-jour" } },
+      moves: [],
+    },
+    "cinema/director-comedy": {
+      prompt: "Two old friends argue over the last slice of cake at a crowded birthday party",
+      settings: { genre: "comedy", era: "1960s", camera: "8mm-film", lens: "warm-vintage", tempo: "calm", lighting: { kind: "preset", slug: "practicals" }, palette: { kind: "preset", slug: "bubblegum-boulevard" } },
+      moves: [],
+    },
+    "cinema/move-dolly-in": { prompt: "A violinist plays alone on an empty theatre stage, a single spotlight above her", settings: {}, moves: ["dolly-in"] },
+    "cinema/move-truck-left": { prompt: "A night market street lined with food stalls, steam rising, people browsing", settings: {}, moves: ["truck-left"] },
+    "cinema/move-crane-up": { prompt: "A small fishing village on a rocky coast at dawn, boats tied in the harbour", settings: {}, moves: ["crane-up"] },
+    "cinema/move-static": { prompt: "A cat sleeps on a sunlit windowsill while rain streaks the glass", settings: {}, moves: ["static-shot"] },
+  };
+
+  it("each Director case is the prompt (and camera LoRA) Cinema compiles on both engines", () => {
+    const suite = JSON.parse(fs.readFileSync(path.join(__dirname, "../scripts/eval/cases/cinema.json"), "utf8")) as {
+      original: string;
+      targets: Record<string, { models: string[] }>;
+      cases: { id: string; prompts?: { text: string }[]; extra?: Record<string, unknown>; engines?: string[] }[];
+    };
+    expect(suite.original).toBe(CINEMA_MODEL);
+    expect(suite.targets.cloud.models[0]).toBe(CINEMA_MODEL);
+    expect(suite.targets.open.models[0]).toBe(CINEMA_MODEL);
+    for (const [id, d] of Object.entries(DIRECTOR)) {
+      const kase = suite.cases.find((c) => c.id === id)!;
+      expect(kase, id).toBeDefined();
+      for (const engine of (kase.engines ?? ["open", "cloud"]).filter((e) => e !== "demo") as ("open" | "cloud")[]) {
+        const plan = planCinema({ engine, mode: "video", action: "generate", prompt: d.prompt, settings: d.settings, moves: d.moves, duration: 5, aspectRatio: "16:9" }, { cloudAllowed: true });
+        const req = plan.steps[0].request;
+        expect(kase.prompts![0].text, `${id} on ${engine}`).toBe(req.prompt);
+        expect(kase.extra ?? {}, `${id} on ${engine}`).toEqual(req.params?.extra ?? {});
+      }
+    }
+  });
+});
+

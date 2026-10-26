@@ -359,6 +359,9 @@ export function PaletteChip({
               <Switch checked={settings.paletteLock !== false} onCheckedChange={(v) => onChange({ paletteLock: v })} aria-label="Lock the grade to the palette" />
             </label>
           )}
+          {engine === "cloud" && (
+            <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-[11.5px] text-muted-foreground">The palette&apos;s colours are written into the prompt. Locking the grade to them runs on your GPU (Open source).</p>
+          )}
         </PopoverContent>
       </Popover>
       <PaletteEditor
