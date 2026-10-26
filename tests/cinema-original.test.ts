@@ -20,7 +20,9 @@ const { falProvider } = await import("@/server/providers/fal");
 const { getModel, modelsFor } = await import("@/lib/catalog");
 const { onEngine } = await import("@/lib/catalog/engines");
 const { estimateCost } = await import("@/lib/catalog/plan");
-const { planCinema, CINEMA_MODEL, ORIGINAL_LINES, modelLine } = await import("@/lib/catalog/cinema");
+const { planCinema, CINEMA_MODEL, ORIGINAL_LINES, modelLine, CAMERA_MOVES, CINEMA_EDIT_STRENGTH, CINEMA_MAX_SECONDS, cinemaMoveRoute, editPrompt } = await import("@/lib/catalog/cinema");
+const { needsToken } = await import("@/lib/catalog/loras");
+const { finishedUrl } = await import("@/lib/soul-post");
 
 beforeAll(() => setSetting("demoMode", "auto"));
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -51,6 +53,9 @@ const ctx = () => ({
   media: (() => undefined) as never,
   serverRam: async () => undefined,
 });
+
+/** fal bills LTX-2.3 per megapixel of video made (width × height × frames), rounded up. */
+const videoMp = (w: number, h: number, frames: number) => Math.ceil((w * h * frames) / 1e6);
 
 const LTX_LORA: LoraRef = {
   file: "my-ltx-style.safetensors",
@@ -85,15 +90,24 @@ describe("Fuobe Cinema on both engines", () => {
     expect(modelLine(getModel("kling-3")!, "cloud")).toBe(getModel("kling-3")!.tagline);
   });
 
-  it("prices a second of video from fal's per-megapixel price, by resolution and with LoRAs; free on the GPU", () => {
+  it("prices a take on fal's per-megapixel price: its tier and shape's size × its frames, rounded up; free on the GPU", () => {
     const cloud = view("cloud");
-    expect(estimateCost(cloud, { duration: 5, resolution: "720p" })).toBeCloseTo(5 * 0.0347, 3);
-    expect(estimateCost(cloud, { duration: 5, resolution: "480p" })).toBeCloseTo(5 * 0.016, 3);
-    expect(estimateCost(cloud, { duration: 5, resolution: "1080p" })).toBeCloseTo(5 * 0.0805, 2);
-    expect(estimateCost(cloud, { duration: 5, resolution: "720p" }, 1, "t2v", true)).toBeCloseTo(5 * 0.039, 3);
-    expect(estimateCost(cloud, { duration: 5, resolution: "1080p" }, 1, "t2v", true)).toBeCloseTo(5 * 0.0905, 2);
-    // 1280 × 704 × 24 frames per second at $0.001605 per megapixel.
+    // 5 s = 121 frames at 24 fps; fal bills width × height × frames in whole megapixels.
+    expect(estimateCost(cloud, { duration: 5, resolution: "720p", aspectRatio: "16:9" })).toBeCloseTo(videoMp(1280, 704, 121) * 0.001605, 3);
+    expect(estimateCost(cloud, { duration: 5, resolution: "480p", aspectRatio: "16:9" })).toBeCloseTo(videoMp(864, 480, 121) * 0.001605, 3);
+    expect(estimateCost(cloud, { duration: 5, resolution: "1080p", aspectRatio: "16:9" })).toBeCloseTo(videoMp(1920, 1088, 121) * 0.001605, 3);
+    // Each shape at its own size: 480p 21:9 is 1120 × 480 and 4:3 is 640 × 480, not the 16:9 frame.
+    expect(estimateCost(cloud, { duration: 10, resolution: "480p", aspectRatio: "21:9" })).toBeCloseTo(videoMp(1120, 480, 241) * 0.001605, 3);
+    expect(estimateCost(cloud, { duration: 10, resolution: "480p", aspectRatio: "4:3" })).toBeCloseTo(videoMp(640, 480, 241) * 0.001605, 3);
+    expect(estimateCost(cloud, { duration: 10, resolution: "720p", aspectRatio: "21:9" })).toBeCloseTo(videoMp(1504, 640, 241) * 0.001605, 3);
+    // The model's defaults fill a missing tier or shape (720p, 16:9).
+    expect(estimateCost(cloud, { duration: 5 })).toBeCloseTo(videoMp(1280, 704, 121) * 0.001605, 3);
+    // The /lora endpoint's rate when a LoRA rides along.
+    expect(estimateCost(cloud, { duration: 5, resolution: "720p", aspectRatio: "16:9" }, 1, "t2v", true)).toBeCloseTo(videoMp(1280, 704, 121) * 0.001805, 3);
+    expect(estimateCost(cloud, { duration: 5, resolution: "1080p", aspectRatio: "9:16" }, 2, "t2v", true)).toBeCloseTo(2 * videoMp(1088, 1920, 121) * 0.001805, 3);
+    // The per-second table stays the 16:9 rate for display: 1280 × 704 × 24 frames per second at $0.001605 per megapixel.
     expect(cloud.pricing!.byResolution!["720p"]).toBeCloseTo((1280 * 704 * 24 * 0.001605) / 1e6, 4);
+    expect(cloud.pricing!.videoMegapixel).toEqual({ usd: 0.001605, withLoras: 0.001805 });
     expect(estimateCost(view("open"), { duration: 5 })).toBe(0);
   });
 
@@ -143,7 +157,7 @@ describe("Fuobe Cinema on both engines", () => {
     try {
       const cloud = previewGeneration({ ...req, engine: "cloud" });
       expect(cloud).toMatchObject({ engine: "cloud", demo: false, route: { provider: "fal", endpoint: "fal-ai/ltx-2.3-22b/text-to-video" } });
-      expect(cloud.costUsd).toBeCloseTo(5 * 0.0347, 3);
+      expect(cloud.costUsd).toBeCloseTo(videoMp(1280, 704, 121) * 0.001605, 3);
     } finally {
       setSetting("falKey", "");
     }
@@ -169,6 +183,134 @@ describe("Fuobe Cinema on the GPU", () => {
       .filter((n) => n.class_type === "LoraLoaderModelOnly")
       .map((n) => n.inputs.lora_name);
     for (const f of l.loras!.map((x) => x.file)) expect(injected).toContain(f);
+  });
+});
+
+describe("Fuobe Cinema edits, extends and casts (review fixes)", () => {
+  const take = (over: Record<string, unknown> = {}) => ({ url: "/api/files/take.mp4", kind: "video" as const, modelId: CINEMA_MODEL, prompt: "A lighthouse keeper climbs the stairs at dusk", seconds: 10, resolution: "720p", aspectRatio: "16:9", ...over });
+  const edit = (source: ReturnType<typeof take>, over: Record<string, unknown> = {}) =>
+    planCinema({ engine: "cloud", mode: "video", action: "edit", prompt: "make it snow", settings: {}, source, ...over }, { cloudAllowed: true });
+
+  it("edits a Fuobe Cinema take on LTX-2.3 video-to-video: the take's scene with the change, the take held, its sound kept", async () => {
+    const plan = edit(take(), { brief: "Muted 1970s Kodachrome" });
+    expect(plan.model.id).toBe(CINEMA_MODEL);
+    const req = plan.steps[0].request;
+    expect(req).toMatchObject({ modelId: CINEMA_MODEL, engine: "cloud", op: "v2v", inputs: { video: "/api/files/take.mp4" } });
+    // The endpoint renders a scene, not an instruction: the take's own scene with the change, and what stays.
+    expect(req.prompt).toBe(`Project brief: Muted 1970s Kodachrome. ${editPrompt("make it snow", "A lighthouse keeper climbs the stairs at dusk")}`);
+    expect(req.prompt).toMatch(/A lighthouse keeper climbs the stairs at dusk\. The same shot with one change: make it snow\. Everything else stays as it is/);
+    expect(editPrompt("make it snow")).toBe("The same shot with one change: make it snow. Everything else stays as it is: the same people, place, framing, camera move, light and sound.");
+    expect(req.params).toMatchObject({ duration: 10, resolution: "720p", aspectRatio: "16:9", generateAudio: true, extra: { video_strength: CINEMA_EDIT_STRENGTH, audio_strength: 1 } });
+    expect(req.params!.extra!.match_video_length).toBeUndefined();
+    expect(CINEMA_EDIT_STRENGTH).toBeGreaterThan(0.01);
+    // Priced on the take's own length and size (10 s at 720p 16:9 = 241 frames), not a flat 5 s.
+    expect(plan.costUsd).toBeCloseTo(videoMp(1280, 704, 241) * 0.001605, 3);
+    expect(edit(take({ seconds: 4, resolution: "480p", aspectRatio: "9:16" })).costUsd).toBeCloseTo(videoMp(480, 864, 97) * 0.001605, 3);
+    // What fal receives: the take, the strengths, the frames from the clip's own length (its header), prompt expansion off.
+    const { url, body } = await submit(view("cloud"), fal("v2v"), { ...req.params, prompt: req.prompt, video: "https://x/take.mp4", sourceDuration: 10 });
+    expect(url).toMatch(/\/fal-ai\/ltx-2\.3-22b\/video-to-video$/);
+    expect(body).toMatchObject({ video_url: "https://x/take.mp4", video_strength: CINEMA_EDIT_STRENGTH, audio_strength: 1, num_frames: 241, enable_prompt_expansion: false, generate_audio: true });
+    expect(body.video_size).toBeUndefined();
+  });
+
+  it("edits the first 20 s of a longer take (481 frames), and says so; unknown lengths are priced as 5 s", async () => {
+    const plan = edit(take({ seconds: 30.04 }));
+    const req = plan.steps[0].request;
+    expect(req.params).toMatchObject({ duration: CINEMA_MAX_SECONDS, extra: { match_video_length: false } });
+    expect(plan.notes).toContain("Fuobe Cinema edits up to 20s of a take (481 frames), so this edit is the take's first 20s");
+    expect(plan.costUsd).toBeCloseTo(videoMp(1280, 704, 481) * 0.001605, 3);
+    const { body } = await submit(view("cloud"), fal("v2v"), { ...req.params, prompt: req.prompt, video: "https://x/take.mp4", sourceDuration: 30.04 });
+    expect(body).toMatchObject({ match_video_length: false, num_frames: 481 });
+    // A 20 s take (481 frames = 20.04 s) is whole.
+    expect(edit(take({ seconds: 20.04 })).steps[0].request.params!.extra!.match_video_length).toBeUndefined();
+    // Length unknown: the default 5 s; the clip's header still sets the frames fal makes.
+    const unknown = edit(take({ seconds: undefined }));
+    expect(unknown.steps[0].request.params!.duration).toBe(5);
+    // Reference pictures and clips aren't used by this edit, and say so.
+    const refs = edit(take(), { images: ["/api/files/a.png"], videos: ["/api/files/r.mp4"] });
+    expect(refs.steps[0].request.inputs).toEqual({ video: "/api/files/take.mp4" });
+    expect(refs.notes.join(" ")).toMatch(/reference images aren't used/);
+  });
+
+  it("the editor follows the take's model: a partner take goes to Kling O3 whatever the menu says", () => {
+    // A Seedance take, the menu back on Fuobe Cinema: Kling O3, named after the take's model.
+    const partner = edit(take({ modelId: "seedance-2-5" }));
+    expect(partner.model.id).toBe("kling-o3");
+    expect(partner.notes).toContain("Takes made on Seedance 2.5 are edited with Kling O3 Omni");
+    expect(partner.steps[0].request.prompt).toBe("make it snow");
+    // A Fuobe Cinema take with Kling 3.0 still picked: LTX-2.3.
+    expect(edit(take(), { modelId: "kling-3" }).model.id).toBe(CINEMA_MODEL);
+    // A Fuobe DoP take (a camera LoRA move) or an open-engine take: LTX-2.3 too.
+    expect(edit(take({ modelId: "fuobe-dop" })).model.id).toBe(CINEMA_MODEL);
+    // Without the take's model (an older take): the menu's pick decides.
+    expect(edit(take({ modelId: undefined }), { modelId: "veo-3-1" }).model.id).toBe("kling-o3");
+    expect(edit(take({ modelId: undefined })).model.id).toBe(CINEMA_MODEL);
+  });
+
+  it("an extend or a prequel longer than 20 s says it is 20 s on Fuobe Cinema in the cloud", () => {
+    const run = (action: "extend-forward" | "extend-backward", duration: number, engine: "cloud" | "open" = "cloud") =>
+      planCinema({ engine, mode: "video", action, prompt: "", settings: {}, duration, source: take() }, { cloudAllowed: true });
+    const fwd = run("extend-forward", 30);
+    expect(fwd.steps[0].request.params!.duration).toBe(20);
+    expect(fwd.notes).toContain("Fuobe Cinema extends by up to 20s at a time, so this one is 20s — run it again for more");
+    const back = run("extend-backward", 25);
+    expect(back.steps[0].request.params).toMatchObject({ duration: 20, extra: { extend_direction: "backward" } });
+    expect(back.notes).toContain("Fuobe Cinema makes a prequel of up to 20s at a time, so this one is 20s — run it again for more");
+    // Up to 20 s: no note; on the GPU the extend graphs set their own lengths.
+    expect(run("extend-forward", 20).notes.join(" ")).not.toMatch(/at a time/);
+    expect(run("extend-forward", 30, "open").notes.join(" ")).not.toMatch(/at a time/);
+  });
+
+  it("a cloud move whose Wan LoRA downloads from civitai runs on its words without a civitai key", () => {
+    const civitai = CAMERA_MOVES.filter((m) => {
+      const r = cinemaMoveRoute(m.slug, "cloud", true);
+      return r.via === "lora" && r.loras.some((l) => !l.hostedUrl && needsToken(l.url));
+    }).map((m) => m.slug);
+    expect(civitai).toEqual(expect.arrayContaining(["handheld", "tracking"]));
+    for (const slug of civitai) {
+      expect(cinemaMoveRoute(slug, "cloud", true, { civitai: false }), slug).toEqual({ via: "prompt", key: true });
+      expect(cinemaMoveRoute(slug, "cloud", false, { civitai: false }), slug).toMatchObject({ via: "prompt", frame: false, key: true });
+      expect(cinemaMoveRoute(slug, "cloud", true, { civitai: true }).via, slug).toBe("lora");
+    }
+    // Moves whose LoRA is hosted elsewhere, and LTX-2.3's camera LoRAs, don't need the key.
+    for (const m of CAMERA_MOVES.filter((x) => !civitai.includes(x.slug))) expect(cinemaMoveRoute(m.slug, "cloud", true, { civitai: false }), m.slug).toEqual(cinemaMoveRoute(m.slug, "cloud", true));
+    // The plan: Fuobe Cinema keeps the take, the move goes into the words, the note says what would drive it.
+    const input = { engine: "cloud" as const, mode: "video" as const, action: "generate" as const, prompt: "a chase down a market street", moves: ["handheld"], settings: {}, images: ["/api/files/a.png"], duration: 5 };
+    const without = planCinema(input, { cloudAllowed: true, civitai: false });
+    expect(without.model.id).toBe(CINEMA_MODEL);
+    expect(without.steps[0].request.loras).toBeUndefined();
+    expect(without.notes).toContain("Handheld is written into the prompt — its camera LoRA downloads from civitai, which needs your free API key (Settings → LoRAs)");
+    const withKey = planCinema(input, { cloudAllowed: true, civitai: true });
+    expect(withKey.model.id).toBe("fuobe-dop");
+    expect(withKey.steps[0].request.loras?.length).toBeGreaterThan(0);
+    // The GPU fetches through the user's own ComfyUI: unchanged.
+    expect(planCinema({ ...input, engine: "open" }, { cloudAllowed: true, civitai: false }).steps[0].request.loras?.length).toBeGreaterThan(0);
+  });
+
+  it("open Soul Cast runs the sheet graph with the Realistic look's LoRAs chained after Z-Image Turbo's loader", async () => {
+    const plan = planCinema({ engine: "open", mode: "image", action: "cast", prompt: "", settings: {}, cast: { genre: "Western", gender: "Female", age: 35 } }, { cloudAllowed: true });
+    const req = plan.steps[0].request;
+    expect(req.modelId).toBe("oss-zimage-soul-cast");
+    const { manifest, workflow } = await prepareWorkflow(
+      "soul-cast-sheet-zimage",
+      { ...req.params, prompt: req.prompt, loras: req.loras, seed: 3 },
+      { generationId: "g", op: "t2i", upload: async (_d: Buffer, _t: string, name: string) => `up_${name}`, media: (() => undefined) as never, serverRam: async () => undefined },
+    );
+    expect(manifest.id).toBe("soul-cast-sheet-zimage");
+    const chain = Object.values(workflow as ComfyWorkflow)
+      .filter((n) => n.class_type === "LoraLoaderModelOnly")
+      .map((n) => [n.inputs.lora_name, n.inputs.strength_model]);
+    expect(chain).toEqual(req.loras!.map((l) => [l.file, l.strength]));
+    // Its outputs: the sheet, then the four views as their own pictures.
+    expect(Object.values(workflow as ComfyWorkflow).filter((n) => n.class_type === "SaveImage").length).toBe(2);
+  });
+
+  it("a variant picked before its grade was applied resolves to the finished picture", () => {
+    const gens = [{ outputs: [{ url: "/api/files/finished.png", kind: "image" as const, meta: { finished: true, original: "/api/files/raw.png" } }, { url: "/api/files/other.png", kind: "image" as const }] }];
+    expect(finishedUrl(gens, "/api/files/raw.png")).toBe("/api/files/finished.png");
+    expect(finishedUrl(gens, "/api/files/finished.png")).toBe("/api/files/finished.png");
+    expect(finishedUrl(gens, "/api/files/other.png")).toBe("/api/files/other.png");
+    expect(finishedUrl(gens, "/api/files/gone.png")).toBe("/api/files/gone.png");
   });
 });
 

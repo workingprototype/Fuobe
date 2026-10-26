@@ -12,7 +12,7 @@ process.env.OLLAMA_URL = "http://127.0.0.1:9";
 const { setSetting } = await import("@/server/settings");
 const gens = await import("@/server/generations");
 const cinema = await import("@/server/cinema");
-const { generateInProject, swatchUrl } = await import("@/server/cinema-generate");
+const { cinemaContext, generateInProject, swatchUrl } = await import("@/server/cinema-generate");
 const { askDirector, ideaOf, offlineDirector, parseDirectorAnswer } = await import("@/server/cinema-director");
 const projectsRoute = await import("@/app/api/cinema/projects/route");
 const projectRoute = await import("@/app/api/cinema/projects/[id]/route");
@@ -174,12 +174,46 @@ describe("Cinema API", () => {
     // Demo mode runs are free, so the guard only bites on real (paid) routes; previewing with a fake key shows the message.
     setSetting("falKey", "test-key");
     try {
-      // 20 s on Fuobe Cinema at 720p is about $0.69 ($0.0347/s).
+      // 20 s on Fuobe Cinema at 720p 16:9 is about $0.70 (1280 × 704 × 481 frames at $0.001605 per megapixel).
       expect(() => generateInProject(p.id, { ...VIDEO, duration: 20 })).toThrow(/past its \$0\.50 limit/);
     } finally {
       setSetting("falKey", "");
     }
   });
+
+  it("an edit carries the take's facts through the API: its model picks the editor, its length prices it", async () => {
+    const p = cinema.createProject({ name: "Edits" });
+    const src = gens.createGenerations({ feature: "cinema", modelId: "seedance-2-5", prompt: "source take", params: { duration: 5 } })[0];
+    const take = await settle(src.id);
+    const source = { url: take.outputs[0].url, kind: "video", modelId: "seedance-2-5", prompt: "A detective lights a match in the rain", seconds: 5.04, resolution: "720p", aspectRatio: "16:9" };
+    // A Seedance take is edited with Kling O3, whatever the menu says.
+    const partner = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "make it snow", source } }), params({ id: p.id }));
+    expect(partner.status).toBe(201);
+    const pj = await partner.json();
+    expect(pj.plan.modelId).toBe("kling-o3");
+    // A Fuobe Cinema take: LTX-2.3 video-to-video with the take's scene, the take held and its sound kept.
+    const own = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "make it snow", source: { ...source, modelId: "fuobe-cinema" } } }), params({ id: p.id }));
+    expect(own.status).toBe(201);
+    const oj = await own.json();
+    expect(oj.plan.modelId).toBe("fuobe-cinema");
+    const g = gens.getGeneration(oj.items[0].id)!;
+    expect(g.op).toBe("v2v");
+    expect(g.prompt).toMatch(/^A detective lights a match in the rain\. The same shot with one change: make it snow\./);
+    expect(g.request.params?.extra).toMatchObject({ video_strength: 0.5, audio_strength: 1 });
+    expect((await settle(g.id)).status).toBe("succeeded");
+    // Facts out of range are refused rather than trusted.
+    const bad = await generateRoute.POST(json("POST", { input: { ...VIDEO, action: "edit", prompt: "x", source: { ...source, seconds: -1 } } }), params({ id: p.id }));
+    expect(bad.status).toBe(400);
+    // The planner (and the project page's context) knows whether a civitai key is set: cloud moves whose LoRA downloads
+    // from civitai need one.
+    expect(cinemaContext()).toMatchObject({ cloudAllowed: true, civitai: false });
+    setSetting("civitaiKey", "test-key");
+    try {
+      expect(cinemaContext().civitai).toBe(true);
+    } finally {
+      setSetting("civitaiKey", "");
+    }
+  }, 60_000);
 
   it("extend backward chains first frame → the moment before → a clip ending on it", async () => {
     const p = cinema.createProject({ name: "Prequel" });

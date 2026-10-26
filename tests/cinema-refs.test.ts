@@ -45,8 +45,8 @@ describe("reference clips", () => {
     expect(plan.model.id).toBe("kling-3");
     expect(plan.steps[0].request.inputs).toBeUndefined();
     expect(plan.notes.join(" ")).toMatch(/Kling 3\.0 doesn't take reference videos and reference audio — Seedance 2\.5 does/);
-    // Fuobe Cinema (the default) takes none yet: Seedance 2.5 is named.
-    const original = planCinema({ ...VIDEO, ...CLIPS }, ctx);
+    // Fuobe Cinema picked from the menu takes none yet: Seedance 2.5 is named.
+    const original = planCinema({ ...VIDEO, ...CLIPS, modelId: "fuobe-cinema" }, ctx);
     expect(original.model.id).toBe("fuobe-cinema");
     expect(original.steps[0].request.op).toBeUndefined();
     expect(original.notes.join(" ")).toMatch(/Fuobe Cinema doesn't take reference videos and reference audio — Seedance 2\.5 does/);
@@ -73,7 +73,22 @@ describe("reference clips", () => {
     const original = planCinema({ ...VIDEO, ...CLIPS, action: "edit", prompt: "make it snow", source }, ctx);
     expect(original.model.id).toBe("fuobe-cinema");
     expect(original.steps[0].request.inputs).toEqual({ video: source.url });
-    expect(original.notes.join(" ")).toMatch(/aren't sent to Fuobe Cinema/);
+    expect(original.notes.join(" ")).toMatch(/Fuobe Cinema edits from the take alone — reference videos and audio aren't used/);
+  });
+
+  it("move a take on the default model to the first partner model that takes them all, with a note", () => {
+    // Nothing picked in the menu (the cloud default, Fuobe Cinema): the clips aren't dropped.
+    const plan = planCinema({ ...VIDEO, ...CLIPS }, ctx);
+    expect(plan.model.id).toBe("seedance-2-5");
+    expect(plan.steps[0].request).toMatchObject({ modelId: "seedance-2-5", op: "ref2v", inputs: CLIPS });
+    expect(plan.notes[0]).toBe("Fuobe Cinema doesn't take reference clips yet, so this take runs on Seedance 2.5 (a partner model) with them — pick Fuobe Cinema in the menu to leave them out");
+    expect(plan.costUsd).toBeGreaterThan(0);
+    // Only a reference video, or only audio: the same.
+    expect(planCinema({ ...VIDEO, videos: CLIPS.videos }, ctx).model.id).toBe("seedance-2-5");
+    expect(planCinema({ ...VIDEO, audios: CLIPS.audios }, ctx).model.id).toBe("seedance-2-5");
+    // No clips, or the GPU, or a still: Fuobe Cinema stays.
+    expect(planCinema(VIDEO, ctx).model.id).toBe("fuobe-cinema");
+    expect(planCinema({ ...VIDEO, ...CLIPS, engine: "open" }, ctx).model.id).toBe("fuobe-cinema");
   });
 });
 
@@ -100,5 +115,15 @@ describe("draftToInput", () => {
     expect(grid).toMatchObject({ mode: "image", action: "grid", grid: { size: "3x3", type: "zooms" }, moves: undefined, multiShot: undefined });
     expect(grid.source).toBeUndefined();
     expect(draftToInput({ ...d, mode: "image", source, action: "edit" }, "cloud", {}).action).toBe("generate");
+  });
+
+  it("sends what the browser knows about the picked take: its model, scene, length and size", () => {
+    const d = initialDraft();
+    const take = { generationId: "g1", url: "/api/files/take.mp4", kind: "video" as const, label: "Take", modelId: "seedance-2-5", prompt: "  a lighthouse at dusk  ", seconds: 30.0417, resolution: "720p", aspectRatio: "21:9" };
+    const edit = draftToInput({ ...d, source: take, action: "edit", prompt: "make it snow" }, "cloud", {});
+    expect(edit.source).toEqual({ url: take.url, kind: "video", modelId: "seedance-2-5", prompt: "a lighthouse at dusk", seconds: 30.04, resolution: "720p", aspectRatio: "21:9" });
+    // Unknown facts are left out rather than sent empty.
+    const bare = draftToInput({ ...d, source: { ...take, modelId: undefined, prompt: " ", seconds: Number.NaN, resolution: undefined, aspectRatio: undefined }, action: "edit" }, "cloud", {});
+    expect(bare.source).toEqual({ url: take.url, kind: "video" });
   });
 });

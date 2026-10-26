@@ -2,7 +2,8 @@
 // At 1440 and 390 px, light and dark: the model menu lists Fuobe Cinema first with an "Original" badge and what runs on
 // each engine; a camera move says how the Original drives it (LTX-2.3's camera LoRA in the cloud); the price shows
 // before running ("Free" on the open engine); a take is made in demo mode; Soul Cast and Soul Location name Fuobe Soul
-// and their look; nothing scrolls sideways.
+// and their look; Soul's post steps (a still's 21:9 crop and grade, the location's Movie grade) run in Cinema's feed and
+// builders; the Director panel's move list drops its badges for a partner model; nothing scrolls sideways.
 // Usage: node tests/e2e/cinema-original.mjs [appUrl] [--shots <dir>]   (app running in demo mode, ComfyUI unreachable).
 // Exits 1 on a failed check.
 import fs from "node:fs";
@@ -47,6 +48,15 @@ const check = (label, ok, extra = "") => {
   if (!ok) failures.push(label);
 };
 if (shots) fs.mkdirSync(shots, { recursive: true });
+/** Poll until `get` answers something (or 30 s pass). */
+async function waitFor(get, ms = 30_000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await get();
+    if (v || Date.now() > until) return v;
+    await new Promise((r) => setTimeout(r, 750));
+  }
+}
 
 async function session(width, height, scheme) {
   const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
@@ -120,6 +130,31 @@ async function session(width, height, scheme) {
     await page.getByRole("button", { name: "5s", exact: true }).click();
     await page.keyboard.press("Escape");
   }
+  // The Director panel's move list badges like the prompt bar's: none when a partner model gets the moves in words.
+  const directorMoves = async () => {
+    const chip = page.getByRole("button", { name: "Camera settings" }).locator("visible=true");
+    if (!(await chip.count())) await page.getByRole("button", { name: /^Director/ }).locator("visible=true").first().click();
+    await chip.first().click();
+    await page.getByRole("tab", { name: /Movement/ }).click();
+    const opt = page.getByRole("option", { name: /Dolly In/ }).locator("visible=true").first();
+    await opt.waitFor();
+    const text = await opt.innerText();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    // A phone's folded Director sheet closes too.
+    if (await page.getByRole("dialog").locator("visible=true").count()) await page.keyboard.press("Escape");
+    return text;
+  };
+  check(`${tag}: the Director's move list badges Dolly In on Fuobe Cinema`, /Camera LoRA/.test(await directorMoves()));
+  const pickModel = async (name) => {
+    await modelChip.click();
+    await menu.waitFor();
+    await menu.getByRole("menuitem").filter({ hasText: name }).first().click();
+    await menu.waitFor({ state: "hidden" });
+  };
+  await pickModel(/^Seedance 2\.5/);
+  check(`${tag}: no move badges in the Director's list for a partner model`, !/Camera LoRA|LoRA|Focus move|Fun Camera/.test(await directorMoves()));
+  await pickModel(/^Fuobe Cinema/);
   const generate = page.getByRole("button", { name: /^Generate/ }).first();
   check(`${tag}: the price shows before running`, /Demo|≈ \$|Free/.test(body));
   await shot("cloud-bar");
@@ -129,6 +164,23 @@ async function session(width, height, scheme) {
   const takes = (await call(`/api/cinema/projects/${project.id}/items`)).items;
   check(`${tag}: Generate makes a Fuobe Cinema take (demo)`, takes.length === before + 1 && takes[0]?.modelId === "fuobe-cinema", takes.map((g) => g.modelId).join(","));
   check(`${tag}: the take asked for the camera LoRA`, takes[0]?.request?.params?.extra?.camera_lora === "dolly_in");
+
+  // A still on Fuobe Soul Cinema at 21:9: the feed crops the 16:9 render to 21:9 and grades it in the browser.
+  const still = await call(`/api/cinema/projects/${project.id}/generate`, "POST", {
+    input: { engine: "cloud", mode: "image", action: "generate", prompt: "A lighthouse keeper at the window", settings: { camera: "modern", lens: "clean-sharp", focal: "50mm" }, aspectRatio: "21:9", batch: 1 },
+  });
+  const stillId = still.items?.[0]?.id;
+  check(`${tag}: a still runs on Fuobe Soul Cinema`, still.plan?.modelId === "fuobe-soul-cinema", still.plan?.modelId ?? JSON.stringify(still).slice(0, 200));
+  // Made through the API, so the open feed learns of it on its next load.
+  await waitFor(async () => (await call(`/api/cinema/projects/${project.id}/items`)).items.find((x) => x.id === stillId && x.status === "succeeded"));
+  await page.reload({ waitUntil: "load" });
+  await prompt.waitFor({ timeout: 120_000 });
+  const graded = await waitFor(async () => {
+    const g = (await call(`/api/cinema/projects/${project.id}/items`)).items.find((x) => x.id === stillId);
+    return g?.outputs?.[0]?.meta?.finished ? g : null;
+  });
+  const meta = graded?.outputs?.[0]?.meta;
+  check(`${tag}: the Cinema feed finishes the still (21:9 crop, grade)`, !!meta && meta.crop === "21:9" && meta.grade === "teal-orange" && !!meta.original, JSON.stringify(meta ?? null));
 
   // The open engine: free, Wan 2.2 Lightning, a Fun Camera badge for pans.
   await pick(/Open source/);
@@ -171,6 +223,12 @@ async function session(width, height, scheme) {
   await page.waitForTimeout(3000);
   const made = (await call(`/api/cinema/projects/${project.id}/items`)).items.filter((g) => g.feature === "cinema-location");
   check(`${tag}: a location is made on Fuobe Soul with the Movie look`, made.length > 0 && made.every((g) => g.modelId === "fuobe-soul" && g.presetId === "v1-movie"), made.map((g) => `${g.modelId}/${g.presetId}`).join(","));
+  // The Movie look's grade is applied in the browser (the builder runs Soul's post steps), so a saved element is finished.
+  const finished = await waitFor(async () => {
+    const rows = (await call(`/api/cinema/projects/${project.id}/items`)).items.filter((g) => g.feature === "cinema-location" && g.status === "succeeded");
+    return rows.length > 0 && rows.every((g) => g.outputs.every((o) => o.kind !== "image" || o.meta?.finished)) ? rows : null;
+  });
+  check(`${tag}: the location's grade is applied in the browser`, !!finished && finished[0].outputs[0].meta?.grade === "teal-orange", JSON.stringify(finished?.[0]?.outputs?.[0]?.meta ?? null));
   check(`${tag}: no sideways scroll in Soul Location`, (await sideways()) <= 1);
   await shot("soul-location");
   await page.keyboard.press("Escape");

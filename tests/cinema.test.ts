@@ -200,6 +200,8 @@ const base = (over: Partial<CinemaGenerateInput>): CinemaGenerateInput => ({
 });
 
 const ctx = { cloudAllowed: true };
+/** fal bills LTX-2.3 per megapixel of video made (width × height × frames), rounded up. */
+const videoMp = (w: number, h: number, frames: number) => Math.ceil((w * h * frames) / 1e6);
 const route = (id: string, op: string, engine: "open" | "cloud" = "cloud") => onEngine(getModel(id)!, engine).routes.find((r) => r.op === op)!;
 
 describe("planCinema", () => {
@@ -213,8 +215,8 @@ describe("planCinema", () => {
     expect(req.prompt).toContain("Noir film");
     expect(req.prompt).toMatch(/Camera moves, in this order: first .*; finally /);
     expect(plan.notes).toContain("Dolly In drives LTX-2.3's dolly in camera LoRA");
-    // 2 takes × 10 s × the 1080p rate ($0.001605 per megapixel of 1920×1088×24 frames).
-    expect(plan.costUsd).toBeCloseTo(2 * 10 * 0.0805, 3);
+    // 2 takes of 2240×960 (1080p at 21:9) × 241 frames, at $0.001605 per megapixel rounded up.
+    expect(plan.costUsd).toBeCloseTo(2 * videoMp(2240, 960, 241) * 0.001605, 3);
     // What fal receives: the tier's exact size, 241 frames at 24 fps (8n+1), the camera LoRA, prompt expansion off.
     const payload = buildPayload(route("fuobe-cinema", "t2v").map!, { ...req.params, prompt: req.prompt });
     expect(payload).toMatchObject({ video_size: { width: 2240, height: 960 }, num_frames: 241, camera_lora: "dolly_in", enable_prompt_expansion: false, generate_audio: true });
@@ -233,7 +235,8 @@ describe("planCinema", () => {
     // 20 s at 481 frames; the extend adds 241 frames; both takes are extended.
     expect(buildPayload(route("fuobe-cinema", "t2v").map!, { ...plan.steps[0].request.params, prompt: "x" })).toMatchObject({ num_frames: 481 });
     expect(buildPayload(route("fuobe-cinema", "extend").map!, { ...plan.steps[1].request.params, prompt: "x", video: "https://x/take.mp4" })).toMatchObject({ num_frames: 241, video_url: "https://x/take.mp4" });
-    expect(plan.costUsd).toBeCloseTo(2 * 30 * 0.0805, 3);
+    // Each take: 481 frames, then the extend's 241, at the 21:9 1080p size.
+    expect(plan.costUsd).toBeCloseTo(2 * (videoMp(2240, 960, 481) + videoMp(2240, 960, 241)) * 0.001605, 3);
     // Any whole second up to 20 in one call (no rounding to a preset length).
     expect(planCinema(base({ duration: 7 }), ctx).steps[0].request.params!.duration).toBe(7);
   });
@@ -425,8 +428,21 @@ describe("planCinema", () => {
     const cast = planCinema(base({ action: "cast", mode: "image", cast: values, prompt: "" }), ctx);
     expect(cast.blocker).toBeUndefined();
     expect(cast.steps[0].request).toMatchObject({ feature: "cinema-cast", modelId: "fuobe-soul", engine: "cloud", presetId: "v1-realistic", params: { aspectRatio: "16:9", resolution: "1080p" } });
-    expect(planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open" }), ctx).model).toMatchObject({ id: "fuobe-soul", engine: "open" });
-    expect(planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open", modelId: "oss-zimage-soul-cast" }), ctx).model.id).toBe("oss-zimage-soul-cast");
+    // On the GPU: the Soul Cast sheet graph with Fuobe Soul's Realistic look (its LoRAs and words), which also cuts the
+    // sheet's four views; Fuobe Soul alone when the graph is missing or picked.
+    const open = planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open" }), ctx);
+    expect(open.model.id).toBe("oss-zimage-soul-cast");
+    const sheet = open.steps[0].request;
+    expect(sheet.presetId).toBeUndefined();
+    expect(sheet.loras?.map((l) => l.file).length).toBeGreaterThan(0);
+    expect(sheet.prompt).toMatch(/No filters, flawless clarity/);
+    expect(sheet.prompt).toMatch(/35-year-old latino woman, the rebel archetype/);
+    expect(open.notes.join(" ")).toMatch(/Realistic look on the Soul Cast sheet graph: the sheet, then its four views/);
+    expect(CAST_MODELS.open).toEqual(["oss-zimage-soul-cast", "fuobe-soul"]);
+    const noSheet = planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open" }), { ...ctx, has: (id: string) => id !== "oss-zimage-soul-cast" });
+    expect(noSheet.model).toMatchObject({ id: "fuobe-soul", engine: "open" });
+    expect(noSheet.steps[0].request).toMatchObject({ presetId: "v1-realistic" });
+    expect(planCinema(base({ action: "cast", mode: "image", cast: values, engine: "open", modelId: "fuobe-soul" }), ctx).model.id).toBe("fuobe-soul");
     expect(planCinema(base({ action: "cast", mode: "image", cast: values, modelId: "nano-banana-pro" }), ctx).model.id).toBe("nano-banana-pro");
     expect(CAST_MODELS.cloud).not.toContain("soul-2");
 
@@ -443,6 +459,10 @@ describe("planCinema", () => {
     expect(high.steps[0].request.prompt).toMatch(/^<sks> front view high-angle shot medium shot\. Show the same location from a high angle/);
     expect(high.steps[0].request.loras?.[0].file).toMatch(/multiple-angles/);
     expect(planCinema(base({ action: "location-view", mode: "image", view: "wide", prompt: "" }), ctx).blocker).toBe("Pick the location image to re-angle");
+    // The project brief keeps the project's look in other views too, on both engines (after the LoRA's own words).
+    const briefed = (engine: "open" | "cloud") => planCinema(base({ action: "location-view", mode: "image", view: "high", source: still, prompt: "", engine, brief: "Muted 1970s Kodachrome" }), ctx).steps[0].request;
+    expect(briefed("cloud").prompt).toMatch(/Project brief: Muted 1970s Kodachrome/);
+    expect(briefed("open").prompt).toMatch(/^<sks> front view high-angle shot medium shot\. .*Project brief: Muted 1970s Kodachrome/s);
   });
 });
 
