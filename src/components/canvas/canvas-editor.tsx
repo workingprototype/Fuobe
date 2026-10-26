@@ -154,6 +154,9 @@ const asShape = (n: FlowNode): CanvasShape | null =>
 /** Focus is in a field (typing there never switches tools). */
 const typing = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable='true'], [role='menu'], [role='listbox'], [role='dialog']");
 
+/** Select: only the middle button pans (a constant: React Flow re-applies a new array on every render). */
+const PAN_MIDDLE = [1];
+
 /** Board tools that turn a drag or click on the board into a drawing, a note or a comment. */
 const GESTURE_TOOLS = new Set<Tool>(["draw", "erase", "note", "shape", "text", "comment"]);
 
@@ -276,7 +279,8 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
     const m = new Map<string, NodeResults>();
     for (const [nodeId, r] of Object.entries(runs)) {
       const list = r.ids.map((g) => gens.get(g)).filter((g): g is NonNullable<typeof g> => !!g);
-      m.set(nodeId, foldResultsKeep(prev?.views.get(nodeId)?.results, list));
+      // A node made in several steps shows its last step's outputs (the film), and its progress over all of them.
+      m.set(nodeId, foldResultsKeep(prev?.views.get(nodeId)?.results, list, r.out));
     }
     return m;
     // `prev` only lends unchanged objects (identity), it isn't an input.
@@ -1225,7 +1229,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
                 multiSelectionKeyCode={["Meta", "Shift", "Control"]}
                 // Select (V): a drag on the board draws a selection box, Space or the middle button pans. Pan (H): a
                 // drag moves the board. The drawing tools take the pointer themselves (onToolPointerDown).
-                panOnDrag={isMobile || tool === "hand" ? true : tool === "select" ? [1] : false}
+                panOnDrag={isMobile || tool === "hand" ? true : tool === "select" ? PAN_MIDDLE : false}
                 selectionOnDrag={!isMobile && tool === "select"}
                 selectionMode={SelectionMode.Partial}
                 elementsSelectable={isMobile || tool !== "hand"}

@@ -184,7 +184,8 @@ describe("plans for the new nodes", () => {
     // No open dub model: the node says where the open engine dubs.
     const { graph: openV, missing } = convertEngine(v, "open");
     expect(missing).toEqual(["dub"]);
-    expect(describeNode({ ...openV, nodes: [openV.nodes[0], { ...openV.nodes[1], data: { ...openV.nodes[1].data, modelId: undefined } }] }, { ...openV.nodes[1], data: { mediaKind: "video" } }, { engineMode: "open" }).error).toBe(OPEN_DUB_HINT);
+    expect(describeNode(openV, { ...openV.nodes[1], data: { mediaKind: "video" } }, { engineMode: "open" }).error).toBe(OPEN_DUB_HINT);
+    expect(describeNode(openV, { ...openV.nodes[1], data: { mediaKind: "video" } }, { engineMode: "both" }).error).toBe("Pick a model");
   });
 
   const clips = (engine: "cloud" | "open"): CanvasGraph => ({

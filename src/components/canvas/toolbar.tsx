@@ -55,7 +55,7 @@ export const BoardToolbar = memo(function BoardToolbar({
 }) {
   const mod = useModKey();
   return (
-    <div className="flex items-center gap-0.5 rounded-full border bg-popover/95 p-1 shadow-normal backdrop-blur" role="toolbar" aria-label="Board tools" data-board-ui>
+    <div className="flex items-center gap-0.5 rounded-full border bg-popover p-1 shadow-normal" role="toolbar" aria-label="Board tools" data-board-ui>
       {TOOLS.map((t, i) => {
         const Icon = t.tool === "shape" ? SHAPE_ICON[shape] : t.icon;
         const active = tool === t.tool;
@@ -154,7 +154,7 @@ export const PageTabs = memo(function PageTabs({ pages, active, ops, readOnly }:
   const [editing, setEditing] = useState<string | null>(null);
   const full = pages.length >= BOARD_LIMITS.pages;
   return (
-    <div className="flex max-w-full items-center gap-0.5 rounded-full border bg-popover/95 p-1 shadow-normal backdrop-blur" data-board-ui>
+    <div className="flex max-w-full items-center gap-0.5 rounded-full border bg-popover p-1 shadow-normal" data-board-ui>
       <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Pages">
         {pages.map((p) =>
           editing === p.id ? (

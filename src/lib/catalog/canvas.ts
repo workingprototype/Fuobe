@@ -1113,7 +1113,8 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   const mode = ctx.engineMode ?? "both";
   // A Fuobe Original as it runs on the node's engine (its routes, its price).
   const model = nodeModel(n, mode);
-  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : n.type === "translate" && n.data.mediaKind === "video" ? OPEN_DUB_HINT : "Pick a model" };
+  // Dubbing has no open model: an open-only install says where it dubs instead.
+  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : n.type === "translate" && n.data.mediaKind === "video" && mode === "open" ? OPEN_DUB_HINT : "Pick a model" };
   if (mode !== "both" && !runsOn(model, mode)) {
     return {
       model,
