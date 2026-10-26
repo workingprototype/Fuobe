@@ -139,6 +139,36 @@ describe("Cinema API", () => {
     expect(cinema.listItems(p.id)).toHaveLength(4);
   }, 70_000);
 
+  it("a 30 s take on Fuobe Cinema is one take plus an extend that waits for it (demo mode, no keys)", async () => {
+    const p = cinema.createProject({ name: "Long take" });
+    const { items, plan } = generateInProject(p.id, { ...VIDEO, duration: 30 });
+    expect(plan.modelId).toBe("fuobe-cinema");
+    expect(items.map((g) => [g.modelId, g.op])).toEqual([
+      ["fuobe-cinema", "t2v"],
+      ["fuobe-cinema", "extend"],
+    ]);
+    expect(items[0].request.params).toMatchObject({ duration: 20, extra: { camera_lora: "dolly_in" } });
+    expect(items[1].request.params).toMatchObject({ duration: 10, extra: { camera_lora: "dolly_in" } });
+    const more = await settle(items[1].id, 50_000);
+    expect(more.status).toBe("succeeded");
+    expect(more.request.inputs?.video).toBe(gens.getGeneration(items[0].id)!.outputs[0].url);
+    expect(cinema.listItems(p.id)).toHaveLength(2);
+  }, 70_000);
+
+  it("Soul Cast and Soul Location run on Fuobe Soul with a look; a location's other view on the Multiple-Angles model", async () => {
+    const p = cinema.createProject({ name: "Builders" });
+    const cast = generateInProject(p.id, { engine: "cloud", mode: "image", action: "cast", prompt: "", cast: { genre: "Western", gender: "Female", age: 35 }, batch: 1 });
+    expect(cast.items[0]).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-realistic" });
+    const loc = generateInProject(p.id, { engine: "cloud", mode: "image", action: "location", prompt: "an abandoned diner on Route 66", batch: 1 });
+    expect(loc.items[0]).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-movie" });
+    const still = await settle(loc.items[0].id);
+    expect(still.status).toBe("succeeded");
+    const view = generateInProject(p.id, { engine: "cloud", mode: "image", action: "location-view", view: "reverse", prompt: "", source: { url: still.outputs[0].url, kind: "image" } });
+    expect(view.items[0]).toMatchObject({ modelId: "qwen-multiple-angles", op: "edit" });
+    expect(view.items[0].request.params?.extra).toMatchObject({ horizontal_angle: 180 });
+    expect((await settle(view.items[0].id)).status).toBe("succeeded");
+  }, 70_000);
+
   it("refuses a run that would pass the project's cost cap", () => {
     const p = cinema.createProject({ name: "Capped", costCapUsd: 0.5 });
     // Demo mode runs are free, so the guard only bites on real (paid) routes; previewing with a fake key shows the message.
