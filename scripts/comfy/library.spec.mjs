@@ -2761,6 +2761,28 @@ export const SPEC = [
       'Sound tracks are kept as they are (the Ken Burns clips have none; the mux adds the voice and the bed).',
   },
 
+  {
+    id: 'video-fit-clip',
+    title: 'One clip cut, retimed and framed for a packet-copy join: start/length at a set fps, centre crop, its sound or silence (VHS meta-batch, no model)',
+    capability: 'trim',
+    handBuilt: 'hand-built/video-fit-clip.json',
+    bindings: {
+      video: [b('1', 'video')], startTime: [b('8', 'value')], duration: [b('9', 'value')], fps: [b('5', 'value')],
+      width: [b('3', 'width')], height: [b('3', 'height')], framesPerBatch: [b('2', 'frames_per_batch')], filenamePrefix: [b('4', 'filename_prefix')],
+    },
+    outputs: [{ node: '4', kind: 'video' }],
+    defaults: { fps: 30, width: 1280, height: 720 },
+    limits: { maxWidth: 2048, maxHeight: 2048, dimensionMultiple: 2 },
+    vramGb: 0,
+    license: 'n/a (no model; ComfyUI core + VideoHelperSuite GPL-3.0 code)',
+    notes:
+      'The Canvas Video concatenator (r4/canvas-plus), one job per clip, then video-concat-encoded joins them: every clip comes out at the film\'s size (width x height, scaled to cover and centre-cropped), ' +
+      'at fps (30) and as H.264 + AAC from VHS, so ConcatenateVideo can copy the packets. VHS_LoadVideo resamples to fps and skips round(startTime x fps) frames, keeping round(duration x fps) ' +
+      '(duration 0 = to the end); its sound is cut to the same window (VHS lazy audio: start = skipped frames / fps, length = kept frames / fps), so picture and sound stay in sync. ' +
+      'framesPerBatch frames per pass (64): memory stays flat however long the clip. Muted clips and clips with no sound: the provider replaces the combine\'s audio with an EmptyAudio as long as the window ' +
+      '(silenceVhsAudio), so every clip of a film has a sound track; when the window\'s length is unknown (no header, no end) the sound is dropped instead.',
+  },
+
   // ---- Music beds and audio joins --------------------------------------------------------
   {
     id: 'audio-loop-crossfade',

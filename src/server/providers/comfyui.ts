@@ -15,6 +15,7 @@ import {
   dropBranch,
   dropLoadedSound,
   dropVhsAudio,
+  silenceVhsAudio,
   expandCaptionWorkflow,
   explainComfyError,
   canTakeLoras,
@@ -926,6 +927,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   const timeline = manifest.expand === "timeline" ? readTimeline(extra.timeline) : null;
   if (manifest.expand === "timeline" && !timeline) throw new ProviderError("The voice track needs the lines' start times (params.extra.timeline)");
   delete extra.timeline;
+  // A Video concatenator clip muted in the canvas (video-fit-clip): its sound becomes silence below.
+  const muted = manifest.id === "video-fit-clip" && extra.mute === true;
+  delete extra.mute;
   for (const [k, v] of Object.entries(extra)) values[k as BindingKey] = v;
   if (audio2 && ctx.op !== "dialogue" && ctx.op !== "voice-change") values.audio2 = audio2;
   // Soundtrack mix: a silent bed as long as the video, so neither track cuts the other short.
@@ -994,6 +998,15 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (finish.dropSound) for (const n of Object.values(wf)) if (n.class_type === "CreateVideo") delete n.inputs.audio;
   // VHS meta-batch: a manager of its own per job (a stale one loses frames), and no sound link for a silent clip.
   wf = tagMetaBatch(wf, ctx.generationId);
+  // A concatenator clip that is muted or has no sound: silence exactly as long as its kept frames, so every clip
+  // of the film carries a track (a packet-copy join of clips with and without one would drift). Not knowing how
+  // long the window is (no end, no header), it has no track instead.
+  if (manifest.id === "video-fit-clip" && (muted || (clip && !clip.hasAudio && clip.hasVideo))) {
+    const kept = Number(values.duration) > 0 ? Number(values.duration) : undefined;
+    const rest = clipLength !== undefined ? Math.max(0, clipLength - start) : undefined;
+    const seconds = kept !== undefined && rest !== undefined ? Math.min(kept, rest) : (kept ?? rest);
+    wf = seconds ? silenceVhsAudio(wf, Math.max(1, Math.round(seconds * fps)) / fps) : dropVhsAudio(wf);
+  }
   if (clip && !clip.hasAudio && clip.hasVideo) {
     wf = dropVhsAudio(wf);
     // Core LoadAudio reading the clip's own sound (the end card's ad): no sound, no sound track.
