@@ -62,7 +62,7 @@ import { ControlsChip } from "@/components/studio/model-controls";
 import { ModelPicker } from "@/components/studio/model-picker";
 import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { useAssets, useElements } from "@/lib/api";
-import { getModel } from "@/lib/catalog";
+import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import {
   CANVAS_TEXT_MAX,
   connectionError,
@@ -73,6 +73,7 @@ import {
   modelChoices,
   NODE_SPECS,
   nodeLabel,
+  nodeModel,
   nodeOps,
   OUT,
   outputType,
@@ -646,7 +647,8 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   const g = useEditorGlobals();
   const v = useNodeView(id);
   const node = useMemo(() => asNode(id, type, data), [id, type, data]);
-  const model = data.modelId ? getModel(data.modelId) : undefined;
+  // A Fuobe Original as it runs on this node's engine (its routes and price).
+  const model = useMemo(() => nodeModel(node, g.mode), [node, g.mode]);
   const ports = useMemo(() => inputPorts(node), [node]);
   const out = outputType(EMPTY_GRAPH, node);
   const r = v.results;
@@ -655,7 +657,8 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
   // The picker opens on the node's own engine (or the install's only one); its switch browses the other.
   const [browseEngine, setBrowseEngine] = useState<Engine | null>(null);
   const pickerEngine: Engine = g.mode !== "both" ? g.mode : (browseEngine ?? model?.engine ?? g.engine);
-  const choices = useMemo(() => modelChoices(node), [node]);
+  // A Fuobe Original is listed on the engine being browsed (it runs on both).
+  const choices = useMemo(() => modelChoices(node).map((m) => onEngine(m, pickerEngine)), [node, pickerEngine]);
   const error = v.runError ?? v.error;
 
   // Handles change with the model and op: tell React Flow to re-measure them (React Flow measures new nodes itself).
@@ -670,7 +673,8 @@ const GeneratorNode = memo(function GeneratorNode({ id, type, data, selected }: 
 
   const pickModel = (m: ModelDef) => {
     const keepOp = data.op && m.routes.some((x) => x.op === data.op) ? data.op : undefined;
-    actions.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params) });
+    // A Fuobe Original runs on the engine it was picked on.
+    actions.update(id, { modelId: m.id, op: keepOp, params: sanitizeParams(m, data.params), engine: dualEngine(m) ? m.engine : undefined });
     setBrowseEngine(null);
   };
 

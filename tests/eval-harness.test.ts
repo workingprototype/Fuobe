@@ -34,6 +34,7 @@ const element = await import("@/app/api/elements/[id]/route");
 const genjutsu = await import("@/app/api/genjutsu/route");
 const genjutsuEstimate = await import("@/app/api/genjutsu/estimate/route");
 const mixedEstimate = await import("@/app/api/mixed-media/estimate/route");
+const paletteLock = await import("@/app/api/palettes/lock/route");
 
 // The harness is plain ESM JavaScript (it runs with node, no build step).
 const evalCli = (await import("../scripts/eval/eval.mjs")) as { main: (argv: string[], io?: object) => Promise<number> };
@@ -69,6 +70,7 @@ const ROUTES: [string, RegExp, (req: Request, m: RegExpExecArray) => Promise<Res
   ["POST", /^\/api\/genjutsu$/, (r) => genjutsu.POST(r)],
   ["POST", /^\/api\/genjutsu\/estimate$/, (r) => genjutsuEstimate.POST(r)],
   ["POST", /^\/api\/mixed-media\/estimate$/, (r) => mixedEstimate.POST(r)],
+  ["POST", /^\/api\/palettes\/lock$/, (r) => paletteLock.POST(r)],
 ];
 
 let server: http.Server;
@@ -185,6 +187,20 @@ describe("the runner on the demo provider", () => {
     expect(summary.counts).toMatchObject({ jobs: 5, succeeded: 5 });
     expect(fs.readFileSync(path.join(runDir, "report.html"), "utf8")).toContain("Harness self-test");
     expect(r.stdout).toMatch(/Harness self-test · demo · 5\/5 done · Free/);
+  });
+
+  it("runs Soul HEX's palette lock end to end: Fuobe Soul, then the lock step, whose picture is the result", async () => {
+    const r = await cli(["run", "--suite", "soul-hex", "--engine", "demo", "--cases", "soul-hex/candy-pop", "--variants", "words,lock", "--prompts", "1", "--no-metrics"]);
+    expect(r.code, r.stderr).toBe(0);
+    const rows = store.latestJobs(path.join(results, runIdFrom(r.stderr)));
+    expect(rows.map((x) => [x.variant, x.status])).toEqual([["words", "succeeded"], ["lock", "succeeded"]]);
+    const lock = rows.find((x) => x.variant === "lock")!;
+    const body = (lock.request as { route: string; body: { request: { modelId: string; prompt: string }; colors: string[] } }).body;
+    expect(lock.request).toMatchObject({ route: "/api/palettes/lock" });
+    expect(body.request.modelId).toBe("fuobe-soul");
+    expect(body.request.prompt).toMatch(/Color palette: use only these colors/);
+    expect(body.colors).toEqual(["#118AB2", "#06D6A0", "#FF5DA2", "#FFD166", "#FDF6EC"]);
+    expect((lock as { steps?: string[] }).steps).toHaveLength(2);
   });
 
   it("records the recipe a Soul look ran with: the look's words, its LoRAs at each variant's strength, and what the route loads", async () => {
@@ -677,9 +693,56 @@ describe("runEval as a library", () => {
   it("sends the shipped Soul Original the look's Fuobe id, never a Higgsfield one", () => {
     const { expandJobs } = plan;
     const jobs = expandJobs(cases.loadSuite("soul"), { engine: "open", looks: ["v1-general"], variants: ["original"], prompts: 1 });
-    expect(jobs[0].request).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-general" });
+    expect(jobs[0].request).toMatchObject({ modelId: "fuobe-soul", presetId: "v1-general", engine: "open" });
     expect(jobs[0].request.loras).toBeUndefined();
     expect(JSON.stringify(jobs[0].request)).not.toContain("464ea177-8d40-4940-8d9d-b438bab269c7");
+    // The Original runs on the engine the run names (a demo run lets the server pick); a lettering look runs on Soul HD.
+    expect(expandJobs(cases.loadSuite("soul"), { engine: "cloud", looks: ["v1-general"], variants: ["original"], prompts: 1 })[0].request.engine).toBe("cloud");
+    expect(expandJobs(cases.loadSuite("soul"), { engine: "demo", looks: ["v1-general"], variants: ["original"], prompts: 1 })[0].request.engine).toBeUndefined();
+    const graffiti = expandJobs(cases.loadSuite("soul"), { engine: "cloud", looks: ["v1-graffiti"], variants: ["original", "recipe"], prompts: 1 });
+    expect(graffiti.map((j) => j.request.modelId)).toEqual(["fuobe-soul-hd", "fuobe-soul-hd"]);
+  });
+
+  it("gives Soul Cinema's recipe its LoRAs, triggers and cine tail, and the Original the scene alone", async () => {
+    const { expandJobs } = plan;
+    const { SOUL_TAILS } = await import("@/lib/catalog/soul-originals.generated");
+    const suite = cases.loadSuite("soul-cinema");
+    const by = (engine: string) => Object.fromEntries(expandJobs(suite, { engine, cases: ["soul-cinema/diner"], variants: ["recipe", "prompt-only", "plain", "original"] }).map((j) => [(j as unknown as { variant: string }).variant, j as unknown as { request: { prompt: string; modelId: string; loras?: { file: string; strength: number }[]; params: { aspectRatio: string } }; notes: string[] }]));
+    const open = by("open");
+    const scene = "a waitress refills a coffee cup for a tired trucker in an empty roadside diner at night";
+    expect(open.recipe.request.prompt).toBe(`CINEMATIC, FILM STILL, ${scene}. ${SOUL_TAILS.cine}`);
+    expect(open.recipe.request.loras!.map((l) => [l.file, l.strength])).toEqual([["[ZImage.Turbo]FilmStill_Redmond.safetensors", 0.7], ["civitai-2462010-moviewide.safetensors", 0.5]]);
+    expect(open.recipe.request.params.aspectRatio).toBe("16:9");
+    expect(open["prompt-only"].request.prompt).toBe(`${scene}. ${SOUL_TAILS.cine}`);
+    expect(open.plain.request.prompt).toBe(scene);
+    expect(open.original.request).toMatchObject({ modelId: "fuobe-soul-cinema", prompt: scene });
+    expect(open.original.request.loras).toBeUndefined();
+    // The cloud can't fetch a civitai link without a mirrored copy: that LoRA is left out, and the runner says so.
+    const cloud = by("cloud");
+    expect(cloud.recipe.request.loras!.map((l) => l.file)).toEqual(["[ZImage.Turbo]FilmStill_Redmond.safetensors"]);
+    expect(cloud.recipe.notes.join(" ")).toMatch(/Movie Wide Angle Z-image left out on the cloud: its civitai link needs a token/);
+  });
+
+  it("writes a HEX palette as the Color signature does, and sends the lock variant through the palette-lock route", async () => {
+    const { expandJobs } = plan;
+    const { palettePrompt } = await import("@/lib/catalog/palettes");
+    const { fillTemplate } = (await import("../scripts/eval/lib/media.mjs")) as { fillTemplate: (v: unknown, vars: object) => Record<string, unknown> };
+    const suite = cases.loadSuite("soul-hex");
+    type HexJob = { variant: string; skip?: string; submit?: { route: string; body: object }; request: { prompt: string; modelId: string; engine?: string; params: { palette: string[] } } };
+    const jobs = (engine: string) => expandJobs(suite, { engine, cases: ["soul-hex/teal-dusk"], prompts: 1, variants: ["words", "lock", "base", "palette-model", "plain"] }) as unknown as HexJob[];
+    const open = Object.fromEntries(jobs("open").map((j) => [j.variant, j]));
+    const colors = ["#0B1D2A", "#1F4E5F", "#2A9D8F", "#E9C46A", "#F4A261"];
+    const subject = "a woman in a knitted sweater sits by a window with a cup of tea, half-length portrait";
+    expect(open.words.request).toMatchObject({ modelId: "fuobe-soul", engine: "open", prompt: `${subject}. ${palettePrompt({ colors, background: null })}`, params: { palette: colors } });
+    expect(open.base.request.modelId).toBe("oss-z-image-turbo");
+    expect(open["palette-model"].request).toMatchObject({ modelId: "oss-zimage-palette", prompt: subject });
+    expect(open.plain.request.prompt).toBe(subject);
+    expect(open.lock.submit!.route).toBe("/api/palettes/lock");
+    expect(fillTemplate(open.lock.submit!.body, { request: open.lock.request })).toEqual({ request: open.lock.request, colors });
+    // The lock is the open engine's: on the cloud it is skipped, not run as something else.
+    const cloud = Object.fromEntries(jobs("cloud").map((j) => [j.variant, j]));
+    expect(cloud.lock.skip).toMatch(/runs on demo \/ open only/);
+    expect(cloud.words.request.engine).toBe("cloud");
   });
 
   it("expands, prices and lists a dry run without uploading anything", async () => {

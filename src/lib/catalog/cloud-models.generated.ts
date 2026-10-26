@@ -16128,3 +16128,593 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   }
 ];
+
+/** The Fuobe Originals' cloud halves (hosted open weights): models.ts joins each to its ComfyUI routes. */
+export const ORIGINAL_CLOUD: ModelDef[] = [
+  {
+    "id": "fuobe-soul",
+    "name": "Fuobe Soul",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-soul",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Soul's 139 looks on open weights: Z-Image Turbo with up to three LoRAs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "size": {
+            "key": "image_size",
+            "multiple": 16,
+            "table": {
+              "720p": {
+                "1:1": [
+                  1024,
+                  1024
+                ],
+                "3:4": [
+                  896,
+                  1152
+                ],
+                "4:3": [
+                  1152,
+                  896
+                ],
+                "2:3": [
+                  832,
+                  1248
+                ],
+                "3:2": [
+                  1248,
+                  832
+                ],
+                "9:16": [
+                  768,
+                  1344
+                ],
+                "16:9": [
+                  1344,
+                  768
+                ]
+              },
+              "1080p": {
+                "1:1": [
+                  1440,
+                  1440
+                ],
+                "3:4": [
+                  1248,
+                  1664
+                ],
+                "4:3": [
+                  1664,
+                  1248
+                ],
+                "2:3": [
+                  1184,
+                  1776
+                ],
+                "3:2": [
+                  1776,
+                  1184
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "num_inference_steps": 8,
+            "enable_prompt_expansion": false,
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/z-image/turbo/lora"
+      },
+      {
+        "op": "t2i",
+        "provider": "replicate",
+        "endpoint": "prunaai/z-image-turbo-lora:29c866f1269ef45b736fbcdff00d6da2a555ecf5f4e575c93ab38c2a2f2693a1",
+        "map": {
+          "seed": "seed",
+          "size": {
+            "width": "width",
+            "height": "height",
+            "multiple": 16,
+            "max": 1440,
+            "base": 1024,
+            "table": {
+              "720p": {
+                "1:1": [
+                  1024,
+                  1024
+                ],
+                "3:4": [
+                  896,
+                  1152
+                ],
+                "4:3": [
+                  1152,
+                  896
+                ],
+                "2:3": [
+                  832,
+                  1248
+                ],
+                "3:2": [
+                  1248,
+                  832
+                ],
+                "9:16": [
+                  768,
+                  1344
+                ],
+                "16:9": [
+                  1344,
+                  768
+                ]
+              },
+              "1080p": {
+                "1:1": [
+                  1440,
+                  1440
+                ],
+                "3:4": [
+                  1248,
+                  1664
+                ],
+                "4:3": [
+                  1664,
+                  1248
+                ],
+                "2:3": [
+                  1184,
+                  1776
+                ],
+                "3:2": [
+                  1776,
+                  1184
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "num_inference_steps": 8,
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "arrays",
+            "weights": "lora_weights",
+            "scales": "lora_scales"
+          }
+        }
+      },
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo/image-to-image",
+        "map": {
+          "image": "image_url",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "fixed": {
+            "enable_prompt_expansion": false,
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/z-image/turbo/image-to-image/lora"
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "2:3",
+        "3:2",
+        "9:16",
+        "16:9",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "seed": true,
+      "maxOutputs": 4,
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "3:4",
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.005,
+      "withLoras": 0.0085
+    }
+  },
+  {
+    "id": "fuobe-soul-hd",
+    "name": "Fuobe Soul HD",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-soul",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Soul's looks on Qwen-Image 2512: clean lettering for posters and signs",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-2512",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "size": {
+            "key": "image_size",
+            "multiple": 16,
+            "table": {
+              "720p": {
+                "1:1": [
+                  1024,
+                  1024
+                ],
+                "3:4": [
+                  896,
+                  1152
+                ],
+                "4:3": [
+                  1152,
+                  896
+                ],
+                "2:3": [
+                  832,
+                  1248
+                ],
+                "3:2": [
+                  1248,
+                  832
+                ],
+                "9:16": [
+                  768,
+                  1344
+                ],
+                "16:9": [
+                  1344,
+                  768
+                ]
+              },
+              "1080p": {
+                "1:1": [
+                  1440,
+                  1440
+                ],
+                "3:4": [
+                  1248,
+                  1664
+                ],
+                "4:3": [
+                  1664,
+                  1248
+                ],
+                "2:3": [
+                  1184,
+                  1776
+                ],
+                "3:2": [
+                  1776,
+                  1184
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/qwen-image-2512/lora"
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "2:3",
+        "3:2",
+        "9:16",
+        "16:9"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "3:4",
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.02,
+      "note": "rounded up to whole megapixels",
+      "roundUp": true,
+      "withLoras": 0.035
+    }
+  },
+  {
+    "id": "fuobe-soul-cinema",
+    "name": "Fuobe Soul Cinema",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-soul",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "One film look: wide cinematic stills with film grain",
+    "routes": [
+      {
+        "op": "t2i",
+        "provider": "fal",
+        "endpoint": "fal-ai/z-image/turbo",
+        "map": {
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "size": {
+            "key": "image_size",
+            "multiple": 16,
+            "table": {
+              "720p": {
+                "1:1": [
+                  1024,
+                  1024
+                ],
+                "3:4": [
+                  896,
+                  1152
+                ],
+                "4:3": [
+                  1152,
+                  896
+                ],
+                "2:3": [
+                  832,
+                  1248
+                ],
+                "3:2": [
+                  1248,
+                  832
+                ],
+                "9:16": [
+                  768,
+                  1344
+                ],
+                "16:9": [
+                  1344,
+                  768
+                ]
+              },
+              "1080p": {
+                "1:1": [
+                  1440,
+                  1440
+                ],
+                "3:4": [
+                  1248,
+                  1664
+                ],
+                "4:3": [
+                  1664,
+                  1248
+                ],
+                "2:3": [
+                  1184,
+                  1776
+                ],
+                "3:2": [
+                  1776,
+                  1184
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "num_inference_steps": 8,
+            "enable_prompt_expansion": false,
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        },
+        "loraEndpoint": "fal-ai/z-image/turbo/lora"
+      },
+      {
+        "op": "t2i",
+        "provider": "replicate",
+        "endpoint": "prunaai/z-image-turbo-lora:29c866f1269ef45b736fbcdff00d6da2a555ecf5f4e575c93ab38c2a2f2693a1",
+        "map": {
+          "seed": "seed",
+          "size": {
+            "width": "width",
+            "height": "height",
+            "multiple": 16,
+            "max": 1440,
+            "base": 1024,
+            "table": {
+              "720p": {
+                "1:1": [
+                  1024,
+                  1024
+                ],
+                "3:4": [
+                  896,
+                  1152
+                ],
+                "4:3": [
+                  1152,
+                  896
+                ],
+                "2:3": [
+                  832,
+                  1248
+                ],
+                "3:2": [
+                  1248,
+                  832
+                ],
+                "9:16": [
+                  768,
+                  1344
+                ],
+                "16:9": [
+                  1344,
+                  768
+                ]
+              },
+              "1080p": {
+                "1:1": [
+                  1440,
+                  1440
+                ],
+                "3:4": [
+                  1248,
+                  1664
+                ],
+                "4:3": [
+                  1664,
+                  1248
+                ],
+                "2:3": [
+                  1184,
+                  1776
+                ],
+                "3:2": [
+                  1776,
+                  1184
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "num_inference_steps": 8,
+            "output_format": "png"
+          },
+          "loras": {
+            "shape": "arrays",
+            "weights": "lora_weights",
+            "scales": "lora_scales"
+          }
+        }
+      }
+    ],
+    "options": {
+      "aspectRatios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "2:3",
+        "3:2",
+        "9:16",
+        "16:9",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "seed": true,
+      "maxOutputs": 4
+    },
+    "defaults": {
+      "aspectRatio": "16:9",
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.005,
+      "withLoras": 0.0085
+    }
+  }
+];

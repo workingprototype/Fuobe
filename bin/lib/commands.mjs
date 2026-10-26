@@ -64,6 +64,8 @@ export const GEN_OPTIONS = {
   count: { type: "number", short: "n", value: "n", describe: "How many takes (1–8)" },
   seed: { type: "number", value: "n" },
   negative: { type: "string", value: "text", describe: "Negative prompt" },
+  look: { type: "string", value: "id", describe: "A Fuobe Soul look (fuobe-soul, fuobe-soul-hd): v1-general, v1-y2k, v2-y2k-studio…" },
+  "look-strength": { type: "number", value: "0-1", describe: "How strongly the look's LoRAs apply (default 1)" },
   sound: { type: "boolean", describe: "Native sound on (--no-sound for off), on video models that offer it" },
   enhance: { type: "boolean", describe: "Let Fuobe rewrite the prompt first" },
   voice: { type: "string", value: "id", describe: "Voice id for text to speech" },
@@ -396,7 +398,8 @@ async function models(ctx) {
   // How a run goes today (Settings → Demo mode decides with the providers); an older server only says `connected`.
   const runs = (m) => m.runs ?? (m.connected ? "real" : "demo");
   const mark = { real: "", demo: " (demo)", refused: " (not set up)" };
-  const rows = items.map((m) => [m.id, m.name, m.engine === "open" ? "open" : "cloud", `${m.price}${mark[runs(m)] ?? ""}`, m.ops.join(", ")]);
+  // A Fuobe Original runs on both engines (open+cloud); --engine lists it as that engine's model.
+  const rows = items.map((m) => [m.id, m.name, (m.engines ?? [m.engine]).map((e) => (e === "open" ? "open" : "cloud")).join("+"), `${m.price}${mark[runs(m)] ?? ""}`, m.ops.join(", ")]);
   ctx.print(table(["ID", "NAME", "ENGINE", "PRICE", "DOES"], rows, ctx.io.columns));
   const count = (r) => items.filter((m) => runs(m) === r).length;
   const notes = [`${items.length} model${items.length === 1 ? "" : "s"}${items.length < res.items.length ? ` of ${res.items.length}` : ""}.`];

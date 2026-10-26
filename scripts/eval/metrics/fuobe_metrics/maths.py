@@ -156,3 +156,37 @@ def yunet_face(row, scale: float = 1.0) -> dict:
     r = np.asarray(row, dtype=np.float64)
     x, y, w, h = r[:4] / scale
     return {"box": [float(x), float(y), float(x + w), float(y + h)], "kps": (r[4:14] / scale).reshape(5, 2), "score": float(r[14])}
+
+
+def hex_colors(colors) -> np.ndarray:
+    """'#RRGGBB' strings as a K×3 uint8 array (anything else is left out)."""
+    out = []
+    for c in colors or []:
+        h = str(c).strip().lstrip("#")
+        if len(h) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in h):
+            out.append([int(h[i : i + 2], 16) for i in (0, 2, 4)])
+    return np.array(out, dtype=np.uint8).reshape(-1, 3)
+
+
+def srgb_to_lab(rgb: np.ndarray) -> np.ndarray:
+    """sRGB 0–255 (…×3) to CIE L*a*b* under D65."""
+    c = np.asarray(rgb, dtype=np.float64) / 255.0
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m = np.array([[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]])
+    xyz = (lin @ m.T) / np.array([0.95047, 1.0, 1.08883])
+    eps, kappa = 216 / 24389, 24389 / 27
+    f = np.where(xyz > eps, np.cbrt(xyz), (kappa * xyz + 16) / 116)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], axis=-1)
+
+
+def palette_fit(pixels: np.ndarray, palette: np.ndarray, used: float = 0.03) -> dict:
+    """How closely a picture keeps to a palette (Soul HEX): `fit`, the mean ΔE (CIE76) from each pixel to its nearest
+    palette colour (lower is closer; about 2.3 is a just-noticeable difference), and `cover`, the share of the palette's
+    colours that are the nearest one for at least `used` of the pixels (a picture in one of five colours covers 0.2)."""
+    px = srgb_to_lab(np.asarray(pixels).reshape(-1, 3))
+    pal = srgb_to_lab(np.asarray(palette).reshape(-1, 3))
+    if not len(px) or not len(pal):
+        return {"fit": float("nan"), "cover": float("nan")}
+    d = np.linalg.norm(px[:, None, :] - pal[None, :, :], axis=-1)
+    share = np.bincount(d.argmin(axis=1), minlength=len(pal)) / len(px)
+    return {"fit": float(d.min(axis=1).mean()), "cover": float(np.mean(share >= used))}

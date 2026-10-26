@@ -100,6 +100,9 @@ const RequestSchema = z.object({
   presetOptions: z.record(z.string(), z.string()).optional(),
   presetStrength: z.number().min(0).max(1).optional(),
   mix: z.object({ presetId: z.string().max(120), strength: z.number().min(0).max(1) }).optional(),
+  // A Fuobe Original runs on both engines: the one to run on (the composer's switch). Unset: the engine mode, else
+  // the first connected.
+  engine: z.enum(["open", "cloud"]).optional(),
   // A recipe's LoRAs (the evaluation harness, scripts/eval): added after the preset's own. On ComfyUI `file` must
   // already be in models/loras (ComfyUI checks the name against its list); a cloud LoRA endpoint takes `url`.
   loras: z

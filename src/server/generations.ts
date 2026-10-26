@@ -13,6 +13,9 @@ import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
 import { estimateCost, inferOperation, planGeneration, routeLoras, routesFor } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
+import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
+import { promptWithLoras, soulKind, soulLook, soulPostSteps } from "@/lib/catalog/soul";
+import { finishSteps } from "@/lib/soul-post";
 import {
   CHAIN_LIST_SLACK,
   LAST_FRAME_CHAIN,
@@ -32,11 +35,11 @@ import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
 import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
-import { enhancePrompt } from "./enhance";
+import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
-import { ensureLorasOnComfy, prepareCloudLoras } from "./loras";
+import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -119,7 +122,8 @@ export function toGeneration(r: Row): Generation {
     updatedAt: r.updated_at,
     completedAt: r.completed_at,
     modelName: model?.name ?? r.model_id,
-    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? null) : null,
+    // A Fuobe Soul look is named like a preset ("Look · Y2K" in the viewer).
+    presetName: r.preset_id ? (getPreset(r.preset_id)?.name ?? (soulKind(r.model_id) ? (soulLook(r.preset_id)?.name ?? null) : null)) : null,
     aspectRatio: ar && ar !== "auto" ? ar : null,
     deletedAt: lib.deleted_at ?? null,
     folderId: lib.folder_id ?? null,
@@ -425,10 +429,13 @@ function prepare(original: GenerationRequest) {
   // @element mentions become reference images / LoRAs; the stored request keeps the mentions for "Reuse".
   // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
   const worded = withSignatureWords(original);
-  const model = getModel(worded.modelId);
-  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
-  let plan = planGeneration(req, getModel, getPreset);
   const mode = engineMode();
+  const found = getModel(worded.modelId);
+  // A Fuobe Original runs on the engine asked for (the composer's switch), else the engine mode, else the first one connected.
+  const model = found && dualEngine(found) ? onEngine(found, pickEngine(found, worded.engine, mode, (e) => onEngine(found, e).routes.some(routeReady))) : found;
+  const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
+  const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
+  let plan = planGeneration(req, lookup, getPreset);
   if (mode !== "both" && plan.model.engine !== mode) {
     throw new Error(
       mode === "open"
@@ -443,11 +450,17 @@ function prepare(original: GenerationRequest) {
   const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
-  // takes at most so many (the plan's notes say which were left out). Open runs carry them all.
+  // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
+  // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
+  // download: the look's words still carry it. Any other run (a motion, whose LoRA is the point) still stops there.
   const asked = plan.loras;
-  const fitted = fitLoras(asked, route);
-  plan = { ...plan, loras: fitted.loras };
-  const notes = [...fitted.notes];
+  const reachable =
+    demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
+  const fitted = fitLoras(reachable.loras, route);
+  // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
+  const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
+  plan = { ...plan, prompt, loras: fitted.loras };
+  const notes = [...(plan.notes ?? []), ...reachable.notes, ...fitted.notes];
   // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
   const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
   if (made !== undefined && route.map?.numFrames) {
@@ -457,15 +470,17 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
-  if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
+  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images; a ComfyUI graph, which makes
+  // one picture a run: Fuobe Soul on the open engine) runs one job per output.
+  if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
   // A text step that runs on Ollama is free; only Claude costs money.
   const free = demo || (route.provider === "llm" && !llmUsesClaude(route));
   const withLoras = fitted.loras.length > 0 && !!route.loraEndpoint;
-  return { req, plan, route, demo, providerId, notes, asked, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
+  const unreachable = asked.filter((l) => !reachable.loras.includes(l));
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, plan.params, 1, plan.op, withLoras) };
 }
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
@@ -474,8 +489,9 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked } = prepare(req);
-  const loras = routeLoras(route, asked);
+  const { plan, route, demo, providerId, cost, notes, asked, unreachable } = prepare(req);
+  const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
+  const loras = { ...fitted, dropped: [...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped] };
   return {
     model: plan.model,
     op: plan.op,
@@ -484,6 +500,8 @@ export function previewGeneration(req: GenerationRequest) {
     demo,
     providerId,
     costUsd: cost === null ? null : cost * plan.jobs,
+    // The engine it runs on (a Fuobe Original picks one per request).
+    engine: plan.model.engine,
     // What the route runs (the evaluation harness records it): the provider endpoint, the final prompt and the LoRAs it loads.
     route: { provider: route.provider, endpoint: loras.applied.length && route.provider !== "comfyui" && route.loraEndpoint ? route.loraEndpoint : route.endpoint },
     prompt: plan.prompt,
@@ -555,7 +573,8 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
       message: waits ? (original.frame ? "Waits for the previous frame" : "Waits for the earlier steps") : demo ? "Demo mode — no provider connected" : "Submitting",
       // A step whose prompt comes from an earlier step shows its own words (not the placeholder) until then.
       prompt: waits && req.chain?.some((s) => s.slot === "prompt") ? original.prompt?.replaceAll("{text}", "…").trim() || null : plan.prompt,
-      request_json: JSON.stringify(original),
+      // An Original remembers the engine it ran on, so a retry or a chained step runs there too.
+      request_json: JSON.stringify(dualEngine(plan.model) ? { ...original, engine: plan.model.engine } : original),
       provider_input_json: null,
       external_id: null,
       external_meta_json: null,
@@ -907,7 +926,13 @@ async function submit(
     let prompt = plan.prompt;
     if (req.params?.enhancePrompt && prompt) {
       update(id, { message: "Enhancing prompt" });
-      prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
+      const words = plan.soul?.words;
+      const at = words ? prompt.indexOf(words) : -1;
+      if (words && at >= 0) {
+        // Soul: only the user's words are expanded (60–120 words of subject, wardrobe, place, light); the look stays as it is.
+        const longer = await enhanceSoulWords(words).catch(() => words);
+        prompt = prompt.slice(0, at) + longer + prompt.slice(at + words.length);
+      } else prompt = await enhancePrompt(prompt, plan.model.kind, plan.op).catch(() => prompt);
       update(id, { prompt });
     }
     const input: GenInput = {
@@ -1171,6 +1196,10 @@ async function pollOne(r: Row): Promise<void> {
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
+  // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
+  // API clients read it as meta.
+  const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
+  if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
   update(r.id, {
     status: "succeeded",
     outputs_json: JSON.stringify(outputs),
@@ -1273,6 +1302,47 @@ export async function cancelGeneration(id: string): Promise<void> {
   update(id, { status: "canceled", completed_at: Date.now(), message: null });
   // Steps waiting only to feed this one are dropped too (nothing was spent on them).
   dropUnused(depIds(r.depends_on));
+}
+
+// ---------------------------------------------------------------------------
+// Fuobe Soul's post steps (the look's grade and overlay), made in the browser when the result arrives.
+
+/** The aspect ratio a stored request asked for (Soul Cinema's 21:9 is made at 16:9 and cropped). */
+function requestAspect(json: string): string | undefined {
+  try {
+    return (JSON.parse(json) as GenerationRequest).params?.aspectRatio;
+  } catch {
+    return undefined;
+  }
+}
+
+export class FinishError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Keep the finished picture of a Soul result in place of the raw one: the raw one stays as meta.original (its
+ * file is still the generation's), meta.finished marks it done. The first finished copy wins: another tab's
+ * answer is 409, and an output with nothing left to do is refused.
+ */
+export function finishOutput(id: string, index: number, png: Buffer): Generation {
+  const r = db().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Row | undefined;
+  if (!r) throw new FinishError("Not found", 404);
+  if (r.status !== "succeeded") throw new FinishError("The result isn't ready yet", 409);
+  const outputs = JSON.parse(r.outputs_json) as OutputFile[];
+  const o = outputs[index];
+  if (!o || !Number.isInteger(index)) throw new FinishError("No such output", 404);
+  if (o.meta?.finished) throw new FinishError("Already finished", 409);
+  if (!finishSteps(o)) throw new FinishError("This output has no grade or overlay to apply", 400);
+  const asset = saveFile({ data: png, contentType: "image/png", name: `${id}-${index}-finished.png`, source: "generation", generationId: id });
+  outputs[index] = { ...o, url: asset.url, assetId: asset.id, contentType: "image/png", meta: { ...o.meta, finished: true, original: o.url } };
+  update(id, { outputs_json: JSON.stringify(outputs) });
+  return getGeneration(id, { includeDeleted: true })!;
 }
 
 // ---------------------------------------------------------------------------

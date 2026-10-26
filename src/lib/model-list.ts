@@ -4,6 +4,7 @@
  * CLI asks (kind, engine, operation, search words).
  */
 import { modelSearchText, toModelRow, type ModelRow } from "./model-rows";
+import { runsOn } from "./catalog/engines";
 import type { Engine, MediaKind, ModelDef, Operation } from "./catalog/types";
 
 export const MODEL_KINDS: MediaKind[] = ["image", "video", "audio", "text", "model3d"];
@@ -61,7 +62,8 @@ export interface ModelQuery {
 export function findModels(models: ModelDef[], query: ModelQuery): ModelDef[] {
   const words = (query.q ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   return models.filter((m) => {
-    if ((m.hidden && !query.hidden) || (query.kind && m.kind !== query.kind) || (query.engine && m.engine !== query.engine)) return false;
+    // A Fuobe Original runs on both engines, so either engine's list has it.
+    if ((m.hidden && !query.hidden) || (query.kind && m.kind !== query.kind) || (query.engine && !runsOn(m, query.engine))) return false;
     if (query.op && !m.routes.some((r) => r.op === query.op)) return false;
     if (!words.length) return true;
     const text = `${modelSearchText(toModelRow(m))} ${m.family} ${m.routes.map((r) => r.op).join(" ")}`.toLowerCase();

@@ -34,7 +34,7 @@ const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, 
 const HELP = {
   run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
 
-  --suite <name|file>    soul, soul-id, dop, genjutsu, mixed-media, shorts, speak, cinema, selftest (or a path)
+  --suite <name|file>    soul, soul-cinema, soul-hex, soul-id, dop, genjutsu, mixed-media, shorts, speak, cinema, selftest (or a path)
   --engine <e>           demo (free self-test), open (your ComfyUI) or cloud (hosted open models)
   --looks <a,b>          Soul looks by slug, name or id (v1-general, "Flash editorial")
   --cases <ids>          case ids or prefixes with * (dop/motion-*)

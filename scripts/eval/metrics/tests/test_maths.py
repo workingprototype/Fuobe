@@ -108,3 +108,29 @@ def test_yunet_rows_come_back_in_the_pictures_pixels_with_the_eyes_left_to_right
     assert f["kps"][0][0] < f["kps"][1][0] and f["kps"][3][0] < f["kps"][4][0]
     assert f["kps"][2].tolist() == [48.0, 80.0]
     assert f["score"] == 0.9
+
+
+def test_palette_fit_distance_and_cover():
+    pal = maths.hex_colors(["#FF0000", "#00ff00", "0000FF", "nope"])
+    assert pal.tolist() == [[255, 0, 0], [0, 255, 0], [0, 0, 255]]
+    # White is L*=100, a*=b*=0.
+    assert maths.srgb_to_lab(np.array([255, 255, 255])) == pytest.approx([100.0, 0.0, 0.0], abs=0.01)
+    # A picture in the palette's own colours: no distance, and it uses two of three.
+    pic = np.array([[255, 0, 0]] * 50 + [[0, 0, 255]] * 50, dtype=np.uint8)
+    on = maths.palette_fit(pic, pal)
+    assert on["fit"] == pytest.approx(0.0, abs=1e-6)
+    assert on["cover"] == pytest.approx(2 / 3)
+    # Grey is far from all three; a near-red is close to red.
+    grey = maths.palette_fit(np.full((10, 3), 128, dtype=np.uint8), pal)
+    near = maths.palette_fit(np.full((10, 3), [250, 10, 5], dtype=np.uint8), pal)
+    assert near["fit"] < 5 < grey["fit"]
+    assert grey["cover"] == pytest.approx(1 / 3)
+    assert math.isnan(maths.palette_fit(pic, maths.hex_colors([]))["fit"])
+
+
+def test_palette_of_reads_the_request_or_the_lock_route():
+    from fuobe_metrics.score import palette_of
+
+    assert palette_of({"request": {"params": {"palette": ["#102030"]}}}).tolist() == [[16, 32, 48]]
+    assert palette_of({"request": {"route": "/api/palettes/lock", "body": {"request": {"params": {}}, "colors": ["#FFFFFF"]}}}).tolist() == [[255, 255, 255]]
+    assert len(palette_of({"request": {"prompt": "x"}})) == 0

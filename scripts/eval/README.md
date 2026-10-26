@@ -115,6 +115,8 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | --- | --- | --- | --- | --- |
 | `selftest` | the harness itself | 5 small tools (trim, palette lock, join, frame, image) | — | temporal, clip |
 | `soul` | Fuobe Soul, the 139 looks | 139 looks × 3 subjects, pinned seeds | `recipe`, `prompt-only`, `half-strength`, `plain`, `original` | clip, aesthetic, style |
+| `soul-cinema` | Soul Cinema's one film look | 6 scenes, pinned seeds | `recipe`, `prompt-only`, `plain`, `original` | clip, aesthetic, style |
+| `soul-hex` | Soul HEX palettes | 3 Fuobe palettes × 2 subjects | `words`, `lock` (open), `base`, `palette-model` (open), `plain` | palette, clip, aesthetic |
 | `soul-id` | character training | your photos → train → 8 scenes | `trained`, `original` | identity, clip, aesthetic |
 | `dop` | DoP motions and effects | the 70 the research gives a LoRA | `catalog`, `prompt-only`, `research` (the candidate), `partner` (cloud) | temporal, clip |
 | `genjutsu` | Genjutsu move / swap / restyle | 3 (through `/api/genjutsu`) | `original`, `partner` (cloud: each mode's own partner on fal) | temporal, clip |
@@ -123,9 +125,10 @@ One JSON file per Original in `cases/`. Later Original packages add their own fi
 | `speak` | talking portraits | 1 portrait + voice | `infinitetalk`, `s2v` | lipsync, temporal, identity |
 | `cinema` | Cinema shot lists | 2 films of 3 shots | `original`, `partner` | clip, temporal, continuity |
 
-`soul.json` and `dop.json` are **generated** from the research. They come from
+`soul.json`, `soul-cinema.json`, `soul-hex.json` and `dop.json` are **generated** from the research. They come from
 `docs/research/higgsfield-image-studios.json` (the look ids) and
-`docs/research/fuobe-originals-recipes-5.json` (recipes, LoRAs, the motion map). Run
+`docs/research/fuobe-originals-recipes-5.json` (recipes, LoRAs, Soul Cinema's recipe, the motion map).
+`soul-hex`'s palettes are Fuobe's own. Run
 `node scripts/eval/gen-cases.mjs` after the research changes, and don't edit the generated files by
 hand. `pnpm eval:validate` fails when they are out of date. The subject prompts are Fuobe's own. No
 Higgsfield prompt or preview is used anywhere.
@@ -136,9 +139,19 @@ Soul variants, all on the same subjects and seeds:
 - **prompt-only**: the same words without LoRAs. Does each LoRA earn its slot?
 - **half-strength**: every LoRA at half strength. This is the over-cooking check.
 - **plain**: the base model with the subject alone.
-- **original**: the shipped `fuobe-soul` Original, which applies the look on the server. The look
+- **original**: the shipped `fuobe-soul` Original (O2), which applies the look on the server. The look
   goes as its Fuobe id in `presetId` (`v1-general`, the slug `--looks` takes); a Higgsfield look id never
-  leaves the harness. O2's look ids should match these slugs. It is skipped until that Original exists.
+  leaves the harness. A lettering look (Graffiti) runs on `fuobe-soul-hd`. Every request names the engine
+  the run is on (`engine`), so an Original that runs on both takes that one. Its grade and overlay are
+  applied in the browser after generation, so the scores are of the raw picture.
+
+Soul Cinema's variants are the same idea for its one look: **recipe** (the research's LoRAs with their
+triggers, then the `cine` tail), **prompt-only** (the tail alone), **plain** and **original**
+(`fuobe-soul-cinema`). Soul HEX's: **words** (the palette sentence the Color signature adds, on Fuobe
+Soul: the cloud's HEX), **lock** (the same, then `POST /api/palettes/lock`: the open engine's HEX),
+**base** (the words on today's base), **palette-model** (Z-Image Turbo · Palette) and **plain** (no
+palette words, the control). A variant can carry fixed `words` after the prompt and its own `submit`
+route; `{{request}}` in a route body is the job's own request.
 
 DoP variants, on your start frame with two seeds:
 
@@ -313,6 +326,7 @@ still has its timing and cost, and the report says why the scores are missing.
 | Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | the identity metric's face detector for the face box when identity is installed, else a fixed lower-centre region |
 | SyncNet (optional) | `syncnet` | higher | runs only when `FUOBE_EVAL_SYNCNET_CMD` points at your own SyncNet. It isn't bundled because its weights' licence isn't stated | yours |
 | Shot continuity | `continuity` | higher | CLIP similarity between consecutive shots of a film | CLIP |
+| Palette | `paletteFit`, `paletteCover` | lower, higher | the mean ΔE (CIE76, Lab) from each pixel to the nearest colour of the palette the request sent (`params.palette`, or the palette lock's colours), and the share of the palette's colours that are nearest for at least 3% of the pixels | none (numpy) |
 | Time, cost, memory | `seconds`, `costUsd`, `vramGb` | lower | from the runner | — |
 
 Identity needs `pnpm eval:setup --identity`, which installs insightface and onnxruntime (MIT

@@ -4,8 +4,7 @@ import { AlertCircle, PinOff, Play, RotateCcw, Sparkles, Square, Upload } from "
 import Link from "next/link";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { getModel } from "@/lib/catalog";
-import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, promptPlaceholder, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
+import { CANVAS_TEXT_MAX, isGenerator, NODE_SPECS, nodeLabel, nodeModel, promptPlaceholder, topoOrder, type CanvasNode } from "@/lib/catalog/canvas";
 import type { MediaKind } from "@/lib/catalog/types";
 import { fileToSlot } from "@/components/studio/media-slot";
 import { cn } from "@/lib/utils";
@@ -55,7 +54,7 @@ export function NodeList({ onQuickStart }: { onQuickStart: () => void }) {
 function NodeCard({ node, index }: { node: CanvasNode; index: number }) {
   const actions = useEditorActions();
   const { graph, views, globals } = useEditorSnapshot();
-  const model = node.data.modelId ? getModel(node.data.modelId) : undefined;
+  const model = nodeModel(node, globals.mode);
   const kind = KIND[node.type];
   const file = useRef<HTMLInputElement>(null);
   const gen = isGenerator(node);

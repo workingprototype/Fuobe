@@ -27,7 +27,8 @@ function fieldsOf(map: FieldMap): string[] {
   for (const [k, v] of Object.entries(map)) {
     if (k === "fixed" || k === "defaults" || k === "seedRange" || k === "maskFormat" || k === "loras") continue;
     if (k === "size") {
-      out.push(map.size!.width, map.size!.height);
+      const z = map.size!;
+      out.push(...[z.key, z.width, z.height].filter((f): f is string => !!f));
       continue;
     }
     if (typeof v === "string") out.push(v);

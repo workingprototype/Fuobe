@@ -815,6 +815,12 @@
     "error": null,
     "at": "2026-10-16T20:57:21.746Z"
   },
+  "z-image-turbo-i2i": {
+    "sha256": "bc702da5141ab4941d1fa0af9eb6cdc94c789f69c2f53c82a4335e1f1df763ea",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:27:46.842Z"
+  },
   "z-image-turbo-t2i": {
     "sha256": "dda8f9b795709c31220a732c2db134e130cda20d0672c0cca64905b1f8397a70",
     "validated": true,

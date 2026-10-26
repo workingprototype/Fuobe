@@ -424,6 +424,31 @@ export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
   return { files };
 }
 
+/**
+ * Before a Fuobe Soul run, without a civitai key: the civitai LoRAs it can't get, so the run goes ahead without
+ * them (the look's words still carry it) and says how to add them, instead of failing at the download. A LoRA is
+ * still reachable when ComfyUI's LoRA folder already has it (open engine) or a live mirror exists (cloud). A
+ * local-only LoRA (civitai's RentCivit-only licence) counts on the open engine; a cloud run never carries it
+ * (fitLoras leaves it out and says so).
+ */
+export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget): { loras: LoraRef[]; notes: string[] } {
+  const civitai = loras.filter((l) => !l.hostedUrl && needsToken(l.url) && (target === "comfyui" || !localOnly(l)));
+  if (!civitai.length || civitaiKey()) return { loras, notes: [] };
+  const folder = target === "comfyui" && getSetting("comfyLorasDir") ? filesInLoraFolder().files : null;
+  const unreachable = civitai.filter((l) => {
+    if (target === "comfyui") return !!folder && !folder.has(l.file);
+    const cached = getCopy(l.file, target);
+    return !(cached?.hostedUrl && Date.now() - cached.createdAt < MIRROR_TTL_MS[target]);
+  });
+  if (!unreachable.length) return { loras, notes: [] };
+  const names = unreachable.map(loraName);
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return {
+    loras: loras.filter((l) => !unreachable.includes(l)),
+    notes: [`${list} ${names.length > 1 ? "download" : "downloads"} from civitai, which needs your free API key (Settings → LoRAs), so this run leaves ${names.length > 1 ? "them" : "it"} out`],
+  };
+}
+
 /** Test the civitai key (Settings → Save & test): civitai's /me answers 200 for a good key. */
 export async function testCivitaiKey(): Promise<{ ok: boolean; detail: string }> {
   const token = civitaiKey();

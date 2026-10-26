@@ -13,6 +13,7 @@ keyFields (which input is the prompt, the image, the clip…) are this script's 
 earlier research files. scripts/gen-cloud-models.py reads both lists.
 
 Run:  python3 scripts/fetch-hosted-schemas.py
+      python3 scripts/fetch-hosted-schemas.py --only fal-ai/z-image/turbo/image-to-image/lora   (one endpoint, the rest kept)
 """
 import datetime
 import json
@@ -44,6 +45,8 @@ LORA = {
                                                 "numFrames": "num_frames", "seed": "seed", "loras": "loras"},
     "fal-ai/wan/v2.2-a14b/text-to-image/lora": {"prompt": "prompt", "negativePrompt": "negative_prompt", "aspectRatio": "image_size", "seed": "seed", "loras": "loras"},
     "fal-ai/z-image/turbo/lora": {k: v for k, v in T2I.items() if k != "negativePrompt"},
+    # Fuobe Soul's edit route (O2): image-to-image with the look's LoRAs; image_size "auto" keeps the picture's shape.
+    "fal-ai/z-image/turbo/image-to-image/lora": {**{k: v for k, v in T2I.items() if k not in ("negativePrompt", "aspectRatio")}, "image": "image_url"},
     "fal-ai/qwen-image-2512/lora": T2I,
     "prunaai/z-image-turbo-lora": {"prompt": "prompt", "width": "width", "height": "height", "seed": "seed"},
 }
@@ -161,7 +164,10 @@ def main():
     raw = FILE.read_text(encoding="utf-8")
     data = json.loads(raw)
     by_id = {e["id"]: e for e in data["hostedLoraEndpoints"]}
+    only = sys.argv[sys.argv.index("--only") + 1:] if "--only" in sys.argv else None
     for ep, kf in LORA.items():
+        if only and ep not in only:
+            continue
         rec = by_id.get(ep)
         if not rec:
             sys.exit(f"{ep} is not in hostedLoraEndpoints")
@@ -175,6 +181,9 @@ def main():
             rec["output"] = "output[]"
         rec["inputsChecked"] = TODAY
         print(f"{ep}: {len(rec['inputs'])} inputs")
+    if only:
+        FILE.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        return
     base = []
     for ep, (op, kf) in BASE.items():
         inputs = fal(ep)

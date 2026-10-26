@@ -3,6 +3,7 @@ import { EFFECTS as RAW_EFFECTS, MOTIONS as RAW_MOTIONS } from "./motions";
 import { MODELS } from "./models";
 import { LLM_MODELS } from "./llm-models";
 import { OSS_LORAS } from "./oss-loras.generated";
+import { runsOn } from "./engines";
 import type { Engine, MediaKind, ModelDef, Operation, Preset } from "./types";
 
 MODELS.push(...LLM_MODELS.filter((m) => !MODELS.some((x) => x.id === m.id))); // text steps (translate, write) on the configured LLM; once per hot reload
@@ -99,7 +100,7 @@ export function modelsFor(opts: { kind?: MediaKind; ops?: Operation[]; engine?: 
     (m) =>
       !m.hidden &&
       (!opts.kind || m.kind === opts.kind) &&
-      (!opts.engine || opts.engine === "all" || m.engine === opts.engine) &&
+      (!opts.engine || opts.engine === "all" || runsOn(m, opts.engine)) &&
       (!opts.ops || m.routes.some((r) => opts.ops!.includes(r.op))),
   );
 }

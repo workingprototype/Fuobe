@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-24T05:04:42.430Z",
+  "generatedAt": "2026-10-26T00:27:25.145Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -8839,6 +8839,110 @@
       "license": "Apache-2.0 (Z-Image Turbo); ColorTransfer has no model",
       "validated": true,
       "notes": "One job = generate + lock. The provider writes paletteText from params.palette (\"Color palette: #.., #..\") and renders paletteImage, a swatch PNG with one band per colour, server-side. strength 0 = prompt only; 0.5-0.8 = lock; 1.0 = full statistics transfer (shifts skin tones). method mkl_lab (default, keeps contrast), reinhard_lab (softer), histogram (strongest). palette-transfer-image / -video do the same lock as a post-step for any model (cloud outputs too)."
+    },
+    {
+      "id": "z-image-turbo-i2i",
+      "title": "Z-Image Turbo image to image (Fuobe Soul edit: the look and its LoRAs on your picture)",
+      "capability": "edit",
+      "file": "z-image-turbo-i2i.json",
+      "source": "hand-built (scripts/comfy/hand-built/z-image-turbo-i2i.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "1",
+            "input": "image"
+          }
+        ],
+        "megapixels": [
+          {
+            "node": "2",
+            "input": "megapixels"
+          }
+        ],
+        "prompt": [
+          {
+            "node": "14",
+            "input": "text"
+          }
+        ],
+        "seed": [
+          {
+            "node": "17",
+            "input": "seed"
+          }
+        ],
+        "steps": [
+          {
+            "node": "17",
+            "input": "steps"
+          }
+        ],
+        "strength": [
+          {
+            "node": "17",
+            "input": "denoise"
+          }
+        ],
+        "shift": [
+          {
+            "node": "13",
+            "input": "shift"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "19",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "19",
+          "kind": "image"
+        }
+      ],
+      "defaults": {
+        "steps": 8,
+        "shift": 3,
+        "strength": 0.6,
+        "megapixels": 1
+      },
+      "limits": {
+        "maxWidth": 2048,
+        "maxHeight": 2048,
+        "dimensionMultiple": 16
+      },
+      "models": [
+        {
+          "file": "z_image_turbo_bf16.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+          "sizeGb": 12.31
+        },
+        {
+          "file": "qwen_3_4b.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+          "sizeGb": 8.04
+        },
+        {
+          "file": "ae.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors",
+          "sizeGb": 0.34
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 12,
+      "license": "Apache-2.0 (Z-Image Turbo)",
+      "validated": true,
+      "notes": "Fuobe Soul's edit route (Soul 2.0 image-to-image): the picture scaled to Soul's tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler (8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal's z-image/turbo/image-to-image; about 0.17 would be Higgsfield's refiner pass, an experiment until the evaluation harness measures it). The look's LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture's shape.",
+      "buildWarnings": [
+        "model z_image_turbo_bf16.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors -> no size (HTTP 307)",
+        "model qwen_3_4b.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors -> no size (HTTP 307)",
+        "model ae.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors -> no size (HTTP 307)"
+      ]
     },
     {
       "id": "video-trim",

@@ -530,7 +530,8 @@
               "identity",
               "temporal",
               "lipsync",
-              "continuity"
+              "continuity",
+              "palette"
             ]
           }
         },
@@ -564,6 +565,10 @@
           },
           "template": {
             "type": "boolean"
+          },
+          "words": {
+            "type": "string",
+            "maxLength": 2000
           },
           "loras": {
             "anyOf": [
@@ -615,6 +620,25 @@
                     },
                     "licence": {
                       "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    "base": {
+                      "type": "string",
+                      "maxLength": 60
+                    },
+                    "download": {
+                      "type": "string",
+                      "enum": [
+                        "direct",
+                        "civitai-token"
+                      ]
+                    },
+                    "hostedUrl": {
+                      "type": "string",
+                      "pattern": "^https:\\/\\/"
                     }
                   },
                   "required": [
@@ -767,6 +791,48 @@
               "type": "string"
             },
             "additionalProperties": {}
+          },
+          "submit": {
+            "type": "object",
+            "properties": {
+              "route": {
+                "type": "string",
+                "pattern": "^\\/api\\/[\\w/-]+$"
+              },
+              "body": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "result": {
+                "default": "final",
+                "type": "string",
+                "enum": [
+                  "final",
+                  "last",
+                  "all"
+                ]
+              },
+              "estimate": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\/api\\/[\\w/-]+$"
+                  },
+                  {
+                    "type": "boolean",
+                    "const": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "route",
+              "body"
+            ],
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -796,6 +862,10 @@
           },
           "presetId": {
             "type": "string"
+          },
+          "words": {
+            "type": "string",
+            "maxLength": 2000
           },
           "models": {
             "type": "object",
@@ -1182,7 +1252,8 @@
                 "identity",
                 "temporal",
                 "lipsync",
-                "continuity"
+                "continuity",
+                "palette"
               ]
             }
           },

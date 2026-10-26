@@ -453,6 +453,8 @@ function routeVars(job, inputs, { engine, runId, attempt = 1 }) {
     engine: engine === "demo" ? "open" : engine,
     modelId: job.model.id,
     requestId: requestIdFor(runId, job.id, attempt),
+    // The job's own request, for a route that wraps one (POST /api/palettes/lock).
+    request: { ...job.request, ...(Object.keys(inputs ?? {}).length && { inputs }) },
   };
 }
 
@@ -546,6 +548,7 @@ async function runJob(client, job, ctx) {
     if (job.submit) {
       const vars = routeVars(job, inputs, ctx);
       vars.prompt = mention(vars.prompt);
+      vars.request.prompt = mention(vars.request.prompt);
       const body = fillTemplate(job.submit.body, vars);
       row.request = { route: job.submit.route, body };
       const answer = await client.request("POST", job.submit.route, { json: body });

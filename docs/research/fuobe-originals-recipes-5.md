@@ -105,6 +105,7 @@ Extra fields that matter:
 - **LTX-2.3 on fal** (`fal-ai/ltx-2.3-22b/*/lora`): `loras` is **required** (send at least one item), plus `camera_lora` = `dolly_in | dolly_out | dolly_left | dolly_right | jib_up | jib_down | static | none` with `camera_lora_scale` 0–1, `distill_lora_first/second_pass_scale` (defaults 0.2 / 0.5), 9–481 frames (default 121), `fps` (default 24), 8–50 steps (default 40). Two defaults must be overridden for Originals: `enable_prompt_expansion` defaults to **true** (it would rewrite Fuobe's compiled Director prompt) and `generate_audio` defaults to **true** (set it from the user's audio toggle). Price: $0.001805 per megapixel of generated video (121 frames at 1280×720 ≈ 111.5 MP ≈ $0.20); distilled $0.001405. The *quality* family (`fal-ai/ltx-2.3-quality/*/lora`) caps LoRAs at 3, scale 0–2, adds `transformer` high/low/both, $0.0027075/MP, and only accepts direct `.safetensors` URLs up to 3 GB.
 - **Replicate Wan 2.2 fast** takes exactly one LoRA per expert (`lora_weights_transformer` = high, `lora_weights_transformer_2` = low), so a motion and an effect cannot be stacked there.
 - *Added 2026-10-24 (o/lora-plumbing):* the full input schemas of the endpoints Fuobe's catalog routes LoRAs to are now in the JSON (`hostedLoraEndpoints[].inputs` and `keyFields`, plus `hostedBaseEndpoints` for the plain LTX-2.3 22B and FLUX.2 [klein] 4B endpoints), read with `scripts/fetch-hosted-schemas.py` from fal's OpenAPI files and Replicate's schema page. Findings: the plain LTX-2.3 22B endpoints cost $0.001605 per megapixel of video (the `/lora` ones $0.001805); FLUX.2 [klein] 4B costs $0.005/MP plain and $0.01/MP with LoRAs and has no `negative_prompt`; Replicate's `prunaai/z-image-turbo-lora` takes `width` / `height` (no `aspect_ratio`, no `num_outputs`) and runs only by version (`usesVersionlessApi: false`). The plain LTX-2.3 22B `extend-video` and `video-to-video` endpoints were read too: both take `num_frames` (9–481, default 121) and `match_input_fps` (default true); `num_frames` is the length extend adds, and video-to-video follows the input clip's length while `match_video_length` is true (its default). Replicate's `wan-video/wan-2.2-t2v-fast` defaults `interpolate_output` to **true** (30 fps, the same trap as fal's `interpolator_model`), takes only 16:9 / 9:16 and 480p / 720p, and both fast models render 81–121 frames.
+- *Added 2026-10-25 (o/soul):* `fal-ai/z-image/turbo/image-to-image/lora` (Fuobe Soul's edit route) now has its full inputs in the JSON too (`scripts/fetch-hosted-schemas.py --only <id>`): `image_url`, `strength` (default 0.6, ≤ 1), `image_size` defaulting to `auto` (the picture's shape), `num_inference_steps` 1–8, `loras` up to 3.
 
 ### 3.2 What has no hosted LoRA route
 
@@ -210,9 +211,9 @@ fal: `fal-ai/z-image/turbo/lora` with `num_inference_steps` 8 (the schema's maxi
 
 - **Grade:** Optional per preset: a preset id from src/lib/grade.ts (natural, split-tone, soft-skin, old-lens, 16mm, teal-orange, portra, noir, faded, golden-hour, cold-steel, pop). Applied in the browser today; for API jobs it needs a server-side port (a small ComfyUI colour node chain or the same shader in a worker).
 - **Palette lock:** When the user picks a Soul HEX palette: run oss-palette-image (palette-transfer-image, strength 0.8) after generation, as Fuobe already does for open models.
-- **New grade presets needed:** invert (Invertethereal), solarize (Surreal solarization).
+- **New grade presets needed:** invert (Invertethereal), solarize (Surreal solarization). *(Corrected 2026-10-25, o/soul: the two looks now carry these grades in the table and the JSON; they had none.)*
 - **Upscale:** 1080p tier and above: SeedVR2 (open: upscale-image-seedvr2; hosted: fal-ai/seedvr/upscale/image at $0.001 per megapixel).
-- **Overlays:** Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic).
+- **Overlays:** *(Added 2026-10-25, o/soul: `presets[].overlay` in the JSON names it: `date-stamp` DigitalCam, `cctv` CCTV, `photo-booth` Vintage PhotoBooth.)* Text and frames that diffusion draws badly are added in post: date stamp (DigitalCam), CCTV camera ID and time, photo-booth strip layout, ID-card crop (dmv), pixelated face (SAM 3.1 face mask + mosaic).
 
 ### 4.5 Soul ID and Soul Cinema
 
@@ -281,7 +282,7 @@ Each row is a Fuobe Soul run: the template is `{prompt}. <look>. <tail>` with th
 | 47 | **Creatures** `b3c8075a` | soul-v1 · Surreal | horroratmo@0.4, awportrait@0.4 | — | **yes** | Creature fusion needs a concept LoRA: train fuobe-creatures. |
 | 48 | **Grunge** `ad9de607` | soul-v1 · All presets | grunge@0.8, amateur90s@0.3 | faded |  |  |
 | 49 | **Glazed doll skin makeup** `a2a42ada` | soul-v1 · All presets | awportrait@0.7 | soft-skin |  | Prompt-only beyond the core LoRA. |
-| 50 | **Invertethereal** `82edba1e` | soul-v1 · Graphic Art | awportrait@0.4 | — |  | Do it in post: an inverted or solarised curve (add an 'Invert' grade preset). No LoRA needed. |
+| 50 | **Invertethereal** `82edba1e` | soul-v1 · Graphic Art | awportrait@0.4 | invert |  | Do it in post: an inverted or solarised curve (add an 'Invert' grade preset). No LoRA needed. |
 | 51 | **Indie sleaze** `5a72fec7` | soul-v1 · All presets | hardflash@0.7, emo@0.4 | — |  |  |
 | 52 | **Mixed Media** `2fcf02e2` | soul-v1 · Graphic Art | montage@0.8 | — |  |  |
 | 53 | **Paper Face** `7fa63380` | soul-v1 · Graphic Art | montage@0.6, paperdiorama@0.3 | — | **yes** | Torn-paper face collage needs its own LoRA: train fuobe-paper-collage. |
@@ -349,7 +350,7 @@ Each row is a Fuobe Soul run: the template is `{prompt}. <look>. <tail>` with th
 | 115 | **Street photography** `95151de0` | soul-v2 · Camera | retrocine@0.5, awportrait@0.4 | natural |  |  |
 | 116 | **Retro BW** `069f5a5f` | soul-v2 · Camera | bwphoto@0.7, grainscape@0.5 | noir |  |  |
 | 117 | **Asian nostalgia** `99716f25` | soul-v2 · Mood | softfuji@0.6, grainscape@0.4 | portra |  |  |
-| 118 | **Surreal solarization** `26bb19d1` | soul-v2 · Mood | awportrait@0.4 | — |  | Do it in post: a solarise curve (add a 'Solarize' grade preset). No LoRA needed. |
+| 118 | **Surreal solarization** `26bb19d1` | soul-v2 · Mood | awportrait@0.4 | solarize |  | Do it in post: a solarise curve (add a 'Solarize' grade preset). No LoRA needed. |
 | 119 | **Subtle flash** `e62e75c2` | soul-v2 · Styles | hardflash@0.4, awportrait@0.5 | natural |  |  |
 | 120 | **Digital camera** `74abc530` | soul-v2 · Camera | digicam@0.8, hardflash@0.4 | — |  |  |
 | 121 | **Siren** `cfd92ced` | soul-v2 · Mood | awportrait@0.5, neonnoir@0.3 | — |  |  |
