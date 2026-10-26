@@ -9,14 +9,16 @@ import { cropRect, finishSteps, outputsToFinish, overlayLayout, type FinishSteps
 /**
  * Fuobe Soul's post steps in the browser (research §4.4): when a result with a look arrives, Soul Cinema's 21:9
  * crop, its grade (the WebGL grade of the Color grading tool) and its overlay are applied once, and the finished picture is kept
- * on the server in place of the raw one (the raw one stays as meta.original). Any open studio feed does it;
- * the server takes the first and answers the others 409.
+ * on the server in place of the raw one (the raw one stays as meta.original). Any open studio feed does it, and
+ * Cinema's feed and builders (its stills on Soul Cinema, Soul Location's Movie look); the server takes the first and
+ * answers the others 409.
  */
 
 const started = new Set<string>();
 /** Outputs that failed to finish (no WebGL, a picture that won't load): tried again after a pause, a few times. */
 const failed = new Map<string, { tries: number; at: number }>();
 const MAX_TRIES = 3;
+const GENERATIONS = ["generations"] as const;
 const RETRY_MS = 30_000;
 
 function load(url: string): Promise<HTMLImageElement> {
@@ -75,9 +77,13 @@ async function finish(url: string, steps: FinishSteps, when: Date): Promise<Blob
   return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't encode the picture"))), "image/png"));
 }
 
-/** Finish every Soul result in `items` that still needs it (once per output, in the background). */
-export function useSoulFinish(items: Generation[]) {
+/**
+ * Finish every Soul result in `items` that still needs it (once per output, in the background). `queryKey`: the cache
+ * that shows them, refetched once the finished picture is kept (Cinema keeps its takes under ["cinema"]).
+ */
+export function useSoulFinish(items: Generation[], queryKey: readonly unknown[] = GENERATIONS) {
   const qc = useQueryClient();
+  const cacheKey = JSON.stringify(queryKey);
   useEffect(() => {
     if (typeof document === "undefined" || document.visibilityState === "hidden") return;
     for (const g of items) {
@@ -98,7 +104,7 @@ export function useSoulFinish(items: Generation[]) {
             const res = await fetch(`/api/generations/${g.id}/finish`, { method: "POST", body: form });
             // The live stream brings the finished row; a feed without it refetches.
             failed.delete(key);
-            if (res.ok) void qc.invalidateQueries({ queryKey: ["generations"] });
+            if (res.ok) void qc.invalidateQueries({ queryKey: JSON.parse(cacheKey) as unknown[] });
           } catch (e) {
             // The raw picture stays; a feed showing it later tries again (after a pause, at most three times).
             started.delete(key);
@@ -108,5 +114,5 @@ export function useSoulFinish(items: Generation[]) {
         })();
       }
     }
-  }, [items, qc]);
+  }, [items, qc, cacheKey]);
 }

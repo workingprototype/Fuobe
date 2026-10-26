@@ -1,26 +1,33 @@
 import { APERTURE, LENS, anglesNote, poseWords, recomposePrompt, type ScenePose } from "@/lib/scene3d";
 import { getModel, getPreset } from "./index";
-import { DOP_MODEL } from "./dop";
-import { triggerOf } from "./loras";
+import { DOP_MODEL, LTX25_HOSTED } from "./dop";
+import { dualEngine, onEngine } from "./engines";
+import { localOnly, needsToken, triggerOf } from "./loras";
 import { composeShots, estimateCost, planGeneration, routesFor } from "./plan";
+import { soulRecipe } from "./soul";
 import type { Engine, GenerationRequest, GenParams, LoraRef, ModelDef, Operation } from "./types";
 
 /*
- * Cinema Studio 4.0: the director's data and the pure planning step shared by the browser
- * (live cost, previews) and the server (src/server/cinema-generate.ts).
+ * Cinema Studio 4.0 as a Fuobe Original (build plan O6): the director's data and the pure planning step
+ * shared by the browser (live cost, previews) and the server (src/server/cinema-generate.ts). No Higgsfield
+ * API: everything runs on open weights (Fuobe Cinema, Fuobe Soul) or on partner models through fal / Replicate.
  *
  * Everything below the "Research data" line is copied from docs/research/higgsfield-studios.json →
- * cinemaStudio (genres, eras, tempos, camera bodies, lenses, apertures, the 33 camera moves the API
- * accepts, the 50 public palettes with their 12 hex colours, the 7 lighting presets, the Emotion Wheel)
- * and higgsfield-image-studios.json → characterSheet.soulCast (the 17 Soul Cast fields).
+ * cinemaStudio (genres, eras, tempos, camera bodies, lenses, apertures, the 33 camera moves, the 50 public
+ * palettes with their 12 hex colours, the 7 lighting presets, the Emotion Wheel), higgsfield-image-studios.json
+ * → characterSheet.soulCast (the 17 Soul Cast fields) and fuobe-originals-recipes-5.json →
+ * studios[cinema-studio].original (Fuobe Cinema's recipe: which camera LoRA each move takes, the longest take).
  * tests/cinema.test.ts checks the copy against the JSON, so a research update shows up as a failing test.
  *
- * Routes (fuobeBuild in the research):
- * - Cloud video: Higgsfield `cinema-studio-4` reads genre / era / pacing / camera / lens / aperture /
- *   light / color_palette / camera_movement natively; without a Higgsfield key (or when another model
- *   is picked) Seedance 2.5, Kling 3.0 or Veo 3.1 get the same settings compiled into the prompt.
- * - Open video: Wan 2.2 14B Lightning with the compiled prompt; camera moves become a camera LoRA or a
- *   Wan Fun Camera pose where motions.ts has one; a palette becomes a palette-transfer post-step.
+ * Routes:
+ * - Video: Fuobe Cinema (`fuobe-cinema`) with the Director's Panel compiled into the prompt. In the cloud it is
+ *   LTX-2.3 22B on fal: a move LTX-2.3's camera LoRA makes goes as `camera_lora`; a move with a Wan 2.2 LoRA runs on
+ *   Fuobe DoP (Wan 2.2 A14B) when there is a start frame; Rack Focus is LTX-2.5's focus shift; the rest are words. A
+ *   take longer than 20 s adds the rest with one extend. On the user's GPU it is Wan 2.2 14B Lightning: the move's
+ *   Wan LoRA or a Fun Camera pose (both need a start frame), then a palette-transfer step when a palette is set.
+ *   Seedance 2.5, Kling 3.0 and Veo 3.1 stay pickable with everything in the prompt.
+ * - Stills: Fuobe Soul Cinema. Soul Cast and Soul Location: Fuobe Soul with a look, other views of a location by
+ *   the Multiple-Angles LoRA.
  */
 
 // ---------------------------------------------------------------------------
@@ -213,13 +220,29 @@ export interface CinemaGenerateInput {
   audio?: boolean;
   multiShot?: { mode: "off" | "auto" | "manual"; shots?: { prompt: string; duration: number }[] };
   /** The selected take (extend, edit, another view of a location). */
-  source?: { url: string; kind: "image" | "video"; firstFrame?: string };
+  source?: TakeFacts;
   grid?: { size: GridSize; type: GridType };
   cast?: CastValues;
   /** Soul Location: which extra view to render. */
   view?: string;
   /** "recompose": the view captured in the 3D scene (an uploaded PNG) and the camera it was taken with. */
   capture?: SceneCapture;
+}
+
+/**
+ * A take picked to extend, edit or re-angle, with what the browser knows about it: the model it was made on (a partner
+ * take is edited by a partner editor), its scene (an LTX-2.3 edit re-renders the whole scene with the change), its length,
+ * resolution and shape (what an edit costs; a take longer than 20 s is edited for its first 20 s).
+ */
+export interface TakeFacts {
+  url: string;
+  kind: "image" | "video";
+  firstFrame?: string;
+  modelId?: string;
+  prompt?: string;
+  seconds?: number;
+  resolution?: string;
+  aspectRatio?: string;
 }
 
 export interface SceneCapture {
@@ -232,12 +255,15 @@ export interface SceneCapture {
 }
 
 export interface CinemaContext {
-  /** A Higgsfield key is configured (cinema-studio-4 and Soul run for real). */
-  higgsfield: boolean;
   /** Cloud models are allowed (engine mode isn't "open only"): extract-frame fallbacks need it. */
   cloudAllowed?: boolean;
   /** Models that exist in this build (open-engine adds the grid / Soul Cast / restyle workflows). */
   has?: (modelId: string) => boolean;
+  /**
+   * A civitai key is set, so a camera LoRA that downloads from civitai can reach fal. False: a cloud move whose LoRA
+   * needs it is written into the prompt instead (unknown = assumed set).
+   */
+  civitai?: boolean;
 }
 
 export interface CinemaStep {
@@ -535,13 +561,88 @@ export const DURATION = { min: 4, max: 30, default: 5 } as const;
 export const BATCH = { min: 1, max: 4 } as const;
 export const REFERENCE_LIMITS = { images: 30, videos: 10, audios: 10, total: 50, clipMin: 2, clipMax: 30, totalVideo: 30, totalAudio: 30 } as const;
 
-/** Models offered in the prompt bar, per mode and engine. The first is the default. */
+/** Fuobe Cinema (O6): Cinema Studio 4.0's Original on both engines. */
+export const CINEMA_MODEL = "fuobe-cinema";
+/** Fuobe Soul Cinema: the stills. */
+export const CINEMA_STILL_MODEL = "fuobe-soul-cinema";
+/** Fuobe Soul: Soul Cast and Soul Location. */
+export const SOUL_BUILDER_MODEL = "fuobe-soul";
+/** The Soul look a cast sheet is made in (natural, unretouched skin and fabric) and a location in (a widescreen film still). */
+export const CAST_LOOK = "v1-realistic";
+export const LOCATION_LOOK = "v1-movie";
+/** The open Soul Cast sheet graph (soul-cast-sheet-zimage): the sheet, then its four views as their own pictures. */
+export const CAST_SHEET_MODEL = "oss-zimage-soul-cast";
+
+/**
+ * Models offered in the prompt bar, per mode and engine. The first is the default: the Original on both engines.
+ * Partner models stay as choices (the Director compiled into the prompt); LTX-2.5 is the open choice with sound.
+ */
 export const CINEMA_MODELS: Record<CinemaMode, Record<Engine, string[]>> = {
-  video: { cloud: ["cinema-studio-4", "seedance-2-5", "kling-3", "veo-3-1"], open: ["oss-wan22-14b-fast", "oss-wan22-14b"] },
-  image: { cloud: ["nano-banana-pro", "seedream-5-pro", "soul-cinema"], open: ["oss-z-image-turbo", "oss-qwen-image"] },
+  video: { cloud: [CINEMA_MODEL, "seedance-2-5", "kling-3", "veo-3-1"], open: [CINEMA_MODEL, "oss-ltx25", "oss-wan22-14b"] },
+  image: { cloud: [CINEMA_STILL_MODEL, "nano-banana-pro", "seedream-5-pro"], open: [CINEMA_STILL_MODEL, "oss-z-image-turbo", "oss-qwen-image"] },
 };
-/** Models that need a Higgsfield key to run for real. */
-export const HIGGSFIELD_ONLY = new Set(["cinema-studio-4", "soul-cinema", "soul-2"]);
+
+/**
+ * LTX-2.3's built-in camera LoRA (fal's `camera_lora`) for each of the 33 moves, where one of its seven fits; null =
+ * no fit (research studios[cinema-studio].original.cameraLora: a zoom is taken as a dolly, pans and tilts have none).
+ */
+export const CINEMA_CAMERA_LORA: Record<string, string | null> = {
+  snorricam: null,
+  "robot-arm": null,
+  "tilt-up": null,
+  "rack-focus": null,
+  "tilt-down": null,
+  pov: null,
+  "pan-left": null,
+  "crane-up": "jib_up",
+  "pan-right": null,
+  "crane-down": "jib_down",
+  "side-tracking": null,
+  "pedestal-up": "jib_up",
+  "pedestal-down": "jib_down",
+  handheld: null,
+  tracking: null,
+  "drone-orbit": null,
+  "dolly-zoom": null,
+  "aerial-pullback": "dolly_out",
+  "static-shot": "static",
+  "bullet-time": null,
+  "whip-pan": null,
+  "slow-zoom-in": "dolly_in",
+  "arc-left": null,
+  "slow-zoom-out": "dolly_out",
+  "arc-right": null,
+  "truck-right": "dolly_right",
+  "dolly-in": "dolly_in",
+  "truck-left": "dolly_left",
+  "dolly-out": "dolly_out",
+  "slider-right": "dolly_right",
+  "crush-zoom": null,
+  "slider-left": "dolly_left",
+  "helicopter-shot": null,
+};
+
+/** The longest take one LTX-2.3 call makes (481 frames at 24 fps); a longer one adds the rest with an extend. */
+export const CINEMA_MAX_SECONDS = 20;
+
+/** What an Original runs on each engine, for the model menus (its own tagline covers both). */
+export const ORIGINAL_LINES: Record<string, Record<Engine, string>> = {
+  [CINEMA_MODEL]: {
+    open: "Wan 2.2 Lightning on your GPU, with camera LoRAs and Fun Camera moves · 3 or 5 s · free",
+    cloud: "LTX-2.3 on fal, with its camera LoRAs and sound · up to 30 s",
+  },
+  [CINEMA_STILL_MODEL]: {
+    open: "Z-Image Turbo with two film-still LoRAs on your GPU · free",
+    cloud: "Z-Image Turbo with two film-still LoRAs, hosted on fal",
+  },
+  [SOUL_BUILDER_MODEL]: {
+    open: "Z-Image Turbo with a Soul look's LoRAs on your GPU · free",
+    cloud: "Z-Image Turbo with a Soul look's LoRAs, hosted on fal",
+  },
+};
+
+/** The line a model menu shows: an Original's line for this engine, else the model's tagline. */
+export const modelLine = (m: Pick<ModelDef, "id" | "tagline">, engine: Engine): string => ORIGINAL_LINES[m.id]?.[engine] ?? m.tagline;
 
 export interface ReferenceCheck {
   images: number;
@@ -713,11 +814,15 @@ export function castName(values: CastValues): string {
 // ---------------------------------------------------------------------------
 // Soul Location (cinemaStudio.soulLocation)
 
-export const LOCATION_VIEWS: { id: string; name: string; prompt: string }[] = [
-  { id: "reverse", name: "Reverse angle", prompt: "Show the same location from the opposite direction (a reverse angle), as if the camera turned around" },
-  { id: "wide", name: "Wider", prompt: "Show the same location from further back, a wider establishing view that reveals more of it" },
-  { id: "close", name: "Closer, eye level", prompt: "Show the same location from closer in, at eye level, framing the most interesting part of the set" },
-  { id: "high", name: "High angle", prompt: "Show the same location from a high angle looking down, as from a crane or a balcony" },
+/**
+ * Other views of a location. `pose` is the camera the Multiple-Angles LoRA moves to (0° = where the still was
+ * taken, 180° = the reverse angle; zoom 0 wide … 5 as framed … 10 close), as the Angles app and 3D re-shoots read it.
+ */
+export const LOCATION_VIEWS: { id: string; name: string; prompt: string; pose: ScenePose }[] = [
+  { id: "reverse", name: "Reverse angle", prompt: "Show the same location from the opposite direction (a reverse angle), as if the camera turned around", pose: { horizontal: 180, vertical: 0, zoom: 5 } },
+  { id: "wide", name: "Wider", prompt: "Show the same location from further back, a wider establishing view that reveals more of it", pose: { horizontal: 0, vertical: 0, zoom: 0 } },
+  { id: "close", name: "Closer, eye level", prompt: "Show the same location from closer in, at eye level, framing the most interesting part of the set", pose: { horizontal: 0, vertical: 0, zoom: 8 } },
+  { id: "high", name: "High angle", prompt: "Show the same location from a high angle looking down, as from a crane or a balcony", pose: { horizontal: 0, vertical: 60, zoom: 3 } },
 ];
 
 /** An empty 16:9 set: no people, the place itself is the subject. */
@@ -736,9 +841,11 @@ export function locationPrompt(description: string, settings: DirectorSettings):
     .join(". ") + ".";
 }
 
+const LOCATION_KEEP = "Keep everything about the place the same: architecture, props, materials, time of day, lighting and colour grade. No people";
+
 export function locationViewPrompt(view: string, description?: string): string {
   const v = LOCATION_VIEWS.find((x) => x.id === view) ?? LOCATION_VIEWS[0];
-  return `${v.prompt}. Keep everything about the place the same: architecture, props, materials, time of day, lighting and colour grade. No people${tidy(description) ? `. ${tidy(description)}` : ""}.`;
+  return `${v.prompt}. ${LOCATION_KEEP}${tidy(description) ? `. ${tidy(description)}` : ""}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -983,6 +1090,15 @@ export function stillCameraMissing(s: DirectorSettings): string | null {
 // ---------------------------------------------------------------------------
 // Planning: which model, which steps
 
+/** A model as it runs on this engine: a Fuobe Original (both engines) keeps that engine's routes, options and price. */
+function modelOn(id: string, engine: Engine): ModelDef | undefined {
+  const m = getModel(id);
+  return m && dualEngine(m) ? onEngine(m, engine) : m;
+}
+
+/** Fuobe Cinema in the cloud: LTX-2.3 makes any whole second up to 20 (a frame count at 24 fps). */
+const anyLength = (m: ModelDef) => m.id === CINEMA_MODEL && m.engine === "cloud";
+
 /**
  * Open camera route for a move: a camera LoRA (from the motion preset), else a Fun Camera pose, else
  * prompt only. Both need a start frame: the camera LoRAs are trained on Wan 2.2 image-to-video.
@@ -998,6 +1114,51 @@ export function openCameraRoute(slug: string, hasStartFrame: boolean): { via: "l
   const pose = move.funCamera ?? (typeof wan?.params?.extra?.cameraMotion === "string" ? wan.params.extra.cameraMotion : undefined);
   if (pose && hasStartFrame) return { via: "fun-camera", pose };
   return { via: "prompt" };
+}
+
+/** How Fuobe Cinema makes a camera move on an engine. */
+export type CinemaMoveRoute =
+  /** Cloud: LTX-2.3's built-in camera LoRA (fal's camera_lora); no start frame needed. */
+  | { via: "camera-lora"; cameraLora: string }
+  /** The move's Wan 2.2 camera LoRA: on Fuobe Cinema (Wan 2.2 Lightning) on the GPU, on Fuobe DoP (fal's Wan 2.2 A14B) in the cloud. */
+  | { via: "lora"; modelId: string; loras: LoraRef[]; trigger?: string }
+  /** Open: a Wan 2.2 Fun Camera pose. */
+  | { via: "fun-camera"; pose: string }
+  /** Cloud: a hosted open model's own move (Rack Focus: LTX-2.5's focus_shift). */
+  | { via: "hosted-move"; modelId: string; cameraMotion: string }
+  /**
+   * The move's words only; `frame`: a start frame would let a LoRA, pose or hosted move drive it; `key`: its camera LoRA
+   * downloads from civitai, and without a civitai key fal can't get it.
+   */
+  | { via: "prompt"; frame?: boolean; key?: boolean };
+
+/**
+ * A camera move on Fuobe Cinema (research studios[cinema-studio].original.cameraLora). In the cloud: LTX-2.3's camera
+ * LoRA where one fits, else (with a start frame) the move's Wan 2.2 LoRA on Fuobe DoP or a hosted model's own move, else
+ * words. On the user's GPU: the move's Wan 2.2 LoRA or a Fun Camera pose (with a start frame), else words. A LoRA whose
+ * licence keeps it on the GPU never goes to the cloud, and one that downloads from civitai goes only with a civitai key
+ * (`civitai: false`: none is set; the cloud run would stop at the download, so the move runs on its words).
+ */
+export function cinemaMoveRoute(slug: string, engine: Engine, hasStartFrame: boolean, opts: { civitai?: boolean } = {}): CinemaMoveRoute {
+  const move = moveBySlug(slug);
+  if (!move) return { via: "prompt" };
+  if (engine === "open") {
+    const r = openCameraRoute(slug, hasStartFrame);
+    if (r.via === "lora" && r.loras?.length) return { via: "lora", modelId: CINEMA_MODEL, loras: r.loras, trigger: r.trigger };
+    if (r.via === "fun-camera" && r.pose) return { via: "fun-camera", pose: r.pose };
+    return { via: "prompt", frame: !hasStartFrame && openCameraRoute(slug, true).via !== "prompt" };
+  }
+  const cameraLora = CINEMA_CAMERA_LORA[slug];
+  if (cameraLora) return { via: "camera-lora", cameraLora };
+  const cloud = move.motionId ? getPreset(move.motionId)?.cloud : undefined;
+  const hostable = (cloud?.modelId === DOP_MODEL ? (cloud.loras ?? []) : []).filter((l) => !localOnly(l));
+  const key = opts.civitai === false && hostable.some((l) => !l.hostedUrl && needsToken(l.url));
+  const loras = key ? [] : hostable;
+  const motion = cloud?.modelId === LTX25_HOSTED ? cloud.params?.extra?.camera_motion : undefined;
+  if (!hasStartFrame) return { via: "prompt", frame: loras.length > 0 || typeof motion === "string", ...(key && { key }) };
+  if (loras.length) return { via: "lora", modelId: DOP_MODEL, loras, trigger: triggerOf(loras) };
+  if (typeof motion === "string") return { via: "hosted-move", modelId: LTX25_HOSTED, cameraMotion: motion };
+  return { via: "prompt", ...(key && { key }) };
 }
 
 /** The chain-slot placeholder a planned step uses for the palette swatch (the server swaps in the real PNG). */
@@ -1073,6 +1234,9 @@ function nearest<T extends number>(values: T[], want: number): T {
   return [...values].sort((a, b) => Math.abs(a - want) - Math.abs(b - want) || a - b)[0];
 }
 
+/** Cinema's image tiers on a model whose tiers are 720p / 1080p (Fuobe Soul: about 1 and 2 megapixels). */
+const IMAGE_TIER: Record<string, string> = { "1K": "720p", "2K": "1080p", "4K": "1080p" };
+
 /** Fit ratio, resolution, duration and batch to what the model takes, saying what changed. */
 function fitParams(model: ModelDef, input: CinemaGenerateInput, notes: string[], kind: CinemaMode): GenParams {
   const o = model.options;
@@ -1085,7 +1249,10 @@ function fitParams(model: ModelDef, input: CinemaGenerateInput, notes: string[],
   const res = input.resolution;
   if (res && o.resolutions?.length) {
     if (o.resolutions.includes(res)) params.resolution = res;
-    else {
+    else if (IMAGE_TIER[res] && o.resolutions.includes(IMAGE_TIER[res])) {
+      params.resolution = IMAGE_TIER[res];
+      if (res === "4K") notes.push(`${model.name} makes up to about 2 megapixels (its ${params.resolution} size)`);
+    } else {
       const order = kind === "video" ? VIDEO_RESOLUTIONS : [...IMAGE_RESOLUTIONS, "0.5K", "1.5K", "720p", "1080p"];
       const below = o.resolutions.filter((r) => order.indexOf(r) <= order.indexOf(res) && order.indexOf(r) >= 0);
       params.resolution = below.sort((a, b) => order.indexOf(b) - order.indexOf(a))[0] ?? o.resolutions[0];
@@ -1095,33 +1262,32 @@ function fitParams(model: ModelDef, input: CinemaGenerateInput, notes: string[],
   if (kind === "video" && model.kind === "video") {
     const want = Math.max(DURATION.min, Math.min(DURATION.max, Math.round(input.duration ?? DURATION.default)));
     const allowed = o.durations;
-    params.duration = allowed?.length ? nearest(allowed, want) : want;
-    if (params.duration !== want) notes.push(`${model.name} makes ${params.duration}s clips — use Extend for longer scenes`);
+    // Fuobe Cinema in the cloud: any whole second; past 20 s planVideo adds an extend for the rest.
+    if (anyLength(model)) params.duration = Math.min(want, CINEMA_MAX_SECONDS);
+    else {
+      params.duration = allowed?.length ? nearest(allowed, want) : want;
+      if (params.duration !== want) notes.push(`${model.name} makes ${params.duration}s clips — use Extend for longer scenes`);
+    }
     if (o.audio === true) params.generateAudio = input.audio !== false;
   }
   params.numOutputs = Math.max(BATCH.min, Math.min(BATCH.max, Math.round(input.batch ?? 1)));
   return params;
 }
 
-function pickModel(kind: CinemaMode, input: CinemaGenerateInput, ctx: CinemaContext, notes: string[]): ModelDef {
+/** The model a mode runs on this engine: the one picked from the model menu, else the Original. */
+function pickModel(kind: CinemaMode, input: CinemaGenerateInput): ModelDef {
   const list = CINEMA_MODELS[kind][input.engine];
-  const fallback = kind === "video" && input.engine === "cloud" ? (ctx.higgsfield ? "cinema-studio-4" : "seedance-2-5") : list[0];
-  let id = input.modelId && list.includes(input.modelId) ? input.modelId : fallback;
-  if (HIGGSFIELD_ONLY.has(id) && !ctx.higgsfield) {
-    const instead = kind === "video" ? "seedance-2-5" : "nano-banana-pro";
-    if (input.modelId === id) notes.push(`${getModel(id)?.name ?? id} needs a Higgsfield key — ${getModel(instead)?.name} runs it with the Director in the prompt`);
-    id = instead;
-  }
-  return getModel(id) ?? getModel(fallback)!;
+  const id = input.modelId && list.includes(input.modelId) ? input.modelId : list[0];
+  return modelOn(id, input.engine) ?? modelOn(list[0], input.engine)!;
 }
 
 function stepCost(req: GenerationRequest, jobsOf: Record<string, number>, step: CinemaStep): { cost: number | null; jobs: number; outputs: number } {
-  const p = planGeneration(withPlaceholders({ ...step, request: req }), getModel, getPreset);
+  // An Original is priced on the engine the step runs on (free on the user's GPU).
+  const lookup = (id: string) => modelOn(id, req.engine ?? getModel(id)?.engine ?? "open");
+  const p = planGeneration(withPlaceholders({ ...step, request: req }), lookup, getPreset);
   const waits = !!step.after?.length;
   const jobs = waits ? 1 : p.jobs;
-  let cost = estimateCost(p.model, p.params, jobs);
-  // Cinema Studio 4.0 is token-metered: 480p costs less per second than the 720p list price.
-  if (cost !== null && p.model.id === "cinema-studio-4" && p.params.resolution === "480p") cost = Math.round(cost * (0.2057 / 0.4623) * 1000) / 1000;
+  const cost = estimateCost(p.model, p.params, jobs, p.op, p.loras.length > 0 && routesFor(p.model, p.op).some((r) => !!r.loraEndpoint));
   const times = step.perJobOf ? (jobsOf[step.perJobOf] ?? 1) : 1;
   return { cost: cost === null ? null : cost * times, jobs: jobs * times, outputs: jobs * times * p.perJobOutputs };
 }
@@ -1164,54 +1330,87 @@ function withBrief(brief: string | undefined, prompt: string): string {
   return b ? `${tidy(b)}. ${prompt}` : prompt;
 }
 
+const loraNames = (loras: LoraRef[]) => [...new Set(loras.map((l) => l.file.replace(/\.safetensors$/, "")))].join(" + ");
+
+/** Number the steps of a chained run ("Take", "Extended to 30s", "Palette · …") when there are several. */
+function label(steps: CinemaStep[], labels: Record<string, string>): CinemaStep[] {
+  if (steps.length < 2) return steps;
+  return steps.map((s, i) => ({ ...s, request: { ...s.request, step: { label: labels[s.key] ?? s.key, index: i, of: steps.length } } }));
+}
+
+/**
+ * Reference clips on the cloud default: Fuobe Cinema takes none yet (research studios[cinema-studio].original
+ * .referenceClips), so a take that carries some runs on the first partner model in the menu that takes them all
+ * (Seedance 2.5). A model picked from the menu stays, and clipInputs says what it leaves out.
+ */
+function clipModel(model: ModelDef, input: CinemaGenerateInput, notes: string[]): ModelDef {
+  const kinds = (["videos", "audios"] as const).filter((k) => !!input[k]?.length);
+  if (input.engine !== "cloud" || input.modelId || model.id !== CINEMA_MODEL || !kinds.length || kinds.every((k) => takesClips(model, "ref2v", k))) return model;
+  const instead = CINEMA_MODELS.video.cloud
+    .flatMap((id) => (id === CINEMA_MODEL ? [] : (modelOn(id, "cloud") ?? [])))
+    .find((m) => kinds.every((k) => takesClips(m, "ref2v", k)));
+  if (!instead) return model;
+  notes.push(`${model.name} doesn't take reference clips yet, so this take runs on ${instead.name} (a partner model) with them — pick ${model.name} in the menu to leave them out`);
+  return instead;
+}
+
 function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const notes: string[] = [];
-  let model = pickModel("video", input, ctx, notes);
-  const open = input.engine === "open";
+  const engine = input.engine;
+  const open = engine === "open";
+  let model = clipModel(pickModel("video", input), input, notes);
   const moves = (input.moves ?? []).filter((m) => moveBySlug(m));
   let images = [...(input.images ?? [])];
   let trigger: string | undefined;
   let loras: LoraRef[] | undefined;
-  let cameraMotion: string | undefined;
-  if (open && moves.length) {
-    const cam = openCameraRoute(moves[0], images.length > 0);
+  const extra: Record<string, unknown> = {};
+  // Fuobe Cinema drives the first move with a camera LoRA, a pose or a hosted move (Wan 2.2 on the GPU takes the same
+  // LoRAs and poses); a partner model gets it in words.
+  if (moves.length && (model.id === CINEMA_MODEL || (open && model.family === "wan"))) {
     const name = moveBySlug(moves[0])!.name;
-    if (cam.via === "lora") {
-      loras = cam.loras;
-      trigger = cam.trigger;
-      notes.push(`${name} adds the ${cam.loras!.map((l) => l.file.replace(/\.safetensors$/, "")).join(" + ")} camera LoRA`);
-    } else if (cam.via === "fun-camera") {
-      model = getModel("oss-wan22-fun-camera") ?? model;
-      cameraMotion = cam.pose;
-      notes.push(`${name} runs on Wan 2.2 Fun Camera (the “${cam.pose}” pose)`);
-    } else {
-      const better = !images.length && (moveBySlug(moves[0])!.funCamera || openCameraRoute(moves[0], true).via !== "prompt");
-      notes.push(`${name} is written into the prompt${better ? " — add a start frame to drive it with a camera LoRA or Fun Camera" : ""}`);
-    }
+    const r = cinemaMoveRoute(moves[0], engine, images.length > 0, { civitai: ctx.civitai });
+    if (r.via === "camera-lora") {
+      extra.camera_lora = r.cameraLora;
+      notes.push(`${name} drives LTX-2.3's ${r.cameraLora.replace(/_/g, " ")} camera LoRA`);
+    } else if (r.via === "lora") {
+      loras = r.loras;
+      trigger = r.trigger;
+      if (!open && r.modelId !== model.id) {
+        model = modelOn(r.modelId, engine) ?? model;
+        notes.push(`${name}'s camera LoRA is made for Wan 2.2, so this take runs on ${model.name} (Wan 2.2 A14B on fal: 16 fps, no sound)`);
+      } else notes.push(`${name} adds the ${loraNames(r.loras)} camera LoRA`);
+    } else if (r.via === "fun-camera") {
+      extra.cameraMotion = r.pose;
+      notes.push(`${name} runs on Wan 2.2 Fun Camera (the “${r.pose}” pose)`);
+    } else if (r.via === "hosted-move") {
+      model = modelOn(r.modelId, engine) ?? model;
+      extra.camera_motion = r.cameraMotion;
+      notes.push(`${name} runs on ${model.name}'s own ${r.cameraMotion.replace(/_/g, " ")} move (open weights, hosted)`);
+    } else if (r.key) notes.push(`${name} is written into the prompt — its camera LoRA downloads from civitai, which needs your free API key (Settings → LoRAs)`);
+    else notes.push(`${name} is written into the prompt${r.frame ? ` — add a start frame to drive it with its camera LoRA${open ? " or Fun Camera" : ""}` : ""}`);
   }
-  const native = model.id === "cinema-studio-4";
-  const compiled = compileDirector({ prompt: input.prompt, settings: input.settings, moves, brief: input.brief, mode: "video", target: native ? "native" : "prompt" });
+  const compiled = compileDirector({ prompt: input.prompt, settings: input.settings, moves, brief: input.brief, mode: "video", target: "prompt" });
   let prompt = trigger ? `${trigger}. ${compiled.prompt}` : compiled.prompt;
   const params = fitParams(model, input, notes, "video");
-  const extra: Record<string, unknown> = { ...compiled.extra, ...(cameraMotion ? { cameraMotion } : {}) };
   if (Object.keys(extra).length) params.extra = extra;
+  let seconds = askedSeconds(input);
 
   const ms = input.multiShot;
   const shots = (ms?.shots ?? []).filter((s) => s.prompt.trim());
   if (ms?.mode === "auto") {
     if (model.options.multiShot?.mode === "prompt") params.multiShot = "auto";
-    else if (native) notes.push("Cinema Studio 4.0 cuts by Tempo — pick Chaotic, Dynamic or Calm in Film setup");
     else notes.push(`${model.name} can't plan its own cuts — switch Multi-shot to Manual and write the shots`);
   } else if (ms?.mode === "manual" && shots.length) {
     const concat = model.options.multiShot?.mode === "concat";
     const fitted = concat && model.options.durations?.length ? shots.map((s) => ({ ...s, duration: nearest(model.options.durations!, s.duration) })) : shots;
     if (model.options.multiShot) params.shots = fitted;
     else {
-      // Cinema Studio 4.0 and Veo have no shot list: the shots go into one prompt.
-      const total = Math.min(DURATION.max, fitted.reduce((n, s) => n + s.duration, 0));
+      // Fuobe Cinema in the cloud, Veo: no shot list, so the shots go into one prompt.
+      seconds = Math.min(DURATION.max, fitted.reduce((n, s) => n + s.duration, 0));
       prompt = composeShots(prompt, fitted);
-      if (model.options.durations?.length) params.duration = nearest(model.options.durations, total);
-      notes.push(`The ${fitted.length} shots are written into one ${params.duration}s prompt`);
+      if (anyLength(model)) params.duration = Math.min(seconds, CINEMA_MAX_SECONDS);
+      else if (model.options.durations?.length) params.duration = nearest(model.options.durations, seconds);
+      notes.push(`The ${fitted.length} shots are written into one ${anyLength(model) ? seconds : params.duration}s prompt`);
     }
   }
 
@@ -1221,7 +1420,7 @@ function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
     images = images.slice(0, max);
   }
   // Reference clips go to reference-to-video when the model's routes take them; otherwise a note says they're left out.
-  const others = CINEMA_MODELS.video[input.engine].filter((id) => ctx.higgsfield || !HIGGSFIELD_ONLY.has(id)).flatMap((id) => getModel(id) ?? []);
+  const others = CINEMA_MODELS.video[engine].flatMap((id) => modelOn(id, engine) ?? []);
   const clips = clipInputs(model, "ref2v", input, notes, others);
   const withClips = !!(clips.videos?.length || clips.audios?.length);
   if (withClips && images.length === 1) notes.push("With reference clips, the image is a reference rather than the start frame");
@@ -1229,15 +1428,45 @@ function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const blocker = !input.prompt.trim() && !images.length ? "Describe your scene first" : undefined;
   const inputs = images.length || withClips ? { ...(images.length ? { images } : {}), ...clips } : undefined;
   const steps: CinemaStep[] = [
-    { key: "main", request: { feature: "cinema", modelId: model.id, ...(withClips ? { op: "ref2v" as const } : {}), prompt, inputs, params, loras } },
+    { key: "main", request: { feature: "cinema", modelId: model.id, engine, ...(withClips ? { op: "ref2v" as const } : {}), prompt, inputs, params, loras } },
   ];
-  const hex = paletteHex(input.settings.palette);
-  if (open && hex && input.settings.paletteLock !== false) {
-    steps[0].request.step = { label: "Take", index: 0, of: 2 };
+  const labels: Record<string, string> = { main: "Take" };
+  let last = "main";
+  // Longer than one LTX-2.3 call (20 s): one extend adds the rest to each take, with the same move.
+  const rest = anyLength(model) && !withClips ? seconds - CINEMA_MAX_SECONDS : 0;
+  if (rest > 0) {
     steps.push({
-      key: "palette",
+      key: "more",
       after: ["main"],
       perJobOf: "main",
+      request: {
+        feature: "cinema",
+        modelId: model.id,
+        engine,
+        op: "extend",
+        prompt,
+        chain: [{ slot: "video" }],
+        // The extension keeps the take's size; its resolution and shape price it.
+        params: {
+          duration: rest,
+          numOutputs: 1,
+          ...(params.resolution && { resolution: params.resolution }),
+          ...(params.aspectRatio && { aspectRatio: params.aspectRatio }),
+          ...(params.generateAudio !== undefined && { generateAudio: params.generateAudio }),
+          ...(extra.camera_lora ? { extra: { camera_lora: extra.camera_lora } } : {}),
+        },
+      },
+    });
+    labels.more = `Extended to ${seconds}s`;
+    notes.push(`${model.name} makes up to ${CINEMA_MAX_SECONDS}s in one take, so an extend adds the last ${rest}s`);
+    last = "more";
+  }
+  const hex = paletteHex(input.settings.palette);
+  if (open && hex && input.settings.paletteLock !== false) {
+    steps.push({
+      key: "palette",
+      after: [last],
+      perJobOf: last,
       swatch: hex,
       request: {
         feature: "cinema",
@@ -1246,23 +1475,24 @@ function planVideo(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
         prompt: `Palette lock · ${paletteLabel(input.settings.palette)}`,
         inputs: { images: [SWATCH_PLACEHOLDER] },
         chain: [{ slot: "video" }],
-        step: { label: `Palette · ${paletteLabel(input.settings.palette)}`, index: 1, of: 2 },
       },
     });
+    labels.palette = `Palette · ${paletteLabel(input.settings.palette)}`;
     notes.push(`The grade is locked to ${paletteLabel(input.settings.palette)} with a palette transfer`);
   }
-  return finish(model, steps, notes, blocker);
+  return finish(model, label(steps, labels), notes, blocker);
 }
 
 const STILL_CLIPS_NOTE = "Stills use image references — reference videos and audio are left out";
 
+/** What edits a still with references: Qwen-Image-Edit 2511 on the user's GPU, Nano Banana Pro in the cloud. */
 function editModel(engine: Engine): ModelDef {
   return getModel(engine === "open" ? "oss-qwen-edit" : "nano-banana-pro")!;
 }
 
-function planStill(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
+function planStill(input: CinemaGenerateInput): CinemaPlan {
   const notes: string[] = [];
-  let model = pickModel("image", input, ctx, notes);
+  let model = pickModel("image", input);
   const images = (input.images ?? []).slice(0, input.engine === "open" ? 3 : 10);
   if (images.length && !model.routes.some((r) => r.op === "edit")) {
     const instead = editModel(input.engine);
@@ -1274,11 +1504,10 @@ function planStill(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const params = fitParams(model, { ...input, resolution: input.resolution ?? "1K" }, notes, "image");
   const blocker = stillCameraMissing(input.settings) ?? (!input.prompt.trim() ? "Describe your scene first" : undefined);
   const steps: CinemaStep[] = [
-    { key: "main", request: { feature: "cinema-image", modelId: model.id, prompt: compiled.prompt, inputs: images.length ? { images } : undefined, params } },
+    { key: "main", request: { feature: "cinema-image", modelId: model.id, engine: input.engine, prompt: compiled.prompt, inputs: images.length ? { images } : undefined, params } },
   ];
   const hex = paletteHex(input.settings.palette);
   if (input.engine === "open" && hex && input.settings.paletteLock !== false) {
-    steps[0].request.step = { label: "Still", index: 0, of: 2 };
     steps.push({
       key: "palette",
       after: ["main"],
@@ -1291,11 +1520,10 @@ function planStill(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
         prompt: `Palette lock · ${paletteLabel(input.settings.palette)}`,
         inputs: { images: [SWATCH_PLACEHOLDER] },
         chain: [{ slot: "images", position: "first" }],
-        step: { label: `Palette · ${paletteLabel(input.settings.palette)}`, index: 1, of: 2 },
       },
     });
   }
-  return finish(model, steps, notes, blocker);
+  return finish(model, label(steps, { main: "Still", palette: `Palette · ${paletteLabel(input.settings.palette)}` }), notes, blocker);
 }
 
 function planGrid(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
@@ -1311,76 +1539,179 @@ function planGrid(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
     model = getModel("oss-zimage-grid")!;
     const { rows, cols } = gridDims(size);
     Object.assign(extra, { rows, columns: cols });
-  } else model = input.engine === "cloud" ? getModel("nano-banana-pro")! : pickModel("image", input, ctx, notes);
+  } else model = input.engine === "cloud" ? getModel("nano-banana-pro")! : pickModel("image", input);
   if (input.videos?.length || input.audios?.length) notes.push(STILL_CLIPS_NOTE);
   const compiled = compileDirector({ prompt: input.prompt, settings: input.settings, brief: input.brief, mode: "image", target: "prompt" });
   const params = fitParams(model, { ...input, batch: 1, resolution: input.resolution ?? "2K" }, notes, "image");
   if (Object.keys(extra).length) params.extra = extra;
   const blocker = !input.prompt.trim() ? "Describe your scene first" : undefined;
-  return finish(model, [{ key: "main", request: { feature: "cinema-grid", modelId: model.id, prompt: gridPrompt(compiled.prompt, size, type), inputs: images.length ? { images } : undefined, params } }], notes, blocker);
+  return finish(
+    model,
+    [{ key: "main", request: { feature: "cinema-grid", modelId: model.id, engine: input.engine, prompt: gridPrompt(compiled.prompt, size, type), inputs: images.length ? { images } : undefined, params } }],
+    notes,
+    blocker,
+  );
+}
+
+/**
+ * Soul Cast's makers, the first the default. In the cloud: Fuobe Soul (the Realistic look), else Nano Banana Pro. On the
+ * user's GPU: the Soul Cast sheet graph with Fuobe Soul's Realistic look (the same Z-Image Turbo with the look's LoRAs and
+ * words), which also cuts the sheet's four views, else Fuobe Soul alone.
+ */
+export const CAST_MODELS: Record<Engine, string[]> = { cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro"], open: [CAST_SHEET_MODEL, SOUL_BUILDER_MODEL] };
+/** Soul Location's makers: Fuobe Soul (the Movie look) on both engines, partner and open alternatives after it. */
+export const LOCATION_MODELS: Record<Engine, string[]> = { cloud: [SOUL_BUILDER_MODEL, "nano-banana-pro", "seedream-5-pro"], open: [SOUL_BUILDER_MODEL, "oss-z-image-turbo", "oss-qwen-image"] };
+
+/** A builder's maker: the one asked for when this engine offers it (and this install has it), else the first. */
+function builderModel(list: string[], input: CinemaGenerateInput, ctx: CinemaContext): ModelDef {
+  const has = ctx.has ?? ((id: string) => !!getModel(id));
+  const ok = list.filter(has);
+  const id = input.modelId && ok.includes(input.modelId) ? input.modelId : (ok[0] ?? list[0]);
+  return modelOn(id, input.engine)!;
 }
 
 function planCast(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const notes: string[] = [];
-  const has = ctx.has ?? ((id: string) => !!getModel(id));
-  const open = input.engine === "open";
-  const id = open ? (has("oss-zimage-soul-cast") ? "oss-zimage-soul-cast" : "oss-z-image-turbo") : ctx.higgsfield ? "soul-2" : "nano-banana-pro";
-  const model = getModel(input.modelId && CAST_MODELS[input.engine].includes(input.modelId) && (ctx.higgsfield || !HIGGSFIELD_ONLY.has(input.modelId)) ? input.modelId : id)!;
-  const params = fitParams(model, { ...input, aspectRatio: "16:9", resolution: model.options.resolutions?.includes("2K") ? "2K" : model.options.resolutions?.includes("1080p") ? "1080p" : undefined }, notes, "image");
-  const prompt = withBrief(input.brief, castPrompt(input.cast ?? {}, input.prompt));
-  return finish(model, [{ key: "main", request: { feature: "cinema-cast", modelId: model.id, prompt, params } }], notes);
+  const model = builderModel(CAST_MODELS[input.engine], input, ctx);
+  const soul = model.id === SOUL_BUILDER_MODEL;
+  const params = fitParams(model, { ...input, aspectRatio: "16:9", resolution: "2K" }, notes, "image");
+  let prompt = withBrief(input.brief, castPrompt(input.cast ?? {}, input.prompt));
+  let loras: LoraRef[] | undefined;
+  if (model.id === CAST_SHEET_MODEL) {
+    // The sheet graph is Fuobe Soul's own base: the Realistic look's LoRAs and words go on it, as a Fuobe Soul run would.
+    const recipe = soulRecipe("soul", prompt, { look: CAST_LOOK });
+    prompt = recipe.prompt;
+    loras = recipe.loras.length ? recipe.loras : undefined;
+    notes.push(`Fuobe Soul's ${recipe.look?.name ?? "Realistic"} look on the Soul Cast sheet graph: the sheet, then its four views`);
+  }
+  return finish(
+    model,
+    [{ key: "main", request: { feature: "cinema-cast", modelId: model.id, engine: input.engine, ...(soul && { presetId: CAST_LOOK }), prompt, params, ...(loras && { loras }) } }],
+    notes,
+  );
 }
 
-export const CAST_MODELS: Record<Engine, string[]> = { cloud: ["soul-2", "nano-banana-pro"], open: ["oss-zimage-soul-cast", "oss-z-image-turbo"] };
-export const LOCATION_MODELS: Record<Engine, string[]> = { cloud: ["soul-cinema", "nano-banana-pro", "seedream-5-pro"], open: ["oss-z-image-turbo", "oss-qwen-image"] };
+/**
+ * Another view of a location: the Multiple-Angles LoRA moves the camera to the view's pose, on Qwen-Image-Edit 2511 on the
+ * user's GPU (the LoRA's own words) and on fal's hosted Multiple Angles model (the angles as fields) in the cloud.
+ */
+function planLocationView(input: CinemaGenerateInput): CinemaPlan {
+  const notes: string[] = [];
+  const view = LOCATION_VIEWS.find((x) => x.id === input.view) ?? LOCATION_VIEWS[0];
+  const src = input.source?.kind === "image" ? input.source.url : undefined;
+  const inputs = src ? { images: [src] } : undefined;
+  let model: ModelDef;
+  let request: GenerationRequest;
+  if (input.engine === "cloud") {
+    model = getModel("qwen-multiple-angles")!;
+    const words = withBrief(input.brief, `${LOCATION_KEEP}${tidy(input.prompt) ? `. ${tidy(input.prompt)}` : ""}.`);
+    request = {
+      feature: "cinema-location",
+      modelId: model.id,
+      op: "edit",
+      prompt: words,
+      inputs,
+      params: { numOutputs: 1, extra: { horizontal_angle: view.pose.horizontal, vertical_angle: view.pose.vertical, zoom: view.pose.zoom } },
+    };
+  } else {
+    model = editModel("open");
+    const loras = getPreset("app-angles")?.open?.loras;
+    request = {
+      feature: "cinema-location",
+      modelId: model.id,
+      op: "edit",
+      // The LoRA's own words lead; the brief keeps the project's look.
+      prompt: `<sks> ${poseWords(view.pose)}. ${withBrief(input.brief, locationViewPrompt(view.id, input.prompt))}`,
+      inputs,
+      params: { numOutputs: 1 },
+      ...(loras?.length ? { loras } : {}),
+    };
+  }
+  notes.push(`${model.name} with the Multiple-Angles LoRA moves the camera for the ${view.name.toLowerCase()} view`);
+  return finish(model, [{ key: "main", request }], notes, src ? undefined : "Pick the location image to re-angle");
+}
 
 function planLocation(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
+  if (input.action === "location-view") return planLocationView(input);
   const notes: string[] = [];
-  if (input.action === "location-view") {
-    const model = editModel(input.engine);
-    const src = input.source?.kind === "image" ? input.source.url : undefined;
-    const prompt = withBrief(input.brief, locationViewPrompt(input.view ?? "reverse", input.prompt));
-    return finish(model, [{ key: "main", request: { feature: "cinema-location", modelId: model.id, op: "edit", prompt, inputs: src ? { images: [src] } : undefined, params: { numOutputs: 1 } } }], notes, src ? undefined : "Pick the location image to re-angle");
-  }
-  const fallback = input.engine === "open" ? "oss-z-image-turbo" : ctx.higgsfield ? "soul-cinema" : "nano-banana-pro";
-  const pick = input.modelId && LOCATION_MODELS[input.engine].includes(input.modelId) && (ctx.higgsfield || !HIGGSFIELD_ONLY.has(input.modelId)) ? input.modelId : fallback;
-  const model = getModel(pick)!;
-  const params = fitParams(model, { ...input, aspectRatio: "16:9", resolution: model.options.resolutions?.includes("2K") ? "2K" : model.options.resolutions?.includes("1080p") ? "1080p" : undefined }, notes, "image");
+  const model = builderModel(LOCATION_MODELS[input.engine], input, ctx);
+  const soul = model.id === SOUL_BUILDER_MODEL;
+  const params = fitParams(model, { ...input, aspectRatio: "16:9", resolution: "2K" }, notes, "image");
   const prompt = withBrief(input.brief, locationPrompt(input.prompt, input.settings));
-  return finish(model, [{ key: "main", request: { feature: "cinema-location", modelId: model.id, prompt, params } }], notes, input.prompt.trim() ? undefined : "Describe your location first");
+  return finish(
+    model,
+    [{ key: "main", request: { feature: "cinema-location", modelId: model.id, engine: input.engine, ...(soul && { presetId: LOCATION_LOOK }), prompt, params } }],
+    notes,
+    input.prompt.trim() ? undefined : "Describe your location first",
+  );
 }
 
-/** The video model an extend/prequel runs on: the picked one when it can, else Seedance 2.5 (Higgsfield's engine). */
-function videoModelFor(op: Operation, input: CinemaGenerateInput, ctx: CinemaContext, notes: string[]): ModelDef {
-  if (input.engine === "open") return getModel(op === "extend" ? "oss-wan22-vace-extend" : "oss-wan22-14b-fast")!;
-  const picked = pickModel("video", input, ctx, []);
-  if (picked.routes.some((r) => r.op === op)) return picked;
-  const seedance = getModel("seedance-2-5")!;
-  notes.push(`${picked.name} ${op === "extend" ? "extends" : "makes prequels"} through ${seedance.name}`);
-  return seedance;
+/**
+ * The video model an extend or a prequel runs on. On the user's GPU: Wan 2.2 Fun VACE (extend) or Fuobe Cinema's start and
+ * end frame. In the cloud: the picked model when it does that on fal or Replicate, else Fuobe Cinema (LTX-2.3).
+ */
+function videoModelFor(op: Operation, input: CinemaGenerateInput, notes: string[]): ModelDef {
+  if (input.engine === "open") return op === "extend" ? getModel("oss-wan22-vace-extend")! : modelOn(CINEMA_MODEL, "open")!;
+  const picked = pickModel("video", input);
+  if (picked.routes.some((r) => r.op === op && r.provider !== "higgsfield")) return picked;
+  const cinema = modelOn(CINEMA_MODEL, "cloud")!;
+  notes.push(`${picked.name} ${op === "extend" ? "extends" : "makes prequels"} through ${cinema.name}`);
+  return cinema;
 }
+
+/** LTX-2.3's camera LoRA for the first move, when Fuobe Cinema runs in the cloud and one fits. */
+function cameraExtra(model: ModelDef, moves: string[] | undefined): Record<string, unknown> | undefined {
+  const fit = anyLength(model) && moves?.length ? CINEMA_CAMERA_LORA[moves[0]] : undefined;
+  return fit ? { camera_lora: fit } : undefined;
+}
+
+/** The seconds asked for on the duration chip (within Cinema's 4–30 s). */
+const askedSeconds = (input: CinemaGenerateInput) => Math.max(DURATION.min, Math.min(DURATION.max, Math.round(input.duration ?? DURATION.default)));
 
 function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const notes: string[] = [];
   const src = input.source?.kind === "video" ? input.source : undefined;
   const settings = input.settings;
   const moves = input.moves ?? [];
+  // Fuobe Cinema in the cloud adds at most one LTX-2.3 call (20 s) per extend: say so rather than cut the length quietly.
+  const capped = (m: ModelDef, what: string) => {
+    if (anyLength(m) && askedSeconds(input) > CINEMA_MAX_SECONDS) notes.push(`${m.name} ${what} up to ${CINEMA_MAX_SECONDS}s at a time, so this one is ${CINEMA_MAX_SECONDS}s — run it again for more`);
+  };
   if (input.action === "extend-forward") {
-    const model = videoModelFor("extend", input, ctx, notes);
+    const model = videoModelFor("extend", input, notes);
     const scene = input.prompt.trim() || "Continue the shot naturally: the same characters, location and camera language, picking up exactly where it ends";
     const compiled = compileDirector({ prompt: scene, settings, moves, brief: input.brief, mode: "video", target: "prompt" });
     const params = fitParams(model, input, notes, "video");
     params.numOutputs = 1;
+    capped(model, "extends by");
+    const camera = cameraExtra(model, moves);
+    if (camera) params.extra = camera;
     const clips = clipInputs(model, "extend", input, notes);
     return finish(
       model,
-      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "extend", prompt: compiled.prompt, inputs: src ? { video: src.url, ...clips } : undefined, params, step: { label: "Extended · sequel", index: 0, of: 1 } } }],
+      [{ key: "main", request: { feature: "cinema", modelId: model.id, engine: input.engine, op: "extend", prompt: compiled.prompt, inputs: src ? { video: src.url, ...clips } : undefined, params, step: { label: "Extended · sequel", index: 0, of: 1 } } }],
       notes,
       src ? undefined : "Select a video take to extend",
     );
   }
-  // Backward (prequel): a still of the moment before, then a clip from it that ends on the take's first frame.
-  const video = videoModelFor("flf2v", input, ctx, notes);
+  if (input.videos?.length || input.audios?.length) notes.push("A prequel is made from the take's first frame — reference videos and audio aren't used");
+  const scene = tidy(input.prompt) || "the moments right before this shot";
+  const video = videoModelFor("flf2v", input, notes);
+  // Fuobe Cinema in the cloud: LTX-2.3 extends the take backward from its first frame in one call.
+  if (anyLength(video)) {
+    const compiled = compileDirector({ prompt: `Prequel: ${scene}. The clip leads straight into the opening of the next shot`, settings, moves, brief: input.brief, mode: "video", target: "prompt" });
+    const params = fitParams(video, input, notes, "video");
+    params.numOutputs = 1;
+    params.extra = { ...cameraExtra(video, moves), extend_direction: "backward" };
+    capped(video, "makes a prequel of");
+    return finish(
+      video,
+      [{ key: "main", request: { feature: "cinema", modelId: video.id, engine: input.engine, op: "extend", prompt: compiled.prompt, inputs: src ? { video: src.url } : undefined, params, step: { label: "Extended · prequel", index: 0, of: 1 } } }],
+      notes,
+      src ? undefined : "Select a video take to extend",
+    );
+  }
+  // Elsewhere: a still of the moment before, then a clip from it that ends on the take's first frame.
   const edit = editModel(input.engine);
   const frame = src?.firstFrame;
   const steps: CinemaStep[] = [];
@@ -1393,8 +1724,6 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
         request: { feature: "cinema", modelId: "extract-frame", op: "frame", inputs: { video: src.url }, params: { extra: { frame_type: "first" } }, step: { label: "First frame", index: 0, of: 3 } },
       });
   }
-  if (input.videos?.length || input.audios?.length) notes.push("A prequel is made from the take's first frame — reference videos and audio aren't used");
-  const scene = tidy(input.prompt) || "the moments right before this shot";
   const n = frame ? 2 : 3;
   steps.push({
     key: "before",
@@ -1402,6 +1731,7 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
     request: {
       feature: "cinema",
       modelId: edit.id,
+      engine: input.engine,
       op: "edit",
       prompt: `The same shot a few seconds earlier: ${scene}. Same characters, wardrobe, location, lighting, lens and colour grade; only time has moved back.`,
       inputs: frame ? { images: [frame] } : undefined,
@@ -1419,6 +1749,7 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
     request: {
       feature: "cinema",
       modelId: video.id,
+      engine: input.engine,
       op: "flf2v",
       prompt: compiled.prompt,
       inputs: frame ? { endImage: frame } : undefined,
@@ -1430,20 +1761,74 @@ function planExtend(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan 
   return finish(video, steps, notes, blocker);
 }
 
+/**
+ * How strongly LTX-2.3's video-to-video holds the take when Fuobe Cinema edits it (fal's `video_strength`: lower lets the
+ * model change more; fal's default of 0.01 all but re-renders the clip). Fuobe's guess, between the Evolution recipe's
+ * low and medium change (build plan O13: denoise 0.45 / 0.65), until the cinema-edit eval suite measures it.
+ */
+export const CINEMA_EDIT_STRENGTH = 0.5;
+
+/**
+ * The prompt of an edit on LTX-2.3's video-to-video, which renders a whole scene rather than following an instruction: the
+ * take's own scene with the change written into it, and what has to stay.
+ */
+export function editPrompt(change: string, scene?: string): string {
+  const keep = "Everything else stays as it is: the same people, place, framing, camera move, light and sound";
+  const c = tidy(change);
+  const sc = tidy(scene);
+  return `${sc ? `${sc}. The same shot with one change` : "The same shot with one change"}: ${c}. ${keep}.`;
+}
+
+/** A take made on a partner model in the menu (Seedance 2.5, Kling 3.0, Veo 3.1): a partner editor edits it. */
+const partnerTake = (modelId: string) => modelId !== CINEMA_MODEL && CINEMA_MODELS.video.cloud.includes(modelId);
+
 function planEdit(input: CinemaGenerateInput, ctx: CinemaContext): CinemaPlan {
   const notes: string[] = [];
   const has = ctx.has ?? ((id: string) => !!getModel(id));
   const src = input.source?.kind === "video" ? input.source : undefined;
-  const prompt = withBrief(input.brief, tidy(applyEmotions(input.prompt, input.settings.emotions)));
+  const change = tidy(applyEmotions(input.prompt, input.settings.emotions));
+  const prompt = withBrief(input.brief, change);
   let blocker = !src ? "Select a video take to edit" : !input.prompt.trim() ? "Describe the change" : undefined;
   if (input.engine === "cloud") {
-    const model = getModel(ctx.higgsfield ? "seedance-2-5" : "kling-o3")!;
-    const images = (input.images ?? []).slice(0, 4);
-    // Extra reference clips ride along when the edit model's routes take them.
-    const clips = clipInputs(model, "v2v", input, notes);
+    // Which editor follows the take: one made on a partner model goes to Kling O3 (Seedance 2.5 has no edit on fal), any
+    // other (Fuobe Cinema, Fuobe DoP, an open-engine take) to LTX-2.3's video-to-video. Without the take's model, the menu's.
+    const origin = src?.modelId ?? pickModel("video", input).id;
+    if (partnerTake(origin)) {
+      const model = getModel("kling-o3")!;
+      notes.push(`Takes made on ${getModel(origin)?.name ?? origin} are edited with ${model.name}`);
+      const images = (input.images ?? []).slice(0, 4);
+      // Extra reference clips ride along when the edit model's routes take them.
+      const clips = clipInputs(model, "v2v", input, notes);
+      const params: GenParams = { numOutputs: 1, ...(model.options.audio === true && { generateAudio: input.audio !== false }) };
+      return finish(
+        model,
+        [{ key: "main", request: { feature: "cinema", modelId: model.id, engine: "cloud", op: "v2v", prompt, inputs: src ? { video: src.url, ...(images.length ? { images } : {}), ...clips } : undefined, params, step: { label: "Edited take", index: 0, of: 1 } } }],
+        notes,
+        blocker,
+      );
+    }
+    const model = modelOn(CINEMA_MODEL, "cloud")!;
+    const o = model.options;
+    const seconds = src?.seconds && Number.isFinite(src.seconds) && src.seconds > 0 ? src.seconds : undefined;
+    // LTX-2.3 renders up to 481 frames: a longer take (20 s + an extend) is edited for its first 20 s.
+    const long = seconds !== undefined && seconds > CINEMA_MAX_SECONDS + 0.5;
+    if (long) notes.push(`${model.name} edits up to ${CINEMA_MAX_SECONDS}s of a take (481 frames), so this edit is the take's first ${CINEMA_MAX_SECONDS}s`);
+    const resolution = [src?.resolution, input.resolution].find((r) => r && o.resolutions?.includes(r));
+    const aspectRatio = [src?.aspectRatio, input.aspectRatio].find((a) => a && o.aspectRatios?.includes(a));
+    if (input.videos?.length || input.audios?.length) notes.push(`${model.name} edits from the take alone — reference videos and audio aren't used`);
+    if (input.images?.length) notes.push(`${model.name} edits from the take alone — reference images aren't used`);
+    // The take's length and size price it (the edit is as long as the take); the clip's own header sets the frames.
+    const params: GenParams = {
+      numOutputs: 1,
+      duration: Math.min(seconds ?? DURATION.default, CINEMA_MAX_SECONDS),
+      ...(resolution && { resolution }),
+      ...(aspectRatio && { aspectRatio }),
+      ...(o.audio === true && { generateAudio: input.audio !== false }),
+      extra: { video_strength: CINEMA_EDIT_STRENGTH, audio_strength: 1, ...(long && { match_video_length: false }) },
+    };
     return finish(
       model,
-      [{ key: "main", request: { feature: "cinema", modelId: model.id, op: "v2v", prompt, inputs: src ? { video: src.url, ...(images.length ? { images } : {}), ...clips } : undefined, params: { numOutputs: 1 }, step: { label: "Edited take", index: 0, of: 1 } } }],
+      [{ key: "main", request: { feature: "cinema", modelId: model.id, engine: "cloud", op: "v2v", prompt: withBrief(input.brief, editPrompt(change, src?.prompt)), inputs: src ? { video: src.url } : undefined, params, step: { label: "Edited take", index: 0, of: 1 } } }],
       notes,
       blocker,
     );
@@ -1559,7 +1944,7 @@ export function planCinema(input: CinemaGenerateInput, ctx: CinemaContext): Cine
     case "recompose":
       return planRecompose(i);
     default:
-      return i.mode === "image" ? planStill(i, ctx) : planVideo(i, ctx);
+      return i.mode === "image" ? planStill(i) : planVideo(i, ctx);
   }
 }
 

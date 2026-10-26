@@ -3434,7 +3434,7 @@ export const CLOUD_MODELS: ModelDef[] = [
     "family": "seedance",
     "engine": "cloud",
     "kind": "video",
-    "tagline": "Higgsfield's default \u2014 multi-shot cinema with native audio, up to 30s",
+    "tagline": "ByteDance's cinema model \u2014 multi-shot with native audio, up to 30s",
     "routes": [
       {
         "op": "t2v",
@@ -17191,6 +17191,497 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "usd": 0.036,
       "note": "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)",
       "withLoras": 0.04
+    }
+  },
+  {
+    "id": "fuobe-cinema",
+    "name": "Fuobe Cinema",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-cinema",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Cinema Studio's Director on LTX-2.3 with its camera LoRAs and sound: up to 20 s at 24 fps",
+    "routes": [
+      {
+        "op": "t2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/text-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora"
+      },
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "flf2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "size": {
+            "key": "video_size",
+            "multiple": 16,
+            "table": {
+              "480p": {
+                "21:9": [
+                  1120,
+                  480
+                ],
+                "16:9": [
+                  864,
+                  480
+                ],
+                "4:3": [
+                  640,
+                  480
+                ],
+                "1:1": [
+                  480,
+                  480
+                ],
+                "3:4": [
+                  480,
+                  640
+                ],
+                "9:16": [
+                  480,
+                  864
+                ]
+              },
+              "720p": {
+                "21:9": [
+                  1504,
+                  640
+                ],
+                "16:9": [
+                  1280,
+                  704
+                ],
+                "4:3": [
+                  1024,
+                  768
+                ],
+                "1:1": [
+                  960,
+                  960
+                ],
+                "3:4": [
+                  768,
+                  1024
+                ],
+                "9:16": [
+                  704,
+                  1280
+                ]
+              },
+              "1080p": {
+                "21:9": [
+                  2240,
+                  960
+                ],
+                "16:9": [
+                  1920,
+                  1088
+                ],
+                "4:3": [
+                  1440,
+                  1088
+                ],
+                "1:1": [
+                  1088,
+                  1088
+                ],
+                "3:4": [
+                  1088,
+                  1440
+                ],
+                "9:16": [
+                  1088,
+                  1920
+                ]
+              }
+            }
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "extend",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/extend-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "endImage": "end_image_url",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8,
+            "fromDuration": true
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora"
+      },
+      {
+        "op": "v2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/video-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "video": "video_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "fixed": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora"
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        4,
+        5,
+        6,
+        8,
+        10,
+        12,
+        15,
+        20
+      ],
+      "aspectRatios": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "audio": true,
+      "endFrame": true,
+      "maxImages": 1
+    },
+    "badges": [
+      "audio"
+    ],
+    "defaults": {
+      "aspectRatio": "16:9",
+      "duration": 5,
+      "resolution": "720p",
+      "generateAudio": true
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.0347,
+      "note": "$0.001605 per megapixel of video (width \u00d7 height \u00d7 frames): about $0.17 for 5 s at 720p; $0.001805 with LoRAs",
+      "byResolution": {
+        "480p": 0.016,
+        "720p": 0.0347,
+        "1080p": 0.0805
+      },
+      "withLoras": 0.039,
+      "withLorasByResolution": {
+        "480p": 0.018,
+        "720p": 0.039,
+        "1080p": 0.0905
+      },
+      "videoMegapixel": {
+        "usd": 0.001605,
+        "withLoras": 0.001805
+      }
     }
   }
 ];

@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField, triggerOf } from "./loras";
+import { numFramesValue, sizeValue } from "./payload";
 import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
@@ -589,6 +590,21 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   return { applied, dropped: loras.filter((l) => !applied.includes(l)).map((l) => ({ file: l.file, reason: why(l) })) };
 }
 
+/**
+ * The megapixels of video a frame-count model makes in `seconds` (Pricing.videoMegapixel: Fuobe Cinema's LTX-2.3): the
+ * size its size table gives the tier and shape (an extend or an edit keeps its take's, priced the same), times the frames
+ * its frame count renders. Undefined when no route has both.
+ */
+function videoMegapixels(model: ModelDef, params: GenParams, seconds: number): number | undefined {
+  const sized = model.routes.find((r) => r.map?.size?.table && r.map.numFrames);
+  const size = sized?.map?.size;
+  const f = sized?.map?.numFrames;
+  if (!size || !f) return undefined;
+  const { width, height } = sizeValue(size, params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution);
+  const frames = numFramesValue({ ...f, fromDuration: true }, { duration: seconds, fps: params.fps });
+  return frames === undefined ? undefined : (width * height * frames) / 1e6;
+}
+
 /** Rough USD estimate for a plan (BYO-key cloud runs). Open-source runs are free. */
 export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: Operation, withLoras = false): number | null {
   if (model.engine === "open" || !model.pricing) return model.engine === "open" ? 0 : null;
@@ -596,7 +612,8 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
   const n = params.numOutputs ?? 1;
   const res = params.resolution ?? model.defaults?.resolution;
   // A run with LoRAs goes to the LoRA endpoint, which has its own price.
-  const usd = withLoras && p.withLoras !== undefined ? p.withLoras : (res && p.byResolution && (p.byResolution[res] ?? p.byResolution[res.toLowerCase()])) || p.usd;
+  const at = (table: Record<string, number> | undefined) => (res && table ? (table[res] ?? table[res.toLowerCase()]) : undefined);
+  const usd = withLoras && p.withLoras !== undefined ? (at(p.withLorasByResolution) ?? p.withLoras) : at(p.byResolution) || p.usd;
   let per = usd;
   const clip = op && CLIP_LENGTH_OPS.has(op) && params.sourceDuration && params.sourceDuration > 0 ? params.sourceDuration * (op === "interpolate" ? Math.max(1, params.slowdown ?? 1) : 1) : undefined;
   if (p.unit === "image") per = usd * n;
@@ -605,7 +622,12 @@ export function estimateCost(model: ModelDef, params: GenParams, jobs = 1, op?: 
     const mp = soulKind(model) ? soulMegapixels(params.aspectRatio ?? model.defaults?.aspectRatio, params.resolution ?? model.defaults?.resolution) : 1;
     per = usd * (p.roundUp ? Math.ceil(mp - 1e-9) : mp) * n;
   }
-  if (p.unit === "second") per = usd * (clip ?? params.duration ?? model.defaults?.duration ?? 5) * (p.inputSeconds ? 2 : 1);
+  if (p.unit === "second") {
+    const seconds = clip ?? params.duration ?? model.defaults?.duration ?? 5;
+    const mp = p.videoMegapixel ? videoMegapixels(model, params, seconds) : undefined;
+    const rate = p.videoMegapixel && (withLoras && p.videoMegapixel.withLoras !== undefined ? p.videoMegapixel.withLoras : p.videoMegapixel.usd);
+    per = mp !== undefined && rate ? Math.ceil(mp - 1e-9) * rate : usd * seconds * (p.inputSeconds ? 2 : 1);
+  }
   if (p.unit === "minute") per = (usd * (params.duration ?? 60)) / 60;
   // Settings that change the price (60 fps, a Pro tier, a cheaper model).
   for (const f of p.factors ?? []) {

@@ -1597,6 +1597,26 @@ const originals: ModelDef[] = [
     // Sound in the cloud only (fal's generate_audio): the open LTX-2.3 graphs decode no audio, so no toggle there.
     engineOptions: { open: { audio: false } },
   },
+  // Fuobe Cinema (O6): Cinema Studio 4.0's Original (src/lib/catalog/cinema.ts compiles the Director into the prompt and
+  // turns a camera move into a camera LoRA, a Fun Camera pose or LTX-2.3's camera_lora). On the user's GPU it is Wan 2.2
+  // 14B Lightning, 3 or 5 s at 16 fps (extend and edit run on Wan 2.2 Fun VACE, sound on LTX-2.5); in the cloud LTX-2.3
+  // 22B with sound, up to 20 s at 24 fps, extend and edit included.
+  {
+    ...original({
+      id: "fuobe-cinema",
+      open: [
+        comfy("t2v", "wan22-t2v-14b-lightx2v", "Wan 2.2 14B Lightning with the Director's prompt"),
+        // A camera pose (params.extra.cameraMotion) runs on wan22-fun-camera-14b instead; a move's camera LoRA is injected.
+        comfy("i2v", "wan22-i2v-14b-lightx2v", "Wan 2.2 14B Lightning with the move's camera LoRA, or Fun Camera's pose"),
+        comfy("flf2v", "wan22-flf2v-14b", "Wan 2.2 14B start and end frame"),
+      ],
+      tagline: "Cinema Studio's Director on open weights · Wan 2.2 Lightning free on your GPU (24 GB), or LTX-2.3 with sound on fal",
+      options: ORIGINAL_HALVES.get("fuobe-cinema")?.options ?? {},
+    }),
+    engineDefaults: { open: { resolution: "480p", duration: 5, generateAudio: false } },
+    // Wan 2.2 Lightning: 3 or 5 s, three shapes, 480p or 720p, no sound; several shots render one clip each, then join.
+    engineOptions: { open: { durations: [3, 5], aspectRatios: VID_AR, resolutions: ["480p", "720p"], audio: false, multiShot: CONCAT_SHOTS } },
+  },
 ];
 
 /** Tools that run entirely in the browser; recorded in the library like any other result. */

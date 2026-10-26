@@ -311,7 +311,7 @@ model("bria-extract-object", "Bria Extract Object", "Bria", "bria", "image",
 
 # ----- Video
 model("seedance-2-5", "Seedance 2.5", "ByteDance", "seedance", "video",
-      "Higgsfield's default — multi-shot cinema with native audio, up to 30s",
+      "ByteDance's cinema model — multi-shot with native audio, up to 30s",
       [("t2v", "bytedance/seedance-2.5/text-to-video"), ("i2v", "bytedance/seedance-2.5/image-to-video", "fal", "+flf2v"),
        ("ref2v", "bytedance/seedance-2.5/reference-to-video"),
        ("extend", "bytedance/seedance-2.5/reference-to-video", "fal", {"fixed": {"task": "extension"}, "videoArray": True}),
@@ -475,6 +475,44 @@ model("fuobe-dop-ltx", "Fuobe DoP · LTX", "Fuobe Original", "fuobe-dop", "video
       original=True, api_defaults={"enable_prompt_expansion": False},
       pricing=("second", 0.036, "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)", {"withLoras": 0.04}),
       options={"durations": [3, 5]}, defaults={"aspectRatio": "auto", "duration": 5, "generateAudio": False}, frame_step=8)
+# ----- Originals (O6): Fuobe Cinema's cloud half, Cinema Studio's Director on LTX-2.3 22B (research §8 cinema-studio →
+# studios[cinema-studio].original). Prompt expansion off so the compiled Director prompt is what runs; sound follows the
+# toggle; up to 481 frames at 24 fps (20 s; Cinema adds the rest with one extend); exact sizes per tier in multiples of
+# 32. A camera move LTX-2.3's camera LoRA makes goes as camera_lora (params.extra, set by src/lib/catalog/cinema.ts).
+# An extend or an edit keeps its source clip's size. Priced on fal's per-megapixel-of-video price (Pricing.videoMegapixel:
+# the tier and shape's size × the frames, rounded up); the per-second rates are the 16:9 ones, for display.
+CINEMA = next(s for s in ORIGINALS["studios"] if s["id"] == "cinema-studio")["original"]["cloud"]
+CINEMA_TIERS = {"480p": "480p tier", "720p": "720p tier", "1080p": "1080p tier"}
+CINEMA_SIZES = {tier: {a: [int(x) for x in wh.split("x")] for a, wh in next(v for k, v in CINEMA["sizes"].items() if k.startswith(prefix)).items()}
+                for tier, prefix in CINEMA_TIERS.items()}
+
+
+def per_megapixel(endpoint):
+    """fal's '$x per megapixel of generated video' for an endpoint of the research (base or /lora)."""
+    rec = EPS.get(("fal", endpoint)) or {}
+    m = re.search(r"\$([0-9.]+) per megapixel", rec.get("price") or "")
+    if not m:
+        sys.exit(f"fuobe-cinema: no per-megapixel price for {endpoint} in the research")
+    return float(m.group(1))
+
+
+CINEMA_MP = per_megapixel("fal-ai/ltx-2.3-22b/image-to-video")
+CINEMA_MP_LORA = per_megapixel("fal-ai/ltx-2.3-22b/image-to-video/lora")
+# A second of 16:9 video at each tier: width × height × 24 frames, in megapixels, at fal's price.
+CINEMA_PER_SECOND = {t: round(s["16:9"][0] * s["16:9"][1] * CINEMA["fps"] / 1e6 * CINEMA_MP, 4) for t, s in CINEMA_SIZES.items()}
+CINEMA_PER_SECOND_LORA = {t: round(s["16:9"][0] * s["16:9"][1] * CINEMA["fps"] / 1e6 * CINEMA_MP_LORA, 4) for t, s in CINEMA_SIZES.items()}
+model("fuobe-cinema", "Fuobe Cinema", "Fuobe Original", "fuobe-cinema", "video",
+      "Cinema Studio's Director on LTX-2.3 with its camera LoRAs and sound: up to 20 s at 24 fps",
+      [("t2v", "fal-ai/ltx-2.3-22b/text-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/text-to-video/lora", "fixed": CINEMA["fixed"]}),
+       ("i2v", "fal-ai/ltx-2.3-22b/image-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora", "fixed": CINEMA["fixed"], "flf2v": True}),
+       ("extend", "fal-ai/ltx-2.3-22b/extend-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/extend-video/lora", "fixed": CINEMA["fixed"], "keepSize": True}),
+       ("v2v", "fal-ai/ltx-2.3-22b/video-to-video", "fal", {"loraEndpoint": "fal-ai/ltx-2.3-22b/video-to-video/lora", "fixed": CINEMA["fixed"], "keepSize": True})],
+      original=True, sizes=CINEMA_SIZES, badges=["audio"],
+      pricing=("second", CINEMA_PER_SECOND["720p"],
+               f"${CINEMA_MP} per megapixel of video (width × height × frames): about ${round(CINEMA_PER_SECOND['720p'] * 5, 2)} for 5 s at 720p; ${CINEMA_MP_LORA} with LoRAs",
+               {"byResolution": CINEMA_PER_SECOND, "withLoras": CINEMA_PER_SECOND_LORA["720p"], "withLorasByResolution": CINEMA_PER_SECOND_LORA,
+                "videoMegapixel": {"usd": CINEMA_MP, "withLoras": CINEMA_MP_LORA}}),
+      defaults={"aspectRatio": "16:9", "duration": 5, "resolution": "720p"}, frame_step=8)
 model("ltx-2-5", "LTX 2.5 Pro", "Lightricks", "ltx", "video", "Fast 4K-capable video with audio",
       [("t2v", "lightricks/ltx-2.5/text-to-video/pro"), ("i2v", "lightricks/ltx-2.5/image-to-video/pro")],
       badges=["audio"], defaults={"aspectRatio": "16:9"})

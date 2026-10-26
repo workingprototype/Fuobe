@@ -26,6 +26,7 @@ import { CinemaFeed, type FeedHandlers } from "./cinema-feed";
 import { initialDraft, type CinemaDraft } from "./draft";
 import { ElementsPanel } from "./elements-panel";
 import { FolderSidebar, subtree, viewKey, type CinemaView } from "./folder-sidebar";
+import { mediaDuration } from "./media";
 import { formatUsd } from "./money";
 import { foreign, useAutosave, useCinemaGenerate, useCinemaItems, useCinemaProject, useItemActions, useStudioGenerations, useUpdateProject, type CinemaGeneration, type ProjectView } from "./hooks";
 import { cutGrid } from "./media";
@@ -286,7 +287,26 @@ function Workspace({ data, items, loading }: { data: ProjectView; items: CinemaG
       focusPrompt();
     },
     onUseTake: (g, o: OutputFile) => {
-      setDraft({ mode: "video", source: { generationId: g.id, url: o.url, kind: "video", label: g.take?.prompt || g.request.prompt || "Take" }, action: "extend-forward" });
+      const p = g.request.params;
+      setDraft({
+        mode: "video",
+        source: {
+          generationId: g.id,
+          url: o.url,
+          kind: "video",
+          label: g.take?.prompt || g.request.prompt || "Take",
+          // What an edit needs to know: the take's model (a partner take goes to a partner editor), its scene, size and length.
+          modelId: g.modelId,
+          prompt: g.take?.prompt || g.request.prompt || undefined,
+          resolution: p?.resolution,
+          aspectRatio: p?.aspectRatio,
+        },
+        action: "extend-forward",
+      });
+      // Its length, read from the file's header (a 20 s take plus its extend is one file).
+      void mediaDuration(o.url, "video").then((seconds) => {
+        if (Number.isFinite(seconds) && seconds > 0) setDraft((d) => (d.source?.url === o.url ? { source: { ...d.source, seconds } } : {}));
+      });
       focusPrompt();
     },
     onAnimate: (url) => {

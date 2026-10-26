@@ -41,6 +41,15 @@ export function cropRect(width: number, height: number, aspect: string): { x: nu
   return { x: 0, y: Math.round((height - h) / 2), width, height: h };
 }
 
+/**
+ * A picked output's URL now: the finished picture's when `url` was its raw one (meta.original: a pick made before the
+ * grade and crop were applied), else `url`.
+ */
+export function finishedUrl(gens: Pick<Generation, "outputs">[], url: string): string {
+  for (const g of gens) for (const o of g.outputs) if (o.url === url || o.meta?.original === url) return o.url;
+  return url;
+}
+
 /** Which outputs of a finished job still need their post steps (indexes into outputs). */
 export function outputsToFinish(g: Pick<Generation, "status" | "outputs" | "provider">): number[] {
   if (g.status !== "succeeded") return [];
