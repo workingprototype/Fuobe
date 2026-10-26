@@ -210,6 +210,19 @@ describe("open engine: multi-view TRELLIS.2 (image-to-3d-trellis2-multiview)", (
     expect(workflow["702"].inputs.filename_prefix).toBe("fuobe/gen-mv");
   });
 
+  it("measures the photos' field of view on the front crop (MoGe), unless one is given", async () => {
+    const { workflow } = await prep(["f.png", "b.png"], { views: ["front", "back"] });
+    // Pixal3D reads the views' horizontal FOV from MoGe 2 run on the front's cut-out crop, not the rig's fixed 20°.
+    expect(workflow["324"].inputs.fov).toEqual(["382", 0]);
+    expect(workflow["382"]).toMatchObject({ class_type: "MoGeGeometryToFOV", inputs: { moge_geometry: ["381", 0], axis: "horizontal", unit: "degrees" } });
+    expect(workflow["381"]).toMatchObject({ class_type: "MoGeInference", inputs: { image: ["312", 0], fov_x_degrees: 0 } });
+    expect(manifest.models.map((m) => m.file)).toContain("moge_2_vitl_normal_fp16.safetensors");
+    // A rendered turnaround sheet: fovX fixes MoGe's lens, which the FOV node passes on.
+    const sheet = await prep(["f.png", "l.png"], { views: ["front", "left"], fovX: 20 });
+    expect(sheet.workflow["381"].inputs.fov_x_degrees).toBe(20);
+    expect(sheet.workflow["324"].inputs.fov).toEqual(["382", 0]);
+  });
+
   it("takes the photos in side order when they aren't named, and all four sides", async () => {
     const { workflow } = await prep(["f.png", "l.png", "b.png", "r.png"]);
     expect(["360", "361", "362", "363"].map((id) => workflow[id].inputs.image)).toEqual(["f.png", "l.png", "b.png", "r.png"]);

@@ -10769,6 +10769,86 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "MoGeGeometryToFOV": {
+    "input": {
+      "required": {
+        "moge_geometry": [
+          "MOGE_GEOMETRY",
+          {}
+        ],
+        "axis": [
+          "COMBO",
+          {
+            "tooltip": "'vertical' (fov_y), 'horizontal' (fov_x), or 'diagonal'.",
+            "default": "vertical",
+            "multiselect": false,
+            "options": [
+              "vertical",
+              "horizontal",
+              "diagonal"
+            ]
+          }
+        ],
+        "unit": [
+          "COMBO",
+          {
+            "tooltip": "Output unit for the FOV.",
+            "default": "degrees",
+            "multiselect": false,
+            "options": [
+              "degrees",
+              "radians"
+            ]
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "moge_geometry",
+        "axis",
+        "unit"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "FLOAT",
+      "FLOAT"
+    ],
+    "output_is_list": [
+      false,
+      false
+    ],
+    "output_name": [
+      "fov",
+      "focal_pixels"
+    ],
+    "output_tooltips": [
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "MoGeGeometryToFOV",
+    "display_name": "Get FoV from MoGe Geometry",
+    "description": "Derive the field of view and focal length from MoGe intrinsics.",
+    "python_module": "comfy_extras.nodes_moge",
+    "category": "image/geometry estimation",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "moge",
+      "fov",
+      "geometry",
+      "intrinsics",
+      "field of view"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "MoGeInference": {
     "input": {
       "required": {
