@@ -27,6 +27,8 @@ import {
   type ShareKind,
   type ShareLayout,
   type ShareListItem,
+  type SharePatch,
+  type ShareRequest,
 } from "@/lib/share";
 import { db } from "./db";
 import { toGeneration } from "./generations";
@@ -207,21 +209,7 @@ export function recordView(id: string, now = Date.now()): void {
 // ---------------------------------------------------------------------------
 // The owner's side
 
-export interface CreateShareInput {
-  kind: ShareKind;
-  /** The result, folder or Cinema project (not for a published selection). */
-  targetId?: string | null;
-  /** A published selection's results, in page order. */
-  items?: string[];
-  title?: string;
-  description?: string;
-  tags?: string[] | string;
-  layout?: ShareLayout;
-  cover?: { generationId: string; index: number } | null;
-  showPrompts?: boolean;
-  /** Days until the link stops working; null or left out: until revoked. */
-  expiresInDays?: number | null;
-}
+export type CreateShareInput = ShareRequest;
 
 const clean = (s: string | undefined, max: number) => (s ?? "").replace(/\s+/g, (w) => (w.includes("\n") ? "\n" : " ")).trim().slice(0, max);
 
@@ -311,18 +299,6 @@ export function listShares(): ShareListItem[] {
     const out = coverGen?.outputs[coverGen.id === info.cover?.generationId ? info.cover.index : coverGen.outputs.findIndex((o) => (o.kind === "image" || o.kind === "video") && storedPath(o.url))];
     return { ...info, count: sc?.list.length ?? 0, thumb: out && storedPath(out.url) ? { url: out.url, kind: out.kind } : null, gone: !sc };
   });
-}
-
-export interface SharePatch {
-  title?: string;
-  description?: string;
-  tags?: string[] | string;
-  layout?: ShareLayout;
-  showPrompts?: boolean;
-  /** Days from now; null: never expires. */
-  expiresInDays?: number | null;
-  /** A new token: the old link stops working. */
-  newLink?: boolean;
 }
 
 /** Change a link (its words, prompts on or off, a new expiry from now), or give it a new token. */

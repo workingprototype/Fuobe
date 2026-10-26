@@ -65,6 +65,43 @@ export interface ShareListItem extends ShareInfo {
   gone: boolean;
 }
 
+/** POST /api/shares: a new link. */
+export interface ShareRequest {
+  kind: ShareKind;
+  /** The result, folder or Cinema project (not for a published selection). */
+  targetId?: string | null;
+  /** A published selection's results, in page order. */
+  items?: string[];
+  title?: string;
+  description?: string;
+  tags?: string[] | string;
+  layout?: ShareLayout;
+  cover?: { generationId: string; index: number } | null;
+  showPrompts?: boolean;
+  /** Days until the link stops working; null or left out: until revoked. */
+  expiresInDays?: number | null;
+}
+
+/** PATCH /api/shares/[id]. */
+export interface SharePatch {
+  title?: string;
+  description?: string;
+  tags?: string[] | string;
+  layout?: ShareLayout;
+  showPrompts?: boolean;
+  /** Days from now; null: never expires. */
+  expiresInDays?: number | null;
+  /** A new token: the old link stops working. */
+  newLink?: true;
+}
+
+/** A link as created (or renewed): the token is in this answer only. */
+export interface ShareCreated {
+  share: ShareInfo;
+  token: string;
+  path: string;
+}
+
 // ---------------------------------------------------------------------------
 // Tokens and the public routes
 

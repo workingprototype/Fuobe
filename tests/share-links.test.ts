@@ -6,6 +6,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import type { ShareListItem } from "@/lib/share";
+import type { ShareRow } from "@/server/share-access";
 
 // Route handlers call connection() (no request scope in a test).
 vi.mock("next/server", async (importOriginal) => ({ ...(await importOriginal<typeof import("next/server")>()), connection: async () => {} }));
@@ -132,7 +134,7 @@ describe("tokens", () => {
     expect(p).toBe(`/s/${token}`);
     expect(share.isShareToken(token)).toBe(true);
     expect(s.id).toBe(token.slice(0, share.SHARE_ID_LENGTH));
-    const row = db().prepare("SELECT * FROM shares WHERE id = ?").get(s.id) as access.ShareRow;
+    const row = db().prepare("SELECT * FROM shares WHERE id = ?").get(s.id) as ShareRow;
     expect(row.token_hash).toBe(crypto.createHash("sha256").update(token).digest("hex"));
     expect(JSON.stringify(db().prepare("SELECT * FROM shares").all())).not.toContain(token.slice(share.SHARE_ID_LENGTH));
 
@@ -315,7 +317,7 @@ describe("the owner's API", () => {
     expect(created.status).toBe(201);
     const { share: s, token } = (await created.json()) as { share: { id: string; expiresAt: number }; token: string };
     expect(s.expiresAt).toBeGreaterThan(Date.now());
-    const list = (await (await listRoute.GET()).json()) as { items: (share.ShareListItem & { token?: string })[]; signIn: boolean };
+    const list = (await (await listRoute.GET()).json()) as { items: ShareListItem[]; signIn: boolean };
     const row = list.items.find((x) => x.id === s.id)!;
     expect(row).toMatchObject({ count: 1, gone: false, thumb: { kind: "image" } });
     expect(JSON.stringify(list)).not.toContain(token);
