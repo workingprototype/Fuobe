@@ -7,6 +7,7 @@ import {
   BOARD_LIMITS,
   FIRST_PAGE_ID,
   groupTargets,
+  nextPageName,
   pageContent,
   pageName,
   pageOf,
@@ -307,7 +308,8 @@ const NOT_TRASHED = "NOT EXISTS (SELECT 1 FROM generation_trash t WHERE t.genera
 function previewOf(runs: CanvasRuns): CanvasSummary["preview"] {
   const ids = Object.values(runs)
     .sort((a, b) => b.at - a.at)
-    .flatMap((r) => r.ids)
+    // A node made in steps shows its result, not one of its cuts.
+    .flatMap((r) => (r.out ? [r.out] : r.ids))
     .slice(0, 60);
   if (!ids.length) return null;
   const rows = db()
@@ -389,7 +391,12 @@ export function updateCanvas(id: string, patch: CanvasPatch): Canvas | null {
   const name = patch.name?.trim() ? patch.name.trim().slice(0, 80) : current.name;
   let pages = current.pages;
   if (patch.pages?.length) pages = patch.pages.map((p) => ({ ...p, graph: cleanGraph(p.graph) }));
-  if (patch.graph) pages = withPageGraph(pages, patch.page, cleanGraph(patch.graph));
+  if (patch.graph) {
+    const graph = cleanGraph(patch.graph);
+    // A page the editor added and hasn't saved yet (a run sent before the autosave): added, never written over page 1.
+    if (patch.page && !pages.some((p) => p.id === patch.page) && pages.length < BOARD_LIMITS.pages) pages = [...pages, { id: patch.page, name: nextPageName(pages), graph }];
+    else pages = withPageGraph(pages, patch.page, graph);
+  }
   const edited = pageContent(pages) !== pageContent(current.pages) ? now : current.editedAt;
   db().prepare("UPDATE canvases SET name = ?, graph_json = ?, updated_at = ?, edited_at = ? WHERE id = ?").run(name, JSON.stringify({ pages }), now, edited, id);
   return getCanvas(id);

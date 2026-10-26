@@ -248,6 +248,9 @@ describe("plans for the new nodes", () => {
     // Switching engines keeps the frame and the cuts.
     const cloud = convertEngine(g, "cloud").graph.nodes[2].data;
     expect(cloud).toMatchObject({ modelId: "join-clips", params: { aspectRatio: "9:16" }, clips: { a: { start: 1, end: 4, mute: true } } });
+    // Made without its tools (through the API): it asks for the engine, not for a model it has no picker for.
+    const bare = { ...g.nodes[2], data: { ...g.nodes[2].data, modelId: undefined } };
+    expect(describeNode(g, bare, { engineMode: "open" }).error).toBe("Pick where the film is made: on the cloud or with open source");
   });
 
   it("Video concatenator, cloud: 30 clips fold into joins of at most 24", () => {
@@ -406,6 +409,16 @@ describe("pages", () => {
     expect(again.ran).toEqual(["img2"]);
     expect(again.canvas.pages[0].graph.nodes[0].data.text).toBe("A red fox");
     expect(again.canvas.pages[1].graph.nodes[0].data.text).toBe("A white wolf");
+
+    // A run on a page the server hasn't stored yet (added just now, before the autosave) adds it.
+    res = await run.POST(req("POST", { page: "page-new", graph: { nodes: [node("p3", "prompt", { text: "A lynx" }), node("img3", "model", { modelId: "nano-banana-pro" }, 400)], edges: [edge("p3", "img3", "prompt")] } }), ctx(c.id));
+    const added = (await res.json()) as { ran: string[]; canvas: Canvas };
+    expect(added.ran).toEqual(["img3"]);
+    expect(added.canvas.pages.map((p) => [p.id, p.name, p.graph.nodes[0].data.text])).toEqual([
+      ["page-1", "Page 1", "A red fox"],
+      ["page-2", "Wolves", "A white wolf"],
+      ["page-new", "Page 3", "A lynx"],
+    ]);
 
     // A row stored before pages (one bare graph) still opens, as page 1.
     db().prepare("UPDATE canvases SET graph_json = ? WHERE id = ?").run(JSON.stringify({ nodes: [node("old", "prompt", { text: "old" })], edges: [] }), c.id);

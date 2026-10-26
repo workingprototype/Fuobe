@@ -1113,8 +1113,12 @@ export function describeNode(graph: CanvasGraph, n: CanvasNode, ctx: DescribeCon
   const mode = ctx.engineMode ?? "both";
   // A Fuobe Original as it runs on the node's engine (its routes, its price).
   const model = nodeModel(n, mode);
-  // Dubbing has no open model: an open-only install says where it dubs instead.
-  if (!model) return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : n.type === "translate" && n.data.mediaKind === "video" && mode === "open" ? OPEN_DUB_HINT : "Pick a model" };
+  // Dubbing has no open model: an open-only install says where it dubs instead. The concatenator's tools are
+  // picked by engine, not by model.
+  if (!model) {
+    const pick = n.type === "translate" && n.data.mediaKind === "video" && mode === "open" ? OPEN_DUB_HINT : n.type === "concat" ? "Pick where the film is made: on the cloud or with open source" : "Pick a model";
+    return { costUsd: null, error: n.data.modelId ? "That model is no longer in the catalog — pick another" : pick };
+  }
   if (mode !== "both" && !runsOn(model, mode)) {
     return {
       model,
@@ -1667,28 +1671,27 @@ export const CANVAS_TEMPLATES: CanvasTemplate[] = [
       ],
     ),
   },
+  {
+    id: "clips-film",
+    name: "Clips → one film",
+    description: "Trim, mute and join clips in one frame, 30 fps, with the Video concatenator",
+    icon: "Film",
+    hue: 250,
+    build: tpl(
+      [
+        ...[0, 1, 2].map((i) => ({ id: `clip${i + 1}`, type: "video-input" as const, x: 0, y: i * 320, data: { label: `Clip ${i + 1}` } })),
+        { id: "film", type: "concat", x: COL, y: 200, data: { label: "Film", params: { aspectRatio: "16:9" } }, models: { cloud: CONCAT_MODELS.cloud, open: CONCAT_MODELS.open } },
+        { id: "out", type: "output", x: COL * 2 + 40, y: 240, data: { label: "Film" } },
+      ],
+      [
+        ["clip1", "film", "videos"],
+        ["clip2", "film", "videos"],
+        ["clip3", "film", "videos"],
+        ["film", "out"],
+      ],
+    ),
+  },
 ];
-
-CANVAS_TEMPLATES.push({
-  id: "clips-film",
-  name: "Clips → one film",
-  description: "Trim, mute and join clips in one frame, 30 fps, with the Video concatenator",
-  icon: "Film",
-  hue: 250,
-  build: tpl(
-    [
-      ...[0, 1, 2].map((i) => ({ id: `clip${i + 1}`, type: "video-input" as const, x: 0, y: i * 320, data: { label: `Clip ${i + 1}` } })),
-      { id: "film", type: "concat", x: COL, y: 200, data: { label: "Film", params: { aspectRatio: "16:9" } }, models: { cloud: CONCAT_MODELS.cloud, open: CONCAT_MODELS.open } },
-      { id: "out", type: "output", x: COL * 2 + 40, y: 240, data: { label: "Film" } },
-    ],
-    [
-      ["clip1", "film", "videos"],
-      ["clip2", "film", "videos"],
-      ["clip3", "film", "videos"],
-      ["film", "out"],
-    ],
-  ),
-});
 
 export function getTemplate(id: string): CanvasTemplate | undefined {
   return CANVAS_TEMPLATES.find((t) => t.id === id);

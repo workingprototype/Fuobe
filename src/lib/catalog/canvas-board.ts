@@ -18,13 +18,14 @@ import type { CanvasGraph, CanvasNode } from "./canvas";
 export const BOARD_COLORS = ["ink", "chart-1", "chart-2", "chart-3", "chart-4", "chart-5"] as const;
 export type BoardColor = (typeof BOARD_COLORS)[number];
 
+/** Named by the tokens' hues (src/app/globals.css): 282, 195, 80, 8 and 240. */
 export const BOARD_COLOR_LABEL: Record<BoardColor, string> = {
   ink: "Ink",
-  "chart-1": "Lime",
-  "chart-2": "Blue",
-  "chart-3": "Violet",
-  "chart-4": "Orange",
-  "chart-5": "Pink",
+  "chart-1": "Violet",
+  "chart-2": "Teal",
+  "chart-3": "Amber",
+  "chart-4": "Rose",
+  "chart-5": "Blue",
 };
 
 /** A frame around nodes: moves them with it, and runs them together. */

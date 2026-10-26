@@ -818,7 +818,7 @@ const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, se
           </div>
         )}
         {type === "concat" ? (
-          <ConcatPanel id={id} data={data} engine={model?.engine ?? g.engine} />
+          <ConcatPanel id={id} data={data} engine={model?.engine} />
         ) : v.error === OPEN_DUB_HINT ? null : (
         <div className={cn("flex flex-wrap items-center gap-1.5 [&>button]:h-7 [&>button]:text-[12px]", g.readOnly && "pointer-events-none")}>
           {choices.length ? (
@@ -1041,7 +1041,8 @@ function ClipItem({ id, row, index, count, settings, readOnly, onMove }: { id: s
   );
 }
 
-function ConcatPanel({ id, data, engine }: { id: string; data: CanvasNodeData; engine: Engine }) {
+/** `engine`: the engine of the node's tools (none yet on a node made without them, e.g. through the API). */
+function ConcatPanel({ id, data, engine }: { id: string; data: CanvasNodeData; engine?: Engine }) {
   const actions = useEditorActions();
   const g = useEditorGlobals();
   const rows = useEditorSelector(selectClipRows, id, sameRows);
@@ -1058,9 +1059,9 @@ function ConcatPanel({ id, data, engine }: { id: string; data: CanvasNodeData; e
     <div className="space-y-2">
       <div className={cn("flex flex-wrap items-center gap-1.5", g.readOnly && "pointer-events-none")}>
         <OptionSelect label="Aspect ratio" value={ratio} options={[...CONCAT_RATIOS]} onChange={(v) => actions.update(id, { params: { ...data.params, aspectRatio: v } })} />
-        {g.mode === "both" && (
-          <div className={cn("inline-grid h-7 grid-cols-2 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label="Engine">
-            {(["cloud", "open"] as const).map((e) => (
+        {(g.mode === "both" || !engine) && (
+          <div className={cn("inline-flex h-7 rounded-full bg-muted p-0.5 text-[12px] font-medium", NO_DRAG)} role="radiogroup" aria-label="Engine">
+            {(g.mode === "both" ? (["cloud", "open"] as const) : [g.mode]).map((e) => (
               <button key={e} role="radio" aria-checked={engine === e} onClick={() => actions.update(id, { modelId: CONCAT_MODELS[e] })} className={cn("rounded-full px-2.5", engine === e ? "bg-background shadow-soft" : "text-muted-foreground")}>
                 {e === "cloud" ? "Cloud" : "Open source"}
               </button>

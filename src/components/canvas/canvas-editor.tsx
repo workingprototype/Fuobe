@@ -1142,7 +1142,7 @@ function Editor({ id, initial, view }: { id: string; initial: Canvas; view: Canv
                 ))}
               </div>
               {pages.length > 1 && (
-                <select value={pageId} onChange={(e) => pageOps.switchTo(e.target.value)} aria-label="Page" className="h-9 max-w-32 min-w-0 truncate rounded-full bg-muted px-3 text-[13px] font-medium outline-none">
+                <select value={pageId} onChange={(e) => pageOps.switchTo(e.target.value)} aria-label="Page" className="h-9 max-w-32 shrink-0 truncate rounded-full bg-muted px-3 text-[13px] font-medium outline-none">
                   {pages.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
