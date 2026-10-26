@@ -8461,6 +8461,117 @@
     "essentials_category": null,
     "has_intermediate_output": false
   },
+  "LTXVAddGuide": {
+    "input": {
+      "required": {
+        "positive": [
+          "CONDITIONING",
+          {}
+        ],
+        "negative": [
+          "CONDITIONING",
+          {}
+        ],
+        "vae": [
+          "VAE",
+          {}
+        ],
+        "latent": [
+          "LATENT",
+          {}
+        ],
+        "image": [
+          "IMAGE",
+          {
+            "tooltip": "Image or video to condition the latent video on. Must be 8*n + 1 frames. If the video is not 8*n + 1 frames, it will be cropped to the nearest 8*n + 1 frames."
+          }
+        ],
+        "frame_idx": [
+          "INT",
+          {
+            "tooltip": "Frame index to start the conditioning at. For single-frame images or videos with 1-8 frames, any frame_idx value is acceptable. For videos with 9+ frames, frame_idx must be divisible by 8, otherwise it will be rounded down to the nearest multiple of 8. Negative values are counted from the end of the video.",
+            "default": 0,
+            "min": -9999,
+            "max": 9999
+          }
+        ],
+        "strength": [
+          "FLOAT",
+          {
+            "default": 1,
+            "min": 0,
+            "max": 10,
+            "step": 0.01
+          }
+        ]
+      },
+      "optional": {
+        "attention_mask": [
+          "MASK",
+          {
+            "tooltip": "Optional pixel-space spatial mask. Controls per-region conditioning influence via self-attention, multiplied by strength."
+          }
+        ],
+        "iclora_parameters": [
+          "IC_LORA_PARAMETERS",
+          {
+            "tooltip": "Optional IC-LoRA parameters from a Get IC-LoRA Parameters node. Used for adjusting guide processing as required by certain IC-LoRAs (eg. those with a reference_downscale_factor > 1). When chained, each LTXVAddGuide uses only the parameters connected to it."
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "positive",
+        "negative",
+        "vae",
+        "latent",
+        "image",
+        "frame_idx",
+        "strength"
+      ],
+      "optional": [
+        "attention_mask",
+        "iclora_parameters"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "CONDITIONING",
+      "CONDITIONING",
+      "LATENT"
+    ],
+    "output_is_list": [
+      false,
+      false,
+      false
+    ],
+    "output_name": [
+      "positive",
+      "negative",
+      "latent"
+    ],
+    "output_tooltips": [
+      null,
+      null,
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "LTXVAddGuide",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_lt",
+    "category": "model/conditioning/ltxv",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
   "LTXVAudioVAEDecode": {
     "input": {
       "required": {
@@ -13705,6 +13816,68 @@
     "description": "",
     "python_module": "comfy_extras.nodes_custom_sampler",
     "category": "model/sampling/custom",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": null,
+    "essentials_category": null,
+    "has_intermediate_output": false
+  },
+  "SamplerEulerAncestral": {
+    "input": {
+      "required": {
+        "eta": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 1,
+            "min": 0,
+            "max": 100,
+            "step": 0.01,
+            "round": false
+          }
+        ],
+        "s_noise": [
+          "FLOAT",
+          {
+            "advanced": true,
+            "default": 1,
+            "min": 0,
+            "max": 100,
+            "step": 0.01,
+            "round": false
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "eta",
+        "s_noise"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "SAMPLER"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "SAMPLER"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "SamplerEulerAncestral",
+    "display_name": null,
+    "description": "",
+    "python_module": "comfy_extras.nodes_custom_sampler",
+    "category": "model/sampling/samplers",
     "output_node": false,
     "deprecated": false,
     "experimental": false,
