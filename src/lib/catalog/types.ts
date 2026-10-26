@@ -741,6 +741,11 @@ export interface LoraRef {
    */
   version?: string;
   licence?: LoraLicence;
+  /**
+   * The user's own trained LoRA (Fuobe Soul ID): Fuobe keeps the file, so a run copies it into ComfyUI's folder or
+   * sends it to the cloud provider itself (src/server/loras.ts), whichever engine trained it.
+   */
+  own?: true;
 }
 
 /** Scale limits of a LoRA field. */

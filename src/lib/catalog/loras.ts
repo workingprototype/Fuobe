@@ -88,7 +88,7 @@ export const needsToken = (url: string | undefined): boolean => !!url && /^https
 export function loraName(l: Pick<LoraRef, "file" | "url">): string {
   const e = libraryEntry(l);
   if (e) return e.name;
-  const base = (l.file || l.url?.split("?")[0].split("/").pop() || "").replace(/\.safetensors$/i, "");
+  const base = (l.file.split("/").pop() || l.url?.split("?")[0].split("/").pop() || "").replace(/\.safetensors$/i, "");
   return base ? `the ${base} LoRA` : "a trained LoRA";
 }
 
@@ -99,6 +99,8 @@ export function loraName(l: Pick<LoraRef, "file" | "url">): string {
  */
 export function cloudPath(l: LoraRef): string | undefined {
   if (l.hostedUrl) return l.hostedUrl;
+  // The user's own trained LoRA: the server picks the copy to send (fal's while it lives, else Fuobe's, sent once).
+  if (l.own) return undefined;
   if (!l.url || needsToken(l.url) || gated(l)) return undefined;
   return l.url;
 }
@@ -163,11 +165,11 @@ function fitSlots(field: LoraField, loras: LoraRef[]): { kept: LoraRef[]; over: 
 }
 
 /**
- * A cloud API can be sent this LoRA: not local-only, and with a URL it can fetch (a mirror or a public file)
- * or a civitai file Fuobe mirrors before the run. Not a gated Hugging Face file (no HF token here) nor a file
- * that exists only on the user's ComfyUI.
+ * A cloud API can be sent this LoRA: not local-only, and with a URL it can fetch (a mirror or a public file),
+ * a civitai file Fuobe mirrors before the run, or the user's own trained LoRA (Fuobe sends its copy). Not a gated
+ * Hugging Face file (no HF token here) nor a file that exists only on the user's ComfyUI.
  */
-const sendable = (l: LoraRef) => !localOnly(l) && (!!cloudPath(l) || (!!l.url && needsToken(l.url)));
+const sendable = (l: LoraRef) => !localOnly(l) && (!!cloudPath(l) || (!!l.url && needsToken(l.url)) || (!!l.own && (!!l.url || !!l.file)));
 const sendableToCloud = (loras: LoraRef[]) => loras.filter(sendable);
 
 /** fal's `/lora` endpoints before FieldMap.loras was generated: loras [{path, scale}]. */

@@ -583,7 +583,7 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   const why = (l: LoraRef) => {
     if (localOnly(l)) return "its licence doesn't allow hosting, so it runs only on your GPU";
     if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
-    if (!cloudPath(l) && !needsToken(l.url)) return "no URL to send to the LoRA endpoint";
+    if (!cloudPath(l) && !needsToken(l.url) && !l.own) return "no URL to send to the LoRA endpoint";
     if (!field) return "this route takes no LoRAs";
     return field.shape === "experts" ? "this API takes one LoRA per expert" : `this API takes up to ${loraCapacity(field)} LoRAs`;
   };
