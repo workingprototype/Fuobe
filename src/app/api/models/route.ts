@@ -61,7 +61,8 @@ export async function GET(request: Request) {
   // A Fuobe Original runs on both engines: on a list for one engine (asked for, or the install's only one) it is
   // that engine's model (its routes, its price), else it is listed once with both.
   const only = (engine as Engine | undefined) ?? (mode === "both" ? undefined : mode);
-  const list = findModels(MODELS, { kind: kind as MediaKind | undefined, engine: engine as Engine | undefined, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" })
+  // The install's only engine counts as asked for: an Original's operations there are that engine's.
+  const list = findModels(MODELS, { kind: kind as MediaKind | undefined, engine: only, op: op as Operation | undefined, q: p.get("q") ?? undefined, hidden: p.get("hidden") === "1" })
     .filter((m) => mode === "both" || runsOn(m, mode))
     .map((m) => (only ? onEngine(m, only) : m));
   const defaults = Object.fromEntries(

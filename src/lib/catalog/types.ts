@@ -603,6 +603,16 @@ export interface ModelDef {
    * onEngine() (src/lib/catalog/engines.ts) gives the model as it runs there (that engine's routes only).
    */
   engines?: Engine[];
+  /**
+   * An Original's defaults on one engine, over `defaults` (Fuobe DoP: 480p on the user's GPU, where 720p takes three
+   * times as long; 720p in the cloud, where the LoRA endpoint costs the same at either size).
+   */
+  engineDefaults?: Partial<Record<Engine, ModelDef["defaults"]>>;
+  /**
+   * An Original's options on one engine, over `options` (Fuobe DoP · LTX: no sound toggle on the user's GPU, whose
+   * LTX-2.3 graphs make silent clips).
+   */
+  engineOptions?: Partial<Record<Engine, Partial<ModelOptions>>>;
   /** Hidden from pickers (used only internally by presets). */
   hidden?: boolean;
   /**
@@ -978,6 +988,12 @@ export interface PresetRoute {
   loras?: LoraRef[];
   /** Overrides the preset prompt template for this engine. */
   promptTemplate?: string;
+  /**
+   * A partner model running the preset's words because its Original has nothing of its own here yet (a Fuobe DoP move
+   * with no hostable LoRA, camera LoRA, hosted move or step in the cloud keeps Kling 2.5 Turbo until the evaluation
+   * harness promotes Fuobe DoP's words). Picking the preset doesn't move the composer to it; an engine switch does.
+   */
+  partner?: boolean;
 }
 
 export type PresetType = "app" | "motion" | "effect";
@@ -1001,6 +1017,25 @@ export interface Preset {
   open: PresetRoute | null;
   /** Research confidence / parity notes shown in docs and the UI. */
   parity?: string;
+  /** Fuobe DoP's colour-grade effects: a src/lib/grade.ts preset the browser applies to the finished clip. */
+  grade?: string;
+  /** Fuobe DoP's relight effects: a step that makes the start frame first, on each engine (src/lib/catalog/dop.ts). */
+  prestep?: PresetPrestep;
+}
+
+/** A step whose picture becomes a preset's start frame (Fuobe DoP relights the still, then animates it). */
+export interface PresetPrestep {
+  open: PrestepRoute;
+  cloud: PrestepRoute;
+}
+
+export interface PrestepRoute {
+  modelId: string;
+  op: Operation;
+  prompt: string;
+  loras?: LoraRef[];
+  /** What the step costs (a 1-megapixel picture), added to the clip's price before the run; 0 on the user's GPU. */
+  usd?: number;
 }
 
 /** Route endpoint for models without an extend API: last frame → image-to-video → join (src/server/chains.ts). */

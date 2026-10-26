@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T00:45:58.502Z",
+  "generatedAt": "2026-10-26T08:23:46.732Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -8943,6 +8943,309 @@
         "model qwen_3_4b.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors -> no size (HTTP 307)",
         "model ae.safetensors: https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors -> no size (HTTP 307)"
       ]
+    },
+    {
+      "id": "ltx23-i2v-lora",
+      "title": "LTX-2.3 22B distilled image to video + LoRAs (Fuobe DoP · LTX)",
+      "capability": "i2v",
+      "file": "ltx23-i2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-i2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "31",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "From the official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, one pass of 8 manual sigmas, cfg 1, Euler ancestral) without the end-frame guide: the start frame is a first-frame guide at strength 1 (the template uses 0.7 for both ends), resized and centre-cropped to width x height. A motion's LoRAs (FPV, Wind to Face, the transition LoRA) are injected after the CheckpointLoaderSimple (LoraLoaderModelOnly). Silent like a DoP clip: the audio latent rides through the audio-video sampler but is not decoded. frames = seconds*fps+1 (8n+1), 24 fps."
+    },
+    {
+      "id": "ltx23-flf2v-lora",
+      "title": "LTX-2.3 22B distilled start and end frame to video + LoRAs (Fuobe DoP · LTX transitions)",
+      "capability": "flf2v",
+      "file": "ltx23-flf2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-flf2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "image": [
+          {
+            "node": "31",
+            "input": "image"
+          }
+        ],
+        "endImage": [
+          {
+            "node": "39",
+            "input": "image"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "The official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, first- and last-frame guides at strength 0.7, 8 manual sigmas, cfg 1) with plain size, frame and fps values and the joyfox LTX-2.3 Transition LoRA (or any LTX-2.3 LoRA) injected after the CheckpointLoaderSimple. Both frames are resized and centre-cropped to width x height. Silent (the audio is not decoded)."
+    },
+    {
+      "id": "ltx23-t2v-lora",
+      "title": "LTX-2.3 22B distilled text to video + LoRAs",
+      "capability": "t2v",
+      "file": "ltx23-t2v-lora.json",
+      "source": "hand-built (scripts/comfy/hand-built/ltx23-t2v-lora.json)",
+      "bindings": {
+        "prompt": [
+          {
+            "node": "128",
+            "input": "text"
+          }
+        ],
+        "negativePrompt": [
+          {
+            "node": "112",
+            "input": "text"
+          }
+        ],
+        "width": [
+          {
+            "node": "113",
+            "input": "value"
+          }
+        ],
+        "height": [
+          {
+            "node": "98",
+            "input": "value"
+          }
+        ],
+        "frames": [
+          {
+            "node": "130",
+            "input": "value"
+          }
+        ],
+        "fps": [
+          {
+            "node": "114",
+            "input": "value"
+          }
+        ],
+        "seed": [
+          {
+            "node": "100",
+            "input": "noise_seed"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "68",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "68",
+          "kind": "video"
+        }
+      ],
+      "defaults": {
+        "width": 1280,
+        "height": 704,
+        "frames": 121,
+        "fps": 24,
+        "frameStep": 8
+      },
+      "limits": {
+        "maxWidth": 1920,
+        "maxHeight": 1920,
+        "maxFrames": 257,
+        "dimensionMultiple": 32
+      },
+      "models": [
+        {
+          "file": "gemma_3_12B_it_fp4_mixed.safetensors",
+          "folder": "text_encoders",
+          "url": "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+          "sizeGb": 9.45
+        },
+        {
+          "file": "ltx-2.3-22b-distilled-fp8.safetensors",
+          "folder": "checkpoints",
+          "url": "https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors",
+          "sizeGb": 29.53
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 32,
+      "license": "LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)",
+      "validated": true,
+      "notes": "ltx23-i2v-lora without the start frame: the empty latent takes width x height directly. LoRAs injected after the CheckpointLoaderSimple. Silent (the audio is not decoded). Not used by a catalog model yet (build plan O4 lists it for LTX camera LoRAs without a start frame)."
     },
     {
       "id": "video-trim",

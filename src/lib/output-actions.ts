@@ -8,6 +8,7 @@
 import type { Generation, OutputFile, VideoFormat } from "./catalog/types";
 import { cueText, type Cue } from "./cues";
 import { downloadHref, downloadName, extensionOf } from "./library";
+import { PRESETS as GRADE_PRESETS } from "./grade";
 
 export type OutputActionId =
   | "animate"
@@ -115,7 +116,9 @@ export function outputActions(g: Generation, index: number, ctx: ActionContext =
       link("lipsync", "Lipsync", `/lipsync?video=${q(o.url)}`);
       link("upscale", "Upscale", `/upscale/video?video=${q(o.url)}`);
       link("add-sound", "Add sound", `/audio/video?video=${q(o.url)}`);
-      link("grade", "Color grade", `/color-grade?video=${q(o.url)}`);
+      // A Fuobe DoP colour-grade effect: the clip opens in Color grading with its grade picked (one click to export).
+      const dopGrade = gradeOf(o);
+      link("grade", dopGrade ? `Apply the ${dopGrade.name} grade` : "Color grade", `/color-grade?video=${q(o.url)}${dopGrade ? `&preset=${q(dopGrade.id)}` : ""}`);
       link("genjutsu", "Use in Genjutsu", `/genjutsu?video=${q(o.url)}`);
       break;
     }
@@ -167,10 +170,19 @@ export function nextSteps(g: Generation, index: number, max = 3): OutputAction[]
   const o = g.outputs[index];
   if (!o || g.status !== "succeeded") return [];
   const all = outputActions(g, index);
-  return (NEXT_STEPS[o.kind] ?? [])
+  // A clip with a grade still to apply (a Fuobe DoP colour-grade effect) offers it first.
+  const order: OutputActionId[] = o.kind === "video" && gradeOf(o) ? ["grade", ...(NEXT_STEPS.video ?? [])] : (NEXT_STEPS[o.kind] ?? []);
+  return order
     .map((id) => all.find((a) => a.id === id && a.href))
     .filter((a): a is OutputAction => !!a)
     .slice(0, max);
+}
+
+/** The grade a clip still asks for (meta.grade: a Fuobe DoP colour-grade effect), as a Color grading preset. */
+export function gradeOf(o: Pick<OutputFile, "kind" | "meta">): { id: string; name: string } | undefined {
+  const id = o.kind === "video" && typeof o.meta?.grade === "string" ? o.meta.grade : undefined;
+  const p = id ? GRADE_PRESETS.find((x) => x.id === id) : undefined;
+  return p && { id: p.id, name: p.name };
 }
 
 /**

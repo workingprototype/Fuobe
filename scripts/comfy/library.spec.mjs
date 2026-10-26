@@ -126,6 +126,8 @@ export const CUSTOM_NODE_REPOS = {
 // Model download locations for files that the source workflow does not annotate
 // (UI templates usually carry node.properties.models; custom-node examples do not).
 export const KNOWN_MODELS = {
+  'ltx-2.3-22b-distilled-fp8.safetensors': { folder: 'checkpoints', url: 'https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors' },
+  'gemma_3_12B_it_fp4_mixed.safetensors': { folder: 'text_encoders', url: 'https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors' },
   'RealESRGAN_x4plus.safetensors': { folder: 'upscale_models', url: 'https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged/resolve/main/RealESRGAN_x4plus.safetensors' },
   'birefnet.safetensors': { folder: 'background_removal', url: 'https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors' },
   'film_net_fp16.safetensors': { folder: 'frame_interpolation', url: 'https://huggingface.co/Comfy-Org/Frame-Interpolation/resolve/main/frame_interpolation/film_net_fp16.safetensors' },
@@ -2002,6 +2004,60 @@ export const SPEC = [
       'Fuobe Soul\'s edit route (Soul 2.0 image-to-image): the picture scaled to Soul\'s tier (megapixels 1 = 720p, 2 = 1080p) on the 16-pixel grid, VAE-encoded, then the Soul sampler ' +
       '(8 steps, cfg 1, res_multistep, shift 3) at denoise = strength (0.6 like fal\'s z-image/turbo/image-to-image; about 0.17 would be Higgsfield\'s refiner pass, an experiment until the evaluation harness measures it). ' +
       'The look\'s LoRAs are injected after the UNETLoader (LoraLoaderModelOnly), as on z-image-turbo-t2i. The result keeps the picture\'s shape.',
+  },
+
+  // ---- Fuobe DoP (Originals O4): LTX-2.3 camera moves, FPV and transitions with LoRAs ------------
+  {
+    id: 'ltx23-i2v-lora',
+    title: 'LTX-2.3 22B distilled image to video + LoRAs (Fuobe DoP · LTX)',
+    capability: 'i2v',
+    handBuilt: 'hand-built/ltx23-i2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'From the official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, one pass of 8 manual sigmas, cfg 1, Euler ancestral) without the end-frame guide: the start frame is a ' +
+      'first-frame guide at strength 1 (the template uses 0.7 for both ends), resized and centre-cropped to width x height. A motion\'s LoRAs (FPV, Wind to Face, the transition LoRA) are ' +
+      'injected after the CheckpointLoaderSimple (LoraLoaderModelOnly). Silent like a DoP clip: the audio latent rides through the audio-video sampler but is not decoded. frames = seconds*fps+1 (8n+1), 24 fps.',
+  },
+  {
+    id: 'ltx23-flf2v-lora',
+    title: 'LTX-2.3 22B distilled start and end frame to video + LoRAs (Fuobe DoP · LTX transitions)',
+    capability: 'flf2v',
+    handBuilt: 'hand-built/ltx23-flf2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')], image: [b('31', 'image')], endImage: [b('39', 'image')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'The official video_ltx2_3_flf2v template (LTX-2.3 22B distilled fp8, first- and last-frame guides at strength 0.7, 8 manual sigmas, cfg 1) with plain size, frame and fps values ' +
+      'and the joyfox LTX-2.3 Transition LoRA (or any LTX-2.3 LoRA) injected after the CheckpointLoaderSimple. Both frames are resized and centre-cropped to width x height. Silent (the audio is not decoded).',
+  },
+  {
+    id: 'ltx23-t2v-lora',
+    title: 'LTX-2.3 22B distilled text to video + LoRAs',
+    capability: 't2v',
+    handBuilt: 'hand-built/ltx23-t2v-lora.json',
+    bindings: {
+      prompt: [b('128', 'text')], negativePrompt: [b('112', 'text')],
+      width: [b('113', 'value')], height: [b('98', 'value')], frames: [b('130', 'value')], fps: [b('114', 'value')], seed: [b('100', 'noise_seed')],
+    },
+    outputs: [{ node: '68', kind: 'video' }],
+    limits: { maxWidth: 1920, maxHeight: 1920, maxFrames: 257, dimensionMultiple: 32, frameStep: 8 },
+    vramGb: 32,
+    license: 'LTX-2 Community License (LTX-2.3 22B: free under US$10M annual revenue); Gemma 3 text encoder (Gemma Terms of Use)',
+    notes:
+      'ltx23-i2v-lora without the start frame: the empty latent takes width x height directly. LoRAs injected after the CheckpointLoaderSimple. Silent (the audio is not decoded). ' +
+      'Not used by a catalog model yet (build plan O4 lists it for LTX camera LoRAs without a start frame).',
   },
 
   // ---- Shorts Studio / Mixed Media: trim, segment, restyle ------------------------

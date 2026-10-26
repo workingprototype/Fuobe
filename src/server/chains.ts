@@ -4,7 +4,7 @@ import { getModel, supportsOp } from "@/lib/catalog";
 import { MODEL3D_STEP_FEATURE, stillPromptFor3d } from "@/lib/av/model3d";
 import { chainTiming, frameTimes, planKeyframeClips, spread } from "@/lib/catalog/keyframes";
 import { routesFor } from "@/lib/catalog/plan";
-import type { ChainSlot, Engine, Generation, GenerationRequest, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
+import type { ChainSlot, Engine, Generation, GenerationRequest, LoraRef, ModelDef, ModelRoute, Operation } from "@/lib/catalog/types";
 import { db } from "./db";
 import { cancelGeneration, chooseRoute, createGenerations, getGeneration, previewChained, previewGeneration } from "./generations";
 import { provider } from "./providers";
@@ -327,6 +327,44 @@ export function createStillTo3d(original: GenerationRequest, model: ModelDef, ro
     void cancelGeneration(still.id);
     throw e;
   }
+}
+
+/**
+ * Fuobe DoP's relight effects (Silhouette, Window, Practicals…): the start frame is relit first (Qwen-Image-Edit 2509
+ * with its Relight LoRA, on the engine the clip runs on), then animated with the effect's words. One batch of two steps.
+ */
+export function createRelitClip(original: GenerationRequest, relight: { engine: Engine; step: { modelId: string; op: Operation; prompt: string; loras?: LoraRef[] } }): Generation[] {
+  const [image, ...rest] = original.inputs?.images ?? [];
+  if (!image) throw new Error("Add a start frame to relight");
+  const { engine, step } = relight;
+  assertOneMode([
+    { label: "Relighting the start frame", modelId: step.modelId, op: step.op },
+    { label: getModel(original.modelId)?.name ?? original.modelId, modelId: original.modelId, op: original.op ?? "i2v" },
+  ]);
+  const batchId = nanoid(10);
+  const relit = createGenerations(
+    {
+      feature: original.feature,
+      modelId: step.modelId,
+      op: step.op,
+      prompt: step.prompt,
+      inputs: { images: [image] },
+      ...(step.loras?.length && { loras: step.loras }),
+      step: { label: "Relit start frame", index: 0, of: 2 },
+    },
+    { batchId },
+  )[0];
+  const clip = createGenerations(
+    {
+      ...original,
+      engine,
+      inputs: { ...original.inputs, images: rest.length ? rest : undefined },
+      chain: [{ slot: "images", position: "first" }],
+      step: { label: "Relit clip", index: 1, of: 2 },
+    },
+    { batchId, dependsOn: relit.id },
+  )[0];
+  return [clip, relit];
 }
 
 /** The model a storyboard film is animated with. */

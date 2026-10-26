@@ -2013,6 +2013,75 @@ export const CLOUD_MODELS: ModelDef[] = [
     }
   },
   {
+    "id": "qwen-image-edit-2509-cloud",
+    "name": "Qwen-Image-Edit 2509 (hosted)",
+    "vendor": "Alibaba Qwen",
+    "family": "qwen-image",
+    "engine": "cloud",
+    "kind": "image",
+    "tagline": "Open-weights Qwen-Image-Edit 2509 with its LoRAs (relight, next scene, angles)",
+    "routes": [
+      {
+        "op": "edit",
+        "provider": "fal",
+        "endpoint": "fal-ai/qwen-image-edit-plus-lora",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "images": "image_urls",
+          "numOutputs": "num_images",
+          "seed": "seed",
+          "aspectRatio": {
+            "key": "image_size",
+            "values": {
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "max": 3,
+            "range": {
+              "min": 0,
+              "max": 4
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "negativePrompt": true,
+      "seed": true,
+      "aspectRatios": [
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxOutputs": 4,
+      "maxImages": 10
+    },
+    "pricing": {
+      "unit": "megapixel",
+      "usd": 0.035
+    },
+    "hidden": true
+  },
+  {
     "id": "flux-2-klein-4b-cloud",
     "name": "FLUX.2 [klein] 4B (hosted)",
     "vendor": "Black Forest Labs",
@@ -6592,6 +6661,74 @@ export const CLOUD_MODELS: ModelDef[] = [
       "unit": "second",
       "usd": 0.12
     }
+  },
+  {
+    "id": "ltx-2-5-fast",
+    "name": "LTX 2.5 Fast",
+    "vendor": "Lightricks",
+    "family": "ltx",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "LTX-2.5's built-in camera moves (focus shift, dolly, jib) from a start frame",
+    "routes": [
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "lightricks/ltx-2.5/image-to-video/fast",
+        "map": {
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "generateAudio": "generate_audio",
+          "aspectRatio": "aspect_ratio",
+          "resolution": "resolution",
+          "duration": {
+            "key": "duration",
+            "type": "string"
+          }
+        }
+      }
+    ],
+    "options": {
+      "endFrame": true,
+      "audio": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "9:16"
+      ],
+      "resolutions": [
+        "720p",
+        "1080p",
+        "1440p",
+        "2160p"
+      ],
+      "durations": [
+        6,
+        8,
+        10,
+        12,
+        20
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "auto",
+      "duration": 6,
+      "resolution": "720p",
+      "generateAudio": false
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.09,
+      "note": "720p; 1080p $0.13/s, 1440p $0.19/s, 4K $0.30/s; sound included",
+      "byResolution": {
+        "720p": 0.09,
+        "1080p": 0.13,
+        "1440p": 0.19,
+        "2160p": 0.3
+      }
+    },
+    "hidden": true
   },
   {
     "id": "pixverse-v6",
@@ -16720,6 +16857,340 @@ export const ORIGINAL_CLOUD: ModelDef[] = [
       "unit": "megapixel",
       "usd": 0.005,
       "withLoras": 0.0085
+    }
+  },
+  {
+    "id": "fuobe-dop",
+    "name": "Fuobe DoP",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-dop",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Camera motions and effects with their LoRAs on Wan 2.2: 3 or 5 s at 16 fps",
+    "routes": [
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-a14b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 17,
+            "max": 161,
+            "step": 4
+          },
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "fixed": {
+            "interpolator_model": "none",
+            "frames_per_second": 16,
+            "num_inference_steps": 20
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "transformer": "high",
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora"
+      },
+      {
+        "op": "flf2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/wan/v2.2-a14b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 17,
+            "max": 161,
+            "step": 4
+          },
+          "aspectRatio": {
+            "key": "aspect_ratio",
+            "accepts": [
+              "auto",
+              "16:9",
+              "9:16",
+              "1:1"
+            ]
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "580p",
+              "720p"
+            ]
+          },
+          "fixed": {
+            "interpolator_model": "none",
+            "frames_per_second": 16,
+            "num_inference_steps": 20
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "transformer": "high",
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/wan/v2.2-a14b/image-to-video/lora"
+      },
+      {
+        "op": "i2v",
+        "provider": "replicate",
+        "endpoint": "wan-video/wan-2.2-i2v-fast",
+        "map": {
+          "image": "image",
+          "endImage": "last_image",
+          "seed": "seed",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 16,
+            "min": 81,
+            "max": 121,
+            "step": 4
+          },
+          "resolution": {
+            "key": "resolution",
+            "accepts": [
+              "480p",
+              "720p"
+            ]
+          },
+          "fixed": {
+            "interpolate_output": false
+          },
+          "loras": {
+            "shape": "experts",
+            "high": {
+              "weights": "lora_weights_transformer",
+              "scale": "lora_scale_transformer"
+            },
+            "low": {
+              "weights": "lora_weights_transformer_2",
+              "scale": "lora_scale_transformer_2"
+            }
+          }
+        }
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        5
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "endFrame": true,
+      "aspectRatios": [
+        "auto",
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "resolutions": [
+        "480p",
+        "580p",
+        "720p"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "auto",
+      "duration": 5,
+      "resolution": "720p"
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.08,
+      "note": "720p on fal; 580p $0.06/s, 480p $0.04/s; with LoRAs $0.10/s",
+      "byResolution": {
+        "720p": 0.08,
+        "580p": 0.06,
+        "480p": 0.04
+      },
+      "withLoras": 0.1
+    }
+  },
+  {
+    "id": "fuobe-dop-ltx",
+    "name": "Fuobe DoP \u00b7 LTX",
+    "vendor": "Fuobe Original",
+    "family": "fuobe-dop",
+    "engine": "cloud",
+    "kind": "video",
+    "tagline": "Camera moves, FPV and transitions on LTX-2.3 with its camera LoRAs: 3 or 5 s at 24 fps",
+    "routes": [
+      {
+        "op": "i2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "aspectRatio": {
+            "key": "video_size",
+            "values": {
+              "auto": "auto",
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      },
+      {
+        "op": "flf2v",
+        "provider": "fal",
+        "endpoint": "fal-ai/ltx-2.3-22b/image-to-video",
+        "map": {
+          "negativePrompt": "negative_prompt",
+          "image": "image_url",
+          "endImage": "end_image_url",
+          "seed": "seed",
+          "generateAudio": "generate_audio",
+          "fps": "fps",
+          "numFrames": {
+            "key": "num_frames",
+            "fps": 24,
+            "min": 9,
+            "max": 481,
+            "step": 8
+          },
+          "aspectRatio": {
+            "key": "video_size",
+            "values": {
+              "auto": "auto",
+              "1:1": "square_hd",
+              "4:3": "landscape_4_3",
+              "3:4": "portrait_4_3",
+              "16:9": "landscape_16_9",
+              "9:16": "portrait_16_9",
+              "3:2": "landscape_4_3",
+              "2:3": "portrait_4_3",
+              "21:9": "landscape_16_9",
+              "5:4": "landscape_4_3",
+              "4:5": "portrait_4_3"
+            }
+          },
+          "defaults": {
+            "enable_prompt_expansion": false
+          },
+          "loras": {
+            "shape": "items",
+            "key": "loras",
+            "required": true,
+            "range": {
+              "min": 0,
+              "max": 4
+            },
+            "weightName": true
+          }
+        },
+        "loraEndpoint": "fal-ai/ltx-2.3-22b/image-to-video/lora"
+      }
+    ],
+    "options": {
+      "durations": [
+        3,
+        5
+      ],
+      "negativePrompt": true,
+      "seed": true,
+      "endFrame": true,
+      "audio": true,
+      "aspectRatios": [
+        "auto",
+        "1:1",
+        "4:3",
+        "3:4",
+        "16:9",
+        "9:16",
+        "3:2",
+        "2:3",
+        "21:9",
+        "5:4",
+        "4:5"
+      ],
+      "maxImages": 1
+    },
+    "defaults": {
+      "aspectRatio": "auto",
+      "duration": 5,
+      "generateAudio": false
+    },
+    "pricing": {
+      "unit": "second",
+      "usd": 0.036,
+      "note": "$0.001605 per megapixel of video: about $0.18 for 5 s at 720p ($0.20 with LoRAs)",
+      "withLoras": 0.04
     }
   }
 ];

@@ -34,7 +34,7 @@ const SCORE = { "no-metrics": { type: "boolean" }, metrics: { type: "string" }, 
 const HELP = {
   run: `pnpm eval:run --suite <name> --engine demo|open|cloud [options]
 
-  --suite <name|file>    soul, soul-cinema, soul-hex, soul-id, dop, genjutsu, mixed-media, shorts, speak, cinema, selftest (or a path)
+  --suite <name|file>    soul, soul-cinema, soul-hex, soul-id, dop, dop-mix, genjutsu, mixed-media, shorts, speak, cinema, selftest (or a path)
   --engine <e>           demo (free self-test), open (your ComfyUI) or cloud (hosted open models)
   --looks <a,b>          Soul looks by slug, name or id (v1-general, "Flash editorial")
   --cases <ids>          case ids or prefixes with * (dop/motion-*)
@@ -356,7 +356,7 @@ async function validate(args, ctx) {
   let bad = results.filter((r) => !r.ok).length;
   const { generated } = await import("./gen-cases.mjs");
   const gen = generated();
-  const stale = ["soul.json", "dop.json", "case.schema.json"].filter((name) => {
+  const stale = ["soul.json", "dop.json", "dop-mix.json", "case.schema.json"].filter((name) => {
     const file = path.join(path.dirname(new URL(import.meta.url).pathname), "cases", name);
     const want = `${JSON.stringify(gen[name], null, 2)}\n`;
     return !fs.existsSync(file) || fs.readFileSync(file, "utf8") !== want;

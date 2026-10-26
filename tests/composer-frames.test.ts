@@ -122,9 +122,10 @@ describe("Frames mode in the Video studio composer", () => {
       return planGeneration({ feature: "video", modelId: id, presetId, op: sent.op, prompt: "a fox", inputs: { images: sent.images }, params: sent.params }, getModel, getPreset);
     };
     expect(run("flux-3-max", preset.id)).toMatchObject({ op: "keyframes", prompt: expect.stringMatching(/zooms in/) });
-    // Dolly In runs on Wan 2.2 14B with a LoRA: its own operation is image-to-video, which would drop frames 2 and 3.
-    expect(getPreset("motion-dolly-in")?.open).toMatchObject({ modelId: "oss-wan22-14b", op: "i2v" });
-    const dolly = run("oss-wan22-14b", "motion-dolly-in");
+    // Dolly In runs on Fuobe DoP (Wan 2.2 14B on the GPU) with a LoRA: its own operation is image-to-video, which would
+    // drop frames 2 and 3.
+    expect(getPreset("motion-dolly-in")?.open).toMatchObject({ modelId: "fuobe-dop", op: "i2v" });
+    const dolly = run("fuobe-dop", "motion-dolly-in");
     expect(dolly.op).toBe("keyframes");
     expect(dolly.loras.length).toBeGreaterThan(0);
   });

@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { Generation, MediaKind, ModelDef, Preset } from "@/lib/catalog/types";
 import { useEngine, useGenerations } from "@/lib/api";
-import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
+import { claimStartToken, followEngineDefault, handoffKey, mergeHandoff, presetModel, promptShown, START_PARAM, withoutStart } from "@/lib/composer";
 import { positionsFrom } from "@/lib/catalog/keyframes";
 import { reuseSignature, withSignatureWords } from "@/lib/catalog/palettes";
 import { matchSpokenLanguage } from "@/lib/speech-languages";
@@ -46,9 +46,12 @@ function initialDraft(
   const presetRoute = preset
     ? ([preset.cloud, preset.open].find((r) => !!requested && r?.modelId === requested) ?? (engine === "open" ? preset.open : preset.cloud) ?? preset.cloud ?? preset.open)
     : null;
+  // A camera motion or effect starts on its Original (Fuobe DoP) when the studio has it.
+  const presetOwn = presetModel(preset, engine);
   const modelId =
     (requested && lookup.getModel(requested)?.id) ||
     (preset?.type === "app" ? presetRoute?.modelId : undefined) ||
+    (presetOwn && lookup.getModel(presetOwn)?.id) ||
     config.defaultModels[engine] ||
     config.defaultModels.cloud ||
     // Open-only tools (Match colors) keep their open model under the Cloud switch, like cloud-only ones do under Open.

@@ -156,7 +156,9 @@ const MODEL_BASES = [
   [/^(oss-z-image-turbo|z-image-turbo-cloud|fuobe-soul|fuobe-soul-cinema)$/, /^z-image/],
   [/^(oss-qwen-image(-lightning)?|fuobe-soul-hd)$/, /^qwen-image-2512/],
   [/^(oss-wan22-14b(-fast)?|fuobe-dop)$/, /^wan2\.[12]/],
-  [/^(oss-ltx25|fuobe-dop-ltx)$/, /^ltx-2\.[35]/],
+  // LTX-2.3 LoRAs (and LTX-2 19B ones, unverified there) on Fuobe DoP · LTX; LTX-2.5 LoRAs on the open LTX-2.5 graph.
+  [/^fuobe-dop-ltx$/, /^ltx-2(\.3-|-19b)/],
+  [/^oss-ltx25$/, /^ltx-2\.5/],
 ];
 
 /** Can `modelId` load a LoRA trained for `base`? (true when either is unknown) */

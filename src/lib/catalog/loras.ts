@@ -113,6 +113,19 @@ export const gated = (l: Pick<LoraRef, "file" | "url">): boolean => libraryEntry
  */
 export const localOnly = (l: LoraRef): boolean => l.licence?.hostedOk === false || libraryEntry(l)?.licence.hostedOk === false;
 
+/**
+ * The first LoRA's trigger word as a prompt can lead with it: without the full stop its author wrote after it (the
+ * prompt adds its own) or the brackets around it, which ComfyUI's text encoder reads as emphasis ("(过顶升摇)." →
+ * "过顶升摇").
+ */
+export function triggerOf(loras: Pick<LoraRef, "trigger">[]): string | undefined {
+  for (const l of loras) {
+    const t = l.trigger?.trim().replace(/[\s.,;:]+$/, "").replace(/^\((.*)\)$/s, "$1").trim();
+    if (t) return t;
+  }
+  return undefined;
+}
+
 /** How many LoRAs one call of this API takes (Infinity when the schema states no limit). */
 export function loraCapacity(field: LoraField): number {
   if (field.shape === "single") return 1;

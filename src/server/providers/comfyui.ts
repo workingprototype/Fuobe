@@ -44,6 +44,7 @@ import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
+import { imageSize } from "@/lib/image-size";
 import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
@@ -486,10 +487,13 @@ function webmInfo(data: Buffer): MediaInfo | null {
   return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
 }
 
-/** The header facts of a file this server uploaded to ComfyUI (undefined for images and unreadable containers). */
+/** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
 export function mediaInfoFor(name: unknown): MediaInfo | undefined {
   return typeof name === "string" ? globalThis.__fuobeComfyMedia?.get(name) : undefined;
 }
+
+/** Image-to-video graphs whose camera moves Wan 2.2 Fun Camera makes natively: a request with a pose (params.extra.cameraMotion) runs there. */
+const CAMERA_POSE_GRAPH: Record<string, string> = { "wan22-i2v-14b": "wan22-fun-camera-14b" };
 
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
 const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
@@ -697,6 +701,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     const exr = exrWorkflow(ctx.op);
     if (loadManifest().workflows.some((w) => w.id === exr)) endpoint = exr;
   }
+  // Fuobe DoP: a camera move Wan 2.2 Fun Camera makes natively (a pose, no LoRA needed) runs on its graph; a LoRA mixed
+  // in is injected on its experts as on the plain image-to-video graph.
+  const posed = CAMERA_POSE_GRAPH[endpoint];
+  if (posed && typeof extra.cameraMotion === "string" && extra.cameraMotion) endpoint = posed;
 
   const { manifest, workflow } = getWorkflow(endpoint);
   const d = manifest.defaults;
@@ -785,7 +793,10 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     // With motion paths the frame keeps the start image's shape, so the paths need no cropping;
     // "auto" keeps the source clip's shape when its header told us.
     const srcAspect = (extra.motionPaths as MotionPaths | undefined)?.aspect;
-    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (clip?.width && clip.height ? `${clip.width}:${clip.height}` : undefined) : input.aspectRatio;
+    // "auto" keeps the source clip's shape when its header told us, else the start frame's (image-to-video).
+    const still = input.aspectRatio === "auto" && !clip?.width ? ctx.media?.(String(values.image ?? "")) : undefined;
+    const src = clip?.width && clip.height ? clip : still?.width && still.height ? still : undefined;
+    const shape = srcAspect ? `${srcAspect[0]}:${srcAspect[1]}` : input.aspectRatio === "auto" ? (src ? `${src.width}:${src.height}` : undefined) : input.aspectRatio;
     const dims = computeDimensions(shape, input.resolution, { width: Number(d.width ?? 1024), height: Number(d.height ?? 1024) }, multiple);
     // Respect the workflow's size limits while keeping the aspect ratio.
     const maxW = Number(manifest.limits?.maxWidth ?? Infinity);
@@ -1092,6 +1103,10 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv)$/i.test(name)) {
     const info = probeMedia(data) ?? webmInfo(data);
     if (info) rememberMedia(uploaded, info);
+  } else if (/^image\//.test(contentType)) {
+    // A start frame's size: "auto" makes an image-to-video clip in the picture's own shape.
+    const size = imageSize(data);
+    if (size) rememberMedia(uploaded, { container: "image", ...size, hasVideo: false, hasAudio: false });
   }
   return uploaded;
 }

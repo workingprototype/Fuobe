@@ -3,7 +3,8 @@
 //   cases/soul.json  one case per Soul look (139, ids from docs/research/higgsfield-image-studios.json)
 //   cases/soul-cinema.json  Soul Cinema's one look (research soul.soulCinema) on cinematic scenes
 //   cases/soul-hex.json  Soul HEX: Fuobe's own palettes in the prompt, and the open engine's palette lock
-//   cases/dop.json   one case per DoP motion / effect that the research gives a LoRA and the catalog has
+//   cases/dop.json   one case per DoP motion / effect that the research gives a LoRA, a camera pose or a camera LoRA
+//   cases/dop-mix.json  Fuobe DoP's Mix: a move and an effect on one run, against the move alone
 //   cases/case.schema.json  the suite format as JSON Schema (for editors)
 // The prompts are Fuobe's own (never Higgsfield's). Run: node scripts/eval/gen-cases.mjs [--check]
 import fs from "node:fs";
@@ -235,6 +236,19 @@ function catalogPresetNames() {
 /** Research statuses with a LoRA to A/B (§7.2); prompt-only presets have nothing to compare yet. */
 const LORA_STATUSES = new Set(["add-lora", "alias", "replace", "weak-candidate", "local-only", "relight-route"]);
 
+/**
+ * The models a DoP preset runs on when it isn't Fuobe DoP's Wan (src/lib/catalog/dop.ts): an LTX-2.3 LoRA runs on Fuobe
+ * DoP · LTX on both engines; an LTX-2.5 LoRA on the open LTX-2.5 graph only. In the cloud the harness measures Fuobe
+ * DoP on its words, against the partner model the catalog keeps there until a run promotes it.
+ */
+function dopModels(m) {
+  const bases = (m.loras ?? []).map((l) => l.base ?? "");
+  if (m.status === "relight-route" || bases.some((b) => /^wan2\.[12]/.test(b))) return undefined;
+  if (bases.some((b) => /^ltx-2(\.3-|-19b)/.test(b))) return everywhere("fuobe-dop-ltx");
+  if (bases.some((b) => /^ltx-2\.5/.test(b))) return { open: ["oss-ltx25"], demo: ["oss-ltx25"], cloud: ["fuobe-dop"] };
+  return undefined;
+}
+
 function dopSuite() {
   const catalog = catalogPresetNames();
   const cases = [];
@@ -247,16 +261,46 @@ function dopSuite() {
         continue;
       }
       const transition = catalog.endFrames.has(name);
+      const models = dopModels(m);
       cases.push({
         id: `dop/${m.kind}-${slug(name)}`,
         title: `DoP ${m.kind} · ${name}`,
         motion: name,
         presetId: `${m.kind}-${slug(name)}`,
         ...(transition && { op: "flf2v" }),
+        ...(models && { models }),
         inputs: { images: ["local/dop/start.png"], ...(transition && { endImage: "local/dop/end.png" }) },
         demoInputs: { images: ["fixtures/start-frame.png"], ...(transition && { endImage: "fixtures/end-frame.png" }) },
         ...(m.status === "local-only" && { engines: ["demo", "open"], note: "local-only LoRAs (civitai RentCivit): open engine only" }),
         tags: [m.kind, m.status, ...(transition ? ["transition"] : [])],
+      });
+    }
+  }
+  // The camera moves the map v2 gives a pose or a camera LoRA (§7.3): Wan 2.2 Fun Camera on the GPU, LTX-2.3's camera
+  // LoRA (or LTX-2.5's move) in the cloud. Prompt-only (preset strength 0) turns the camera LoRA off.
+  const ids = new Set(cases.map((c) => c.id));
+  for (const m of research().recipes.motionsEffects) {
+    for (const name of m.presets) {
+      const lora = m.cameraLora?.[name];
+      const move = m.cameraMotion?.[name];
+      const pose = m.funCamera?.[name];
+      const id = `dop/${m.kind}-${slug(name)}`;
+      if ((!lora && !move && !pose) || ids.has(id) || !catalog[m.kind].has(name)) continue;
+      ids.add(id);
+      const transition = catalog.endFrames.has(name);
+      const cloud = move ? "ltx-2-5-fast" : lora ? "fuobe-dop-ltx" : "fuobe-dop";
+      cases.push({
+        id,
+        title: `DoP ${m.kind} · ${name} (camera)`,
+        motion: name,
+        presetId: `${m.kind}-${slug(name)}`,
+        ...(transition && { op: "flf2v" }),
+        ...(cloud !== "fuobe-dop" && { models: { open: ["fuobe-dop"], demo: ["fuobe-dop"], cloud: [cloud] } }),
+        inputs: { images: ["local/dop/start.png"], ...(transition && { endImage: "local/dop/end.png" }) },
+        demoInputs: { images: ["fixtures/start-frame.png"], ...(transition && { endImage: "fixtures/end-frame.png" }) },
+        ...(move && { params: { duration: 6 } }),
+        tags: [m.kind, m.status, "camera", ...(pose && !transition ? ["fun-camera"] : []), ...(lora ? ["camera-lora"] : []), ...(transition ? ["transition"] : [])],
+        note: [pose && !transition ? `GPU: Wan 2.2 Fun Camera "${pose}"` : "", lora ? `cloud: LTX-2.3 camera_lora ${lora}` : "", move ? `cloud: LTX-2.5 camera_motion ${move}` : ""].filter(Boolean).join(" · "),
       });
     }
   }
@@ -265,14 +309,14 @@ function dopSuite() {
       $schema: "./case.schema.json",
       suite: "dop",
       title: "Fuobe DoP · camera motions and effects with LoRAs",
-      description: `${HEADER} Every motion and effect the research gives a LoRA (§7.2) and the catalog already has, on your start frame (local/dop/start.png, plus local/dop/end.png for transitions; a photo of a person on a bridge matches the prompt). Variants: the catalog preset as it ships, its prompt without LoRAs (preset strength 0), and the research's LoRA map v2 on the same prompt. The cloud Original (fuobe-dop on fal's Wan 2.2 LoRA endpoint) arrives with O4; the partner variant runs the preset's words on Kling 2.5 Turbo. Not in the catalog yet: ${later.length ? later.join(", ") : "none"}.`,
+      description: `${HEADER} Every motion and effect the research gives a LoRA (§7.2), on your start frame (local/dop/start.png, plus local/dop/end.png for transitions; a photo of a person on a bridge matches the prompt), on the Original that runs it: Fuobe DoP (Wan 2.2 on your GPU, fal's Wan 2.2 LoRA endpoint in the cloud), Fuobe DoP · LTX for the LTX-2.3 LoRAs, the open LTX-2.5 graph for the LTX-2.5 ones. Variants: the catalog preset as it ships (the map v2), its prompt without LoRAs (preset strength 0), the research's LoRAs at their listed strengths sent by the harness (the same request as the catalog's until the strengths are tuned), and the preset's words on a partner model (Kling 2.5 Turbo). Not in the catalog yet: ${later.length ? later.join(", ") : "none"}.`,
       original: ["fuobe-dop", "fuobe-dop-ltx"],
       kind: "video",
       recipe: "motion",
       targets: {
-        open: { models: ["oss-wan22-14b"], params: { duration: 5 } },
+        open: { models: ["fuobe-dop"], params: { duration: 5 } },
         cloud: { models: ["fuobe-dop"], params: { duration: 5 } },
-        demo: { models: ["oss-wan22-14b"], params: { duration: 5 } },
+        demo: { models: ["fuobe-dop"], params: { duration: 5 } },
       },
       defaults: {
         seeds: [1001, 2002],
@@ -283,7 +327,7 @@ function dopSuite() {
         timeoutSeconds: 2700,
       },
       variants: {
-        catalog: { description: "The catalog preset as it ships (prompt template + today's LoRA map)" },
+        catalog: { description: "The catalog preset as it ships on Fuobe DoP (prompt template + the LoRA map v2)" },
         "prompt-only": { description: "The preset's prompt without LoRAs (preset strength 0)", presetStrength: 0 },
         research: { description: "The research's LoRA map v2 at the listed strengths on the preset's prompt", presetStrength: 0, loras: "recipe" },
         partner: { description: "The preset's words on a partner model (Kling 2.5 Turbo), for reference", models: { cloud: ["kling-2-5-turbo"] }, engines: ["cloud"] },
@@ -291,6 +335,61 @@ function dopSuite() {
       cases,
     },
     later,
+  };
+}
+
+/** Fuobe's own Mix pairs (a move and an effect, research §7.5): the second preset's LoRAs stack on the first's model. */
+const MIX_PAIRS = [
+  ["motion-overhead", "effect-building-explosion"],
+  ["motion-handheld", "effect-glitch"],
+  ["motion-robo-arm", "effect-money-rain"],
+  ["motion-dolly-in", "effect-hero-flight"],
+  // A camera LoRA in the cloud (LTX-2.3) with a Wan effect: the effect joins as words there.
+  ["motion-jib-up", "effect-freezing"],
+];
+
+function dopMixSuite() {
+  const catalog = catalogPresetNames();
+  const name = (id) => [...catalog.motion, ...catalog.effect].find((n) => id.endsWith(`-${slug(n)}`) && (id.startsWith("motion-") ? catalog.motion.has(n) : catalog.effect.has(n)));
+  const cases = MIX_PAIRS.map(([first, second]) => {
+    const [a, b] = [name(first), name(second)];
+    if (!a || !b) throw new Error(`Mix pair ${first} + ${second}: not in the catalog`);
+    return {
+      id: `dop-mix/${slug(a)}--${slug(b)}`,
+      title: `Mix · ${a} + ${b}`,
+      presetId: first,
+      mix: { presetId: second, strength: 0.6 },
+      ...(first === "motion-jib-up" && { models: { open: ["fuobe-dop"], demo: ["fuobe-dop"], cloud: ["fuobe-dop-ltx"] } }),
+      inputs: { images: ["local/dop/start.png"] },
+      demoInputs: { images: ["fixtures/start-frame.png"] },
+      tags: ["mix"],
+    };
+  });
+  return {
+    $schema: "./case.schema.json",
+    suite: "dop-mix",
+    title: "Fuobe DoP · Mix (a move and an effect on one run)",
+    description: `${HEADER} Fuobe DoP's Mix on both engines: the second preset's LoRAs stack on the first's model, each scaled by its strength (0.6 here), and its words join the prompt. A LoRA for another base (a Wan effect on an LTX-2.3 camera move) joins as words only. Variants: the Mix, and the first preset alone.`,
+    original: ["fuobe-dop", "fuobe-dop-ltx"],
+    kind: "video",
+    targets: {
+      open: { models: ["fuobe-dop"], params: { duration: 5 } },
+      cloud: { models: ["fuobe-dop"], params: { duration: 5 } },
+      demo: { models: ["fuobe-dop"], params: { duration: 5 } },
+    },
+    defaults: {
+      seeds: [1001, 2002],
+      prompts: [{ id: "bridge", text: "a woman in a red coat on a city bridge at golden hour" }],
+      metrics: ["temporal", "clip"],
+      variant: "first",
+      candidate: "mix",
+      timeoutSeconds: 2700,
+    },
+    variants: {
+      mix: { description: "Both presets: the first at full strength, the second's LoRAs at 0.6" },
+      first: { description: "The first preset alone (no Mix)", mix: false },
+    },
+    cases,
   };
 }
 
@@ -308,12 +407,12 @@ const write = (name, data, check) => {
 
 export function generated() {
   const dop = dopSuite();
-  return { "soul.json": soulSuite(), "soul-cinema.json": soulCinemaSuite(), "soul-hex.json": soulHexSuite(), "dop.json": dop.suite, "case.schema.json": schemaJson(), later: dop.later };
+  return { "soul.json": soulSuite(), "soul-cinema.json": soulCinemaSuite(), "soul-hex.json": soulHexSuite(), "dop.json": dop.suite, "dop-mix.json": dopMixSuite(), "case.schema.json": schemaJson(), later: dop.later };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const check = process.argv.includes("--check");
   const out = generated();
-  for (const name of ["soul.json", "soul-cinema.json", "soul-hex.json", "dop.json", "case.schema.json"]) write(name, out[name], check);
-  console.log(`soul: ${out["soul.json"].cases.length} looks · dop: ${out["dop.json"].cases.length} presets${out.later.length ? ` (${out.later.length} research names not in the catalog yet)` : ""}`);
+  for (const name of ["soul.json", "soul-cinema.json", "soul-hex.json", "dop.json", "dop-mix.json", "case.schema.json"]) write(name, out[name], check);
+  console.log(`soul: ${out["soul.json"].cases.length} looks · dop: ${out["dop.json"].cases.length} presets · dop-mix: ${out["dop-mix.json"].cases.length} pairs${out.later.length ? ` (${out.later.length} research names not in the catalog yet)` : ""}`);
 }
