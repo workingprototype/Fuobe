@@ -7,6 +7,9 @@
 //   2. A box selection grouped with Ctrl+G frames the nodes; Run group runs only the nodes inside it.
 //   3. A second page holds its own board; switching back keeps the first one; everything is saved (read
 //      back from the API).
+//   4. An Undo clicked after switching pages lands on its own page; a page renamed just before a run is saved
+//      by the run; ⌘↵ with only a drawing selected runs the board; C then Enter pins a comment, and an empty
+//      one goes when focus leaves it; the arrow keys move between page tabs; scrolling pans the board.
 import { DESKTOP, launch } from "./_browser.mjs";
 
 const app = (process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "http://localhost:3000").replace(/\/$/, "");
@@ -101,6 +104,77 @@ try {
   const p1 = saved.pages[0].graph;
   check("both pages are saved", saved.pages.length === 2 && saved.pages[1].graph.nodes.length === 0, saved.pages.map((p) => p.name).join(", "));
   check("drawings, text, comment and group are saved", (p1.shapes ?? []).some((x) => x.kind === "rect") && (p1.shapes ?? []).some((x) => x.text === "Hello board") && p1.comments?.[0]?.text === "Check the light" && p1.groups?.length === 1);
+
+  // 4. Review fixes.
+  const pageNodes = async () => (await api(`/api/canvases/${c.id}`)).canvas.pages.map((p) => p.graph.nodes.map((x) => x.id).sort().join(","));
+  // Undo after a page switch: the deleted node comes back on page 1, and page 2 keeps its own board.
+  await page.locator('[data-testid="canvas-node-other"]').click({ position: { x: 20, y: 12 } });
+  await page.keyboard.press("Delete");
+  await page.getByText("Node deleted").waitFor({ timeout: 5000 });
+  await page.getByRole("tab", { name: "Page 2" }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await page.waitForTimeout(400);
+  check("Undo after a page switch leaves the open page as it is", (await page.locator('[data-testid^="canvas-node-"]').count()) === 0);
+  await page.waitForTimeout(1500);
+  const afterUndo = await pageNodes();
+  check("…and puts the node back on its own page", afterUndo[0] === "img,other,p" && afterUndo[1] === "", afterUndo.join(" | "));
+  // A rename just before ⌘↵ is saved by the run (the autosave hasn't gone yet).
+  await page.getByRole("tab", { name: "Page 2" }).dblclick();
+  await page.getByRole("textbox", { name: "Page name" }).fill("Shots");
+  await page.keyboard.press("Enter");
+  await page.getByRole("tab", { name: "Page 1" }).click();
+  await page.locator('[data-testid="canvas-node-img"]').waitFor({ timeout: 10_000 });
+  // A drawing alone is selected (a new rectangle is): ⌘↵ runs the board, not the drawing.
+  await page.keyboard.press("r");
+  const r2 = at(0.15, 0.85);
+  await page.mouse.move(r2.x, r2.y);
+  await page.mouse.down();
+  await page.mouse.move(r2.x + 60, r2.y + 40, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.press("Control+Enter");
+  const toast = await page.locator("[data-sonner-toast]").filter({ hasText: /Running|up to date/ }).first().textContent({ timeout: 10_000 });
+  check("⌘↵ with only a drawing selected runs the board", /Running/.test(toast ?? ""), toast ?? "");
+  const named = (await api(`/api/canvases/${c.id}`)).canvas.pages.map((p) => p.name);
+  check("a page renamed right before a run is saved by it", named[1] === "Shots", named.join(", "));
+  // C, then Enter: a comment in the middle of the view, open for typing; leaving it empty removes it.
+  const pins = () => page.locator('[data-testid^="canvas-comment-"]').count();
+  const before = await pins();
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press("c");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Comment", null, { timeout: 5000 }).catch(() => {});
+  check("C then Enter pins a comment from the keyboard", (await pins()) === before + 1);
+  await page.mouse.click(at(0.3, 0.5).x, at(0.3, 0.5).y);
+  await page.waitForTimeout(300);
+  check("an empty comment goes when focus leaves it", (await pins()) === before);
+  // Keyboard only: Tab to the Comment tool, Enter picks it, Enter again pins a comment.
+  await page.getByRole("button", { name: "Comment (C)" }).focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Comment", null, { timeout: 5000 }).catch(() => {});
+  check("the Comment tool's button, pressed again with Enter, pins a comment", (await pins()) === before + 1);
+  await page.keyboard.type("From the keyboard");
+  await page.keyboard.press("Escape");
+  // Page tabs: one in the Tab order, arrows move between them.
+  await page.getByRole("tab", { name: "Page 1" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(400);
+  const selectedTab = await page.locator('[role="tab"][aria-selected="true"]').textContent();
+  const focusedTab = await page.evaluate(() => document.activeElement?.textContent);
+  check("ArrowRight opens and focuses the next page tab", selectedTab === "Shots" && focusedTab === "Shots", `${selectedTab} / ${focusedTab}`);
+  check("only the open page's tab is in the Tab order", (await page.locator('[role="tab"][tabindex="0"]').count()) === 1);
+  await page.keyboard.press("Home");
+  await page.locator('[data-testid="canvas-node-img"]').waitFor({ timeout: 10_000 });
+  // Scrolling pans (pinch or ⌘-scroll zooms).
+  const transform = () => page.locator(".react-flow__viewport").evaluate((el) => getComputedStyle(el).transform);
+  const t0 = await transform();
+  await page.mouse.move(at(0.4, 0.4).x, at(0.4, 0.4).y);
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(400);
+  const t1 = await transform();
+  const scale = (t) => Number(/matrix\(([^,]+)/.exec(t)?.[1] ?? 1);
+  check("scrolling pans the board without zooming", t1 !== t0 && scale(t1) === scale(t0), `${t0} → ${t1}`);
 } catch (e) {
   failures.push(`script: ${e.message.split("\n")[0]}`);
   console.log(`FAIL ${e.message.split("\n")[0]}`);
