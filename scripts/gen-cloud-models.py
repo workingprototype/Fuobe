@@ -835,16 +835,17 @@ model("triposplat", "TripoSplat", "Tripo", "tripo", "model3d", "A Gaussian splat
       [("splat", "tripo3d/triposplat")], badges=["new"], fixed={"output_format": "ply"}, sliders=[("num_gaussians", "Gaussians")])
 # Its prompt defaults to "car" at the API, so Fuobe always asks for one.
 model("sam-3d-objects", "SAM 3D Objects", "Meta", "sam", "model3d", "The objects you name, rebuilt in 3D where they stand in the photo",
+      # export_textured_glb defaults to false (a grey mesh): the viewer shows the textured one.
       [("image-to-3d", "fal-ai/sam-3/3d-objects")], badges=["new"], pricing=("request", 0.02, "per unit; fal does not say what a unit is"),
-      options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
+      fixed={"export_textured_glb": True}, options={"requires": {"prompt": True, "msg": "Name the objects to rebuild, e.g. “chair, lamp”"}})
 model("tripo-h3-1-text", "Tripo H3.1 Text to 3D", "Tripo", "tripo", "model3d", "A textured 3D model from a description",
       [("text-to-3d", "tripo3d/h3.1/text-to-3d")], pricing=("request", 0.2, "standard textures; untextured $0.10, HD $0.30"),
       controls=[("texture_quality", "Texture"), ("geometry_quality", "Geometry")])
 model("meshy-7-1-multi", "Meshy 7.1 Multi-view", "Meshy", "meshy", "model3d", "One object from up to 4 photos of different sides",
       [("image-to-3d", "meshy/v7.1/multi-image-to-3d")], pricing=("request", 1.2, "textured; untextured $0.80, rigging +$0.20"),
-      controls=[("topology", "Topology")])
+      controls=[("topology", "Topology")], options={"minImages": 2})
 model("meshy-rigging", "Meshy Rigging", "Meshy", "meshy", "model3d", "Rig a humanoid GLB with a skeleton, walk and run cycles, or an animation preset",
-      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset"))
+      [("rig-3d", "fal-ai/meshy/rigging")], badges=["new"], pricing=("request", 0.2, "+$0.12 with an animation preset", {"animationUsd": 0.12}))
 # Cinema Studio's "Create 3D scene" on the cloud (part 4 §8): a depth map of the whole frame, which the browser
 # turns into a point cloud with the photo's colours. So scene-3d answers with an image on this model.
 model("marigold-depth", "Marigold V2 Depth", "Marigold", "marigold", "image", "A depth map of the whole frame, for the 3D scene your browser builds",

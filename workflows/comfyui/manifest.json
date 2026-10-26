@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T00:27:25.145Z",
+  "generatedAt": "2026-10-26T00:45:58.502Z",
   "comfyuiCommit": "fc04da91b2ab12f99e4716371a7e4f98ac982597",
   "comfyuiVersion": "0.41.0",
   "workflowTemplatesVersion": "0.11.86",
@@ -10843,9 +10843,148 @@
       ],
       "customNodes": [],
       "vramGb": 16,
-      "license": "MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet)",
+      "license": "MIT (TRELLIS.2 weights, DINOv3-NAF / TRELLIS VAEs as repackaged by Comfy-Org, BiRefNet); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License (royalty-free, commercial use allowed; the app must show a \"Built with DINOv3\" notice)",
       "validated": true,
       "notes": "Template 3d_pixal3d_trellis2_image_to_model: BiRefNet cut-out -> crop to mask -> TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB (Save3DAdvanced, history ui \"3d\"). The graph adds a 36-view turntable (RotateMesh + RenderMesh, core) saved as MP4 at turntableFps."
+    },
+    {
+      "id": "image-to-3d-trellis2-multiview",
+      "title": "Photos of 2-4 sides to textured 3D (Pixal3D multi-view on TRELLIS.2, PBR GLB) + a 36-view turntable video",
+      "capability": "image-to-3d",
+      "file": "image-to-3d-trellis2-multiview.json",
+      "source": "hand-built (scripts/comfy/hand-built/image-to-3d-trellis2-multiview.json)",
+      "bindings": {
+        "image": [
+          {
+            "node": "360",
+            "input": "image"
+          }
+        ],
+        "image2": [
+          {
+            "node": "361",
+            "input": "image"
+          }
+        ],
+        "image3": [
+          {
+            "node": "362",
+            "input": "image"
+          }
+        ],
+        "image4": [
+          {
+            "node": "363",
+            "input": "image"
+          }
+        ],
+        "seed": [
+          {
+            "node": "3",
+            "input": "seed"
+          },
+          {
+            "node": "12",
+            "input": "seed"
+          },
+          {
+            "node": "18",
+            "input": "seed"
+          },
+          {
+            "node": "23",
+            "input": "seed"
+          }
+        ],
+        "textureSize": [
+          {
+            "node": "288",
+            "input": "value"
+          }
+        ],
+        "turntableFps": [
+          {
+            "node": "701",
+            "input": "fps"
+          }
+        ],
+        "fovX": [
+          {
+            "node": "381",
+            "input": "fov_x_degrees"
+          }
+        ],
+        "filenamePrefix": [
+          {
+            "node": "372",
+            "input": "filename_prefix"
+          },
+          {
+            "node": "702",
+            "input": "filename_prefix"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "node": "372",
+          "kind": "model3d"
+        },
+        {
+          "node": "702",
+          "kind": "video",
+          "role": "turntable"
+        }
+      ],
+      "defaults": {
+        "textureSize": 4096,
+        "turntableFps": 12,
+        "fovX": 0
+      },
+      "limits": {},
+      "models": [
+        {
+          "file": "dino_v3_L_naf_fp32.safetensors",
+          "folder": "clip_vision",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/clip_vision/dino_v3_L_naf_fp32.safetensors",
+          "sizeGb": 1.22
+        },
+        {
+          "file": "trellis_2_shape_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_shape_vae_bf16.safetensors",
+          "sizeGb": 1.1
+        },
+        {
+          "file": "trellis_2_texture_vae_bf16.safetensors",
+          "folder": "vae",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/vae/trellis_2_texture_vae_bf16.safetensors",
+          "sizeGb": 0.95
+        },
+        {
+          "file": "birefnet.safetensors",
+          "folder": "background_removal",
+          "url": "https://huggingface.co/Comfy-Org/BiRefNet/resolve/main/background_removal/birefnet.safetensors",
+          "sizeGb": 0.44
+        },
+        {
+          "file": "pixal3d_multiview_int8_convrot.safetensors",
+          "folder": "diffusion_models",
+          "url": "https://huggingface.co/Comfy-Org/Pixal3D/resolve/main/diffusion_models/pixal3d_multiview_int8_convrot.safetensors",
+          "sizeGb": 5.58
+        },
+        {
+          "file": "moge_2_vitl_normal_fp16.safetensors",
+          "folder": "geometry_estimation",
+          "url": "https://huggingface.co/Comfy-Org/MoGe/resolve/main/geometry_estimation/moge_2_vitl_normal_fp16.safetensors",
+          "sizeGb": 0.66
+        }
+      ],
+      "customNodes": [],
+      "vramGb": 16,
+      "license": "MIT (Pixal3D multi-view weights by TencentARC, TRELLIS.2 VAEs as repackaged by Comfy-Org, BiRefNet, microsoft/MoGe 2); the dino_v3_L_naf image encoder is DINOv3 ViT-L under the DINOv3 License (royalty-free, commercial use allowed; the app must show a \"Built with DINOv3\" notice)",
+      "validated": true,
+      "notes": "Template 3d_pixal3d_multi_views (2026-09-09) with the turnaround-sheet loader and its crops replaced by one upload per side: image = front, image2 = left, image3 = back, image4 = right (Pixal3DMultiViewConditioning, a fixed orbit rig 90 degrees apart, Z up: the left view is the object's own left, the camera at +90 degrees azimuth from the front, i.e. the photographer walks to their right; every side but the front is optional and the provider drops the branch of a side with no photo). Each side: BiRefNet cut-out -> crop to mask (1024, pad 1.1) -> the view. Then TRELLIS.2 structure (12 steps) -> shape (20) -> upsample to 1536 (12) -> texture (12) on Pixal3D multi-view -> decimate to 700k faces -> remesh -> UV unwrap -> baked base colour / metallic / roughness / AO / normal at textureSize -> GLB. The same 36-view turntable as image-to-3d-trellis2. The views' horizontal field of view as framed (Pixal3DMultiViewConditioning.fov) is measured on the front crop: MoGe 2 (LoadMoGeModel -> MoGeInference -> MoGeGeometryToFOV, horizontal, degrees), as the node's tooltip says for photos and as the official single-view template 3d_pixal3d_trellis2_image_to_model feeds Pixal3DConditioning; the multi-view template keeps the rig value 20, which suits rendered turnaround sheets but not phone photos, whose crops are usually wider. fovX (degrees, 0 = estimate, the default) fixes MoGe's lens instead, so MoGeGeometryToFOV passes it on (20 for a generated turnaround sheet). Weights: pixal3d_multiview_int8_convrot 5.58 GB + moge_2_vitl_normal_fp16 0.66 GB + the TRELLIS.2 VAEs, DINOv3-NAF and BiRefNet the single-view graph already uses. VRAM unverified (as the single-view graph: 16 GB). Validated by /prompt only."
     },
     {
       "id": "image-to-3d-hunyuan3d-21",

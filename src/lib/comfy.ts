@@ -613,6 +613,37 @@ export function dropLoadedSound(wf: ComfyWorkflow, loaders: string[], keep: stri
   return dropUnused(out, keep);
 }
 
+/**
+ * An optional upload with no file (a side of a multi-view 3D model nobody photographed): the loader goes, with
+ * every node downstream of it, up to the inputs of `into` nodes (Pixal3DMultiViewConditioning's "left"), which
+ * are dropped. Null when its branch doesn't end in such an input, or reaches an output node in `keep` (then the
+ * upload can't simply be left out).
+ */
+export function dropBranch(wf: ComfyWorkflow, loaderId: string, into: string, keep: string[] = []): ComfyWorkflow | null {
+  if (!wf[loaderId]) return null;
+  const gone = new Set([loaderId]);
+  const cut: { id: string; input: string }[] = [];
+  for (const queue = [loaderId]; queue.length; ) {
+    const id = queue.shift()!;
+    for (const [cid, n] of Object.entries(wf)) {
+      for (const [input, v] of Object.entries(n.inputs)) {
+        if (!isLinkValue(v) || v[0] !== id) continue;
+        if (n.class_type === into) cut.push({ id: cid, input });
+        else if (keep.includes(cid)) return null;
+        else if (!gone.has(cid)) {
+          gone.add(cid);
+          queue.push(cid);
+        }
+      }
+    }
+  }
+  if (!cut.length) return null;
+  const out = cloneWorkflow(wf);
+  for (const c of cut) delete out[c.id].inputs[c.input];
+  for (const id of gone) delete out[id];
+  return out;
+}
+
 /** Codes people use that Whisper spells differently. */
 const WHISPER_ALIASES: Record<string, string> = { fil: "tl", jv: "jw", iw: "he", nb: "no", zh_hans: "zh" };
 

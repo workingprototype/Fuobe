@@ -165,7 +165,13 @@
     "sha256": "7bfa7ebe14aa128a4b9b513e653998c5293ddc9221ca1d668191d27dc52725f6",
     "validated": true,
     "error": null,
-    "at": "2026-10-23T00:12:16.834Z"
+    "at": "2026-10-26T00:46:02.904Z"
+  },
+  "image-to-3d-trellis2-multiview": {
+    "sha256": "06ac47b57c4007ed0bb6f96ecde799de1e24285baf590f14357ffde87081b118",
+    "validated": true,
+    "error": null,
+    "at": "2026-10-26T00:46:07.467Z"
   },
   "image-to-splat-triposplat": {
     "sha256": "cb65f4660b4d5fef3c0544146ed51b7d3acf059f3190a102dccf8166908f5413",

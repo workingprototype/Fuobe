@@ -34,6 +34,7 @@ const EXT_BY_TYPE: Record<string, string> = {
   // Gaussian splats (TripoSplat on fal writes .ply; the open TripoSplat graph writes .spz).
   "model/ply": "ply",
   "model/x-spz": "spz",
+  "model/x-ksplat": "ksplat",
   // Pro exports: FFV1 in Matroska, EXR frames (ComfyUI's /view says image/aces) and their zip.
   "video/x-matroska": "mkv",
   "image/x-exr": "exr",
@@ -65,6 +66,7 @@ const TYPE_BY_EXT: Record<string, string> = {
   gltf: "model/gltf+json",
   ply: "model/ply",
   spz: "model/x-spz",
+  ksplat: "model/x-ksplat",
   mkv: "video/x-matroska",
   exr: "image/x-exr",
   zip: "application/zip",

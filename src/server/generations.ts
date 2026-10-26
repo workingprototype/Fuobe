@@ -34,7 +34,7 @@ import {
 import { db } from "./db";
 import { listElements } from "./elements";
 import { pollTrainings } from "./training";
-import { createExtendChain, createKeyframeFilm, createShotFilm } from "./chains";
+import { createExtendChain, createKeyframeFilm, createShotFilm, createStillTo3d } from "./chains";
 import { enhancePrompt, enhanceSoulWords } from "./enhance";
 import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
@@ -516,7 +516,7 @@ export function previewChained(req: GenerationRequest, deps: number) {
   // A waiting step always runs as one job (createGenerations doesn't batch dependents).
   const p = previewGeneration(withChainInputs(req, slotsFor(req, deps).map(placeholderFor)));
   // Refused before anything starts, as createGenerations refuses it.
-  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name));
+  if (routesFor(p.model, p.op).some((r) => r.chained)) throw new Error(chainedWaitMessage(p.model.name, p.op));
   const jobs = Math.max(1, p.jobs);
   return { ...p, jobs: 1, outputs: p.outputs / jobs, costUsd: p.costUsd === null ? null : p.costUsd / jobs };
 }
@@ -545,13 +545,17 @@ export function createGenerations(original: GenerationRequest, opts: CreateOptio
   // Frames mode on an open model: one start/end-frame clip per pair of frames, then joined.
   const filmRoute = shotModel && keyframeChain(shotModel);
   if (!opts.dependsOn && filmRoute && inferOperation(shotModel, original) === "keyframes") return createKeyframeFilm(original, shotModel, filmRoute);
+  // Text to 3D on the open engine: a still first, then the 3D model of it. The operation is read as the planner
+  // reads it (Assist, MCP and API clients usually leave op out).
+  const stillTo3d = !opts.dependsOn && shotModel && inferOperation(shotModel, original) === "text-to-3d" ? routesFor(shotModel, "text-to-3d").find((r) => r.chained) : undefined;
+  if (shotModel && stillTo3d) return createStillTo3d(original, shotModel, stillTo3d);
   const deps = opts.dependsOn === undefined ? [] : Array.isArray(opts.dependsOn) ? opts.dependsOn : [opts.dependsOn];
   const waits = deps.length > 0;
   // A dependent job can't be planned until its inputs exist; it's validated with placeholders, then launched by the runner.
   const p = waits ? prepare(withChainInputs(original, slotsFor(original, deps.length).map(placeholderFor))) : prepare(original);
   const { req, plan, route, demo, providerId, cost, notes } = p;
   // A chained route is built from its inputs when it's created; it can't wait for another step's output.
-  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name));
+  if (waits && route.chained) throw new Error(chainedWaitMessage(plan.model.name, plan.op));
   const jobs = waits ? 1 : plan.jobs;
   const batchId = opts.batchId ?? (jobs > 1 ? nanoid(10) : null);
   const now = Date.now();
@@ -1225,37 +1229,64 @@ function inlineText(text: string | undefined, meta: Record<string, unknown> | un
 }
 
 /**
- * Extra files a result carries as links (meta.artifacts: LTX HDR's EXR zip, Higgsfield's fbx / zip) are kept
- * too, so the Library never depends on a provider's expiring URL. Links are streamed to disk (an EXR zip runs
- * to gigabytes); one that can't be fetched stays as it was (the result's actions still offer it).
+ * Extra files a result carries as links are kept too, so the Library never depends on a provider's expiring URL:
+ * meta.artifacts (LTX HDR's EXR zip, Higgsfield's fbx / zip), meta.formats (a 3D model's other formats, a rig's FBX
+ * and its walk and run cycles, SAM 3D's splat) and meta.preview (a 3D model's render, the cut-out a splat was
+ * made from). Links are streamed to disk (an EXR zip runs to gigabytes); one that can't be fetched stays as it
+ * was (the result's actions still offer it). A link to the main file itself (`main`) is left for persistOutput.
  */
-export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string): Promise<Record<string, unknown> | undefined> {
-  const links = meta?.artifacts;
-  if (!links || typeof links !== "object" || Array.isArray(links)) return meta;
-  const kept: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(links as Record<string, unknown>)) {
-    kept[k] = v;
-    if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) continue;
-    try {
-      if (v.startsWith("data:")) {
-        const f = await readRef(v);
-        kept[k] = saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
-        continue;
-      }
-      const dest = path.join(scratchDir(), `${generationId}-${k}-${nanoid(6)}`);
-      const res = await fetchRemoteToFile(v, dest);
-      const name = new URL(res.url).pathname.split("/").pop() || undefined;
-      const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
-      kept[k] = adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
-    } catch (e) {
-      console.warn(`[fuobe] could not keep the ${k} file of ${generationId}: ${(e as Error).message}`);
-    }
+export async function persistArtifacts(meta: Record<string, unknown> | undefined, generationId: string, main?: string): Promise<Record<string, unknown> | undefined> {
+  if (!meta) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links)) continue;
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(links as Record<string, unknown>)) kept[k] = v === main ? v : await keepLink(v, key === "artifacts" ? k : `${key}-${k}`, generationId);
+    out = { ...out, [key]: kept };
   }
-  return { ...meta, artifacts: kept };
+  for (const key of LINKS) if (typeof meta[key] === "string" && meta[key] !== main) out = { ...out, [key]: await keepLink(meta[key], key, generationId) };
+  return out;
+}
+
+/** Maps of extra files by name, and single extra files, that a result links to (see persistArtifacts). */
+const LINK_MAPS = ["artifacts", "formats"] as const;
+const LINKS = ["preview"] as const;
+
+/** A provider's link stored as a file of the generation (its local URL), or the link as it was when it can't be fetched. */
+async function keepLink(v: unknown, label: string, generationId: string): Promise<unknown> {
+  if (typeof v !== "string" || !/^(https?:|data:)/.test(v)) return v;
+  try {
+    if (v.startsWith("data:")) {
+      const f = await readRef(v);
+      return saveFile({ data: f.data, contentType: f.contentType, source: "generation", generationId }).url;
+    }
+    const dest = path.join(scratchDir(), `${generationId}-${label}-${nanoid(6)}`);
+    const res = await fetchRemoteToFile(v, dest);
+    const name = new URL(res.url).pathname.split("/").pop() || undefined;
+    const header = res.contentType && res.contentType !== "application/octet-stream" ? res.contentType : null;
+    return adoptFile({ from: dest, contentType: header ?? contentTypeFor(name ?? "", "application/octet-stream"), name, source: "generation", generationId }).url;
+  } catch (e) {
+    console.warn(`[fuobe] could not keep the ${label} file of ${generationId}: ${(e as Error).message}`);
+    return v;
+  }
+}
+
+/** The extra links that pointed at the main file point at its stored copy. */
+function relinkMain(meta: Record<string, unknown> | undefined, from: string, to: string): Record<string, unknown> | undefined {
+  if (!meta || !from) return meta;
+  let out = meta;
+  for (const key of LINK_MAPS) {
+    const links = meta[key];
+    if (!links || typeof links !== "object" || Array.isArray(links) || !Object.values(links).includes(from)) continue;
+    out = { ...out, [key]: Object.fromEntries(Object.entries(links as Record<string, unknown>).map(([k, v]) => [k, v === from ? to : v])) };
+  }
+  for (const key of LINKS) if (meta[key] === from) out = { ...out, [key]: to };
+  return out;
 }
 
 async function persistOutput(o: RichOutput, generationId: string): Promise<OutputFile> {
-  const meta = await persistArtifacts(o.meta, generationId);
+  const linked = await persistArtifacts(o.meta, generationId, o.url);
   let data: Buffer;
   let contentType = o.contentType;
   if (!o.url && o.text !== undefined) {
@@ -1277,6 +1308,7 @@ async function persistOutput(o: RichOutput, generationId: string): Promise<Outpu
     contentType ??= header && header !== "application/octet-stream" ? header : contentTypeFor(new URL(o.url).searchParams.get("filename") ?? o.url);
   }
   const asset = saveFile({ data, contentType: contentType!, source: "generation", generationId });
+  const meta = relinkMain(linked, o.url, asset.url);
   // A text file's words travel with the generation, so feeds and the next chained step can use them.
   const text = o.text ?? (asset.kind === "text" ? data.toString("utf8") : undefined);
   return {

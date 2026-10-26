@@ -578,6 +578,8 @@ export interface Pricing {
   withLoras?: number;
   /** Per-megapixel prices billed on whole megapixels (fal's Qwen-Image 2512). */
   roundUp?: true;
+  /** What an animation preset adds to a run (params.animation: Meshy rigging +$0.12). */
+  animationUsd?: number;
 }
 
 export interface ModelDef {

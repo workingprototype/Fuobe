@@ -12,6 +12,7 @@ import {
   bypassReference,
   computeDimensions,
   computeFrames,
+  dropBranch,
   dropLoadedSound,
   dropVhsAudio,
   expandCaptionWorkflow,
@@ -251,7 +252,18 @@ function kindFor(filename: string, key: string, declared?: MediaKind): MediaKind
   return guessKind(filename, undefined, key === "gifs" || key === "videos" ? "video" : key);
 }
 
-const CONTENT_TYPES: Record<string, string> = { glb: "model/gltf-binary", gltf: "model/gltf+json", txt: "text/plain", srt: "application/x-subrip", vtt: "text/vtt", json: "application/json" };
+const CONTENT_TYPES: Record<string, string> = {
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  // Gaussian splats: ComfyUI's /view serves them as application/octet-stream.
+  ply: "model/ply",
+  spz: "model/x-spz",
+  ksplat: "model/x-ksplat",
+  txt: "text/plain",
+  srt: "application/x-subrip",
+  vtt: "text/vtt",
+  json: "application/json",
+};
 
 function textsOf(ui: Record<string, unknown> | undefined): string[] {
   return Array.isArray(ui?.text) ? (ui.text as unknown[]).filter((t): t is string => typeof t === "string") : [];
@@ -313,6 +325,8 @@ export function collectOutputs(entry: HistoryEntry, manifest: ManifestWorkflow |
         const meta: Record<string, unknown> = {};
         if (spec?.stem) meta.stem = spec.stem;
         if (spec?.role) meta.role = spec.role;
+        // A splat says what it is (the viewer and the download name go by it): spz, ply or ksplat.
+        if (spec?.role === "splat" && ext) meta.format = ext;
         // Qwen-Image-Layered saves its layers back to front.
         if (spec?.role === "layers") Object.assign(meta, { z: i, name: i === 0 ? "Background" : `Layer ${i}` });
         if (Object.keys(meta).length) o.meta = meta;
@@ -478,7 +492,7 @@ export function mediaInfoFor(name: unknown): MediaInfo | undefined {
 }
 
 /** Inputs a workflow handles its own way (the manifest doesn't say). */
-const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string> }> = {
+const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?: Record<string, string>; views?: ViewSlots }> = {
   // Edit graphs whose extra images feed TextEncodeQwenImageEditPlus: a repeated reference is harmless.
   "qwen-image-edit-2511-multi": { reuse: true },
   "storyboard-qwen-edit-2509-next-scene": { reuse: true },
@@ -489,7 +503,34 @@ const SLOT_RULES: Record<string, { reuse?: boolean; required?: string[]; hints?:
   "face-swap-reactor": { hints: { image2: "Add the face to put in" } },
   "video-swap-wan-vace": { hints: { image: "Add a picture of what goes in" } },
   "video-insert-wan-vace": { hints: { image: "Add a picture of what to add", mask: "Paint where it goes on the first frame" } },
+  // Pixal3D multi-view: the front, then any of the other sides.
+  "image-to-3d-trellis2-multiview": { hints: { image: "Add a photo of the front" }, views: { sides: ["front", "left", "back", "right"], into: "Pixal3DMultiViewConditioning" } },
 };
+
+/** Uploads that are sides of one object (image = the first side, image2 the second…), and the node they all go into. */
+interface ViewSlots {
+  sides: string[];
+  into: string;
+}
+
+const IMAGE_SLOTS = ["image", "image2", "image3", "image4"] as const;
+
+/**
+ * Which slot each photo of a multi-view 3D model goes to: params.extra.views names the side of each photo
+ * ("front", "left"…), in the order of the images; without names they are the sides in order.
+ */
+export function viewSlots(views: ViewSlots, images: string[], named: unknown): Partial<Record<(typeof IMAGE_SLOTS)[number], string>> {
+  const sides = Array.isArray(named) ? named.map((v) => String(v).toLowerCase()) : views.sides.slice(0, images.length);
+  if (sides.length !== images.length) throw new ProviderError(`${images.length} photo${images.length === 1 ? "" : "s"} but ${sides.length} side${sides.length === 1 ? "" : "s"} named`);
+  const out: Partial<Record<(typeof IMAGE_SLOTS)[number], string>> = {};
+  sides.forEach((side, i) => {
+    const at = views.sides.indexOf(side);
+    if (at < 0 || at >= IMAGE_SLOTS.length) throw new ProviderError(`A photo's side must be ${views.sides.join(", ")} (got “${side}”)`);
+    if (out[IMAGE_SLOTS[at]]) throw new ProviderError(`Two photos of the ${side}: keep one`);
+    out[IMAGE_SLOTS[at]] = images[i];
+  });
+  return out;
+}
 
 const MEDIA_HINT: Record<string, string> = {
   image: "Add an image",
@@ -678,6 +719,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     audio: input.audio,
     seed: input.seed !== undefined && input.seed >= 0 ? input.seed : randomSeed(),
   };
+  // A multi-view 3D model: each photo goes to its side.
+  if (rules.views) Object.assign(values, { image: undefined, image2: undefined, image3: undefined, image4: undefined }, viewSlots(rules.views, images, extra.views));
+  delete extra.views;
   // Voice workflows: "audio" is the voice to speak with (TTS), speaker A (dialogue) or the speech to convert
   // (voice change, whose target voice is "audio2").
   if (ctx.op === "tts") values.audio = input.voiceAudio ?? input.audio;
@@ -894,8 +938,19 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
   let graph = workflow;
   const left: string[] = [];
+  // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
+  if (rules.views) {
+    for (const k of IMAGE_SLOTS.slice(1)) {
+      if (values[k] !== undefined || b[k]?.length !== 1) continue;
+      const dropped = dropBranch(graph, b[k]![0].node, rules.views.into, manifest.outputs.map((o) => o.node));
+      if (dropped) {
+        graph = dropped;
+        left.push(k);
+      }
+    }
+  }
   for (const [k, prev] of [["image2", "image"], ["image3", "image2"], ["image4", "image3"]] as const) {
-    if (!b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
+    if (rules.views || !b[k] || values[k] !== undefined || rules.required?.includes(k)) continue;
     if (values[prev] === undefined && !left.includes(prev)) continue;
     const bypassed = b[k]!.length === 1 ? bypassReference(graph, b[k]![0].node) : null;
     if (bypassed) {
