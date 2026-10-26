@@ -315,6 +315,8 @@ export const ASSET_FREE: Record<string, string> = {
   "skills.files_json": "a skill's own text files, stored inline",
   "lora_mirrors.source_url": "where a LoRA file downloads from (civitai, Hugging Face), without the key",
   "lora_mirrors.hosted_url": "the provider's copy of a LoRA file (fal or Replicate storage), never ours",
+  "shares.tags_json": "words",
+  "shares.items_json": "generation ids: a share link shows what still exists and keeps no file alive",
   "lora_mirrors.licence_json": "the licence and civitai permissions a LoRA copy was made under",
 };
 
