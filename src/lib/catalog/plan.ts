@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import { chainGapProblem, chainTiming, FIRST_AT_ZERO, frameTimes, keyframeChain, MAX_KEYFRAMES, spread } from "./keyframes";
 import { cloudPath, fitLoras, gated, localOnly, loraCapacity, needsToken, routeLoraField } from "./loras";
-import { soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
+import { CINEMA_CROP, soulKind, soulMegapixels, soulRecipe, soulSize, type SoulOverlay } from "./soul";
 
 /** Infer the operation from what the user attached. */
 export function inferOperation(model: ModelDef, req: Pick<GenerationRequest, "op" | "inputs" | "params">): Operation {
@@ -116,7 +116,7 @@ export interface Plan {
    * expands them, the look stays), the look's LoRA triggers at the front (in order), and what happens after
    * generation (the grade, an overlay) that the result's meta carries.
    */
-  soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay };
+  soul?: { look?: string; words: string; triggers: string[]; grade?: string; overlay?: SoulOverlay; crop?: "21:9" };
 }
 
 /** Operations that work from their inputs alone. */
@@ -301,6 +301,10 @@ export function planGeneration(
   if (op === "bg-remove-video" && !params.matteOutput && matteOutputs && matteOutputs.length > 1) params = { ...params, matteOutput: matteOutputs[0] };
   // Soul's prompt always carries the look's words: it's the user's own words a new picture needs.
   if (soulPlan && op === "t2i" && !soulPlan.words) throw new Error("Write a prompt first");
+  // Soul HD (and Soul Cinema) make new pictures only: a picture attached isn't used, and the run says so.
+  if (soulPlan && op === "t2i" && req.inputs?.images?.length && !routesFor(model, "edit").length) {
+    notes.push(`${model.name} makes new pictures, so it doesn't use the picture you attached (Fuobe Soul restyles a picture with a look)`);
+  }
   if (!prompt && !promptOptional(model, op) && !markedTarget(model, op, req, params)) {
     throw new Error(op === "remove-object" ? "Say what to remove, e.g. “the coffee cup in her hand”" : "Write a prompt first");
   }
@@ -310,6 +314,12 @@ export function planGeneration(
   const presets = model.options.presets;
   if (presets?.required && !params.extra?.[presets.param]) throw new Error(`Pick a ${presets.label.toLowerCase()} first`);
 
+  // Soul Cinema's 21:9 (research §4.5: a crop option): made at 16:9 on both engines, then cropped to 21:9 with
+  // its grade after generation (meta.crop).
+  if (soulPlan && soul === "cinema" && params.aspectRatio === CINEMA_CROP) {
+    params = { ...params, aspectRatio: "16:9" };
+    soulPlan = { ...soulPlan, crop: CINEMA_CROP };
+  }
   // Soul's exact sizes on the user's GPU (the cloud routes send them through FieldMap.size); an edit keeps the
   // picture's shape at the tier's size (about 1 or 2 megapixels).
   if (soul && model.engine === "open" && op === "t2i") {

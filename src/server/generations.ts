@@ -450,9 +450,11 @@ function prepare(original: GenerationRequest) {
   const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
-  // civitai key a civitai LoRA the run can't get is left out (and said), rather than failing at the download.
+  // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
+  // download: the look's words still carry it. Any other run (a motion, whose LoRA is the point) still stops there.
   const asked = plan.loras;
-  const reachable = demo ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
+  const reachable =
+    demo || !plan.soul ? { loras: asked, notes: [] } : withoutUnreachableCivitai(asked, route.provider === "comfyui" ? "comfyui" : route.provider === "replicate" ? "replicate" : "fal");
   const fitted = fitLoras(reachable.loras, route);
   // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
   const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
@@ -467,8 +469,9 @@ function prepare(original: GenerationRequest) {
     const span = f.min !== undefined && f.max !== undefined ? ` makes ${half(f.min / fps)}–${half(f.max / fps)} s clips,` : "";
     notes.push(`${plan.model.name} on ${provider(route.provider).label}${span} so this one is about ${half(made)} s, not ${seconds} s`);
   }
-  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images) runs one job per output.
-  if (!demo && route.map && !route.map.numOutputs && plan.perJobOutputs > 1) {
+  // A route that can't batch (Higgsfield's Grok Imagine Image beside fal's num_images; a ComfyUI graph, which makes
+  // one picture a run: Fuobe Soul on the open engine) runs one job per output.
+  if (!demo && !route.map?.numOutputs && plan.perJobOutputs > 1) {
     plan = { ...plan, jobs: plan.jobs * plan.perJobOutputs, perJobOutputs: 1, params: { ...plan.params, numOutputs: 1 } };
   }
   const providerId: ProviderId = demo ? "mock" : route.provider;
@@ -1089,8 +1092,9 @@ async function pollOne(r: Row): Promise<void> {
       console.warn(`[fuobe] could not save output for ${r.id}: ${(e as Error).message}`);
     }
   }
-  // Fuobe Soul: what follows in the browser (the look's grade, an overlay), on each image; API clients read it as meta.
-  const post = soulPostSteps(r.model_id, r.preset_id);
+  // Fuobe Soul: what follows in the browser (the look's grade, an overlay, Soul Cinema's 21:9 crop), on each image;
+  // API clients read it as meta.
+  const post = soulPostSteps(r.model_id, r.preset_id, soulKind(r.model_id) ? requestAspect(r.request_json) : undefined);
   if (post) for (const [i, o] of outputs.entries()) if (o.kind === "image") outputs[i] = { ...o, meta: { ...o.meta, ...post } };
   update(r.id, {
     status: "succeeded",
@@ -1196,6 +1200,15 @@ export async function cancelGeneration(id: string): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Fuobe Soul's post steps (the look's grade and overlay), made in the browser when the result arrives.
+
+/** The aspect ratio a stored request asked for (Soul Cinema's 21:9 is made at 16:9 and cropped). */
+function requestAspect(json: string): string | undefined {
+  try {
+    return (JSON.parse(json) as GenerationRequest).params?.aspectRatio;
+  } catch {
+    return undefined;
+  }
+}
 
 export class FinishError extends Error {
   constructor(

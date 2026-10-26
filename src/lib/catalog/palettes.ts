@@ -23,7 +23,7 @@
  * `request.prompt`: they ride in `request.signature.words`, which the server adds when it plans the
  * run, so feeds, Library titles and Reuse keep the user's own words.
  */
-import { lookCard, SOUL_MODEL_IDS } from "./soul-cards";
+import { DEFAULT_LOOK, lookCard, SOUL_MODEL_IDS } from "./soul-cards";
 import type { GenerationRequest, GenParams, ModelDef, Operation } from "./types";
 
 export type RGB = [number, number, number];
@@ -428,18 +428,27 @@ export function styleLegend(from: number, to: number): string {
   return `Use ${which} only as a style reference: match their colour palette, light, texture, grain and mood, but don't copy their subjects or layout.`;
 }
 
+/** Takes a Fuobe Soul look as its presetId (Fuobe Soul, Soul HD); a look id means nothing to any other model. */
+const lookOf = (r: GenerationRequest, m: ModelDef) => (m.options.looks && r.presetId ? lookCard(r.presetId) : undefined);
+
 function swap(request: GenerationRequest, to: ModelDef, from: ModelDef): GenerationRequest {
   if (to.id === from.id) return request;
   const p = request.params ?? {};
   // Keep what the new model takes; drop the old model's own settings.
   const aspect = p.aspectRatio && (!to.options.aspectRatios || to.options.aspectRatios.includes(p.aspectRatio)) ? p.aspectRatio : to.defaults?.aspectRatio;
   const resolution = p.resolution && to.options.resolutions?.includes(p.resolution) ? p.resolution : to.defaults?.resolution;
-  return {
+  const out: GenerationRequest = {
     ...request,
     modelId: to.id,
     op: undefined,
     params: { ...to.defaults, aspectRatio: aspect, resolution, numOutputs: p.numOutputs, seed: p.seed, enhancePrompt: p.enhancePrompt, palette: p.palette, extra: undefined },
   };
+  // A Soul look is Fuobe Soul's own (its presetId): it doesn't go to a model that takes no looks.
+  if (from.options.looks && !to.options.looks) {
+    delete out.presetId;
+    delete out.presetStrength;
+  }
+  return out;
 }
 
 const setExtra = (r: GenerationRequest, key: string, value: unknown): GenerationRequest => ({ ...r, params: { ...r.params, extra: { ...r.params?.extra, [key]: value } } });
@@ -481,8 +490,11 @@ export function applySignature(req: GenerationRequest, sig: Signature | undefine
   const move = (id: string, why: string) => {
     const to = ctx.getModel(id);
     if (!to || !model || to.id === model.id) return false;
+    const look = !to.options.looks ? lookOf(r, model) : undefined;
     r = swap(r, to, model);
     notes.push(why.replace("{model}", to.name));
+    // The moodboard's style wins over the look (it moved the run); say the look isn't used.
+    if (look && look.id !== DEFAULT_LOOK) notes.push(`The ${look.name} look is Fuobe Soul's own, so it isn't used on ${to.name}`);
     model = to;
     return true;
   };

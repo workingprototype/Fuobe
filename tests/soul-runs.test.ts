@@ -131,10 +131,10 @@ describe("Fuobe Soul on both engines", () => {
   it("prices per megapixel of every image: free on the GPU, the /lora price with LoRAs, whole megapixels on Soul HD", () => {
     const cloud = onEngine(soul(), "cloud");
     const p = plan("cloud", { params: { aspectRatio: "1:1", resolution: "720p", numOutputs: 4 } });
-    expect(estimateCost(cloud, p.params, p.jobs, p.op, true)).toBeCloseTo(0.0085 * 1.048576 * 4, 3);
+    expect(estimateCost(cloud, p.params, p.jobs, p.op, true)).toBeCloseTo(0.0085 * 4, 4);
     expect(estimateCost(onEngine(soul(), "open"), p.params, p.jobs, p.op)).toBe(0);
     const hd = onEngine(getModel("fuobe-soul-hd")!, "cloud");
-    expect(estimateCost(hd, { aspectRatio: "16:9", resolution: "1080p", numOutputs: 1 }, 1, "t2i")).toBeCloseTo(0.02 * 3, 3);
+    expect(estimateCost(hd, { aspectRatio: "16:9", resolution: "1080p", numOutputs: 1 }, 1, "t2i")).toBeCloseTo(0.02 * 2, 3);
   });
 
   it("gives Soul Cinema its film look and Soul HD the look's words without Z-Image LoRAs", () => {

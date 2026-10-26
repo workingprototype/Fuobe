@@ -1,7 +1,7 @@
 /**
- * Fuobe Soul's post steps (research §4.4), the part that runs in the browser when a result arrives: the look's
- * grade (src/lib/grade.ts presets, WebGL) and the text or frame some looks add, which diffusion draws badly
- * (a camera's date stamp, a CCTV caption, a photo-booth print). Pure: the layout of what to draw, and which
+ * Fuobe Soul's post steps (research §4.4), the part that runs in the browser when a result arrives: Soul Cinema's
+ * 21:9 crop (§4.5), the look's grade (src/lib/grade.ts presets, WebGL) and the text or frame some looks add, which
+ * diffusion draws badly (a camera's date stamp, a CCTV caption, a photo-booth print). Pure: the layout of what to draw, and which
  * outputs still need it. src/components/studio/soul-finish.ts draws it; the server keeps the finished picture
  * (POST /api/generations/<id>/finish) and the original beside it (meta.original).
  */
@@ -11,6 +11,8 @@ export type SoulOverlay = "date-stamp" | "cctv" | "photo-booth";
 
 /** What an output asks for after generation (the server writes it as meta when the job succeeds). */
 export interface FinishSteps {
+  /** Soul Cinema's 21:9: the 16:9 picture's middle band. */
+  crop?: "21:9";
   grade?: string;
   overlay?: SoulOverlay;
 }
@@ -20,9 +22,23 @@ const OVERLAYS = new Set<SoulOverlay>(["date-stamp", "cctv", "photo-booth"]);
 /** The steps one output still needs (none once it is finished, or for anything but an image). */
 export function finishSteps(o: Pick<OutputFile, "kind" | "meta">): FinishSteps | null {
   if (o.kind !== "image" || !o.meta || o.meta.finished) return null;
+  const crop = o.meta.crop === "21:9" ? ("21:9" as const) : undefined;
   const grade = typeof o.meta.grade === "string" && o.meta.grade ? o.meta.grade : undefined;
   const overlay = OVERLAYS.has(o.meta.overlay as SoulOverlay) ? (o.meta.overlay as SoulOverlay) : undefined;
-  return grade || overlay ? { ...(grade && { grade }), ...(overlay && { overlay }) } : null;
+  return crop || grade || overlay ? { ...(crop && { crop }), ...(grade && { grade }), ...(overlay && { overlay }) } : null;
+}
+
+/** The crop of a `width` × `height` picture to an aspect ratio ("21:9"): the full width, the middle band (or the reverse). */
+export function cropRect(width: number, height: number, aspect: string): { x: number; y: number; width: number; height: number } {
+  const [a, b] = aspect.split(":").map(Number);
+  const want = a / b;
+  if (!(want > 0) || !(width > 0) || !(height > 0)) return { x: 0, y: 0, width, height };
+  if (width / height > want) {
+    const w = Math.round(height * want);
+    return { x: Math.round((width - w) / 2), y: 0, width: w, height };
+  }
+  const h = Math.round(width / want);
+  return { x: 0, y: Math.round((height - h) / 2), width, height: h };
 }
 
 /** Which outputs of a finished job still need their post steps (indexes into outputs). */

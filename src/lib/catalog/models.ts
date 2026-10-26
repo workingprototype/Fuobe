@@ -3,7 +3,7 @@ import { HIGGSFIELD_MODELS, HIGGSFIELD_ROUTES } from "./higgsfield-models.genera
 import { pricingAt } from "./plan";
 import { DEFAULT_FPS_TARGET, FPS_TARGETS, SLOW_MOTION } from "@/lib/av/fps";
 import { ASR_LANGUAGES, WHISPER_LANGUAGES } from "../speech-languages";
-import { SOUL_ASPECTS, SOUL_TIERS } from "./soul";
+import { CINEMA_CROP, SOUL_ASPECTS, SOUL_TIERS } from "./soul";
 import { LAST_FRAME_CHAIN, type ModelDef, type ModelOptions, type ModelRoute, type Operation } from "./types";
 
 /*
@@ -1497,7 +1497,8 @@ const originals: ModelDef[] = [
   original({
     id: "fuobe-soul-cinema",
     open: [comfy("t2i", "z-image-turbo-t2i", "Z-Image Turbo with the film-still LoRAs")],
-    options: SOUL_OPTIONS,
+    // 21:9 is a crop of the 16:9 picture, made after generation (research §4.5).
+    options: { ...SOUL_OPTIONS, aspectRatios: [...SOUL_ASPECTS, CINEMA_CROP] },
   }),
 ];
 

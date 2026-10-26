@@ -110,6 +110,8 @@ export const needsCivitai = (look: Pick<SoulLook, "loras">): boolean => look.lor
 export const SOUL_TIERS: SoulTier[] = ["720p", "1080p"];
 /** The seven aspect ratios of Soul's size table. */
 export const SOUL_ASPECTS: string[] = Object.keys(SOUL_SIZES["720p"]);
+/** Soul Cinema's crop option (research §4.5): made at 16:9, cropped to 21:9 after generation. */
+export const CINEMA_CROP = "21:9" as const;
 
 /** Width and height for an aspect ratio and tier (the 720p tier and 3:4 when either is unknown). */
 export function soulSize(aspectRatio: string | undefined, tier: string | undefined): { width: number; height: number } {
@@ -118,10 +120,16 @@ export function soulSize(aspectRatio: string | undefined, tier: string | undefin
   return { width, height };
 }
 
-/** Megapixels of one image at this size (what a per-megapixel price is billed on). */
+/**
+ * fal's megapixel is 1024 × 1024 pixels: its price pages bill a 1024x1024 image as one megapixel and a 1920x1080
+ * one as two. Soul's 720p tier is one (896x1152 is 0.98), its 1080p tier about two.
+ */
+export const FAL_MEGAPIXEL = 1024 * 1024;
+
+/** Megapixels of one image at this size, as a per-megapixel price bills them (fal's 1024 × 1024 megapixel). */
 export const soulMegapixels = (aspectRatio: string | undefined, tier: string | undefined): number => {
   const { width, height } = soulSize(aspectRatio, tier);
-  return (width * height) / 1_000_000;
+  return (width * height) / FAL_MEGAPIXEL;
 };
 
 // ---------------------------------------------------------------------------
@@ -233,13 +241,18 @@ export function promptWithLoras(prompt: string, triggers: string[], kept: Pick<L
 }
 
 /**
- * What happens to a Soul result after generation, read from its request (the grade preset and the overlay the
- * browser applies; meta.grade / meta.overlay tell API clients). Undefined for other models.
+ * What happens to a Soul result after generation, read from its request (the grade preset, the overlay and Soul
+ * Cinema's 21:9 crop the browser applies; meta.grade / meta.overlay / meta.crop tell API clients). Undefined for
+ * other models.
  */
-export function soulPostSteps(modelId: string, presetId: string | null | undefined): { look?: string; grade?: string; overlay?: SoulOverlay } | undefined {
+export function soulPostSteps(
+  modelId: string,
+  presetId: string | null | undefined,
+  aspectRatio?: string | null,
+): { look?: string; grade?: string; overlay?: SoulOverlay; crop?: typeof CINEMA_CROP } | undefined {
   const kind = soulKind(modelId);
   if (!kind) return undefined;
-  if (kind === "cinema") return { grade: SOUL_CINEMA.grades[0] };
+  if (kind === "cinema") return { grade: SOUL_CINEMA.grades[0], ...(aspectRatio === CINEMA_CROP && { crop: CINEMA_CROP }) };
   const look = soulLook(presetId ?? DEFAULT_LOOK);
   if (!look) return undefined;
   return { look: look.id, ...(look.grade && { grade: look.grade }), ...(look.overlay && { overlay: look.overlay }) };

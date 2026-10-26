@@ -105,7 +105,8 @@ describe("Soul looks (soul-originals.generated.ts)", () => {
     expect(soulSize("16:9", "1080p")).toEqual({ width: 1920, height: 1088 });
     expect(soulSize("9:16", "720p")).toEqual({ width: 768, height: 1344 });
     expect(soulSize(undefined, undefined)).toEqual({ width: 896, height: 1152 });
-    expect(soulMegapixels("1:1", "720p")).toBeCloseTo(1.048576);
+    // fal bills a 1024x1024 image as one megapixel (1024 × 1024 pixels).
+    expect(soulMegapixels("1:1", "720p")).toBe(1);
     expect(SOUL_SAMPLER).toEqual({ steps: 8, cfg: 1, sampler: "res_multistep", scheduler: "simple", shift: 3 });
   });
 });
