@@ -75,11 +75,11 @@ describe("Models & licences in listings and picks", () => {
     expect(plan()).not.toBe("nano-banana-pro");
   });
 
-  it("leaves switched-off models out of the ⌘K palette", () => {
+  it("sends a switched-off model in the ⌘K palette to Models & licences instead of its studio", () => {
     const index = paletteIndex();
-    const has = (access?: { off: string[] }) => indexEntries(index, "both", access).some((e) => e.key === "model:nano-banana-pro");
-    expect(has()).toBe(true);
-    expect(has({ off: ["nano-banana-pro"] })).toBe(false);
+    const entry = (access?: { off: string[] }) => indexEntries(index, "both", access).find((e) => e.key === "model:nano-banana-pro")!;
+    expect(entry().href).not.toBe("/settings/models");
+    expect(entry({ off: ["nano-banana-pro"] })).toMatchObject({ href: "/settings/models", hint: "Google · turned off in Models & licences" });
   });
 
   it("refuses a model that is off through the API, naming the switch", async () => {
