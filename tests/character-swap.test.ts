@@ -277,6 +277,7 @@ describe("Character swap: licences are information", () => {
       ["h3_character_swap_v1.5.safetensors", "regions"],
       ["h3_character_swap_pro4500_1000.safetensors", "regions"],
       [TURBO_LORA.file, "commercial"],
+      ["H3-Person-Remover-V1.safetensors", "regions"],
     ]);
   });
 

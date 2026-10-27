@@ -155,6 +155,24 @@ describe("Remove object: estimates", () => {
     expect(effects.notes.join(" ")).toMatch(/CogVideoX/);
   });
 
+  it("open engine, H3 person removal: the clean first frame, H3 Relay and the GPU said; the LoRA switched off refuses", async () => {
+    const h3 = (over: Record<string, unknown> = {}) => estimateRoute.POST(json(body({ engine: "open", modelId: "oss-h3-person-remove", prompt: "the skater", source: { url: clip, duration: 12, fps: 16, width: 72, height: 128, hasAudio: true }, ...over })));
+    const e = await (await h3()).json();
+    expect(e).toMatchObject({ modelId: "oss-h3-person-remove", pieces: 1, costUsd: 0 });
+    const notes = e.notes.join(" ");
+    expect(notes).toMatch(/clean copy of the part's first frame with the person gone/);
+    expect(notes).toMatch(/H3_RELAY=1/);
+    expect(notes).toMatch(/People only/);
+    expect(notes).toMatch(/MiniMax H3 Community License — not licensed in the US, the EU, the UK and South Korea/);
+    expect((await (await h3({ prompt: " " })).json()).error).toMatch(/Say who to remove/);
+    const { changeAccess } = await import("@/server/model-access");
+    changeAccess([{ kind: "lora", id: "H3-Person-Remover-V1.safetensors", on: false }]);
+    const off = await h3();
+    expect(off.status).toBe(422);
+    expect((await off.json()).error).toMatch(/Person Remover LoRA is switched off in Settings → Models & licences/);
+    changeAccess([{ kind: "reset" }]);
+  });
+
   it("says what's missing", async () => {
     const click = await estimateRoute.POST(json(body({ engine: "open", mode: "click", source: { url: clip, duration: 12, fps: 16 } })));
     expect(click.status).toBe(422);
@@ -260,6 +278,23 @@ describe("Remove object: runs", () => {
     expect(final).toMatchObject({ modelId: "oss-vace-remove", feature: REMOVE.feature });
     // 3 s at 16 fps is 48 frames: the window is the largest 4n+1, 45 frames (2.8125 s).
     expect(final.request.params).toMatchObject({ startTime: 0, endTime: 2.8125 });
+  });
+
+  it("open engine, H3 person removal: fit, first frame, clean frame, H3 removal, then the sound put back", async () => {
+    const res = await createRoute.POST(json(body({ engine: "open", modelId: "oss-h3-person-remove", prompt: "the skater", range: { start: 1, end: 7 } })));
+    const out = (await res.json()) as { final: Generation; items: Generation[] };
+    expect(res.status).toBe(201);
+    const rows = batchOf(out.final.id);
+    expect(rows.map((r) => r.model_id)).toEqual(expect.arrayContaining(["oss-fit-clip", "oss-extract-frame", "oss-qwen-edit", "oss-h3-person-remove", "oss-trim", "oss-mux"]));
+    expect(out.final).toMatchObject({ modelId: "oss-mux", feature: REMOVE.feature });
+    expect((await settle(out.final.id)).status).toBe("succeeded");
+    const removal = gens.getGeneration(rows.find((r) => r.model_id === "oss-h3-person-remove")!.id)!;
+    const clean = gens.getGeneration(rows.find((r) => r.model_id === "oss-qwen-edit")!.id)!;
+    const fit = gens.getGeneration(rows.find((r) => r.model_id === "oss-fit-clip")!.id)!;
+    // The removal read the fitted part and the clean first frame the steps before it made.
+    expect(removal.request.inputs?.video).toBe(fit.outputs[0].url);
+    expect(removal.request.inputs?.images).toEqual([clean.outputs[0].url]);
+    expect(removal.request.prompt).toBe("the skater");
   });
 
   it("mask preview: SAM 3.1 on the first 2 s (cloud), the SAM 3 matte (open)", async () => {

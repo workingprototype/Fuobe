@@ -104,11 +104,23 @@ export const TURBO_LORA: LoraRef = {
 /** The ComfyUI workflows of the Character swap. */
 export const H3_WORKFLOWS = ["video-character-swap-h3", "video-character-swap-h3-relay"] as const;
 
+/** Remove object's "Remove a person (H3)": H3 Relay's Person Removal graph (docs/research/openjutsu-6.md §4.4). */
+export const H3_REMOVAL_WORKFLOW = "video-person-remove-h3-relay";
+
+/** Akatz Labs' Person Remover V1 LoRA (Hugging Face akatz-ai/MiniMax-H3-Person-Remover-LoRA at the researched revision). */
+export const PERSON_REMOVER_LORA: LoraRef = {
+  file: "H3-Person-Remover-V1.safetensors",
+  url: "https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors",
+  version: "fe136b3dc93aea993b9f194d48ea9859fdc2de14",
+  licence: { commercial: true, hostedOk: true, snapshotDate: "2026-10-27", name: "MiniMax H3 Community License" },
+};
+
 /**
  * The LoRA files a Character swap graph loads itself (not injected: its own loaders name them), so a run can download
  * the ones ComfyUI lacks before it starts: the Turbo LoRA and the swap LoRA's release (none: only Turbo).
  */
 export function graphLoras(endpoint: string, extra: Record<string, unknown> | undefined): LoraRef[] {
+  if (endpoint === H3_REMOVAL_WORKFLOW) return [PERSON_REMOVER_LORA];
   if (!(H3_WORKFLOWS as readonly string[]).includes(endpoint)) return [];
   const lora = extra?.lora;
   return lora === "none" ? [TURBO_LORA] : [TURBO_LORA, swapLoraRef(lora === "v1" ? "v1" : "v1.5")];
@@ -472,7 +484,7 @@ export interface CharacterLicence {
 const H3_LICENCE_URL = "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE";
 
 export const MINIMAX_H3_LICENCE: CharacterLicence = {
-  item: "MiniMax H3 (diffusion model, VAEs, packaged text encoder) and Akatz Labs' Character Swap LoRA V1 / V1.5",
+  item: "MiniMax H3 (diffusion model, VAEs, packaged text encoder), Akatz Labs' Character Swap LoRA V1 / V1.5 and Person Remover V1",
   name: "MiniMax H3 Community License",
   class: "regions",
   url: H3_LICENCE_URL,
@@ -541,6 +553,8 @@ export const CHARACTER_LORAS: { file: string; name: string; url: string; licence
   { file: SWAP_LORAS["v1.5"].file, name: "H3 Character Swap LoRA V1.5 (Akatz Labs)", url: SWAP_LORAS["v1.5"].url, licence: MINIMAX_H3_LICENCE },
   { file: SWAP_LORAS.v1.file, name: "H3 Character Swap LoRA V1 (Akatz Labs)", url: SWAP_LORAS.v1.url, licence: MINIMAX_H3_LICENCE },
   { file: TURBO_LORA.file, name: "MiniMax H3 FL2V Turbo 8-step (lightx2v)", url: TURBO_LORA.url!, licence: TURBO_LICENCE },
+  // Remove object's "Remove a person (H3)".
+  { file: PERSON_REMOVER_LORA.file, name: "H3 Person Remover V1 (Akatz Labs)", url: PERSON_REMOVER_LORA.url!, licence: MINIMAX_H3_LICENCE },
 ];
 
 export const characterLora = (file: string) => CHARACTER_LORAS.find((l) => l.file === file);

@@ -695,6 +695,19 @@ const open: ModelDef[] = [
     routes: [comfy("video-swap", "video-character-swap-h3-relay", "H3 Relay toolkit: SAM 3.1 subject, 124-frame windows with 18 frames of history, the clip's sound kept")],
     options: { seed: true, resolutions: ["480p", "768p"], maxImages: 1 },
   }),
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §11.1): H3 Relay's Person Removal with Akatz
+  // Labs' Person Remover LoRA, from a clean first frame (Remove object makes it, fits the clip to 24 fps, puts the sound back).
+  o({
+    id: "oss-h3-person-remove",
+    name: "H3 Person Removal · Relay 2.0",
+    vendor: "MiniMax × Akatz Labs",
+    family: "minimax-h3",
+    kind: "video",
+    tagline: "Name the person to remove: SAM 3.1 marks them, MiniMax H3 with Akatz Labs' Person Remover LoRA rebuilds what was behind them from a clean first frame · 24 GB GPU with offloading (Video tools → Remove object makes the clean frame and keeps the sound)",
+    badges: ["new"],
+    routes: [comfy("remove-object", "video-person-remove-h3-relay", "H3 Relay Person Removal: the person painted green, 22-frame windows with 18 of history from the clean first frame (image), 12 steps, silent")],
+    options: { seed: true, maxImages: 1 },
+  }),
   o({
     id: "oss-qwen-relight",
     name: "Qwen-Image-Edit Relight",

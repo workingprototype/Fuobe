@@ -288,17 +288,19 @@ node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 
 
 ### Genjutsu Character swap (o/genjutsu-original, 2026-10-27)
 
-Two hand-built entries for Genjutsu's Character swap on MiniMax H3 (docs/research/openjutsu-6.md):
+Two hand-built entries for Genjutsu's Character swap on MiniMax H3, and one for Remove object's person removal on the same
+model (docs/research/openjutsu-6.md):
 
 ```bash
-npm run build -- video-character-swap-h3 video-character-swap-h3-relay
-node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-relay --shared
+npm run build -- video-character-swap-h3 video-character-swap-h3-relay video-person-remove-h3-relay
+node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-relay video-person-remove-h3-relay --shared
 ```
 
 | id | capability | what | validated here |
 |---|---|---|---|
 | `video-character-swap-h3` | video-character-swap | Openjutsu's `swap.api.json` (Akatz Labs' H3 Character Swap graph at `0670e4f` with a `Video Slice` in front): the part (start + length, 5–15 s, longer continues window by window), quality as the unpatched pack's string (`"480"` / `"768"`), H3 reference tags in the prompt, who to swap (SAM 3.1 words, largest / leftmost / rightmost / index, or clicks as JSON points on H3's canvas), the anchor first frame as `image2` (absent: its loader and fit are deleted and the shot's `use_anchor` is off), the swap LoRA release (V1.5, V1, or none: the Turbo LoRA alone) | no: `missing_node_type` (the `h3_character_swap` nodes are not on this server; its 22 core nodes are in `object_info.subset.json`) |
 | `video-character-swap-h3-relay` | video-character-swap | H3 Relay 2.0's character-swap example (akatz-ai/h3-relay at `e2a7665b`) with a `Video Slice`: the same part, quality, words, seed and who; no anchor | no: `missing_node_type` (`H3RelayAppendWindow`) |
+| `video-person-remove-h3-relay` | remove-object | H3 Relay 2.0's Person Removal example with Akatz Labs' Person Remover V1 LoRA (`akatz-ai/MiniMax-H3-Person-Remover-LoRA` at `fe136b3`): SAM 3.1 marks the person you name in green, H3 rebuilds the background in 22-frame windows from a clean first frame (`image`, fitted to the video's size by an added `ImageScale`). Remove object's "H3 Person Removal" eraser fits the part to 24 fps on the 32-pixel grid, makes the clean frame with Qwen-Image-Edit and puts the sound back | no: `missing_node_type` (`H3RelayAppendWindow`) |
 
 - **Node packs**: `h3_character_swap` (GPL-3.0) is copied out of `akatz-labs/h3-character-swap-tool` at
   `0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b` by `install-comfyui.sh` (`H3_PACK=0` skips it; it needs FFmpeg and FFprobe on

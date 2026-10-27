@@ -193,6 +193,7 @@ export const KNOWN_MODELS = {
   'minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors': { folder: 'loras', url: 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/3ec17a324ced54151364f24f8b5fb6bf7e26414f/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors' },
   'h3_character_swap_v1.5.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/d06323b7c8e70e97cdab48b78a1e05f786c8cba9/h3_character_swap_v1.5.safetensors' },
   'h3_character_swap_pro4500_1000.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/a665bb7e3bb9804e487d2925f67744f554c8ad49/h3_character_swap_pro4500_1000.safetensors' },
+  'H3-Person-Remover-V1.safetensors': { folder: 'loras', url: 'https://huggingface.co/akatz-ai/MiniMax-H3-Person-Remover-LoRA/resolve/fe136b3dc93aea993b9f194d48ea9859fdc2de14/H3-Person-Remover-V1.safetensors' },
   'depth_anything_3_mono_large.safetensors': { folder: 'geometry_estimation', url: 'https://huggingface.co/Comfy-Org/Depth-Anything-3/resolve/main/geometry_estimation/depth_anything_3_mono_large.safetensors' },
   // comfyui-oss-3 additions (docs/research/comfyui-oss-3.json, sizes from the Hugging Face tree API)
   'z_image_turbo_bf16.safetensors': { folder: 'diffusion_models', url: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors' },
@@ -2858,6 +2859,32 @@ export const SPEC = [
       'Akatz Labs\' newer route for the same swap (h3-relay @ e2a7665b, 2.0.1; example_workflows/toolkit/H3-Character-Swap.api.json, which Akatz\'s tool ships at 5f83374). Changed: a Trim Video node picks the part, the mask preview is removed, the adapter loads the V1.5 file by its Hugging Face name. ' +
       'Bindings as video-character-swap-h3 without an anchor frame or a masked-generation switch; lora "none" deletes the adapter and feeds its users from the Turbo LoRA. H3 Relay registers HTTP routes and an in-memory H3 layout compatibility layer on import: run it on the isolated worker if you prefer (install-comfyui.sh installs it with H3_RELAY=1). ' +
       'Needs FFmpeg and FFprobe on PATH. Not validated here: the pack is not installed on this server.',
+  },
+  // Remove object's "Remove a person (H3)" (docs/research/openjutsu-6.md §4.4, §11.1 item 9): H3 Relay 2.0's Person Removal
+  // example (akatz-ai/h3-relay @ e2a7665b, GPL-3.0) with Akatz Labs' Person Remover V1 LoRA, started from a clean first
+  // frame the app makes (the person already gone). The clip comes in at 24 fps on the 32-pixel grid (Fuobe's fit step).
+  {
+    id: 'video-person-remove-h3-relay',
+    title: 'Remove a person on H3 Relay 2.0: SAM 3.1 marks them green, MiniMax H3 + the Person Remover LoRA rebuilds the background from a clean first frame (h3-relay pack)',
+    capability: 'remove-object',
+    handBuilt: 'hand-built/video-person-remove-h3-relay.json',
+    packs: ['h3-relay'],
+    modelUrls: { 'sam3.1_multiplex_fp16.safetensors': 'https://huggingface.co/Comfy-Org/sam3.1/resolve/7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors' },
+    bindings: {
+      video: [b('source', 'file')], image: [b('anchor', 'image')],
+      maskPrompt: [b('subject', 'text')], maskGrow: [b('grow_mask', 'expand')], seed: [b('plan', 'seed')], steps: [b('schedule', 'steps')],
+      windowFrames: [b('plan', 'window_frames')], historyFrames: [b('plan', 'history_frames')],
+      lora: [b('adapter', 'lora_name')], loraStrength: [b('adapter', 'strength_model')], filenamePrefix: [b('save', 'filename_prefix')],
+    },
+    outputs: [{ node: 'save', kind: 'video' }],
+    defaults: { maskPrompt: 'person', maskGrow: 5, steps: 12, windowFrames: '22', historyFrames: '18', lora: 'H3-Person-Remover-V1.safetensors', loraStrength: 1 },
+    limits: { maxDurationSec: 60, maxFrames: 3592 },
+    vramGb: 24,
+    license: 'MiniMax H3 Community License (H3 Ref2VA, its video and audio VAEs, the packaged Qwen3-VL text encoder, Akatz Labs\' Person Remover V1 LoRA): territory EXCLUDES the US, the EU, the UK and South Korea; commercial use above US$20M yearly revenue needs MiniMax\'s written authorization; show "MiniMax H3" on the product\'s interface; no outputs used to improve other AI models · Qwen3-VL-32B base Apache-2.0 · SAM 3.1 under Meta\'s SAM License (commercial use allowed under its terms) · H3 Relay nodes GPL-3.0 (Sendy Software LLC and contributors; vendored Context Loop and Spectrum GPL-3.0); the graph is H3 Relay\'s example workflow (GPL-3.0 repository)',
+    notes:
+      'H3 Relay\'s toolkit H3-Person-Removal.api.json at e2a7665b (Akatz Labs\' tool ships the same file). Changed: the clean first frame goes through an ImageScale (centre crop) to the video\'s exact size, so an edit that came back a little larger or smaller still fits; SAM 3.1\'s words default to "person"; the save prefix. ' +
+      'video = the part already fitted to 24 fps on the 32-pixel grid (oss-fit-clip), image = the clean first frame (the app makes it with Qwen-Image-Edit from the part\'s first frame). 22-frame windows with 18 of history, 12 steps, er_sde / simple, CFG 1, LoRA 1.0, mask grown 5 px, seed 904234 by default (Akatz\'s settings). The output is silent: the app puts the clip\'s sound back. ' +
+      'Needs the h3-relay pack (H3_RELAY=1) and FFmpeg. Not validated here: the pack is not installed on this server.',
   },
 
   // ---- Faceless "Frame by frame": Ken Burns over a still ------------------------------

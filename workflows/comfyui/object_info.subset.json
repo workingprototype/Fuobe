@@ -5979,6 +5979,7 @@
   "H3RelayFinishWindows": null,
   "H3RelayPrepareSource": null,
   "H3RelayRecoverMasks": null,
+  "H3RelayReviewWindows": null,
   "H3RelaySamplingMemory": null,
   "H3RelaySelectMask": null,
   "H3RelayTextMemory": null,
@@ -18207,6 +18208,61 @@
     "output_node": false,
     "has_intermediate_output": false,
     "search_aliases": []
+  },
+  "ThresholdMask": {
+    "input": {
+      "required": {
+        "mask": [
+          "MASK",
+          {}
+        ],
+        "value": [
+          "FLOAT",
+          {
+            "default": 0.5,
+            "min": 0,
+            "max": 1,
+            "step": 0.01
+          }
+        ]
+      }
+    },
+    "input_order": {
+      "required": [
+        "mask",
+        "value"
+      ]
+    },
+    "is_input_list": false,
+    "output": [
+      "MASK"
+    ],
+    "output_is_list": [
+      false
+    ],
+    "output_name": [
+      "MASK"
+    ],
+    "output_tooltips": [
+      null
+    ],
+    "output_matchtypes": null,
+    "name": "ThresholdMask",
+    "display_name": "Threshold Mask",
+    "description": "",
+    "python_module": "comfy_extras.nodes_mask",
+    "category": "image/mask",
+    "output_node": false,
+    "deprecated": false,
+    "experimental": false,
+    "dev_only": false,
+    "api_node": false,
+    "price_badge": null,
+    "search_aliases": [
+      "binary mask"
+    ],
+    "essentials_category": null,
+    "has_intermediate_output": false
   },
   "Trellis2Conditioning": {
     "input": {
