@@ -1135,9 +1135,10 @@ export type CinemaMoveRoute =
 /**
  * A camera move on Fuobe Cinema (research studios[cinema-studio].original.cameraLora). In the cloud: LTX-2.3's camera
  * LoRA where one fits, else (with a start frame) the move's Wan 2.2 LoRA on Fuobe DoP or a hosted model's own move, else
- * words. On the user's GPU: the move's Wan 2.2 LoRA or a Fun Camera pose (with a start frame), else words. A LoRA whose
- * licence keeps it on the GPU never goes to the cloud, and one that downloads from civitai goes only with a civitai key
- * (`civitai: false`: none is set; the cloud run would stop at the download, so the move runs on its words).
+ * words. On the user's GPU: the move's Wan 2.2 LoRA or a Fun Camera pose (with a start frame), else words. A LoRA licensed
+ * for the GPU only goes to the cloud too unless the run marks it kept there (Settings → Models & licences), and one that
+ * downloads from civitai goes only with a civitai key (`civitai: false`: none is set; the cloud run would stop at the
+ * download, so the move runs on its words).
  */
 export function cinemaMoveRoute(slug: string, engine: Engine, hasStartFrame: boolean, opts: { civitai?: boolean } = {}): CinemaMoveRoute {
   const move = moveBySlug(slug);

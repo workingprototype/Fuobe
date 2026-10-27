@@ -11,14 +11,15 @@
  *   cloud runs the preset's words. Focus Change is LTX-2.5's own focus_shift move, hosted (LTX-2.5 Fast).
  * - Effects that are a grade (15) animate without a LoRA, then the grade is applied in the browser; the relight
  *   effects (6) relight the start frame first (Qwen-Image-Edit 2509 + its Relight LoRA), then animate it.
- * - A LoRA whose licence doesn't allow hosting (civitai "RentCivit") stays on the user's GPU: the cloud route leaves
- *   it out (and fitLoras would too, saying so).
+ * - Licences are information: a LoRA licensed for the user's GPU only (civitai "RentCivit") goes to the cloud route
+ *   too, unless Settings → Models & licences keeps such LoRAs on the GPU (fitLoras then leaves it out, saying so); a
+ *   non-commercial LoRA or one whose licence the research holds is used and said in the preset's line.
  * - A preset with nothing of the Original's own in the cloud (no hostable LoRA, camera LoRA, hosted move, grade or
  *   relight) keeps its partner route there, Kling 2.5 Turbo on the preset's words: Fuobe DoP on the words alone
  *   becomes its cloud default only when the evaluation harness (scripts/eval, O8) promotes it. On the user's GPU it
  *   is Fuobe DoP (Wan 2.2 on the words, as before).
  */
-import { libraryEntry, localOnly, loraName, loraRef, triggerOf } from "./loras";
+import { gpuOnlyLicence, libraryEntry, loraName, loraRef, triggerOf } from "./loras";
 import { DOP_RECIPES, OSS_LORAS, type DopRecipe, type OssLora } from "./oss-loras.generated";
 import type { LoraRef, Operation, Preset, PresetRoute } from "./types";
 
@@ -49,7 +50,11 @@ export function loraFamily(base: string): LoraFamily | undefined {
   return undefined;
 }
 
-/** Statuses whose preset runs on its words alone (no cleared LoRA, a licence on hold, or a better route elsewhere). */
+/**
+ * Statuses whose preset runs on its words alone (no LoRA, or a better route elsewhere). A licence the research holds
+ * ("licence-hold": BTS) is information now, and its LoRA is in the map with it; the preset keeps the words it ran on
+ * until the evaluation harness measures the LoRA, so no default changes with the licence rule (a suggestion).
+ */
 const WORDS_ONLY = new Set(["post-grade", "mixed-media-route", "licence-hold", "prompt-only", "train-own", "motion-library"]);
 
 /**
@@ -186,11 +191,12 @@ export function dopPreset(p: Preset): Preset {
     };
   }
 
-  // In the cloud: LTX-2.5's own move, LTX-2.3's camera LoRA, the Wan or LTX LoRAs a host may run, a grade or a relight
-  // on Wan. A LoRA whose licence keeps it on the GPU never reaches the cloud route (its trigger stays out too).
-  // Anything else keeps its partner route on the preset's words until the evaluation harness promotes Fuobe DoP's.
-  const wanHosted = wan.filter((l) => !localOnly(l));
-  const ltxHosted = ltx.filter((l) => !localOnly(l));
+  // In the cloud: LTX-2.5's own move, LTX-2.3's camera LoRA, the Wan or LTX LoRAs a host runs, a grade or a relight on
+  // Wan. A LoRA licensed for the GPU only rides along on Fuobe DoP (said below; the admin can keep such LoRAs on the
+  // GPU), but doesn't make Fuobe DoP the cloud default by itself: that preset keeps its partner route on the words
+  // (Wiggle), like anything else, until the evaluation harness promotes Fuobe DoP's.
+  const wanHosted = wan.some((l) => !gpuOnlyLicence(l)) ? wan : [];
+  const ltxHosted = ltx.some((l) => !gpuOnlyLicence(l)) ? ltx : [];
   let cloud: PresetRoute;
   let cloudSays: string;
   if (recipe?.cameraMotion) {
@@ -214,13 +220,22 @@ export function dopPreset(p: Preset): Preset {
     cloudSays = `the preset's words on a partner model until the evaluation harness measures Fuobe DoP on them${ltx25.length ? " (fal has no LTX-2.5 LoRA endpoint)" : ""}`;
   }
 
-  const local = [...wan, ...ltx].filter(localOnly);
+  const local = [...wan, ...ltx].filter(gpuOnlyLicence);
+  const used = [...wan, ...ltx, ...(open.modelId === LTX25_OPEN ? ltx25 : [])];
+  const nonCommercial = used.filter((l) => (l.licence ?? libraryEntry(l)?.licence)?.commercial === false);
+  const held = status === "licence-hold" ? presetLoras(p.id).map((l) => l.ref) : [];
   let parity: string;
   if (grade) parity = "Fuobe DoP animates your still without a LoRA, then your browser grades the clip";
   else if (extras.prestep) parity = "Fuobe DoP relights your still first (Qwen-Image-Edit 2509 + its Relight LoRA), then animates it";
   else if (status === "mixed-media-route") parity = `${p.parity ?? ""}${p.parity ? ". " : ""}For a whole clip restyled frame by frame, use Mixed Media`;
   else if (openSays === cloudSays) parity = `Fuobe DoP: ${openSays}, on your GPU and in the cloud`;
   else parity = `Fuobe DoP on your GPU: ${openSays}. In the cloud: ${cloudSays}`;
-  if (local.length) parity += `. ${names(local)} runs on your GPU only (its licence doesn't allow hosting), so the cloud runs the words`;
+  if (local.length) {
+    parity += cloud.modelId === DOP_MODEL || cloud.modelId === DOP_LTX_MODEL
+      ? `. ${names(local)} is licensed for your GPU only (civitai lists no “Rent”): the cloud runs it too unless Settings → Models & licences keeps such LoRAs on your GPU`
+      : `. ${names(local)} is licensed for your GPU only (civitai lists no “Rent”), so the cloud keeps the preset's partner route until Fuobe DoP with it is evaluated`;
+  }
+  if (nonCommercial.length) parity += `. ${names(nonCommercial)} is licensed for non-commercial use`;
+  if (held.length) parity += `. ${names(held)} is in Fuobe's LoRA library, but the research holds its licence (its Hugging Face and civitai pages disagree), so the preset runs on its words until it is evaluated`;
   return { ...p, open, cloud, parity, ...extras };
 }

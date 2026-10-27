@@ -1,8 +1,9 @@
 /**
  * LoRAs as part of a recipe, on both engines. Pure logic, no I/O:
  * - the researched library (lora-library.generated.ts) and how to turn an entry into a LoraRef;
- * - what a cloud run may carry (the licence rules of the build plan: a LoRA whose licence doesn't allow
- *   hosting runs only on the user's GPU) and how many the route's API takes (fitLoras);
+ * - what a cloud run may carry and how many the route's API takes (fitLoras). A LoRA whose licence allows the
+ *   user's GPU only is information: it goes to the cloud too, unless Settings → Models & licences keeps such LoRAs
+ *   on the GPU (the server marks the run's LoRAs `keepOnGpu`);
  * - the payload fields each API shape wants (loraFields) and when a route switches to its LoRA endpoint.
  * Downloads, mirrors and the civitai key live in src/server/loras.ts.
  */
@@ -107,11 +108,16 @@ export function cloudPath(l: LoraRef): string | undefined {
 export const gated = (l: Pick<LoraRef, "file" | "url">): boolean => libraryEntry(l)?.download === "hf-gated";
 
 /**
- * Runs only on the user's GPU: its licence doesn't allow running it on fal or Replicate (civitai without
- * "Rent"). The library's licence counts even when the ref carries none (or another): either one saying
- * no keeps it off the cloud.
+ * Its licence allows running it on the user's GPU only, not on fal or Replicate (civitai without "Rent"). The
+ * library's licence counts even when the ref carries none (or another). Information: shown wherever it is used.
  */
-export const localOnly = (l: LoraRef): boolean => l.licence?.hostedOk === false || libraryEntry(l)?.licence.hostedOk === false;
+export const gpuOnlyLicence = (l: LoraRef): boolean => l.licence?.hostedOk === false || libraryEntry(l)?.licence.hostedOk === false;
+
+/**
+ * Kept off the cloud: a GPU-only licence while Settings → Models & licences keeps such LoRAs on the user's GPU
+ * (the server marks the run's LoRAs `keepOnGpu`). By default they are sent like any other LoRA.
+ */
+export const localOnly = (l: LoraRef): boolean => !!l.keepOnGpu && gpuOnlyLicence(l);
 
 /**
  * The first LoRA's trigger word as a prompt can lead with it: without the full stop its author wrote after it (the
@@ -194,7 +200,8 @@ const list = (names: string[]) => (names.length < 2 ? names.join("") : `${names.
 
 /**
  * The LoRAs a cloud run carries, and what it says about the ones it leaves out:
- * - a LoRA whose licence doesn't allow hosting (civitai "RentCivit" only) runs only on the user's GPU;
+ * - a LoRA licensed for the user's GPU only (civitai "RentCivit" only) is sent and said, unless Settings → Models &
+ *   licences keeps such LoRAs on the GPU (localOnly): then this run leaves it out;
  * - a gated Hugging Face LoRA (accept its licence first) runs only on the user's GPU;
  * - a LoRA that exists only as a file on the user's ComfyUI (an open-engine training) can't be sent;
  * - beyond the API's maximum (3 on Z-Image, Qwen, FLUX.2 [klein] and LTX-2.3 quality; one per expert on
@@ -205,13 +212,15 @@ const list = (names: string[]) => (names.length < 2 ? names.join("") : `${names.
 export function fitLoras(loras: LoraRef[], route: Pick<ModelRoute, "provider" | "map" | "loraEndpoint">): { loras: LoraRef[]; notes: string[] } {
   if (!loras.length || route.provider === "comfyui" || route.provider === "mock") return { loras, notes: [] };
   const notes: string[] = [];
-  const local = loras.filter(localOnly);
-  if (local.length) notes.push(`${list(local.map(loraName))} ${local.length > 1 ? "run" : "runs"} only on your GPU (the licence doesn't allow hosting it), so this cloud run leaves ${local.length > 1 ? "them" : "it"} out`);
+  const local = [...new Set(loras.filter(localOnly).map(loraName))];
+  if (local.length) notes.push(`${list(local)} ${local.length > 1 ? "are" : "is"} licensed for your GPU only and Settings → Models & licences keeps such LoRAs off the cloud, so this run leaves ${local.length > 1 ? "them" : "it"} out`);
   const locked = loras.filter((l) => !localOnly(l) && !l.hostedUrl && gated(l));
   if (locked.length) notes.push(`${list(locked.map(loraName))} ${locked.length > 1 ? "are" : "is"} in a gated Hugging Face repo, so this cloud run leaves ${locked.length > 1 ? "them" : "it"} out (on your GPU ${locked.length > 1 ? "they run" : "it runs"} once you've accepted the licence)`);
   const unsent = loras.filter((l) => !localOnly(l) && !gated(l) && !sendable(l));
   if (unsent.length) notes.push(`${list(unsent.map(loraName))} ${unsent.length > 1 ? "exist" : "exists"} only on your ComfyUI, so this cloud run leaves ${unsent.length > 1 ? "them" : "it"} out`);
   const cloud = sendableToCloud(loras);
+  const gpuOnly = [...new Set(cloud.filter(gpuOnlyLicence).map(loraName))];
+  if (gpuOnly.length) notes.push(`${list(gpuOnly)}: ${gpuOnly.length > 1 ? "their licences allow your GPU only (civitai lists no “Rent”); they run" : "its licence allows your GPU only (civitai lists no “Rent”); it runs"} in the cloud because Settings → Models & licences lets such LoRAs go there`);
   const field = routeLoraField(route);
   if (!field) {
     if (cloud.length) notes.push(`This model takes no LoRAs in the cloud, so ${list(cloud.map(loraName))} ${cloud.length > 1 ? "are" : "is"} left out`);

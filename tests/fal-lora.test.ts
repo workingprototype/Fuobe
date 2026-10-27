@@ -83,18 +83,23 @@ describe("fal LoRA payloads (generated FieldMap.loras)", () => {
     expect((loraFields(r.map!.loras!, four).loras as unknown[]).length).toBe(3);
   });
 
-  it("drops LoRAs whose licence doesn't allow hosting and says so (they run only on the GPU)", () => {
+  it("sends a LoRA licensed for the GPU only and says so; one kept on the GPU (the admin's switch) is dropped", () => {
     const r = route("wan-2-2-a14b-cloud", "i2v");
     const wiggle = loraRef(loraEntry("civitai-2490836-wiggle-redmond")!);
     expect(wiggle.licence?.hostedOk).toBe(false);
     const keep = hf("squish_18.safetensors", { target: "both" });
-    const fitted = fitLoras([wiggle, keep], r);
-    expect(fitted.loras).toEqual([keep]);
-    expect(fitted.notes[0]).toMatch(/^Wiggle Redmond runs only on your GPU/);
+    const sent = fitLoras([wiggle, keep], r);
+    expect(sent.loras).toEqual([wiggle, keep]);
+    expect(sent.notes[0]).toMatch(/^Wiggle Redmond: its licence allows your GPU only/);
+    expect(loraFields(r.map!.loras!, [{ ...wiggle, hostedUrl: "https://v3.fal.media/x" }])).toMatchObject({ loras: [{ path: "https://v3.fal.media/x" }] });
+    // Settings → Models & licences keeps GPU-only LoRAs on the GPU: the run's LoRAs come marked.
+    const kept = fitLoras([{ ...wiggle, keepOnGpu: true }, keep], r);
+    expect(kept.loras).toEqual([keep]);
+    expect(kept.notes[0]).toMatch(/^Wiggle Redmond is licensed for your GPU only and Settings → Models & licences keeps such LoRAs off the cloud/);
     // Defensively, the payload drops it too.
-    expect(loraFields(r.map!.loras!, [{ ...wiggle, hostedUrl: "https://v3.fal.media/x" }])).toEqual({});
+    expect(loraFields(r.map!.loras!, [{ ...wiggle, keepOnGpu: true, hostedUrl: "https://v3.fal.media/x" }])).toEqual({});
     // The open engine carries every LoRA.
-    expect(fitLoras([wiggle, keep], { provider: "comfyui" }).loras).toHaveLength(2);
+    expect(fitLoras([{ ...wiggle, keepOnGpu: true }, keep], { provider: "comfyui" }).loras).toHaveLength(2);
   });
 
   it("never sends a civitai URL (the user's key stays home): only its mirror", () => {
@@ -118,8 +123,8 @@ describe("fal LoRA payloads (generated FieldMap.loras)", () => {
     // Prompt expansion would rewrite the prompt; 5 s at 24 fps = 121 frames (8n+1).
     expect(withOne.body.enable_prompt_expansion).toBe(false);
     expect(withOne.body.num_frames).toBe(121);
-    // No LoRA left (all local-only): the plain endpoint, never an empty required list.
-    const none = await submit(r, { prompt: "fly", images: ["https://x/a.png"], loras: [{ ...fpv, licence: { ...fpv.licence!, hostedOk: false } }] });
+    // No LoRA left (all kept on the GPU by the admin's switch): the plain endpoint, never an empty required list.
+    const none = await submit(r, { prompt: "fly", images: ["https://x/a.png"], loras: [{ ...fpv, keepOnGpu: true, licence: { ...fpv.licence!, hostedOk: false } }] });
     expect(none.url).toBe("https://queue.fal.run/fal-ai/ltx-2.3-22b/image-to-video");
     expect(none.body.loras).toBeUndefined();
     // A route that is only the /lora endpoint refuses to run without one.
