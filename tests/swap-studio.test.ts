@@ -1,27 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { coarseTimes, coarseWindows, mafd, sceneCuts, sceneScores, studioFrames, timeFrame, windowCuts, windowFrames } from "@/lib/av/scene-cuts";
+import { coarseTimes, coarseWindows, fineWidth, FINE_MAX_WIDTH, mafd, sceneCuts, sceneScores, studioFrames, timeFrame, windowChunks, windowCuts, windowFrames } from "@/lib/av/scene-cuts";
+import { pointsValue } from "@/lib/catalog/payload";
 import {
   addCut,
   applyLayout,
+  approvedMask,
   assemblyPieces,
   assemblyTakes,
   autoSelect,
   buildSegmentPrompt,
+  clipNeedsPreview,
   clipProblem,
+  cloudFilmSize,
   cueWords,
   currentSegments,
   DEFAULT_SETTINGS,
+  defaultMaskBase,
   dependencies,
   digest,
   enginePrompt,
   exportDecisions,
+  freezeTake,
+  maskMemoryProblem,
   maskPieceAt,
   maskPieces,
   maskProblem,
+  masterKeep,
   moveCut,
   newSegment,
   newShot,
   normalizedSize,
+  pageClip,
   planQueue,
   predecessors,
   referenceContext,
@@ -39,6 +48,7 @@ import {
   shotSpeaker,
   speakerIn,
   stableJson,
+  studioHandOff,
   updateTake,
   voicesOf,
   windowRanges,
@@ -50,7 +60,7 @@ import {
   type SwapShot,
   type SwapTake,
 } from "@/lib/catalog/swap-studio";
-import { cloudCallSeconds, maskPointsPayload, planAnchor, planAssembly, planMask, planNormalize, planSegmentTake, planTranscribe, STUDIO_MODELS } from "@/lib/catalog/swap-studio-plan";
+import { cloudCallSeconds, cloudMaskCut, frozenTakePlan, maskPointsPayload, planAnchor, planAssembly, planMask, planNormalize, planPreview, planSegmentTake, planTranscribe, STUDIO_MODELS } from "@/lib/catalog/swap-studio-plan";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -604,8 +614,12 @@ describe("engine steps", () => {
     const project = projectOf([clip], "cloud");
     const shot = shotOf(0, 300, { who: { selection: "rightmost", index: 0, words: "person" } });
     const items = currentSegments(shot);
-    const { steps } = planSegmentTake({ engine: "cloud", project, clip, shot, seg: items[1], shotNumber: 1, segNumber: 2, takeNumber: 3, prompt: "Replace only the selected person in <Video 1>. <Picture 2> is the generated boundary. <Picture 3> is a reference.", history: 18, anchor: "/api/files/a.png", previous: { video: "/api/files/prev.mp4", frames: 124 } });
-    expect(steps.map((s) => s.key)).toEqual(["cut", "boundary", "swap"]);
+    const { steps, final } = planSegmentTake({ engine: "cloud", project, clip, shot, seg: items[1], shotNumber: 1, segNumber: 2, takeNumber: 3, prompt: "Replace only the selected person in <Video 1>. <Picture 2> is the generated boundary. <Picture 3> is a reference.", history: 18, anchor: "/api/files/a.png", previous: { video: "/api/files/prev.mp4", frames: 124 } });
+    expect(steps.map((s) => s.key)).toEqual(["cut", "boundary", "swap", "fit"]);
+    // H3 makes whole seconds (6 s for these 123 frames): the take is cut back to the segment, so the next segment's
+    // boundary is this one's real last frame and the take lines up with the clip's sound.
+    expect(final).toBe("fit");
+    expect(steps[3]).toMatchObject({ request: { modelId: "trim-video", params: { startTime: 0, endTime: 123 / 24 } }, after: ["swap"], chain: [{ slot: "video" }] });
     expect(steps[0].request.params).toEqual({ startTime: 124 / 24, endTime: 247 / 24 });
     expect(steps[1].request).toMatchObject({ modelId: "extract-frame", inputs: { video: "/api/files/prev.mp4" }, params: { extra: { frame_type: "last" } } });
     const swap = steps[2];
@@ -641,8 +655,9 @@ describe("assembly", () => {
       ["source", 400, 480],
     ]);
     expect(assemblyTakes(pieces).length).toBe(2);
+    expect("stale" in r && r.stale).toEqual([]);
     const missing = assemblyPieces(project, { ...assembled, shots: [shots[0], shotOf(100, 480)] });
-    expect("problem" in missing && missing.problem).toMatch(/Shot 2, segment 1 has no current take/);
+    expect("problem" in missing && missing.problem).toMatch(/Shot 2, segment 1 has no chosen take/);
     expect(assemblyPieces(project, { ...assembled, shots: [shots[0]] })).toEqual({ problem: expect.stringMatching(/No shot replaces/) });
   });
 
@@ -671,10 +686,11 @@ describe("assembly", () => {
     expect(steps.filter((s) => s.request.modelId === "join-clips").map((s) => s.after?.length)).toEqual([24, 6, 2]);
     const mux = steps.find((s) => s.key === "final")!;
     expect(mux.request.inputs?.audio).toMatch(/^silence:|20/);
-    // One piece with sound: no join, the cut goes straight to the mux.
+    expect(steps.find((s) => s.key === "join")!.request.params?.extra).toEqual({ target_fps: 24 });
+    // One piece with sound: no join, the cut (scaled to the film's frame) goes straight to the mux.
     const one = planAssembly({ engine: "cloud", clip, pieces: [{ kind: "source", start: 0, end: 480 }], videoOf: () => "" });
-    expect(one.steps.map((s) => s.key)).toEqual(["piece0", "final"]);
-    expect(one.steps[1].after).toEqual(["piece0"]);
+    expect(one.steps.map((s) => s.key)).toEqual(["piece0-cut", "piece0", "final"]);
+    expect(one.steps[2].after).toEqual(["piece0"]);
   });
 
   it("ends on the join for a silent clip on your GPU", () => {
@@ -690,5 +706,239 @@ describe("signatures", () => {
     expect(stableJson({ b: 1, a: [2, { d: 1, c: 2 }] })).toBe('{"a":[2,{"c":2,"d":1}],"b":1}');
     expect(digest({ a: 1, b: 2 })).toBe(digest({ b: 2, a: 1 }));
     expect(digest({ a: 1 })).not.toBe(digest({ a: 2 }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: continuation on both engines, stale takes, engine-bound masks, anchors off, the cloud's browser copy
+
+describe("continuing a segment", () => {
+  it("your GPU's master keeps only the frames the next segment reads", () => {
+    const shot = shotOf(0, 480, { settings: { ...DEFAULT_SETTINGS, useAnchor: false } });
+    const items = currentSegments(shot);
+    // The default layout continues with 18 frames of history: each master keeps 18 frames, not the whole segment.
+    expect(items.map((_, i) => masterKeep(items, i, shot.settings))).toEqual([18, 18, 18, 18]);
+    const longer = items.map((g, i) => (i === 2 ? { ...g, history: 52 } : g));
+    expect(masterKeep(longer, 1, shot.settings)).toBe(52);
+    // Never more than the segment, at least one frame.
+    expect(masterKeep([{ ...items[0], end: 10 }], 0, { historyFrames: 18 })).toBe(10);
+    expect(masterKeep(items, 3, { historyFrames: 0 })).toBe(1);
+
+    const clip = clipOf();
+    const project = projectOf([clip]);
+    const plan = planSegmentTake({ engine: "open", project, clip, shot, seg: items[1], shotNumber: 1, segNumber: 2, takeNumber: 1, prompt: "P", history: 18, anchor: null, previous: { master: "/api/files/master.mkv", frames: 18 }, keep: 18 });
+    // The previous master holds 18 frames: the history is all of them.
+    expect(plan.steps[0].request.params?.extra).toMatchObject({ historyStart: 0, historyLength: 18, masterKeep: 18, segmentFrames: items[1].end - items[1].start });
+  });
+
+  it("refuses to continue from a take whose master kept fewer frames than the history asks for", () => {
+    const clip = clipOf();
+    const project = projectOf([clip]);
+    const base = shotOf(0, 300, { settings: { ...DEFAULT_SETTINGS, useAnchor: false } });
+    const done = ready(project, clip, { ...base, segments: currentSegments(base) });
+    const kept = (n: number) => ({ ...done, segments: done.segments!.map((g, i) => (i === 0 ? { ...g, takes: g.takes.map((t) => ({ ...t, frozen: { ...freezeTake(project, done, g), keep: n } })) } : i ? { ...g, takes: [], selectedTake: null } : g)) });
+    const short = planQueue(project, clip, kept(1), done.segments![1].id, "segment", { active: () => false, hasMaster: () => true });
+    expect("problem" in short && short.problem).toMatch(/kept its last 1 frame to continue from — use at most 1 frames of history/);
+    expect("entries" in planQueue(project, clip, kept(18), done.segments![1].id, "segment", { active: () => false, hasMaster: () => true })).toBe(true);
+  });
+
+  it("a frozen take on your GPU saves the frames it was queued to keep", () => {
+    const clip = clipOf();
+    const project = projectOf([clip]);
+    const shot = shotOf(0, 300, { settings: { ...DEFAULT_SETTINGS, useAnchor: false } });
+    const items = currentSegments(shot);
+    const t = take("k", { prompt: "P", frozen: { ...freezeTake(project, shot, items[0]), keep: 35 } });
+    const plan = frozenTakePlan(project, clip, shot, items[0], t, { shot: 1, segment: 1, take: 1 }, null);
+    expect(plan.steps[0].request.params?.extra).toMatchObject({ masterKeep: 35, segmentFrames: items[0].end - items[0].start });
+  });
+});
+
+describe("assembling with takes made before later changes", () => {
+  it("uses the chosen takes as they are and names the out-of-date ones", () => {
+    const clip = clipOf();
+    const project = projectOf([clip], "cloud");
+    const shot = ready(project, clip, shotOf(0, 120, { settings: { ...DEFAULT_SETTINGS, useAnchor: false } }));
+    const c = { ...clip, shots: [shot, shotOf(120, 480, { mode: "preserve" })] };
+    expect(assemblyPieces(project, c)).toMatchObject({ stale: [] });
+    // A new description changes every prompt: the takes are out of date, the assembly still runs with them.
+    const edited = { ...project, character: { ...project.character, description: "a woman in a red coat" } };
+    expect(segmentStates(edited, c, shot)[0].status).toBe("stale");
+    const r = assemblyPieces(edited, c);
+    expect("pieces" in r && r.pieces.map((p) => p.kind)).toEqual(["take", "source"]);
+    expect("stale" in r && r.stale).toEqual(["Shot 1, segment 1"]);
+    // A take that never ran can't be assembled.
+    const stopped = { ...shot, segments: shot.segments!.map((g) => ({ ...g, takes: g.takes.map((t) => ({ ...t, state: "stopped" as const })) })) };
+    expect(assemblyPieces(project, { ...c, shots: [stopped, c.shots[1]] })).toEqual({ problem: expect.stringMatching(/no chosen take/) });
+  });
+});
+
+describe("masks belong to the engine that made them", () => {
+  const who = { selection: "largest" as const, index: 0, words: "person" };
+  const cloudMask: MaskVersion = { id: "mc", createdAt: 0, kind: "track", engine: "cloud", frame: 30, points: [], who, pieces: [{ from: 30, frames: 210, url: "/api/files/cloudmask.mp4" }] };
+  const gpuMask: MaskVersion = { id: "mg", createdAt: 0, kind: "track", engine: "open", frame: 0, points: [], who, pieces: [{ from: 0, frames: 240, url: "/api/files/gpumask.mp4" }] };
+
+  it("a cloud-approved mask isn't sent to your GPU's segment graph, nor counted in its signature", () => {
+    const clip = clipOf();
+    const project = projectOf([clip]);
+    const shot = shotOf(0, 240, { masks: [cloudMask], approvedMask: "mc", settings: { ...DEFAULT_SETTINGS, useAnchor: false } });
+    expect(approvedMask(shot)).toBe(cloudMask);
+    expect(approvedMask(shot, "open")).toBeNull();
+    expect(freezeTake(project, shot, currentSegments(shot)[0]).mask).toBeNull();
+    const plain = shotOf(0, 240, { settings: { ...DEFAULT_SETTINGS, useAnchor: false } });
+    expect(settingSignature(project, clip, { ...shot, id: plain.id }, currentSegments(shot)[0])).toBe(settingSignature(project, clip, plain, currentSegments(shot)[0]));
+    // Your GPU's own approved mask is.
+    const own = { ...shot, masks: [cloudMask, gpuMask], approvedMask: "mg" };
+    expect(freezeTake(project, own, currentSegments(own)[0]).mask).toBe("/api/files/gpumask.mp4");
+  });
+
+  it("Track shot corrects this engine's versions only", () => {
+    const shot = shotOf(0, 240, { masks: [gpuMask, cloudMask], approvedMask: "mc" });
+    expect(defaultMaskBase(shot, "open")).toBe(gpuMask);
+    expect(defaultMaskBase(shot, "cloud")).toBe(cloudMask);
+    expect(defaultMaskBase({ ...shot, masks: [cloudMask] }, "open")).toBeNull();
+    expect(maskProblem("open", "track", 0, 240, [], who, defaultMaskBase({ ...shot, masks: [cloudMask] }, "open"))).toBeNull();
+    expect(maskProblem("open", "track", 0, 240, [], who, cloudMask)).toMatch(/other engine/);
+  });
+});
+
+describe("scene anchor off", () => {
+  it("a segment set to the scene anchor runs without one once anchors are off", () => {
+    const clip = clipOf();
+    const project = projectOf([clip], "cloud");
+    const base = shotOf(0, 240);
+    const items = currentSegments(base);
+    expect(items[0].anchorMode).toBe("shot");
+    const on = planQueue(project, clip, { ...base, segments: items }, items[0].id, "segment", { active: () => false });
+    expect("problem" in on && on.problem).toMatch(/approve a scene anchor/);
+    const off = { ...base, segments: items, settings: { ...base.settings, useAnchor: false } };
+    expect("entries" in planQueue(project, clip, off, items[0].id, "segment", { active: () => false })).toBe(true);
+    // A segment reference of its own is still needed when picked.
+    const custom = { ...off, segments: items.map((g, i) => (i ? g : { ...g, anchorMode: "custom" as const })) };
+    const r = planQueue(project, clip, custom, items[0].id, "segment", { active: () => false });
+    expect("problem" in r && r.problem).toMatch(/pick its reference image/);
+  });
+});
+
+describe("the cloud's pieces", () => {
+  it("scales every piece to one frame inside merge-videos' 512–2048 px and joins at 24 fps", () => {
+    expect(cloudFilmSize(1920, 1080)).toEqual({ width: 1920, height: 1080 });
+    expect(cloudFilmSize(3840, 2160)).toEqual({ width: 2048, height: 1152 });
+    expect(cloudFilmSize(72, 128)).toEqual({ width: 512, height: 910 });
+    expect(cloudFilmSize(undefined, 1080)).toBeNull();
+    const clip = clipOf();
+    const t = take("t1");
+    const { steps } = planAssembly({ engine: "cloud", clip, pieces: [{ kind: "source", start: 0, end: 100 }, { kind: "take", start: 100, end: 224, take: t, segmentId: "s" }], videoOf: () => "/api/files/take.mp4" });
+    expect(steps.map((s) => [s.key, s.request.modelId])).toEqual([
+      ["piece0-cut", "trim-video"],
+      ["piece0", "scale-video"],
+      ["piece1", "scale-video"],
+      ["join", "join-clips"],
+      ["final", "merge-audio-video"],
+    ]);
+    expect(steps[1]).toMatchObject({ request: { op: "reframe", params: { extra: { width: 1920, height: 1080 } } }, after: ["piece0-cut"], chain: [{ slot: "video" }] });
+    // A take is already its segment's length (planSegmentTake trims it): it is only scaled.
+    expect(steps[2].request.inputs).toEqual({ video: "/api/files/take.mp4" });
+  });
+
+  it("Update frame near the clip's end reads its last half second, the clicks on the frame inside it", () => {
+    const clip = clipOf();
+    const shot = shotOf(400, 480);
+    expect(cloudMaskCut(clip, shot, "frame", 10)).toEqual({ from: 410, to: 422, offset: 0 });
+    // Past the shot's end is fine (the clicked frame is what counts); the clip's end isn't.
+    expect(cloudMaskCut(clip, shotOf(0, 100), "frame", 99)).toEqual({ from: 99, to: 111, offset: 0 });
+    expect(cloudMaskCut(clip, shot, "frame", 79)).toEqual({ from: 468, to: 480, offset: 11 });
+    expect(cloudMaskCut(clip, shot, "track", 20)).toEqual({ from: 420, to: 480, offset: 0 });
+    const steps = planMask({ engine: "cloud", clip, shot, kind: "frame", frame: 79, points: [{ x: 5, y: 6, label: "positive" }], who: shot.who, base: null });
+    expect(steps[0].request.params).toEqual({ startTime: 468 / 24, endTime: 20 });
+    expect(steps[1].request.params?.points).toEqual([{ x: 5, y: 6, label: "positive", frame: 11 }]);
+    // fal's SAM 3.1 video takes the frame as frame_index (left out on the first frame).
+    expect(pointsValue("sam", [{ x: 5, y: 6, frame: 11 }, { x: 1, y: 2, label: "negative" }])).toEqual([
+      { x: 5, y: 6, label: 1, frame_index: 11 },
+      { x: 1, y: 2, label: 0 },
+    ]);
+    expect(maskPieces("cloud", "frame", 79, 80, null, 11)).toEqual([{ from: 79, frames: 1, offset: 11 }]);
+  });
+
+  it("makes a copy the browser can play when it can't play the clip (AVI, or a codec it lacks)", () => {
+    const avi = clipOf({ source: { ...clipOf().source, url: "/api/files/uploads/x/old.avi", name: "old.avi" }, normalized: null });
+    const mkv = clipOf({ source: { ...clipOf().source, name: "a.mkv", playable: false }, normalized: null });
+    const mp4 = clipOf({ normalized: null });
+    expect([avi, mkv, mp4].map((c) => clipNeedsPreview("cloud", c))).toEqual([true, true, false]);
+    expect(clipNeedsPreview("open", avi)).toBe(false);
+    const [step] = planPreview(avi)!;
+    expect(step.request).toMatchObject({ modelId: "scale-video", op: "reframe", inputs: { video: avi.source.url }, params: { extra: { width: 1920, height: 1080 } }, feature: "swap-studio-step" });
+    expect(planPreview({ ...avi, source: { ...avi.source, width: undefined } })).toBeNull();
+    // The page plays the copy once it's made; the cloud's jobs still read the upload as filmed.
+    expect(pageClip("cloud", avi)).toBe(avi.source.url);
+    expect(pageClip("cloud", { ...avi, preview: { url: "/api/files/copy.mp4" } })).toBe("/api/files/copy.mp4");
+    expect(pageClip("open", clipOf())).toBe(clipOf().normalized!.url);
+  });
+});
+
+describe("your GPU's mask memory", () => {
+  it("refuses a shot the server can't hold, in words", () => {
+    const GB = 2 ** 30;
+    const shot = { width: 1920, height: 1080, quality: "768p", shotFrames: 240, correcting: true };
+    expect(maskMemoryProblem(shot, 64 * GB)).toBeNull();
+    expect(maskMemoryProblem(shot, 16 * GB)).toMatch(/needs about \d+ GB of RAM and this ComfyUI can spare 8 GB.*or track it at 0\.5 MP/);
+    // Tracking holds fewer copies than correcting; 0.5 MP holds half.
+    expect(maskMemoryProblem({ ...shot, correcting: false }, 32 * GB)).toBeNull();
+    expect(maskMemoryProblem({ ...shot, quality: "480p" }, 32 * GB)).toBeNull();
+    expect(maskMemoryProblem({ ...shot, shotFrames: 3592 }, 64 * GB)).toMatch(/149\.7 s shot/);
+    expect(maskMemoryProblem({ ...shot, width: undefined }, 1)).toBeNull();
+  });
+});
+
+describe("the fine pass of Detect edits", () => {
+  it("reads frames at the clip's size (a small picture scores a cut lower), in bounded pieces", () => {
+    // Shrinking averages pixels: a cut between two textures scores lower when downscaled.
+    const a = new Uint8ClampedArray(4 * 4 * 4);
+    const b = new Uint8ClampedArray(4 * 4 * 4);
+    for (let i = 0; i < 16; i++) {
+      const v = (i + Math.floor(i / 4)) % 2 ? 255 : 0;
+      a.set([v, v, v, 255], i * 4);
+      b.set([255 - v, 255 - v, 255 - v, 255], i * 4);
+    }
+    const avg = (px: Uint8ClampedArray) => {
+      let t = 0;
+      for (let i = 0; i < 16; i++) t += px[i * 4];
+      const m = t / 16;
+      return new Uint8ClampedArray([m, m, m, 255]);
+    };
+    expect(mafd(a, b)).toBe(255);
+    expect(mafd(avg(a), avg(b))).toBeLessThan(1);
+    expect(fineWidth(1920)).toBe(FINE_MAX_WIDTH);
+    expect(fineWidth(480)).toBe(480);
+    expect(fineWidth(undefined)).toBe(640);
+    // Pieces decide on the same frames as the whole stretch: each starts two frames before its first decision.
+    const w = { from: 100, to: 160 };
+    const pieces = windowChunks(w, 24);
+    expect(pieces).toEqual([
+      { from: 100, to: 123 },
+      { from: 122, to: 145 },
+      { from: 144, to: 160 },
+    ]);
+    const frames = windowFrames(w);
+    const pixels = frames.map((f) => frame(f < 150 ? 10 : 240));
+    const whole = windowCuts(frames, pixels, 480);
+    const parts = pieces.flatMap((p) => {
+      const fs = windowFrames(p);
+      return windowCuts(fs, fs.map((f) => pixels[f - w.from]), 480);
+    });
+    expect(whole).toEqual([150]);
+    expect(parts).toEqual(whole);
+    expect(windowChunks({ from: 0, to: 5 }, 24)).toEqual([{ from: 0, to: 5 }]);
+  });
+});
+
+describe("from Genjutsu", () => {
+  it("opens the whole clip and the character in a new project on the same engine", () => {
+    const h = studioHandOff({ engine: "cloud", clip: { url: "/api/files/uploads/x/street.mov", name: "street.mov", size: 1234, duration: 42, width: 1920, height: 1080 }, image: "/api/files/uploads/x/hero.png", description: "  a knight\n in armour " });
+    expect(h).toEqual({
+      project: { name: "street", engine: "cloud", character: { image: "/api/files/uploads/x/hero.png", description: "a knight in armour" } },
+      clip: { url: "/api/files/uploads/x/street.mov", name: "street.mov", bytes: 1234, duration: 42, width: 1920, height: 1080 },
+    });
+    // Still uploading (no file yet), or nothing: an empty project with the character.
+    expect(studioHandOff({ engine: "open", clip: { name: "a.mp4" }, image: "blob:x" })).toEqual({ project: { name: "Character swap", engine: "open", character: { image: null, description: "" } }, clip: null });
   });
 });

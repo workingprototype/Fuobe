@@ -12,7 +12,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/swap-studio/pro
 export async function PATCH(request: Request, ctx: RouteContext<"/api/swap-studio/projects/[id]">) {
   return handle(async () => {
     const { id } = await ctx.params;
-    return Response.json(editProject(id, await body(request, EditSchema, "That change isn't valid")));
+    return Response.json(await editProject(id, await body(request, EditSchema, "That change isn't valid")));
   });
 }
 

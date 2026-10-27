@@ -20,6 +20,11 @@ export interface SegmentGraphOptions {
   mask?: { file: string; start: number; duration: number } | null;
   /** Masked generation off: the whole frame is regenerated (the edit mask is bypassed). */
   useMask: boolean;
+  /**
+   * The lossless master keeps the take's last `frames` frames from `from` on (what the next segment reads as history):
+   * a 16-bit master of the whole segment is hundreds of MB, more than ComfyUI takes as an upload by default.
+   */
+  masterTail?: { from: number; frames: number } | null;
   /** Output nodes (never dropped). */
   outputs: string[];
 }
@@ -29,7 +34,7 @@ export interface SegmentGraphOptions {
  * loader goes); without an anchor and without history Picture 2 and the first-frame guide go too (the window's anchor
  * would otherwise be the clip's own first frame). With both, the anchor moves to Picture 3 at the canvas size and the
  * window's anchor output is the boundary. An approved mask replaces SAM's chain; masked generation off bypasses the
- * edit mask and SAM altogether.
+ * edit mask and SAM altogether. The master saves only the frames the next segment can read (masterTail).
  */
 export function segmentGraph(wf: ComfyWorkflow, o: SegmentGraphOptions): ComfyWorkflow {
   const out = cloneWorkflow(wf);
@@ -61,6 +66,11 @@ export function segmentGraph(wf: ComfyWorkflow, o: SegmentGraphOptions): ComfyWo
     out.mask_fit = { class_type: "ImageScale", inputs: { image: ["mask_components", 0], upscale_method: "nearest-exact", width: ["dimensions", 0], height: ["dimensions", 1], crop: "center" } };
     out.mask_channel = { class_type: "ImageToMask", inputs: { image: ["mask_fit", 0], channel: "red" } };
     out.expand_mask.inputs.masks = ["mask_channel", 0];
+  }
+  const save = out.save_master?.inputs;
+  if (o.masterTail && save && isLink(save.images)) {
+    out.master_tail = { class_type: "ImageFromBatch", inputs: { image: [...save.images], batch_index: o.masterTail.from, length: o.masterTail.frames }, _meta: { title: "The take's last frames (the next segment's history)" } };
+    save.images = ["master_tail", 0];
   }
   return dropUnused(out, o.outputs);
 }

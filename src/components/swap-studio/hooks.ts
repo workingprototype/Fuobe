@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { QueueMode, StudioEstimate, SwapProject, SwapProjectCard, SwapProjectView } from "@/lib/catalog/swap-studio";
+import { studioHandOff, type HandOffInput, type QueueMode, type StudioEstimate, type SwapProject, type SwapProjectCard, type SwapProjectView } from "@/lib/catalog/swap-studio";
 import type { SwapEdit } from "@/lib/catalog/swap-studio-edit";
 import type { Engine, PixelPoint } from "@/lib/catalog/types";
 
@@ -97,6 +97,8 @@ export interface ClipInput {
   fps?: number;
   hasAudio?: boolean;
   bytes?: number;
+  /** Whether this browser could play it (the cloud makes a copy the page can play when it couldn't). */
+  playable?: boolean;
 }
 
 /** What "Queue …" answers: the project, the takes it made and any notes (a LoRA switched off). */
@@ -123,6 +125,22 @@ export const useStopTake = (id: string) => useAction<{ clipId: string; shotId: s
 export const useStopJob = (id: string) =>
   useAction<{ kind: "mask" | "anchor" | "assembly" | "normalize" | "transcribe"; clipId: string; shotId?: string; segmentId?: string; jobId?: string }>(id, "stop");
 export const useAssemble = (id: string) => useAction<{ clipId: string }>(id, "assemble");
+
+/**
+ * Genjutsu's "Open in Character Swap Studio": a new project with the character, and the clip added (the clip's
+ * problem, if it can't be added, comes back to say on the way in). Answers the project's id.
+ */
+export async function openInStudio(input: HandOffInput): Promise<{ id: string; problem: string | null }> {
+  const h = studioHandOff(input);
+  const p = await send<SwapProject>("/api/swap-studio/projects", "POST", h.project);
+  if (!h.clip) return { id: p.id, problem: null };
+  try {
+    await send<SwapProject>(`${base(p.id)}/clips`, "POST", h.clip);
+    return { id: p.id, problem: null };
+  } catch (e) {
+    return { id: p.id, problem: (e as Error).message };
+  }
+}
 
 /** The Export decisions download link. */
 export const decisionsHref = (id: string) => `${base(id)}/decisions`;

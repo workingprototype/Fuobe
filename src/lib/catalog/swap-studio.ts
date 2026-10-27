@@ -13,8 +13,9 @@
  * steps are in swap-studio-plan.ts. Behaviour follows Akatz Labs' app (MIT, Akatz Labs 2026); its prompts are reused
  * with that notice. No code of theirs is copied.
  */
-import { CHARACTER_SWAP, HISTORY_CHOICES, WINDOW_CHOICES, whoWords, type SwapLora, type SwapWho } from "./character-swap";
+import { CHARACTER_SWAP, h3Canvas, HISTORY_CHOICES, WINDOW_CHOICES, whoWords, type SwapLora, type SwapWho } from "./character-swap";
 import { STUDIO_FPS } from "@/lib/av/scene-cuts";
+import { wholeClipBudget } from "@/lib/av/video-finish";
 import type { Engine, PixelPoint } from "./types";
 
 export const SWAP_STUDIO = {
@@ -121,6 +122,8 @@ export const DEFAULT_WHO: WhoToSwap = { selection: "largest", index: 0, words: "
 export interface MaskPiece {
   from: number;
   frames: number;
+  /** Frames into its video where `from` is (a cloud Update frame near the clip's end reads frames before it). */
+  offset?: number;
   /** The mask video once it is made. */
   url?: string;
   genId?: string;
@@ -174,6 +177,11 @@ export interface FrozenTake {
   anchor: string | null;
   /** Your GPU: the approved mask video (masked generation on). */
   mask: string | null;
+  /**
+   * Your GPU: how many of the take's last frames its lossless master keeps (what the next segment reads as history;
+   * unset: all of them).
+   */
+  keep?: number;
   settings: SwapSettings;
   who: WhoToSwap;
 }
@@ -273,9 +281,15 @@ export interface TranscriptCue {
 export interface SwapClip {
   id: string;
   name: string;
-  source: { url: string; name?: string; duration: number; fps?: number; width?: number; height?: number; hasAudio: boolean; bytes?: number };
+  /** The upload; `playable` false when the browser that added it couldn't play it (AVI, or a codec it lacks). */
+  source: { url: string; name?: string; duration: number; fps?: number; width?: number; height?: number; hasAudio: boolean; bytes?: number; playable?: boolean };
   /** Your GPU: the clip at 24 fps (H.264, its sound kept), made on import. */
   normalized: { genId?: string; url?: string } | null;
+  /**
+   * The cloud: an H.264 copy at the clip's size for the page to play, show frames from and detect edits in, made when
+   * the browser can't play the upload (clipNeedsPreview). The cloud's jobs read the upload as filmed.
+   */
+  preview?: { genId?: string; url?: string } | null;
   /** Frames at 24 fps. */
   frames: number;
   cuts: number[];
@@ -384,6 +398,24 @@ export function normalizedSize(width?: number, height?: number): { width: number
   const even = (n: number) => Math.max(2, Math.floor((n * k) / 2) * 2);
   return { width: even(width), height: even(height) };
 }
+
+/**
+ * The cloud assembly's frame: the clip's own shape on even numbers within fal merge-videos' 512–2048 px (every piece,
+ * the clip's own and H3's 480p / 768p takes, is scaled to it before the join). Null when the clip's size is unknown.
+ */
+export function cloudFilmSize(width?: number, height?: number): { width: number; height: number } | null {
+  if (!width || !height) return null;
+  // Down to 2048 on the long side; up towards 512 on the short side (as far as the long side allows).
+  const scale = Math.min(2048 / Math.max(width, height), Math.max(1, 512 / Math.min(width, height)));
+  const even = (n: number) => Math.max(2, Math.round((n * scale) / 2) * 2);
+  return { width: even(width), height: even(height) };
+}
+
+/** Whether the page needs a copy of a clip to play it (the cloud keeps the upload as filmed; your GPU makes its 24 fps copy anyway). */
+export const clipNeedsPreview = (engine: Engine, clip: Pick<SwapClip, "source">) => engine === "cloud" && (clip.source.playable === false || clipExtension(clip.source.name ?? clip.source.url) === "avi");
+
+/** The clip as the page plays it: your GPU's 24 fps copy, the cloud's browser copy, else the upload. */
+export const pageClip = (engine: Engine, clip: Pick<SwapClip, "source" | "normalized" | "preview">) => (engine === "open" ? clip.normalized?.url : clip.preview?.url) ?? clip.source.url;
 
 // ---------------------------------------------------------------------------
 // Shots
@@ -824,14 +856,28 @@ export const dependencies = (items: SwapSegment[], index: number): TakeDependenc
 
 export const takeOf = (seg: SwapSegment, id?: string | null) => seg.takes.find((t) => t.id === (id ?? seg.selectedTake)) ?? null;
 
-/** The mask a shot's segments generate with (your GPU, masked generation on): the approved version's newest piece. */
-export function approvedMask(shot: SwapShot): MaskVersion | null {
-  return shot.masks.find((m) => m.id === shot.approvedMask) ?? null;
+/**
+ * The shot's approved mask version, on `engine` when one is named: a version made on the other engine doesn't count
+ * there (a cloud mask is pieces of the clip as filmed, your GPU's one whole-shot mask at 24 fps).
+ */
+export function approvedMask(shot: SwapShot, engine?: Engine): MaskVersion | null {
+  const m = shot.masks.find((x) => x.id === shot.approvedMask) ?? null;
+  return m && (!engine || m.engine === engine) ? m : null;
+}
+
+/**
+ * The version a new mask job corrects when none is named: the approved one, else the newest finished one — made on
+ * this engine (a version from the other engine can't be spliced into).
+ */
+export function defaultMaskBase(shot: SwapShot, engine: Engine): MaskVersion | null {
+  const finished = (m: MaskVersion) => m.engine === engine && m.pieces.every((x) => x.url);
+  const approved = approvedMask(shot, engine);
+  return approved && finished(approved) ? approved : ([...shot.masks].reverse().find(finished) ?? null);
 }
 
 /** Everything a take's result depends on: a take whose signature differs from its segment's is stale. */
 export function settingSignature(project: SwapProject, clip: SwapClip, shot: SwapShot, seg: SwapSegment, engine: Engine = project.engine): string {
-  const mask = engine === "open" && shot.settings.useMask ? (approvedMask(shot)?.pieces.map((p) => p.url ?? p.genId) ?? null) : null;
+  const mask = engine === "open" && shot.settings.useMask ? (approvedMask(shot, engine)?.pieces.map((p) => p.url ?? p.genId) ?? null) : null;
   return digest({
     engine,
     source: clip.normalized?.url ?? clip.source.url,
@@ -937,12 +983,14 @@ export function planQueue(
   if (mode !== "segment") indices = indices.filter((i) => !busy(items[i]) && states[i].status !== "ready");
   if (!indices.length) return { problem: "These segments are already current, queued or generating" };
   const queued = new Set(indices);
-  const mask = approvedMask(shot);
+  const mask = approvedMask(shot, engine);
   const entries: QueueEntry[] = [];
   for (const i of indices) {
     const seg = items[i];
     const n = i + 1;
-    if (seg.anchorMode !== "none" && !segmentAnchor(shot, seg)) {
+    // "Scene anchor" off in the shot's settings: a segment set to the scene anchor runs without one.
+    const wantsAnchor = seg.anchorMode === "custom" || (seg.anchorMode === "shot" && shot.settings.useAnchor);
+    if (wantsAnchor && !segmentAnchor(shot, seg)) {
       return { problem: seg.anchorMode === "shot" ? `Segment ${n}: approve a scene anchor, or choose no anchor` : `Segment ${n}: pick its reference image, or choose no anchor` };
     }
     if (engine === "open" && shot.settings.useMask && mask && mask.pieces.some((p) => !p.url)) return { problem: "The approved mask is still being made — wait for it" };
@@ -966,6 +1014,8 @@ export function planQueue(
       const chosen = takeOf(items[j]);
       if (states[j].status !== "ready" || !chosen) return { problem: `Generate segment ${j + 1} first, or queue from an earlier segment` };
       if (engine === "open" && o.hasMaster && !o.hasMaster(chosen)) return { problem: `Segment ${j + 1}'s take has no lossless master to continue from — make it again on your GPU` };
+      const kept = chosen.frozen?.keep ?? items[j].end - items[j].start;
+      if (engine === "open" && kept < d.frames) return { problem: `Segment ${j + 1}'s take kept its last ${kept} frame${kept === 1 ? "" : "s"} to continue from — use at most ${kept} frames of history, or make segment ${j + 1} again` };
       if (chosen.engine !== engine) return { problem: `Segment ${j + 1}'s take was made on the ${chosen.engine === "open" ? "open engine" : "cloud"} — make it again on this engine to continue from it` };
     }
     entries.push({ index: i, segment: seg, waitsOn, dependencies: deps });
@@ -973,9 +1023,21 @@ export function planQueue(
   return { entries };
 }
 
+/**
+ * How many of a take's last frames its lossless master keeps (your GPU): the most the segment after it can read as
+ * history — its own history when it continues, the shot's history for a layout made later — and at most the segment.
+ * A 16-bit master of a whole segment runs to hundreds of MB, more than ComfyUI takes as an upload by default (100 MB);
+ * the next segment reads only these frames.
+ */
+export function masterKeep(items: SwapSegment[], index: number, settings: Pick<SwapSettings, "historyFrames">): number {
+  const seg = items[index];
+  const next = items[index + 1];
+  return Math.min(seg.end - seg.start, Math.max(1, settings.historyFrames, next ? effectiveHistory(next) : 0));
+}
+
 /** A segment's take as queued now: what it will run with (see FrozenTake). */
 export function freezeTake(project: SwapProject, shot: SwapShot, seg: SwapSegment): FrozenTake {
-  const mask = project.engine === "open" && shot.settings.useMask ? (approvedMask(shot)?.pieces[0]?.url ?? null) : null;
+  const mask = project.engine === "open" && shot.settings.useMask ? (approvedMask(shot, "open")?.pieces[0]?.url ?? null) : null;
   return {
     reference: project.character.image ?? "",
     shotStart: shot.start,
@@ -1086,9 +1148,12 @@ export function maskPieceAt(version: MaskVersion | null | undefined, frame: numb
   return null;
 }
 
-/** The pieces of a new version (the cloud keeps the corrected version's pieces under the new one). */
-export function maskPieces(engine: Engine, kind: MaskVersion["kind"], frame: number, shotFrames: number, base: MaskVersion | null): MaskPiece[] {
-  const piece: MaskPiece = kind === "frame" ? { from: frame, frames: 1 } : { from: frame, frames: shotFrames - frame };
+/**
+ * The pieces of a new version (the cloud keeps the corrected version's pieces under the new one). `offset`: where the
+ * new piece's first frame is in its video (a cloud Update frame near the clip's end reads frames before it).
+ */
+export function maskPieces(engine: Engine, kind: MaskVersion["kind"], frame: number, shotFrames: number, base: MaskVersion | null, offset = 0): MaskPiece[] {
+  const piece: MaskPiece = { ...(kind === "frame" ? { from: frame, frames: 1 } : { from: frame, frames: shotFrames - frame }), ...(offset > 0 ? { offset } : {}) };
   // Your GPU splices the new part into the corrected version: one whole-shot mask.
   if (engine === "open") return [{ from: 0, frames: shotFrames }];
   return [...(base?.pieces ?? []).filter((p) => p.url || p.genId), piece];
@@ -1104,6 +1169,26 @@ export function maskProblem(engine: Engine, kind: MaskVersion["kind"], frame: nu
   if (kind === "frame" && engine === "open" && !points.length) return "Click the person on this frame to correct it";
   if (base && base.engine !== engine) return "That mask was made on the other engine — track the shot again here";
   return null;
+}
+
+const GB = 2 ** 30;
+
+/**
+ * Your GPU's mask graph holds the whole shot as float frames at H3's canvas size: the prepared shot, SAM's masks as
+ * pictures and the joined result — and, correcting a version, that version decoded, fitted and cut around the new part
+ * as well. Why a ComfyUI with `ramBytes` of RAM can't take this shot (half of it may go to frames, as for the other
+ * whole-clip graphs); null when it fits or the clip's size is unknown.
+ */
+export function maskMemoryProblem(m: { width?: number; height?: number; quality: string | undefined; shotFrames: number; correcting: boolean }, ramBytes: number | undefined): string | null {
+  if (!m.width || !m.height || !(m.shotFrames > 0)) return null;
+  const canvas = h3Canvas(m.width, m.height, m.quality);
+  const need = canvas.width * canvas.height * 12 * m.shotFrames * (m.correcting ? 6 : 3);
+  const budget = wholeClipBudget(ramBytes);
+  if (need <= budget) return null;
+  return (
+    `A mask on your GPU holds the whole shot in memory: this ${secondsLabel(m.shotFrames)} shot needs about ${Math.ceil(need / GB)} GB of RAM and this ComfyUI can spare ${Math.floor(budget / GB)} GB. ` +
+    `Cut the shot shorter (Shots → Cut at the playhead)${m.quality === "768p" ? ", or track it at 0.5 MP" : ""}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,12 +1278,15 @@ export type AssemblyPiece = { kind: "source"; start: number; end: number } | { k
 
 /**
  * The clip's timeline for the assembly: kept shots as they were filmed (neighbours merged into one piece), swapped
- * shots as their segments' chosen takes, in order. Every swapped shot needs a current take for every segment.
+ * shots as their segments' chosen takes, in order. Every swapped segment needs a chosen take that came out (Akatz's
+ * assemble: a selected take for every generated shot); one made with settings that changed since is used as it is and
+ * named in `stale`, for the page to say.
  */
-export function assemblyPieces(project: SwapProject, clip: SwapClip): { pieces: AssemblyPiece[] } | { problem: string } {
+export function assemblyPieces(project: SwapProject, clip: SwapClip): { pieces: AssemblyPiece[]; stale: string[] } | { problem: string } {
   if (!clip.shots.length) return { problem: "Confirm the clip's shots first" };
   if (!clip.shots.some((s) => s.mode === "generate")) return { problem: "No shot replaces the character — mark at least one shot Replace character" };
   const pieces: AssemblyPiece[] = [];
+  const stale: string[] = [];
   for (const [si, shot] of clip.shots.entries()) {
     if (shot.mode === "preserve") {
       const last = pieces.at(-1);
@@ -1210,15 +1298,57 @@ export function assemblyPieces(project: SwapProject, clip: SwapClip): { pieces: 
     const states = segmentStates(project, clip, shot, items);
     for (const [gi, seg] of items.entries()) {
       const t = takeOf(seg);
-      if (!t || states[gi].status !== "ready") return { problem: `Shot ${si + 1}, segment ${gi + 1} has no current take — generate it, or use a take that matches its settings` };
+      if (!t || t.state !== "launched") return { problem: `Shot ${si + 1}, segment ${gi + 1} has no chosen take — generate it, or choose one in Takes & review` };
+      if (states[gi].status !== "ready") stale.push(`Shot ${si + 1}, segment ${gi + 1}`);
       pieces.push({ kind: "take", start: shot.start + seg.start, end: shot.start + seg.end, take: t, segmentId: seg.id });
     }
   }
-  return { pieces };
+  return { pieces, stale };
 }
 
 /** The takes an assembly is made of (its identity: the same takes need no new assembly). */
 export const assemblyTakes = (pieces: AssemblyPiece[]) => pieces.flatMap((p) => (p.kind === "take" ? [p.take.id] : []));
+
+// ---------------------------------------------------------------------------
+// From Genjutsu
+
+export interface HandOffInput {
+  engine: Engine;
+  /** The clip Genjutsu has (its upload once it is done). */
+  clip?: { url?: string; name: string; size?: number; duration?: number; width?: number; height?: number } | null;
+  /** The character's picture (an upload) and description. */
+  image?: string | null;
+  description?: string;
+}
+
+/**
+ * "Open in Character Swap Studio" from Genjutsu's Character swap: a project on the same engine with the character
+ * already in it, and the whole clip (the studio cuts it into shots), when Genjutsu has them uploaded.
+ */
+export function studioHandOff(o: HandOffInput): {
+  project: { name: string; engine: Engine; character: { image: string | null; description: string } };
+  clip: { url: string; name: string; bytes?: number; duration?: number; width?: number; height?: number } | null;
+} {
+  const file = o.clip?.url?.startsWith("/api/files/") ? o.clip : null;
+  const name = file ? file.name.replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, SWAP_STUDIO.maxNameChars) : "";
+  return {
+    project: {
+      name: name || "Character swap",
+      engine: o.engine,
+      character: { image: o.image?.startsWith("/api/files/") ? o.image : null, description: tidy(o.description).slice(0, SWAP_STUDIO.maxDescriptionChars) },
+    },
+    clip: file
+      ? {
+          url: file.url!,
+          name: file.name,
+          ...(file.size !== undefined ? { bytes: file.size } : {}),
+          ...(file.duration !== undefined ? { duration: file.duration } : {}),
+          ...(file.width !== undefined ? { width: file.width } : {}),
+          ...(file.height !== undefined ? { height: file.height } : {}),
+        }
+      : null,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The Finish stage (Akatz's refinement) — not runnable from the public release

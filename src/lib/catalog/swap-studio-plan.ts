@@ -8,16 +8,18 @@
  * correct), Qwen-Image-Edit 2511 makes anchors, and each segment is one H3 Relay pass with the approved mask, its
  * anchor and the previous take's lossless (FFV1) master as history; the assembly fits every piece to the clip's size
  * at 24 fps, joins them packet by packet and puts the clip's sound back.
- * The cloud (fal): the clip stays as filmed (H3 makes 24 fps, the join keeps the lowest rate), Scribe v2 transcribes,
+ * The cloud (fal): the clip stays as filmed (a browser copy is made when the page can't play it), Scribe v2 transcribes,
  * SAM 3.1 video marks the person from your words or clicks, GPT Image 2.5 Sunburst or Nano Banana Pro make anchors, and
- * each segment is fal's MiniMax H3 reference-to-video with Akatz Labs' swap LoRA — no mask (who to swap is said in
- * words) and no history (a continuing segment starts from the previous take's last frame).
+ * each segment is fal's MiniMax H3 reference-to-video with Akatz Labs' swap LoRA, trimmed to the segment — no mask (who
+ * to swap is said in words) and no history (a continuing segment starts from the previous take's last frame); the
+ * assembly scales every piece to one frame and joins them at 24 fps.
  */
 import { anchorAspect, anchorModel, anchorPrompt, swapLoraRef } from "./character-swap";
 import { MASK_TRACKER } from "./remove-object";
 import type { PlanStep } from "./shorts";
 import {
   at,
+  cloudFilmSize,
   enginePrompt,
   frameWindow,
   normalizedSize,
@@ -55,6 +57,7 @@ export const STUDIO_MODELS = {
     cut: "trim-video",
     frame: "extract-frame",
     swap: "fuobe-character-swap",
+    scale: "scale-video",
     join: "join-clips",
     mux: "merge-audio-video",
     joinMax: 24,
@@ -86,6 +89,29 @@ export function planNormalize(clip: SwapClip): PlanStep[] {
         inputs: { video: clip.source.url },
         params: { startTime: 0, fps: SWAP_STUDIO.fps, ...(size ? { extra: { ...size } } : { aspectRatio: "auto" }) },
         step: { label: "The clip at 24 fps", index: 0, of: 1 },
+      },
+    },
+  ];
+}
+
+/**
+ * The cloud: a copy of the clip the browser can play (fal's scale-video re-encodes it as an H.264 MP4 at its own
+ * size), for the page alone — the cloud's jobs read the upload as filmed. Null when the clip's size is unknown.
+ */
+export function planPreview(clip: SwapClip): PlanStep[] | null {
+  const size = normalizedSize(clip.source.width, clip.source.height);
+  if (!size) return null;
+  return [
+    {
+      key: "preview",
+      request: {
+        ...helper(`Character Swap · ${clip.name}`),
+        title: `${clip.name} · browser copy`,
+        modelId: STUDIO_MODELS.cloud.scale,
+        op: "reframe",
+        inputs: { video: clip.source.url },
+        params: { extra: { ...size } },
+        step: { label: "A copy your browser can play", index: 0, of: 1 },
       },
     },
   ];
@@ -140,6 +166,20 @@ export function maskPointsPayload(engine: Engine, points: PixelPoint[], who: Who
   return clicked.length ? { points: clicked, prompt: who.words.trim() || "person", selection: "index", subjectIndex: 0 } : { prompt: who.words.trim() || "person", selection: who.selection, subjectIndex: who.selection === "index" ? who.index : 0 };
 }
 
+/**
+ * The clip's frames [from, to) a cloud mask job reads, and where the shot's frame is in them (`offset`). Track shot:
+ * from the frame to the shot's end. Update frame: half a second (a one-frame cut is too short to trim and track) from
+ * the frame — past the shot's end if need be, it is the clicked frame that counts — or, in the clip's last half
+ * second, its last 12 frames with the clicks on the frame inside them.
+ */
+export function cloudMaskCut(clip: Pick<SwapClip, "frames">, shot: Pick<SwapShot, "start" | "end">, kind: MaskVersion["kind"], frame: number): { from: number; to: number; offset: number } {
+  const at0 = shot.start + frame;
+  if (kind === "track") return { from: at0, to: shot.end, offset: 0 };
+  const span = Math.min(12, clip.frames);
+  const from = Math.max(0, Math.min(at0, clip.frames - span));
+  return { from, to: from + span, offset: at0 - from };
+}
+
 export function planMask(m: MaskPlanInput): PlanStep[] {
   const { clip, shot } = m;
   const len = shot.end - shot.start;
@@ -179,12 +219,11 @@ export function planMask(m: MaskPlanInput): PlanStep[] {
       },
     ];
   }
-  const from = shot.start + m.frame;
-  // Update frame reads half a second from the frame (a one-frame cut is too short to trim and track); its piece is the
-  // first frame of that mask.
-  const to = m.kind === "frame" ? Math.min(shot.end, from + 12) : shot.end;
+  const cut = cloudMaskCut(clip, shot, m.kind, m.frame);
+  // The clicks go on the clicked frame of the cut (fal's frame_index when it isn't the first).
+  const points = payload.points?.map((p) => (cut.offset ? { ...p, frame: cut.offset } : p));
   return [
-    { key: "cut", request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video: clip.source.url }, params: { startTime: at(from), endTime: at(to) }, step: { label: "Cut from the frame", index: 0, of: 2 } } },
+    { key: "cut", request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video: clip.source.url }, params: { startTime: at(cut.from), endTime: at(cut.to) }, step: { label: "Cut from the frame", index: 0, of: 2 } } },
     {
       key: "mask",
       request: {
@@ -193,7 +232,7 @@ export function planMask(m: MaskPlanInput): PlanStep[] {
         modelId: STUDIO_MODELS.cloud.mask,
         op: "bg-remove-video",
         ...(payload.prompt ? { prompt: payload.prompt } : {}),
-        params: { matteOutput: "matte", duration: at(to - from), ...(payload.points ? { points: payload.points } : {}) },
+        params: { matteOutput: "matte", duration: at(cut.to - cut.from), ...(points ? { points } : {}) },
         step: { label, index: 1, of: 2 },
       },
       after: ["cut"],
@@ -280,6 +319,8 @@ export interface SegmentPlanInput {
   mask?: string | null;
   /** Your GPU: the previous take's lossless master and its frame count; the cloud: its video (the last frame starts this one). */
   previous?: { master?: string; video?: string; frames: number } | null;
+  /** Your GPU: how many of this take's last frames its master keeps (masterKeep; all of them when unset). */
+  keep?: number;
 }
 
 /** H3's whole seconds for a cloud call (5–15). */
@@ -303,6 +344,7 @@ export function planSegmentTake(p: SegmentPlanInput): { steps: PlanStep[]; final
     if (h && !p.previous?.master) throw new Error(`${label} continues from the segment before it, which has no lossless master`);
     const first = shot.start + seg.start - h;
     const mask = shot.settings.useMask ? (p.mask ?? null) : null;
+    const keep = Math.max(1, Math.min(frames, p.keep ?? frames));
     return {
       final: "swap",
       steps: [
@@ -330,6 +372,9 @@ export function planSegmentTake(p: SegmentPlanInput): { steps: PlanStep[]; final
                 ...(mask ? { maskVideo: mask, maskStart: frameWindow(seg.start - h, seg.end).startTime } : {}),
                 ...(h ? { historyVideo: p.previous!.master, historyStart: p.previous!.frames - h, historyLength: h } : {}),
                 ...(h && p.anchor ? { anchorAfterHistory: true } : {}),
+                // The master keeps the segment's last `keep` frames (what the next segment reads as history).
+                masterKeep: keep,
+                segmentFrames: frames,
               },
             },
             step: { label, index: 0, of: 1 },
@@ -338,18 +383,20 @@ export function planSegmentTake(p: SegmentPlanInput): { steps: PlanStep[]; final
       ],
     };
   }
-  // The cloud: fal's H3 takes 2–15 s of reference video and makes whole seconds.
+  // The cloud: fal's H3 takes 2–15 s of reference video and makes whole seconds (at least 5), so its video is cut back
+  // to the segment: the next segment's boundary is this one's last frame, and the assembly lines it up with the sound.
   const from = shot.start + seg.start;
   const boundary = p.history > 0 && !!p.previous?.video;
+  const of = boundary ? 4 : 3;
   const steps: PlanStep[] = [
-    { key: "cut", request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video: clip.source.url }, params: { startTime: at(from), endTime: at(shot.start + seg.end) }, step: { label: `${label} · cut`, index: 0, of: 3 } } },
+    { key: "cut", request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video: clip.source.url }, params: { startTime: at(from), endTime: at(shot.start + seg.end) }, step: { label: `${label} · cut`, index: 0, of } } },
   ];
   const after = ["cut"];
   const chain: ChainSlot[] = [{ slot: "video" }];
   if (boundary) {
     steps.push({
       key: "boundary",
-      request: { ...helper(title), modelId: STUDIO_MODELS.cloud.frame, op: "frame", inputs: { video: p.previous!.video! }, params: { extra: { frame_type: "last" } }, step: { label: `${label} · the previous take's last frame`, index: 1, of: 3 } },
+      request: { ...helper(title), modelId: STUDIO_MODELS.cloud.frame, op: "frame", inputs: { video: p.previous!.video! }, params: { extra: { frame_type: "last" } }, step: { label: `${label} · the previous take's last frame`, index: 1, of } },
     });
     after.push("boundary");
     chain.push({ slot: "images", position: "last" });
@@ -366,12 +413,18 @@ export function planSegmentTake(p: SegmentPlanInput): { steps: PlanStep[]; final
       inputs: { images: [project.character.image, ...(p.anchor ? [p.anchor] : [])] },
       loras: [swapLoraRef(shot.settings.lora === "v1" ? "v1" : "v1.5")],
       params: { duration: cloudCallSeconds(frames), sourceDuration: at(frames), resolution: quality, seed: seg.seed },
-      step: { label, index: 2, of: 3 },
+      step: { label: `${label} · swap`, index: of - 2, of },
     },
     after,
     chain,
   });
-  return { steps, final: "swap" };
+  steps.push({
+    key: "fit",
+    request: { ...helper(title), title: label, modelId: STUDIO_MODELS.cloud.cut, op: "trim", params: { startTime: 0, endTime: at(frames) }, step: { label, index: of - 1, of } },
+    after: ["swap"],
+    chain: [{ slot: "video" }],
+  });
+  return { steps, final: "fit" };
 }
 
 /**
@@ -403,6 +456,7 @@ export function frozenTakePlan(
     anchor: f.anchor,
     mask: f.mask,
     previous,
+    ...(f.keep !== undefined ? { keep: f.keep } : {}),
   });
 }
 
@@ -438,8 +492,9 @@ function joins(steps: PlanStep[], keys: string[], max: number, request: (n: numb
 /**
  * The clip with every swapped shot's chosen takes over the original timeline and the clip's own sound; kept shots
  * stay as filmed. Your GPU: each piece fitted to the clip's size at 24 fps (Fuobe's fit graph), joined packet by
- * packet, the clip's sound put back. The cloud: each piece cut (a take to its segment's exact length), joined (fal
- * keeps the lowest frame rate: 24 for H3), the clip's sound (or its silence) put back.
+ * packet, the clip's sound put back. The cloud: the clip's pieces cut (a take is already its segment's length), every
+ * piece scaled to one frame (cloudFilmSize: H3 makes 480p / 768p, the clip is as filmed), joined at 24 fps, the clip's
+ * sound (or its silence) put back.
  */
 export function planAssembly(a: AssemblyPlanInput): { steps: PlanStep[]; final: string } {
   const { clip } = a;
@@ -449,6 +504,7 @@ export function planAssembly(a: AssemblyPlanInput): { steps: PlanStep[]; final: 
   const steps: PlanStep[] = [];
   const keys: string[] = [];
   const size = normalizedSize(clip.source.width, clip.source.height);
+  const film = cloudFilmSize(clip.source.width, clip.source.height);
   a.pieces.forEach((piece, i) => {
     const key = `piece${i}`;
     const what = piece.kind === "source" ? "kept as filmed" : "your character";
@@ -463,12 +519,24 @@ export function planAssembly(a: AssemblyPlanInput): { steps: PlanStep[]; final: 
         request: { ...helper(title), modelId: STUDIO_MODELS.open.fit, op: "trim", inputs: { video }, params: { startTime: start, endTime: start + len, fps: SWAP_STUDIO.fps, ...(size ? { extra: { ...size } } : { aspectRatio: "auto" }) }, step: label },
       });
     } else {
-      steps.push({ key, request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video }, params: { startTime: start, endTime: start + len }, step: label } });
+      const cut = piece.kind === "source";
+      if (cut) steps.push({ key: film ? `${key}-cut` : key, request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video }, params: { startTime: start, endTime: start + len }, step: label } });
+      if (film) {
+        steps.push({
+          key,
+          request: { ...helper(title), modelId: STUDIO_MODELS.cloud.scale, op: "reframe", ...(cut ? {} : { inputs: { video } }), params: { extra: { ...film } }, step: { ...label, label: `${label.label} · to ${film.width}×${film.height}` } },
+          ...(cut ? { after: [`${key}-cut`], chain: [{ slot: "video" as const }] } : {}),
+        });
+      } else if (!cut) {
+        // The clip's size unknown: the take as it came out.
+        steps.push({ key, request: { ...helper(title), modelId: STUDIO_MODELS.cloud.cut, op: "trim", inputs: { video }, params: { startTime: 0, endTime: len }, step: label } });
+      }
     }
     keys.push(key);
   });
   const m = STUDIO_MODELS[a.engine];
-  const picture = joins(steps, keys, m.joinMax, (_n, last) => ({ ...helper(title), modelId: m.join, op: "concat", prompt: title, step: { label: last ? "Join the parts" : "Joining", index: 1000, of: 1000 } }));
+  const rate = a.engine === "cloud" ? { params: { extra: { target_fps: SWAP_STUDIO.fps } } } : {};
+  const picture = joins(steps, keys, m.joinMax, (_n, last) => ({ ...helper(title), modelId: m.join, op: "concat", prompt: title, ...rate, step: { label: last ? "Join the parts" : "Joining", index: 1000, of: 1000 } }));
   const sound: GenerationRequest["inputs"] = clip.source.hasAudio ? { audio: workingClip(clip, a.engine) } : a.engine === "cloud" ? { audio: silenceRef(clip.source.duration) } : undefined;
   if (!sound) {
     // Your GPU, a silent clip: the fit graph already gave every part silence; the join is the result.

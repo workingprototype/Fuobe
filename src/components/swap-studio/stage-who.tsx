@@ -9,7 +9,7 @@ import { Panel } from "@/components/av/tool-shell";
 import { Segmented, ToggleRow } from "@/components/faceless/controls";
 import { FrameStage, type Frame } from "@/components/remove-object/frame-stage";
 import { WHO_INDEX_LABEL, WHO_LABELS, type SwapWho } from "@/lib/catalog/character-swap";
-import { at, jobState, maskPieceAt, secondsLabel, SWAP_STUDIO, type MaskVersion } from "@/lib/catalog/swap-studio";
+import { approvedMask, at, jobState, maskPieceAt, secondsLabel, SWAP_STUDIO, type MaskVersion } from "@/lib/catalog/swap-studio";
 import type { PixelPoint } from "@/lib/catalog/types";
 import { cn } from "@/lib/utils";
 import { useMakeMask, useStopJob } from "./hooks";
@@ -32,10 +32,14 @@ export function WhoStage({ id, project, clip, shot, gens, estimate, edit, src }:
   if (!shot) return <Note>Pick a shot.</Note>;
   const len = shot.end - shot.start;
   const engine = project.engine;
+  const approvedMaskHere = !!approvedMask(shot, engine);
   const who = shot.who;
   const shown = frame && frame.shot === shot.id ? frame : null;
   const finished = (m: MaskVersion) => m.pieces.every((p) => p.url);
-  const baseVersion = shot.masks.find((m) => m.id === (base ?? shot.approvedMask)) ?? [...shot.masks].reverse().find(finished) ?? null;
+  // Corrections go into a version made on this engine (the other engine's can't be spliced into).
+  const here = (m: MaskVersion) => m.engine === engine && finished(m);
+  const named = shot.masks.find((m) => m.id === (base ?? shot.approvedMask));
+  const baseVersion = (named && here(named) ? named : null) ?? [...shot.masks].reverse().find(here) ?? null;
 
   const show = async (f: number) => {
     setLoading(true);
@@ -192,6 +196,7 @@ export function WhoStage({ id, project, clip, shot, gens, estimate, edit, src }:
               const state = jobState(m.genId, m.stepIds, gens);
               const piece = maskPieceAt(m, shown?.f ?? at24);
               const approved = shot.approvedMask === m.id;
+              const elsewhere = m.engine !== engine;
               return (
                 <li key={m.id} className={cn("min-w-0 space-y-2 rounded-xl border p-2.5", approved && "border-success")}>
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -199,22 +204,35 @@ export function WhoStage({ id, project, clip, shot, gens, estimate, edit, src }:
                     <span className="min-w-0 truncate text-[12px] text-muted-foreground">
                       {m.kind === "track" ? `Track from frame ${m.frame + 1}` : `Frame ${m.frame + 1}`} · {m.points.length ? `${m.points.length} point${m.points.length === 1 ? "" : "s"}` : `“${m.who.words}”`}
                       {m.base ? ` · corrects v${shot.masks.findIndex((x) => x.id === m.base) + 1}` : ""}
+                      {elsewhere ? ` · made ${m.engine === "open" ? "on your GPU" : "on the cloud"}` : ""}
                     </span>
                     <GenChip genId={m.genId} stepIds={m.stepIds} gens={gens} className="ml-auto" />
                   </div>
                   {piece?.url ? <video src={piece.url} muted loop playsInline controls preload="metadata" className="aspect-video w-full rounded-lg bg-media object-contain" /> : null}
                   <JobError genId={m.genId} stepIds={m.stepIds} gens={gens} />
                   <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      size="sm"
-                      variant={approved ? "secondary" : "outline"}
-                      className="h-7 rounded-full px-2.5 text-[12px]"
-                      disabled={!finished(m) || approved}
-                      onClick={() => void edit({ type: "shot", clipId: clip.id, shotId: shot.id, patch: { approvedMask: m.id } })}
-                    >
-                      <Check className="size-3.5" /> {approved ? "Approved" : "Approve"}
-                    </Button>
-                    {finished(m) && (
+                    {approved ? (
+                      <>
+                        <span className="inline-flex h-7 items-center gap-1 rounded-full bg-success/12 px-2.5 text-[12px] font-medium text-success">
+                          <Check className="size-3.5" /> Approved
+                        </span>
+                        <Button size="sm" variant="ghost" className="h-7 rounded-full px-2.5 text-[12px]" onClick={() => void edit({ type: "shot", clipId: clip.id, shotId: shot.id, patch: { approvedMask: null } })}>
+                          Unapprove
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 rounded-full px-2.5 text-[12px]"
+                        disabled={!finished(m) || elsewhere}
+                        title={elsewhere ? "Made on the other engine — track the shot again here" : undefined}
+                        onClick={() => void edit({ type: "shot", clipId: clip.id, shotId: shot.id, patch: { approvedMask: m.id } })}
+                      >
+                        <Check className="size-3.5" /> Approve
+                      </Button>
+                    )}
+                    {here(m) && (
                       <Button size="sm" variant="ghost" className="h-7 rounded-full px-2.5 text-[12px]" aria-pressed={baseVersion?.id === m.id} onClick={() => setBase(m.id)}>
                         {baseVersion?.id === m.id ? "Updates go here" : "Update this one"}
                       </Button>
@@ -234,7 +252,7 @@ export function WhoStage({ id, project, clip, shot, gens, estimate, edit, src }:
             })}
           </ol>
         )}
-        {engine === "open" && shot.settings.useMask && !shot.approvedMask && <Note className="mt-3">No approved mask: each segment finds the person itself with SAM 3.1 from the pick and words above.</Note>}
+        {engine === "open" && shot.settings.useMask && !approvedMaskHere && <Note className="mt-3">No approved mask{shot.approvedMask ? " made on your GPU (the approved one is the cloud's)" : ""}: each segment finds the person itself with SAM 3.1 from the pick and words above.</Note>}
       </Panel>
     </div>
   );

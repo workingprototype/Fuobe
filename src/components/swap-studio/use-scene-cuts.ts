@@ -2,12 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import { openVideo, releaseVideo, sampleFrames } from "@/components/av/frame-sampler";
-import { coarseTimes, coarseWindows, sceneScores, STUDIO_FPS, windowCuts, windowFrames } from "@/lib/av/scene-cuts";
+import { COARSE_WIDTH, coarseTimes, coarseWindows, fineWidth, sceneScores, STUDIO_FPS, windowChunks, windowCuts, windowFrames } from "@/lib/av/scene-cuts";
 
 /**
  * "Detect edits": FFmpeg's scene score at Akatz Labs' 0.32, read in the browser (src/lib/av/scene-cuts.ts). A coarse
- * pass a few frames a second finds where a cut can be; a fine pass reads every 24 fps frame there. The frames are
- * small (64 px wide) — the score is a mean over the picture, so it barely depends on the size.
+ * pass a few frames a second (small frames, a lower threshold) finds where a cut can be; a fine pass reads every
+ * 24 fps frame there at the clip's own size (up to 1280 px wide: a smaller picture scores cuts lower than FFmpeg).
  */
 export function useSceneCuts() {
   const [state, setState] = useState<{ busy: boolean; progress: number; error: string | null }>({ busy: false, progress: 0, error: null });
@@ -23,7 +23,7 @@ export function useSceneCuts() {
       v = await openVideo(src);
       const duration = v.duration;
       const times = coarseTimes(duration);
-      const coarse = await sampleFrames(v, times, { width: 64, signal: ctrl.signal, onProgress: (p) => setState((s) => ({ ...s, progress: p * 0.6 })) });
+      const coarse = await sampleFrames(v, times, { width: COARSE_WIDTH, signal: ctrl.signal, onProgress: (p) => setState((s) => ({ ...s, progress: p * 0.6 })) });
       if (ctrl.signal.aborted) return null;
       const windows = coarseWindows(
         coarse.map((f) => f.t),
@@ -31,16 +31,19 @@ export function useSceneCuts() {
         total,
       );
       const cuts = new Set<number>();
+      const width = fineWidth(v.videoWidth);
       for (const [i, w] of windows.entries()) {
-        const frames = windowFrames(w);
-        // The middle of each 24 fps frame: whichever frame of the clip shows then.
-        const fine = await sampleFrames(
-          v,
-          frames.map((f) => Math.min(duration - 0.01, (f + 0.5) / STUDIO_FPS)),
-          { width: 64, signal: ctrl.signal },
-        );
-        if (ctrl.signal.aborted) return null;
-        for (const c of windowCuts(frames, fine.map((f) => f.data.data), total)) cuts.add(c);
+        for (const piece of windowChunks(w)) {
+          const frames = windowFrames(piece);
+          // The middle of each 24 fps frame: whichever frame of the clip shows then.
+          const fine = await sampleFrames(
+            v,
+            frames.map((f) => Math.min(duration - 0.01, (f + 0.5) / STUDIO_FPS)),
+            { width, signal: ctrl.signal },
+          );
+          if (ctrl.signal.aborted) return null;
+          for (const c of windowCuts(frames, fine.map((f) => f.data.data), total)) cuts.add(c);
+        }
         setState((s) => ({ ...s, progress: 0.6 + (0.4 * (i + 1)) / windows.length }));
       }
       setState({ busy: false, progress: 1, error: null });

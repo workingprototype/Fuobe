@@ -291,8 +291,26 @@ function FrameSelect({ id, label, value, choices, onChange }: { id: string; labe
   );
 }
 
-/** The limits, the cut warning, the GPU it was tested on (open) and the licence, as information under the settings. */
-export function CharacterFacts({ engine, maker, cut }: { engine: Engine; maker: Maker | null; cut: string | null }) {
+/**
+ * The limits, the cut warning, the GPU it was tested on (open) and the licence, as information under the settings; and
+ * the way to Character Swap Studio for the whole clip (`onOpenStudio` takes the clip and character along).
+ */
+export function CharacterFacts({
+  engine,
+  maker,
+  cut,
+  onOpenStudio,
+  opening,
+  waiting,
+}: {
+  engine: Engine;
+  maker: Maker | null;
+  cut: string | null;
+  onOpenStudio?: () => void;
+  opening?: boolean;
+  /** Why the studio can't be opened with the clip yet (it is still uploading). */
+  waiting?: string | null;
+}) {
   return (
     <div className="space-y-2 text-[12px] leading-snug text-muted-foreground">
       {cut && (
@@ -320,10 +338,17 @@ export function CharacterFacts({ engine, maker, cut }: { engine: Engine; maker: 
         <span>Licences are information: each model&apos;s is under its name above, and your admin decides what runs (Settings → Models &amp; licences).</span>
       </p>
       {/* Whole clips, shot by shot, with masks, anchors, segments and takes: the studio built on the same H3 recipe. */}
-      <Link href="/character-swap" className="inline-flex items-center gap-1 font-medium text-brand-text hover:underline">
-        <Drama className="size-3.5" /> Open in Character Swap Studio
-        <span className="font-normal text-muted-foreground">— whole clips, shot by shot</span>
-      </Link>
+      {onOpenStudio ? (
+        <button type="button" onClick={onOpenStudio} disabled={opening || !!waiting} className="inline-flex items-center gap-1 rounded-sm text-left font-medium text-brand-text outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60">
+          {opening ? <Loader2 className="size-3.5 animate-spin" /> : <Drama className="size-3.5" />} Open in Character Swap Studio
+          <span className="font-normal text-muted-foreground">— {waiting ?? "this whole clip and character, shot by shot"}</span>
+        </button>
+      ) : (
+        <Link href="/character-swap" className="inline-flex items-center gap-1 font-medium text-brand-text hover:underline">
+          <Drama className="size-3.5" /> Open in Character Swap Studio
+          <span className="font-normal text-muted-foreground">— whole clips, shot by shot</span>
+        </Link>
+      )}
     </div>
   );
 }

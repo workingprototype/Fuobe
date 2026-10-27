@@ -5,16 +5,18 @@ import { ANCHOR_MODELS, anchorModel, characterLicenceLine, SWAP_LORAS, swapLoraR
 import { scalePoints } from "@/lib/catalog/remove-object";
 import type { PlanStep } from "@/lib/catalog/shorts";
 import {
-  approvedMask,
   assemblyPieces,
   assemblyTakes,
+  clipNeedsPreview,
   clipProblem,
   currentSegments,
   DEFAULT_SETTINGS,
+  defaultMaskBase,
   exportDecisions,
   freezeTake,
   maskPieces,
   maskProblem,
+  masterKeep,
   newShot,
   normalizedSize,
   planQueue,
@@ -40,7 +42,7 @@ import {
   type TranscriptCue,
 } from "@/lib/catalog/swap-studio";
 import { applyEdit, EditError, type SwapEdit } from "@/lib/catalog/swap-studio-edit";
-import { frozenTakePlan, planAnchor, planAssembly, planMask, planNormalize, planTranscribe, STUDIO_MODELS } from "@/lib/catalog/swap-studio-plan";
+import { cloudMaskCut, frozenTakePlan, planAnchor, planAssembly, planMask, planNormalize, planPreview, planTranscribe, STUDIO_MODELS } from "@/lib/catalog/swap-studio-plan";
 import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
 import { ACCESS_PLACE } from "@/lib/model-access";
 import { createPipeline } from "./chains";
@@ -157,7 +159,7 @@ const ACTIVE = new Set(["queued", "running"]);
 function projectGenIds(p: SwapProject): string[] {
   const ids: (string | undefined)[] = [];
   for (const c of p.clips) {
-    ids.push(c.normalized?.genId, c.transcript?.genId, c.assembly?.genId, ...(c.assembly?.stepIds ?? []));
+    ids.push(c.normalized?.genId, c.preview?.genId, c.transcript?.genId, c.assembly?.genId, ...(c.assembly?.stepIds ?? []));
     for (const s of c.shots) {
       for (const m of s.masks) ids.push(m.genId, ...(m.stepIds ?? []), ...m.pieces.map((x) => x.genId));
       for (const a of s.anchors) ids.push(a.genId, ...(a.stepIds ?? []));
@@ -205,8 +207,9 @@ function settleShot(project: SwapProject, clip: SwapClip, shot: SwapShot, look: 
   if (items.some((g) => g.anchors.some((a) => a.genId && !a.url && done(a.genId)))) {
     items = items.map((g) => {
       const anchors = fill(g.anchors);
-      // A segment's first reference that is ready becomes its pick.
-      return { ...g, anchors, anchor: g.anchor ?? anchors.find((a) => a.url)?.id ?? null };
+      // A reference that just came out becomes the segment's pick when it has none (the newest of them).
+      const fresh = anchors.filter((a, i) => a.url && !g.anchors[i].url);
+      return { ...g, anchors, anchor: g.anchor ?? fresh.at(-1)?.id ?? null };
     });
   }
   // Finished takes: selected when nothing changed since they were queued (Akatz's attach_take).
@@ -295,7 +298,8 @@ function launchTake(project: SwapProject, clip: SwapClip, shot: SwapShot, seg: S
     const prev = before?.takes.find((t) => t.id === dep?.takeId);
     const g = look(prev?.genId);
     if (!before || !prev || !g) throw new Error("the take it continues from is gone");
-    previous = { master: masterOutput(g)?.url, video: mainOutput(g)?.url, frames: before.end - before.start };
+    // Your GPU's master holds the take's last `keep` frames (masterKeep); the cloud's take is the segment's length.
+    previous = { master: masterOutput(g)?.url, video: mainOutput(g)?.url, frames: prev.frozen?.keep ?? before.end - before.start };
   }
   const plan = frozenTakePlan(project, clip, shot, seg, take, { shot: shotIndex + 1, segment: segIndex + 1, take: seg.takes.findIndex((t) => t.id === take.id) + 1 }, previous);
   const pipe = run(plan.steps);
@@ -309,6 +313,7 @@ function settleClip(project: SwapProject, clip: SwapClip, look: Look): SwapClip 
     return g?.status === "succeeded" ? g : null;
   };
   if (c.normalized?.genId && !c.normalized.url && ok(c.normalized.genId)) c = { ...c, normalized: { ...c.normalized, url: mainOutput(ok(c.normalized.genId)!)?.url } };
+  if (c.preview?.genId && !c.preview.url && ok(c.preview.genId)) c = { ...c, preview: { ...c.preview, url: mainOutput(ok(c.preview.genId)!)?.url } };
   if (c.transcript?.genId && c.transcript.cues === null && ok(c.transcript.genId)) c = { ...c, transcript: { ...c.transcript, cues: cuesOf(ok(c.transcript.genId)!) } };
   const shots = c.shots.map((s, i) => settleShot(project, c, s, look, i));
   return shots.some((s, i) => s !== c.shots[i]) ? { ...c, shots } : c;
@@ -532,11 +537,15 @@ export const EditSchema = z.discriminatedUnion("type", [
 
 export type EditBody = z.infer<typeof EditSchema>;
 
-/** Apply one edit from the page (src/lib/catalog/swap-studio-edit.ts), on the project as it is now. */
-export function editProject(projectId: string, body: EditBody): SwapProject {
+/**
+ * Apply one edit from the page (src/lib/catalog/swap-studio-edit.ts), on the project as it is now. Jobs the edit leaves
+ * nothing to point at (a removed clip's or a re-cut shot's masks, anchors, copies and words) are stopped: their
+ * generations are hidden helpers, so nobody could find, stop or use them afterwards.
+ */
+export async function editProject(projectId: string, body: EditBody): Promise<SwapProject> {
   const look = lookup();
   const active = (gid: string) => ACTIVE.has(look(gid)?.status ?? "");
-  const after: { engine: Engine | null } = { engine: null };
+  const after: { engine: Engine | null; orphans: string[] } = { engine: null, orphans: [] };
   const next = mutate(projectId, (cur) => {
     const p = settle(cur, look);
     const edit: SwapEdit = body.type === "anchor-import" ? { ...body, id: uid("anchor-"), at: Date.now() } : (body as SwapEdit);
@@ -551,16 +560,24 @@ export function editProject(projectId: string, body: EditBody): SwapProject {
       const t = seg?.takes.find((k) => k.id === edit.takeId);
       if (t && look(t.genId)?.status !== "succeeded") throw new ShortsError("Only a finished take can be chosen", 422);
     }
+    let out: SwapProject;
     try {
-      return applyEdit(p, edit, { active });
+      out = applyEdit(p, edit, { active });
     } catch (e) {
       if (e instanceof EditError) throw new ShortsError(e.message, e.status);
       throw e;
     }
+    const kept = new Set(projectGenIds(out));
+    after.orphans = projectGenIds(p).filter((g) => !kept.has(g) && active(g));
+    return out;
   });
-  // Switched to your GPU: the clips need their 24 fps copies.
-  if (after.engine !== "open") return next;
-  for (const c of next.clips) if (!c.normalized) prepareClipQuietly(next.id, c.id);
+  for (const g of after.orphans) await cancelGeneration(g).catch(() => undefined);
+  if (!after.engine) return next;
+  // Switched engines: on your GPU the clips need their 24 fps copies, on the cloud the page may need browser copies.
+  for (const c of next.clips) {
+    if (after.engine === "open" && !c.normalized) prepareClipQuietly(next.id, c.id);
+    if (after.engine === "cloud" && !c.preview && clipNeedsPreview("cloud", c)) prepareClipQuietly(next.id, c.id);
+  }
   return mustProject(projectId);
 }
 
@@ -591,6 +608,8 @@ export const ClipSchema = z.object({
   height: z.number().int().positive().max(20_000).optional(),
   hasAudio: z.boolean().optional(),
   bytes: z.number().int().nonnegative().optional(),
+  /** Whether the browser that added it could play it (it couldn't: the cloud makes a copy for the page). */
+  playable: z.boolean().optional(),
 });
 
 /**
@@ -612,8 +631,19 @@ export async function addClip(projectId: string, body: z.infer<typeof ClipSchema
   const clip: SwapClip = {
     id: uid("clip-"),
     name: name.replace(/\.[a-z0-9]{2,4}$/i, "").trim().slice(0, SWAP_STUDIO.maxNameChars) || "Clip",
-    source: { url: body.url, name, duration, fps: info.fps ?? body.fps, width: info.width ?? body.width, height: info.height ?? body.height, hasAudio, ...(body.bytes !== undefined ? { bytes: body.bytes } : {}) },
+    source: {
+      url: body.url,
+      name,
+      duration,
+      fps: info.fps ?? body.fps,
+      width: info.width ?? body.width,
+      height: info.height ?? body.height,
+      hasAudio,
+      ...(body.bytes !== undefined ? { bytes: body.bytes } : {}),
+      ...(body.playable !== undefined ? { playable: body.playable } : {}),
+    },
     normalized: null,
+    preview: null,
     frames,
     cuts: [],
     detected: null,
@@ -627,8 +657,22 @@ export async function addClip(projectId: string, body: z.infer<typeof ClipSchema
   if (before.engine === "open") {
     mustMatchMode("open");
     clip.normalized = { genId: normalizeJob(clip) };
+  } else if (clipNeedsPreview("cloud", clip)) {
+    // The page can't play it: a browser copy (if it can't be made, the page says so and offers to try again).
+    try {
+      clip.preview = { genId: previewJob(clip) };
+    } catch {
+      clip.preview = null;
+    }
   }
   return mutate(projectId, (p) => ({ ...p, clips: [...p.clips, clip] }));
+}
+
+function previewJob(clip: SwapClip): string {
+  mustOffer(STUDIO_MODELS.cloud.scale, "cloud");
+  const steps = planPreview(clip);
+  if (!steps) throw new ShortsError("Couldn't read this clip's size to make a copy your browser can play — save it as an MP4 (H.264) and add it again", 422);
+  return run(steps).byKey.preview.id;
 }
 
 function normalizeJob(clip: SwapClip): string {
@@ -637,12 +681,18 @@ function normalizeJob(clip: SwapClip): string {
   return pipe.byKey.normalize.id;
 }
 
-/** Your GPU: make (or make again) a clip's 24 fps copy. */
+/** Your GPU: make (or make again) a clip's 24 fps copy. The cloud: its browser copy, when the page can't play the clip. */
 export function prepareClip(projectId: string, clipId: string): SwapProject {
   const p = advanceProject(projectId);
-  if (p.engine !== "open") throw new ShortsError("The cloud reads the clip as filmed — no 24 fps copy needed", 422);
-  mustMatchMode("open");
+  mustMatchMode(p.engine);
   const clip = mustClip(p, clipId);
+  if (p.engine === "cloud") {
+    if (!clipNeedsPreview("cloud", clip)) throw new ShortsError("The cloud reads the clip as filmed — no copy needed", 422);
+    const g = getGeneration(clip.preview?.genId ?? "");
+    if (clip.preview?.url || (g && ACTIVE.has(g.status))) throw new ShortsError("The browser copy is ready or on its way", 409);
+    const genId = previewJob(clip);
+    return mutate(projectId, (cur) => mapClip(cur, clipId, (c) => ({ ...c, preview: { genId } })));
+  }
   const g = getGeneration(clip.normalized?.genId ?? "");
   if (clip.normalized?.url || (g && ACTIVE.has(g.status))) throw new ShortsError("The 24 fps copy is ready or on its way", 409);
   const genId = normalizeJob(clip);
@@ -708,7 +758,8 @@ export function makeMask(projectId: string, body: z.infer<typeof MaskSchema>): S
   const len = shot.end - shot.start;
   if (shot.masks.length >= SWAP_STUDIO.maxMaskVersions) throw new ShortsError(`A shot keeps ${SWAP_STUDIO.maxMaskVersions} mask versions — remove one first`, 422);
   const finished = (m: MaskVersion) => m.pieces.every((x) => x.url);
-  const base = body.base ? (shot.masks.find((m) => m.id === body.base) ?? null) : (approvedMask(shot) ?? [...shot.masks].reverse().find(finished) ?? null);
+  // The version it corrects: the one named, else this engine's approved or newest (never the other engine's).
+  const base = body.base ? (shot.masks.find((m) => m.id === body.base) ?? null) : defaultMaskBase(shot, p.engine);
   if (base && !finished(base)) throw new ShortsError("That mask version is still being made — wait for it", 409);
   const size = workingSize(p, clip);
   const points: PixelPoint[] = body.points.length && body.size && size ? scalePoints(body.points, body.size, size) : body.points;
@@ -718,7 +769,7 @@ export function makeMask(projectId: string, body: z.infer<typeof MaskSchema>): S
   mustOffer(STUDIO_MODELS[p.engine].mask, p.engine);
   const pipe = run(planMask({ engine: p.engine, clip, shot, kind: body.kind, frame: body.frame, points, who: shot.who, base }));
   const genId = pipe.byKey.mask.id;
-  const pieces = maskPieces(p.engine, body.kind, body.frame, len, base);
+  const pieces = maskPieces(p.engine, body.kind, body.frame, len, base, p.engine === "cloud" ? cloudMaskCut(clip, shot, body.kind, body.frame).offset : 0);
   pieces[pieces.length - 1] = { ...pieces[pieces.length - 1], genId };
   const version: MaskVersion = {
     id: uid("mask-"),
@@ -810,10 +861,14 @@ function takeSteps(p: SwapProject, clip: SwapClip, shot: SwapShot, seg: SwapSegm
   return frozenTakePlan(p, clip, shot, seg, take, numbers, previous);
 }
 
-/** A new take of a segment as it reads now (waiting until the takes it continues from are made). */
-function newTake(p: SwapProject, clip: SwapClip, shot: SwapShot, seg: SwapSegment, deps: SwapTake["dependencies"], lora: SwapShot["settings"]["lora"]): SwapTake {
+/**
+ * A new take of a segment as it reads now (waiting until the takes it continues from are made). `keep`: your GPU's
+ * master keeps the take's last frames for the segment after it (masterKeep).
+ */
+function newTake(p: SwapProject, clip: SwapClip, shot: SwapShot, seg: SwapSegment, deps: SwapTake["dependencies"], lora: SwapShot["settings"]["lora"], keep?: number): SwapTake {
   const frozen = freezeTake(p, shot, seg);
   frozen.settings = { ...frozen.settings, lora };
+  if (p.engine === "open" && keep !== undefined) frozen.keep = keep;
   return {
     id: uid("take-"),
     createdAt: Date.now(),
@@ -865,7 +920,7 @@ export function queueTakes(projectId: string, body: z.infer<typeof QueueSchema>)
     if (seg.takes.length >= SWAP_STUDIO.maxTakes) throw new ShortsError(`Segment ${e.index + 1} keeps ${SWAP_STUDIO.maxTakes} takes — remove one first`, 422);
     // Takes it continues from in this queue are named by their new ids (they become the selection when made).
     const deps = e.dependencies.map((d) => ({ ...d, takeId: made.get(d.segmentId)?.id ?? d.takeId }));
-    const take = newTake(cur, clip, shot, seg, deps, lora);
+    const take = newTake(cur, clip, shot, seg, deps, lora, masterKeep(items, e.index, shot.settings));
     made.set(seg.id, take);
   }
   // Every take's steps checked now (models switched off, demo and real mixed, a request a route refuses).
@@ -1052,9 +1107,10 @@ export function estimateProject(projectId: string): StudioEstimate {
       let shotCost: number | null = 0;
       let count = 0;
       for (const [gi, seg] of items.entries()) {
-        const take = newTake(stand, working, shot, seg, [], lora);
+        const take = newTake(stand, working, shot, seg, [], lora, masterKeep(items, gi, shot.settings));
         // A stand-in anchor where one is still to be made: the price doesn't depend on which picture it is.
-        if (seg.anchorMode !== "none" && !take.frozen!.anchor) take.frozen!.anchor = "/api/files/placeholder-anchor.png";
+        const wantsAnchor = seg.anchorMode === "custom" || (seg.anchorMode === "shot" && shot.settings.useAnchor);
+        if (wantsAnchor && !take.frozen!.anchor) take.frozen!.anchor = "/api/files/placeholder-anchor.png";
         let r: ReturnType<typeof price>;
         try {
           r = price(takeSteps(stand, working, shot, seg, take, { shot: si + 1, segment: gi + 1, take: seg.takes.length + 1 }).steps);
@@ -1124,14 +1180,14 @@ export function studioNotes(engine: Engine): string[] {
     return [
       WORKERS_NOTE,
       "Needs H3 Relay 2.0's nodes on your ComfyUI (scripts/comfy/install-comfyui.sh with H3_RELAY=1) and a 24 GB GPU with offloading; the masks need SAM 3.1",
-      "Each segment is one H3 Relay pass with the approved mask, its anchor and the previous take's lossless (FFV1) master as continuation history",
+      "Each segment is one H3 Relay pass with the approved mask, its anchor and the previous take's last frames as continuation history (a lossless 16-bit FFV1 master, about 3 MB a frame at 1 MP: ComfyUI takes uploads up to 100 MB unless started with a higher --max-upload-size, so keep history to about 30 frames or raise it)",
       characterLicenceLine("open", STUDIO_MODELS.open.swap),
     ];
   }
   return [
     "On fal, H3 has no mask: who to swap is said in words, and the whole frame is regenerated around them",
     "fal's H3 reads 2–15 s of the clip a call and bills whole seconds (5–15 s): a segment runs 2–15 s",
-    "A continuing segment starts from the previous take's last frame — fal's H3 takes no continuation history",
+    "A continuing segment starts from the previous take's last frame — fal's H3 takes no continuation history. H3 makes whole seconds (at least 5), so each take is trimmed back to its segment",
     "SAM 3.1 on fal marks the person from your clicks or words, for review; the swap itself doesn't read the mask",
     characterLicenceLine("cloud", STUDIO_MODELS.cloud.swap),
   ];

@@ -188,17 +188,23 @@ describe("Character Swap Studio: the cloud, as a demo", () => {
     });
     const after = v.project.clips[0].shots[0].segments!;
     expect(after.map((g) => g.selectedTake)).toEqual([t1.id, t2.id]);
-    // The second take: cut, the first take's last frame, then H3 with the swap LoRA and both pictures.
+    // The second take: cut, the first take's last frame, H3 with the swap LoRA and both pictures, cut back to 2 s.
     const take2 = after[1].takes[0];
     const steps = take2.stepIds!.map((s) => gens.getGeneration(s)!);
-    expect(steps.map((g) => g.modelId)).toEqual(["trim-video", "extract-frame", "fuobe-character-swap"]);
-    expect(steps[1].request.inputs?.video).toBe(v.gens[after[0].takes[0].genId!].url);
+    expect(steps.map((g) => g.modelId)).toEqual(["trim-video", "extract-frame", "fuobe-character-swap", "trim-video"]);
+    // The boundary is the last frame of the first take as trimmed to its segment (H3 made 5 s for 2 s).
+    const take1 = gens.getGeneration(after[0].takes[0].genId!)!;
+    expect(take1).toMatchObject({ modelId: "trim-video", request: { params: { startTime: 0, endTime: 2 } } });
+    expect(steps[1].request.inputs?.video).toBe(v.gens[take1.id].url);
     expect(steps[1].request.params?.extra).toEqual({ frame_type: "last" });
     const swap = steps[2].request;
     expect(swap.loras?.[0]?.file).toMatch(/swap/i);
     expect(swap.params).toMatchObject({ duration: 5, sourceDuration: 2 });
+    expect(steps[3].request.params).toMatchObject({ startTime: 0, endTime: 2 });
+    expect(take2.genId).toBe(steps[3].id);
     // The anchor is Image 2 on the first segment; after the boundary the boundary frame is Image 2, the anchor Image 3.
-    expect(gens.getGeneration(after[0].takes[0].genId!)!.request.prompt).toMatch(/Image 2 is the exact first-frame scene/);
+    const swap1 = after[0].takes[0].stepIds!.map((s) => gens.getGeneration(s)!).find((g) => g.modelId === "fuobe-character-swap")!;
+    expect(swap1.request.prompt).toMatch(/Image 2 is the exact first-frame scene/);
     expect(swap.prompt).toMatch(/Image 2 is the generated boundary/);
   });
 
@@ -221,15 +227,36 @@ describe("Character Swap Studio: the cloud, as a demo", () => {
     await expect(post(assemble, id, { clipId: c.id })).rejects.toThrow(/being assembled/);
     const v = await until(id, (x) => statusOf(x, x.project.clips[0].assembly?.genId) === "succeeded");
     const steps = asm.stepIds.map((s: string) => gens.getGeneration(s)!);
-    // Two takes and the kept shot cut to their frames, joined, the clip's sound put back.
-    expect(steps.map((g: { modelId: string }) => g.modelId)).toEqual(["trim-video", "trim-video", "trim-video", "join-clips", "merge-audio-video"]);
+    // The two takes (already their segments' length) and the kept shot cut to its frames, all scaled to one frame
+    // (the 72×128 clip's shape, 512 px on its short side for merge-videos), joined at 24 fps, the clip's sound put back.
+    expect(steps.map((g: { modelId: string }) => g.modelId)).toEqual(["scale-video", "scale-video", "trim-video", "scale-video", "join-clips", "merge-audio-video"]);
     const final = gens.getGeneration(asm.genId)!;
     expect(final).toMatchObject({ feature: "swap-studio", op: "mux" });
     expect(final.request.inputs?.audio).toBe(clip);
     expect(steps[2].request.params).toMatchObject({ startTime: 4, endTime: 12 });
+    expect(steps[0].request.params).toMatchObject({ extra: { width: 512, height: 910 } });
+    expect(steps[4].request.params).toMatchObject({ extra: { target_fps: 24 } });
     expect(v.gens[asm.genId].url).toBeTruthy();
     // The step generations stay out of the Library; the assembled clip is in it.
     expect(gens.listGenerations({ feature: "swap-studio" }).map((g) => g.id)).toContain(asm.genId);
+  });
+
+  it("a clip the browser can't play gets a copy for the page; removing a clip stops the jobs it started", async () => {
+    let p: SwapProject = await post(clips, id, { url: clip, name: "night.mp4", playable: false });
+    const c = p.clips[1];
+    const copy = gens.getGeneration(c.preview!.genId!)!;
+    expect(copy).toMatchObject({ modelId: "scale-video", op: "reframe", feature: "swap-studio-step", request: { inputs: { video: clip }, params: { extra: { width: 72, height: 128 } } } });
+    const v = await until(id, (x) => !!x.project.clips[1].preview?.url);
+    expect(v.project.clips[1].preview!.url).toBe(v.gens[copy.id].url);
+    // The jobs still read the clip as filmed.
+    p = await post(masks, id, { clipId: c.id, shotId: c.shots[0].id, kind: "track", frame: 0, points: [] });
+    const m = p.clips[1].shots[0].masks[0];
+    expect(gens.getGeneration(m.stepIds![0])!.request.inputs?.video).toBe(clip);
+    // Removed while its mask is still being made: the mask's generations are stopped (nothing would show them).
+    expect([...m.stepIds!, m.genId].map((g) => gens.getGeneration(g!)!.status)).not.toContain("succeeded");
+    await patch(id, { type: "remove-clip", clipId: c.id });
+    for (const g of [...m.stepIds!, m.genId!]) expect(gens.getGeneration(g)!.status).toBe("canceled");
+    expect((await view(id)).project.clips).toHaveLength(1);
   });
 });
 
@@ -265,8 +292,10 @@ describe("Character Swap Studio: your GPU, as a demo", () => {
     expect(first).toMatchObject({ modelId: "oss-h3-swap-segment", op: "video-swap", feature: "swap-studio-step" });
     expect(first.request.inputs?.video).toBe(v.project.clips[0].normalized!.url);
     expect(first.request.params?.extra).not.toHaveProperty("historyVideo");
-    // Segment 2 reads 18 frames of history from take 1's master (144 frames long).
-    expect(second.request.params?.extra).toMatchObject({ historyVideo: v.gens[first.id].master, historyStart: 126, historyLength: 18 });
+    // Take 1's master keeps its last 18 frames of 144 (what segment 2 reads), and segment 2 reads all of them.
+    expect(first.request.params?.extra).toMatchObject({ masterKeep: 18, segmentFrames: 144 });
+    expect(after[0].takes[0].frozen?.keep).toBe(18);
+    expect(second.request.params?.extra).toMatchObject({ historyVideo: v.gens[first.id].master, historyStart: 0, historyLength: 18 });
     expect(v.gens[first.id].master).toBeTruthy();
     expect(after.map((g) => g.selectedTake)).toEqual([t1.id, t2.id]);
 

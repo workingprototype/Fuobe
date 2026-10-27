@@ -23,8 +23,9 @@ const entry = (id: string) => manifest.workflows.find((w) => w.id === id)!;
 const file = (id: string) => JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), "utf8")) as ComfyWorkflow;
 
 const clip: MediaInfo = { container: "mp4", hasVideo: true, hasAudio: true, duration: 20, videoDuration: 20, width: 1920, height: 1080, fps: 24, frames: 480 };
-const prepare = (id: string, input: Partial<GenInput>, op: Operation) =>
-  prepareWorkflow(id, { video: "clip.mp4", ...input } as GenInput, { generationId: "g1", op, upload: async (_d, _t, name) => `up_${name}`, media: (n) => (n === "clip.mp4" ? clip : undefined) });
+const GB = 2 ** 30;
+const prepare = (id: string, input: Partial<GenInput>, op: Operation, ram = 64 * GB) =>
+  prepareWorkflow(id, { video: "clip.mp4", ...input } as GenInput, { generationId: "g1", op, upload: async (_d, _t, name) => `up_${name}`, media: (n) => (n === "clip.mp4" ? clip : undefined), serverRam: async () => ram });
 const at = (wf: ComfyWorkflow, node: string, input: string) => wf[node]?.inputs[input];
 const SEG = STUDIO_WORKFLOWS.segment;
 const MASK = STUDIO_WORKFLOWS.mask;
@@ -110,6 +111,20 @@ describe("a segment through the provider", () => {
     await expect(prepare(SEG, { ...base, extra: { historyVideo: "up_master.mkv", historyStart: -1, historyLength: 18 } }, "video-swap")).rejects.toThrow(/frame count/);
   });
 
+  it("saves only the take's last frames as its lossless master (what the next segment reads)", async () => {
+    const { workflow: wf } = await prepare(SEG, { ...base, extra: { masterKeep: 18, segmentFrames: 120 } }, "video-swap");
+    expect(wf.master_tail).toMatchObject({ class_type: "ImageFromBatch", inputs: { image: ["finish", 0], batch_index: 102, length: 18 } });
+    expect(at(wf, "save_master", "images")).toEqual(["master_tail", 0]);
+    expect(at(wf, "save_master", "format")).toBe("video/ffv1-mkv");
+    // The take itself is the whole segment.
+    expect(at(wf, "video", "images")).toEqual(["finish", 0]);
+    for (const k of ["masterKeep", "segmentFrames"]) expect(JSON.stringify(wf)).not.toContain(k);
+    // Keeping every frame (or not saying): the master is the whole segment, as before.
+    const all = await prepare(SEG, { ...base, extra: { masterKeep: 120, segmentFrames: 120 } }, "video-swap");
+    expect(all.workflow.master_tail).toBeUndefined();
+    expect(at(all.workflow, "save_master", "images")).toEqual(["finish", 0]);
+  });
+
   it("the approved mask replaces SAM's chain, trimmed like the segment", async () => {
     const { workflow: wf } = await prepare(SEG, { ...base, startTime: 105.5 / 24, endTime: (105.5 + 141.25) / 24, extra: { maskVideo: "up_mask.mp4", maskStart: 105.5 / 24 } }, "video-swap");
     expect(at(wf, "mask_source", "file")).toBe("up_mask.mp4");
@@ -183,5 +198,13 @@ describe("a mask through the provider", () => {
     expect(at(blank.workflow, "video", "images")).toEqual(["join_head", 0]);
     expect(blank.workflow.prev_source).toBeUndefined();
     await expect(prepare(MASK, { ...base, extra: { keyFrame: 200, spanFrames: 100, shotFrames: 240 } }, "bg-remove-video")).rejects.toThrow(/don't fit in the shot/);
+  });
+
+  it("refuses a shot the server can't hold in memory, before it runs", async () => {
+    // Correcting a 10 s 1080p shot at 768p holds about 18 GB of frames: a 16 GB server spares 8.
+    await expect(prepare(MASK, { ...base, points: [{ x: 9, y: 9 }], extra: { keyFrame: 30, spanFrames: 1, shotFrames: 240, prevMask: "up_prev.mp4" } }, "bg-remove-video", 16 * GB)).rejects.toThrow(/holds the whole shot in memory.*can spare 8 GB/);
+    // At 0.5 MP it fits.
+    const small = await prepare(MASK, { ...base, resolution: "480p", points: [{ x: 9, y: 9 }], extra: { keyFrame: 30, spanFrames: 1, shotFrames: 240, prevMask: "up_prev.mp4" } }, "bg-remove-video", 16 * GB);
+    expect(at(small.workflow, "prepare", "resolution")).toBe("480");
   });
 });

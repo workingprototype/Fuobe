@@ -254,7 +254,8 @@ function SegmentCard(props: StageProps & { shot: SwapShot; seg: SwapSegment; ind
             ]}
             onChange={(anchorMode) => set({ anchorMode })}
           />
-          {seg.anchorMode === "shot" && !shot.approvedAnchor && <p className="text-[12px] text-muted-foreground">Approve a scene anchor (Scene anchors), or pick None.</p>}
+          {seg.anchorMode === "shot" && !shot.settings.useAnchor && <p className="text-[12px] text-muted-foreground">Scene anchors are off in Generation settings: this segment runs without one.</p>}
+          {seg.anchorMode === "shot" && shot.settings.useAnchor && !shot.approvedAnchor && <p className="text-[12px] text-muted-foreground">Approve a scene anchor (Scene anchors), or pick None.</p>}
         </div>
       </div>
 

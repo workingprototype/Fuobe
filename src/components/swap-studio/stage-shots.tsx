@@ -24,6 +24,7 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
   const [modes, setModes] = useState<Record<string, ShotMode>>({});
   const [frame, setFrame] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [unplayable, setUnplayable] = useState<string | null>(null);
   const cuts = draft ?? clip.cuts;
   const total = clip.frames;
   const shots = useMemo(() => shotsFromCuts(clip, cuts, project.defaults), [clip, cuts, project.defaults]);
@@ -31,8 +32,9 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
   const changed = draft !== null || Object.keys(modes).length > 0;
 
   const seek = (f: number) => {
-    if (video.current) video.current.currentTime = at(f) + 0.5 / 24;
-    setFrame(f);
+    const n = Math.min(total - 1, Math.max(0, Math.round(f)));
+    if (video.current) video.current.currentTime = at(n) + 0.5 / 24;
+    setFrame(n);
   };
   const detect = async () => {
     const found = await scene.detect(src, total);
@@ -60,8 +62,17 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
           playsInline
           preload="metadata"
           onTimeUpdate={(e) => setFrame(Math.min(total - 1, Math.floor(e.currentTarget.currentTime * 24)))}
+          onLoadedData={() => setUnplayable(null)}
+          onError={() => setUnplayable(src)}
           className="max-h-[46vh] w-full rounded-xl bg-media"
         />
+        {unplayable === src && (
+          <Note tone="warn" className="mt-2">
+            {project.engine === "cloud"
+              ? "Your browser can't play this clip, so Detect edits and frames to click on can't work here yet. Make a browser copy (above the stages), or add the clip as an MP4 (H.264). You can still type cuts by frame number."
+              : "Your browser can't play this clip yet — wait for the 24 fps copy (above the stages). You can still type cuts by frame number."}
+          </Note>
+        )}
         {/* The timeline: shots by colour, cuts as lines, detected edits dashed, the playhead. */}
         <div
           className="relative mt-3 h-10 cursor-pointer overflow-hidden rounded-lg bg-muted"
@@ -83,9 +94,25 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
           <div className="absolute inset-y-0 w-0.5 bg-primary" style={{ left: pct(frame, total) }} />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-            Frame {frame} · {secondsLabel(frame)}
-          </span>
+          {/* The playhead by number: the timeline above is for the mouse. */}
+          <label className="flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground tabular-nums">
+            Frame
+            <input
+              key={frame}
+              type="number"
+              aria-label="Playhead frame"
+              defaultValue={frame}
+              min={0}
+              max={total - 1}
+              onBlur={(e) => {
+                const n = Number(e.currentTarget.value);
+                if (Number.isFinite(n) && Math.round(n) !== frame) seek(n);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+              className="h-7 w-20 rounded-md border bg-background px-2 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            · {secondsLabel(frame)}
+          </label>
           <Button size="sm" variant="outline" className="h-8 rounded-full" onClick={() => setDraft(addCut(cuts, frame, total))} disabled={frame <= 0 || cuts.includes(frame)}>
             <Plus className="size-3.5" /> Cut at the playhead
           </Button>
@@ -132,7 +159,7 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
             const cutAt = i > 0 ? s.start : null;
             return (
               <li key={s.id} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border px-2.5 py-2">
-                <button type="button" onClick={() => seek(s.start)} className="min-w-0 text-left text-[13px] font-medium hover:underline">
+                <button type="button" onClick={() => seek(s.start)} className="min-w-0 rounded-sm text-left text-[13px] font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
                   Shot {i + 1}
                   <span className="ml-2 font-mono text-[12px] font-normal text-muted-foreground tabular-nums">
                     {s.start}–{s.end} · {secondsLabel(s.end - s.start)}
@@ -163,7 +190,12 @@ export function ShotsStage({ project, clip, edit, src }: StageProps) {
                         className="h-7 w-20 rounded-md border bg-background px-2 font-mono tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </label>
-                    <button type="button" onClick={() => setDraft(removeCut(cuts, cutAt))} className="inline-flex items-center gap-1 rounded-full px-2 py-1 hover:bg-muted hover:text-foreground" aria-label={`Remove the cut at frame ${cutAt}`}>
+                    <button
+                      type="button"
+                      onClick={() => setDraft(removeCut(cuts, cutAt))}
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-1 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Remove the cut at frame ${cutAt}`}
+                    >
                       <Trash2 className="size-3.5" /> Remove cut
                     </button>
                   </div>

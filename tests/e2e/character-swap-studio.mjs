@@ -3,8 +3,8 @@
 // click on a frame and Track shot, a mask and a scene anchor approved, two segments (the second continuing from the
 // first, waiting for it), takes made, compared and reviewed, Export decisions, the assembly with a download, and the
 // Finish stage shown as not available. Then every stage at 1440 and 390 px, light and dark, without sideways scroll;
-// a project on your GPU shows its 24 fps copy; the sidebar and Genjutsu's Character swap link here; an unknown project
-// is a 404.
+// a project on your GPU shows its 24 fps copy; an AVI on the cloud gets a copy the browser can play; the sidebar links
+// here and Genjutsu's Character swap opens its clip and character in a new project; an unknown project is a 404.
 // Usage: node tests/e2e/character-swap-studio.mjs [appUrl] [--shots <dir>]   (app in demo mode, ComfyUI unreachable).
 // Exits 1 on a failed check.
 import { execFileSync } from "node:child_process";
@@ -37,7 +37,7 @@ const STAGES = ["Shots", "Words", "Who to swap", "Scene anchors", "Segments", "T
 
 // A rerun starts clean: earlier runs' projects go.
 for (const p of (await (await fetch(`${app}/api/swap-studio/projects`)).json()).items ?? []) {
-  if (p.name === "Rain scene" || p.name === "GPU check") await fetch(`${app}/api/swap-studio/projects/${p.id}`, { method: "DELETE" });
+  if (["Rain scene", "GPU check", "AVI check", "walk-handoff"].includes(p.name)) await fetch(`${app}/api/swap-studio/projects/${p.id}`, { method: "DELETE" });
 }
 
 const browser = await launch();
@@ -85,14 +85,16 @@ try {
     check("Detect edits finds the cut at 4 s (frame 96)", /Detected 1 edit at frames 96 /.test(found), found.match(/Detected[^\n]*|No edits[^\n]*/)?.[0] ?? "");
     if (/Detected 1 edit at frames 96 /.test(found)) await page.getByRole("button", { name: "Use them" }).click();
     else {
-      // Placed by hand at the playhead instead.
-      await page.evaluate(() => {
-        const v = document.querySelector("video");
-        v.currentTime = 4.02;
-      });
-      await page.waitForFunction(() => /Frame 96 /.test(document.body.innerText), null, { timeout: 15_000 });
+      // Placed by hand at the playhead instead (typed: the timeline is for the mouse).
+      await page.getByLabel("Playhead frame").fill("96");
+      await page.getByLabel("Playhead frame").press("Enter");
       await page.getByRole("button", { name: "Cut at the playhead" }).click();
     }
+    // The playhead by keyboard: typed frame number.
+    await page.getByLabel("Playhead frame").fill("30");
+    await page.getByLabel("Playhead frame").press("Enter");
+    await page.waitForFunction(() => Math.abs(document.querySelector("video").currentTime - 30.5 / 24) < 0.01, null, { timeout: 10_000 });
+    check("the playhead moves to a typed frame", true);
     await page.getByRole("radiogroup", { name: "Shot 2" }).getByRole("radio", { name: /Keep original/ }).click();
     await page.getByRole("button", { name: "Save shots" }).click();
     await page.getByRole("button", { name: "Saved" }).waitFor();
@@ -121,8 +123,16 @@ try {
     await approveMask.waitFor();
     await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Approve" && !b.disabled), null, { timeout: 60_000 });
     await approveMask.click();
-    await page.getByRole("button", { name: "Approved" }).waitFor();
-    check("mask version made and approved", true);
+    await page.getByRole("button", { name: "Unapprove" }).waitFor();
+    check("mask version made and approved (and can be unapproved)", true);
+    // The shot strip is one tab stop; the arrow keys pick shots.
+    const radios = page.getByRole("radiogroup", { name: "Shot", exact: true }).getByRole("radio");
+    check("shot strip: one tab stop", (await radios.evaluateAll((els) => els.filter((e) => e.tabIndex === 0).length)) === 1);
+    await radios.first().focus();
+    await page.keyboard.press("ArrowRight");
+    check("shot strip: ArrowRight picks shot 2", (await radios.nth(1).getAttribute("aria-checked")) === "true" && (await page.evaluate(() => document.activeElement?.textContent ?? "")).startsWith("Shot 2"));
+    await page.keyboard.press("ArrowLeft");
+    await page.getByRole("button", { name: "Unapprove" }).waitFor();
     await shot("03-who");
 
     // Scene anchor: make, approve.
@@ -154,8 +164,21 @@ try {
     await page.getByRole("radiogroup", { name: "Take 1 decision" }).first().getByRole("radio", { name: "Keep" }).click();
     await page.getByRole("radiogroup", { name: "Clip decision" }).getByRole("radio", { name: "Keep" }).click();
     await page.getByRole("button", { name: "Unfavourite" }).first().waitFor();
-    const exported = await page.evaluate(async (u) => (await fetch(u)).json(), `${new URL(projectUrl).pathname.replace("/character-swap/", "/api/swap-studio/projects/")}/decisions`);
-    check("Export decisions: the clip's review and the take's", exported.clips?.[0]?.review === "keep" && exported.clips[0].shots[0].segments[0].takes[0].favourite === true);
+    // The edits save as they're made: read the export once they have.
+    const decisionsUrl = `${new URL(projectUrl).pathname.replace("/character-swap/", "/api/swap-studio/projects/")}/decisions`;
+    const exported = await page
+      .waitForFunction(
+        async (u) => {
+          const d = await (await fetch(u)).json();
+          return d.clips?.[0]?.review === "keep" && d.clips[0].shots[0].segments[0].takes[0].favourite === true && d.clips[0].shots[0].segments[0].takes[0].decision === "keep" ? d : false;
+        },
+        decisionsUrl,
+        { timeout: 15_000, polling: 500 },
+      )
+      .then((h) => h.jsonValue())
+      .catch(() => null);
+    const last = exported ?? (await page.evaluate(async (u) => (await fetch(u)).json(), decisionsUrl));
+    check("Export decisions: the clip's review and the take's", !!exported, exported ? "" : JSON.stringify(last.clips?.[0]?.shots?.[0]?.segments?.map((g) => g.takes.map((t) => [t.favourite, t.decision]))) + ` review=${last.clips?.[0]?.review}`);
     await shot("06-review");
 
     // Assemble; the Finish stage is not available.
@@ -216,6 +239,42 @@ try {
     await page.goto(`${app}/genjutsu?mode=character`, { waitUntil: "load" });
     await page.getByRole("link", { name: /Open in Character Swap Studio/ }).waitFor({ timeout: 90_000 });
     check("Genjutsu's Character swap links the studio", true);
+
+    // From Genjutsu with a clip and a character: a new project with both.
+    const upload = async (file, type, name) => {
+      const f = new FormData();
+      f.append("file", new Blob([fs.readFileSync(file)], { type }), name);
+      return (await (await fetch(`${app}/api/uploads`, { method: "POST", body: f })).json()).url;
+    };
+    const gClip = await upload(clipFile, "video/webm", "walk-handoff.webm");
+    const gHero = await upload(heroFile, "image/png", "hero.png");
+    await page.goto(`${app}/genjutsu?mode=character&video=${encodeURIComponent(gClip)}&image=${encodeURIComponent(gHero)}`, { waitUntil: "load" });
+    const open = page.getByRole("button", { name: /Open in Character Swap Studio/ });
+    await open.waitFor({ timeout: 90_000 });
+    await page.waitForFunction(() => ![...document.querySelectorAll("button")].find((b) => /Open in Character Swap Studio/.test(b.textContent ?? ""))?.disabled, null, { timeout: 30_000 });
+    await open.click();
+    await page.waitForURL(/\/character-swap\/swap-/, { timeout: 60_000 });
+    await page.getByText("Clips · 1").waitFor({ timeout: 60_000 });
+    const handedId = page.url().split("/").pop();
+    const handed = await (await fetch(`${app}/api/swap-studio/projects/${handedId}`)).json();
+    // Named after the clip (Genjutsu's name for an adopted upload is its stored file name).
+    check(
+      "Genjutsu hands the clip and character to a new studio project",
+      handed.project.clips.length === 1 && handed.project.clips[0].source.url === gClip && handed.project.character.image === gHero && handed.project.name === handed.project.clips[0].name,
+      `${handed.project.name} · ${handed.project.clips.length} clip`,
+    );
+    await fetch(`${app}/api/swap-studio/projects/${handedId}`, { method: "DELETE" });
+
+    // An AVI on the cloud: the browser can't play it, so the page gets an H.264 copy (a sample clip in demo mode).
+    const avi = path.join(path.dirname(clipFile), "walk.avi");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-i", walk, "-c:v", "mjpeg", "-q:v", "5", "-c:a", "pcm_s16le", avi]);
+    const aviProject = await (await fetch(`${app}/api/swap-studio/projects`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "AVI check", engine: "cloud" }) })).json();
+    await page.goto(`${app}/character-swap/${aviProject.id}`, { waitUntil: "load" });
+    await page.locator('input[type="file"][accept^="video/"]').setInputFiles(avi);
+    await page.getByRole("button", { name: /^walk/ }).waitFor({ timeout: 90_000 });
+    await page.getByText(/Your browser can.t play this clip \(AVI\)/).waitFor({ timeout: 30_000 });
+    const aviView = await (await fetch(`${app}/api/swap-studio/projects/${aviProject.id}`)).json();
+    check("an AVI on the cloud gets a browser copy (fal scale-video)", !!aviView.project.clips[0].preview?.genId && aviView.project.clips[0].source.playable === false);
     const missing = await fetch(`${app}/character-swap/swap-nothing-here`);
     check("an unknown project is a 404", missing.status === 404, String(missing.status));
     await context.close();

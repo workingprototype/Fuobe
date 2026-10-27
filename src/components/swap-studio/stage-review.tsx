@@ -187,6 +187,12 @@ export function AssembleStage({ id, project, clip, gens, estimate }: StageProps)
           {"problem" in found ? (
             <Note tone="warn">{found.problem}</Note>
           ) : (
+            <>
+            {found.stale.length > 0 && (
+              <Note tone="warn">
+                {found.stale.join("; ")} {found.stale.length === 1 ? "uses a take" : "use takes"} made before later changes (settings, words, the character or the take before). The assembly uses {found.stale.length === 1 ? "it" : "them"} as {found.stale.length === 1 ? "it is" : "they are"} — queue {found.stale.length === 1 ? "it" : "them"} again in Segments for current ones.
+              </Note>
+            )}
             <ol className="flex min-w-0 flex-wrap gap-1.5" aria-label="Pieces">
               {found.pieces.map((p, i) => (
                 <li key={i} className={cn("rounded-full px-2.5 py-1 text-[11px] font-medium", p.kind === "take" ? "bg-brand-faint text-brand-text" : "bg-muted text-muted-foreground")}>
@@ -194,11 +200,12 @@ export function AssembleStage({ id, project, clip, gens, estimate }: StageProps)
                 </li>
               ))}
             </ol>
+            </>
           )}
           <p className="text-[12px] text-muted-foreground">
             {project.engine === "open"
               ? "Each piece is fitted to the clip's size at 24 fps, joined packet by packet, and the clip's own sound goes back on."
-              : "Each piece is cut to its frames, joined (fal keeps 24 fps, H3's rate), and the clip's own sound — or its silence — goes back on."}
+              : "The clip's pieces are cut to their frames, every piece is scaled to one frame size, they're joined at 24 fps (H3's rate), and the clip's own sound — or its silence — goes back on."}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button

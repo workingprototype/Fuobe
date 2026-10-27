@@ -11,7 +11,7 @@ import { Panel, ToolShell } from "@/components/av/tool-shell";
 import { tabKeys } from "@/components/shorts/ui";
 import { EngineSwitch } from "@/components/studio/engine-switch";
 import { uploadFile } from "@/lib/api";
-import { clipExtension, clipProblem, jobState, MODE_LABELS, secondsLabel, SWAP_STUDIO, type GenSummary, type StudioEstimate, type SwapClip, type SwapProject, type SwapShot } from "@/lib/catalog/swap-studio";
+import { clipExtension, clipNeedsPreview, clipProblem, jobState, MODE_LABELS, pageClip, secondsLabel, SWAP_STUDIO, type GenSummary, type StudioEstimate, type SwapClip, type SwapProject, type SwapShot } from "@/lib/catalog/swap-studio";
 import { cn } from "@/lib/utils";
 import { decisionsHref, useAddClip, usePrepareClip, useSwapEdit, useSwapEstimate, useSwapProject, type EditInput } from "./hooks";
 import { GenChip, JobError, Note, priceText, SavedText } from "./parts";
@@ -32,7 +32,7 @@ export interface StageProps {
   shot: SwapShot | null;
   setShot: (id: string) => void;
   edit: (e: EditInput) => Promise<SwapProject | undefined>;
-  /** The clip as the page plays it (your GPU's 24 fps copy once it's made). */
+  /** The clip as the page plays it (your GPU's 24 fps copy, or the cloud's browser copy, once it's made). */
   src: string;
 }
 
@@ -130,7 +130,7 @@ export function SwapWorkbench({ id }: { id: string }) {
     );
   }
 
-  const src = clip ? (project.engine === "open" ? (clip.normalized?.url ?? clip.source.url) : clip.source.url) : "";
+  const src = clip ? pageClip(project.engine, clip) : "";
   const props: StageProps | null = clip ? { id, project, clip, gens: v.gens, estimate, shot, setShot: setShotId, edit, src } : null;
 
   return (
@@ -328,10 +328,12 @@ function ClipsPanel({
     const facts = await browserFacts(file);
     const long = clipProblem({ duration: facts.duration });
     if (long) return toast.error(long);
+    // A clip this browser can't play (AVI, or a codec it lacks): the cloud makes a copy the page can play.
+    const playable = facts.duration !== undefined && facts.width !== undefined;
     setUpload({ name: file.name, progress: 0 });
     try {
       const up = await uploadClip(file, (p) => setUpload({ name: file.name, progress: p }));
-      const p = await add.mutateAsync({ url: up.url, name: file.name, bytes: file.size, ...facts });
+      const p = await add.mutateAsync({ url: up.url, name: file.name, bytes: file.size, playable, ...facts });
       onSelect(p.clips.at(-1)!.id);
     } catch (e) {
       toast.error((e as Error).message);
@@ -364,6 +366,7 @@ function ClipsPanel({
         <ul className="space-y-1.5">
           {project.clips.map((c) => {
             const norm = project.engine === "open" && !c.normalized?.url ? jobState(c.normalized?.genId, undefined, gens) : null;
+            const copy = project.engine === "cloud" && clipNeedsPreview("cloud", c) && !c.preview?.url ? jobState(c.preview?.genId, undefined, gens) : null;
             return (
               <li key={c.id} className="flex min-w-0 items-center gap-1">
                 <button
@@ -380,6 +383,7 @@ function ClipsPanel({
                     {secondsLabel(c.frames)} · {c.shots.length} shot{c.shots.length === 1 ? "" : "s"} · {c.shots.filter((s) => s.mode === "generate").length} swapped
                     {c.assembly?.genId ? " · assembled" : ""}
                     {norm ? ` · 24 fps copy: ${norm.status === "succeeded" ? "ready" : norm.status}` : ""}
+                    {copy ? ` · browser copy: ${copy.status === "succeeded" ? "ready" : copy.status}` : ""}
                   </span>
                 </button>
                 <button
@@ -414,6 +418,9 @@ function ClipsPanel({
 function ClipHeader({ id, project, clip, gens }: StageProps) {
   const prepare = usePrepareClip(id);
   const norm = jobState(clip.normalized?.genId, undefined, gens);
+  const copy = jobState(clip.preview?.genId, undefined, gens);
+  const copied = project.engine === "cloud" && clipNeedsPreview("cloud", clip);
+  const needsCopy = copied && !clip.preview?.url;
   const s = clip.source;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -433,9 +440,26 @@ function ClipHeader({ id, project, clip, gens }: StageProps) {
           )}
         </span>
       )}
+      {needsCopy && (
+        <span className="flex items-center gap-2">
+          <span className="text-[12px] text-muted-foreground">Browser copy</span>
+          <GenChip genId={clip.preview?.genId} gens={gens} />
+          {(!clip.preview?.genId || copy.status === "failed" || copy.status === "canceled" || copy.status === "missing") && (
+            <Button size="sm" variant="outline" className="h-7 rounded-full px-2.5 text-[12px]" disabled={prepare.isPending} onClick={() => prepare.mutate({ clipId: clip.id }, { onError: (e) => toast.error((e as Error).message) })}>
+              <RotateCcw className="size-3.5" /> Make a browser copy
+            </Button>
+          )}
+        </span>
+      )}
       <div className="w-full">
         <JobError genId={clip.normalized?.genId} gens={gens} />
+        {project.engine === "cloud" && <JobError genId={clip.preview?.genId} gens={gens} />}
       </div>
+      {copied && (
+        <Note className="w-full">
+          Your browser can&apos;t play this clip ({clipExtension(s.name ?? s.url)?.toUpperCase() ?? "its format"}), so the page shows a copy fal makes as an H.264 MP4 — for finding the edits and clicking who to swap. The jobs read the clip as filmed.
+        </Note>
+      )}
     </div>
   );
 }
@@ -443,8 +467,19 @@ function ClipHeader({ id, project, clip, gens }: StageProps) {
 /** The clip's shots as a strip (widths by length): pick the shot a stage works on. */
 export function ShotStrip({ clip, shot, onPick, gens }: { clip: SwapClip; shot: SwapShot | null; onPick: (id: string) => void; gens: Record<string, GenSummary> }) {
   const busy = useMemo(() => new Set(Object.entries(gens).filter(([, g]) => g.status === "queued" || g.status === "running").map(([k]) => k)), [gens]);
+  const current = Math.max(0, clip.shots.findIndex((s) => s.id === shot?.id));
+  // A radio group is one tab stop: the arrow keys (and Home / End) move between shots and pick them.
+  const keys = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    const n = clip.shots.length;
+    const to = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : step ? (current + step + n) % n : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    onPick(clip.shots[to].id);
+    (e.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]")[to])?.focus();
+  };
   return (
-    <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="radiogroup" aria-label="Shot">
+    <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="radiogroup" aria-label="Shot" onKeyDown={keys}>
       {clip.shots.map((s, i) => {
         const working = (s.segments ?? []).some((g) => g.takes.some((t) => t.state === "waiting" || (t.genId && busy.has(t.genId))));
         return (
@@ -453,6 +488,7 @@ export function ShotStrip({ clip, shot, onPick, gens }: { clip: SwapClip; shot: 
             type="button"
             role="radio"
             aria-checked={shot?.id === s.id}
+            tabIndex={i === current ? 0 : -1}
             onClick={() => onPick(s.id)}
             title={`${MODE_LABELS[s.mode].label} · ${secondsLabel(s.end - s.start)}`}
             style={{ flexGrow: Math.max(1, s.end - s.start) }}

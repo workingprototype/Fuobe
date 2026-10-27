@@ -81,6 +81,18 @@ describe("project edits", () => {
     expect(shotOf(after).anchors).toHaveLength(1);
   });
 
+  it("a new character picture also un-picks the segments' own references (made or imported with the old one)", () => {
+    const base = shotOf(projectOf());
+    const segs = currentSegments(base).map((g, i) => (i ? g : { ...g, anchorMode: "custom" as const, anchors: [{ id: "r1", createdAt: 1, source: "generated" as const, url: "/api/files/r1.png" }], anchor: "r1" }));
+    const p = projectOf([clipOf({ shots: [{ ...base, segments: segs }] })]);
+    expect(shotOf(edit(p, { type: "character", description: "someone else" })).segments![0].anchor).toBe("r1");
+    const after = shotOf(edit(p, { type: "character", image: "/api/files/uploads/x/other.png" }));
+    expect(after.segments![0]).toMatchObject({ anchor: null, anchors: [{ id: "r1" }] });
+    // Queueing it now asks for a reference made with the new picture.
+    const q = planQueue({ ...p, character: { ...p.character, image: "/api/files/uploads/x/other.png" } }, p.clips[0], after, after.segments![0].id, "segment", { active: () => false });
+    expect("problem" in q && q.problem).toMatch(/pick its reference image/);
+  });
+
   it("detected edits are kept apart until confirmed; confirmed cuts make shots, with Replace or Keep for each", () => {
     let p = edit(projectOf(), { type: "detected", clipId: "clip-1", cuts: [120, 0, 600, 120, 300] });
     expect(p.clips[0].detected).toEqual([120, 300]);
@@ -131,6 +143,10 @@ describe("project edits", () => {
     expect(shotOf(edit(approved, { type: "remove-anchor", clipId: "clip-1", shotId: s.id, anchorId: "a1" })).approvedAnchor).toBeNull();
     // A mask still being made can't be removed.
     expect(refused(() => edit(p, { type: "remove-mask", clipId: "clip-1", shotId: s.id, maskId: "m1" }, (id) => id === "g-m1")).message).toMatch(/still being made/);
+    // A mask made on the other engine can't be approved here; an approval can be taken back.
+    const cloud = { ...made, engine: "cloud" as const };
+    expect(refused(() => edit(cloud, { type: "shot", clipId: "clip-1", shotId: s.id, patch: { approvedMask: "m1" } })).message).toMatch(/other engine/);
+    expect(shotOf(edit(approved, { type: "shot", clipId: "clip-1", shotId: s.id, patch: { approvedMask: null } })).approvedMask).toBeNull();
   });
 
   it("Build shot prompts writes each swapped shot's prompt from its speaker and words", () => {
@@ -255,12 +271,13 @@ describe("queued takes", () => {
 });
 
 describe("cloud mask updates", () => {
-  it("Update frame cuts half a second from the frame (within the shot); its piece is that one frame", () => {
+  it("Update frame cuts half a second from the frame (past the shot's end if need be); its piece is that one frame", () => {
     const p = projectOf([clipOf()], "cloud");
     const shot = { ...shotOf(p), start: 24, end: 120 };
     const [cut, mask] = planMask({ engine: "cloud", clip: p.clips[0], shot, kind: "frame", frame: 90, points: [{ x: 5, y: 5 }], who: shot.who, base: null });
-    expect(cut.request.params).toEqual({ startTime: 114 / 24, endTime: 120 / 24 });
-    expect(mask.request.params).toMatchObject({ duration: 6 / 24, points: [{ x: 5, y: 5 }] });
+    // Frame 114 of the clip, six frames before the shot ends: still half a second of clip to trim and track.
+    expect(cut.request.params).toEqual({ startTime: 114 / 24, endTime: 126 / 24 });
+    expect(mask.request.params).toMatchObject({ duration: 12 / 24, points: [{ x: 5, y: 5 }] });
     const [mid] = planMask({ engine: "cloud", clip: p.clips[0], shot, kind: "frame", frame: 10, points: [{ x: 5, y: 5 }], who: shot.who, base: null });
     expect(mid.request.params).toEqual({ startTime: 34 / 24, endTime: 46 / 24 });
   });

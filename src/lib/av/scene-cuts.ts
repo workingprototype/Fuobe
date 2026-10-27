@@ -9,12 +9,27 @@
  * frames a second finds the stretches where a cut can be (`coarseWindows`), and a fine pass reads every 24 fps frame
  * of those stretches and keeps the frames whose score is over the threshold (`sceneCuts`). Pure: the sampling lives
  * in src/components/swap-studio, the tests run these on synthetic frames.
+ *
+ * The score depends on the picture's size: shrinking a frame averages its pixels, and the mean difference of averages
+ * is never more than the mean of the differences (|avg a − avg b| ≤ avg |a − b|), so a small picture scores a cut
+ * lower than FFmpeg does on the whole frame (on a sample pair, 0.035 at 64×36 against 0.046 at 640×360). The coarse
+ * pass reads small frames with a threshold well under 0.32 to make up for it; the fine pass, which decides, reads the
+ * frames at the clip's own size up to FINE_MAX_WIDTH, in stretches of at most FINE_CHUNK frames to bound memory.
  */
 
 /** FFmpeg's scene-change threshold in Akatz Labs' tool. */
 export const SCENE_THRESHOLD = 0.32;
 /** The coarse pass keeps more than it needs: the fine pass decides at the real threshold. */
 export const COARSE_THRESHOLD = 0.18;
+/** The coarse pass's frame width (pixels). */
+export const COARSE_WIDTH = 64;
+/** The widest frame the fine pass reads (the clip's own width when it is narrower). */
+export const FINE_MAX_WIDTH = 1280;
+/** Frames the fine pass holds at once. */
+export const FINE_CHUNK = 24;
+
+/** The fine pass's frame width for a clip `videoWidth` pixels wide (640 when the browser doesn't say). */
+export const fineWidth = (videoWidth: number | undefined) => Math.max(COARSE_WIDTH, Math.min(FINE_MAX_WIDTH, Math.round(videoWidth || 640)));
 /** The studio's frame rate: every clip is worked on at 24 fps (H3's rate). */
 export const STUDIO_FPS = 24;
 
@@ -106,6 +121,23 @@ export function coarseWindows(times: number[], scores: number[], total: number, 
 
 /** The 24 fps frames a stretch reads, in order. */
 export const windowFrames = (w: { from: number; to: number }) => Array.from({ length: w.to - w.from + 1 }, (_, i) => w.from + i);
+
+/**
+ * A stretch read in pieces of at most `max` frames (at least 3). Each piece after the first starts two frames before
+ * the next frame it decides on (windowCuts ignores a piece's first two frames), so together they decide on the same
+ * frames as the whole stretch.
+ */
+export function windowChunks(w: { from: number; to: number }, max = FINE_CHUNK): { from: number; to: number }[] {
+  const size = Math.max(3, Math.floor(max));
+  const out: { from: number; to: number }[] = [];
+  let from = w.from;
+  for (;;) {
+    const to = Math.min(w.to, from + size - 1);
+    out.push({ from, to });
+    if (to >= w.to) return out;
+    from = to - 1;
+  }
+}
 
 /**
  * The cuts in one stretch read frame by frame. Its first two scores aren't FFmpeg's: the first frame has nothing

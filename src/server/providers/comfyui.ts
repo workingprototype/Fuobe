@@ -43,6 +43,7 @@ import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSi
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
+import { maskMemoryProblem } from "@/lib/catalog/swap-studio";
 import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
 import { maskGraph, segmentGraph, type MaskGraphOptions, type SegmentGraphOptions } from "@/lib/swap-studio-graphs";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
@@ -967,14 +968,18 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     }
     const maskFile = typeof extra.maskVideo === "string" && extra.maskVideo ? extra.maskVideo : null;
     const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : Number(values.duration ?? 0);
+    // The master keeps the segment's last frames (the next segment's history), not the whole 16-bit segment.
+    const frames = Math.round(Number(extra.segmentFrames ?? 0));
+    const keep = Math.round(Number(extra.masterKeep ?? frames));
     studioSegment = {
       anchor: !dropAnchor,
       history,
       anchorAfterHistory: extra.anchorAfterHistory === true,
       mask: maskFile ? { file: maskFile, start: Math.max(0, Number(extra.maskStart ?? 0)), duration: span } : null,
       useMask: extra.useMask !== false,
+      masterTail: frames > 0 && keep > 0 && keep < frames ? { from: frames - keep, frames: keep } : null,
     };
-    for (const k of ["maskVideo", "maskStart", "anchorAfterHistory", "useMask"]) delete extra[k];
+    for (const k of ["maskVideo", "maskStart", "anchorAfterHistory", "useMask", "masterKeep", "segmentFrames"]) delete extra[k];
   }
   // Character Swap Studio's mask: who to swap on one frame of a shot (words, a selection or clicks moved into H3's
   // canvas), followed for spanFrames, spliced into the version it corrects (prevMask).
@@ -1004,6 +1009,9 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     Object.assign(extra, { keyFrame, spanFrames, tailStart: keyFrame + spanFrames, tailFrames: Math.max(1, shotFrames - keyFrame - spanFrames) });
     delete extra.shotFrames;
     studioMask = { head: keyFrame, tail: shotFrames - keyFrame - spanFrames, prev };
+    // The graph holds the whole shot as float frames: refuse what the server can't hold (before it runs out of memory).
+    const tooBig = maskMemoryProblem({ width: clip?.width, height: clip?.height, quality: input.resolution, shotFrames, correcting: prev }, await ctx.serverRam?.());
+    if (tooBig) throw new ProviderError(tooBig);
   }
   // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
@@ -1239,6 +1247,11 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   form.append("type", "input");
   form.append("overwrite", "true");
   const res = await comfyFetch("/upload/image", { method: "POST", body: form }, worker);
+  if (res.status === 413) {
+    // ComfyUI's own limit (--max-upload-size, 100 MB unless it was started with more).
+    const mb = Math.ceil(data.length / 2 ** 20);
+    throw new ProviderError(`ComfyUI refused a ${mb} MB upload as too large (its --max-upload-size, 100 MB unless set) — start ComfyUI with a higher --max-upload-size, or send a smaller file`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw worker === "isolated" ? isolatedAnswer("an upload", res.status, reasonOf(text)) : new ProviderError(`ComfyUI upload failed: ${res.status} ${text}`);

@@ -2,8 +2,9 @@
  * Character Swap Studio's edits: every change the page makes to a project, as pure functions (the server checks the
  * shape, applies them and saves; the tests run them here). Jobs that make something (the 24 fps copy, a transcript,
  * a mask, an anchor, a take, an assembly) are in src/server/swap-studio.ts. Akatz Labs' rules carried over: a new
- * character picture un-approves the anchors made with the old one; editing a segment's words or speaker keeps its
- * prompt as it was (Update prompt rebuilds it, explicitly); a shot layout can't change under a running job.
+ * character picture un-approves the anchors made with the old one (the shots' scene anchors and the segments' picked
+ * references); editing a segment's words or speaker keeps its prompt as it was (Update prompt rebuilds it,
+ * explicitly); a shot layout can't change under a running job.
  */
 import { HISTORY_CHOICES, WINDOW_CHOICES, type SwapLora, type SwapWho } from "./character-swap";
 import {
@@ -177,12 +178,13 @@ export function applyEdit(project: SwapProject, edit: SwapEdit, o: { active: (ge
     case "character": {
       const image = edit.image === undefined ? p.character.image : edit.image;
       const description = text(edit.description, SWAP_STUDIO.maxDescriptionChars, "description") ?? p.character.description;
-      // Anchors were made with the old picture: they need approving again.
+      // Anchors and segment references were made with the old picture: they need approving (picking) again.
       const changed = image !== p.character.image;
+      const unpick = (s: SwapShot): SwapShot => ({ ...s, approvedAnchor: null, segments: s.segments?.map((g) => (g.anchor ? { ...g, anchor: null } : g)) ?? null });
       return {
         ...p,
         character: { image, description },
-        clips: changed ? p.clips.map((c) => ({ ...c, shots: c.shots.map((s) => ({ ...s, approvedAnchor: null })) })) : p.clips,
+        clips: changed ? p.clips.map((c) => ({ ...c, shots: c.shots.map(unpick) })) : p.clips,
       };
     }
     case "defaults":
@@ -236,6 +238,7 @@ export function applyEdit(project: SwapProject, edit: SwapEdit, o: { active: (ge
           who.words = who.words.slice(0, 120);
           if (x.approvedAnchor && !s.anchors.some((a) => a.id === x.approvedAnchor && a.url)) throw new EditError("That anchor isn't ready yet");
           if (x.approvedMask && !s.masks.some((m) => m.id === x.approvedMask && m.pieces.every((pc) => pc.url))) throw new EditError("That mask isn't ready yet");
+          if (x.approvedMask && s.masks.find((m) => m.id === x.approvedMask)!.engine !== p.engine) throw new EditError("That mask was made on the other engine — track the shot again here");
           return {
             ...s,
             ...(x.mode ? { mode: x.mode } : {}),
