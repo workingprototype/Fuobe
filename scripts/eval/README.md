@@ -209,9 +209,14 @@ refuses to start. Copy the file to `local/soul-id.json`. In your copy, set `"con
 when the person in the photos agreed: the runner then sends Fuobe the consent line with the training,
 as the Train dialog does. A look (`"kind": "style"`) needs no consent. Then run it with
 `--suite scripts/eval/local/soul-id.json`. To reuse a character you already trained, put its element
-id in `"element"` instead of training again. Each case trains its own family (a Soul ID runs on the
-models of the base it was trained on), so a full cloud run trains four times: about $1.70 + $1.70 +
-$1.50 + $6.00 for the characters and $3.39 for the look, priced before anything starts.
+id in `"element"` instead of training again. Each case trains its own element (a Soul ID runs on the
+models of the base it was trained on), so a full cloud run trains five times: about $1.70 + $1.70 +
+$1.50 + $6.00 for the four character cases (Soul Cinema trains Fuobe Soul's family again unless its
+`"element"` names the character case's element) and $3.39 for the look, priced before anything
+starts. A training the server would run as a demo (no fal.ai key or AI-Toolkit connected, or Demo
+mode On) is skipped with its case, so a "trained" result is always a trained LoRA. The look case runs
+the trained style as the board's own look (`"presetId": "own-style"`), as a trained moodboard does in
+the app.
 
 ## The case format
 

@@ -25,6 +25,7 @@
     },
     "references": {
       "description": "No training: the same element's photos as references on an edit model (open) or a partner model (cloud), the bar Soul ID has to clear",
+      "preset": false,
       "models": { "open": ["oss-qwen-edit"], "cloud": ["nano-banana-pro"], "demo": ["oss-qwen-edit"] }
     }
   },
@@ -119,7 +120,9 @@
     {
       "id": "soul-id/look",
       "title": "A moodboard trained as a look on Fuobe Soul",
+      "note": "The trained style is the look (own-style), as the app runs a trained moodboard: none of Soul's own look LoRAs under it.",
       "models": { "open": ["fuobe-soul"], "cloud": ["fuobe-soul"], "demo": ["fuobe-soul"] },
+      "presetId": "own-style",
       "metrics": ["style", "clip", "aesthetic"],
       "train": {
         "photos": "local/styles/default",

@@ -249,6 +249,8 @@ describe("the runner on the demo provider", () => {
     // The look case makes a style element (no consent line), @mentioned on Fuobe Soul.
     expect(elements["soul-id/look"]).toMatchObject({ status: "demo", photos: 2 });
     expect(prompt("soul-id/look")).toContain(`@${elements["soul-id/look"].handle} a lighthouse`);
+    // The trained style is the look, as the app runs a trained moodboard: none of Soul's own look LoRAs under it.
+    expect((rows.find((x) => x.caseId === "soul-id/look")!.request as { presetId?: string }).presetId).toBe("own-style");
     const look = getElement(elements["soul-id/look"].id);
     expect(look?.kind).toBe("style");
   });
@@ -756,6 +758,16 @@ describe("runEval as a library", () => {
     expect(cloud.recipe.notes.join(" ")).toMatch(/Movie Wide Angle Z-image left out on the cloud: its civitai link needs a token/);
   });
 
+  it("runs the soul-id look as the board's own look, but not on the references variant's edit models", () => {
+    type LookJob = { variant: string; request: { modelId: string; presetId?: string; params: { extra?: Record<string, unknown> } } };
+    const jobs = plan.expandJobs(cases.loadSuite("soul-id"), { engine: "cloud", cases: ["soul-id/look"], prompts: 1, variants: ["trained", "half-strength", "references"] }) as unknown as LookJob[];
+    const by = Object.fromEntries(jobs.map((j) => [j.variant, j.request]));
+    expect(by.trained).toMatchObject({ modelId: "fuobe-soul", presetId: "own-style" });
+    expect(by["half-strength"]).toMatchObject({ presetId: "own-style", params: { extra: { characterStrength: 0.5 } } });
+    expect(by.references.modelId).toBe("nano-banana-pro");
+    expect(by.references.presetId).toBeUndefined();
+  });
+
   it("writes a HEX palette as the Color signature does, and sends the lock variant through the palette-lock route", async () => {
     const { expandJobs } = plan;
     const { palettePrompt } = await import("@/lib/catalog/palettes");
@@ -991,6 +1003,49 @@ describe("the cloud spend cap", () => {
     ]);
     const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client })) as { jobs: { case: string; skip?: string }[] };
     expect(dry.jobs.find((j) => j.case === "t/noconsent")?.skip).toMatch(/training a character needs "consent": true/);
+  });
+
+  it("never measures a demo training as trained: skipped when the server says it would be one, stopped when it ran as one", async () => {
+    const suiteFile = path.join(dir, "train-demo.json");
+    const photos = path.join(process.cwd(), "scripts/eval/fixtures/character");
+    fs.writeFileSync(
+      suiteFile,
+      JSON.stringify({
+        suite: "train-demo",
+        title: "Demo trainings",
+        description: "x",
+        original: "fuobe-soul-id",
+        kind: "image",
+        targets: { cloud: { models: ["fuobe-soul"] } },
+        cases: [{ id: "t/person", title: "person", train: { photos, targets: { cloud: "fal-z-image" }, minPhotos: 3, consent: true }, prompts: [{ id: "p", text: "{character} in a cafe", seed: 1 }] }],
+      }),
+    );
+    const suite = cases.loadSuite(suiteFile);
+    // The server lists the target as a demo (no fal.ai key there): nothing is planned for it.
+    const demoTarget = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: true, blocker: null }] });
+    const dry = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: demoTarget.client })) as { trainingUsd?: number; jobs: { case: string; skip?: string }[] };
+    expect(dry.jobs[0].skip).toMatch(/would run as a demo on that Fuobe \(no fal\.ai key connected\), so nothing would be trained/);
+    expect(dry.trainingUsd).toBeUndefined();
+    // One that can't start at all says why.
+    const blocked = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: false, blocker: "Add a fal.ai key in Settings" }] });
+    const dry2 = (await runner.runEval({ suite, engine: "cloud", dryRun: true, root }, { client: blocked.client })) as { jobs: { skip?: string }[] };
+    expect(dry2.jobs[0].skip).toMatch(/can't start there: Add a fal\.ai key/);
+    // The key went missing between the plan and the training: the server ran a demo, so the case stops before any render.
+    const stub = cloudStub({ previewUsd: 0.01, actualUsd: 0.01, models: ["fuobe-soul"], trainingTargets: [{ id: "fal-z-image", provider: "fal", price: "≈ $1.70 (2,000 steps)", demo: false, blocker: null }] });
+    const base = stub.client.request.bind(stub.client);
+    const client = {
+      ...stub.client,
+      async request(method: string, p: string, opts: { json?: Record<string, unknown>; query?: Record<string, unknown> } = {}) {
+        if (p === "/api/elements" && method === "POST") return { id: "el1", handle: "Eval_1" };
+        if (p === "/api/elements/el1/trainings" && method === "POST") return { id: "tr-demo", provider: "demo", status: "running" };
+        return base(method, p, opts);
+      },
+    };
+    const r = (await runner.runEval({ suite, engine: "cloud", maxUsd: 10, root }, { client, sleep: async () => {} })) as { dir: string; run: { spentUsd: number }; rows: Row[] };
+    expect(stub.started).toEqual([]);
+    expect(r.rows.every((x) => x.status === "skipped" && /training didn't finish: the server ran the training on fal-z-image as a demo/.test(String(x.skip)))).toBe(true);
+    expect(r.run.spentUsd).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(r.dir, "elements.json"), "utf8"))["t/person"]).toMatchObject({ status: "failed", demoTraining: "tr-demo" });
   });
 });
 
