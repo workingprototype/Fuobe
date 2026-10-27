@@ -431,9 +431,9 @@ export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
 /**
  * Before a Fuobe Soul run, without a civitai key: the civitai LoRAs it can't get, so the run goes ahead without
  * them (the look's words still carry it) and says how to add them, instead of failing at the download. A LoRA is
- * still reachable when ComfyUI's LoRA folder already has it (open engine) or a live mirror exists (cloud). A
- * local-only LoRA (civitai's RentCivit-only licence) counts on the open engine; a cloud run never carries it
- * (fitLoras leaves it out and says so).
+ * still reachable when ComfyUI's LoRA folder already has it (open engine) or a live mirror exists (cloud). A LoRA
+ * licensed for the GPU only counts on both engines, unless the admin keeps such LoRAs on the GPU: then a cloud run
+ * never carries it (fitLoras leaves it out and says so).
  */
 export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget): { loras: LoraRef[]; notes: string[] } {
   const civitai = loras.filter((l) => !l.hostedUrl && needsToken(l.url) && (target === "comfyui" || !localOnly(l)));

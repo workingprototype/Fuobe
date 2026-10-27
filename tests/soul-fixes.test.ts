@@ -222,8 +222,11 @@ describe("civitai LoRAs without a key", () => {
     try {
       const rent: LoraRef = { file: "rent-only.safetensors", url: "https://civitai.com/api/download/models/999", strength: 1, licence: { commercial: true, hostedOk: false } as LoraRef["licence"] };
       expect(withoutUnreachableCivitai([rent], "comfyui").loras).toEqual([]);
-      // On the cloud it was never sent (fitLoras leaves it out and says so), so it isn't listed twice.
-      expect(withoutUnreachableCivitai([rent], "fal")).toEqual({ loras: [rent], notes: [] });
+      // On the cloud it goes like any LoRA (its licence is information), so without a key it's unreachable there too...
+      expect(withoutUnreachableCivitai([rent], "fal").loras).toEqual([]);
+      // ...unless the admin keeps such LoRAs on the GPU: then fitLoras leaves it out and says so, so it isn't listed twice.
+      const kept = { ...rent, keepOnGpu: true as const };
+      expect(withoutUnreachableCivitai([kept], "fal")).toEqual({ loras: [kept], notes: [] });
     } finally {
       setSetting("comfyLorasDir", "");
     }

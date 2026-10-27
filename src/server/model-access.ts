@@ -123,7 +123,8 @@ export function offeredModel(m: ModelDef): ModelDef | undefined {
 
 /** Listings (the API, Assist, MCP, the CLI): only what is on, each model with the routes that are on. */
 export function offeredModels(list: ModelDef[]): ModelDef[] {
-  return list.flatMap((m) => offeredModel(m) ?? []);
+  const access = readAccess();
+  return list.flatMap((m) => gateModel(m, access, factsOf) ?? []);
 }
 
 /** Why a model is off, as the refusal names it ("…turned off in Settings → Models & licences (fal.ai is switched off)"). */
