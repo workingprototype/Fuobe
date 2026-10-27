@@ -13,6 +13,8 @@ import { BrandChip } from "@/components/brand/brand-dialog";
 import { inputCls } from "@/components/brand/fields";
 import { FORMATS, formatModels, looksLikeWebsite, MAX_PROMPT, openingAspect, TEMPLATE_INDEX, type FormatId, type MarketingCategory, type MarketingTemplate, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
+import { useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useBrands, useEstimate, useStatusFlags } from "./hooks";
 import type { MarketingRun } from "@/lib/catalog/marketing";
@@ -100,7 +102,9 @@ function withTemplate(d: Draft, t: MarketingTemplate | null, format?: FormatId):
 function SettingsPanel({ draft, set, models, higgsfield, engine }: { draft: Draft; set: (p: Partial<Draft>) => void; models: Record<string, ModelInfo>; higgsfield: boolean; engine: "cloud" | "open" }) {
   const [open, setOpen] = useState(false);
   const f = FORMATS[draft.format];
-  const choices = formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar, higgsfield });
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const access = useModelAccess();
+  const choices = keepOffered(formatModels(f, engine, { product: !!draft.product, avatar: !!draft.avatar, higgsfield }), (c) => offered(access, c.id, engine));
   const model = choices.find((c) => c.id === draft.modelId) ?? choices[0];
   const summary = [draft.aspectRatio, f.durations && `${draft.duration}s`, draft.batch > 1 && `×${draft.batch}`].filter(Boolean).join(" · ");
   const seg = (active: boolean) => cn("h-7 rounded-full px-2.5 text-[12px] font-medium text-muted-foreground", active && "bg-background text-foreground shadow-soft");

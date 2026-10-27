@@ -268,14 +268,7 @@ export function planGeneration(
   }
   // A LoRA at strength 0 changes nothing: leave it out, so preset strength 0 is the preset's prompt alone (and its file isn't needed).
   const kept = loras.filter((l) => (l.strength ?? 1) !== 0);
-  // Its trigger word goes with it: an open motion's template starts with its LoRA's trigger ("e13c7r1c electricity
-  // effect. …", see withOssLoras), which means nothing to the model without the LoRA.
-  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
-  for (const l of loras) {
-    if ((l.strength ?? 1) !== 0 || !l.trigger || keptTriggers.has(l.trigger)) continue;
-    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
-    if (lead) prompt = prompt.slice(lead.length);
-  }
+  prompt = withoutTriggers(prompt, loras.filter((l) => !kept.includes(l)), kept);
   loras = kept;
 
   // Multi-shot: the clip is as long as its shots, and models without per-shot prompts get them written out.
@@ -576,6 +569,21 @@ export function pricingAt(p: Pricing, now = Date.now()): Pricing {
 const CLIP_LENGTH_OPS = new Set<Operation>(["upscale-video", "interpolate", "sdr-to-hdr", "export-video"]);
 
 /**
+ * A prompt without the trigger words of LoRAs a run leaves out: an open motion's template starts with its LoRA's
+ * trigger ("e13c7r1c electricity effect. …", see withOssLoras), which means nothing to the model without the LoRA.
+ * A trigger a kept LoRA shares stays.
+ */
+export function withoutTriggers(prompt: string, dropped: Pick<LoraRef, "trigger">[], kept: Pick<LoraRef, "trigger">[]): string {
+  const keptTriggers = new Set(kept.map((l) => l.trigger).filter(Boolean));
+  for (const l of dropped) {
+    if (!l.trigger || keptTriggers.has(l.trigger)) continue;
+    const lead = [". ", ", ", " "].map((sep) => l.trigger + sep).find((t) => prompt.startsWith(t));
+    if (lead) prompt = prompt.slice(lead.length);
+  }
+  return prompt;
+}
+
+/**
  * Which of a plan's LoRAs a route really applies, and why the others are left out: ComfyUI loads every file
  * (injectLoras); a cloud route carries the ones fitLoras keeps (the licence allows hosting, there is a URL to
  * send, the API takes LoRAs and so many). The preview reports it, so a caller (the evaluation harness) records
@@ -585,7 +593,7 @@ export function routeLoras(route: Pick<ModelRoute, "provider" | "map" | "loraEnd
   const applied = fitLoras(loras, route).loras;
   const field = routeLoraField(route);
   const why = (l: LoraRef) => {
-    if (localOnly(l)) return "its licence doesn't allow hosting, so it runs only on your GPU";
+    if (localOnly(l)) return "it is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud";
     if (gated(l) && !l.hostedUrl) return "it is in a gated Hugging Face repo, so it runs only on your GPU";
     if (!cloudPath(l) && !needsToken(l.url) && !l.own) return "no URL to send to the LoRA endpoint";
     if (!field) return "this route takes no LoRAs";

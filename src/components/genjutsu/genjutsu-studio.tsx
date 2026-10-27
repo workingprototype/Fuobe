@@ -22,7 +22,7 @@ import { fileToList, MediaSlot, type SlotValue } from "@/components/studio/media
 import { radioKeys, radioTab } from "@/components/studio/radio-keys";
 import { SketchEditor, type Stroke } from "@/components/studio/sketch-editor";
 import { VideoTrimmer, type TrimRange, type VideoTrimmerHandle } from "@/components/studio/video-trimmer";
-import { useEngine, useGenerations } from "@/lib/api";
+import { useEngine, useGenerations, useModelAccess } from "@/lib/api";
 import { CHARACTER_SWAP, cutsInPart, cutWarning, seedProblem, type CharacterOptions, type CharacterQuality } from "@/lib/catalog/character-swap";
 import {
   chooseMaker,
@@ -49,6 +49,7 @@ import {
 import { chainState } from "@/lib/catalog/shorts";
 import type { PixelPoint } from "@/lib/catalog/types";
 import { downloadHref, downloadName } from "@/lib/library";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { CharacterControls, CharacterFacts } from "./character-panel";
 import { useGenjutsuEstimate, useGenjutsuRun, type GenjutsuBody } from "./hooks";
@@ -91,6 +92,7 @@ const seedOf = (s: string): number | undefined => (s.trim() === "" ? undefined :
  */
 export function GenjutsuStudio() {
   const [engine, setEngine, engineMode] = useEngine();
+  const access = useModelAccess();
   const [mode, setModeState] = useState<GenjutsuMode>("motion");
   const source = useSourceClip(GENJUTSU.maxBytes);
   const clip = source.clip;
@@ -159,9 +161,11 @@ export function GenjutsuStudio() {
           : undefined;
   const lookKind = mode === "restyle" ? lookSource : "";
   const choiceKey = `${engine}:${mode}:${target ?? ""}:${lookKind}`;
-  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey] });
+  // Models switched off in Settings → Models & licences leave the list, and the pick falls back to one that is on.
+  const isOn = (id: string) => offered(access, id, engine);
+  const choice = chooseMaker({ engine, mode, target, tier, look: effLook ?? (mode === "restyle" ? lookPlaceholder(lookSource) : undefined), modelId: picked[choiceKey], offered: isOn });
   const maker: Maker | null = "maker" in choice ? choice.maker : null;
-  const options = makersFor(engine, mode, target);
+  const options = keepOffered(makersFor(engine, mode, target), (m) => isOn(m.id));
   const references = mode === "restyle" ? [] : ready(refs);
   const showRefs = mode !== "restyle";
   const maxRefs = isCharacter ? Math.max(1, maker?.refs.max ?? 1) : GENJUTSU.maxReferences;

@@ -1,0 +1,344 @@
+import "server-only";
+import { getPreset, MODELS } from "@/lib/catalog";
+import { onEngine, providerEngine } from "@/lib/catalog/engines";
+import { LORA_LIBRARY, MOTION_EFFECT_LORAS } from "@/lib/catalog/lora-library.generated";
+import { libraryEntry, loraName } from "@/lib/catalog/loras";
+import { OSS_LORAS, type OssLora } from "@/lib/catalog/oss-loras.generated";
+import type { Engine, LoraRef, ModelDef, ModelRoute } from "@/lib/catalog/types";
+import type { ManifestWorkflow } from "@/lib/comfy";
+import {
+  BROWSER_LICENCE,
+  CLASS_HINT,
+  CLASS_LABEL,
+  LICENCE_CLASSES,
+  llmLicence,
+  licenceInfo,
+  loraLicenceInfo,
+  mergeLicences,
+  modelCardOf,
+  NODE_PACKS,
+  paidApiLicence,
+  PROVIDER_NAME,
+  workflowLicence,
+  type LicenceInfo,
+} from "@/lib/licences";
+import {
+  accessSummary as summarize,
+  ACCESS_PLACE,
+  applyChange,
+  gateModel,
+  offMessage,
+  offSwitches,
+  parseAccess,
+  routeOff,
+  switchLabel,
+  type AccessChange,
+  type AccessList,
+  type AccessSummary,
+  type LoraInfo,
+  type ModelEntry,
+  type FactsOf,
+  type ModelAccess,
+} from "@/lib/model-access";
+import { db } from "./db";
+import { loadManifest } from "./providers/comfyui";
+import { getSetting } from "./settings";
+
+/**
+ * Settings → Models & licences on the server: the switches (one settings row, JSON), each route's licence and
+ * node packs (the ComfyUI manifest for open routes, the provider's terms for paid ones), and the checks every
+ * run, listing and automatic pick goes through. Licences are information; only the admin's switches turn
+ * anything off, and everything is on by default.
+ */
+
+const KEY = "models.access";
+
+let cached: { raw: string | null; access: ModelAccess } | null = null;
+
+/** The switches in effect (the same object while they don't change, so gated model views stay cached). */
+export function readAccess(): ModelAccess {
+  const row = db().prepare("SELECT value FROM settings WHERE key = ?").get(KEY) as { value: string } | undefined;
+  const raw = row?.value ?? null;
+  if (!cached || cached.raw !== raw) cached = { raw, access: parseAccess(raw) };
+  return cached.access;
+}
+
+export function saveAccess(next: ModelAccess): ModelAccess {
+  const raw = JSON.stringify(next);
+  db().prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(KEY, raw);
+  return readAccess();
+}
+
+/** Flip switches in one write (read, change, write inside one transaction). */
+export function changeAccess(changes: AccessChange[]): ModelAccess {
+  return db().transaction(() => saveAccess(changes.reduce(applyChange, readAccess())))();
+}
+
+// ---------------------------------------------------------------------------
+// Licences and node packs per route
+
+/** Workflow ids a ComfyUI endpoint names: one id, or a family (`video-concat-{n}`). */
+function workflowsOf(endpoint: string, all: ManifestWorkflow[]): ManifestWorkflow[] {
+  if (!endpoint.includes("{")) return all.filter((w) => w.id === endpoint);
+  const re = new RegExp(`^${endpoint.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{[^}]+\}/g, "\\d+")}$`);
+  return all.filter((w) => re.test(w.id));
+}
+
+let factsCache: { manifest: object; byEndpoint: Map<string, { licence: LicenceInfo; packs: string[]; workflows: string[] }> } | null = null;
+
+/** An open route's licence (its workflows' weights, the strictest one naming it), node packs and workflow ids. */
+function comfyFacts(endpoint: string): { licence: LicenceInfo; packs: string[]; workflows: string[] } {
+  const manifest = loadManifest();
+  if (factsCache?.manifest !== manifest) factsCache = { manifest, byEndpoint: new Map() };
+  const hit = factsCache.byEndpoint.get(endpoint);
+  if (hit) return hit;
+  const wfs = workflowsOf(endpoint, manifest.workflows);
+  const largestFirst = (w: ManifestWorkflow) => [...w.models].sort((a, b) => (b.sizeGb ?? 0) - (a.sizeGb ?? 0)).flatMap((m) => (m.url ? [m.url] : []));
+  const facts = {
+    licence: wfs.length ? mergeLicences(wfs.map((w) => licenceInfo(workflowLicence(w), largestFirst(w)))) : licenceInfo(workflowLicence({ id: endpoint })),
+    packs: [...new Set(wfs.flatMap((w) => w.customNodes.map((n) => n.name)))],
+    workflows: wfs.map((w) => w.id),
+  };
+  factsCache.byEndpoint.set(endpoint, facts);
+  return facts;
+}
+
+/** A route's licence: the weights' for ComfyUI, the provider's terms for a paid API, Fuobe's own code in the browser. */
+export function routeLicence(route: ModelRoute, model: Pick<ModelDef, "vendor">): LicenceInfo {
+  if (route.provider === "comfyui") return comfyFacts(route.endpoint).licence;
+  if (route.provider === "local") return BROWSER_LICENCE;
+  if (route.provider === "llm") return llmLicence(route.endpoint, getSetting("ollamaModel"));
+  return paidApiLicence(model.vendor, [route]);
+}
+
+export const factsOf: FactsOf = (route, model) => ({
+  class: routeLicence(route, model).class,
+  packs: route.provider === "comfyui" ? comfyFacts(route.endpoint).packs : [],
+});
+
+// ---------------------------------------------------------------------------
+// The checks
+
+/** The model as this install offers it (only its routes that are on), or undefined when it is off. */
+export function offeredModel(m: ModelDef): ModelDef | undefined {
+  return gateModel(m, readAccess(), factsOf);
+}
+
+/** Listings (the API, Assist, MCP, the CLI): only what is on, each model with the routes that are on. */
+export function offeredModels(list: ModelDef[]): ModelDef[] {
+  const access = readAccess();
+  return list.flatMap((m) => gateModel(m, access, factsOf) ?? []);
+}
+
+/** Why a model is off, as the refusal names it ("…turned off in Settings → Models & licences (fal.ai is switched off)"). */
+export function offReason(m: ModelDef, routes?: ModelRoute[]): string {
+  return offMessage(m.name, offSwitches(m, readAccess(), factsOf, routes));
+}
+
+/**
+ * The model a run may use, refusing one that is off with a message naming the switch. `engine` (an Original's
+ * engine asked for) refuses that engine when only its routes are off.
+ */
+export function requireOffered(m: ModelDef, engine?: Engine): ModelDef {
+  const view = offeredModel(m);
+  if (!view) throw new Error(offReason(m));
+  if (engine && m.engines?.includes(engine) && !view.engines?.includes(engine) && view.engine !== engine) {
+    throw new Error(offReason(m, onEngine(m, engine).routes).replace(m.name, `${m.name} ${engine === "open" ? "on your GPU" : "in the cloud"}`));
+  }
+  return view;
+}
+
+/** The routes of these that are on (a run's candidates); throws naming the switches when none is. */
+export function offeredRoutes(m: ModelDef, routes: ModelRoute[]): ModelRoute[] {
+  const access = readAccess();
+  const on = routes.filter((r) => !routeOff(m, r, access, factsOf));
+  if (routes.length && !on.length) throw new Error(offReason(m, routes));
+  return on;
+}
+
+/** Whether a model id is offered (an unknown id is not). */
+export function isOffered(id: string | undefined, engine?: Engine): boolean {
+  const m = id ? MODELS.find((x) => x.id === id) : undefined;
+  const view = m && offeredModel(m);
+  return !!view && (!engine || !m!.engines || (view.engines ?? [view.engine]).includes(engine));
+}
+
+/**
+ * A studio's default among its own models (Shorts' restyle models, a Layers tool's): the first that is on, else
+ * the first (its run then refuses, naming the switch to turn back on).
+ */
+export function firstOn(ids: readonly string[], engine?: Engine): string | undefined {
+  return ids.find((id) => isOffered(id, engine)) ?? ids[0];
+}
+
+/**
+ * A default that is on, else the next model that is on and does the same job on this engine (same kind, an
+ * operation in common, not a hidden helper), else the default itself: a run of it then refuses, naming the switch
+ * to turn back on. Assist's own picks and the studios' defaults in /api/models go through it.
+ */
+export function offeredDefault(id: string | undefined, engine: Engine): string | undefined {
+  if (!id || isOffered(id, engine)) return id;
+  const own = MODELS.find((m) => m.id === id);
+  if (!own) return id;
+  const ops = new Set(onEngine(own, engine).routes.map((r) => r.op));
+  const next = MODELS.find((m) => !m.hidden && m.id !== id && m.kind === own.kind && isOffered(m.id, engine) && onEngine(offeredModel(m)!, engine).routes.some((r) => ops.has(r.op) && providerEngine(r.provider) === engine));
+  return next?.id ?? id;
+}
+
+/** The summary the browser filters its pickers with (undefined while everything is on). */
+export function offeredSummary(): AccessSummary | undefined {
+  return summarize(MODELS, readAccess(), factsOf);
+}
+
+// ---------------------------------------------------------------------------
+// LoRAs
+
+/** A LoRA's licence: the ref's snapshot, else the library's; a LoRA with neither is the user's own. */
+export function loraLicence(l: Pick<LoraRef, "file" | "url" | "licence">): LicenceInfo {
+  const e = libraryEntry(l);
+  return loraLicenceInfo(l.licence ?? e?.licence, e?.page);
+}
+
+/**
+ * The LoRAs a run may load: one switched off, or whose licence class is, is left out (the plan's notes say
+ * which switch). With "keep GPU-only LoRAs on your GPU" on, each LoRA is marked so a cloud route leaves the ones
+ * licensed for the user's GPU only out (src/lib/catalog/loras.ts localOnly).
+ */
+export function offeredLoras(loras: LoraRef[]): { loras: LoraRef[]; notes: string[]; dropped: { file: string; reason: string }[] } {
+  const access = readAccess();
+  const dropped: { file: string; reason: string }[] = [];
+  const kept: LoraRef[] = [];
+  for (const l of loras) {
+    // The user's own LoRAs (a trained @character, no licence recorded) aren't anyone's licensed work: only their own switch counts.
+    const own = !l.licence && !libraryEntry(l);
+    const reason = access.loras.includes(l.file) ? "it is switched off" : !own && access.classes.includes(loraLicence(l).class) ? "its licence class is switched off" : undefined;
+    if (reason) dropped.push({ file: l.file, reason: `${reason} in ${ACCESS_PLACE}` });
+    else kept.push(access.keepGpuOnlyLoras ? { ...l, keepOnGpu: true } : l);
+  }
+  const notes = dropped.length ? [`${dropped.map((d) => loraName({ file: d.file })).join(", ")} ${dropped.length > 1 ? "are" : "is"} left out: turned off in ${ACCESS_PLACE}`] : [];
+  return { loras: kept, notes, dropped };
+}
+
+// ---------------------------------------------------------------------------
+// Settings → Models & licences: everything with its licence and its switch
+
+const isOpenRoute = (r: ModelRoute) => providerEngine(r.provider) === "open";
+
+/** A model's licence as the list shows it: the open half names it, the cloud half is said beside it. */
+export function modelLicence(m: ModelDef): { licence: LicenceInfo; cloud?: LicenceInfo; packs: string[] } {
+  const open = m.routes.filter(isOpenRoute);
+  const cloud = m.routes.filter((r) => !isOpenRoute(r));
+  const packs = [...new Set(open.flatMap((r) => (r.provider === "comfyui" ? comfyFacts(r.endpoint).packs : [])))];
+  const openLicence = open.length ? mergeLicences([...new Map(open.map((r) => [r.endpoint, routeLicence(r, m)])).values()]) : undefined;
+  const cloudRoutes = cloud.filter((r) => r.provider !== "llm");
+  const cloudLicence = cloudRoutes.length ? paidApiLicence(m.vendor, cloudRoutes) : cloud.length ? routeLicence(cloud[0], m) : undefined;
+  if (openLicence) return { licence: openLicence, ...(cloudLicence && { cloud: cloudLicence }), packs };
+  return { licence: cloudLicence ?? { name: "Not recorded", class: "unknown", note: "" }, packs };
+}
+
+/** The presets a map key names: a map v2 preset id, or a round-1 slug (the motion, effect or app it matches). */
+const presetsOf = (key: string) => (getPreset(key) ? [getPreset(key)!] : ["motion", "effect", "app"].flatMap((k) => getPreset(`${k}-${key}`) ?? []));
+
+/** A map LoRA's name as its download names it: the Hugging Face repo ("Remade-AI/Crane_up" → "Crane up"), else its file. */
+function mapLoraName(l: OssLora): string {
+  const repo = l.url && /^https:\/\/huggingface\.co\/[^/]+\/([^/]+)\//.exec(l.url)?.[1];
+  return (repo || l.file.replace(/\.safetensors$/i, "")).replace(/[_-]+/g, " ").trim();
+}
+
+/**
+ * Every LoRA a run can load, with its licence: the library's, then the preset LoRA map's files that aren't
+ * library files (the round-1 Wan LoRAs camera motions and effects load), their licence as the map records it.
+ */
+function loraRows(access: ModelAccess): LoraInfo[] {
+  const rows: LoraInfo[] = LORA_LIBRARY.map((e) => {
+    const row = MOTION_EFFECT_LORAS.find((r) => r.loras.includes(e.key));
+    const hold = row?.status === "licence-hold" ? "The research holds this licence: its Hugging Face and civitai pages disagree" : undefined;
+    return { file: e.file, name: e.name, group: e.group, base: e.base, licence: loraLicenceInfo(e.licence, e.page, hold), on: !access.loras.includes(e.file) };
+  });
+  const map = new Map<string, { ref: OssLora; keys: string[] }>();
+  for (const [key, refs] of Object.entries(OSS_LORAS)) {
+    for (const ref of refs) {
+      if (libraryEntry(ref)) continue;
+      const hit = map.get(ref.file);
+      if (hit) hit.keys.push(key);
+      else map.set(ref.file, { ref, keys: [key] });
+    }
+  }
+  for (const [file, { ref, keys }] of map) {
+    const presets = [...new Map(keys.flatMap(presetsOf).map((p) => [p.id, p])).values()];
+    const motion = presets.length ? presets.every((p) => p.id.startsWith("motion-")) : keys.every((k) => k.startsWith("motion-"));
+    const used = presets.length ? `In the preset LoRA map: ${presets.map((p) => p.name).join(", ")}` : "In the preset LoRA map";
+    rows.push({ file, name: mapLoraName(ref), group: motion ? "motion" : "effect", base: ref.base, licence: loraLicenceInfo(ref.licence, modelCardOf(ref.url), used), on: !access.loras.includes(file) });
+  }
+  return rows;
+}
+
+/**
+ * Whether a switch names something this install has (a model, a provider in use, a node pack, a LoRA the
+ * library or the preset map loads): the settings API refuses a typo rather than storing a switch that does nothing.
+ */
+export function knownSwitch(kind: "model" | "provider" | "pack" | "lora", id: string): boolean {
+  switch (kind) {
+    case "model":
+      return MODELS.some((m) => m.id === id);
+    case "provider":
+      return MODELS.some((m) => m.routes.some((r) => r.provider === id));
+    case "pack":
+      return NODE_PACKS.some((p) => p.name === id);
+    case "lora":
+      return LORA_LIBRARY.some((e) => e.file === id) || Object.values(OSS_LORAS).some((refs) => refs.some((r) => r.file === id));
+  }
+}
+
+export function accessList(): AccessList {
+  const access = readAccess();
+  const models: ModelEntry[] = MODELS.map((m) => {
+    const { licence, cloud, packs } = modelLicence(m);
+    const others = { ...access, models: access.models.filter((x) => x !== m.id) };
+    const off = m.routes.map((r) => routeOff(m, r, others, factsOf)).filter((s): s is NonNullable<typeof s> => !!s);
+    const labels = [...new Set(off.map(switchLabel))];
+    const all = off.length === m.routes.length;
+    return {
+      id: m.id,
+      name: m.name,
+      vendor: m.vendor,
+      kind: m.kind,
+      ...(m.hidden && { hidden: true as const }),
+      engines: m.engines ?? [m.engine],
+      providers: [...new Set(m.routes.map((r) => r.provider))],
+      licence,
+      ...(cloud && { cloud }),
+      packs,
+      on: !access.models.includes(m.id),
+      offBy: all ? labels : [],
+      partly: all ? [] : labels,
+    };
+  });
+  const count = (f: (e: ModelEntry) => boolean) => models.filter(f).length;
+  const routeClasses = (id: string) => {
+    const m = MODELS.find((x) => x.id === id)!;
+    return new Set(m.routes.map((r) => factsOf(r, m).class));
+  };
+  const classesOf = new Map(models.map((e) => [e.id, routeClasses(e.id)]));
+  const loras = loraRows(access);
+  return {
+    access,
+    classes: LICENCE_CLASSES.map((id) => ({
+      id,
+      label: CLASS_LABEL[id],
+      hint: CLASS_HINT[id],
+      models: count((e) => classesOf.get(e.id)!.has(id)),
+      loras: loras.filter((l) => l.licence.class === id).length,
+      on: !access.classes.includes(id),
+    })),
+    providers: [...new Set(MODELS.flatMap((m) => m.routes.map((r) => r.provider)))].map((id) => ({
+      id,
+      label: PROVIDER_NAME[id] ?? id,
+      models: count((e) => e.providers.includes(id)),
+      on: !access.providers.includes(id),
+    })),
+    packs: NODE_PACKS.map((p) => ({ ...p, models: count((e) => e.packs.includes(p.name)), on: !access.packs.includes(p.name) })),
+    models,
+    loras,
+  };
+}

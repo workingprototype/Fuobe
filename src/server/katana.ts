@@ -9,6 +9,7 @@ import { probeMedia } from "@/lib/media-probe";
 import { createPipeline } from "./chains";
 import { db } from "./db";
 import { cancelGeneration, createGenerations, getGeneration, previewChained } from "./generations";
+import { firstOn } from "./model-access";
 import { engineMode } from "./settings";
 import fs from "node:fs";
 import { absolutePath } from "./storage";
@@ -175,7 +176,8 @@ export function planKatana(body: KatanaRequest): { input: KatanaInput; engine: E
   const engine: Engine = mode === "both" ? body.engine : mode;
   const duration = Math.min(referenceLength(body.reference, body.duration), KATANA_LIMITS.maxReference);
   if (duration < KATANA_LIMITS.minReference) throw new Error("The reference is too short");
-  const m = motionModel(engine, body.motionModel);
+  // Without one asked for: the first motion model switched on in Settings → Models & licences.
+  const m = motionModel(engine, body.motionModel ?? firstOn(MOTION_MODELS[engine].map((x) => x.id), engine));
   if (body.motionModel && m.id !== (RETIRED_MOTION_MODELS[body.motionModel] ?? body.motionModel)) throw new Error(`${getModel(body.motionModel)?.name ?? body.motionModel} isn't a ${engine === "open" ? "open-source" : "cloud"} motion model for Katana`);
   const segments = body.segments?.length ? validSegments(body.segments, duration) : planSegments({ duration, mode: "fixed", length: body.length ?? m.max, min: m.min, max: m.max });
   const title = body.title?.trim().slice(0, 120) || "Katana edit";

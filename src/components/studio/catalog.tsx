@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { onEngine } from "@/lib/catalog/engines";
-import type { ModelDef, Preset } from "@/lib/catalog/types";
-import { useEngine } from "@/lib/api";
+import type { Engine, ModelDef, Preset } from "@/lib/catalog/types";
+import { useEngine, useModelAccess } from "@/lib/api";
+import { offered } from "@/lib/model-access";
 import type { StudioCatalog } from "@/lib/studio-catalog";
 import type { StudioConfig } from "./studio-context";
 
@@ -50,6 +51,8 @@ export interface CatalogApi {
   presets: { motion: Preset[]; effect: Preset[] } | null;
   /** True once the full catalog chunk has arrived. */
   complete: boolean;
+  /** Whether Settings → Models & licences offers the model (on this engine): `models` leaves the others out. */
+  offered: (id: string, engine?: Engine) => boolean;
 }
 
 const Ctx = createContext<CatalogApi | null>(null);
@@ -65,6 +68,7 @@ export function CatalogProvider({ catalog, config, children }: { catalog?: Studi
   // A Fuobe Original runs on both engines: the studio sees it as it runs on the engine switched to (its routes,
   // its price or "Free"), so it is in both engines' model lists.
   const [engine] = useEngine();
+  const access = useModelAccess();
   // Studios rendered from client code (an element's page) have no server slice: compute it from the lazy chunk.
   const [lazy, setLazy] = useState<StudioCatalog | null>(null);
   useEffect(() => {
@@ -77,8 +81,11 @@ export function CatalogProvider({ catalog, config, children }: { catalog?: Studi
   }, [catalog, config]);
   const slice = catalog ?? lazy;
   const value = useMemo<CatalogApi>(() => {
-    const models = (slice?.models ?? []).map((m) => onEngine(m, engine));
-    const index = new Map([...models, ...(slice?.lookup ?? [])].map((m) => [m.id, m]));
+    // Models switched off in Settings → Models & licences leave the lists (an Original, the engine it's off on); a
+    // lookup by id still finds them, so a generation that ran on one keeps its name.
+    const all = (slice?.models ?? []).map((m) => onEngine(m, engine));
+    const models = access ? all.filter((m) => offered(access, m.id, engine)) : all;
+    const index = new Map([...all, ...(slice?.lookup ?? [])].map((m) => [m.id, m]));
     const view = (m: ModelDef | undefined) => (m ? onEngine(m, engine) : undefined);
     return {
       ready: !!slice,
@@ -87,7 +94,8 @@ export function CatalogProvider({ catalog, config, children }: { catalog?: Studi
       getPreset: (id) => (config.preset?.id === id ? config.preset : fullCatalog?.getPreset(id)),
       presets: fullCatalog ? { motion: fullCatalog.MOTIONS, effect: fullCatalog.EFFECTS } : null,
       complete: !!fullCatalog,
+      offered: (id, e) => offered(access, id, e),
     };
-  }, [slice, fullCatalog, config.preset, engine]);
+  }, [slice, fullCatalog, config.preset, engine, access]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -16,6 +16,7 @@
  * Research: docs/research/fuobe-originals-recipes-5.md §8 genjutsu and O5, openjutsu-6.md, paid-model-apis-4.md §4,
  * comfyui-oss-4.md §c.
  */
+import { keepOffered } from "@/lib/model-access";
 import {
   anchorModel,
   anchorPrompt,
@@ -628,10 +629,24 @@ export const CLOUD_CLICK_PROBLEM = "Clicking the person works on your GPU (SAM 3
  * The model a request runs on, or why there is none. Without a modelId: the mode's Fuobe Original (Lite unless the
  * tier is High), then other open weights, then partners.
  */
-export function chooseMaker(o: { engine: Engine; mode: GenjutsuMode; target?: GenjutsuTarget; tier?: GenjutsuTier; look?: GenjutsuLook; modelId?: string }): { maker: Maker } | { problem: string } {
+export function chooseMaker(o: {
+  engine: Engine;
+  mode: GenjutsuMode;
+  target?: GenjutsuTarget;
+  tier?: GenjutsuTier;
+  look?: GenjutsuLook;
+  modelId?: string;
+  /**
+   * Whether Settings → Models & licences offers a model: one switched off isn't picked while another is on (with
+   * all of them off the pick stays, and its run names the switch).
+   */
+  offered?: (id: string) => boolean;
+}): { maker: Maker } | { problem: string } {
   const target = MODE_TARGETS[o.mode].length ? (o.target ?? MODE_TARGETS[o.mode][0]) : undefined;
   if (target && !MODE_TARGETS[o.mode].includes(target)) return { problem: `${getMode(o.mode).label} doesn't take ${target === "click" ? "clicks" : target === "paint" ? "paint" : "that"} — pick another way` };
-  const options = makersFor(o.engine, o.mode, target);
+  const on = o.offered;
+  const all = makersFor(o.engine, o.mode, target);
+  const options = on ? keepOffered(all, (m) => on(m.id)) : all;
   if (!options.length) {
     if (o.engine === "cloud" && o.mode === "character" && target === "click") return { problem: CLOUD_CLICK_PROBLEM };
     return { problem: (o.engine === "open" && OPEN_TARGET_PROBLEM[o.mode]) || "Nothing on this engine does that yet" };

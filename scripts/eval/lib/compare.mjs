@@ -151,8 +151,9 @@ export function compareText(c) {
 /**
  * The promote rule. A recipe (the candidate variant) becomes a look's default only when, in one run
  * with the same prompts and seeds:
- *  1. its licence allows it: every LoRA it loaded is commercial, hostable when the run is on the
- *     cloud, and none of the recipe's LoRAs was left out on this engine;
+ *  1. none of the recipe's LoRAs was left out on this engine (its licences are information: a
+ *     non-commercial LoRA, or one licensed for the GPU only on a cloud run, is said in the notes, and
+ *     holds the recipe only with `licenceHold`, the admin's --licence-hold);
  *  2. it made at least `minJobs` results for the case;
  *  3. against every alternative in the run (prompt only, half strength, the bare base, today's
  *     default…) it scores at least as well on the case's main metric, and gives up no more than the
@@ -163,11 +164,11 @@ export function compareText(c) {
  *  4. people prefer it in a blind review of this case's own pictures: at least `minRatings` ratings
  *     against the alternatives (every pair the review offered when it offered fewer), and at least
  *     `minPreference` of the non-tie ones for the candidate.
- * Half strength beating the full recipe means the LoRAs over-cook: lower them (and run again). A licence
- * problem holds the recipe whatever else happened. Passing the rule makes a recipe eligible; the catalog
- * default is still changed by hand, in a reviewed commit, on both engines.
+ * Half strength beating the full recipe means the LoRAs over-cook: lower them (and run again). Passing the
+ * rule makes a recipe eligible; the catalog default is still changed by hand, in a reviewed commit, on both
+ * engines.
  */
-export const PROMOTE_RULE = { minJobs: 3, clipGuard: 1.0, aestheticGuard: 0.15, warpGuard: 0.002, driftGuard: 0.004, minRatings: 6, minPreference: 0.55 };
+export const PROMOTE_RULE = { minJobs: 3, clipGuard: 1.0, aestheticGuard: 0.15, warpGuard: 0.002, driftGuard: 0.004, minRatings: 6, minPreference: 0.55, licenceHold: false };
 
 /** The metrics a case is judged on, most specific first (see PROMOTE_RULE). */
 export const MAIN_METRICS = ["style", "lipsync", "identity", "aesthetic", "clip", "warp"];
@@ -192,7 +193,7 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const ok = mine.filter((r) => r.status === "succeeded");
     const scoresOf = (list) => list.map((r) => jobScores(r, L.metrics));
     const m = (list, k) => mean(scoresOf(list).map((s) => s[k]));
-    /** Licence problems hold a recipe whatever the scores say; the rest can be fixed by another run. */
+    /** What the recipe's licences say: information, or a hold with rule.licenceHold (--licence-hold). */
     const licence = [];
     const reasons = [];
     const notes = [];
@@ -206,7 +207,8 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const nonCommercial = applied.filter((l) => lib.get(l.file)?.commercial === false);
     const notHostable = L.run.engine === "cloud" ? applied.filter((l) => lib.get(l.file)?.hostedOk === false) : [];
     if (recipe?.commercialOk === false || nonCommercial.length) licence.push(`non-commercial LoRA${nonCommercial.length > 1 ? "s" : ""}: ${nonCommercial.map((l) => l.file).join(", ") || "the recipe is flagged"}`);
-    if (notHostable.length) licence.push(`not allowed on hosted services: ${notHostable.map((l) => l.file).join(", ")}`);
+    if (notHostable.length) licence.push(`licensed for the GPU only, run on a hosted service: ${notHostable.map((l) => l.file).join(", ")}`);
+    if (!rule.licenceHold) notes.push(...licence.map((l) => `licence: ${l}`));
     if (mine.some((r) => r.recipe?.complete === false || r.recipe?.sent?.complete === false)) reasons.push("some of the recipe's LoRAs were left out on this engine, so this isn't the recipe");
     // 2. enough results
     if (ok.length < rule.minJobs) reasons.push(`${ok.length} result${ok.length === 1 ? "" : "s"}, the rule wants ${rule.minJobs}`);
@@ -257,9 +259,11 @@ export function promote(dir, { candidate, alternatives, rule = PROMOTE_RULE } = 
     const got = forCand + forAlt + ties;
     if (got < want) reasons.push(`needs a blind review of this case: ${got} rating${got === 1 ? "" : "s"} against the alternatives, the rule wants ${want}${offered && offered < rule.minRatings ? " (every pair the review offered)" : ""} (pnpm eval:review)`);
     else if (forCand + forAlt && forCand / (forCand + forAlt) < rule.minPreference) reasons.push(`people preferred it ${Math.round((100 * forCand) / (forCand + forAlt))}% of the time, the rule wants ${Math.round(rule.minPreference * 100)}%`);
-    // A licence problem holds the recipe; over-cooking is its own verdict (the fix is a lower strength, not another recipe).
-    const verdictText = licence.length ? "hold" : !reasons.length ? "promote" : overcooked ? "lower strengths" : "hold";
-    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, target: researchTarget(recipe), candidate: cand, verdict: verdictText, reasons: [...licence, ...reasons], notes, mainMetric: main, against, ratings: { forCandidate: forCand, forAlternatives: forAlt, ties, offered }, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null, ...(suggested && { suggested }) });
+    // A licence holds the recipe only when asked (--licence-hold); over-cooking is its own verdict (the fix is a lower
+    // strength, not another recipe).
+    const held = rule.licenceHold ? licence : [];
+    const verdictText = held.length ? "hold" : !reasons.length ? "promote" : overcooked ? "lower strengths" : "hold";
+    results.push({ caseId, title: mine[0]?.caseTitle ?? caseId, look: recipe?.look ?? null, target: researchTarget(recipe), candidate: cand, verdict: verdictText, reasons: [...held, ...reasons], notes, mainMetric: main, against, ratings: { forCandidate: forCand, forAlternatives: forAlt, ties, offered }, recipe: recipe ? { loras: applied.map((l) => ({ file: l.file, strength: l.strength ?? 1 })), source: recipe.source } : null, ...(suggested && { suggested }) });
   }
   const doc = {
     runId: L.run.runId,

@@ -28,6 +28,7 @@ import {
 import type { Engine, Generation, MediaKind } from "@/lib/catalog/types";
 import { db } from "../db";
 import { getGeneration } from "../generations";
+import { offeredDefault } from "../model-access";
 import { engineMode, getSetting } from "../settings";
 import { getSkill } from "../skills";
 import { readRef } from "../storage";
@@ -836,7 +837,8 @@ export function offlinePlan(message: string, preferred: Engine, hint?: SkillMeta
   const aspect = /\b(vertical|portrait|9:16|reels?|tiktok|stories|story format)\b/.test(t) ? "9:16" : /\b(square|1:1)\b/.test(t) ? "1:1" : /\b(wide|landscape|16:9|widescreen)\b/.test(t) ? "16:9" : hint?.aspect;
   const seconds = secondsAsked(t);
   const withSound = /\b(with|plus|and) (sound|audio|sfx|sound effects)\b/.test(t);
-  const pick = (d: { cloud: string; open: string }) => (engine === "open" && d.open ? d.open : d.cloud);
+  // A studio's default, or the next model that is on when Settings → Models & licences switched it off.
+  const pick = (d: { cloud: string; open: string }) => offeredDefault(engine === "open" && d.open ? d.open : d.cloud, engine === "open" && d.open ? "open" : "cloud")!;
   const textModel = engine === "open" ? "oss-text-llm" : "text-llm";
   const styled = (p: string) => (hint?.style ? `${p}. ${hint.style}` : p);
   // The video settings a clip takes from the words: its length (one the model lists) and its own sound.
@@ -1015,7 +1017,7 @@ function latestStills(messages: MessageList): { stills: { url: string; g: Genera
 /** Animate one picked still with the default video model. */
 function animateTake(still: { url: string; g: Generation }, take: number, preferred: Engine, said: string): { tool: string; input: Record<string, unknown>; say: string } {
   const engine = engineFor(preferred);
-  const modelId = engine === "open" ? VIDEO_STUDIO.defaultModels.open : VIDEO_STUDIO.defaultModels.cloud;
+  const modelId = offeredDefault(engine === "open" ? VIDEO_STUDIO.defaultModels.open : VIDEO_STUDIO.defaultModels.cloud, engine)!;
   const subject = (still.g.request.prompt ?? "").trim().replace(/[.\s]+$/, "") || "The picture";
   const duration = fitDuration(modelId, secondsAsked(said.toLowerCase()));
   return {

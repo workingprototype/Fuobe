@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getModel, modelsFor } from "@/lib/catalog";
+import { offeredModels } from "../model-access";
 import { dualEngine, runsOn } from "@/lib/catalog/engines";
 import { OPERATION_LABELS, type ChainSlot, type GenerationRequest, type MediaKind, type ModelDef, type Operation } from "@/lib/catalog/types";
 import { type PlannedJob, totalCost } from "@/lib/assist";
@@ -95,7 +96,8 @@ const searchModels = defineTool({
   }),
   async run({ kind, task, query }, ctx) {
     const mode = engineMode();
-    let list = modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode });
+    // Only what Settings → Models & licences offers, each model with the routes that are on.
+    let list = offeredModels(modelsFor({ kind: kind as MediaKind, ops: task ? [task as Operation] : undefined, engine: mode === "both" ? "all" : mode }));
     if (query) {
       const words = query.toLowerCase().split(/\s+/).filter(Boolean);
       const scored = list.map((m) => {

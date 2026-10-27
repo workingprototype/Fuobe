@@ -30,6 +30,7 @@ import { planSegments, type PlanStep } from "@/lib/catalog/shorts";
 import type { Engine, Generation, PixelPoint, ProviderId } from "@/lib/catalog/types";
 import { createPipeline } from "./chains";
 import { previewChained } from "./generations";
+import { isOffered } from "./model-access";
 import { provider } from "./providers";
 import { pointsFromPaint } from "./remove-object";
 import { engineMode } from "./settings";
@@ -151,7 +152,15 @@ interface Planned {
 
 async function planInput(body: GenjutsuBody, opts: { probe: boolean }): Promise<Planned> {
   mustMatchMode(body.engine);
-  const picked = chooseMaker({ engine: body.engine, mode: body.mode, target: body.target, tier: body.tier, look: body.look, modelId: body.modelId });
+  const picked = chooseMaker({
+    engine: body.engine,
+    mode: body.mode,
+    target: body.target,
+    tier: body.tier,
+    look: body.look,
+    modelId: body.modelId,
+    offered: (id) => isOffered(id, body.engine),
+  });
   if ("problem" in picked) throw new ShortsError(picked.problem, 422);
   const maker = picked.maker;
   // The header's facts win over what the browser read (the estimate runs before the upload is read).
@@ -335,7 +344,7 @@ function mixProblem(modes: StepMode[], cannot: boolean, input: GenjutsuPlanInput
 function otherModel(input: GenjutsuPlanInput): string | undefined {
   const runs = (id: string) => {
     const m = getModel(id);
-    return !!m && onEngine(m, input.engine).routes.some((r) => provider(r.provider).isConfigured());
+    return !!m && isOffered(id, input.engine) && onEngine(m, input.engine).routes.some((r) => provider(r.provider).isConfigured());
   };
   const other = makersFor(input.engine, input.mode, input.target).find((x) => x.id !== input.maker.id && x.pair !== input.maker.id && runs(x.id));
   return other ? `pick ${other.label}` : undefined;

@@ -300,6 +300,18 @@ export function Composer({ docked }: { docked: boolean }) {
     setDraft((d) => (d.modelId !== model.id ? {} : { modelId: m.id, params: { ...m.defaults, ...route, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(model, m) }));
   }, [engine, model, preset, config.defaultModels, setDraft, catalog]);
 
+  // Settings → Models & licences switched the model off (a default, a remembered pick, a Reuse, a link): the composer
+  // moves to the studio's default on this engine, else the first model of its list that is on, and says so. With
+  // none on, Generate says what to turn on (accessError).
+  const offModel = model && !catalog.offered(model.id, engine) ? model : undefined;
+  const fallback = offModel ? [config.defaultModels[engine], ...models.filter((m) => m.engine === engine).map((m) => m.id)].find((id) => !!id && catalog.offered(id, engine) && !!catalog.getModel(id)) : undefined;
+  useEffect(() => {
+    if (!offModel || !fallback || lockedModel) return;
+    const m = catalog.getModel(fallback)!;
+    setDraft((d) => (d.modelId !== offModel.id ? {} : { modelId: m.id, params: { ...m.defaults, numOutputs: d.params.numOutputs, enhancePrompt: d.params.enhancePrompt }, ...lookCleared(offModel, m) }));
+    toast(`${offModel.name} is turned off in Settings → Models & licences, so this uses ${m.name}`, { id: "model-access" });
+  }, [offModel, fallback, lockedModel, catalog, setDraft]);
+
   // A camera motion or effect runs on its Original on this engine (Fuobe DoP): picking one moves the composer there,
   // with the move's own settings (Focus Change: 6 s, silent). Another video model can be picked after it; it takes
   // the move's words. A move whose cloud route is a partner model's words leaves the person's model as it is.
@@ -386,8 +398,9 @@ export function Composer({ docked }: { docked: boolean }) {
   // A cloud-only install refuses open models, and with demo mode off nothing else runs it, so Generate says why.
   const comfyMissing = !!config.comfyOnly && !!status && (engineMode === "cloud" || !status.providers.comfyui?.configured);
   const comfyBlock = comfyMissing && model?.engine === "open" && (engineMode === "cloud" || status?.demoMode === "off") ? "Needs ComfyUI: see the note below" : null;
+  const accessError = offModel && (!fallback || lockedModel) ? `${offModel.name} is turned off in Settings → Models & licences` : null;
   const engineError =
-    (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null) ?? comfyBlock;
+    (lockedModel && preset && !(engine === "open" ? preset.open : preset.cloud) ? `${preset.name} has no ${engine === "open" ? "open-source" : "cloud"} version yet` : null) ?? accessError ?? comfyBlock;
   let op: Operation | undefined;
   let cost: number | null = null;
   let planError: string | null = null;

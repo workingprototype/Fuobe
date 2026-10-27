@@ -15,6 +15,8 @@ import { VideoTrimmer } from "@/components/studio/video-trimmer";
 import { initialClip, mentionedImages, MULTIPLIER, MULTIPLIER_MODELS, multiplierResolution, type ClipRange as Range, type MarketingRun, type RunEstimate } from "@/lib/catalog/marketing";
 import { formatCost } from "@/lib/format";
 import { probeBlob, probeUrl } from "@/lib/media-probe";
+import { useModelAccess } from "@/lib/api";
+import { keepOffered, offered } from "@/lib/model-access";
 import { cn } from "@/lib/utils";
 import { addRuns, send, useEstimate, useStatusFlags } from "@/components/marketing/hooks";
 import type { ModelInfo } from "@/components/marketing/model-info";
@@ -172,6 +174,7 @@ function MentionImages({ value, onChange, onMention, max }: { value: string[]; o
 export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) {
   const qc = useQueryClient();
   const { engine, setEngine } = useMarketingEngine();
+  const access = useModelAccess();
   const { higgsfield } = useStatusFlags();
   const [video, setVideo] = useState<SlotValue | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
@@ -190,8 +193,9 @@ export function AdMultiplier({ models }: { models: Record<string, ModelInfo> }) 
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const sections = hookOn || ctaOn;
-  const choices = MULTIPLIER_MODELS[engine];
-  const fallback = engine === "cloud" && !higgsfield ? "kling-o3" : choices[0].id;
+  // Models switched off in Settings → Models & licences leave the menu, and the pick falls back to one that is on.
+  const choices = useMemo(() => keepOffered(MULTIPLIER_MODELS[engine], (c) => offered(access, c.id, engine)), [access, engine]);
+  const fallback = engine === "cloud" && !higgsfield && choices.some((c) => c.id === "kling-o3") ? "kling-o3" : choices[0].id;
   const modelId = picked && choices.some((c) => c.id === picked) ? picked : fallback;
   const model = models[modelId];
   const maxImages = engine === "open" ? 1 : (model?.maxImages ?? 0);

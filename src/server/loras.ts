@@ -328,8 +328,10 @@ export async function ensureLorasOnComfy(loras: LoraRef[] | undefined, listed: s
 
 /**
  * Before a fal or Replicate run: every LoRA gets a URL the provider can fetch. Public files go as they are;
- * a civitai file is mirrored once to the provider's storage (`upload`), when the model's civitai permissions
- * still include "Rent" (running it on a third-party service), and the mirror is reused while it lives.
+ * a civitai file is mirrored once to the provider's storage (`upload`) and the mirror is reused while it lives.
+ * The civitai permissions are read before each copy and recorded with it (information). Only while Settings →
+ * Models & licences keeps LoRAs licensed for your GPU only on the GPU (the run's LoRAs are marked `keepOnGpu`)
+ * do they decide: no "Rent", or no answer, and the file isn't copied.
  */
 export async function prepareCloudLoras(
   loras: LoraRef[] | undefined,
@@ -343,8 +345,8 @@ export async function prepareCloudLoras(
   for (const l of loras) {
     const entry = libraryEntry(l);
     const name = loraName(l);
-    // The library's licence counts even when the ref carries none: a GPU-only file never reaches a provider.
-    if (localOnly(l)) throw new LoraError(`${name} runs only on your GPU (its licence doesn't allow hosting it)`);
+    // Only while the admin keeps GPU-only LoRAs on the GPU (fitLoras has left it out of a cloud run already).
+    if (localOnly(l)) throw new LoraError(`${name} is licensed for your GPU only, and Settings → Models & licences keeps such LoRAs off the cloud`);
     if (l.own && !l.hostedUrl) {
       out.push(await sendOwnLora(l, target, upload, onProgress));
       continue;
@@ -360,13 +362,15 @@ export async function prepareCloudLoras(
       out.push({ ...l, hostedUrl: cached.hostedUrl });
       continue;
     }
-    // The hosting right is read again before a copy is made (civitai permissions can change). No answer, no copy.
+    // The hosting right is read again before a copy is made (civitai permissions can change) and recorded with the copy.
+    // It decides only while the admin keeps GPU-only LoRAs on the GPU: then no answer, or no "Rent", means no copy.
     const version = l.version ?? entry?.version ?? civitaiVersion(l.url);
+    const strict = !!l.keepOnGpu;
     const modelId = entry?.civitaiModel ?? (version ? (await civitaiVersionFacts(version)).modelId : undefined);
     const now = modelId ? await civitaiPermissions(modelId) : null;
-    if (!now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host}. Try again in a moment, or run it on your GPU`);
-    if (!now.includes("Rent")) {
-      throw new LoraError(`${name}'s civitai licence no longer allows running it on a hosted service, so it can only run on your GPU`);
+    if (strict && !now) throw new LoraError(`Couldn't confirm on civitai that ${name} may run on a hosted service, so it isn't copied to ${host} (Settings → Models & licences keeps LoRAs licensed for your GPU only off the cloud). Try again in a moment, or run it on your GPU`);
+    if (strict && !now!.includes("Rent")) {
+      throw new LoraError(`${name}'s civitai licence no longer allows running it on a hosted service, and Settings → Models & licences keeps such LoRAs off the cloud, so it runs only on your GPU`);
     }
     // A copy already on this machine is used when its bytes are the pinned ones (a same-named file may be another LoRA).
     const local = [getSetting("comfyLorasDir"), LORA_CACHE_DIR]
@@ -397,7 +401,7 @@ export async function prepareCloudLoras(
       hostedUrl,
       sha256: facts?.sha256 ?? crypto.createHash("sha256").update(data).digest("hex"),
       sizeBytes: data.length,
-      licence: licenceSnapshot(l, entry, now),
+      licence: { ...licenceSnapshot(l, entry, now), ...(hostingNote(now) && { hosting: hostingNote(now) }) },
     });
     out.push({ ...l, hostedUrl });
   }
@@ -483,6 +487,16 @@ async function sendOwnLora(l: LoraRef, target: "fal" | "replicate", upload: (dat
 }
 
 /**
+ * What a mirror records about the hosting right it was copied under (nothing when civitai lists "Rent"): civitai
+ * didn't answer, so it is unknown, or civitai lists no "Rent" and the admin lets such LoRAs go to the cloud.
+ */
+function hostingNote(now: string[] | null): string | undefined {
+  if (!now) return "copied without civitai's current permissions: civitai didn't answer, so its hosting right wasn't confirmed";
+  if (!now.includes("Rent")) return "copied without civitai's “Rent” permission: Settings → Models & licences lets LoRAs licensed for your GPU only go to the cloud";
+  return undefined;
+}
+
+/**
  * Download a library LoRA into the LoRA folder ahead of a run (Settings → LoRAs). Returns the copy recorded.
  */
 export async function downloadToComfy(file: string): Promise<LoraCopy> {
@@ -520,9 +534,9 @@ export function filesInLoraFolder(): { files: Set<string>; problem?: string } {
 /**
  * Before a Fuobe Soul run, without a civitai key: the civitai LoRAs it can't get, so the run goes ahead without
  * them (the look's words still carry it) and says how to add them, instead of failing at the download. A LoRA is
- * still reachable when ComfyUI's LoRA folder already has it (open engine) or a live mirror exists (cloud). A
- * local-only LoRA (civitai's RentCivit-only licence) counts on the open engine; a cloud run never carries it
- * (fitLoras leaves it out and says so).
+ * still reachable when ComfyUI's LoRA folder already has it (open engine) or a live mirror exists (cloud). A LoRA
+ * licensed for the GPU only counts on both engines, unless the admin keeps such LoRAs on the GPU: then a cloud run
+ * never carries it (fitLoras leaves it out and says so).
  */
 export function withoutUnreachableCivitai(loras: LoraRef[], target: MirrorTarget): { loras: LoraRef[]; notes: string[] } {
   const civitai = loras.filter((l) => !l.hostedUrl && needsToken(l.url) && (target === "comfyui" || !localOnly(l)));

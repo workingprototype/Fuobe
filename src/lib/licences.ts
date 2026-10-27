@@ -194,3 +194,266 @@ export const FLAG_LABEL: Record<LicenceFlag, string> = {
   territory: "Not everywhere",
   conditions: "Conditions apply",
 };
+
+// ---------------------------------------------------------------------------
+// Licence classes (Settings → Models & licences). The owner's decision of 2026-10-27: licences are
+// information, never a gate. Every model, LoRA and node pack carries its licence as data, sorted into a
+// class an admin can switch off; everything is on by default.
+
+export type LicenceClass = "commercial" | "conditions" | "regions" | "non-commercial" | "research" | "paid-api" | "unknown";
+
+/** In the order Settings lists them: the freest first, then the cloud's, then what isn't recorded. */
+export const LICENCE_CLASSES: LicenceClass[] = ["commercial", "conditions", "regions", "non-commercial", "research", "paid-api", "unknown"];
+
+export const CLASS_LABEL: Record<LicenceClass, string> = {
+  commercial: "Commercial use allowed",
+  conditions: "Commercial use with conditions",
+  regions: "Restricted regions",
+  "non-commercial": "Non-commercial",
+  research: "Research only",
+  "paid-api": "Proprietary paid API",
+  unknown: "Licence unknown",
+};
+
+/** What a class means, in one line (the section headers in Settings). */
+export const CLASS_HINT: Record<LicenceClass, string> = {
+  commercial: "Open licences that let you sell what you make (Apache-2.0, MIT, BSD) and tools with no model weights.",
+  conditions: "Commercial use is allowed within limits: a revenue ceiling, registration, attribution or use rules.",
+  regions: "The licence leaves out some countries or regions.",
+  "non-commercial": "The weights or code may not be used commercially without another licence.",
+  research: "Released for research only.",
+  "paid-api": "Closed or hosted models you pay for per run, under the provider's and the vendor's terms.",
+  unknown: "No licence is recorded yet: check the model card or repository.",
+};
+
+/** A model's, LoRA's or node pack's licence, as information. */
+export interface LicenceInfo {
+  /** The licence's name ("Apache-2.0", "FLUX.1 [dev] Non-Commercial License", "fal.ai · paid API"). */
+  name: string;
+  /** Where to read it: the licence text, or the model card / repository that states it. */
+  url?: string;
+  class: LicenceClass;
+  /** Restricted regions: who it leaves out ("the EU, UK and South Korea"). */
+  excludes?: string;
+  /** One line: the licence as recorded (what it covers, its catches). */
+  note: string;
+  /** Notices the app must show ("Built with DINOv3"). */
+  notices?: string[];
+}
+
+/** How strict a class is, for a model whose parts carry several licences (the strictest one counts). */
+const STRICTNESS: Record<LicenceClass, number> = { commercial: 0, "paid-api": 1, conditions: 2, unknown: 3, regions: 4, "non-commercial": 5, research: 6 };
+
+export const stricter = (a: LicenceClass, b: LicenceClass): LicenceClass => (STRICTNESS[b] > STRICTNESS[a] ? b : a);
+
+const SPDX = (id: string) => `https://spdx.org/licenses/${id}.html`;
+
+/**
+ * Licences by name, with the class each one puts a model in and where to read it. Order matters: a text
+ * names a model's licence by the first entry of its class it mentions (a text with Apache-2.0 weights and
+ * the CogVideoX base is the CogVideoX License's).
+ */
+const KNOWN: { re: RegExp; name: string; class: LicenceClass; url?: string }[] = [
+  { re: /FLUX\.1 \[dev\] Non-Commercial License|FLUX\.1 \[dev\] base is NON-COMMERCIAL/, name: "FLUX.1 [dev] Non-Commercial License", class: "non-commercial", url: "https://huggingface.co/black-forest-labs/FLUX.1-dev" },
+  { re: /FLUX \[dev\] Non-Commercial License/, name: "FLUX [dev] Non-Commercial License", class: "non-commercial", url: "https://huggingface.co/black-forest-labs/FLUX.2-dev" },
+  { re: /inswapper/, name: "InsightFace inswapper (research only)", class: "research", url: "https://github.com/deepinsight/insightface" },
+  { re: /CC-BY-NC-SA-4\.0/, name: "CC BY-NC-SA 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-SA-4.0") },
+  { re: /CC[- ]BY[- ]NC(?:[- ]4\.0)?\b/, name: "CC BY-NC 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-4.0") },
+  { re: /Tencent Hunyuan 3D 2\.1 Community License/, name: "Tencent Hunyuan 3D 2.1 Community License", class: "regions" },
+  { re: /Tencent Hunyuan Community License/, name: "Tencent Hunyuan Community License", class: "regions" },
+  { re: /CogVideoX License/, name: "CogVideoX License", class: "conditions" },
+  { re: /LTX-2(?:\.x)? Community License/, name: "LTX-2 Community License", class: "conditions" },
+  { re: /Stability AI Community License|Stability Community License/, name: "Stability AI Community License", class: "conditions", url: "https://stability.ai/community-license-agreement" },
+  { re: /Krea 2 Community License/, name: "Krea 2 Community License", class: "conditions" },
+  { re: /IndexTTS-2 Model Use License/, name: "bilibili IndexTTS-2 Model Use License", class: "conditions" },
+  { re: /Llama 3\.1 Community License/, name: "Llama 3.1 Community License", class: "conditions", url: "https://www.llama.com/llama3_1/license/" },
+  { re: /DINOv3 License/, name: "DINOv3 License", class: "conditions" },
+  // Before SAM's: the H3 workflows' text names both, and the territory catch is the one that counts.
+  { re: /MiniMax H3 Community License/, name: "MiniMax H3 Community License", class: "regions", url: "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/42ed227ee7df40d41602854ae760620d6eb651fe/LICENSE" },
+  { re: /SAM License/, name: "Meta SAM License", class: "conditions" },
+  { re: /OpenRAIL\+\+-M/, name: "CreativeML OpenRAIL++-M", class: "conditions" },
+  { re: /OpenRAIL-M/, name: "CreativeML OpenRAIL-M", class: "conditions", url: SPDX("CreativeML-OpenRAIL-M") },
+  { re: /Gemma Terms of Use/, name: "Gemma Terms of Use", class: "conditions", url: "https://ai.google.dev/gemma/terms" },
+  { re: /Apache[- ]2\.0/, name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0") },
+  { re: /\bMIT\b/, name: "MIT", class: "commercial", url: SPDX("MIT") },
+  { re: /BSD-3-Clause/, name: "BSD-3-Clause", class: "commercial", url: SPDX("BSD-3-Clause") },
+];
+
+/** ComfyUI's own licence: the tools with no model weights run on its nodes. */
+const COMFYUI_REPO = "https://github.com/comfyanonymous/ComfyUI";
+
+/** A Hugging Face download's repository page, where its licence is stated. */
+export function modelCardOf(url: string | undefined): string | undefined {
+  const m = url && /^https:\/\/huggingface\.co\/([^/]+\/[^/]+)\/(?:resolve|blob)\//.exec(url);
+  return m ? `https://huggingface.co/${m[1]}` : undefined;
+}
+
+/**
+ * What a recorded licence text means as information: its class, a short name, where to read it. `cards` are
+ * the model downloads it covers (the largest first): their Hugging Face page is the link when the licence
+ * has no page of its own.
+ */
+export function licenceInfo(text: string, cards: string[] = []): LicenceInfo {
+  const terms = licenceTerms(text);
+  const card = cards.map(modelCardOf).find(Boolean);
+  if (text === UNKNOWN_LICENCE) return { name: "Not recorded", class: "unknown", note: text, ...(card && { url: card }) };
+  if (terms.noWeights) return { name: "No model weights", class: "commercial", url: COMFYUI_REPO, note: `${text.replace(/^n\/a \((.*)\)$/, "$1")}: ComfyUI's own nodes (GPL-3.0) or FFmpeg` };
+  const cls: LicenceClass = terms.flags.includes("non-commercial")
+    ? /research (?:use )?only/i.test(text)
+      ? "research"
+      : "non-commercial"
+    : terms.flags.includes("territory")
+      ? "regions"
+      : terms.flags.includes("conditions")
+        ? "conditions"
+        : "commercial";
+  const found = KNOWN.filter((k) => k.re.test(text));
+  const named = found.find((k) => k.class === cls) ?? found[0];
+  const name = named?.name ?? text.split(/[(;:]/)[0].trim();
+  // The licence's own text when it has a page, else the model card that states it.
+  const url = named?.url ?? card;
+  return { name, class: cls, note: text, ...(url && { url }), ...(terms.excludes && { excludes: terms.excludes }), ...(terms.notices.length && { notices: terms.notices }) };
+}
+
+/** Several licences as one (a model running several workflows, a chain): the strictest class names it. */
+export function mergeLicences(infos: LicenceInfo[]): LicenceInfo {
+  if (infos.length <= 1) return infos[0] ?? { name: "Not recorded", class: "unknown", note: UNKNOWN_LICENCE };
+  const lead = infos.reduce((a, b) => (STRICTNESS[b.class] > STRICTNESS[a.class] ? b : a));
+  const notes = [...new Set(infos.map((i) => i.note))];
+  const notices = [...new Set(infos.flatMap((i) => i.notices ?? []))];
+  return { ...lead, note: notes.join(" · "), ...(notices.length && { notices }) };
+}
+
+/** Where a provider shows a hosted model (its page states the model's licence and the provider's terms). */
+export function providerPage(provider: string, endpoint: string): string | undefined {
+  if (provider === "fal") return `https://fal.ai/models/${endpoint}`;
+  if (provider === "replicate") return `https://replicate.com/${endpoint.split(":")[0]}`;
+  if (provider === "llm") return "https://www.anthropic.com/legal/commercial-terms";
+  return undefined;
+}
+
+export const PROVIDER_NAME: Record<string, string> = {
+  fal: "fal.ai",
+  replicate: "Replicate",
+  higgsfield: "Higgsfield",
+  comfyui: "ComfyUI (your GPU)",
+  llm: "Claude or Ollama",
+  local: "Your browser",
+  openai: "OpenAI",
+  google: "Google",
+};
+
+/** A model on a paid API: the provider's and the vendor's terms (a closed model, or open weights the provider hosts). */
+export function paidApiLicence(vendor: string, routes: { provider: string; endpoint: string }[]): LicenceInfo {
+  const providers = [...new Set(routes.map((r) => r.provider))];
+  const names = providers.map((p) => PROVIDER_NAME[p] ?? p);
+  const first = routes[0];
+  const url = first && providerPage(first.provider, first.endpoint);
+  return {
+    name: `Paid API · ${names.join(", ")}`,
+    class: "paid-api",
+    note: `${vendor}'s model through ${names.join(" or ")} on your key: you pay per run, under the provider's terms and the model's own (the provider's page states both)`,
+    ...(url && { url }),
+  };
+}
+
+/** Text steps: Claude through the Anthropic key, else the Ollama model; on the open engine, Ollama only. */
+export function llmLicence(endpoint: string, ollamaModel = "qwen3:8b"): LicenceInfo {
+  if (endpoint !== "ollama") {
+    return {
+      name: "Paid API · Anthropic (or Ollama)",
+      class: "paid-api",
+      url: "https://www.anthropic.com/legal/commercial-terms",
+      note: "Claude through your Anthropic key, under Anthropic's commercial terms; with no key, the Ollama model on your machine",
+    };
+  }
+  const known: [RegExp, string, LicenceClass, string?][] = [
+    [/^qwen/i, "Apache-2.0", "commercial", SPDX("Apache-2.0")],
+    [/^(mistral|mixtral)/i, "Apache-2.0", "commercial", SPDX("Apache-2.0")],
+    [/^(phi|deepseek)/i, "MIT", "commercial", SPDX("MIT")],
+    [/^gemma/i, "Gemma Terms of Use", "conditions", "https://ai.google.dev/gemma/terms"],
+    [/^llama/i, "Llama Community License", "conditions", "https://www.llama.com/"],
+  ];
+  const hit = known.find(([re]) => re.test(ollamaModel));
+  const note = `The Ollama model this install uses (${ollamaModel}); another model carries its own licence: ollama show <model> --license`;
+  return hit ? { name: hit[1], class: hit[2], note, ...(hit[3] && { url: hit[3] }) } : { name: "Not recorded", class: "unknown", note };
+}
+
+/** Tools that run in the browser (colour grade, ad compositing): Fuobe's own code. */
+export const BROWSER_LICENCE: LicenceInfo = { name: "Fuobe (open source)", class: "commercial", note: "Runs in your browser with Fuobe's own code: no model weights, nothing sent anywhere" };
+
+// ---------------------------------------------------------------------------
+// ComfyUI node packs: the code a workflow loads beside ComfyUI (scripts/comfy/install-comfyui.sh and
+// install-isolated-worker.sh), from the research (docs/research/comfyui-oss*.json) and the manifest's licence
+// notes. A pack whose repository has no LICENSE file is recorded as unknown.
+
+export interface NodePack {
+  name: string;
+  repo: string;
+  licence: LicenceInfo;
+  /** Installed on the isolated worker (install-isolated-worker.sh), not the main ComfyUI. */
+  worker?: "isolated";
+}
+
+const pack = (name: string, repo: string, licence: Omit<LicenceInfo, "url"> & { url?: string }, worker?: "isolated"): NodePack => ({
+  name,
+  repo,
+  licence: { url: repo, ...licence },
+  ...(worker && { worker }),
+});
+const GPL: Omit<LicenceInfo, "note"> = { name: "GPL-3.0", class: "commercial", url: SPDX("GPL-3.0-only") };
+const NO_FILE = (extra = "") => ({ name: "Not recorded", class: "unknown" as const, note: `The repository has no LICENSE file${extra}` });
+
+export const NODE_PACKS: NodePack[] = [
+  pack("ComfyUI-WanVideoWrapper", "https://github.com/kijai/ComfyUI-WanVideoWrapper", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "Code Apache-2.0; the Wan weights it loads are Apache-2.0" }),
+  pack("ComfyUI-VideoHelperSuite", "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite", { ...GPL, note: "Video loading and saving; GPL-3.0 code, like ComfyUI" }),
+  pack("ComfyUI-KJNodes", "https://github.com/kijai/ComfyUI-KJNodes", { ...GPL, note: "Utility nodes (GrowMaskWithBlur, resizing); GPL-3.0 code, like ComfyUI" }),
+  pack("ComfyUI-SeedVR2_VideoUpscaler", "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler", { name: "Apache-2.0", class: "commercial", url: SPDX("Apache-2.0"), note: "SeedVR2 upscaling; code and weights Apache-2.0" }),
+  pack("ComfyUI-Frame-Interpolation", "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation", { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "RIFE and FILM frame interpolation; MIT code" }),
+  pack("ComfyUI-RMBG", "https://github.com/1038lab/ComfyUI-RMBG", { ...GPL, note: "Background removal; GPL-3.0 code. Fuobe uses BEN2 (MIT); RMBG-2.0 in the same pack is CC BY-NC 4.0" }),
+  pack("ComfyUI-ReActor", "https://github.com/Gourieff/ComfyUI-ReActor", { name: "MIT (per the research)", class: "commercial", note: "Face swap node; the inswapper_128 weights it loads are for non-commercial research only" }),
+  pack("ComfyUI-MMAudio", "https://github.com/kijai/ComfyUI-MMAudio", { name: "Not recorded", class: "unknown", note: "Code licence not recorded; the MMAudio weights it loads are CC BY-NC 4.0 (non-commercial)" }),
+  pack("ComfyUI_Fill-ChatterBox", "https://github.com/filliptm/ComfyUI_Fill-ChatterBox", NO_FILE("; the Chatterbox weights are MIT")),
+  pack("ComfyUI-IndexTTS2", "https://github.com/snicolast/ComfyUI-IndexTTS2", NO_FILE("; the IndexTTS-2 weights have their own Model Use License")),
+  pack("ComfyUI-Video-Depth-Anything", "https://github.com/yuvraj108c/ComfyUI-Video-Depth-Anything", { name: "Not recorded", class: "unknown", note: "Code licence not recorded; Fuobe loads the Apache-2.0 Small model (Base and Large are CC BY-NC 4.0)" }),
+  pack("ComfyUI-MelBandRoFormer", "https://github.com/kijai/ComfyUI-MelBandRoFormer", { name: "Not recorded", class: "unknown", note: "Code licence not recorded; the MelBand RoFormer weights are MIT" }),
+  pack("ComfyUI-QwenASR", "https://github.com/1038lab/ComfyUI-QwenASR", { ...GPL, note: "Qwen3-ASR transcription; GPL-3.0 code, Apache-2.0 weights" }),
+  pack("ComfyUI-HunyuanVideo-Foley", "https://github.com/phazei/ComfyUI-HunyuanVideo-Foley", { name: "Not recorded", class: "unknown", note: "Code licence not recorded; the HunyuanVideo-Foley weights leave out the EU, UK and South Korea" }),
+  pack("ComfyUI-ToSVG", "https://github.com/Yanick112/ComfyUI-ToSVG", { name: "MIT", class: "commercial", url: SPDX("MIT"), note: "VTracer vectorising; MIT. The pack also imports PyMuPDF (AGPL-3.0) for a node Fuobe doesn't use" }),
+  pack("ComfyUI-Whisper", "https://github.com/yuvraj108c/ComfyUI-Whisper", { name: "CC BY-NC-SA 4.0", class: "non-commercial", url: SPDX("CC-BY-NC-SA-4.0"), note: "Word-timed captions in one job; non-commercial code (the author asks to be contacted for commercial use). The Whisper weights are MIT" }),
+  pack("ComfyUI-LatentSyncWrapper", "https://github.com/ShmuelRonen/ComfyUI-LatentSyncWrapper", NO_FILE("; the LatentSync 1.6 weights are CreativeML OpenRAIL++-M"), "isolated"),
+  pack("ComfyUI-ThinkSound_Wrapper", "https://github.com/ShmuelRonen/ComfyUI-ThinkSound_Wrapper", NO_FILE("; the ThinkSound weights are Apache-2.0"), "isolated"),
+  // Genjutsu's Character swap (docs/research/openjutsu-6.md §7): Akatz Labs' packs, pinned in install-comfyui.sh.
+  pack("h3_character_swap", "https://github.com/akatz-labs/h3-character-swap-tool/tree/0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b/worker_nodes/h3_character_swap", {
+    ...GPL,
+    note: "MiniMax H3 character swap nodes (Akatz Labs); GPL-3.0 code, a modified NVIDIA INT8 kernel inside is Apache-2.0. The MiniMax H3 weights it runs leave out the US, the EU, the UK and South Korea",
+  }),
+  pack("h3-relay", "https://github.com/akatz-ai/h3-relay/tree/e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220", {
+    ...GPL,
+    note: "H3 Relay 2.0 (Sendy Software LLC and contributors); GPL-3.0 code, vendored Context Loop and Spectrum GPL-3.0. Opt-in (H3_RELAY=1): it registers HTTP routes when it loads",
+  }),
+];
+
+export const nodePack = (name: string): NodePack | undefined => NODE_PACKS.find((p) => p.name === name);
+
+/** The parts of a LoRA's licence snapshot the class needs (src/lib/catalog/types.ts LoraLicence). */
+interface LoraLicenceLike {
+  commercial: boolean;
+  hostedOk: boolean;
+  snapshotDate?: string;
+  name?: string;
+}
+
+/**
+ * A LoRA's licence as information: commercial and hostable, commercial on your GPU only (civitai lists no
+ * "Rent": a condition), non-commercial, or not recorded. `page` is its model card.
+ */
+export function loraLicenceInfo(l: LoraLicenceLike | undefined, page?: string, extra?: string): LicenceInfo {
+  if (!l) return { name: "Your own", class: "commercial", note: "A LoRA you trained or added yourself", ...(page && { url: page }) };
+  const recorded = l.name?.trim();
+  const unknown = !recorded || /unspecified|no licen[cs]e|check (?:the )?card/i.test(recorded);
+  const cls: LicenceClass = unknown && !l.commercial ? "unknown" : !l.commercial ? "non-commercial" : !l.hostedOk ? "conditions" : "commercial";
+  const what = !l.commercial ? "Outputs may not be sold" : l.hostedOk ? "Commercial use, on your GPU and in the cloud" : "Commercial use on your GPU; the licence doesn't allow running it on another hosted service";
+  const note = [what, recorded && `licence as read: ${recorded}`, l.snapshotDate && `read ${l.snapshotDate}`, extra].filter(Boolean).join(" · ");
+  return { name: unknown ? "Not recorded" : (KNOWN.find((k) => k.re.test(recorded!))?.name ?? recorded!), class: cls, note, ...(page && { url: page }) };
+}

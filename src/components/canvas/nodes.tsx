@@ -69,7 +69,8 @@ import { ResponsivePanel } from "@/components/studio/responsive-panel";
 import { VoiceRecorder } from "@/components/studio/voice-recorder";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAssets, useClipFacts as useFileFacts, useElements } from "@/lib/api";
+import { useAssets, useClipFacts as useFileFacts, useElements, useModelAccess } from "@/lib/api";
+import { offered } from "@/lib/model-access";
 import { dualEngine, onEngine } from "@/lib/catalog/engines";
 import {
   CANVAS_TEXT_MAX,
@@ -680,8 +681,16 @@ const GeneratorNode = memo(function GeneratorNode({ id, type: flowType, data, se
   // The picker opens on the node's own engine (or the install's only one); its switch browses the other.
   const [browseEngine, setBrowseEngine] = useState<Engine | null>(null);
   const pickerEngine: Engine = g.mode !== "both" ? g.mode : (browseEngine ?? model?.engine ?? g.engine);
-  // A Fuobe Original is listed on the engine being browsed (it runs on both).
-  const choices = useMemo(() => modelChoices(node).map((m) => onEngine(m, pickerEngine)), [node, pickerEngine]);
+  // A Fuobe Original is listed on the engine being browsed (it runs on both). Models switched off in Settings →
+  // Models & licences aren't offered (a node already on one says so when it runs).
+  const access = useModelAccess();
+  const choices = useMemo(
+    () =>
+      modelChoices(node)
+        .filter((m) => offered(access, m.id, pickerEngine))
+        .map((m) => onEngine(m, pickerEngine)),
+    [node, pickerEngine, access],
+  );
   const error = v.runError ?? v.error;
 
   // Handles change with the model and op: tell React Flow to re-measure them (React Flow measures new nodes itself).

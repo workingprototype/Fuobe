@@ -27,6 +27,7 @@ import {
 } from "./generation-stream";
 import { cursorAfter, filterToSearch, type AssetUse, type FeedFilter, type Folder } from "./library";
 import type { ShareCreated, ShareInfo, ShareListItem, SharePatch, ShareRequest } from "./share";
+import type { AccessSummary } from "./model-access";
 
 export interface Asset {
   id: string;
@@ -812,6 +813,8 @@ export interface StatusInfo {
   cloudProvider: string;
   /** The first-run guide was put away, or something the engine mode generates with was connected once. */
   onboarded?: boolean;
+  /** Settings → Models & licences: what is switched off (absent while everything is on). */
+  access?: AccessSummary;
 }
 
 /** A connection test's answer (POST /api/providers/test). */
@@ -932,6 +935,16 @@ export function useEngineMode(): EngineMode {
   // Suspense subtrees can hydrate after the status query resolved; render the server's view until hydrated.
   if (!hydrated) return "both";
   return serverMode ?? cached;
+}
+
+/**
+ * What Settings → Models & licences switched off, for pickers to leave out (src/lib/model-access.ts offered()).
+ * Undefined until hydrated and while everything is on; the server refuses an off model either way.
+ */
+export function useModelAccess(): AccessSummary | undefined {
+  const hydrated = useHydrated();
+  const access = useStatus().data?.access;
+  return hydrated ? access : undefined;
 }
 
 export function useEngine(): [Engine, (e: Engine) => void, EngineMode] {

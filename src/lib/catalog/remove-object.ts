@@ -226,15 +226,22 @@ export function erasersFor(engine: Engine, mode: RemoveMode): Eraser[] {
   return ERASERS.filter((e) => e.engine === engine && e.modes.includes(mode));
 }
 
-/** The eraser a request runs on, or why there is none. */
-export function chooseEraser(o: { engine: Engine; mode: RemoveMode; effects?: boolean; modelId?: string }): { eraser: Eraser } | { problem: string } {
+/**
+ * The eraser a request runs on, or why there is none. `offered` (Settings → Models & licences) passes over an
+ * eraser switched off for the next one that does the job and is on; with none on, the default stays and its run
+ * names the switch.
+ */
+export function chooseEraser(o: { engine: Engine; mode: RemoveMode; effects?: boolean; modelId?: string; offered?: (id: string) => boolean }): { eraser: Eraser } | { problem: string } {
   if (o.engine === "open" && o.mode === "click") return { problem: CLICK_OPEN_PROBLEM };
   if (o.effects && o.mode !== "type") return { problem: "Shadows and reflections go too when you type what to remove — switch to Type it" };
+  const on = o.offered ?? (() => true);
+  const fits = (e: Eraser | undefined): e is Eraser => !!e && e.engine === o.engine && e.modes.includes(o.mode) && (!o.effects || !!e.effects);
   const picked = getEraser(o.modelId);
-  if (picked && picked.engine === o.engine && picked.modes.includes(o.mode) && (!o.effects || picked.effects)) return { eraser: picked };
+  if (fits(picked) && on(picked.id)) return { eraser: picked };
   const id = DEFAULT_ERASER[o.engine][o.effects ? "effects" : o.mode];
   const eraser = getEraser(id);
-  return eraser ? { eraser } : { problem: "Nothing on this engine removes objects that way yet" };
+  if (!eraser) return { problem: "Nothing on this engine removes objects that way yet" };
+  return { eraser: [eraser, ...erasersFor(o.engine, o.mode)].find((e) => fits(e) && on(e.id)) ?? eraser };
 }
 
 // ---------------------------------------------------------------------------

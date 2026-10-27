@@ -97,7 +97,12 @@ export default async function Page() {
         </h2>
         <p className="mt-1 mb-5 max-w-2xl text-[13px] text-muted-foreground">
           {list.counts.all} models and workflows: {list.counts.clear} allow commercial use, {list.counts.conditions} with conditions (revenue limits or use rules), {list.counts["non-commercial"]}{" "}
-          non-commercial and {list.counts.territory} not available everywhere. Read the licence itself before you sell what you make; this list is a guide, not legal advice.
+          non-commercial and {list.counts.territory} not available everywhere. Read the licence itself before you sell what you make; this list is a guide, not legal advice. Which of them this
+          install offers is yours to decide in{" "}
+          <Link href="/settings/models" className="text-brand-text underline underline-offset-2">
+            Models &amp; licences
+          </Link>
+          .
         </p>
         <LicencesView list={list} />
       </section>

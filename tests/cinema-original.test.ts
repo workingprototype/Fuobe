@@ -128,11 +128,14 @@ describe("Fuobe Cinema on both engines", () => {
     expect(body.loras).toBeUndefined();
   });
 
-  it("switches to the /lora endpoint when a LoRA rides along, and never sends a GPU-only LoRA", async () => {
+  it("switches to the /lora endpoint when a LoRA rides along; a GPU-only LoRA stays home only when the admin keeps it there", async () => {
     const { url, body } = await submit(view("cloud"), fal("t2v"), { prompt: "x", duration: 5, resolution: "720p", aspectRatio: "16:9", loras: [LTX_LORA] });
     expect(url).toMatch(/\/fal-ai\/ltx-2\.3-22b\/text-to-video\/lora$/);
     expect(body.loras).toEqual([{ path: LTX_LORA.url, scale: 0.8 }]);
-    const local = { ...LTX_LORA, licence: { commercial: true, hostedOk: false, snapshotDate: "2026-10-26" } };
+    const gpuOnly = { ...LTX_LORA, licence: { commercial: true, hostedOk: false, snapshotDate: "2026-10-26" } };
+    const sent = await submit(view("cloud"), fal("t2v"), { prompt: "x", duration: 5, loras: [gpuOnly] });
+    expect(sent.url).toMatch(/\/fal-ai\/ltx-2\.3-22b\/text-to-video\/lora$/);
+    const local = { ...gpuOnly, keepOnGpu: true as const };
     const plain = await submit(view("cloud"), fal("t2v"), { prompt: "x", duration: 5, loras: [local] });
     expect(plain.url).toMatch(/\/fal-ai\/ltx-2\.3-22b\/text-to-video$/);
     expect(plain.body.loras).toBeUndefined();

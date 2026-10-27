@@ -60,7 +60,7 @@ const LayersInput = z.object({
     .string()
     .optional()
     .describe(
-      `Layers' decomposition models: ${TOOL_MODELS.decompose.cloud.join(", ")} (cloud), ${TOOL_MODELS.decompose.open.join(", ")} (open source); default: the engine's first. Another model runs outside Layers, as a plain job in the Library.`,
+      `Layers' decomposition models: ${TOOL_MODELS.decompose.cloud.join(", ")} (cloud), ${TOOL_MODELS.decompose.open.join(", ")} (open source); default: the engine's first one switched on in Settings → Models & licences. Another model runs outside Layers, as a plain job in the Library.`,
     ),
 });
 const RestyleInput = z.object({
@@ -71,7 +71,7 @@ const RestyleInput = z.object({
     .string()
     .optional()
     .describe(
-      `Shorts Studio's restyle models: ${SHORTS_MODELS.cloud.join(", ")} (cloud), ${SHORTS_MODELS.open.join(", ")} (open source); default: the engine's first. Another video-to-video model runs outside Shorts Studio, as a single job in the Library.`,
+      `Shorts Studio's restyle models: ${SHORTS_MODELS.cloud.join(", ")} (cloud), ${SHORTS_MODELS.open.join(", ")} (open source); default: the engine's first one switched on in Settings → Models & licences. Another video-to-video model runs outside Shorts Studio, as a single job in the Library.`,
     ),
 });
 const DubInput = z.object({

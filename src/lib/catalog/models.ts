@@ -1117,7 +1117,7 @@ const open: ModelDef[] = [
     vendor: "OpenAI × yuvraj108c",
     family: "whisper",
     kind: "video",
-    tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack, installed only with NC_PACKS=1",
+    tagline: "Transcribes and burns word-by-word captions in one job, short clips (whole clip in RAM) · 6 GB GPU · non-commercial node pack (CC BY-NC-SA)",
     routes: [comfy("captions", "captions-whisper-burnin", "Whisper large-v3-turbo + ComfyUI-Whisper (CC-BY-NC-SA code)")],
     options: { sliders: [{ param: "fontSize", label: "Text size (px)", min: 30, max: 160, step: 5, default: 90 }], sourceLanguages: Object.keys(WHISPER_LANGUAGES) },
   }),
