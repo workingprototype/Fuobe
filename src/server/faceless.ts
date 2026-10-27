@@ -86,6 +86,7 @@ import { llmBackends, probeOllama } from "./providers/llm";
 import { fetchRemote } from "./remote-fetch";
 import { engineMode, getSetting } from "./settings";
 import { fileUrl, saveFile } from "./storage";
+import { offeredModel } from "./model-access";
 
 /**
  * Faceless Studio and the Explainer on the server: channels (genre, saved style, narrator, aspect,
@@ -213,7 +214,9 @@ const TOPICS_TIMEOUT_MS = 25_000;
 /** One answer from the engine's text model, or null (no LLM, AI helper off, demo mode on, or it failed: `onError` hears why). */
 export async function askLlm(engine: Engine, system: string, user: string, o: AskOptions = {}): Promise<string | null> {
   if (getSetting("demoMode") === "on") return null;
-  const model = getModel(ENGINE_MODELS[engine].write);
+  // A text model switched off in Settings → Models & licences gives way to the offline wording, like no LLM at all.
+  const found = getModel(ENGINE_MODELS[engine].write);
+  const model = found && offeredModel(found);
   const route = model?.routes.find((r) => r.op === "write");
   if (!model || !route) return null;
   await probeOllama();
