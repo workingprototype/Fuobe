@@ -53,6 +53,7 @@ import { probeMedia, type MediaInfo } from "@/lib/media-probe";
 import { ocrText, parseOcrFrame, parseOcrLines, type OcrFrame } from "@/lib/ocr";
 import { getSetting, isCandidate, savedSetting } from "../settings";
 import { decodePng, encodePng } from "../png";
+import { probeAvi } from "../avi-probe";
 import { probeWebm } from "../webm-probe";
 import { adoptFile, readRef, scratchDir } from "../storage";
 import { zipToFile } from "../zip";
@@ -489,6 +490,14 @@ function webmInfo(data: Buffer): MediaInfo | null {
   if (!w) return null;
   const frames = w.duration && w.fps ? Math.round(w.duration * w.fps) : undefined;
   return { container: "webm", duration: w.duration, videoDuration: w.hasVideo ? w.duration : undefined, width: w.width, height: w.height, fps: w.fps, frames, hasVideo: w.hasVideo, hasAudio: w.hasAudio };
+}
+
+/** An AVI clip's header facts in MediaInfo's shape (src/server/avi-probe.ts; Character Swap Studio takes AVI). */
+function aviInfo(data: Buffer): MediaInfo | null {
+  const a = probeAvi(data);
+  if (!a) return null;
+  const frames = a.duration && a.fps ? Math.round(a.duration * a.fps) : undefined;
+  return { container: "avi", duration: a.duration, videoDuration: a.hasVideo ? a.duration : undefined, width: a.width, height: a.height, fps: a.fps, frames, hasVideo: a.hasVideo, hasAudio: a.hasAudio };
 }
 
 /** The header facts of a file this server uploaded to ComfyUI (a still has only its size; undefined for unreadable containers). */
@@ -1237,8 +1246,8 @@ async function uploadTo(worker: ComfyWorker, data: Buffer, contentType: string, 
   const j = (await res.json()) as { name: string; subfolder?: string };
   const uploaded = j.subfolder ? `${j.subfolder}/${j.name}` : j.name;
   // Remember a clip's / track's header facts (length, size, fps, audio) for prepareWorkflow.
-  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv)$/i.test(name)) {
-    const info = probeMedia(data) ?? webmInfo(data);
+  if (MEDIA_FILE.test(contentType) || MEDIA_EXT.test(name) || /\.(webm|mkv|avi)$/i.test(name)) {
+    const info = probeMedia(data) ?? webmInfo(data) ?? aviInfo(data);
     if (info) rememberMedia(uploaded, info);
   } else if (/^image\//.test(contentType)) {
     // A start frame's size: "auto" makes an image-to-video clip in the picture's own shape.
