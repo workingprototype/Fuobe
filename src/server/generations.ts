@@ -967,9 +967,11 @@ async function advanceDependents(): Promise<void> {
         fail(`${earlier} has no ${slotNoun(slots[missing])} to use`);
         continue;
       }
-      // Routing reads cached reachability: make sure it's fresh for local engines.
+      // Routing reads cached reachability: make sure it's fresh for local engines. An Original counts with the routes of
+      // the engine it runs on, ComfyUI taken as answering: one on the cloud doesn't use it, so doesn't wait for it.
       const model = getModel(request.modelId);
-      if (model?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
+      const runs = model && dualEngine(model) ? onEngine(model, pickEngine(model, request.engine, engineMode(), () => true)) : model;
+      if (runs?.routes.some((x) => x.provider === "comfyui") && !(await probeComfy()) && deps.some((d) => d!.provider === "comfyui")) {
         // The earlier steps ran for real on ComfyUI: one missed check (a server busy finishing them, or restarting)
         // mustn't make this one a demo, which chainMode fails. Look again at once (one forced look a sweep), then wait
         // for the next sweeps (COMFY_WAIT from the first miss) before chainMode has its say.

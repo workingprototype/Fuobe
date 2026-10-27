@@ -178,20 +178,23 @@ describe("ComfyUI reachability under load", () => {
 });
 
 describe("a chain step after real ComfyUI steps", () => {
-  const clip = () => saveFile({ data: Buffer.from("not really a video"), contentType: "video/mp4", source: "generation" }).url;
-  /** Two clips that ran on ComfyUI, and the join waiting for them. */
-  const join = () => {
-    const ids = ["a", "b"].map((k) => `comfy-clip-${k}-${Math.random().toString(36).slice(2, 8)}`);
-    for (const id of ids) {
-      db()
-        .prepare(
-          `INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, external_id, created_at, updated_at, completed_at)
-           VALUES (?, 'canvas', 'oss-fit-clip', 'open', 'comfyui', 'video-fit', 'video', 'succeeded', '{"feature":"canvas","modelId":"oss-fit-clip"}', ?, 'x', ?, ?, ?)`,
-        )
-        .run(id, JSON.stringify([{ url: clip(), kind: "video", contentType: "video/mp4" }]), Date.now(), Date.now(), Date.now());
-    }
-    return gens.createGenerations({ feature: "canvas", modelId: "oss-join-encoded", op: "concat", chain: [{ slot: "videos" }, { slot: "videos" }] }, { dependsOn: ids })[0];
+  /** A step that ran for real on ComfyUI: a clip (oss-fit-clip), or a still (oss-z-image-turbo). */
+  const ranOnComfy = (kind: "video" | "image" = "video") => {
+    const id = `comfy-${kind}-${Math.random().toString(36).slice(2, 8)}`;
+    const contentType = kind === "video" ? "video/mp4" : "image/png";
+    const file = saveFile({ data: Buffer.from(`not really a ${kind}`), contentType, source: "generation" }).url;
+    const [model, op] = kind === "video" ? ["oss-fit-clip", "video-fit"] : ["oss-z-image-turbo", "text-to-image"];
+    db()
+      .prepare(
+        `INSERT INTO generations (id, feature, model_id, engine, provider, op, kind, status, request_json, outputs_json, external_id, created_at, updated_at, completed_at)
+         VALUES (?, 'canvas', ?, 'open', 'comfyui', ?, ?, 'succeeded', ?, ?, 'x', ?, ?, ?)`,
+      )
+      .run(id, model, op, kind, JSON.stringify({ feature: "canvas", modelId: model }), JSON.stringify([{ url: file, kind, contentType }]), Date.now(), Date.now(), Date.now());
+    return id;
   };
+  /** Two clips that ran on ComfyUI, and the join waiting for them. */
+  const join = () =>
+    gens.createGenerations({ feature: "canvas", modelId: "oss-join-encoded", op: "concat", chain: [{ slot: "videos" }, { slot: "videos" }] }, { dependsOn: [ranOnComfy(), ranOnComfy()] })[0];
   /** A missed check, as a busy server that didn't answer in time left it. */
   const missed = () => (globalThis.__fuobeComfyReach = { ok: false, at: Date.now(), url: comfyUrl });
   const launched = (id: string) => until(() => {
@@ -224,6 +227,21 @@ describe("a chain step after real ComfyUI steps", () => {
     const done = await launched(g.id);
     expect(done.provider).toBe("comfyui");
     expect(done.error ?? "").not.toMatch(/needs ComfyUI to continue/);
+  });
+
+  it("doesn't wait for ComfyUI when the step runs on the cloud (an Original on its cloud engine)", async () => {
+    status = 503;
+    missed();
+    const g = gens.createGenerations(
+      { feature: "canvas", modelId: "fuobe-dop", engine: "cloud", prompt: "A slow push in", chain: [{ slot: "images" }] },
+      { dependsOn: ranOnComfy("image") },
+    )[0];
+    // No cloud key here: it's settled at once, as before, by chainMode naming the cloud provider (not by a minute's wait).
+    const done: Generation = await until(() => {
+      const x = gens.getGeneration(g.id)!;
+      return x.status === "failed" ? x : undefined;
+    }, 15_000);
+    expect(done.error).toMatch(/Fuobe DoP needs (fal\.ai|Replicate) to continue/);
   });
 
   it("fails as before once the wait is over and ComfyUI still doesn't answer", async () => {
