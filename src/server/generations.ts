@@ -10,7 +10,7 @@ import { cueText, type Cue } from "@/lib/cues";
 import { HELPER_FEATURES, HELPER_SUFFIX, isReviewStatus, type AssetUse, type ReviewFilter } from "@/lib/library";
 import { upscaleTier } from "@/lib/av/upscale";
 import { chainedWaitMessage, keyframeChain } from "@/lib/catalog/keyframes";
-import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor } from "@/lib/catalog/plan";
+import { estimateCost, inferOperation, planGeneration, presetRoute, routeLoras, routesFor, withoutTriggers } from "@/lib/catalog/plan";
 import { framedLength, keepMatte } from "@/lib/catalog/payload";
 import { fitLoras, lorasFit } from "@/lib/catalog/loras";
 import { dualEngine, onEngine, pickEngine } from "@/lib/catalog/engines";
@@ -44,6 +44,7 @@ import { setResolver, watchGenerations, type LiveEvent } from "./live";
 import { provider } from "./providers";
 import { comfyLoraFiles, probeComfy } from "./providers/comfyui";
 import { ensureLorasOnComfy, prepareCloudLoras, withoutUnreachableCivitai } from "./loras";
+import { offeredLoras, offeredModel, offeredRoutes, requireOffered } from "./model-access";
 import { llmBackends, llmMissing, llmUsesClaude, probeOllama } from "./providers/llm";
 import type { PollContext, PollResult, RemoteOutput } from "./providers/types";
 import { mediaFacts } from "./media-facts";
@@ -456,8 +457,11 @@ function prepare(original: GenerationRequest) {
   // A style signature's sentences (palette, look) join the prompt here; the stored request keeps the user's words.
   const worded = withSignatureWords(original);
   const mode = engineMode();
+  // Settings → Models & licences: a model (or the engine of an Original asked for) that is switched off is refused,
+  // naming the switch; an Original otherwise runs on an engine that is still on, with the routes that are on.
   const found = getModel(worded.modelId);
-  const model = found && dualEngine(found) ? onEngine(found, engineFor(found, worded.engine)) : found;
+  const allowed = found && requireOffered(found, worded.engine);
+  const model = allowed && dualEngine(allowed) ? onEngine(allowed, engineFor(allowed, worded.engine)) : allowed;
   const lookup = (id: string) => (model && id === model.id ? model : getModel(id));
   const req = model ? stripMotionPaths(applySketch(applyMentions(worded, model, listElements()).request, model).request, model) : worded;
   let plan = planGeneration(req, lookup, getPreset);
@@ -473,7 +477,13 @@ function prepare(original: GenerationRequest) {
   if (plan.op === "translate" && !plan.params.targetLanguage) throw new Error("Pick a language to translate into");
   // The length asked of a clip that is made (not one that follows its input video's length).
   const seconds = MADE_LENGTH_OPS.has(plan.op) ? plan.params.duration : undefined;
-  const { route, demo } = chooseRoute(routesFor(plan.model, plan.op), req.inputs?.images?.length ?? 0, plan.loras, seconds);
+  // LoRAs switched off (by file or licence class) are left out, their trigger words with them; with "keep GPU-only
+  // LoRAs on your GPU" on, the rest are marked so a cloud route leaves those out (fitLoras).
+  const access = offeredLoras(plan.loras);
+  if (access.dropped.length) plan = { ...plan, loras: access.loras, prompt: withoutTriggers(plan.prompt, plan.loras.filter((l) => !access.loras.some((k) => k.file === l.file)), access.loras) };
+  else if (access.loras.some((l, i) => l !== plan.loras[i])) plan = { ...plan, loras: access.loras };
+  // A preset can route to another model than the one asked for: its routes that are on (or the switch that's off).
+  const { route, demo } = chooseRoute(offeredRoutes(plan.model, routesFor(plan.model, plan.op)), req.inputs?.images?.length ?? 0, plan.loras, seconds);
   // What the cloud run can carry: a LoRA whose licence doesn't allow hosting stays on the GPU, and an API
   // takes at most so many (the plan's notes say which were left out). Open runs carry them all. Without a
   // civitai key a Soul look's civitai LoRA the run can't get is left out (and said), rather than failing at the
@@ -485,7 +495,7 @@ function prepare(original: GenerationRequest) {
   // A Soul look's triggers lead the prompt: a LoRA left out takes its trigger with it.
   const prompt = plan.soul ? promptWithLoras(plan.prompt, plan.soul.triggers, fitted.loras) : plan.prompt;
   plan = { ...plan, prompt, loras: fitted.loras };
-  const notes = [...(plan.notes ?? []), ...reachable.notes, ...fitted.notes];
+  const notes = [...(plan.notes ?? []), ...access.notes, ...reachable.notes, ...fitted.notes];
   // A frame-count API that can't make the length asked (Replicate's Wan 2.2 fast: 81–121 frames) says what it makes.
   const made = demo ? undefined : framedLength(route.map?.numFrames, seconds, plan.params.fps);
   if (made !== undefined && route.map?.numFrames) {
@@ -507,7 +517,7 @@ function prepare(original: GenerationRequest) {
   const unreachable = asked.filter((l) => !reachable.loras.includes(l));
   // Priced for the clip the route makes: Replicate's Wan 2.2 fast makes 5 s when 3 s was asked.
   const priced = made !== undefined && plan.params.duration !== undefined ? { ...plan.params, duration: Math.round(made * 2) / 2 } : plan.params;
-  return { req, plan, route, demo, providerId, notes, asked, unreachable, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
+  return { req, plan, route, demo, providerId, notes, asked, unreachable, switchedOff: access.dropped, cost: free ? 0 : estimateCost(plan.model, priced, 1, plan.op, withLoras) };
 }
 
 /** Operations whose clip length is the duration picked (made, or added by extend), not an input video's. */
@@ -516,9 +526,12 @@ const MADE_LENGTH_OPS = new Set<Operation>(["t2v", "i2v", "flf2v", "ref2v", "ext
 
 /** What a request would run as — model, operation, job count and cost — without starting it. */
 export function previewGeneration(req: GenerationRequest) {
-  const { plan, route, demo, providerId, cost, notes, asked, unreachable } = prepare(req);
+  const { plan, route, demo, providerId, cost, notes, asked, unreachable, switchedOff } = prepare(req);
   const fitted = routeLoras(route, asked.filter((l) => !unreachable.includes(l)));
-  const loras = { ...fitted, dropped: [...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped] };
+  const loras = {
+    ...fitted,
+    dropped: [...switchedOff, ...unreachable.map((l) => ({ file: l.file, reason: "it downloads from civitai, which needs your civitai key (Settings → LoRAs)" })), ...fitted.dropped],
+  };
   return {
     model: plan.model,
     op: plan.op,
@@ -563,7 +576,9 @@ const depIds = (v: string | null): string[] => (!v ? [] : v.startsWith("[") ? (J
 export function createGenerations(original: GenerationRequest, opts: CreateOptions = {}): Generation[] {
   // Open models make multi-shot films shot by shot, then join the clips. A Fuobe Original is taken on the engine it runs
   // on (Fuobe DoP's Frames mode is a GPU chain).
-  const found = getModel(original.modelId);
+  // An Original runs on an engine still on in Settings → Models & licences (prepare refuses a model that is off).
+  const catalogModel = getModel(original.modelId);
+  const found = catalogModel && (offeredModel(catalogModel) ?? catalogModel);
   const shotModel = found && dualEngine(found) ? onEngine(found, engineFor(found, original.engine)) : found;
   if (!opts.dependsOn && shotModel?.options.multiShot?.mode === "concat" && (original.params?.shots?.filter((x) => x.prompt.trim()).length ?? 0) > 1) {
     return createShotFilm(original, shotModel);
