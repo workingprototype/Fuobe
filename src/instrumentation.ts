@@ -1,7 +1,8 @@
 /**
  * Runs once when the server starts: start the generation runner right away, so jobs that were in
  * flight before a restart keep advancing (and live updates flow) even when the UI only lists them.
- * Also empties what has been in the Trash for 30 days (then daily), and starts Assist's scheduled tasks.
+ * Also empties what has been in the Trash for 30 days (then daily), starts Assist's scheduled tasks and Character
+ * Swap Studio's sweep.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
@@ -15,4 +16,7 @@ export async function register() {
   // Assist's scheduled tasks: a 30 s sweep starts the runs that are due (a run missed while the server was off happens once, a few seconds after boot).
   const { ensureScheduleRunner } = await import("./server/assist/schedules");
   ensureScheduleRunner({ soon: true });
+  // Character Swap Studio: takes queued behind the segments they continue from launch (or stop) when those finish.
+  const { ensureSwapStudioRunner } = await import("./server/swap-studio");
+  ensureSwapStudioRunner();
 }

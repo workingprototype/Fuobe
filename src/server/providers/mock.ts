@@ -334,6 +334,11 @@ function demoOutputs(op: Operation | undefined, kind: MediaKind, prompt: string,
     case "bg-remove-video":
       return [{ url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true, role: meta.matteOutput } }];
     case "video-swap":
+      return [
+        { url: `sample:${sampleClip(ar)}`, kind: "video", contentType: "video/mp4", meta: { demo: true } },
+        // Character Swap Studio's segment graph also saves a lossless master the next segment continues from.
+        ...(meta.master ? [{ url: `sample:${sampleClip(ar)}`, kind: "video" as const, contentType: "video/mp4", meta: { role: "master", demo: true } }] : []),
+      ];
     case "video-insert":
     case "keyframes":
     case "still-motion":
@@ -400,6 +405,8 @@ export const mockProvider: ProviderAdapter = {
         lastMask: route.provider === "comfyui" && route.endpoint === "video-inpaint-wan-vace-painted" && input.extra?.[HAND_OFF] === true,
         // Workflows whose second output is the cut's first frame (video-segment-resample).
         firstFrame: route.provider === "comfyui" && route.endpoint === "video-segment-resample",
+        // Character Swap Studio's segment graph: the take and its lossless master (video-character-swap-h3-segment).
+        master: route.provider === "comfyui" && route.endpoint === "video-character-swap-h3-segment",
         // A stem split that also transcribes (ComfyUI's dub-prepare-separate-transcribe).
         transcript: route.op === "separate-audio" && route.provider === "comfyui" && route.endpoint.includes("transcribe"),
       },

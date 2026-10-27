@@ -142,8 +142,9 @@ export interface MaskVersion {
   /** The version it corrects. */
   base?: string;
   pieces: MaskPiece[];
-  /** The job that makes the newest piece. */
+  /** The job that makes the newest piece, and every step it took. */
   genId?: string;
+  stepIds?: string[];
 }
 
 export interface AnchorVariant {
@@ -153,8 +154,28 @@ export interface AnchorVariant {
   /** The image (an upload, or the job's output once it is done). */
   url?: string;
   genId?: string;
+  stepIds?: string[];
   modelId?: string;
   prompt?: string;
+}
+
+/**
+ * What a take was queued with (Akatz's freeze): a continuation launches later, once the takes it continues from are
+ * made, and runs with the settings, words, anchor and mask it was queued with, not what was edited meanwhile.
+ */
+export interface FrozenTake {
+  reference: string;
+  /** The shot's first frame in the clip, and the segment's frames in the shot. */
+  shotStart: number;
+  start: number;
+  end: number;
+  /** Frames of continuation history (0: starts fresh). */
+  history: number;
+  anchor: string | null;
+  /** Your GPU: the approved mask video (masked generation on). */
+  mask: string | null;
+  settings: SwapSettings;
+  who: WhoToSwap;
 }
 
 export interface TakeDependency {
@@ -187,6 +208,9 @@ export interface SwapTake {
   favourite: boolean;
   decision: Decision;
   notes: string;
+  frozen?: FrozenTake;
+  /** The studio has looked at its finished result (selected it, or left the selection alone). */
+  settled?: boolean;
 }
 
 export interface SwapSegment {
@@ -929,6 +953,10 @@ export function planQueue(
     } catch (e) {
       return { problem: `Segment ${n}: ${(e as Error).message.toLowerCase()}` };
     }
+    // Your GPU continues from the segment before it: its take's lossless master holds that segment's frames only.
+    if (engine === "open" && deps.length > 1) {
+      return { problem: `Segment ${n}: its ${effectiveHistory(seg)} frames of history reach back past segment ${n - 1} — on your GPU a continuation reads the segment before it; shorten the history or lengthen segment ${n - 1}` };
+    }
     for (const d of deps) {
       const j = items.findIndex((s) => s.id === d.segmentId);
       if (queued.has(j)) {
@@ -943,6 +971,106 @@ export function planQueue(
     entries.push({ index: i, segment: seg, waitsOn, dependencies: deps });
   }
   return { entries };
+}
+
+/** A segment's take as queued now: what it will run with (see FrozenTake). */
+export function freezeTake(project: SwapProject, shot: SwapShot, seg: SwapSegment): FrozenTake {
+  const mask = project.engine === "open" && shot.settings.useMask ? (approvedMask(shot)?.pieces[0]?.url ?? null) : null;
+  return {
+    reference: project.character.image ?? "",
+    shotStart: shot.start,
+    start: seg.start,
+    end: seg.end,
+    history: effectiveHistory(seg),
+    anchor: segmentAnchor(shot, seg),
+    mask,
+    settings: { ...shot.settings },
+    who: { ...shot.who },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Jobs as the page sees them
+
+export type GenStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+/** A generation as the project view reports it. */
+export interface GenSummary {
+  status: GenStatus;
+  progress: number | null;
+  message: string | null;
+  error: string | null;
+  /** The main output, and (your GPU's takes) the lossless master. */
+  url?: string;
+  master?: string;
+  costUsd: number | null;
+  demo: boolean;
+}
+
+export type JobStatus = "waiting" | "stopped" | GenStatus | "missing";
+
+/**
+ * One job (a take, a mask, an anchor, an assembly) from its generations: the final one's state, unless a step before it
+ * failed (its error is the reason) — progress counts the steps done.
+ */
+export function jobState(finalId: string | undefined, stepIds: string[] | undefined, gens: Record<string, GenSummary | undefined>): { status: JobStatus; progress: number | null; message: string | null } {
+  if (!finalId) return { status: "missing", progress: null, message: null };
+  const final = gens[finalId];
+  if (!final) return { status: "missing", progress: null, message: "This job is gone from the Library" };
+  const steps = (stepIds?.length ? stepIds : [finalId]).map((id) => gens[id]).filter((g): g is GenSummary => !!g);
+  const failed = steps.find((g) => g.status === "failed" && g.error);
+  if (final.status === "failed" || final.status === "canceled") return { status: final.status, progress: null, message: failed?.error ?? final.error ?? final.message };
+  if (final.status === "succeeded") return { status: "succeeded", progress: 1, message: null };
+  const done = steps.filter((g) => g.status === "succeeded").length;
+  const running = steps.find((g) => g.status === "running");
+  const progress = steps.length > 1 ? (done + (running?.progress ?? 0)) / steps.length : final.progress;
+  return { status: running || final.status === "running" ? "running" : "queued", progress, message: running?.message ?? final.message };
+}
+
+// ---------------------------------------------------------------------------
+// What the API answers (src/server/swap-studio.ts)
+
+export interface SwapProjectCard {
+  id: string;
+  name: string;
+  engine: Engine;
+  clips: number;
+  shots: number;
+  swapped: number;
+  assembled: number;
+  waiting: number;
+  character: string | null;
+  updatedAt: number;
+}
+
+export interface SwapProjectView {
+  project: SwapProject;
+  /** Every generation the project names. */
+  gens: Record<string, GenSummary>;
+  /** Akatz's "Finish" stage and the workers note, said on the page. */
+  workers: string;
+}
+
+export interface StudioEstimate {
+  engine: Engine;
+  /** Runs as a demo (no provider for it): nothing is paid for. */
+  demo: boolean;
+  /** Your GPU: nothing to pay. */
+  free: boolean;
+  /** One take of each generated segment (null: price unknown, or it can't run yet — see `problems`). */
+  segments: Record<string, number | null>;
+  problems: Record<string, string>;
+  /** "Queue all" for each shot: the segments that aren't current. */
+  shots: Record<string, { costUsd: number | null; segments: number }>;
+  /** Every shot's "Queue all", across the project. */
+  project: { costUsd: number | null; segments: number };
+  assembly: Record<string, number | null>;
+  transcribe: Record<string, number | null>;
+  /** Tracking a whole shot's mask. */
+  mask: Record<string, number | null>;
+  /** One anchor with each model on this engine. */
+  anchors: { id: string; label: string; note: string; costUsd: number | null; offered: boolean }[];
+  notes: string[];
 }
 
 // ---------------------------------------------------------------------------

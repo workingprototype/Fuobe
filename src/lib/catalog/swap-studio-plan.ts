@@ -29,6 +29,7 @@ import {
   type SwapProject,
   type SwapSegment,
   type SwapShot,
+  type SwapTake,
   type WhoToSwap,
 } from "./swap-studio";
 import { silenceRef } from "./canvas";
@@ -369,6 +370,38 @@ export function planSegmentTake(p: SegmentPlanInput): { steps: PlanStep[]; final
     chain,
   });
   return { steps, final: "swap" };
+}
+
+/**
+ * A queued take's steps from what it was queued with (take.frozen): the shot's frames, settings, who to swap, anchor,
+ * mask, history, prompt and seed as they were, and the previous take it continues from as it came out.
+ */
+export function frozenTakePlan(
+  project: SwapProject,
+  clip: SwapClip,
+  shot: SwapShot,
+  seg: SwapSegment,
+  take: SwapTake,
+  numbers: { shot: number; segment: number; take: number },
+  previous: SegmentPlanInput["previous"],
+): { steps: PlanStep[]; final: string } {
+  const f = take.frozen;
+  if (!f) throw new Error("This take wasn't queued from the studio — queue the segment again");
+  return planSegmentTake({
+    engine: take.engine,
+    project: { ...project, character: { ...project.character, image: f.reference } },
+    clip,
+    shot: { ...shot, start: f.shotStart, settings: f.settings, who: f.who },
+    seg: { ...seg, start: f.start, end: f.end, seed: take.seed },
+    shotNumber: numbers.shot,
+    segNumber: numbers.segment,
+    takeNumber: numbers.take,
+    prompt: take.prompt,
+    history: f.history,
+    anchor: f.anchor,
+    mask: f.mask,
+    previous,
+  });
 }
 
 // ---------------------------------------------------------------------------
