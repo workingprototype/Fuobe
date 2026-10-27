@@ -450,7 +450,7 @@ export function recordTrainedMirror(file: string, target: "fal" | "replicate", u
     version: null,
     hostedUrl: url,
     sha256: own ? sha256File(own) : null,
-    sizeBytes: own ? fs.statSync(own).size : null,
+    sizeBytes: own ? fs.statSync(/*turbopackIgnore: true*/ own).size : null,
     licence: { own: true },
   });
 }
@@ -477,7 +477,7 @@ async function sendOwnLora(l: LoraRef, target: "fal" | "replicate", upload: (dat
   const local = ownCopy(l.file) ?? inComfy;
   if (local) {
     onProgress?.(`Sending ${name} to ${target === "fal" ? "fal.ai" : "Replicate"} (once)`);
-    const data = fs.readFileSync(local);
+    const data = fs.readFileSync(/*turbopackIgnore: true*/ local);
     const hostedUrl = await upload(data, path.basename(l.file));
     recordCopy({ file: l.file, target, sourceUrl: `fuobe:${l.file}`, version: null, hostedUrl, sha256: crypto.createHash("sha256").update(data).digest("hex"), sizeBytes: data.length, licence: { own: true } });
     return { ...l, hostedUrl };
