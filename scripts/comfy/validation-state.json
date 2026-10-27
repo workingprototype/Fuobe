@@ -587,6 +587,12 @@
     "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
     "at": "2026-10-27T04:10:39.895Z"
   },
+  "video-character-swap-h3-segment": {
+    "sha256": "876118b7908f3f831f4232a4cdad10235d15b736af835c84b60234a384226f4e",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayAppendWindow' not found. The custom node may not be installed. (Node ID '#append')",
+    "at": "2026-10-27T11:01:36.134Z"
+  },
   "video-concat-2": {
     "sha256": "3d08966f5a3c2da662dc112df537ad4245bcd5dbb90e0451a0beb5c54d8db581",
     "validated": true,
@@ -712,6 +718,12 @@
     "validated": true,
     "error": null,
     "at": "2026-10-23T00:12:21.209Z"
+  },
+  "video-mask-h3-relay": {
+    "sha256": "d5a3fc7046010b54ea070f45acc325602ed5ab5dbe403040e4d6591949084c84",
+    "validated": false,
+    "error": "HTTP 400: missing_node_type: Node 'H3RelayPrepareSource' not found. The custom node may not be installed. (Node ID '#prepare')",
+    "at": "2026-10-27T11:01:36.148Z"
   },
   "video-mux-audio": {
     "sha256": "68af795bae0c0e89749819173916044e4024a6ce3035f830b48c80e0b6899181",

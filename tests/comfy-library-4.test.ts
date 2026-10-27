@@ -58,6 +58,8 @@ const ROLES: NonNullable<ManifestOutput["role"]>[] = [
   "cues", "transcript", "language", "layers", "sheet", "tiles", "first-frame", "turntable", "lines", "frame", "frames", "scene", "depth", "splat", "brief", "preview",
   // remove-object package: the painted eraser's hand-off mask, the matte graphs' two videos.
   "mask", "cutout", "matte",
+  // Character Swap Studio: a segment's lossless master, which the next segment continues from.
+  "master",
 ];
 
 describe("round-4 ComfyUI workflows", () => {
@@ -84,7 +86,13 @@ describe("round-4 ComfyUI workflows", () => {
     expect(new Set(manifest.workflows.map((w) => w.id)).size).toBe(manifest.workflows.length);
     // Only the MiniMax H3 graphs wait on node packs this server doesn't have (h3_character_swap, H3 Relay): never
     // installed here, so their /prompt check names a missing node (tests/comfy-character-swap.test.ts).
-    expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual(["video-character-swap-h3", "video-character-swap-h3-relay", "video-person-remove-h3-relay"]);
+    expect(manifest.workflows.filter((w) => !w.validated).map((w) => w.id)).toEqual([
+      "video-character-swap-h3",
+      "video-character-swap-h3-relay",
+      "video-person-remove-h3-relay",
+      "video-character-swap-h3-segment",
+      "video-mask-h3-relay",
+    ]);
     for (const w of manifest.workflows) for (const o of w.outputs) if (o.role) expect(ROLES, `${w.id} ${o.role}`).toContain(o.role);
   });
 

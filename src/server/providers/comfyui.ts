@@ -43,6 +43,8 @@ import { exportValues, exrWorkflow, framesPerPass, hdrColorSpace, upscaleShortSi
 import { guessKind } from "@/lib/catalog/payload";
 import { loraByFile, needsToken } from "@/lib/catalog/loras";
 import { CHARACTER_SWAP, packResolution, samCoords, swapPrompt, SWAP_LORAS, windowPlan } from "@/lib/catalog/character-swap";
+import { STUDIO_WORKFLOWS } from "@/lib/catalog/swap-studio-plan";
+import { maskGraph, segmentGraph, type MaskGraphOptions, type SegmentGraphOptions } from "@/lib/swap-studio-graphs";
 import { getMaker, makerPrompt, OPEN_TARGET_PROBLEM, ORIGINALS, swapTarget } from "@/lib/catalog/genjutsu";
 import { CLICK_OPEN_PROBLEM, HAND_OFF, REMOVE_SCENE, targetPhrase } from "@/lib/catalog/remove-object";
 import type { GenInput, MediaKind, ModelRoute, Operation } from "@/lib/catalog/types";
@@ -939,6 +941,61 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
     // No words: Openjutsu's instruction, with the anchor sentence only when the anchor goes in (the graph's own text names it).
     if (!(typeof values.prompt === "string" && values.prompt.trim())) values.prompt = swapPrompt({ engine: "open", anchor: !!b.image2 && !dropAnchor });
   }
+  // Character Swap Studio's segment (one H3 Relay pass): the previous take's master as history, the approved mask in
+  // place of SAM's, the anchor after the boundary, masked generation off. Branches it doesn't use go after binding.
+  // Media inputs a studio job leaves out on purpose (their branches go after binding).
+  const studioLeft: string[] = [];
+  let studioSegment: Omit<SegmentGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.segment) {
+    const history = typeof extra.historyVideo === "string" && !!extra.historyVideo;
+    if (!history) {
+      studioLeft.push("historyVideo");
+      for (const k of ["historyVideo", "historyStart", "historyLength"]) delete extra[k];
+    } else {
+      const start = Number(extra.historyStart);
+      const length = Number(extra.historyLength);
+      if (!Number.isInteger(start) || start < 0 || !Number.isInteger(length) || length < 1) throw new ProviderError("The continuation history needs the previous take's frame count");
+    }
+    const maskFile = typeof extra.maskVideo === "string" && extra.maskVideo ? extra.maskVideo : null;
+    const span = input.endTime !== undefined ? Math.max(0, input.endTime - start) : Number(values.duration ?? 0);
+    studioSegment = {
+      anchor: !dropAnchor,
+      history,
+      anchorAfterHistory: extra.anchorAfterHistory === true,
+      mask: maskFile ? { file: maskFile, start: Math.max(0, Number(extra.maskStart ?? 0)), duration: span } : null,
+      useMask: extra.useMask !== false,
+    };
+    for (const k of ["maskVideo", "maskStart", "anchorAfterHistory", "useMask"]) delete extra[k];
+  }
+  // Character Swap Studio's mask: who to swap on one frame of a shot (words, a selection or clicks moved into H3's
+  // canvas), followed for spanFrames, spliced into the version it corrects (prevMask).
+  let studioMask: Omit<MaskGraphOptions, "outputs"> | null = null;
+  if (manifest.id === STUDIO_WORKFLOWS.mask) {
+    values.quality = packResolution(input.resolution);
+    const words = (typeof extra.maskPrompt === "string" && extra.maskPrompt.trim()) || input.prompt?.trim() || "person";
+    values.maskPrompt = words.slice(0, 120);
+    delete extra.maskPrompt;
+    if (input.points?.length) {
+      if (!clip?.width || !clip.height) throw new ProviderError("Couldn't read the clip's size to place your clicks — pick who to swap instead");
+      const [pos, neg] = samCoords(input.points, { width: clip.width, height: clip.height }, input.resolution);
+      values.positiveCoords = pos;
+      values.negativeCoords = neg;
+      extra.selection = "index";
+      extra.subjectIndex = 0;
+    }
+    const keyFrame = Math.max(0, Math.round(Number(extra.keyFrame ?? 0)));
+    const shotFrames = Math.round(Number(extra.shotFrames ?? 0));
+    const spanFrames = Math.max(1, Math.round(Number(extra.spanFrames ?? shotFrames - keyFrame)));
+    if (!(shotFrames > 0) || keyFrame + spanFrames > shotFrames) throw new ProviderError("The mask's frames don't fit in the shot — reload and try again");
+    const prev = typeof extra.prevMask === "string" && !!extra.prevMask;
+    if (!prev) {
+      studioLeft.push("prevMask");
+      delete extra.prevMask;
+    }
+    Object.assign(extra, { keyFrame, spanFrames, tailStart: keyFrame + spanFrames, tailFrames: Math.max(1, shotFrames - keyFrame - spanFrames) });
+    delete extra.shotFrames;
+    studioMask = { head: keyFrame, tail: shotFrames - keyFrame - spanFrames, prev };
+  }
   // Genjutsu's Object swap: SAM 3.1 follows what goes (params.extra.maskPrompt, or the "replace … with" part of the prompt,
   // as Genjutsu sends it), the reference comes in, the prompt describes the result. Insert: the painted spot and the
   // reference, the prompt says what appears there. Neither graph takes clicked points.
@@ -988,7 +1045,7 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   // Reference images the user left out: dropped from a FLUX.2 reference chain, else the previous image
   // again where that's harmless (style boards, multi-reference edits), else a clear "add …" message.
   let graph = workflow;
-  const left: string[] = [];
+  const left: string[] = [...studioLeft];
   // A side nobody photographed is left out (its cut-out and crop with it); the front is needed.
   if (rules.views) {
     for (const k of IMAGE_SLOTS.slice(1)) {
@@ -1041,6 +1098,8 @@ export async function prepareWorkflow(endpointTemplate: string, input: GenInput,
   if (dropAnchor) wf = withoutAnchor(wf, b.image2![0].node);
   // LoRA "none": the swap LoRA's loader is linked out (H3 runs with the Turbo LoRA alone).
   if (dropSwapLora && b.lora?.length === 1) wf = bypassNode(wf, b.lora[0].node, "model", outputIds);
+  if (studioSegment) wf = segmentGraph(wf, { ...studioSegment, outputs: outputIds });
+  if (studioMask) wf = maskGraph(wf, { ...studioMask, outputs: outputIds });
   // FPS Boost to a lower rate, or one the clip divides into: no interpolation, only every n-th frame.
   if (finish.bypassInterpolation) {
     const id = Object.keys(wf).find((k) => wf[k].class_type === "FrameInterpolate");

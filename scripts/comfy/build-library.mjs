@@ -124,6 +124,8 @@ export const BINDING_KEYS = new Set([
   'megapixels',
   // Genjutsu's Character swap (Originals O5): MiniMax H3 with the h3_character_swap / H3 Relay packs
   'quality', 'selection', 'subjectIndex', 'positiveCoords', 'negativeCoords', 'audioGuide', 'useMask', 'windowFrames', 'historyFrames',
+  // Character Swap Studio (o/h3-studio): continuation history from the previous take's master, masks on any frame spliced into a version
+  'historyVideo', 'historyStart', 'historyLength', 'keyFrame', 'spanFrames', 'tailStart', 'tailFrames', 'prevMask',
 ]);
 
 const readJson = (p, fallback) => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fallback);
