@@ -160,7 +160,8 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
           </p>
         </div>
         {lic && (
-          <p className={cn("text-[11.5px]", lic.commercial === true ? "text-muted-foreground" : "text-warning")}>Licence: {licenceNote(lic)}</p>
+          // Information, never a gate: the admin decides what to turn on in Settings.
+          <p className="text-[11.5px] text-muted-foreground">Licence: {licenceNote(lic)}</p>
         )}
         {targets
           .filter((t) => t.family === f)
@@ -226,8 +227,8 @@ export function TrainDialog({ element, open, onOpenChange }: { element: StudioEl
             <GraduationCap className="size-5" /> Soul ID · {element.name}
           </DialogTitle>
           <DialogDescription>
-            Train once and @{element.handle} {person ? "looks like them" : "looks right"} every time on Fuobe Soul, Soul Cinema and Soul HD — on your GPU and in the cloud,
-            instead of reference photos.
+            Train once and @{element.handle} {person ? "looks like them" : "looks right"} every time on Fuobe Soul, and on every other model you train it for — on your
+            GPU and in the cloud, instead of reference photos.
           </DialogDescription>
         </DialogHeader>
 

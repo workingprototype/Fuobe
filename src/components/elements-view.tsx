@@ -285,7 +285,7 @@ function ElementCard({ el }: { el: StudioElement }) {
               el.references.slice(0, 4).map((r, i, arr) => (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  key={r}
+                  key={`${i}:${r}`}
                   src={r}
                   alt=""
                   className={cn(
