@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
+import { Bell, Clapperboard, Cpu, Film, KeyRound, Layers, LayoutGrid, Loader2, Plug, Plus, Scale, Server, Settings2, ShieldCheck, Sparkles, Wand2, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { NAV } from "@/components/nav-items";
@@ -59,6 +59,7 @@ const SETTINGS: { id: string; label: string; icon: LucideIcon; keywords: string;
     href: "/settings/models",
   },
   { id: "text-ai", label: "Prompt enhancement", icon: Sparkles, keywords: "claude ollama enhancer llm" },
+  { id: "assist-connectors", label: "Assist connectors", icon: Plug, keywords: "mcp connector claude tools notion linear slack server token" },
   { id: "notifications", label: "Notifications", icon: Bell, keywords: "browser done alerts" },
   { id: "security", label: "Password and API tokens", icon: ShieldCheck, keywords: "security sign in mcp token" },
   { id: "demo", label: "Demo mode", icon: Settings2, keywords: "placeholder free try" },

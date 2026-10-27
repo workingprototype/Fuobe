@@ -492,6 +492,52 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS shares_target ON shares(kind, target_id);`,
+  // round 4 (r4/assist-connectors): Assist's scheduled tasks (a prompt, its rule and time zone, ask-first or
+  // auto-run within a cost cap, whether its runs may use connectors, and how the last run went), custom MCP
+  // connectors (name, URL, token — a secret, masked before it reaches the browser — and the tools they're
+  // limited to), and on each chat the task that started it, what that run has spent on its own, and whether
+  // it uses connectors.
+  `CREATE TABLE IF NOT EXISTS assist_schedules (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    attachments_json TEXT NOT NULL DEFAULT '[]',
+    project_id TEXT,
+    rule_json TEXT NOT NULL,
+    tz TEXT NOT NULL,
+    approval TEXT NOT NULL DEFAULT 'ask',
+    cap_usd REAL,
+    connectors INTEGER NOT NULL DEFAULT 0,
+    engine TEXT NOT NULL DEFAULT 'cloud',
+    mode_json TEXT,
+    paused INTEGER NOT NULL DEFAULT 0,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    last_thread_id TEXT,
+    last_status TEXT,
+    last_text TEXT,
+    runs INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_schedules_due ON assist_schedules(paused, next_run_at);
+  CREATE INDEX IF NOT EXISTS assist_schedules_project ON assist_schedules(project_id);
+  CREATE TABLE IF NOT EXISTS assist_connectors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    token TEXT,
+    tools_json TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  ALTER TABLE assist_thread_state ADD COLUMN schedule_id TEXT;
+  ALTER TABLE assist_thread_state ADD COLUMN cap_usd REAL;
+  ALTER TABLE assist_thread_state ADD COLUMN spent_usd REAL NOT NULL DEFAULT 0;
+  ALTER TABLE assist_thread_state ADD COLUMN connectors INTEGER NOT NULL DEFAULT 1;
+  CREATE INDEX IF NOT EXISTS assist_thread_state_schedule ON assist_thread_state(schedule_id);`,
 ];
 
 declare global {
