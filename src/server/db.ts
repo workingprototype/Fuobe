@@ -492,6 +492,48 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS shares_target ON shares(kind, target_id);`,
+  // round 4 (r4/assist-connectors): Assist's scheduled tasks (a prompt, its rule and time zone, ask-first or
+  // auto-run within a cost cap, and how the last run went), custom MCP connectors (name, URL, token — a
+  // secret, masked before it reaches the browser), and on each chat the task that started it and what
+  // that run has spent on its own.
+  `CREATE TABLE IF NOT EXISTS assist_schedules (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    attachments_json TEXT NOT NULL DEFAULT '[]',
+    project_id TEXT,
+    rule_json TEXT NOT NULL,
+    tz TEXT NOT NULL,
+    approval TEXT NOT NULL DEFAULT 'ask',
+    cap_usd REAL,
+    engine TEXT NOT NULL DEFAULT 'cloud',
+    mode_json TEXT,
+    paused INTEGER NOT NULL DEFAULT 0,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    last_thread_id TEXT,
+    last_status TEXT,
+    last_text TEXT,
+    runs INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS assist_schedules_due ON assist_schedules(paused, next_run_at);
+  CREATE INDEX IF NOT EXISTS assist_schedules_project ON assist_schedules(project_id);
+  CREATE TABLE IF NOT EXISTS assist_connectors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    token TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  ALTER TABLE assist_thread_state ADD COLUMN schedule_id TEXT;
+  ALTER TABLE assist_thread_state ADD COLUMN cap_usd REAL;
+  ALTER TABLE assist_thread_state ADD COLUMN spent_usd REAL NOT NULL DEFAULT 0;
+  CREATE INDEX IF NOT EXISTS assist_thread_state_schedule ON assist_thread_state(schedule_id);`,
 ];
 
 declare global {

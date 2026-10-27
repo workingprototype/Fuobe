@@ -1,7 +1,7 @@
 /**
  * Runs once when the server starts: start the generation runner right away, so jobs that were in
  * flight before a restart keep advancing (and live updates flow) even when the UI only lists them.
- * Also empties what has been in the Trash for 30 days (then daily).
+ * Also empties what has been in the Trash for 30 days (then daily), and starts Assist's scheduled tasks.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
@@ -12,4 +12,7 @@ export async function register() {
   // Faceless / Explainer renders whose narration was timed while the server was down continue with their scenes.
   const { ensureFacelessRunner } = await import("./server/faceless");
   ensureFacelessRunner();
+  // Assist's scheduled tasks: a 30 s sweep starts the runs that are due (a run missed while the server was off happens once).
+  const { ensureScheduleRunner } = await import("./server/assist/schedules");
+  ensureScheduleRunner();
 }

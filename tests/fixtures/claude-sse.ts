@@ -1,8 +1,15 @@
 /**
  * A Messages API reply as the server-sent events the SDK's stream reads (Assist's Claude calls
- * stream and keep the final message). Text and tool_use blocks only.
+ * stream and keep the final message). Text, tool_use, and the MCP connector's mcp_tool_use /
+ * mcp_tool_result blocks.
  */
-export function claudeStream(reply: { content: ({ type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: unknown })[]; stop_reason: string; model?: string }): Response {
+type Block =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "mcp_tool_use"; id: string; name: string; server_name: string; input: unknown }
+  | { type: "mcp_tool_result"; tool_use_id: string; is_error: boolean; content: { type: "text"; text: string }[] };
+
+export function claudeStream(reply: { content: Block[]; stop_reason: string; model?: string }): Response {
   const events: Record<string, unknown>[] = [
     {
       type: "message_start",
@@ -13,8 +20,10 @@ export function claudeStream(reply: { content: ({ type: "text"; text: string } |
     if (b.type === "text") {
       events.push({ type: "content_block_start", index, content_block: { type: "text", text: "", citations: null } });
       events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: b.text } });
+    } else if (b.type === "mcp_tool_result") {
+      events.push({ type: "content_block_start", index, content_block: b });
     } else {
-      events.push({ type: "content_block_start", index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } });
+      events.push({ type: "content_block_start", index, content_block: { ...b, input: {} } });
       events.push({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(b.input) } });
     }
     events.push({ type: "content_block_stop", index });

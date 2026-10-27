@@ -146,6 +146,10 @@ export function deleteProject(id: string): boolean {
     db().prepare("DELETE FROM assist_project_sources WHERE project_id = ?").run(id);
     deleteProjectMemories(id);
     db().prepare("UPDATE assist_thread_state SET project_id = NULL WHERE project_id = ?").run(id);
+    // Its scheduled tasks move out with the chats, paused: they were written for the project's brief.
+    db()
+      .prepare("UPDATE assist_schedules SET project_id = NULL, paused = 1, last_status = 'failed', last_text = 'Paused: its project was deleted', updated_at = ? WHERE project_id = ?")
+      .run(Date.now(), id);
     return db().prepare("DELETE FROM assist_projects WHERE id = ?").run(id).changes;
   })();
   return n > 0;
