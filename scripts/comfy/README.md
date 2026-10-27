@@ -286,6 +286,36 @@ node validate-workflows.mjs image-to-3d-trellis2-multiview image-to-3d-trellis2 
 - **Not open**: rigging. UniRig (MIT) has no ComfyUI pack verified against v0.41, so Rig & animate is Meshy on fal only.
   SAM 3D Objects has no open route either (the core SAM 3D nodes are body only).
 
+### Genjutsu Character swap (o/genjutsu-original, 2026-10-27)
+
+Two hand-built entries for Genjutsu's Character swap on MiniMax H3 (docs/research/openjutsu-6.md):
+
+```bash
+npm run build -- video-character-swap-h3 video-character-swap-h3-relay
+node validate-workflows.mjs video-character-swap-h3 video-character-swap-h3-relay --shared
+```
+
+| id | capability | what | validated here |
+|---|---|---|---|
+| `video-character-swap-h3` | video-character-swap | Openjutsu's `swap.api.json` (Akatz Labs' H3 Character Swap graph at `0670e4f` with a `Video Slice` in front): the part (start + length, 5–15 s, longer continues window by window), quality as the unpatched pack's string (`"480"` / `"768"`), H3 reference tags in the prompt, who to swap (SAM 3.1 words, largest / leftmost / rightmost / index, or clicks as JSON points on H3's canvas), the anchor first frame as `image2` (absent: its loader and fit are deleted and the shot's `use_anchor` is off), the swap LoRA release (V1.5, V1, or none: the Turbo LoRA alone) | no: `missing_node_type` (the `h3_character_swap` nodes are not on this server; its 22 core nodes are in `object_info.subset.json`) |
+| `video-character-swap-h3-relay` | video-character-swap | H3 Relay 2.0's character-swap example (akatz-ai/h3-relay at `e2a7665b`) with a `Video Slice`: the same part, quality, words, seed and who; no anchor | no: `missing_node_type` (`H3RelayAppendWindow`) |
+
+- **Node packs**: `h3_character_swap` (GPL-3.0) is copied out of `akatz-labs/h3-character-swap-tool` at
+  `0670e4fdf95adf2262caa4b81afed2a9c4ae4b7b` by `install-comfyui.sh` (`H3_PACK=0` skips it; it needs FFmpeg and FFprobe on
+  PATH). H3 Relay (GPL-3.0) registers HTTP routes and patches H3's layout in memory when it loads, so it is opt-in:
+  `H3_RELAY=1` clones it at `e2a7665b6eb8ea37a88c0de2c9c6b69a8f7c9220`. Neither pack is installed on the CPU server
+  these graphs were built on, so both entries are recorded with `validated: false` and the missing node named.
+- **Weights** (46.33 GB, pinned to Hugging Face revisions in `library.spec.mjs`): H3 Ref2VA int8, its video and audio VAEs and
+  the NVFP4 Qwen3-VL text encoder (Comfy-Org/MiniMax-H3), lightx2v's FL2V Turbo 8-step LoRA, SAM 3.1, and Akatz Labs'
+  Character Swap LoRA V1.5 (V1 optional). The provider downloads the two LoRAs before a run (`graphLoras`).
+- **Licences, as information**: MiniMax H3 Community License (territory excludes the US, the EU, the UK and South Korea;
+  over US$20M yearly revenue needs MiniMax's written authorization; show "MiniMax H3"), Meta's SAM License, Apache-2.0
+  (Turbo LoRA), GPL-3.0 (both packs). The admin decides what runs (Settings → Models & licences).
+- **GPU**: tested by their authors on a 96 GB RTX PRO 6000 and on a 24 GB RTX 4090 with 128 GB RAM and offloading.
+- **Comfy Developer Platform** (what Openjutsu deploys to): a deployment is not a plain ComfyUI server — it is driven by
+  the v2 API (`@comfyorg/sdk`: upload, job, poll), not `/prompt` and `/history` — so Fuobe does not add a provider for it.
+  Point `COMFYUI_URL` at a ComfyUI that has the packs installed instead.
+
 ## Adding a workflow
 
 1. Find the template name in `$COMFYUI_DIR/.venv/lib/python3.*/site-packages/comfyui_workflow_templates_json/templates/index.json`

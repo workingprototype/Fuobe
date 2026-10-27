@@ -1,0 +1,284 @@
+"use client";
+
+import { Cpu, Scale, TriangleAlert } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, Segmented } from "@/components/shorts/ui";
+import {
+  ANCHOR_MODELS,
+  anchorModel,
+  CHARACTER_GPU,
+  CHARACTER_LIMITS,
+  CHARACTER_SWAP,
+  characterLicenceLine,
+  HISTORY_CHOICES,
+  SPEECH_LABELS,
+  SWAP_LORAS,
+  WHO_LABELS,
+  WINDOW_CHOICES,
+  type CharacterOptions,
+  type CharacterQuality,
+  type SwapLora,
+  type SwapSpeech,
+  type SwapWho,
+} from "@/lib/catalog/character-swap";
+import type { GenjutsuTarget, Maker } from "@/lib/catalog/genjutsu";
+import type { Engine } from "@/lib/catalog/types";
+
+/**
+ * Character swap's own settings (Openjutsu's and Akatz Labs' H3 Character Swap tool's, on Genjutsu): who to swap,
+ * the quality, the first frame made first, what the character looks like, the seed, and under Advanced the speech,
+ * the swap LoRA's release and the H3 settings of the open graph. The limits and the GPU line sit under it.
+ */
+export function CharacterControls({
+  engine,
+  maker,
+  target,
+  value,
+  onChange,
+  quality,
+  onQuality,
+  seed,
+  onSeed,
+  seedProblem,
+}: {
+  engine: Engine;
+  maker: Maker | null;
+  target?: GenjutsuTarget;
+  value: CharacterOptions;
+  onChange: (v: CharacterOptions) => void;
+  quality: CharacterQuality;
+  onQuality: (q: CharacterQuality) => void;
+  seed: string;
+  onSeed: (s: string) => void;
+  seedProblem?: string | null;
+}) {
+  const set = (patch: Partial<CharacterOptions>) => onChange({ ...value, ...patch });
+  const h3 = !!maker?.h3;
+  const open = engine === "open";
+  const anchors = ANCHOR_MODELS[engine];
+  const who: SwapWho = value.who ?? "largest";
+  return (
+    <div className="space-y-4">
+      {target === "type" && (
+        <Field label="Who to swap" hint={who === "largest" ? "The largest person in the first frame" : undefined}>
+          <Segmented
+            label="Who to swap"
+            value={who}
+            onChange={(w) => set({ who: w, ...(w === "index" ? { index: value.index ?? 0 } : {}) })}
+            options={(Object.keys(WHO_LABELS) as SwapWho[]).map((w) => ({ value: w, label: WHO_LABELS[w] }))}
+          />
+          {who === "index" && (
+            <div className="flex items-center gap-2 pt-1">
+              <label htmlFor="gj-person" className="text-[12px] text-muted-foreground">
+                Person number, from the left
+              </label>
+              <Input
+                id="gj-person"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={CHARACTER_SWAP.maxPeople}
+                value={(value.index ?? 0) + 1}
+                onChange={(e) => set({ index: Math.max(0, Math.min(CHARACTER_SWAP.maxPeople - 1, Math.round(Number(e.target.value) || 1) - 1)) })}
+                className="h-8 w-20 text-[13px]"
+              />
+            </div>
+          )}
+        </Field>
+      )}
+      {(target === "type" || !open) && (
+        <Field label="Who, in words (optional)" htmlFor="gj-who-words" hint={open ? "What SAM 3.1 looks for" : "Said in the prompt"}>
+          <Input
+            id="gj-who-words"
+            value={value.subject ?? ""}
+            onChange={(e) => set({ subject: e.target.value || undefined })}
+            maxLength={120}
+            placeholder="e.g. “the man in the red jacket”"
+            className="text-[13px]"
+          />
+        </Field>
+      )}
+
+      {h3 && (
+        <Field label="Quality" hint={quality === "480p" ? "Faster and cheaper" : "H3's native top"}>
+          <Segmented label="Quality" value={quality} onChange={onQuality} options={CHARACTER_SWAP.qualities.map((q) => ({ value: q, label: q }))} />
+        </Field>
+      )}
+
+      {maker?.h3?.anchor && (
+        <div className="space-y-2 rounded-xl bg-muted/50 p-3">
+          <label className="flex items-start justify-between gap-3 text-[13px]">
+            <span className="min-w-0">
+              <span className="block font-medium">Make the first frame first</span>
+              <span className="block text-[12px] leading-snug text-muted-foreground">
+                Your character put into the part&apos;s first frame, then H3 follows it. If it can&apos;t be made, the swap runs without it and says so.
+              </span>
+            </span>
+            <Switch checked={value.anchor !== false} onCheckedChange={(on) => set({ anchor: on ? undefined : false })} aria-label="Make the first frame first" />
+          </label>
+          {value.anchor !== false && anchors.length > 1 && (
+            <Segmented
+              label="First frame model"
+              value={anchorModel(engine, value.anchorModel).id}
+              onChange={(id) => set({ anchorModel: id === anchors[0].id ? undefined : id })}
+              options={anchors.map((a) => ({ value: a.id, label: a.label, title: a.note }))}
+            />
+          )}
+          {value.anchor !== false && <p className="text-[12px] text-muted-foreground">{anchorModel(engine, value.anchorModel).note}</p>}
+        </div>
+      )}
+
+      <Field label="What your character looks like (optional)" htmlFor="gj-description">
+        <Input
+          id="gj-description"
+          value={value.description ?? ""}
+          onChange={(e) => set({ description: e.target.value || undefined })}
+          maxLength={CHARACTER_SWAP.maxDescriptionChars}
+          placeholder="e.g. “a young woman with short silver hair and a green raincoat”"
+          className="text-[13px]"
+        />
+      </Field>
+
+      <Field label="Seed (optional)" htmlFor="gj-seed" hint={seedProblem ?? "Blank is random; the same seed repeats a take"}>
+        <Input id="gj-seed" type="number" inputMode="numeric" min={0} max={CHARACTER_SWAP.maxSeed} value={seed} onChange={(e) => onSeed(e.target.value)} placeholder="Random" className="text-[13px]" aria-invalid={!!seedProblem} />
+      </Field>
+
+      {h3 && (
+        <details className="group rounded-xl border px-3 py-2 [&_summary::-webkit-details-marker]:hidden">
+          <summary className="cursor-pointer list-none text-[13px] font-medium outline-none select-none focus-visible:ring-2 focus-visible:ring-ring">
+            Advanced <span className="text-[12px] font-normal text-muted-foreground">· speech, LoRA{open ? ", mask, windows" : ""}</span>
+          </summary>
+          <div className="space-y-3 pt-3">
+            <Field label="Who speaks in the part" htmlFor="gj-speech">
+              <Select value={value.speech ?? "character"} onValueChange={(v) => set({ speech: v === "character" ? undefined : (v as SwapSpeech) })}>
+                <SelectTrigger id="gj-speech" className="h-8 w-full text-[13px]">
+                  <SelectValue>{SPEECH_LABELS[value.speech ?? "character"].label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(SPEECH_LABELS) as SwapSpeech[]).map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {SPEECH_LABELS[s].label} — {SPEECH_LABELS[s].hint}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {value.speech !== "none" && (
+              <Field label="What's said (optional)" htmlFor="gj-dialogue">
+                <Textarea
+                  id="gj-dialogue"
+                  value={value.dialogue ?? ""}
+                  onChange={(e) => set({ dialogue: e.target.value || undefined })}
+                  maxLength={2000}
+                  rows={2}
+                  placeholder="The words in the part, so the lips follow them"
+                  className="resize-none text-[13px]"
+                />
+              </Field>
+            )}
+            <Field label="Swap LoRA" hint="Akatz Labs' Character Swap LoRA">
+              <Segmented
+                label="Swap LoRA"
+                value={value.lora ?? "v1.5"}
+                onChange={(l: SwapLora) => set({ lora: l === "v1.5" ? undefined : l })}
+                options={[
+                  { value: "v1.5" as const, label: "V1.5", title: SWAP_LORAS["v1.5"].label },
+                  { value: "v1" as const, label: "V1", title: SWAP_LORAS.v1.label },
+                  { value: "none" as const, label: "None", title: "MiniMax H3 with the Turbo LoRA only" },
+                ]}
+              />
+            </Field>
+            {open && (
+              <>
+                <label className="flex items-center justify-between gap-3 text-[13px]">
+                  <span>
+                    Audio guide <span className="text-[12px] text-muted-foreground">· the clip&apos;s sound guides the performance</span>
+                  </span>
+                  <Switch checked={value.audioGuide !== false} onCheckedChange={(on) => set({ audioGuide: on ? undefined : false })} aria-label="Audio guide" />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-[13px]">
+                  <span>
+                    Masked generation <span className="text-[12px] text-muted-foreground">· only the person is remade</span>
+                  </span>
+                  <Switch checked={value.useMask !== false} onCheckedChange={(on) => set({ useMask: on ? undefined : false })} aria-label="Masked generation" />
+                </label>
+                <Field label="Mask margin" htmlFor="gj-grow" hint="Pixels around the person">
+                  <Input
+                    id="gj-grow"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={256}
+                    value={value.maskGrow ?? CHARACTER_SWAP.maskGrow}
+                    onChange={(e) => set({ maskGrow: Math.max(0, Math.min(256, Math.round(Number(e.target.value) || 0))) })}
+                    className="h-8 text-[13px]"
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <FrameSelect id="gj-window" label="Window" value={value.windowFrames ?? CHARACTER_SWAP.window} choices={WINDOW_CHOICES} onChange={(n) => set({ windowFrames: n === CHARACTER_SWAP.window ? undefined : n })} />
+                  <FrameSelect id="gj-history" label="History" value={value.historyFrames ?? CHARACTER_SWAP.history} choices={HISTORY_CHOICES} onChange={(n) => set({ historyFrames: n === CHARACTER_SWAP.history ? undefined : n })} />
+                </div>
+              </>
+            )}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function FrameSelect({ id, label, value, choices, onChange }: { id: string; label: string; value: number; choices: number[]; onChange: (n: number) => void }) {
+  return (
+    <Field label={label} htmlFor={id}>
+      <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
+        <SelectTrigger id={id} className="h-8 w-full text-[13px] tabular-nums">
+          <SelectValue>{value} frames</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {choices.map((n) => (
+            <SelectItem key={n} value={String(n)}>
+              {n} frames
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+/** The limits, the cut warning, the GPU it was tested on (open) and the licence, as information under the settings. */
+export function CharacterFacts({ engine, maker, cut }: { engine: Engine; maker: Maker | null; cut: string | null }) {
+  return (
+    <div className="space-y-2 text-[12px] leading-snug text-muted-foreground">
+      {cut && (
+        <p role="status" className="flex gap-1.5 rounded-lg bg-warning/10 p-2 text-foreground">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
+          <span>{cut}.</span>
+        </p>
+      )}
+      <ul className="list-disc space-y-0.5 pl-4">
+        {CHARACTER_LIMITS.map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+        <li>Clips up to {CHARACTER_SWAP.maxBytes / 1024 / 1024} MB</li>
+      </ul>
+      {engine === "open" && maker?.h3 && (
+        <p className="flex gap-1.5">
+          <Cpu className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {CHARACTER_GPU.tested}. {CHARACTER_GPU.advice}. {CHARACTER_GPU.weightsGb} GB of weights.
+          </span>
+        </p>
+      )}
+      {maker && (
+        <p className="flex gap-1.5">
+          <Scale className="mt-0.5 size-3.5 shrink-0" />
+          <span>{characterLicenceLine(engine, maker.id)}. Your admin decides what runs (Settings → Models &amp; licences).</span>
+        </p>
+      )}
+    </div>
+  );
+}

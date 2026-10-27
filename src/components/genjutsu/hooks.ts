@@ -1,12 +1,13 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { GenjutsuLook, GenjutsuMode, GenjutsuTarget, GenjutsuTier } from "@/lib/catalog/genjutsu";
+import type { CharacterOptions } from "@/lib/catalog/character-swap";
+import type { GenjutsuLook, GenjutsuMode, GenjutsuTarget, GenjutsuTier, MakerSource } from "@/lib/catalog/genjutsu";
 import type { Engine, Generation, PixelPoint } from "@/lib/catalog/types";
 import { useDebounced } from "@/components/faceless/hooks";
 import { send } from "@/components/shorts/hooks";
 
-/** React Query hooks for /api/genjutsu/** and Higgsfield's live Genjutsu looks. */
+/** React Query hooks for /api/genjutsu/**. */
 
 export interface GenjutsuBody {
   engine: Engine;
@@ -25,6 +26,10 @@ export interface GenjutsuBody {
   source: { url: string; name?: string; duration?: number; fps?: number; width?: number; height?: number; hasAudio?: boolean };
   range?: { start: number; end: number };
   seed?: number;
+  /** Character swap's settings. */
+  character?: CharacterOptions;
+  /** Hard cuts the browser found in the clip (seconds): the server warns when the part has one. */
+  cuts?: number[];
   /** Client nonce: a repeat of it gets the first answer (see useSubmitGuard). */
   requestId?: string;
 }
@@ -34,13 +39,18 @@ export interface GenjutsuEstimate {
   demo: boolean;
   modelId: string;
   modelName: string;
+  /** A Fuobe Original, other open weights, or a partner's model. */
+  source: MakerSource;
   tier?: GenjutsuTier;
   quality?: string;
   pieces: number;
   seconds: number;
   steps: number;
   notes: string[];
-  higgsfield: boolean;
+  /** Character swap: first frames made, the limits, and the GPU the open route was tested on. */
+  anchors?: number;
+  limits?: string[];
+  gpu?: { weightsGb: number; tested: string; advice: string; speed: string };
 }
 
 /** The price and shape of a run for the current settings, asked for once typing pauses (300 ms). */
@@ -64,21 +74,5 @@ export function useGenjutsuRun() {
       r.items.forEach((g) => qc.setQueryData(["generation", g.id], g));
       void qc.invalidateQueries({ queryKey: ["generations"] });
     },
-  });
-}
-
-export interface HiggsfieldLook {
-  id: string;
-  name: string;
-  preview?: string;
-}
-
-/** Higgsfield's own Genjutsu looks (a key is needed; the list comes live from Higgsfield). */
-export function useHiggsfieldLooks(enabled: boolean) {
-  return useQuery({
-    queryKey: ["provider-presets", "genjutsu-restyle"],
-    queryFn: async () => (await (await fetch("/api/providers/higgsfield/presets?source=genjutsu-restyle")).json()) as { items: HiggsfieldLook[]; error?: string },
-    enabled,
-    staleTime: 60 * 60 * 1000,
   });
 }
