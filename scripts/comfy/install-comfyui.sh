@@ -32,9 +32,10 @@ declare -A NODES=(
   # round 4 (2026-10-22): VTracer image → SVG (the Vectorize app's open route)
   [ComfyUI-ToSVG]="https://github.com/Yanick112/ComfyUI-ToSVG 1022ba05318dccb4fe586ce5bbd09f1f0b3c7909"
 )
-# Non-commercial node code is opt-in: NC_PACKS=1 also installs ComfyUI-Whisper (CC-BY-NC-SA-4.0), used only by the
-# optional captions-whisper-burnin workflow. The default caption route (Qwen3-ASR + core burn-in) does not need it.
-if [ "${NC_PACKS:-0}" = "1" ]; then
+# Licences are information (Settings → Models & licences has the switches): every pack is installed, the
+# non-commercial ComfyUI-Whisper (CC-BY-NC-SA-4.0, used by the captions-whisper-burnin workflow) included.
+# NC_PACKS=0 leaves the non-commercial packs out of this install.
+if [ "${NC_PACKS:-1}" = "1" ]; then
   NODES[ComfyUI-Whisper]="https://github.com/yuvraj108c/ComfyUI-Whisper 006a709848259ed3d69e2f9fcfd7a75f6c860ddd"
 fi
 
@@ -81,14 +82,14 @@ fi
 # Chatterbox's Perth watermarker (recommended in production for cloned voices; optional for validation):
 #   uv pip install --python "$PY" resemble-perth
 
-# ComfyUI-HunyuanVideo-Foley needs loguru; ComfyUI-Whisper (NC_PACKS=1) needs openai-whisper (built from sdist).
+# ComfyUI-HunyuanVideo-Foley needs loguru; ComfyUI-Whisper (unless NC_PACKS=0) needs openai-whisper (built from sdist).
 # ComfyUI-MelBandRoFormer needs rotary_embedding_torch + einops (installed above).
 # ComfyUI-QwenASR: do NOT install its requirements.txt (nagisa/DyNet38 have no cp313 wheels and are unused on the
 # Hugging Face path); transformers>=5.13 from ComfyUI's requirements is all it needs.
 uv pip install --python "$PY" loguru
 # ComfyUI-ToSVG imports vtracer (MIT), potracer and PyMuPDF (AGPL-3.0, used only by its SVG-to-image node) at load time.
 uv pip install --python "$PY" "vtracer==0.6.15" "potracer==0.0.4" "PyMuPDF==1.26.5"
-if [ "${NC_PACKS:-0}" = "1" ]; then uv pip install --python "$PY" "openai-whisper==20250625"; fi
+if [ "${NC_PACKS:-1}" = "1" ]; then uv pip install --python "$PY" "openai-whisper==20250625"; fi
 
 # Optional isolated worker (never in this install or its venv): LatentSync 1.6 lipsync and ThinkSound SFX change
 # process-wide state or pin old packages, so they run on a second ComfyUI with its own code copy, base directory,

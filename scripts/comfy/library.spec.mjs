@@ -2291,7 +2291,7 @@ export const SPEC = [
     autoDownloads: ['Apply Whisper downloads large-v3-turbo.pt (1.62 GB) into models/stt/whisper on first run'],
     notes:
       'All-ComfyUI alternative that transcribes and burns in one job (word-by-word captions from words_alignment). One style per run (font, size, colour, border, centred). ' +
-      'Because of the NC code licence the default open route is captions-qwen3-asr + captions-burnin, and install-comfyui.sh only installs ComfyUI-Whisper with NC_PACKS=1. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
+      'The default open route is captions-qwen3-asr + captions-burnin (chosen because of this NC code licence, which is now information: Settings → Models & licences); install-comfyui.sh installs ComfyUI-Whisper unless NC_PACKS=0. Save SRT (not an output node) is dropped; the transcript text is kept. ' +
       'VHS_LoadVideo decodes the whole clip and Add Subtitles To Frames copies it (about 2.5 copies of the frames in RAM): the provider refuses clips that would need more than half of the ComfyUI server\'s RAM and points to the chunked route. ' +
       'sourceLanguage takes Whisper\'s own names (the provider maps ISO codes: tl/fil -> Tagalog, he -> Hebrew).',
   },

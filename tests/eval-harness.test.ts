@@ -521,7 +521,7 @@ describe("report, blind review, compare and promote", () => {
     expect(compare.promote(demo).results[0].reasons[0]).toBe("demo media, not model output");
   });
 
-  it("judges a clip on its words and guards its flicker; a licence problem holds whatever else won", () => {
+  it("judges a clip on its words and guards its flicker; a licence is a note, and a hold only with --licence-hold", () => {
     // A DoP motion: no style or aesthetic scores, so prompt adherence decides; the suite names its candidate.
     const clipScores = (warp: number) => ({
       ...Object.fromEntries(["s1001", "s2002", "s3003"].map((s) => [`motion-a--bridge--${s}--research`, { clip: 32, warp, drift: 0.02 }])),
@@ -538,13 +538,18 @@ describe("report, blind review, compare and promote", () => {
     review3(flicker);
     rateFor(flicker, "research");
     expect((compare.promote(flicker) as Verdicts).results[0].reasons).toEqual(["it gives up warp error (flicker) against catalog (0.0400 vs 0.0300, the rule allows 0.0020)"]);
-    // The recipe is the candidate even when it isn't the run's first variant; a non-commercial LoRA holds it even though half strength won.
+    // The recipe is the candidate even when it isn't the run's first variant. Its non-commercial LoRA is a note on the
+    // verdict (half strength won, so: lower strengths); with --licence-hold it holds the recipe.
     const nc = { recipe: { kind: "soul-look", commercialOk: false, loras: [{ file: "nc.safetensors", commercial: false, hostedOk: true }], applied: [{ file: "nc.safetensors", strength: 0.7 }], complete: true, sent: { complete: true, loras: [] } } };
     const lic = fakeRun("fake-open-nc", "open", { ...scored("half-strength", 0.9, 30), ...scored("recipe", 0.8, 30) }, nc);
     const d3 = compare.promote(lic) as Verdicts;
     expect(d3.candidate).toBe("recipe");
-    expect(d3.results[0].verdict).toBe("hold");
-    expect(d3.results[0].reasons[0]).toBe("non-commercial LoRA: nc.safetensors");
+    expect(d3.results[0].verdict).not.toBe("promote");
+    expect(d3.results[0].reasons).not.toContain("non-commercial LoRA: nc.safetensors");
+    expect(d3.results[0].notes).toContain("licence: non-commercial LoRA: nc.safetensors");
+    const held = compare.promote(lic, { rule: { licenceHold: true } }) as Verdicts;
+    expect(held.results[0].verdict).toBe("hold");
+    expect(held.results[0].reasons[0]).toBe("non-commercial LoRA: nc.safetensors");
   });
 
   it("promote --record writes each verdict into the research entry it measured, and nothing else", async () => {

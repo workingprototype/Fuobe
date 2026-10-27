@@ -93,7 +93,7 @@ node validate-workflows.mjs <ids>
   stream is copied packet by packet (bit-identical, no decode), only the AAC soundtrack is encoded. The two-track
   graph mixes voice and background over `EmptyAudio` of the video's length (`AudioMerge` cuts its second track to
   the first one's length). A 900-frame clip muxes in ~5 s at +0.02 GB RSS.
-- **`captions-whisper-burnin`** decodes the whole clip (VHS) and needs ComfyUI-Whisper (`NC_PACKS=1`); the provider
+- **`captions-whisper-burnin`** decodes the whole clip (VHS) and needs ComfyUI-Whisper (non-commercial code, installed unless `NC_PACKS=0`); the provider
   refuses clips that would need more than half the server's RAM and points to the chunked route.
 - **New entry fields**: `worker: "isolated"` (below), `expand`, and on outputs `stem` (`voice` | `background`) and
   `role` (`cues`, `transcript`, `language`, `sheet`, `tiles`, `layers`, `first-frame`, `turntable`).

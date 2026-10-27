@@ -173,10 +173,12 @@ the catalog run.
 The recipe's licence flags go with every job, following the research's "Licence rules for
 Originals":
 
-- A LoRA whose licence forbids hosted use never goes to the cloud engine.
+- Licences are information (Settings → Models & licences): a LoRA licensed for the GPU only goes to the
+  cloud engine like any other, unless the install keeps such LoRAs on the GPU there.
 - A civitai link is left out on the cloud until a mirrored copy exists, because civitai answers 401
   without your token.
-- A non-commercial LoRA is noted, and a recipe that uses one can't be promoted.
+- A non-commercial LoRA is noted on the verdict; with `--licence-hold`, a recipe that uses one isn't
+  promoted.
 - A LoRA link (your own variant's included) must be on Hugging Face, civitai, fal or Replicate: the API
   refuses other hosts, since the server may download an unknown file from it before a ComfyUI run.
 
@@ -322,7 +324,7 @@ still has its timing and cost, and the report says why the scores are missing.
 | Prompt adherence | `clip` | higher | CLIPScore (100·cos) between the output and the case's own words. Clips are sampled at 4 frames | open_clip ViT-B/32 laion2B, **MIT** (`--clip-model clip-l14`: OpenAI ViT-L/14, MIT) |
 | Aesthetic | `aesthetic` | higher | LAION improved aesthetic predictor v2 on CLIP ViT-L/14 embeddings, about 1–10 | head **Apache-2.0** (christophschuhmann/improved-aesthetic-predictor), CLIP MIT |
 | Style vs references | `style`, `styleNearest` | higher | cosine of the output's embedding to the centroid of the look's reference set, and to the nearest reference | CLIP (default), or `--style-model dinov2`: DINOv2 ViT-S/14 via timm, **Apache-2.0** |
-| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only**: opt in with `--identity-model buffalo_l --accept-noncommercial` |
+| Identity | `identity`, `faceRate` | higher | ArcFace-style face embeddings of the output against the person's photos; the share of frames with a face | **AuraFace v1**'s recognition model (fal, **Apache-2.0**, trained for commercial use), with faces found and aligned by **YuNet** (OpenCV Zoo, **MIT**). The SCRFD detector AuraFace's repo ships comes from insightface's model zoo (released for non-commercial research; the licence is unclear), so it runs only with `--face-detector scrfd`. insightface's `buffalo_l` is **non-commercial research only** (recorded with the result): pick it with `--identity-model buffalo_l`; `--commercial-only` refuses it |
 | Temporal consistency | `drift`, `driftMax`, `warp` | lower | frame-to-frame CLIP embedding drift (mean and worst jump), and a warp error: Farneback optical flow with a forward-backward occlusion mask | CLIP, OpenCV (Apache-2.0) |
 | Lip-sync | `lipsync`, `lipsyncOffset` | higher | a proxy: mouth-region motion against the voice's loudness, with the best lag as the A/V offset | the identity metric's face detector for the face box when identity is installed, else a fixed lower-centre region |
 | SyncNet (optional) | `syncnet` | higher | runs only when `FUOBE_EVAL_SYNCNET_CMD` points at your own SyncNet. It isn't bundled because its weights' licence isn't stated | yours |
@@ -383,9 +385,9 @@ when the run has it, else the run's first variant; `--candidate` picks another. 
 become the default only when one run, on the same prompts and seeds, shows all of the following for
 the case:
 
-1. **Licence**: every LoRA it loaded is commercial, and is hostable when the run is on the cloud.
-   None of the recipe's LoRAs was left out on that engine. A licence problem holds the recipe whatever
-   else won.
+1. **Complete**: none of the recipe's LoRAs was left out on that engine. Its licences are information:
+   a non-commercial LoRA (or one licensed for the GPU only, on a cloud run) is a note on the verdict, and
+   holds the recipe only with `--licence-hold`.
 2. **Enough results**: at least 3 for the case.
 3. **Metrics**: against every alternative in the run (prompt only, half strength, the bare base,
    today's default), it scores at least as well on the case's main metric: the first of style (a look
@@ -433,8 +435,9 @@ instead of their procedural preview.
 
 - `--variant catalog` takes that variant's renders for every case instead, such as what ships today.
 - `--dry-run` lists what it would pick.
-- Only Fuobe's own renders become covers: a demo run never does, nor a render whose LoRAs aren't
-  commercial. No Higgsfield preview is used anywhere.
+- Only Fuobe's own renders become covers: a demo run never does. A render whose LoRAs aren't commercial
+  becomes one with its licence noted (`licence` in the result); `--commercial-only` leaves it out. No
+  Higgsfield preview is used anywhere.
 - It needs ffmpeg. Look at the media and the generated file's diff before committing them.
 
 ## Tests
