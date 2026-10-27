@@ -26,6 +26,7 @@ import { useEngine } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BoardCover, CuratedCover, StatusBadge } from "./cards";
 import { CreateMoodboardDialog } from "./create-moodboard";
+import { TrainBoardDialog } from "./train-board";
 import { useCuratedSet, useMoodboardActions, useMoodboards } from "./hooks";
 import { COPY, CURATED_TABS, inCuratedTab, MOODBOARD_LIMITS, type Moodboard } from "./logic";
 
@@ -50,9 +51,9 @@ function CreateFromUrl({ onOpen }: { onOpen: () => void }) {
 }
 
 function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => void; onDelete: () => void }) {
-  const { retry, train } = useMoodboardActions();
-  const router = useRouter();
-  // Settings can lock one engine: then there's no other engine to rebuild for, and no open-source LoRA on cloud only.
+  const { retry } = useMoodboardActions();
+  const [training, setTraining] = useState(false);
+  // Settings can lock one engine: then there's no other engine to rebuild for.
   const [, , mode] = useEngine();
   const ready = m.status === "complete";
   return (
@@ -104,25 +105,16 @@ function BoardCard({ m, onRename, onDelete }: { m: Moodboard; onRename: () => vo
                 <RotateCcw /> {m.status === "failed" ? "Retry" : `Rebuild for ${m.engine === "cloud" ? "open source" : "cloud"}`}
               </DropdownMenuItem>
             )}
-            {mode !== "cloud" && (
-              <DropdownMenuItem
-                disabled={!ready || m.lora?.status === "training"}
-                onSelect={() =>
-                  train.mutate(m.id, {
-                    onSuccess: () => toast.success("Training a style LoRA on your GPU"),
-                    onError: (e) => toast.error((e as Error).message, { action: /Settings/.test((e as Error).message) ? { label: "Settings", onClick: () => router.push("/settings#training") } : undefined }),
-                  })
-                }
-              >
-                <GraduationCap /> {m.lora?.status === "ready" ? "Retrain style LoRA" : "Train a style LoRA"}
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem disabled={!ready || m.lora?.status === "training"} onSelect={() => setTimeout(() => setTraining(true))}>
+              <GraduationCap /> {m.lora?.status === "ready" ? "Retrain as a look…" : "Train as a look…"}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => setTimeout(onDelete)}>
               <Trash2 /> Delete
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <TrainBoardDialog board={m} open={training} onOpenChange={setTraining} />
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-2 px-0.5">
         <p className="min-w-0 truncate text-[13.5px] font-medium">{m.name}</p>
